@@ -7,12 +7,20 @@ configureLogging()
 for name in [
     "uvicorn", "uvicorn.access", "uvicorn.error",
     "fastapi", "concurrent.futures", "asyncio",
-    "httpcore.connection", "httpcore.http11"
+    "httpcore.connection", "httpcore.http11",
+    "httpx"
 ]:
     logging.getLogger(name).propagate = False
 
 from core.logger import getJSLogHandler
 getJSLogHandler().setReady()
+
+from core.frontend_server import FrontendServer
+frontendServer = FrontendServer(port=3000, directory="frontend")
+frontendServer.start()
+
+import atexit
+atexit.register(frontendServer.stop)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
