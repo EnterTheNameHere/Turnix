@@ -1,11 +1,10 @@
 from enum import Enum
 
 class PipelineStage(str, Enum):
-    PreInput = "PreInput"
-    PostInput = "PostInput"
-    PreQueryBuild = "PreQueryBuild"
-    PostQueryBuild = "PostQueryBuild"
-    PreQuerySend = "PreQuerySend"
-    PostQueryReply = "PostQueryReply"
-    PreStoreHistory = "PreStoreHistory"
-    PostStoreHistory = "PostStoreHistory"
+    SanitizeAndValidateInput = "SanitizeAndValidateInput"
+    InputAccepted = "InputAccepted"
+    GenerateQueryItems = "GenerateQueryItems"
+    FinalizePrompt = "FinalizePrompt"
+    SanitizeAndValidateResponse = "SanitizeAndValidateResponse"
+    ProcessResponseAndUpdateState = "ProcessResponseAndUpdateState"
+    UpdateUI = "UpdateUI"

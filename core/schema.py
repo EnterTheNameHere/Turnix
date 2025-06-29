@@ -102,23 +102,14 @@ class QueryItem(BaseModel):
 # === Pipeline Stage Schemas ===
 
 
-class PreInputData(BaseModel):
+class SanitizeAndValidateInputData(BaseModel):
     model_config = ConfigDict(alias_generator=toCamel, populate_by_name=True)
 
     sessionId: str
     userMessage: str
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-class PostInputData(BaseModel):
-    model_config = ConfigDict(alias_generator=toCamel, populate_by_name=True)
-
-    sessionId: str
-    userMessage: str
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-
-class PreQueryBuildData(BaseModel):
+class InputAcceptedData(BaseModel):
     model_config = ConfigDict(alias_generator=toCamel, populate_by_name=True)
 
     sessionId: str
@@ -126,23 +117,21 @@ class PreQueryBuildData(BaseModel):
     queryItems: list[QueryItem] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-class PostQueryBuildData(BaseModel):
+class GenerateQueryItemsData(BaseModel):
     model_config = ConfigDict(alias_generator=toCamel, populate_by_name=True)
 
     sessionId: str
     queryItems: list[QueryItem] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-
-
-class PreQuerySendData(BaseModel):
+class FinalizePromptData(BaseModel):
     model_config = ConfigDict(alias_generator=toCamel, populate_by_name=True)
 
     sessionId: str
     queryItems: list[QueryItem] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-class PostQueryReplyData(BaseModel):
+class SanitizeAndValidateResponseData(BaseModel):
     model_config = ConfigDict(alias_generator=toCamel, populate_by_name=True)
 
     sessionId: str
@@ -151,7 +140,7 @@ class PostQueryReplyData(BaseModel):
 
 
 
-class PreStoreHistoryData(BaseModel):
+class ProcessResponseAndUpdateStateData(BaseModel):
     model_config = ConfigDict(alias_generator=toCamel, populate_by_name=True)
 
     sessionId: str
@@ -161,7 +150,7 @@ class PreStoreHistoryData(BaseModel):
     sanitizedModelResponse: dict = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-class PostStoreHistoryData(BaseModel):
+class UpdateUIData(BaseModel):
     model_config = ConfigDict(alias_generator=toCamel, populate_by_name=True)
 
     sessionId: str
@@ -174,12 +163,11 @@ class PostStoreHistoryData(BaseModel):
 
 # TODO: make sure pipeline stages are matching registry
 schemaRegistry = {
-    "PreInput": PreInputData,
-    "PostInput": PostInputData,
-    "PreQueryBuild": PreQueryBuildData,
-    "PostQueryBuild": PostQueryBuildData,
-    "PreQuerySend": PreQuerySendData,
-    "PostQueryReply": PostQueryReplyData,
-    "PreStoreHistory": PreStoreHistoryData,
-    "PostStoreHistory": PostStoreHistoryData,
+    "SanitizeAndValidateInput": SanitizeAndValidateInputData,
+    "InputAccepted": InputAcceptedData,
+    "GenerateQueryItems": GenerateQueryItemsData,
+    "FinalizePrompt": FinalizePromptData,
+    "SanitizeAndValidateResponse": SanitizeAndValidateResponseData,
+    "ProcessResponseAndUpdateState": ProcessResponseAndUpdateStateData,
+    "UpdateUI": UpdateUIData,
 }

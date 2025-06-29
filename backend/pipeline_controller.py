@@ -37,15 +37,14 @@ class PipelineController:
         state = PipelineState(sessionId=sessionId, userMessage=userMessage)
         
         stagesInOrder = [
-            PipelineStage.PreInput,
-            PipelineStage.PostInput,
-            PipelineStage.PreQueryBuild,
-            PipelineStage.PostQueryBuild,
-            PipelineStage.PreQuerySend,
+            PipelineStage.SanitizeAndValidateInput,
+            PipelineStage.InputAccepted,
+            PipelineStage.GenerateQueryItems,
+            PipelineStage.FinalizePrompt,
             "__MODEL_CALL__",
-            PipelineStage.PostQueryReply,
-            PipelineStage.PreStoreHistory,
-            PipelineStage.PostStoreHistory,
+            PipelineStage.SanitizeAndValidateResponse,
+            PipelineStage.ProcessResponseAndUpdateState,
+            PipelineStage.UpdateUI,
         ]
 
         for stage in stagesInOrder:
@@ -74,9 +73,9 @@ class PipelineController:
             
             # === TESTING ===
 
-            if stage == PipelineStage.PreQueryBuild:
+            if stage == PipelineStage.GenerateQueryItems:
                 new_query_item = QueryItem(type="message", content=state.userMessage, role="user", id="42")
-                preQueryInput = cast(schemaRegistry[PipelineStage.PreQueryBuild], stageInput)
+                preQueryInput = cast(schemaRegistry[PipelineStage.InputAccepted], stageInput)
                 preQueryInput.queryItems.append(new_query_item)
 
             # === END TESTING ===

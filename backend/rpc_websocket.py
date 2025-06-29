@@ -3,6 +3,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from typing import Callable, Awaitable, Any
 from core.stringjson import safe_json_dumps, safe_json_loads
 from core.logger import getLogger
+from backend.view import View
 
 import logging
 logger = logging.getLogger(__name__)
@@ -11,6 +12,14 @@ handlers: dict[str, Callable[[Any], Awaitable[Any]]] = {}
 activeSocket: WebSocket | None = None
 socketOnline = asyncio.Event()
 pendingRequests: dict[str, dict] = {}
+
+rpcHandlers: dict[str, Callable[[View, dict], Awaitable[Any]]] = {}
+
+def registerNewRpc(name: str):
+    def decorator(func: Callable[[View, dict], Awaitable[Any]]):
+        rpcHandlers[name] = func
+        return func
+    return decorator
 
 def registerRpc(name: str):
     def decorator(func: Callable[[Any], Awaitable[Any]]):
