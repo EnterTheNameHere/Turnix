@@ -5,6 +5,8 @@
 **Project Name:** Turnix\
 **Core Purpose:** Modular AI-driven narrative and simulation engine with real-time pipeline extensibility, built for both experimentation and RPG-style storytelling.
 
+> ⚠️ **Disclaimer:** Variable/class/property/member names are not final and subject to change.
+
 ---
 
 ## 🌍 Core Philosophy
@@ -55,124 +57,193 @@ Turnix is designed to be:
 
 ---
 
-## ⚖️ Pipeline Model
+## 📦 ModLoader Behavior
 
-Stages:
+### Lifecycle Phases
 
-- `PreInput`
-- `PostInput`
-- `PreQueryBuild`
-- `PostQueryBuild`
-- `PreQuerySend`
-- `PostQueryReply`
-- `PreStoreHistory`
-- `PostStoreHistory`
+- **Phase 0: Boot** — Turnix backend starts, no mods loaded
+- **Phase 1: Frontend Loads** — view connects, JS identifies view and sends `frontendReady`
+- Backend then loads Python mods, resolving dependencies
 
-Each stage is processed in order. Each hook within a stage is executed in this order:
+### Mod Discovery
 
-1. By `mod_id`
-2. By `view_id` ("main" first)
-3. By registration order
+- All mods live under `mods/` (recursively)
+- Valid mod folder must include `mod.py` or `mod.js`
+- Optional manifest: `manifest.yaml`, `mod.yaml`, or `package.json`
 
-Hooks are **not allowed to affect order** or trigger reruns.
+### Manifest Schema
 
----
-
-## 🧬 Mod Views and Hook Execution
-
-- The "main" view is always present. Mods start in main.
-- Mods may choose not to register hooks in main, but instead request a secondary view.
-- Hook execution is always scoped per view.
-- Mods that register for the same stage on multiple views will have separate handlers per view.
-- Mods share backend memory, but execution is isolated.
-- Cross-view mod coordination is done via **shared memory**, not message passing.
-
----
-
-## 📂 Shared Mod Memory
-
-- Each mod has access to its own shared memory space on the backend.
-- Memory is read/write.
-- No mod or view can trigger reruns based on memory changes.
-- Execution order is deterministic; mods should not assume whether they are first or second.
-- Memory is used to cache results, coordinate work, or share common data between views.
-
----
-
-## 🔗 WebSocket and View Routing
-
-- Each view maintains its own WebSocket connection to the backend.
-- Backend manages all views under a single client (game/user instance).
-- Mods cannot send arbitrary WebSocket messages.
-- Backend provides routing helpers (`sendToView`, `broadcastToViews`), sandboxed inside `modContext`.
-- Mods must register hooks per view explicitly if they want to operate across views.
-- Views register themselves on connect with `viewId`, `clientId`, and optional tags.
-- New `viewId`s are generated on the backend to enforce resource limits and control view creation.
-- Each WebSocket request includes: `requestId`, `viewId`, `clientId`, `ownerId`, `type`, `timestamp`, and optionally `handler`, `message`, or `extra`
-
----
-
-## 🧪 Subpipelines & Template System
-
-- Pipelines are named by template: e.g. `LLM.main`, `LLM.hidden`, `image.generation`, `tts.speak`
-- Main LLM pipeline is shared by all mods; others may be spawned dynamically
-- Mods can spawn new pipelines via `createPipeline(template, config)` and then `run()`
-- Mods may register hooks to known templates
-- `pipelineCreated(pipeline)` is called for all pipelines
-- Mods that spawn pipelines may `resolveUntilStage(stageName)` and receive results in metadata
-
----
-
-## 🗕️ Prompt Templates & Compatibility
-
-- Each model can have its own optimized prompt template.
-- Prompts are generated through a registry (`PromptTemplateRegistry`) depending on:
-  - Model ID or capability profile
-  - Task type (e.g. scene.reasoning, item.generation)
-  - Desired output format (structured steps, JSONL, plain text)
-- Pipeline chooses the best available template or retries simpler fallback
-
-### Prompt Testing Framework
-
-- Models are tested for compatibility with various prompt templates
-- Results are stored and scored (success rate, token efficiency, parse reliability)
-- Invalid results trigger fallback, simpler formatting, or per-step regeneration
-- Validator functions per template check for correctness (e.g., presence of 3 `<step:N>` blocks)
-
----
-
-## 📅 Manifest Structure (Minimal)
+Supports either YAML or NPM-style JSON:
 
 ```yaml
-name: debug-tools
-version: 1.0.0
-author: you
-license: MIT
-description: Custom debug UI
+modId: chat-ui
+displayName: "Chat Interface"
+version: "1.0.2"
+dependencies:
+  - ui-button
+  - { modId: audio-core, version: "^1.1.0" }
+before:
+  - debug-logger
+after:
+  - theme-dark
+author: Jane Doe
+tags: ["ui", "chat"]
+order: 10
+type: ui
+hidden: false
 ```
 
-No hooks or views are declared in manifest. All behavior is registered in code.
+### Loading
+
+- JS mods are loaded using `import()` after main view is ready
+- Python mods are activated via `Turnix.import("mod-id")`
+
+### Ordering and Dependencies
+
+- Explicit via `dependencies`
+- Implicit via `Turnix.import()` usage
+- Ordered by `order`, `before`, `after`
+- Circular imports raise errors
+
+### Access API
+
+```python
+Turnix.import("chat-ui")
+Turnix.mods["chat-ui"]
+```
+
+```js
+const mod = await Turnix.import("chat-ui")
+```
+
+---
+
+## ⚖️ Pipeline Model
+
+The pipeline consists of deterministic, hookable stages:
+
+- `ValidateInput`: basic checks
+- `SanitizeInput`: clean input (case, profanity, etc.)
+- `GenerateQueryItems`: extract reasoning units
+- `FilterQueryItems`: prune and structure input
+- `FinalizePrompt`: build prompt for LLM
+- `__MODEL_CALL__`: LLM receives prompt
+- `SanitizeResponse`: clean model output (per chunk)
+- `ValidateResponse`: confirm chunk correctness
+- `ProcessResponseAndUpdateState`: apply chunk effects (per chunk)
+- `FinalizeResponse`: post-processing after full reply
+
+Each stage is executed in order. `SanitizeResponse`, `ValidateResponse`, and `ProcessResponseAndUpdateState` are called per stream chunk. Others run once.
+
+### Streaming Guarantees
+
+- `soFar` is always the accumulated, sanitized, validated output.
+- `chunk` is the current sanitized, validated piece.
+- `isFinal` is true only for the last response segment.
+
+### Memory Behavior
+
+- All mod memory is transactionally buffered per pipeline.
+- Changes are committed in `FinalizeResponse`, or discarded on `abort` / `retry`.
+
+### Abort / Retry / Continue Logic
+
+- Mods may request `abort`, `retry`, or `continue` in `ValidateResponse`
+- `abort` and `retry` only work if transactional memory is in use
+- `continue` launches a follow-up pipeline with current `soFar`
+
+---
+
+## 🧠 Pipeline Roles
+
+- **Session**: Owns running pipelines and active mods
+- **Game**: World state holder, persistent memory, and active session
+- **Pipeline**: A full request-response cycle
+- **Driver**: Backend model processor (LLM, TTS, etc.)
+- **View**: A user interface with WebSocket connection and mod scope
+
+### Session Variants
+
+- `MainSession`: Core gameplay
+- `TemporarySession`: One-shot subreasoning
+- `HiddenSession`: Isolated, invisible unless debug mode
+
+---
+
+## 🧩 Mod Behavior by Stage
+
+| Stage                | Mod Role                         |
+| -------------------- | -------------------------------- |
+| `ValidateInput`      | Reject unsafe/invalid input      |
+| `SanitizeInput`      | Normalize input text             |
+| `GenerateQueryItems` | Add reasoning units / meta info  |
+| `FilterQueryItems`   | Prune and organize inputs        |
+| `FinalizePrompt`     | Convert to prompt text           |
+| `SanitizeResponse`   | Clean model chunk                |
+| `ValidateResponse`   | Check validity, optionally alter |
+| `ProcessResponse...` | Apply state/UI effect per chunk  |
+| `FinalizeResponse`   | Commit memory, finalize pipeline |
+
+---
+
+## 🧾 Command System via QueryItems
+
+Mods may register commands (e.g. `/weather.set rain`) using:
+
+```python
+self.registerCommand("weather.set", self.cmdSetWeather)
+```
+
+When `ValidateInput` sees a command string, it transforms it into a `QueryItem`:
+
+```python
+pipeline.addQueryItem({
+  type: "command",
+  command: "weather.set",
+  args: ["rain"],
+  metadata: { source: "chat" }
+})
+```
+
+If command handler returns a result, it can:
+
+- Cancel pipeline (early response)
+- Modify memory
+- Launch subpipeline
+
+---
+
+## 🧑‍💻 UI Template Injection
+
+Mods can provide UI fragments via:
+
+```python
+self.registerTemplate("myPanel", {
+  html: "/mods/my/ui/panel.html",
+  js: "/mods/my/ui/panel.js",
+  css: "/mods/my/ui/panel.css"
+})
+```
+
+Frontend runtime loads it and calls:
+
+```js
+window.TurnixUI = {
+  render(props), destroy(), onMessage(msg)
+}
+```
 
 ---
 
 ## ✅ Summary
 
-Turnix is a deterministic, pipeline-based, modular AI runtime with full mod/view separation. It avoids the pitfalls of declarative-only mod systems and allows modders to flexibly load, unload, or reassign functionality across dynamic views. The backend is authoritative on memory, scheduling, view creation, and model access. The frontend is a runtime shell that can render mod output, register hooks, and request layout changes.
+Turnix is a deterministic, composable, UI-aware pipeline framework with:
 
-This design supports:
-
-- Rich, modular UIs
-- Companion devices
-- View-specific rendering
-- Safe per-mod memory sharing
-- Controlled expansion to multiplayer or streaming observers
-- Dynamic prompt formatting and model compatibility fallback
-- Subpipeline spawning with callback/sync behavior
-- Per-pipeline introspection via `pipelineCreated()`
-
-It avoids:
-
-- Cross-mod side effects
-- Pipeline instability
-- Manifest-driven rigidity
+- Modular, hookable pipeline stages
+- View-isolated JS mods with dynamic template injection
+- Shared transactional memory per mod, per pipeline
+- Mod discovery and activation with ordering and dependencies
+- Support for LLM streaming and chunk-wise processing
+- Commands, prompts, and subpipelines
+- Robust fallback and retry handling without leaving dirty state
 
