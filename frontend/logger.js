@@ -1,7 +1,7 @@
 let defaultModId = "frontend";
 let rpcSend = null;
 
-function configureLogger({ sendRpc, modId = "frontend" }) {
+export function configureLogger({ sendRpc, modId = "frontend" }) {
     rpcSend = sendRpc;
     defaultModId = modId;
 }
@@ -26,11 +26,11 @@ function log(level = "info", args, modId=defaultModId) {
             message,
             modId,
             timestamp,
-        });
+        }, false); // We don't want response
     }
 }
 
-function getModLogger(modId) {
+export function getModLogger(modId) {
     return {
         debug:   (...args) => log("debug", args, modId),
         info:    (...args) => log("info", args, modId),
@@ -39,7 +39,3 @@ function getModLogger(modId) {
         error:   (...args) => log("error", args, modId),
     };
 }
-
-let logger = getModLogger(defaultModId);
-
-export { configureLogger/*, getModLogger, logger*/ }
