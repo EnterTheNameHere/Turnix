@@ -1,10 +1,12 @@
 from enum import Enum
 
-class PipelineStage(str, Enum):
-    SanitizeAndValidateInput = "SanitizeAndValidateInput"
-    InputAccepted = "InputAccepted"
+class LLMPipelineStages(str, Enum):
+    ValidateInput = "ValidateInput"
+    SanitizeInput = "SanitizeInput"
     GenerateQueryItems = "GenerateQueryItems"
+    FilterQueryItems = "FilterQueryItems"
     FinalizePrompt = "FinalizePrompt"
-    SanitizeAndValidateResponse = "SanitizeAndValidateResponse"
-    ProcessResponseAndUpdateState = "ProcessResponseAndUpdateState"
-    UpdateUI = "UpdateUI"
+    ValidateStreamResponse = "ValidateStreamResponse"
+    SanitizeStreamResponse = "SanitizeStreamResponse"
+    ProcessStreamResponse = "ProcessStreamResponse"
+    ReceivedResponse = "ReceivedResponse"

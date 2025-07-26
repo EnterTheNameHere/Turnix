@@ -1,30 +1,35 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, computed_field
+from pydantic.alias_generators import to_camel
 from typing import Optional, Any
 from core.stringjson import safe_json_dumps
-from core.utils.naming import toCamel
-
 
 
 # === Core Pipeline State (internal only) ===
 
-
-class PipelineState(BaseModel):
-    model_config = ConfigDict(alias_generator=toCamel, populate_by_name=True)
+class LLMPipelineState(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     sessionId: str
-    userMessage: str
+    rawUserMessage: str
+    sanitizedUserMessage: str = ""
     assistantMessage: Optional[str] = ""
     queryItems: list["QueryItem"] = Field(default_factory=list)
     rawModelResponse: dict = Field(default_factory=dict)
     sanitizedModelResponse: dict = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    chunk: str = ""
+    isFinal: bool = False
 
+    @computed_field
+    @property
+    def userMessage(self) -> str:
+        return self.sanitizedUserMessage
 
 # === Query Item ===
 
 
 class QueryItem(BaseModel):
-    model_config = ConfigDict(alias_generator=toCamel, populate_by_name=True)
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     id: Optional[str]
     type: str # "systemPrompt", "gmPrompt", "message", "memory", "worldInfo"
@@ -41,11 +46,9 @@ class QueryItem(BaseModel):
         if not ignoreCache and cacheKey in self.metadata:
             return self.metadata[cacheKey]
 
-        if tokenizer is None:
-            from backend.token_counter import TokenCounter
-            tokenizer = TokenCounter
+        # TODO: Implement calling LLM tokenizer
 
-        count = tokenizer.count(self.text(ignoreCache=True))
+        count = 0
         self.metadata[cacheKey] = count
         return count
 
@@ -101,73 +104,78 @@ class QueryItem(BaseModel):
 
 # === Pipeline Stage Schemas ===
 
-
-class SanitizeAndValidateInputData(BaseModel):
-    model_config = ConfigDict(alias_generator=toCamel, populate_by_name=True)
+class BaseStageData(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     sessionId: str
-    userMessage: str
+    rawUserMessage: str
+    sanitizedUserMessage: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-class InputAcceptedData(BaseModel):
-    model_config = ConfigDict(alias_generator=toCamel, populate_by_name=True)
+    def __setattr__(self, name, value):
+        if name == "sessionId" and hasattr(self, "sessionId"):
+            raise AttributeError("'sessionId' is read-only after initiation.")
+        super().__setattr__(name, value)
 
-    sessionId: str
-    userMessage: str
+    @computed_field
+    @property
+    def userMessage(self) -> str:
+        return self.sanitizedUserMessage
+
+class QueryItemsStageData(BaseStageData):
     queryItems: list[QueryItem] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
 
-class GenerateQueryItemsData(BaseModel):
-    model_config = ConfigDict(alias_generator=toCamel, populate_by_name=True)
-
-    sessionId: str
-    queryItems: list[QueryItem] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-class FinalizePromptData(BaseModel):
-    model_config = ConfigDict(alias_generator=toCamel, populate_by_name=True)
-
-    sessionId: str
-    queryItems: list[QueryItem] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-class SanitizeAndValidateResponseData(BaseModel):
-    model_config = ConfigDict(alias_generator=toCamel, populate_by_name=True)
-
-    sessionId: str
+class StreamStageData(BaseStageData):
+    chunk: str
+    isFinal: bool
     rawModelResponse: dict = Field(default_factory=dict)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    sanitizedModelResponse: dict = Field(default_factory=dict)
 
+    @computed_field
+    @property
+    def soFar(self) -> dict[str, Any]:
+        return self.sanitizedModelResponse
 
+class ValidateInputData(BaseStageData):
+    pass
 
-class ProcessResponseAndUpdateStateData(BaseModel):
-    model_config = ConfigDict(alias_generator=toCamel, populate_by_name=True)
+class SanitizeInputData(BaseStageData):
+    pass
 
-    sessionId: str
-    userMessage: str
+class GenerateQueryItemsData(QueryItemsStageData):
+    pass
+
+class FilterQueryItemsData(QueryItemsStageData):
+    pass
+
+class FinalizePromptData(QueryItemsStageData):
+    pass
+
+class ValidateStreamResponseData(StreamStageData):
+    pass
+
+class SanitizeStreamResponseData(StreamStageData):
+    pass
+
+class ProcessStreamResponseData(StreamStageData):
+    pass
+
+class ReceivedResponseData(BaseStageData):
     assistantMessage: Optional[str] = ""
     rawModelResponse: dict = Field(default_factory=dict)
     sanitizedModelResponse: dict = Field(default_factory=dict)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-class UpdateUIData(BaseModel):
-    model_config = ConfigDict(alias_generator=toCamel, populate_by_name=True)
-
-    sessionId: str
-    userMessage: str
-    assistantMessage: Optional[str] = ""
-    rawModelResponse: dict = Field(default_factory=dict)
-    sanitizedModelResponse: dict = Field(default_factory=dict)
-    metadata: dict[str, Any] = Field(default_factory=dict)
     
+
 
 # TODO: make sure pipeline stages are matching registry
 schemaRegistry = {
-    "SanitizeAndValidateInput": SanitizeAndValidateInputData,
-    "InputAccepted": InputAcceptedData,
+    "ValidateInput": ValidateInputData,
+    "SanitizeInput": SanitizeInputData,
     "GenerateQueryItems": GenerateQueryItemsData,
+    "FilterQueryItems": FilterQueryItemsData,
     "FinalizePrompt": FinalizePromptData,
-    "SanitizeAndValidateResponse": SanitizeAndValidateResponseData,
-    "ProcessResponseAndUpdateState": ProcessResponseAndUpdateStateData,
-    "UpdateUI": UpdateUIData,
+    "ValidateStreamResponse": ValidateStreamResponseData,
+    "SanitizeStreamResponse": SanitizeStreamResponseData,
+    "ProcessStreamResponse": ProcessStreamResponseData,
+    "ReceivedResponse": ReceivedResponseData,
 }
