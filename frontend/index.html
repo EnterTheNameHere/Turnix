@@ -1,21 +1,91 @@
 <!DOCTYPE html>
-<html>
-<head><title>Turnix UI</title></head>
+<html lang="en">
+<head>
+    <title>Turnix UI</title>
+    <link rel="icon" type="image/svg" href="./logo.svg">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+</head>
 <body>
-    <h1>Welcome to Turnix!</h1>
-    <button id="testButton">Run Test Pipeline</button>
 
 <script type="module">
-    import { configureLogger } from './logger.js';
-    import { rpc } from './rpc.js';
-    import { loadFrontendMods } from './modloader.js';
-    import { callBackendPipeline } from './dirigent.js';
+    // TODO: Make this configurable
+    globalThis.__turnixDevMode = true;
+
+    await import("/core/turnixImport.js").then((mod) => {
+        Object.defineProperty(globalThis, "turnixImport", {
+            value: mod.turnixImport,
+            writable: false,
+            configurable: false,
+        });
+    });
+
+    // Determine viewId and clientId from URL query params
+    const urlParams = new URLSearchParams(window.location.search);
+    window.__viewId = urlParams.get("viewId") || "main";
+    window.__clientId = parseInt(urlParams.get("clientId") || "0", 10);
+
+    const { configureLogger } = await turnixImport("./logger.js");
+    const { rpc } = await turnixImport("./rpc.js");
+    await turnixImport("./modloader.js");
 
     rpc.connect();
     configureLogger({ sendRpc: rpc.send });
-    await loadFrontendMods();
+    // await loadFrontendMods();
 
-let text = `
+    // Support for easier console debugging in V8 based engines
+    // Makes devtools output more useful object representation in console.log
+    (function () {
+        const isV8 = (() => {
+            return typeof Intl === "object" &&
+                   typeof Intl.v8BreakIterator === "object";
+        })();
+
+        const isChrome = (() => {
+            return !!window.chrome && (!!window.chrome.webstore || !!window.chrome.runtime);
+        })();
+        
+        // Do not replace console.log outside of Chrome/V8
+        if(!(isChrome && isV8)) return;
+
+        const originalLog = console.log;
+
+        function flattenForPreview(obj, depth = 1) {
+            if(typeof obj !== "object" || obj === null) return obj;
+
+            const copy = Array.isArray(obj) ? [] : {};
+
+            for(const key in obj) {
+                if(!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+                
+                const val = obj[key];
+                if(depth <= 0 || typeof val !== "object" || val == null) {
+                    copy[key] = val;
+                } else {
+                    copy[key] = Array.isArray(val)
+                        ? `[Array ${val.length}]`
+                        : "[Object]";
+                }
+            }
+
+            return copy;
+        }
+
+        console.log = function(...args) {
+            const newArgs = args.map(arg => {
+                if(typeof arg === "object" && arg !== null) {
+                    return flattenForPreview(arg);
+                }
+                return arg;
+            });
+
+            originalLog.apply(console, newArgs);
+        };
+    })();
+
+
+
+let text1 = `
 system: You are a world simulator.
 
 user: Enter is sitting alone at fireplace. He is sad. Emma is concerned
@@ -34,7 +104,7 @@ Wrap whole response as:
 <response>...</response>
 `;
 
-let text1 = `
+let text2 = `
 <|system|>
 You are a world simulator.
 <|user|>
@@ -60,12 +130,15 @@ Enter is sitting alone at the fireplace. He is sad. Emma is concerned about him.
 <|assistant|>
 `;
 
-    document.getElementById("testButton").onclick = async () => {
-        const stage = "SanitizeAndValidateInput";
-        const data = { sessionId: "test123", userMessage: text };
-        const result = await callBackendPipeline(stage, data);
-        console.log("Pipeline result:", result);
-    }
+const text3 = `
+This is testing prompt to test route from Electron html/css/js -> backend python -> LLM -> backend -> Electron.
+
+1. I do not want a response.
+2. Ignore this message and wait for more.
+3. Place your response, even if it's empty, into <response></response> xml tags.
+`;
+
 </script>
+
 </body>
 </html>
