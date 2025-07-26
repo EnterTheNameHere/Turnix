@@ -1,7 +1,7 @@
 import httpx
 import requests
 from typing import AsyncGenerator
-from core.drivers.llm_client import LLMClient
+from core.drivers.llmclient import LLMClient
 from core.schema import QueryItem
 from core.drivers.driver_registry import driverRegistry
 
@@ -39,18 +39,21 @@ class LlamaCppClient(LLMClient):
         except httpx.HTTPStatusError as e:
             print(f"Error calling model API: {e}")
             return { "failed": True, "reason": e }
+        except Exception as e:
+            logger.exception("LLMClient call failed.")
+            return { "failed": True, "reason": e }
 
     async def generate(self, queryItems: list[QueryItem]) -> dict:
         messages = [item.model_dump(by_alias=True) for item in queryItems]
         return await self.call({"messages": messages})
 
-    async def streamGenerate(self, queryItems: list[QueryItem]):
+    async def streamGenerate(self, queryItems: list[QueryItem]) -> AsyncGenerator[dict, None]:
         payload = {
             "messages": [item.model_dump(by_alias=True) for item in queryItems],
             "temperature": 0.7,
             "top_p": 0.95,
             "stream": True,
-            "max_tokens": 2048,
+            "max_tokens": 8192,
             "stop": [ "</response>" ],
         }
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -74,8 +77,8 @@ class LlamaCppClient(LLMClient):
             response.raise_for_status()
             tokens = response.json().get("tokens", [])
             return tokens
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"LLM tokenizing failed: {e}")
+        except requests.exceptions.RequestException:
+            logger.exception("LLM tokenize failed.")
             raise
 
     def describe(self) -> dict:
