@@ -8,9 +8,9 @@ export function isDevMode() {
 }
 
 export function bustCache(path) {
-    globalThis.__turnixSessionId ??= Date.now();
+    globalThis.__turnixCacheBustToken ??= Date.now();
     const url = new URL(path, window.location.origin);
-    url.searchParams.set("ts", globalThis.__turnixSessionId);
+    url.searchParams.set("ts", globalThis.__turnixCacheBustToken);
     return url.toString();
 }
 
