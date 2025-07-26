@@ -17,21 +17,24 @@ class JSLogHandler(logging.Handler):
         # Fire and forget to JS
         try:
             if self._ready:
-                from backend.rpc_websocket import pushEvent
-                asyncio.create_task(pushEvent("log", logData))
+                # from backend.rpc_websocket import pushEvent
+                # if asyncio.get_event_loop().is_running():
+                #     asyncio.create_task(pushEvent("log", logData))
+                pass
             else:
                 self.queue.append(logData)
         
         except RuntimeError:
-            # Ignore errors when the event loop isn't running
-            pass
+            # Event loop isn't ready, so queue the log for later
+            self.queue.append(logData)
         
     def flushQueue(self):
         if self._ready:
-            from backend.rpc_websocket import pushEvent
-            for record in self.queue:
-                asyncio.create_task(pushEvent("log", record))
-            self.queue.clear()
+            # from backend.rpc_websocket import pushEvent
+            # for record in self.queue:
+            #     asyncio.create_task(pushEvent("log", record))
+            # self.queue.clear()
+            pass
 
     def setReady(self, ready = True):
         self._ready = ready
