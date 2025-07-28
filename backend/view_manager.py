@@ -38,6 +38,6 @@ class ViewManager:
             logger.warning(f"No View ({viewId}, {clientId}) exists!")
         else:
             view = self.views[(viewId, clientId)]
-            if view.viewId == "main" and clientId == 0:
+            if view.viewId == "main" and view.clientId == 0:
                 raise ValueError(f"Cannot destroy main view!")
             del self.views[(viewId, clientId)]
