@@ -47,13 +47,11 @@ Turnix is designed to be:
 ### 3. **Mod System**
 
 - Mods register hooks **programmatically** via runtime lifecycle methods:
-  - `init()`: general init (non-view specific)
-  - `activate(viewId)`: register hooks for a view
-  - `deactivate(viewId)`: optional cleanup
+  - `activate()`: register hooks for a view
+  - `deactivate()`: optional cleanup
   - `teardown()`: full mod unload
-  - `pipelineCreated(pipeline)`: optional callback when new pipeline is instantiated
+  - `sessionCreated(session)`: optional callback when new session is instantiated
 - Mod manifest describes only **metadata**, not hook declarations
-- Mods can request new views from backend (`requestView(...)`) and hook into them
 
 ---
 
@@ -95,7 +93,7 @@ hidden: false
 
 ### Loading
 
-- JS mods are loaded using `import()` after main view is ready
+- JS mods are loaded using `turnixImport()` after main view is ready
 - Python mods are activated via `Turnix.import("mod-id")`
 
 ### Ordering and Dependencies
@@ -113,7 +111,7 @@ Turnix.mods["chat-ui"]
 ```
 
 ```js
-const mod = await Turnix.import("chat-ui")
+const mod = await turnixImport("chat-ui")
 ```
 
 ---
@@ -128,10 +126,10 @@ The pipeline consists of deterministic, hookable stages:
 - `FilterQueryItems`: prune and structure input
 - `FinalizePrompt`: build prompt for LLM
 - `__MODEL_CALL__`: LLM receives prompt
-- `SanitizeResponse`: clean model output (per chunk)
-- `ValidateResponse`: confirm chunk correctness
-- `ProcessResponseAndUpdateState`: apply chunk effects (per chunk)
-- `FinalizeResponse`: post-processing after full reply
+- `ValidateStreamResponse`: confirm chunk correctness
+- `SanitizeStreamResponse`: clean model output (per chunk)
+- `ProcessStreamResponse`: apply chunk effects (per chunk)
+- `ResponseFinalized`: post-processing after full reply
 
 Each stage is executed in order. `SanitizeResponse`, `ValidateResponse`, and `ProcessResponseAndUpdateState` are called per stream chunk. Others run once.
 
@@ -144,11 +142,11 @@ Each stage is executed in order. `SanitizeResponse`, `ValidateResponse`, and `Pr
 ### Memory Behavior
 
 - All mod memory is transactionally buffered per pipeline.
-- Changes are committed in `FinalizeResponse`, or discarded on `abort` / `retry`.
+- Changes are committed in `ResponseFinalized`, or discarded on `abort` / `retry`.
 
 ### Abort / Retry / Continue Logic
 
-- Mods may request `abort`, `retry`, or `continue` in `ValidateResponse`
+- Mods may request `abort`, `retry`, or `continue` in `ValidateStreamResponse`
 - `abort` and `retry` only work if transactional memory is in use
 - `continue` launches a follow-up pipeline with current `soFar`
 
@@ -172,17 +170,17 @@ Each stage is executed in order. `SanitizeResponse`, `ValidateResponse`, and `Pr
 
 ## 🧩 Mod Behavior by Stage
 
-| Stage                | Mod Role                         |
-| -------------------- | -------------------------------- |
-| `ValidateInput`      | Reject unsafe/invalid input      |
-| `SanitizeInput`      | Normalize input text             |
-| `GenerateQueryItems` | Add reasoning units / meta info  |
-| `FilterQueryItems`   | Prune and organize inputs        |
-| `FinalizePrompt`     | Convert to prompt text           |
-| `SanitizeResponse`   | Clean model chunk                |
-| `ValidateResponse`   | Check validity, optionally alter |
-| `ProcessResponse...` | Apply state/UI effect per chunk  |
-| `FinalizeResponse`   | Commit memory, finalize pipeline |
+| Stage                    | Mod Role                         |
+| ------------------------ | -------------------------------- |
+| `ValidateInput`          | Reject unsafe/invalid input      |
+| `SanitizeInput`          | Normalize input text             |
+| `GenerateQueryItems`     | Add reasoning units / meta info  |
+| `FilterQueryItems`       | Prune and organize inputs        |
+| `FinalizePrompt`         | Convert to prompt text           |
+| `ValidateStreamResponse` | Check validity, optionally alter |
+| `SanitizeStreamResponse` | Clean model chunk                |
+| `ProcessStreamResponse`  | Apply state/UI effect per chunk  |
+| `ResponseFinalized`      | Commit memory, finalize pipeline |
 
 ---
 
@@ -232,6 +230,59 @@ window.TurnixUI = {
   render(props), destroy(), onMessage(msg)
 }
 ```
+
+---
+
+#### WebSocket protocol
+
+| Property        | Description                                          | Type           | Required    |
+|-----------------|------------------------------------------------------|----------------|-------------|
+| `type`          | Message type.                                        | WSMessageType  | Yes         |
+| `action`        | Handlers can be registered for this action.          | String         | Yes         |
+| `viewId`        | View identifier which sent this message.             | String         | Yes         |
+| `clientId`      | Cliend identifier.                                   | String         | Yes         |
+| `requestId`     | Unique identifier for this message request.          | String         | Conditional |
+| `securityToken` | Security token.                                      | String         | Yes         |
+| `timestamp`     | Timestamp of this message request.                   | Number         | Yes         |
+| `origin.modId`  | If the origin of this message is a mod.              | String         | Conditional |
+| `data`          | Data sent as part of this message.                   | Object         | Conditional |
+| `error`         | Sent when frontend or backend cannot properly reply. | WSMessageError | Conditional |
+
+- `requestId` is required for `*Request`, `*Reply` and `*Error`, not for `*Emit`.
+- `origin.modId` is present if the origin of message is a mod.
+- `error` is required for `*Error`.
+- `data` should not be sent for `*Error`.
+- `*Error` might still be sent if the message as a whole cannot be parsed, as in such case `type` cannot be determined.
+
+| WSMessageType     | Description                                                                 |
+|-------------------|-----------------------------------------------------------------------------|
+| `frontendEmit`    | Send a message from frontend. No response from backend is expected.         |
+| `backendEmit`     | Send a message from backend. No response from frontend is expected.         |
+| `frontendRequest` | Frontend request, should be followed by `backendReply` or `backendError`    |
+| `backendRequest`  | Backend request, should be followed by `frontendReply` or `frontendError`   |
+| `frontendReply`   | Sent as reply to `backendRequest`                                           |
+| `backendReply`    | Sent as reply to `frontendRequest`                                          |
+| `frontendError`   | Sent as error reply to `backendRequest` when proper reply is not possible.  |
+| `backendError`    | Sent as error reply to `frontendRequest` when proper reply is not possible. |
+
+| WSMessageError  | Error message sent as reply when proper reply is not possible.    | Type   |
+| `code`          | Error code.                                                       | String |
+| `message`       | Error message.                                                    | String |
+| `origin.modId`  | Optional mod identifier if the error is caused by a specific mod. | String |
+
+| Error codes         | Description                                                  |
+| `NOT_CONNECTED`     | When WebSocket has no valid connection.                      |
+| `UNABLE_TO_PARSE`   | When message as a whole cannot be parsed.                    |
+| `MISSING_FIELD`     | When bad or missing field was provided.                      |
+| `HANDLER_NOT_FOUND` | When no handler for message's `action` is found.             |
+| `INVALID_PAYLOAD`   | When bad or missing `data`.                                  |
+| `HANDLER_ERROR`     | When error occurred while executing handler.                 |
+| `INTERNAL_ERROR`    | When an error occurred and no more information is available. |
+| `MOD_NOT_FOUND`     | When referenced mod is not found.                            |
+| `TIMEOUT`           | When operation took too long to complete.                    |
+| `INVALID_STATE`     | When the mod is in an invalid state.                         |
+| `NOT_FOUND`         | When a resource was not found.                               |
+| `REJECTED`          | When request was rejected.                                   |
 
 ---
 
