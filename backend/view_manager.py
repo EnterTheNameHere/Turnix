@@ -1,5 +1,6 @@
 from backend.resilient_websocket import WebSocketRetryError
 from backend.view import View
+from backend.main_view import MainView
 
 import logging
 logger = logging.getLogger(__name__)
@@ -48,6 +49,6 @@ class ViewManager:
             logger.warning(f"No View ({viewId}, {clientId}) exists!")
         else:
             view = self.views[(viewId, clientId)]
-            if view.viewId == "main" and view.clientId == 0:
-                raise ValueError(f"Cannot destroy main view!")
+            if isinstance(view, MainView):
+                raise ValueError("Cannot destroy MainView!")
             del self.views[(viewId, clientId)]
