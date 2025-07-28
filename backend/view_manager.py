@@ -1,3 +1,4 @@
+from backend.resilient_websocket import WebSocketRetryError
 from backend.view import View
 
 import logging
@@ -8,6 +9,15 @@ class ViewManager:
         self.mainView = mainView
         self.views: dict[tuple[str, int], View] = {("main", 0): mainView}
  
+    async def broadcast(self, data: dict):
+        for _, view in self.views.items():
+            try:
+                await view.send(data)
+            except WebSocketRetryError as e:
+                logger.error(f"Failed to broadcast data to view '{view.key}': {e}")
+
+        return
+
     def createView(self, viewId: str, clientId: int = 0) -> View:
         if not isinstance(viewId, str) or len(viewId.strip()) == 0:
             raise ValueError("viewId must be a non-empty string!")
