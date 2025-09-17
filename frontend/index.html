@@ -14,10 +14,16 @@
             }
         }
     </script>
+    <div id="app">
+        <h1>Turnix GM Starter</h1>
+        <div id="mods-status"></div>
+        <pre id="log"></pre>
+    </div>
 <script type="module">
     // TODO: Make this configurable
     globalThis.__turnixDevMode = true;
 
+        // Makes turnixImport work
     await import("/core/turnixImport.js").then((mod) => {
         Object.defineProperty(globalThis, "turnixImport", {
             value: mod.turnixImport,
@@ -25,19 +31,6 @@
             configurable: false,
         });
     });
-
-    // Determine viewId and clientId from URL query params
-    const urlParams = new URLSearchParams(window.location.search);
-    window.__viewId = urlParams.get("viewId") || "main";
-    window.__clientId = parseInt(urlParams.get("clientId") || "0", 10);
-
-    const { configureLogger } = await turnixImport("./logger.js");
-    const { rpc } = await turnixImport("./rpc.js");
-    await turnixImport("./modloader.js");
-
-    rpc.connect();
-    configureLogger({ sendRpc: rpc.send });
-    // await loadFrontendMods();
 
     // Support for easier console debugging in V8 based engines
     // Makes devtools output more useful object representation in console.log
@@ -89,62 +82,18 @@
         };
     })();
 
+    const { RpcClient } = await turnixImport('/assets/rpc-client.js');
+    const { loadMods } =  await turnixImport('/assets/mod-loader.js');
 
+    const wsUrl = (location.origin.replace(/^http/, 'ws')) + '/ws'
+    const settings = await fetch('/settings').then(response=>response.json())
+    const rpc = await RpcClient.connect(wsUrl, { settings });
+    globalThis.Turnix = {rpc, settings};
 
-let text1 = `
-system: You are a world simulator.
-
-user: Enter is sitting alone at fireplace. He is sad. Emma is concerned
-about him. She approaches Enter.
-
-First, Generate 5 options of what Emma can do to brighten Enter.
-Second, Generate random event which can happen as background to the scene.
-Third, select a weather, select one of: rainy, sunny, stormy, cold.
-Format each as:
-
-<step:1>{"suggestions": [...]}</step>
-<step:2>{"event": ...}</step>
-<step:3>{"weather": ...}</step>
-
-Wrap whole response as:
-<response>...</response>
-`;
-
-let text2 = `
-<|system|>
-You are a world simulator.
-<|user|>
-You must respond in this XML-like format:
-
-<response>
-<step:1>{"suggestions": ["..."]}</step>
-<step:2>{"event": "..."}</step>
-<step:3>{"weather": "..."}</step>
-</response>
-
-IMPORTANT:
-- Do NOT explain.
-- Do NOT change the tag names.
-- Keep everything in the format above.
-
-Now:  
-Enter is sitting alone at the fireplace. He is sad. Emma is concerned about him. She approaches Enter.
-
-1. Generate 5 suggestions of what Emma could do to help.  
-2. Generate a background random event.  
-3. Select weather: rainy, sunny, stormy, cold.
-<|assistant|>
-`;
-
-const text3 = `
-This is testing prompt to test route from Electron html/css/js -> backend python -> LLM -> backend -> Electron.
-
-1. I do not want a response.
-2. Ignore this message and wait for more.
-3. Place your response, even if it's empty, into <response></response> xml tags.
-`;
-
+    const loaded = await loadMods({rpc, settings});
+    document.getElementById('mods-status').textContent =
+        loaded.length ? `Loaded mods: ${loaded.map(m => m.manifest.name).join(',')}` : 'No mods loaded';
+    console.log('Mods loaded.')
 </script>
-
 </body>
 </html>
