@@ -14,7 +14,7 @@ function createWindow() {
         },
     });
 
-    win.loadURL("http://localhost:3000/")
+    win.loadURL("http://localhost:63726/")
 
     if(globalThis.__turnixDevMode) {
         win.webContents.openDevTools()
