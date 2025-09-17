@@ -57,6 +57,24 @@ Turnix is designed to be:
 
 ## 📦 ModLoader Behavior
 
+Scan Directories
+  ↓
+Find Candidate Mod Folders
+  ↓
+Load/Infer Manifest
+  ↓
+Resolve Executable + Runtime
+  ↓
+Finalize ModManifest
+  ↓
+Sort Mods
+  ↓
+Load Mods (by runtime)
+  ↓
+Activate Mods
+  ↓
+System Ready
+
 ### Lifecycle Phases
 
 - **Phase 0: Boot** — Turnix backend starts, no mods loaded
