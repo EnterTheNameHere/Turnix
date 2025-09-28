@@ -28,7 +28,7 @@ class Launcher(QWidget):
         self.initUI()
         self.initProcessChecker()
     
-    def loadLlamaCppPresets(self):
+    def loadLlamaCppPresets(self) -> dict:
         try:
             with open("launcher_llama_cpp_presets.json5", "r", encoding="utf-8") as file:
                 content = file.read()
@@ -42,7 +42,10 @@ class Launcher(QWidget):
                 return '"' + path + '"'
             
             fixed_content = re.sub(r'"([^"]*)"', fix_path_slashes, content)
-            return json5.loads(fixed_content)
+            parsedContent = json5.loads(fixed_content)
+            if not isinstance(parsedContent, dict):
+                raise ValueError("Content of launcher_llama_cpp_presets.json5 must be dict.")
+            return parsedContent
         
         except FileNotFoundError:
             print("launcher_llama_cpp_presets.json5 file not found.")
@@ -82,7 +85,8 @@ class Launcher(QWidget):
         row4 = QHBoxLayout()
         row4.addWidget(QLabel("Model presets"))
         self.modelBox = QComboBox()
-        self.modelBox.addItems(self.llamaCppPresets.keys())
+        if self.llamaCppPresets is not None:
+            self.modelBox.addItems(self.llamaCppPresets.keys())
         self.modelBox.currentTextChanged.connect(self.selectLlamaCppModel)
         row4.addWidget(self.modelBox)
 
