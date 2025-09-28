@@ -136,7 +136,9 @@ class Launcher(QWidget):
         try:
             if not self.backendProcess:
                 print("Starting backend in visible console...")
-                cmd = ["pwsh", "-NoExit", "-Command", "uvicorn backend.server:app"]
+                python_embedded = os.path.join(os.getcwd(), "python-embedded", "python.exe")
+                backend_cmd = f'$host.UI.RawUI.WindowTitle = "Backend Server"; & "{python_embedded}" -m uvicorn backend.server:app --port 63726'
+                cmd = ["pwsh", "-NoExit", "-Command", backend_cmd]
                 print("Command:", " ".join(cmd))
                 self.backendProcess = psutil.Popen(cmd, creationflags=CREATE_NEW_CONSOLE)
                 print(f"Backend PID: {self.backendProcess.pid}")
@@ -165,7 +167,15 @@ class Launcher(QWidget):
         try:
             if not self.electronProcess:
                 print("Starting Electron in visible console...")
-                cmd = ["pwsh", "-NoExit", "-Command", "npm run start"]
+                #cmd = ["pwsh", "-NoLogo", "-NoExit", "-Command", '& { $host.UI.RawUI.WindowTitle = "Electron"; cmd /c "title Electron && npm.cmd run start" }']
+                cmd = [
+                    "pwsh",
+                    "-NoLogo",
+                    "-NoExit",
+                    "-Command",
+                    'cmd /k "title Electron && npm.cmd run start"'
+                    # use /k to keep the window after it finishes; /c if you want it to close
+                ]
                 print("Command:", " ".join(cmd))
                 self.electronProcess = psutil.Popen(
                     cmd, cwd="electron", creationflags=CREATE_NEW_CONSOLE
@@ -212,7 +222,7 @@ class Launcher(QWidget):
                 args_quoted = " ".join(
                     f'"{a}"' if " " in a or "\\" in a else a for a in args
                 )
-                cmd_str = f'& "{exe}" {args_quoted}'
+                cmd_str = f'$host.UI.RawUI.WindowTitle = "LlamaCPP"; & "{exe}" {args_quoted}'
 
                 pwsh_cmd = ["pwsh", "-NoExit", "-Command", cmd_str]
 
