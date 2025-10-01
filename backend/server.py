@@ -1,5 +1,17 @@
 from __future__ import annotations
 import logging
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+from pydantic import BaseModel, ValidationError, Field, ConfigDict, JsonValue, model_validator
+from pydantic.alias_generators import to_camel
+from pathlib import Path
+from typing import Any, Literal, Callable
+import json5, os, time, asyncio, uuid6, re, secrets, hashlib, importlib.util
+
+
 
 from core.logger import configureLogging
 configureLogging()
@@ -18,20 +30,30 @@ for name in [
 ]:
     logging.getLogger(name).propagate = False
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, FileResponse
-from pydantic import BaseModel, ValidationError, Field, ConfigDict, JsonValue
-from pydantic.alias_generators import to_camel
-from pathlib import Path
-from typing import Any, Literal, Callable
-import json5, os, time, asyncio, uuid6, re
+
 
 BACKEND_DIR = Path(__file__).parent
 ROOT_DIR = BACKEND_DIR.parent
 WEBROOT = ROOT_DIR / "frontend"
 
-app = FastAPI()
+@asynccontextmanager
+async def life(app: FastAPI):
+    # startup
+    yield
+    # shutdown
+    if hasattr(LLM, "aclose"):
+        res = LLM.aclose()
+        if asyncio.iscoroutine(res):
+            await res
+
+app = FastAPI(lifespan=life)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # ---------- Load settings (defaults + optional file) ----------
 SETTINGS_DEFAULT_PATH = BACKEND_DIR / "settings_default.json5"
@@ -48,7 +70,7 @@ SETTINGS = json5.loads(SETTINGS_DEFAULT_PATH.read_text()) if SETTINGS_DEFAULT_PA
     "http": {"retry": 2, "backoff": {"baseMs": 250, "maxMs": 1000, "jitterPct": 30}, "timeoutCapMs": 30000},
     "mods": {"allowSymlinks": False},
     "httpProxy": {
-        "allowList": ["httpbin.org", "api.openai.com", "localhost", "127.0.0.1"],
+        "allowList": ["httpbin.org", "api.openai.com", "localhost", "127.0.0.1", "::1"],
         "buckets": { "default": {"rpm": 600, "burst": 200}},
     },
     "debug": {"backend":  {"rpc": {"incomingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"]},
@@ -57,6 +79,20 @@ SETTINGS = json5.loads(SETTINGS_DEFAULT_PATH.read_text()) if SETTINGS_DEFAULT_PA
                                    "outgoingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"]}}},
     },
 }
+
+
+
+def quickImport(path: str | Path):
+    """Dynamically import a Python file by path. Development helper only for quick testing."""
+    path = Path(path).resolve()
+    spec = importlib.util.spec_from_file_location(path.stem, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load module from {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 
 def deepMerge(aDict: dict, bDict: dict) -> dict:
     outDict = dict(aDict)
@@ -67,6 +103,8 @@ def deepMerge(aDict: dict, bDict: dict) -> dict:
             outDict[key] = value
     return outDict
 
+
+
 def loadUserSettings() -> JsonValue:
     filePath = Path(os.path.expanduser("~/.turnix/turnix.json5"))
     if filePath.exists():
@@ -76,17 +114,50 @@ def loadUserSettings() -> JsonValue:
             logger.error("Failed to parse %s: %s", filePath, err)
     return {}
 
+
+
 def loadSettings():
     merged = deepMerge(SETTINGS, loadUserSettings())
     return merged
+
+
 
 @app.get("/settings")
 async def getSettings():
     return JSONResponse(loadSettings())
 
+
+
 @app.get("/health")
 async def health():
+    # TODO: add llama.cpp or other driver health here too
     return {"ok": True, "ts": int(time.time() * 1000)}
+
+
+
+def nowMonotonicMs() -> int:
+    try:
+        import time as _t
+        return int(_t.perf_counter() * 1000)
+    except Exception:
+        return int(time.time() * 1000)
+
+
+
+def sha256sumWithPath(path: str | Path) -> str:
+    path = Path(path).resolve()
+    sha = hashlib.sha256()
+
+    # Include absolute path in the hash
+    sha.update(str(path).encode("utf-8"))
+
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(8192), b""):
+            sha.update(chunk)
+    
+    return sha.hexdigest()
+
+
 
 class ModManifest(BaseModel):
     id: str
@@ -97,6 +168,33 @@ class ModManifest(BaseModel):
     capabilities: list[str] = Field(default_factory=list)
     assets: list[str] = Field(default_factory=list)
 
+
+
+class Gen(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="forbid",
+    )
+    num: int
+    salt: str
+
+
+
+class Route(BaseModel):
+    capability: str | None = None
+    object: str | None = None
+
+
+
+class Invocation(BaseModel):
+    route: Route
+    path: str | None = None
+    op: str | None = None
+    args: list | None = None
+
+
+
 class RPCMessage(BaseModel):
     model_config = ConfigDict(
         alias_generator=to_camel,
@@ -104,26 +202,48 @@ class RPCMessage(BaseModel):
         extra="forbid",
     )
 
-    v: str
-    id: str
-    type: str
-    correlatesTo: str | None = None
-    lane: str
-    ts: int
-    gen: int
-    budgetMs: int | None = None
+    v: str                          # RPCMessage schema version
+    id: str                         # UUIDv7
+    type: Literal["ack","hello","welcome","clientReady","request","emit","reply","subscribe","stateUpdate","unsubscribe","cancel","error"]
+    correlatesTo: str | None = None # UUIDv7 of previous message, if in sequence.
+    gen: Gen                        # generation of connection as set by server
+    ts: int = Field(default_factory=nowMonotonicMs) # Monotonic time of sending
+    budgetMs: int | None = None     # How many ms to finish job and communication
     ackOf: int | None = None
-    job: dict | None = None
+    job: dict[str, Any] | None = None # Represents current status of job being executed
     idempotencyKey: str | None = None
-    route: dict | None = None
-    args: list | None = None
-    op: str | None = None
-    seq: int | None = None
-    path: str | None = None
-    origin: dict | None = None # For metadata only, not for auth
-    chunkNo: int | None = None # For streamed payload
-    final: int | None = None   # For streamed payload
-    payload: dict = Field(default_factory=dict)
+    route: Route | None = None      # "Address" of handler which should be handling the message
+    op: str | None = None           # "operation" handler should perform, if further specification is needed
+    path: str | None = None         # Additional info for handler to decide which "operation" to execute
+    args: list[Any] | None = None   # "arguments" for "operation" handler might find useful to decide what "operation" to execute
+    seq: int | None = None          # Per-lane delivery sequence number
+    origin: dict[str, Any] | None = None # For metadata only, not for auth
+    chunkNo: int | None = None      # For streamed payload
+    final: int | None = None        # For streamed payload
+    payload: dict[str, Any] = Field(default_factory=dict)
+    
+    # Non-optional with a default value
+    lane: str = Field(default="noLaneSet") # "sys" or other lane name
+
+    # --------------
+    #   Validators  
+    # --------------
+    @model_validator(mode="after")
+    def fillDefaults(self):
+        # lane fallback based on route
+        if not self.lane or self.lane == "noLaneSet":
+            if self.route:
+                if self.route.capability is not None:
+                    self.lane = f"cap:{self.route.capability}"
+                elif self.route.object is not None:
+                    self.lane = f"obj:{self.route.object}"
+                else:
+                    self.lane = "noValidRouteLane"
+            else:
+                self.lane = "noLaneSet"
+        
+        return self
+
 
 def defaultModRoots() -> list[tuple[Path, dict[str, Any]]]:
     roots: list[tuple[Path, dict[str, Any]]] = []
@@ -135,10 +255,12 @@ def defaultModRoots() -> list[tuple[Path, dict[str, Any]]]:
 
 MOD_ROOTS = defaultModRoots()
 
+
+
 def resolveSafe(root: Path, requested: str) -> Path:
     raw = root.joinpath(requested)
     
-    # Resolve with string=False to avoid raising if file doesn't exist yet
+    # Resolve with strict=False to avoid raising if file doesn't exist yet
     resolved = raw.resolve(strict=False)
     rootResolved = root.resolve(strict=True)
     
@@ -160,12 +282,16 @@ def resolveSafe(root: Path, requested: str) -> Path:
             path = path.parent
     return resolved
 
+
+
 def findManifestPath(dir: Path) -> Path|None:
     if(dir / "mod.json5").exists():
         return dir / "mod.json5"
     if(dir / "mod.json").exists():
         return dir / "mod.json"
     return None
+
+
 
 def scanMods() -> dict[str, tuple[Path, Path, ModManifest, str]]:
     found: dict[str, tuple[Path, Path, ModManifest, str]] = {}
@@ -177,7 +303,7 @@ def scanMods() -> dict[str, tuple[Path, Path, ModManifest, str]]:
                 continue
             manifestPath = findManifestPath(dir)
             if not manifestPath:
-                logger.warning("Skipping mod dir without manifest: %s", dir)
+                logger.info("Skipping mod dir without manifest: %s", dir)
                 continue
             try:
                 raw = json5.loads(manifestPath.read_text())
@@ -189,21 +315,36 @@ def scanMods() -> dict[str, tuple[Path, Path, ModManifest, str]]:
                 logger.exception("Failed reading manifest %s: %s", manifestPath, err)
     return found
 
+
+
 @app.get("/mods/index")
 def listMods():
     found = scanMods()
     logger.info("Mods discovered: %d", len(found))
     modManifests = []
     for _modId, (_root, _dir, manifest, _fname) in found.items():
-        modManifests.append({
+        entry = f"/mods/load/{manifest.id}/{manifest.entry}"
+        modEntry ={
             "id": manifest.id,
             "name": manifest.name,
             "version": manifest.version,
-            "entry": f"/mods/load/{manifest.id}/{manifest.entry}",
+            "entry": entry,
             "permissions": manifest.permissions,
             "capabilities": manifest.capabilities,
-        })
+        }
+        entryPath = _dir / manifest.entry
+        if not entryPath.exists():
+            logger.warning("Missing entry file for mod '%s': '%s'", manifest.id, str(entryPath))
+            modEntry["problems"] = modEntry.get("problems", [])
+            modEntry["problems"].append({"error": f"Entry file not found."})
+            modEntry["enabled"] = False
+        else:
+            modEntry["hash"] = sha256sumWithPath(_dir / manifest.entry)
+            modEntry["enabled"] = True
+        modManifests.append(modEntry)
     return {"modManifests": modManifests}
+
+
 
 @app.get("/mods/validate")
 def validateMods():
@@ -235,6 +376,8 @@ def validateMods():
                 results.append(status)
     return {"results": results}
 
+
+
 @app.get("/mods/load/{modId}/{path:path}")
 def serveModAsset(modId: str, path: str):
     found = scanMods()
@@ -247,98 +390,77 @@ def serveModAsset(modId: str, path: str):
     # TODO: Add strict caching/versioning later; for now no-cache in dev
     return FileResponse(safe)
 
+
+
 class Session:
     """
     Holds per-connection state: idempotency cache, pending jobs, etc.
     """
-    def __init__(self):
+    def __init__(self, key: tuple[str, str | None, str | None]):
+        self.key = key
         self.idCache: set[str] = set()
         self.replyCache: dict[str, RPCMessage] = {}
         self.pending: dict[str, asyncio.Task] = {}
         self.cancelled: set[str] = set()
         self.subscriptions: dict[str, asyncio.Task] = {} # correlatesTo -> task
+        self.state = {
+            "serverMessage": "Welcome to Turnix RPC",
+            "serverBootTs": time.time(),
+            "mods": {
+                "frontend": listMods(),
+            }
+        }
+        self.genNum = 0
+        self.genSalt = ""
+        # Last clientReady payload
+        self.lastClientReady: dict | None = None
+
+    def newGeneration(self) -> dict:
+        self.genNum += 1
+        self.genSalt = secrets.token_hex(4)
+        return {"num": self.genNum, "salt": self.genSalt}
     
+    def currentGeneration(self) -> dict:
+        return {"num": self.genNum, "salt": self.genSalt}
+
     def dedupeKey(self, msg: RPCMessage) -> str:
         return msg.idempotencyKey or msg.id
 
+    _MAX_CACHE = 512
     def remember(self, key: str):
         self.idCache.add(key)
-        # Optional: prune LRU; keep it simple here
+        if len(self.idCache) > self._MAX_CACHE:
+            # simple prune: drop ~1/4
+            for _ in range(len(self.idCache) // 4):
+                self.idCache.pop()
+    
+    def putReply(self, key: str, reply: RPCMessage):
+        self.replyCache[key] = reply
+        if len(self.replyCache) > self._MAX_CACHE:
+            # drop arbitrary 1/4
+            for k in list(self.replyCache.keys())[:len(self.replyCache)//4]:
+                self.replyCache.pop(k, None)
 
-def nowMonotonicMs() -> int:
-    # TODO: just demo
-    try:
-        import time as _t
-        return int(_t.perf_counter() * 1000)
-    except Exception:
-        return int(time.time() * 1000)
 
-def ackFor(msg: RPCMessage, remainingMs: int | None = None) -> RPCMessage:
-    ackMsg = RPCMessage(
-        id=str(uuid6.uuid7()),
-        v="0.1",
-        type="ack",
-        correlatesTo=msg.id,
-        lane=msg.lane or "sys",
-        ts=nowMonotonicMs(),
-        gen=0,
-        budgetMs=loadSettings()["protocol"]["ackWaitMs"],
-        seq=0,
-        ackOf=msg.seq if msg.seq is not None else 0,
-    )
 
-    if remainingMs is not None:
-        ackMsg.job = {"accepted": True, "remainingMs": max(0, int(remainingMs))}
-    return ackMsg
+def _gen(session: Session) -> Gen:
+    return Gen.model_validate(session.currentGeneration())
 
-def errorFor(msg: RPCMessage, code: str, message: str, retryable: bool=False) -> RPCMessage:
-    return RPCMessage(
-        id=str(uuid6.uuid7()),
-        v="0.1",
-        type="error",
-        correlatesTo=msg.id,
-        lane=msg.lane or "sys",
-        ts=nowMonotonicMs(),
-        gen=0,
-        payload={
-            "code": code,
-            "message": message,
-            "retryable": retryable,
-        },
-    )
 
-def replyFor(msg: RPCMessage, payload: dict) -> RPCMessage:
-    return RPCMessage(
-        id=str(uuid6.uuid7()),
-        v="0.1",
-        type="reply",
-        correlatesTo=msg.id,
-        lane=msg.lane or "sys",
-        ts=nowMonotonicMs(),
-        gen=0,
-        payload=payload,
-    )
 
 def safeJsonDumps(obj: object | RPCMessage) -> str:
+    import json
     if isinstance(obj, RPCMessage):
-        return json5.dumps(
+        return json.dumps(
             obj.model_dump(by_alias=True, exclude_unset=True),
-            indent=None,
             ensure_ascii=False,
             allow_nan=False,
-            allow_duplicate_keys=True,
-            trailing_commas=False,
-            quote_keys=True,
             separators=(",", ":"),
         )
-    return json5.dumps(
+    return json.dumps(
         obj,
-        indent=None,
         ensure_ascii=False,
         allow_nan=False,
-        allow_duplicate_keys=True,
-        trailing_commas=False,
-        quote_keys=True,
         separators=(",", ":"),
     )
 
@@ -350,11 +472,15 @@ def logIncomingStr(text: str) -> None:
         if all(f'"type":"{value}"' not in text for value in ignoreTypes):
             logger.debug(f"[RPC] incoming: {text}")
 
+
+
 def logOutgoingStr(text: str) -> None:
     if(loadSettings().get("debug", {}).get("backend", {}).get("rpc", {}).get("outgoingMessages", {}).get("log", False)):
         ignoreTypes = loadSettings().get("debug", {}).get("backend", {}).get("rpc", {}).get("outgoingMessages", {}).get("ignoreTypes", [])
         if all(f'"type":"{value}"' not in text for value in ignoreTypes):
             logger.debug(f"[RPC] sending: {text}")
+
+
 
 def defaultRedactor(text: str) -> str:
     # Hide bearer tokens & simple passwords
@@ -362,6 +488,8 @@ def defaultRedactor(text: str) -> str:
     text = re.sub(r"Bearer\s+[A-Za-z0-9\._\-]+", "Bearer ***", text)
     text = re.sub(r'("password"\s*:\s*")[^"]+(")', r'\1***\2', text)
     return text
+
+
 
 class LoggingWebSocket:
     """
@@ -378,8 +506,29 @@ class LoggingWebSocket:
         await self._ws.send_text(data)
     
     async def send_json(self, data: Any, mode: str = "text") -> None:
-        logOutgoingStr(self._shorten(safeJsonDumps(data)))
-        await self._ws.send_json(data, mode=mode)
+        if mode not in ("text", "binary"):
+            raise ValueError("mode must be 'text' or 'binary'")
+        
+        if mode == "text":
+            if isinstance(data, str):
+                payloadText = data
+            elif isinstance(data, (bytes, bytearray)):
+                payloadText = data.decode("utf-8", errors="replace")
+            else:
+                payloadText = safeJsonDumps(data)
+            logOutgoingStr(self._shorten(payloadText))
+            await self._ws.send_text(payloadText)
+        
+        else: # binary mode
+            if isinstance(data, (bytes, bytearray)):
+                payloadBytes = bytes(data)
+            elif isinstance(data, str):
+                payloadBytes = data.encode("utf-8")
+            else:
+                payloadBytes = safeJsonDumps(data).encode("utf-8")
+            preview = payloadBytes[:self._maxLen or 4096]
+            logOutgoingStr(self._shorten(preview.decode("utf-8", errors="replace")))
+            await self._ws.send_bytes(payloadBytes)
 
     async def send_bytes(self, data: bytes) -> None:
         logOutgoingStr(self._shorten(f"<{len(data)} bytes>"))
@@ -394,15 +543,200 @@ class LoggingWebSocket:
     def __getattr__(self, name: str):
         return getattr(self._ws, name)
 
+
+
+SESSIONS: dict[tuple[str, str | None, str | None], Session] = {}
+
+
+
+def getSession(viewId: str, clientId: str | None, sessionId: str | None) -> Session:
+    key = (viewId, clientId, sessionId)
+    session = SESSIONS.get(key)
+    if not session:
+        session = Session(key)
+        SESSIONS[key] = session
+    return session
+
+
+
+def uuidv7() -> str:
+    return str(uuid6.uuid7())
+
+
+
+def createWelcomeMessage(props: dict[str, Any], opts: dict[str, Any] | None = None):
+    if not isinstance(props, dict): raise TypeError("props must be a dict")
+    
+    try:
+        gen = Gen.model_validate(props["gen"])
+    except KeyError:
+        raise ValueError("props.gen is required")
+    except ValidationError as err:
+        raise TypeError(f"props.gen must be a valid Gen: {err}")
+    
+    payload = props.get("payload", {})
+    if not isinstance(payload, dict): raise TypeError("props.payload must be a dict")
+
+    return RPCMessage(
+        id=uuidv7(),
+        v="0.1",
+        type="welcome",
+        ts=nowMonotonicMs(),
+        gen=Gen.model_validate(gen),
+        lane="sys",
+        budgetMs=pickBudgetMs(opts),
+        payload=payload,
+    )
+
+
+
+def createAckMessage(toMsg: RPCMessage, props: dict[str, Any]):
+    if not isinstance(toMsg, RPCMessage): raise TypeError("toMsg must be a valid RPCMessage")
+    if not isinstance(props, dict): raise TypeError("props must be a dict")
+    
+    try:
+        gen = Gen.model_validate(props["gen"])
+    except KeyError:
+        raise ValueError("props.gen is required")
+    except ValidationError as err:
+        raise TypeError(f"props.gen must be a valid Gen: {err}")
+
+    return RPCMessage(
+        id=uuidv7(),
+        v="0.1",
+        type="ack",
+        budgetMs=loadSettings()["protocol"]["ackWaitMs"],
+        gen=gen,
+        route=toMsg.route,
+        lane="sys",
+        correlatesTo=toMsg.id,
+        payload={},
+    )
+
+
+
+def createErrorMessage(toMsg: RPCMessage, props: dict[str, Any], opts: dict[str, Any] | None = None):
+    if not isinstance(toMsg, RPCMessage): raise TypeError("toMsg must be a valid RPCMessage")
+    if not isinstance(props, dict): raise TypeError("props must be a dict")
+    
+    try:
+        gen = Gen.model_validate(props["gen"])
+    except KeyError:
+        raise ValueError("props.gen is required")
+    except ValidationError as err:
+        raise TypeError(f"props.gen must be a valid Gen: {err}")
+
+    payload = props.get("payload", {})
+    if not isinstance(payload, dict): raise TypeError("props.payload must be a dict")
+    
+    errorPayload = {
+        "code": props.get("code", payload.get("code", "UNKNOWN_ERROR")),
+        "message": props.get("message", payload.get("message", "")),
+        "err": serializeError(props.get("err", payload.get("err"))),
+        "retryable": props.get("retryable", payload.get("retryable", False)),
+    }
+
+    if not isinstance(errorPayload["code"], str): raise TypeError("code or payload.code must be a string with readable error code")
+    
+    return RPCMessage(
+        id=uuidv7(),
+        v="0.1",
+        type="error",
+        gen=gen,
+        route=toMsg.route,
+        lane="sys",
+        correlatesTo=toMsg.id,
+        budgetMs=pickBudgetMs(opts),
+        payload=errorPayload,
+    )
+
+
+
+def createReplyMessage(toMsg: RPCMessage, props: dict[str, Any], opts: dict[str, Any] | None = None):
+    if not isinstance(toMsg, RPCMessage): raise TypeError("toMsg must be a valid RPCMessage")
+    if not isinstance(props, dict): raise TypeError("props must be a dict")
+    
+    try:
+        gen = Gen.model_validate(props["gen"])
+    except KeyError:
+        raise ValueError("props.gen is required")
+    except ValidationError as err:
+        raise TypeError(f"props.gen must be a valid Gen: {err}")
+    
+    payload = props.get("payload")
+    if not isinstance(payload, dict): raise TypeError("props.payload must be a dict (did you forget to add reply payload?)")
+    
+    return RPCMessage(
+        id=uuidv7(),
+        v="0.1",
+        type="reply",
+        correlatesTo=toMsg.id,
+        idempotencyKey=toMsg.idempotencyKey if toMsg.idempotencyKey is not None else None,
+        route=toMsg.route,
+        lane=toMsg.lane,
+        gen=gen,
+        budgetMs=pickBudgetMs(opts),
+        payload=payload,
+    )
+
+
+
+def pickBudgetMs(opts) -> int:
+    # 3000 ms is fallback default
+    if isinstance(opts, dict):
+        budgetMs = opts.get("budgetMs") if isinstance(opts, dict) else None
+        if budgetMs is None:
+            budgetMs = resolveClassCfg(opts).get("serviceTtlMs", 3000)
+    else:
+        # Fallback to 3000
+        budgetMs = 3000
+    return budgetMs
+
+
+
+def resolveClassCfg(opts) -> dict:
+    cls = opts.get("class") or "request.medium"
+    cfg = loadSettings().get("timeouts", {}).get("classes", {}).get(cls) or { "serviceTtlMs": 3000, "clientPatienceExtraMs": 200 }
+    return cfg
+
+
+
+async def sendRaw(ws: LoggingWebSocket, message: RPCMessage):
+    await ws.send_text(safeJsonDumps(message))
+
+
+
+llmclientMod = quickImport(Path("mods/first-party/drivers/llamacpp/llamacpp_client.py"))
+LLM = llmclientMod.LlamaCppClient()
+
+
+
+async def pushToast(ws: LoggingWebSocket, level: Literal["info", "warn", "error"], text: str, gen: dict, ttlMs: int = 5000) -> None:
+    await sendRaw(ws, RPCMessage(
+        id=uuidv7(),
+        v="0.1",
+        type="emit",
+        route=Route(capability="ui.toast@1"),
+        gen=Gen.model_validate(gen),
+        payload={
+            "level": level,
+            "text": text,
+        }
+    ))
+
+
+
 @app.websocket("/ws")
 async def wsEndpoint(ws_: WebSocket):
     ws = LoggingWebSocket(ws_)
     await ws.accept()
-    sess = Session()
+    sessLocal: Session | None = None
+    
     try:
         while True:
             raw = await ws.receive_text()
             logIncomingStr(raw)
+
             try:
                 msg = RPCMessage.model_validate_json(raw)
             except ValidationError as verr:
@@ -410,231 +744,437 @@ async def wsEndpoint(ws_: WebSocket):
                 continue
             
             msgType = msg.type
+
+            # TODO: warn on message with lane = "noLaneSet" or "noValidRouteLane"
+
+            # ----- Handshake -----
+            if msgType == "hello":
+                sessLocal = getSession("view-1", "client-1", "session-1")
+                gen = sessLocal.newGeneration()
+
+                # Send snapshot state with welcome
+                await ws.send_text(safeJsonDumps(createWelcomeMessage({
+                    "gen": gen,
+                    "payload": {
+                        "state": sessLocal.state,
+                    },
+                })))
+                continue
+
+            # Handshake is required!
+            if sessLocal is None:
+                # Ignore anything before hello
+                continue
+
+            if msgType == "clientReady":
+                # Frontend declares it has finished loading/initializing
+                sessLocal.lastClientReady = {
+                    "gen": msg.gen,
+                    "ts": msg.ts,
+                    "mods": {
+                        "loaded": msg.payload.get("mods", {}).get("loaded") or [],
+                        "failed": msg.payload.get("mods", {}).get("failed") or [],
+                        "modsHash": msg.payload.get("modsHash"),                    
+                    }
+                }
+                await sendRaw(ws, createAckMessage(msg, {"gen": sessLocal.currentGeneration()}))
+                continue
+
             if msgType is None:
                 logger.warning(f"Received message where msg.type is None.")
                 raise HTTPException(status_code=400, detail="Invalid message type")
 
-            msgReceivedTime = nowMonotonicMs()
-            timeBudget = int(msg.budgetMs if msg.budgetMs is not None else 3000)
-
             # Immediate ack for non-control messages
-            if msgType not in ("ack", "heartbeat", "hello"):
-                elapsed = nowMonotonicMs() - msgReceivedTime
-                remaining = max(0, timeBudget - elapsed) if msgType  == "request" else None
-                await ws.send_text(safeJsonDumps(ackFor(msg, remainingMs=remaining if msgType=="request" else None)))
+            if msgType not in ("ack", "heartbeat"):
+                await sendRaw(ws, createAckMessage(msg, { "gen": sessLocal.currentGeneration() }))
 
             # Cancel request or subscription
             if msgType == "cancel" or msgType == "unsubscribe":
                 corrId = msg.correlatesTo
-                if corrId and corrId in sess.pending:
-                    sess.cancelled.add(corrId)
-                    sess.pending[corrId].cancel()
-                    sess.pending.pop(corrId, None)
-                if corrId and corrId in sess.subscriptions:
-                    sess.subscriptions[corrId].cancel()
-                    sess.subscriptions.pop(corrId, None)
+                if corrId and corrId in sessLocal.pending:
+                    sessLocal.cancelled.add(corrId)
+                    sessLocal.pending[corrId].cancel()
+                    sessLocal.pending.pop(corrId, None)
+                if corrId and corrId in sessLocal.subscriptions:
+                    sessLocal.subscriptions[corrId].cancel()
+                    sessLocal.subscriptions.pop(corrId, None)
                 continue
 
-            if msgType == "subscribe" and (msg.route if msg.route is not None else {}).get("capability") == "gm.world@1":
-                async def streamWorld(corrId: str, lane: str):
-                    try:
-                        while True:
-                            await asyncio.sleep(2.0)
-                            payload = {"turn": int(time.time()), "actors": ["goblin", "player"]}
-                            await ws.send_text(safeJsonDumps(RPCMessage(
-                                v="0.1",
-                                id=str(uuid6.uuid7()),
-                                type="stateUpdate",
-                                correlatesTo=corrId,
-                                lane=lane,
-                                ts=nowMonotonicMs(),
-                                gen=0,
-                                payload=payload,
-                            )))
-                    except asyncio.CancelledError:
-                        pass
-                corrId = msg.id
-                lane = msg.lane or "sys"
-                task = asyncio.create_task(streamWorld(corrId, lane))
-                sess.subscriptions[corrId] = task
+            if msgType == "subscribe":
+                capability = (msg.route.capability if isinstance(msg.route, Route) else "") or ""
+                handler = SUBSCRIBE_HANDLERS.get(capability)
+                if not handler:
+                    logger.warning(f"Unknown capability for subscribe: '{capability}'\n{msg}")
+                    await sendRaw(ws, createErrorMessage(msg, {
+                        "gen": sessLocal.currentGeneration(),
+                        "payload": {"code":"CAPABILITY_NOT_FOUND","message":"Unknown capability/route for subscribe"}
+                    }))
+                    continue
+                await handler(HandlerContext(ws=ws, session=sessLocal), msg)
                 continue
-
-            # Dedupe
-            key = sess.dedupeKey(msg)
-            if key in sess.idCache and msgType in ("request", "emit"):
-                # Resend cached reply if any
-                cached = sess.replyCache.get(key)
-                if cached:
-                    await ws.send_text(safeJsonDumps(cached))
-                continue
-            if msgType in ("request", "emit"):
-                sess.remember(key)
+                # Following comments are contains old code, ignore them until next uncommented code
+                #     route = msg.route
+                #     capability = route.capability if isinstance(route, Route) else ""
+                #     if capability == "gm.world@1":
+                #         sess = sessLocal
+                #         if sess is None:
+                #             await sendRaw(ws, createErrorMessage(msg, {
+                #                 "gen": sessLocal.currentGeneration(),
+                #                 "payload": {
+                #                     "code": "UNAUTHORIZED",
+                #                     "message": "Handshake required",
+                #                 }
+                #             }))
+                #             continue
+                #
+                #         async def streamWorld(corrId: str, lane: str, sessLocal: Session):
+                #             try:
+                #                 while True:
+                #                     await asyncio.sleep(2.0)
+                #                     payload = {"turn": int(time.time()), "actors": ["goblin", "player"]}
+                #                     await ws.send_text(safeJsonDumps(RPCMessage(
+                #                         v="0.1",
+                #                         id=str(uuid6.uuid7()),
+                #                         type="stateUpdate",
+                #                         correlatesTo=corrId,
+                #                         lane=lane,
+                #                         ts=nowMonotonicMs(),
+                #                         gen=Gen.model_validate(sessLocal.currentGeneration()),
+                #                         payload=payload,
+                #                     )))
+                #             except asyncio.CancelledError:
+                #                 pass
+                #             except Exception:
+                #                 # client likely disconnected
+                #                 pass
+                #         corrId = msg.id
+                #         lane = msg.lane or "sys"
+                #         task = asyncio.create_task(streamWorld(corrId, lane, sess))
+                #         sess.subscriptions[corrId] = task
+                #         continue
+                #     else:
+                #         await sendRaw(ws, createErrorMessage(msg, {
+                #             "gen": sessLocal.currentGeneration(),
+                #             "payload": {
+                #                 "code": "UNKNOWN_SUBSCRIBE",
+                #                 "message": f"Cannot subscribe to '{capability}' as such capability doesn't exist."
+                #             }
+                #         }))
+                #         continue
+                #
+                # # Check if we already have a cached reply for this message
+                # key = sessLocal.dedupeKey(msg)
+                # if key in sessLocal.idCache and msgType in ("request", "emit"):
+                #     cached = sessLocal.replyCache.get(key)
+                #     if cached:
+                #         # We have, so resend it...
+                #         await ws.send_text(safeJsonDumps(cached))
+                #     continue
+                # if msgType in ("request", "emit"):
+                #     sessLocal.remember(key)
 
             if msgType == "request":
-                capability = (msg.route if msg.route is not None else {}).get("capability")
-                if capability == "http.client@1":
-                    async def doHttp():
-                        from .http_client import request as httpRequest
-                        import urllib.parse, ipaddress
-
-                        args = msg.args or []
-                        if len(args) < 2:
-                            await ws.send_text(safeJsonDumps(errorFor(msg, "BAD_REQUEST", "Need method, url.")))
-                            return
-                        method, url = args[0], args[1]
-                        opts = (args[2] if len(args) > 2 else {}) or {}
-                        method = str(method).upper()
-                        if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}:
-                            await ws.send_text(safeJsonDumps(errorFor(msg, "METHOD_NOT_ALLOWED", f"Method {method} not allowed.")))
-                            return
-                        
-                        # Validate against allowlist
-                        try:
-                            parsedUrl = urllib.parse.urlparse(url)
-                            host = parsedUrl.hostname or ""
-                            if not host:
-                                raise ValueError("No hostname.")
-                            settings = loadSettings()
-                            httpProxy = settings.get("httpProxy", {})
-                            allowedHosts = httpProxy.get("allowList", [])
-                            if host not in allowedHosts:
-                                # If host is an IP, allow only if explicitly in allow list
-                                try:
-                                    ipaddress.ip_address(host)
-                                    # IP not in allow list: reject
-                                    await ws.send_text(safeJsonDumps(errorFor(msg, "FORBIDDEN_HOST", f"Host {host} not allowed.")))
-                                    return
-                                except ValueError:
-                                    # hostname not allowed
-                                    await ws.send_text(safeJsonDumps(errorFor(msg, "FORBIDDEN_HOST", f"Host {host} not allowed.")))
-                                    return
-                        except Exception as err:
-                            await ws.send_text(safeJsonDumps(errorFor(msg, "BAD_URL", str(err))))
-                            return
-
-                        timeoutCap = loadSettings().get("http", {}).get("timeoutCapMs", 30000)
-                        timeoutMs = min(int(msg.budgetMs if msg.budgetMs is not None else 3000), int(timeoutCap))
-
-                        # Apply settings policy for request headers
-                        requestPolicy = _pickPolicy(loadSettings(), kind="requestHeaders", cap="http.client@1", host=host)
-                        requestHeaders = opts.get("headers", {}) or {}
-                        if not isinstance(requestHeaders, dict): requestHeaders = {} # Prevent invalid value
-                        requestHeaders = _filterHeaders(requestHeaders, requestPolicy)
-
-                        try:
-                            response = await httpRequest(
-                                method,
-                                url,
-                                headers=requestHeaders,
-                                json=opts.get("json"),
-                                data=opts.get("data"),
-                                timeoutMs=timeoutMs,
-                                retries=int(loadSettings().get("http", {}).get("retry", 2)),
-                                backoffBaseMs=int(loadSettings().get("http", {}).get("backoff", {}).get("baseMs", 250)),
-                                backoffMaxMs=int(loadSettings().get("http", {}).get("backoff", {}).get("maxMs", 1000)),
-                            )
-
-                            # Apply settings policy for response headers
-                            responsePolicy = _pickPolicy(loadSettings(), kind="responseHeaders", cap="http.client@1", host=host)
-                            responseHeaders = response["headers"]
-                            if not isinstance(responseHeaders, dict): responseHeaders = {} # Prevent malformed headers
-                            responseHeaders = _filterHeaders(responseHeaders, responsePolicy)
-                            
-                            reply = replyFor(msg, {
-                                "status": response["status"],
-                                "headers": responseHeaders,
-                                "text": response["text"]
-                            })
-                            
-                            await ws.send_text(safeJsonDumps(reply))
-                        except Exception as err:
-                            await ws.send_text(safeJsonDumps(errorFor(msg, "HTTP_ERROR", str(err), retryable=True)))
-                            return
-                    
-                    task = asyncio.create_task(doHttp())
-                    sess.pending[msg.id] = task
-                    task.add_done_callback(lambda _t: sess.pending.pop(msg.id, None))
+                capability = (msg.route.capability if isinstance(msg.route, Route) else "") or ""
+                handler = REQUEST_HANDLERS.get(capability)
+                if not handler:
+                    logger.warning(f"Unknown capability for request: '{capability}'\n{msg}")
+                    await sendRaw(ws, createErrorMessage(msg, {
+                        "gen": sessLocal.currentGeneration(),
+                        "payload": {"code":"CAPABILITY_NOT_FOUND","message":"Unknown capability/route for request"}
+                    }))
                     continue
-
-                if capability == "gm.narration@1":
-                    async def handle():
-                        start = nowMonotonicMs()
-                        try:
-                            # Simulate some works within budget
-                            toSleep = min(0.2, timeBudget/1000)
-                            await asyncio.sleep(toSleep)
-                            if msg.id in sess.cancelled:
-                                # best effort cancel
-                                return
-                            action = (msg.args or ["(silence)"])[0]
-                            text = f"The GM considers your action: {action!r} and responds with a twist."
-                            rep = replyFor(msg, {"text": text, "spentMs": nowMonotonicMs() - start})
-                            sess.replyCache[key] = rep
-                            await ws.send_text(safeJsonDumps(rep))
-                        except asyncio.CancelledError:
-                            pass
-                    task = asyncio.create_task(handle())
-                    sess.pending[msg.id] = task
-                    task.add_done_callback(lambda _t: sess.pending.pop(msg.id, None))
-                    continue
-
-                logger.warning(f"Received message with 'request' but : {msg}")
-                await ws.send_text(safeJsonDumps(errorFor(msg, "CAPABILITY_NOT_FOUND", "Unknown capability/path")))
+                await handler(HandlerContext(ws=ws, session=sessLocal), msg)
+                continue
+                # Following comments are contains old code, ignore them until next uncommented code
+                # route = msg.route
+                # capability = route.capability if isinstance(route, Route) else ""
+                # if capability == "http.client@1":
+                #     sess = sessLocal
+                #     if sess is None:
+                #         await sendRaw(ws, createErrorMessage(msg, {
+                #             "gen": sessLocal.currentGeneration(),
+                #             "payload": {
+                #                 "code": "UNAUTHORIZED",
+                #                 "message": "Handshake required",
+                #             }
+                #         }))
+                #         continue
+                #
+                #     async def doHttp(msgLocal: RPCMessage, sessLocal: Session):
+                #         from .http_client import request as httpRequest
+                #         import urllib.parse, ipaddress
+                #
+                #         args = msgLocal.args or []
+                #         if len(args) < 2:
+                #             await sendRaw(ws, createErrorMessage(msgLocal, {
+                #                 "gen": sessLocal.currentGeneration(),
+                #                 "payload": {
+                #                     "code": "BAD_REQUEST",
+                #                     "message": "Need method, url",
+                #                 }
+                #             }))
+                #             return
+                #         method, url = args[0], args[1]
+                #         opts = (args[2] if len(args) > 2 else {}) or {}
+                #         method = str(method).upper()
+                #         if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}:
+                #             await sendRaw(ws, createErrorMessage(msgLocal, {
+                #                 "gen": sessLocal.currentGeneration(),
+                #                 "payload": {
+                #                     "code": "METHOD_NOT_ALLOWED",
+                #                     "message": f"Method {method} not allowed",
+                #                 }
+                #             }))
+                #             return
+                #
+                #         # Validate against allowlist
+                #         try:
+                #             parsedUrl = urllib.parse.urlparse(url)
+                #             host = parsedUrl.hostname or ""
+                #             if not host:
+                #                 raise ValueError("No hostname.")
+                #             settings = loadSettings()
+                #             httpProxy = settings.get("httpProxy", {})
+                #             allowedHosts = httpProxy.get("allowList", [])
+                #             if host not in allowedHosts:
+                #                 # If host is an IP, allow only if explicitly in allow list
+                #                 try:
+                #                     ipaddress.ip_address(host)
+                #                     # IP not in allow list: reject
+                #                     await sendRaw(ws, createErrorMessage(msgLocal, {
+                #                         "gen": sessLocal.currentGeneration(),
+                #                         "payload": {
+                #                             "code": "FORBIDDEN_HOST",
+                #                             "message": f"Host {host} not allowed.",
+                #                         }
+                #                     }))
+                #                     return
+                #                 except ValueError:
+                #                     # hostname not allowed
+                #                     await sendRaw(ws, createErrorMessage(msgLocal, {
+                #                         "gen": sessLocal.currentGeneration(),
+                #                         "payload": {
+                #                             "code": "FORBIDDEN_HOST",
+                #                             "message": f"Host {host} not allowed.",
+                #                         }
+                #                     }))
+                #                     return
+                #         except Exception as err:
+                #             await sendRaw(ws, createErrorMessage(msgLocal, {
+                #                 "gen": sessLocal.currentGeneration(),
+                #                 "payload": {
+                #                     "code": "BAD_URL",
+                #                     "message": str(err),
+                #                     "err": err,
+                #                 }
+                #             }))
+                #             return
+                #
+                #         timeoutCap = loadSettings().get("http", {}).get("timeoutCapMs", 30000)
+                #         timeoutMs = min(int(msgLocal.budgetMs if msgLocal.budgetMs is not None else 3000), int(timeoutCap))
+                #
+                #         # Apply settings policy for request headers
+                #         requestPolicy = _pickPolicy(loadSettings(), kind="requestHeaders", cap="http.client@1", host=host)
+                #         requestHeaders = opts.get("headers", {}) or {}
+                #         if not isinstance(requestHeaders, dict): requestHeaders = {} # Prevent invalid value
+                #         requestHeaders = _filterHeaders(requestHeaders, requestPolicy)
+                #
+                #         try:
+                #             response = await httpRequest(
+                #                 method,
+                #                 url,
+                #                 headers=requestHeaders,
+                #                 json=opts.get("json"),
+                #                 data=opts.get("data"),
+                #                 timeoutMs=timeoutMs,
+                #                 retries=int(loadSettings().get("http", {}).get("retry", 2)),
+                #                 backoffBaseMs=int(loadSettings().get("http", {}).get("backoff", {}).get("baseMs", 250)),
+                #                 backoffMaxMs=int(loadSettings().get("http", {}).get("backoff", {}).get("maxMs", 1000)),
+                #             )
+                #
+                #             # Apply settings policy for response headers
+                #             responsePolicy = _pickPolicy(loadSettings(), kind="responseHeaders", cap="http.client@1", host=host)
+                #             responseHeaders = response["headers"]
+                #             if not isinstance(responseHeaders, dict): responseHeaders = {} # Prevent malformed headers
+                #             responseHeaders = _filterHeaders(responseHeaders, responsePolicy)
+                #
+                #             reply = createReplyMessage(msgLocal, {
+                #                 "gen": sessLocal.currentGeneration(),
+                #                 "payload": {
+                #                     "status": response["status"],
+                #                     "headers": responseHeaders,
+                #                     "text": response["text"]
+                #                 }
+                #             })
+                #             sessLocal.putReply(key, reply)
+                #             await ws.send_text(safeJsonDumps(reply))
+                #         except Exception as err:
+                #             await sendRaw(ws, createErrorMessage(msgLocal, {
+                #                 "gen": sessLocal.currentGeneration(),
+                #                 "payload": {
+                #                     "code": "HTTP_ERROR",
+                #                     "message": str(err),
+                #                     "err": err,
+                #                     "retryable": True
+                #                 }
+                #             }))
+                #             return
+                #
+                #     task = asyncio.create_task(doHttp(msg, sess))
+                #
+                #     mId = msg.id
+                #     sess.pending[mId] = task
+                #
+                #     def _removeFromPending(_t, s: Session = sess, m: str = mId):
+                #         s.pending.pop(m, None)
+                #         s.cancelled.discard(m)
+                #
+                #     task.add_done_callback(_removeFromPending)
+                #     continue
+                #
+                # if capability == "chat@1":
+                #     userTurn = {
+                #         "id": msg.id+".u",
+                #         "role": msg.payload.get("role", "user"),
+                #         "text": msg.payload.get("text", ""),
+                #     }
+                #
+                #     messages: list[dict[str, str]] = []
+                #     for t in [userTurn]:
+                #         role = "assistant" if t.get("role") == "assistant" else "user"
+                #         messages.append({"role": role, "content": t.get("text", "")})
+                #
+                #     # Send ack early so UI can mark as pending
+                #     await sendRaw(ws, createAckMessage(msg, {
+                #         "gen": sessLocal.currentGeneration(),
+                #     }))
+                #
+                #     # Stream from llama.cpp
+                #     assistantTextChunks: list[str] = []
+                #     try:
+                #         async for event in LLM.streamChat(messages):
+                #             if event.get("done", False) == True:
+                #                 break
+                #             # OpenAI-style chunk
+                #             ch = event.get("choices", [{}])[0]
+                #             delta = ch.get("delta", {}).get("content", "")
+                #             if not delta:
+                #                 continue
+                #             assistantTextChunks.append(delta)
+                #             await sendRaw(ws, RPCMessage(
+                #                 id=uuidv7(),
+                #                 v="0.1",
+                #                 type="stateUpdate",
+                #                 lane=msg.lane,
+                #                 ts=nowMonotonicMs(),
+                #                 gen=Gen.model_validate(sessLocal.currentGeneration()),
+                #                 correlatesTo=msg.id,
+                #                 payload={"delta": delta}
+                #             ))
+                #         fullText = "".join(assistantTextChunks)
+                #         # Finalize
+                #         await sendRaw(ws, RPCMessage(
+                #             id=uuidv7(),
+                #             v="0.1",
+                #             type="stateUpdate",
+                #             lane=msg.lane,
+                #             ts=nowMonotonicMs(),
+                #             gen=Gen.model_validate(sessLocal.currentGeneration()),
+                #             correlatesTo=msg.id,
+                #             payload={"text": fullText, "delta": "", "done": True}
+                #         ))
+                #     except Exception as err:
+                #         await sendRaw(ws, createErrorMessage(msg, {
+                #             "gen": sessLocal.currentGeneration(),
+                #             "payload": {
+                #                 "code": "ERR_LLM",
+                #                 "message": str(err),
+                #                 "err": err,
+                #                 "retryable": True
+                #             }
+                #         }))
+                #     continue
+                #
+                # if capability == "gm.narration@1":
+                #     sess = sessLocal
+                #     if sess is None:
+                #         await sendRaw(ws, createErrorMessage(msg, {
+                #             "gen": sessLocal.currentGeneration(),
+                #             "payload": {
+                #                 "code": "UNAUTHORIZED",
+                #                 "message": "Handshake required",
+                #             }
+                #         }))
+                #         continue
+                #
+                #     async def handle(msgLocal: RPCMessage, sessLocal: Session, keyLocal: str):
+                #         start = nowMonotonicMs()
+                #         try:
+                #             # Simulate some works within budget
+                #             toSleep = min(0.2, timeBudget/1000)
+                #             await asyncio.sleep(toSleep)
+                #             if msgLocal.id in sessLocal.cancelled:
+                #                 # best effort cancel
+                #                 return
+                #             action = (msgLocal.args or ["(silence)"])[0]
+                #             text = f"The GM considers your action: {action!r} and responds with a twist."
+                #             reply = createReplyMessage(msgLocal, {
+                #                 "gen": sessLocal.currentGeneration(),
+                #                 "payload": {"text": text, "spentMs": nowMonotonicMs() - start}
+                #             })
+                #             sessLocal.putReply(keyLocal, reply)
+                #             await ws.send_text(safeJsonDumps(reply))
+                #         except asyncio.CancelledError:
+                #             pass
+                #
+                #     task = asyncio.create_task(handle(msg, sess, key))
+                #
+                #     mId = msg.id
+                #     sess.pending[mId] = task
+                #
+                #     def _removeFromPending(_t, s: Session = sess, m: str = mId):
+                #         s.pending.pop(m, None)
+                #         s.cancelled.discard(m)
+                #
+                #     task.add_done_callback(_removeFromPending)
+                #     continue
+                #
+                # logger.warning(f"Received message with 'request' but unknown capability: '{capability}' {msg}")
+                # await sendRaw(ws, createErrorMessage(msg, {
+                #     "gen": sessLocal.currentGeneration(),
+                #     "payload": {
+                #         "code": "CAPABILITY_NOT_FOUND",
+                #         "message": "Unknown capability/path",
+                #     }
+                # }))
 
             if msg.type == "emit":
-                capability = (msg.route if msg.route is not None else {}).get("capability")
-                if capability == "test.sendText@1":
-                    logger.info('GOT REQUEST TO SEND TEXT TO FRONTEND')
-                    await ws.send_text(safeJsonDumps(RPCMessage(
-                        v="0.1",
-                        id=str(uuid6.uuid7()),
-                        type="request",
-                        correlatesTo=msg.id,
-                        lane=msg.lane or "sys",
-                        route={"capability": "ui.toast@1"},
-                        op="call",
-                        ts=nowMonotonicMs(),
-                        gen=0,
-                        payload={ "text": "Hello from backend!" }
-                    )))
-                if capability == "test.subscribe@1":
-                    logger.info('GOT REQUEST TO SUBSCRIBE TO FRONTEND')
-                    await ws.send_text(safeJsonDumps(RPCMessage(
-                        v="0.1",
-                        id=str(uuid6.uuid7()),
-                        type="subscribe",
-                        correlatesTo=msg.id,
-                        lane=msg.lane or "sys",
-                        route={"capability": "time.service@1"},
-                        op="call",
-                        ts=nowMonotonicMs(),
-                        gen=0,
-                        payload={}
-                    )))
-                if capability == "test.unsubscribe@1":
-                    logger.info('GOT REQUEST TO UNSUBSCRIBE FROM FRONTEND')
-                    await ws.send_text(safeJsonDumps(RPCMessage(
-                        v="0.1",
-                        id=str(uuid6.uuid7()),
-                        type="unsubscribe",
-                        correlatesTo=msg.id,
-                        lane=msg.lane or "sys",
-                        route={"capability": "time.service@1"},
-                        op="call",
-                        ts=nowMonotonicMs(),
-                        gen=0,
-                        payload={}
-                    )))
+                capability = (msg.route.capability if isinstance(msg.route, Route) else "") or ""
+                handler = EMIT_HANDLERS.get(capability)
+                if not handler:
+                    logger.warning(f"Unknown capability for emit: '{capability}'\n{msg}")
+                    await sendRaw(ws, createErrorMessage(msg, {
+                        "gen": sessLocal.currentGeneration(),
+                        "payload": {"code":"CAPABILITY_NOT_FOUND","message":"Unknown capability/route for emit"}
+                    }))
+                    continue
+                await handler(HandlerContext(ws=ws, session=sessLocal), msg)
+                continue
 
     except WebSocketDisconnect:
-        # Cleanup pending tasks
-        for task in list(sess.pending.values()):
-            task.cancel()
-        for task in list(sess.subscriptions.values()):
-            task.cancel()
+        if sessLocal is not None:
+            # Cleanup pending tasks
+            for task in list(sessLocal.pending.values()):
+                task.cancel()
+            for task in list(sessLocal.subscriptions.values()):
+                task.cancel()
         return
 
+
+
 app.mount("/", StaticFiles(directory=WEBROOT, html=True), name="web")
+
+
 
 def _pickPolicy(
         settings: dict,
@@ -643,15 +1183,16 @@ def _pickPolicy(
         cap: str | None = None,
         host: str | None = None ) -> dict:
     httpProxy = settings.get("httpProxy", {})
-    policy = dict(httpProxy.get(kind, {})) # Base policy
+    base = dict(httpProxy.get(kind, {})) # Base policy
+    policy = dict(base)
 
     def overlay(src: dict | None):
         nonlocal policy
         if not src: return
         policy = {**policy, **{key: value for key, value in src.items() if key in ("mode", "list")}}
     
-    perCap  = (policy.get("perCap")  or {}) if isinstance(policy.get("perCap"),  dict) else {}
-    perHost = (policy.get("perHost") or {}) if isinstance(policy.get("perHost"), dict) else {}
+    perCap  = (base.get("perCap")  or {}) if isinstance(base.get("perCap"),  dict) else {}
+    perHost = (base.get("perHost") or {}) if isinstance(base.get("perHost"), dict) else {}
 
     overlay(perCap.get(cap))   if cap  else None
     overlay(perHost.get(host)) if host else None
@@ -663,12 +1204,351 @@ def _pickPolicy(
 
     return policy
 
+
+
 def _filterHeaders(headers: dict[str, str], policy: dict) -> dict[str, str]:
     mode = policy["mode"]
     listed = set(policy["list"])
     out = {}
     for key, value in (headers or {}).items():
-        lKey = key.lower()
+        lKey = str(key).lower()
         if(mode == "allow" and lKey in listed) or (mode == "block" and lKey not in listed):
-            out[key] = value
+            out[str(key)] = str(value)
     return out
+
+
+
+from dataclasses import dataclass
+@dataclass
+class HandlerContext:
+    ws: LoggingWebSocket
+    session: Session
+
+async def handleSubscribeGMWorld(ctx: HandlerContext, msg: RPCMessage):
+    """
+    Subscribe: gm.world@1
+    """
+    async def streamWorld(correlatesTo: str, lane: str, session: Session):
+        try:
+            while True:
+                await asyncio.sleep(2.0)
+                payload = { "turn": int(time.time()), "actors": ["goblin", "player"] }
+                await sendRaw(ctx.ws, RPCMessage(
+                    v="0.1",
+                    id=(uuidv7()),
+                    type="stateUpdate",
+                    correlatesTo=correlatesTo,
+                    lane=lane,
+                    ts=nowMonotonicMs(),
+                    gen=_gen(session),
+                    payload=payload,
+                ))
+        except asyncio.CancelledError:
+            pass
+        except Exception as err:
+            logger.debug("gm.world stream stopped: %s", err)
+            pass
+    correlatesTo = msg.id
+    lane = msg.lane
+    task = asyncio.create_task(streamWorld(correlatesTo=correlatesTo, lane=lane, session=ctx.session))
+    ctx.session.subscriptions[correlatesTo] = task
+
+async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
+    """
+    Request: http.client@1
+    """
+    from .http_client import request as httpRequest
+    import urllib.parse, base64
+
+    args = msg.args or []
+    if len(args) < 2:
+        await sendRaw(ctx.ws, createErrorMessage(msg, {
+            "gen": ctx.session.currentGeneration(),
+            "payload": {"code": "BAD_REQUEST", "message": "Arguments required: method, url"},
+        }))
+        return
+    
+    method, url = args[0], args[1]
+    opts = (args[2] if len(args) > 2 else {}) or {}
+    method = str(method).upper()
+    if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}:
+        await sendRaw(ctx.ws, createErrorMessage(msg, {
+            "gen": ctx.session.currentGeneration(),
+            "payload": {"code": "BAD_REQUEST", "message": f"Invalid HTTP method: {method}"},
+        }))
+        return
+    
+    settings = loadSettings()
+    # Allowlist check
+    try:
+        parsedUrl = urllib.parse.urlparse(url)
+        host = parsedUrl.hostname or ""
+        if not host:
+            await sendRaw(ctx.ws, createErrorMessage(msg, {
+                "gen": ctx.session.currentGeneration(),
+                "payload": {"code": "BAD_REQUEST", "message": f"Invalid URL: {url}"},
+            }))
+            return
+        httpProxy = settings.get("httpProxy", {})
+        allowedHosts = httpProxy.get("allowList", [])
+        if host not in allowedHosts:
+            await sendRaw(ctx.ws, createErrorMessage(msg, {
+                "gen": ctx.session.currentGeneration(),
+                "payload": {"code": "FORBIDDEN_HOST", "message": f"Host {host} not allowed"}
+            }))
+            return
+    except Exception as err:
+        await sendRaw(ctx.ws, createErrorMessage(msg, {
+            "gen": ctx.session.currentGeneration(),
+            "payload": {"code": "BAD_URL", "message": str(err), "err": err}
+        }))
+        return
+    
+    timeoutCapMs = settings.get("http", {}).get("timeoutCapMs", 30_000)
+    timeoutMs = min(int(msg.budgetMs if msg.budgetMs is not None else 3_000), int(timeoutCapMs))
+
+    # Header policies
+    requestHeadersPolicy = _pickPolicy(settings=settings, kind="requestHeaders", cap="http.client@1", host=host)
+    requestHeaders = opts.get("headers", {}) or {}
+    if not isinstance(requestHeaders, dict):
+        requestHeaders = {}
+    requestHeaders = _filterHeaders(requestHeaders, requestHeadersPolicy)
+
+    try:
+        response = await httpRequest(
+            method=method,
+            url=url,
+            headers=requestHeaders,
+            json=opts.get("json"),
+            data=opts.get("data"),
+            params=opts.get("params"),
+            timeoutMs=timeoutMs,
+            retries=int(settings.get("http", {}).get("retry", 2)),
+            backoffBaseMs=int(settings.get("http", {}).get("backoff", {}).get("baseMs", 250)),
+            backoffMaxMs=int(settings.get("http", {}).get("backoff", {}).get("maxMs", 1_000)),
+            followRedirects=bool(opts.get("followRedirects", True)),
+        )
+
+        responseHeadersPolicy = _pickPolicy(settings=settings, kind="responseHeaders", cap="http.client@1", host=host)
+        responseHeaders = response.get("headers", {}) or {}
+        if not isinstance(responseHeaders, dict):
+            responseHeaders = {}
+        responseHeaders = _filterHeaders(responseHeaders, responseHeadersPolicy)
+
+        if not isinstance(response.get("status"), int):
+            await sendRaw(ctx.ws, createErrorMessage(msg, {
+                "gen": _gen(ctx.session),
+                "payload": {"code":"HTTP_ERROR","message":"Received invalid status code."},
+            }))
+            return
+        
+        content = response.get("content", b"")
+        if isinstance(content, str): # Make sure we have bytes and not accidentally pass str to b64encode
+            content = content.encode("utf-8", errors="replace")
+
+        payload = {
+            "status": response["status"],
+            "headers": responseHeaders,
+            "text": response.get("text", ""),
+            "contentB64": base64.b64encode(content).decode("ascii"),
+        }
+
+        if response.get("json") is not None:
+            payload["json"] = response["json"]
+
+        await sendRaw(ctx.ws, createReplyMessage(msg, {
+            "gen": ctx.session.currentGeneration(),
+            "payload": payload,
+        }))
+        return
+    except Exception as err:
+        await sendRaw(ctx.ws, createErrorMessage(msg, {
+            "gen": ctx.session.currentGeneration(),
+            "payload": {"code":"HTTP_ERROR","message":str(err),"err":err,"retryable": True},
+        }))
+        return
+
+async def handleRequestChat(ctx: HandlerContext, msg: RPCMessage):
+    """
+    Request: chat@1 (streaming, cancellable)
+    """
+    # Build OpenAI-style messages from payload
+    userTurn = {
+        "id": msg.id + ".u",
+        "role": msg.payload.get("role", "user"),
+        "text": msg.payload.get("text", ""),
+    }
+
+    messages = [{
+        "role": ("assistant" if userTurn["role"] == "assistant" else "user"),
+        "content": userTurn["text"]
+    }]
+
+    async def run():
+        assistantChunks: list[str] = []
+        try:
+            async for event in LLM.streamChat(
+                messages,
+                model=msg.payload.get("model", ""),
+                temperature=msg.payload.get("temperature", 0.8),
+                max_tokens=msg.payload.get("max_tokens", 256),
+                top_p=msg.payload.get("top_p"),
+                extra=msg.payload.get("extra"),
+            ):
+                if msg.id in ctx.session.cancelled:
+                    break
+
+                if event.get("error"):
+                    await sendRaw(ctx.ws, createErrorMessage(msg, {
+                        "gen": ctx.session.currentGeneration(),
+                        "payload": {"code":"ERR_LLM_STREAM", "message": event.get("error"), "err": event},
+                    }))
+                    break
+
+                if event.get("done"):
+                    break
+
+                ch = (event.get("choices") or [{}])[0]
+                delta = (ch.get("delta") or {}).get("content") or ""
+                if not delta:
+                    continue
+                assistantChunks.append(delta)
+                await sendRaw(ctx.ws, RPCMessage(
+                    id=uuidv7(),
+                    v="0.1",
+                    type="stateUpdate",
+                    lane=msg.lane,
+                    gen=_gen(ctx.session),
+                    correlatesTo=msg.id,
+                    payload={"delta": delta}
+                ))
+        except asyncio.CancelledError:
+            pass
+        except Exception as err:
+            await sendRaw(ctx.ws, createErrorMessage(msg, {
+                "gen": ctx.session.currentGeneration(),
+                "payload": {"code":"ERR_LLM", "message":str(err), "err": err, "retryable": True},
+            }))
+        else:
+            fullText = "".join(assistantChunks)
+            await sendRaw(ctx.ws, RPCMessage(
+                id=uuidv7(),
+                v="0.1",
+                type="stateUpdate",
+                lane=msg.lane,
+                gen=_gen(ctx.session),
+                correlatesTo=msg.id,
+                payload={"text": fullText, "delta": "", "done": True},
+            ))
+    
+    task = asyncio.create_task(run())
+    ctx.session.pending[msg.id] = task
+    task.add_done_callback(lambda _t, lSession=ctx.session, lMsgId=msg.id: (lSession.pending.pop(lMsgId, None), lSession.cancelled.discard(lMsgId)))
+
+async def handleRequestGMNarration(ctx: HandlerContext, msg: RPCMessage):
+    """
+    Request: gm.narration@1 (simple, cancellable)
+    """
+    async def run():
+        start = nowMonotonicMs()
+        try:
+            toSleep = min(0.2, (msg.budgetMs or 3_000)/1_000)
+            await asyncio.sleep(toSleep)
+            if msg.id in ctx.session.cancelled:
+                return
+            action = (msg.args or ["(silence)"])[0]
+            text = f"The GM considers your action {action!r} and responds with a twist."
+            reply = createReplyMessage(msg, {
+                "gen": ctx.session.currentGeneration(),
+                "payload": {"text": text, "spentMs": nowMonotonicMs() - start},
+            })
+            ctx.session.putReply(ctx.session.dedupeKey(msg), reply)
+            await sendRaw(ctx.ws, reply)
+        except asyncio.CancelledError:
+            pass
+    
+    task = asyncio.create_task(run())
+    ctx.session.pending[msg.id] = task
+    task.add_done_callback(lambda _t, lSession=ctx.session, lMsgId=msg.id: (lSession.pending.pop(lMsgId, None), lSession.cancelled.discard(lMsgId)))
+
+REQUEST_HANDLERS: dict[str, Callable[[HandlerContext, RPCMessage], Any]] = {
+    "http.client@1":    handleRequestHttpClient,
+    "chat@1":           handleRequestChat,
+    "gm.narration@1":   handleRequestGMNarration,
+}
+SUBSCRIBE_HANDLERS: dict[str, Callable[[HandlerContext, RPCMessage], Any]] = {
+    "gm.world@1":       handleSubscribeGMWorld,
+}
+EMIT_HANDLERS: dict[str, Callable[[HandlerContext, RPCMessage], Any]] = {
+    
+}
+
+def serializeError(err: Any) -> dict[str, Any]:
+    """Converts Exception object to JSON-serializable dict."""
+    import json, traceback
+
+    if err is None:
+        return {}
+    if isinstance(err, str):
+        return {"message": err}
+    if isinstance(err, BaseException):
+        data = {
+            "type": err.__class__.__name__,
+            "name": err.__class__.__name__,
+            "message": str(err),
+            "args": [repr(arg) for arg in getattr(err, "args", [])],
+        }
+        traceBack = getattr(err, "__traceback__", None)
+        if traceBack:
+            data["stack"] = "".join(traceback.format_tb(traceBack))[-4000:] # Prevent huge frames
+            if len(data["stack"]) > 4000:
+                data["stack"] = data["stack"] + "[TRUNCATED]"
+        return data
+    try:
+        # Maybe it's already serializable?
+        json.dumps(err) # if not, it throws
+        return err
+    except Exception:
+        return {"type": type(err).__name__, "repr": repr(err)}
+
+def tryJSONify(obj: Any) -> Any:
+    """Tries to convert any object to a JSON-serializable value."""
+    import base64
+    from datetime import date, datetime
+    from pathlib import Path
+    from collections.abc import Mapping, Iterable
+
+    # Basic types
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    
+    # Exceptions
+    if isinstance(obj, BaseException):
+        return serializeError(obj)
+
+    # Bytes/bytearray
+    if isinstance(obj, (bytes, bytearray, memoryview)):
+        return {"__b64__": base64.b64encode(bytes(obj)).decode("ascii")}
+    
+    # Datetime/date
+    if isinstance(obj, (date, datetime)):
+        return obj.isoformat()
+
+    # Path
+    if isinstance(obj, Path):
+        return str(obj)
+    
+    # Set/tuples
+    if isinstance(obj, (set, tuple)):
+        return [tryJSONify(value) for value in obj]
+    
+    # Mappings
+    if isinstance(obj, Mapping):
+        return {str(key): tryJSONify(value) for key, value in obj.items()}
+
+    # Iterables which are not handles above
+    if isinstance(obj, Iterable):
+        return [tryJSONify(value) for value in obj]
+    
+    # Fallback: string representation
+    return str(obj)
