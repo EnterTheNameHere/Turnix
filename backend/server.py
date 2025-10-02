@@ -9,9 +9,8 @@ from pydantic import BaseModel, ValidationError, Field, ConfigDict, JsonValue, m
 from pydantic.alias_generators import to_camel
 from pathlib import Path
 from typing import Any, Literal, Callable
+from collections.abc import AsyncIterator
 import json5, os, time, asyncio, uuid6, re, secrets, hashlib, importlib.util
-
-
 
 from core.logger import configureLogging
 configureLogging()
@@ -37,7 +36,7 @@ ROOT_DIR = BACKEND_DIR.parent
 WEBROOT = ROOT_DIR / "frontend"
 
 @asynccontextmanager
-async def life(app: FastAPI):
+async def life(app: FastAPI) -> AsyncIterator[None]:
     # startup
     yield
     # shutdown
