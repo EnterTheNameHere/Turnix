@@ -58,7 +58,7 @@ app.add_middleware(
 SETTINGS_DEFAULT_PATH = BACKEND_DIR / "settings_default.json5"
 SETTINGS = json5.loads(SETTINGS_DEFAULT_PATH.read_text()) if SETTINGS_DEFAULT_PATH.exists() else {
     "loadedFromBackendDefaults": True,
-    "protocol": {"ackWaitMs": 250, "graceWindowMs": 150, "maxInFlightPerLane": 64, "heartbeatMs": 5000},
+    "protocol": {"ackWaitMs": 250, "graceWindowMs": 150, "maxInFlightPerLane": 64, "heartbeatMs": 5000, "maxQueue": 1024, "maxOfflineQueue": 2000},
     "reconnect": {"initialDelayMs": 500, "maxDelayMs": 15000, "factor": 2.0, "jitterRatio": 0.25},
     "timeouts": {"classes": {
         "request.fast":   {"serviceTtlMs": 800,  "clientPatienceExtraMs": 150},
