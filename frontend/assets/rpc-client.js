@@ -1095,7 +1095,7 @@ export class RpcClient {
 export function defaultSettings() {
     console.warn("Loading default settings - this shouldn't happen if everything is set up correctly!")
     return {
-        loadedFromFrontendDefaults: true,
+        __source: "FRONTEND_DEFAULTS",
         protocol: {ackWaitMs: 250, graceWindowMs: 150, maxInFlightPerLane: 64, heartbeatMs: 5000, maxQueue: 1024, maxOfflineQueue: 2000},
         timeouts: {classes: {
             "request.fast": {serviceTtlMs: 800, clientPatienceExtraMs: 150},
