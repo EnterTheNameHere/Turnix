@@ -1,17 +1,126 @@
 import { uuidv7 } from "uuidv7";
 
+/**
+ * @template {any[]} A
+ * @returns {{
+ *     add(fn: (...args: A) => void): { unsubscribe(): void, fn: (...args: A) => void };
+ *     once(fn: (...args: A) => void): { unsubscribe(): void, fn: (...args: A) => void };
+ *     remove(target: { unsubscribe(): void, fn: (...args: A) => void } | ((...args: A) => void)): void;
+ *     emit(...args: A): void;
+ *     size(): number;
+ * }}
+ */
+export function createEmitter() {
+    const listeners = new Set();
+    const byOriginal = new Map();
+
+    const add = (fn) => {
+        if(typeof fn !== "function") throw new TypeError("Event handler must be a function");
+        const wrapped = (...args) => fn(...args);
+
+        listeners.add(wrapped);
+        let set = byOriginal.get(fn);
+        if(!set) byOriginal.set(fn, (set = new Set()));
+        set.add(wrapped);
+
+        const handle = {
+            fn,
+            unsubscribe() {
+                const s = byOriginal.get(fn);
+                if(s) {
+                    s.delete(wrapped);
+                    if(s.size === 0) byOriginal.delete(fn);
+                }
+                listeners.delete(wrapped);
+            },
+        };
+        return handle;
+    };
+
+    const once = (fn) => {
+        if(typeof fn !== "function") throw new TypeError("Event handler must be a function");
+        let handle = null;
+        const wrapped = (...args) => {
+            // Call and then unsubscribe
+            try { fn(...args); } finally { handle && handle.unsubscribe(); }
+        };
+        // Register using the original fn as the key so remove(fn) still works
+        listeners.add(wrapped);
+        let set = byOriginal.get(fn);
+        if(!set) byOriginal.set(fn, (set = new Set()));
+        set.add(wrapped);
+
+        handle = {
+            fn,
+            unsubscribe() {
+                const s = byOriginal.get(fn);
+                if(s) {
+                    s.delete(wrapped);
+                    if(s.size === 0) byOriginal.delete(fn);
+                }
+                listeners.delete(wrapped);
+            },
+        };
+        return handle;
+    };
+
+    const remove = (target) => {
+        if(!target) return;
+        if(typeof target === "function") {
+            // Remove all wrappers registered for this original function
+            const set = byOriginal.get(target);
+            if(set) {
+                for(const w of set) listeners.delete(w);
+                byOriginal.delete(target);
+            }
+            return;
+        }
+        if(typeof target.unsubscribe === "function") {
+            target.unsubscribe();
+            return;
+        }
+        throw new TypeError("remove expects a function or handle with unsubscribe()");
+    }
+
+    const emit = (...args) => {
+        // Snapshot to avoid mutation during iteration
+        for(const fn of [...listeners]) fn(...args);
+    };
+
+    const size = () => {
+        return listeners.size;
+    }
+
+    return {
+        add, once, remove, emit, size,
+    };
+}
+
+// Assignment sugar
+export function defineEventProperty(obj, propName, emitter) {
+    Object.defineProperty(obj, propName, {
+        enumerable: true,
+        get() { return emitter; }, // Returns read only emitter with .add/.once/.remove/.emit/.size on get.
+        set(value) { // On property set it adds handler to emitter; prevents overriding of the emitter.
+            if(typeof value !== "function") throw new TypeError(`${propName} event emitter setter expects a function`);
+            emitter.add(value); // Register and forget.
+        },
+    });
+}
+
 export class PerLaneSerializer {
     constructor() {
+        /** @type {Map<string, Promise<void>>} */
         this.tails = new Map();
     }
 
     enqueue(lane, task) {
         const tail = this.tails.get(lane) || Promise.resolve();
-        const next = tail.then(() => task()).catch(err => {
+        const chained = tail.then(() => task()).catch(err => {
             console.error("[lane]", lane, err);
         });
-        this.tails.set(lane, next.finally(() => {
-            if(this.tails.get(lane) === next) {
+        this.tails.set(lane, chained.finally(() => {
+            if(this.tails.get(lane) === chained) {
                 this.tails.delete(lane);
             }
         }));
@@ -26,30 +135,49 @@ export class RpcClient {
         return client;
     }
 
-    #generation = 0; // Connection generation epoch
+    /** @type {boolean} */
+    #ready = false; // Is websocket rpc ready for use?
+    /** @type {import("./types").Gen|null} */
+    #generation = null; // Connection generation epoch
 
     // TODO: Send settings if updated to backend, and receive settings from backend
+    /**
+     * @param {string} url
+     * @param {ReturnType<typeof defaultSettings>|any} settings
+     * @param {string|undefined} token
+     */
     constructor(url, settings, token) {
         this.url = url;
         this.token = token;
         this.settings = settings || defaultSettings();
-
+        
+        /** @type {WebSocket|null} */
         this.webSocket = null;
         this.connected = false;
         this.reconnectAttempts = 0;
-        this.#generation = 0;
+        /** @type {import("./types").Gen|null} */
+        this.#generation = null;
         
         this.offlineQueue = [];          // Used to collect messages when connection is not OPEN; sent once connection is OPEN
-        this.laneStates = new Map();     // lane -> { nextSeq, inFlight }
+        /** @type {Map<string, {nextSeq:number, peerAck?:number, inFlight:number}>} */
+        this.laneStates = new Map();
+        /** @type {Map<string, {resolve:Function, reject:Function, timer:any, laneKey?:string, wantAck?:boolean, onFinally?:Function}>} */
         this.pending = new Map();        // id -> { resolve, reject, timer, opts }
-        /** @type {Map<uuidv7, import("./types").Subscription} */
+        /** @type {Map<string, import("./types").Subscription>} */
         this.subscriptions = new Map();  // subId -> subscription object
         this.localCaps = new Map();      // capability -> { call?, emit?, subscribe? }
 
         this.heartbeatTimer = null;
         this.awolTimer = null;
-
-        this.heartbeat = { timer: null, intervalMs: this.settings.protocol.heartbeatMs, lastSeen: Date.now() };
+        this.heartbeat = { timer: null, intervalMs: this.settings?.protocol?.heartbeatMs ?? 5000, lastSeen: Date.now() };
+    
+        // Frontend events
+        /** @type {ReturnType<typeof createEmitter>} */
+        this.onReadyChange = createEmitter();
+        /** @type {ReturnType<typeof createEmitter>} */
+        this.onWelcome = createEmitter();
+        /** @type {ReturnType<typeof createEmitter>} */
+        this.onClientReady = createEmitter();
     }
 
     /**
@@ -79,26 +207,10 @@ export class RpcClient {
 
         // Send hello
         this.#sendRaw(this.#createHelloMessage());
-
-        // Resume subscriptions (best effort)
-        for(const [subId, subscription] of this.subscriptions.entries()) {
-            // Create a new subscribe with a new id, but keep the local sub object
-            const msg = this.#createSubscribeMessage({
-                route: subscription.invocation.route,
-                op: subscription.invocation.op ?? "none",
-                path: subscription.invocation.path,
-                payload: { ...subscription.opts },
-            }, subscription.opts);
-
-            // Move the sub to the new id
-            this.subscriptions.delete(subId);
-            this.subscriptions.set(msg.id, subscription);
-            // Send and wait only for ACK so we don't stall whole connect
-            this.#sendWithAck(msg).catch(() => {});
-        }
     }
 
     #onClose() {
+        this.#setReady(false);
         this.connected = false;
         this.#stopHeartbeat();
 
@@ -110,7 +222,6 @@ export class RpcClient {
         this.pending.clear();
 
         // Subscriptions are kept for resuming later
-
         const base = 250, max = 3000;
         const attempt = ++this.reconnectAttempts;
         const delay = Math.min(max, base * Math.pow(2, attempt - 1)) + Math.floor(Math.random() * 100);
@@ -121,21 +232,49 @@ export class RpcClient {
         }, delay);
     }
 
-    request(route, path, args = [], opts = {}) {
-        const msg = this.#createRequestMessage({ route, path, args }, opts);
+    /**
+     * @param {Object} p0
+     * @param {import("./types").Route} p0.route 
+     * @param {string} p0.path 
+     * @param {string} p0.op 
+     * @param {unknown[]} p0.args
+     * @param {import("./types").Payload} [payload={}]
+     * @param {{}} [opts={}] 
+     */
+    request({route, path, op, args}, payload = {}, opts = {}) {
+        const msg = this.#createRequestMessage({route, path, op, args, payload}, opts);
         return this.#sendWithReply(msg, msg.lane, opts);
     }
 
+    /**
+     * @param {import("./types").Route} route
+     * @param {string} path
+     * @param {import("./types").Payload} [payload={}]
+     * @param {{noAck?:boolean}} [opts={}]
+     * @return {Promise<boolean>}
+     */
     emit(route, path, payload = {}, opts = {}) {
-        this.#enqueue(this.#createEmitMessage({ route, path, payload }, opts));
+        const msg = this.#createEmitMessage({ route, path, payload }, opts);
+        if(opts.noAck) {
+            this.#enqueue(msg);
+            return Promise.resolve(true);
+        }
+        return this.#sendWithAck(msg);
     }
 
+    /**
+     * @param {import("./types").Route} route
+     * @param {string} path
+     * @param {string} op
+     * @param {{noAck?:boolean}} [opts={}]
+     * @return {Promise<any>}
+     */
     async subscribe(route, path, op, opts = {}) {
         console.group("Subscribe");
         console.log({route, path, op, opts});
         
-        const msg = this.#createSubscribeMessage({ route, path, op }, opts);
-        const subscription = this.#makeSub(msg.id, { route, path, op }, opts);
+        const msg = this.#createSubscribeMessage({route, path, op}, opts);
+        const subscription = this.#makeSub(msg.id, {route, path, op}, opts);
         console.log({subscription});
         this.subscriptions.set(msg.id, subscription);
         await this.#sendWithAck(msg);
@@ -146,33 +285,79 @@ export class RpcClient {
     unsubscribe(subId, opts = {}) {
         console.group("Unsubscribe");
         console.log({subId, opts});
-        const msg = this.#createUnsubscribeMessage({
-            correlatesTo: subId,
-        }, opts);
+        const msg = this.#createUnsubscribeMessage({correlatesTo: subId}, opts);
         this.#enqueue(msg);
         this.subscriptions.delete(subId);
         console.groupEnd();
     }
 
     cancel(correlatesTo, opts = {}) {
-        const msg = this.#createCancelMessage({
-            correlatesTo,
-        }, opts);
+        const msg = this.#createCancelMessage({correlatesTo}, opts);
         this.#enqueue(msg);
     }
 
-    #asPromise(fn, ...args) {
-        try {
-            return Promise.resolve(fn(...args)); // Catches sync return or async promise
-        } catch(err) {
-            return Promise.reject(err);          // Catches sync throw
-        }
+    async clientReady({ loaded = [], failed = [], modsHash = null } = {}) {
+        const msg = this.#createClientReadyMessage({
+            payload: {loaded, failed, modsHash}
+        });
+        await this.#sendWithAck(msg);
+        this.onClientReady.emit();
+    }
+
+    #setReady(value) {
+        if(this.#ready === value) return;
+        this.#ready = value;
+        this.onReadyChange.emit(value);
     }
 
     #onMessage(ev) {
-        this.#logIncomingStr(ev.data);
-        /** @type {import("./types").RPCMessage} */
-        const msg = JSON.parse(ev.data);
+        /** @type {import("./types").RPCMessage|null} */
+        let msg;
+        try {
+            msg = JSON.parse(ev.data);
+            this.#logIncomingStr(msg);
+        } catch(err) {
+            this.#logIncomingStr(ev.data);
+            console.error("[RPC] Error parsing message received.", err, ev);
+            return;
+        }
+
+        // Bump heartbeat
+        this.heartbeat.lastSeen = Date.now();
+
+        // ----- Handshake -----
+        if(msg.type === "welcome") {
+            this.#generation = msg.gen;
+            this.#setReady(true);
+            this.#flushQueue();
+
+            // Resume subscriptions (best effort)
+            for(const [oldSubId, subscription] of [...this.subscriptions.entries()]) {
+                // Create a new subscribe with a new id, but keep the local sub object
+                const newMsg = this.#createSubscribeMessage({
+                    route: subscription.invocation.route,
+                    op: subscription.invocation.op ?? "none",
+                    path: subscription.invocation.path,
+                    payload: { ...subscription.opts },
+                }, subscription.opts);
+
+                // Move the sub to the new id
+                this.subscriptions.delete(oldSubId);
+                this.subscriptions.set(newMsg.id, subscription);
+                
+                // Update exposed id so .close() unsubscribes correctly
+                try { subscription.id = newMsg.id; } catch {}
+
+                // Send and wait only for ACK so we don't stall whole connection
+                this.#sendWithAck(newMsg).catch(() => {});
+            }
+            this.onWelcome.emit(msg.payload?.state);
+        }
+
+        // Drop stale messages
+        if(msg.gen && this.#generation && (msg.gen.num !== this.#generation.num || msg.gen.salt !== this.#generation.salt)) {
+            return;
+        }
 
         // Frontend routing: backend is calling our exposed capability
         if(["request", "emit", "subscribe"].includes(msg.type) && msg.route?.capability) {
@@ -186,11 +371,8 @@ export class RpcClient {
                     Promise.resolve()
                         .then(() => cap.call(msg.path, msg.args || [], { origin: msg.origin, id: msg.id }))
                         .then((payload) => {
-                            const message = this.#createReplyMessage(msg, {
-                                payload: payload,
-                            });
+                            const message = this.#createReplyMessage(msg, {payload: payload});
                             this.#enqueue(message);
-                            return;
                         })
                         .catch((err) => {
                             const message = this.#createErrorMessage(msg, {
@@ -200,7 +382,6 @@ export class RpcClient {
                                 retryable: false,
                             });
                             this.#enqueue(message);
-                            return;
                         });
                     return;
                 }
@@ -210,40 +391,29 @@ export class RpcClient {
                         cap.emit(msg.path, msg.payload, { origin: msg.origin, id: msg.id });
                     } catch(err) {
                         // Emit is non reporting, so just log it
-                        console.warn(`Error caught when executing capability '${msg.path}' emit, error ${err.message}`, err, msg);
+                        console.warn(`Error caught when executing capability '${msg.path}' emit: ${err?.message}`, err, msg);
                     }
                     return;
                 }
                 // For a subscribe, we want to execute a subscribe()
-                if(msg.type === "subscribe" && typeof cap.subscribe === "function") {
+                else if(msg.type === "subscribe" && typeof cap.subscribe === "function") {
                     try {
                         console.log("Capability object:", cap);
-                        if(!cap.subscribe) {
-                            // TODO: Think about whether subscribe should be required, and how to report it - in frontend, in backend, in both?
-                            this.#enqueue(this.#createErrorMessage(msg, {
-                                code: "FRONTEND_SUBSCRIBE_ERROR",
-                                message: "Capability does not have subscribe method",
-                                err: err,
-                                replyable: false,
-                            }));
-                        }
-
-                        console.log("Subscriptions:", this.subscriptions);
-
                         const push = async (payload) => {
                             const message = this.#createStateUpdateMessage(msg, {payload});
                             this.#enqueue(message);
                         }
                         const abortController = new AbortController();
                         /** @type {import("./types").SubscribeCtx} */
-                        const ctx = { id: msg.id, origin: msg.origin, signal: abortController.signal, push };
+                        const ctx = {id: msg.id, origin: msg.origin, signal: abortController.signal, push};
 
+                        console.log("Subscriptions:", this.subscriptions);
                         Promise.resolve()
                             .then(() => cap.subscribe(msg.path, msg.payload ?? {}, ctx))
                             .then((stream) => {
                                 let subscription = this.subscriptions.get(msg.id);
                                 if(!subscription) {
-                                    subscription = this.#makeSub(msg.id, { route: msg.route, path: msg.path, op: msg.op }, {});
+                                    subscription = this.#makeSub(msg.id, {route: msg.route, path: msg.path, op: msg.op}, {});
                                     this.subscriptions.set(msg.id, subscription);
                                 }
 
@@ -254,7 +424,7 @@ export class RpcClient {
                                 // If handler didn't provide its own push, use our
                                 if(stream && typeof stream.push !== "function") {
                                     // Non-enumerable to prevent JSON serialization
-                                    Object.defineProperty(stream, "push", { value: push, enumerable: false });
+                                    Object.defineProperty(stream, "push", {value: push, enumerable: false});
                                 }
 
                                 // Send initial data if provided
@@ -265,7 +435,7 @@ export class RpcClient {
                                     code: "FRONTEND_SUBSCRIBE_ERROR",
                                     message: String(err),
                                     err: err,
-                                    replyable: false,
+                                    retryable: false,
                                 }));
                             });
                     } catch(err) {
@@ -273,15 +443,41 @@ export class RpcClient {
                             code: "FRONTEND_SUBSCRIBE_ERROR",
                             message: String(err),
                             err: err,
-                            replyable: false,
+                            retryable: false,
                         }));
                     }
+                    return;
+                }
+                
+                // If capability exists but missing specific handler (e.g., request), report cleanly
+                else if(msg.type === "request" && !cap.call) {
+                    this.#enqueue(this.#createErrorMessage(msg, {
+                        code: "FRONTEND_REQUEST_ERROR",
+                        message: `Capability '${msg.route.capability}' does not have 'call' method`,
+                        retryable: false,
+                    }));
+                    return;
+                }
+                else if(msg.type === "emit" && !cap.emit) {
+                    this.#enqueue(this.#createErrorMessage(msg, {
+                        code: "FRONTEND_EMIT_ERROR",
+                        message: `Capability '${msg.route.capability}' does not have 'emit' method`,
+                        retryable: false,
+                    }));
+                    return;
+                }
+                else if(msg.type === "subscribe" && !cap.subscribe) {
+                    this.#enqueue(this.#createErrorMessage(msg, {
+                        code: "FRONTEND_SUBSCRIBE_ERROR",
+                        message: `Capability '${msg.route.capability}' does not have 'subscribe' method`,
+                        retryable: false,
+                    }));
                     return;
                 }
             }
         }
 
-        // auto ack for non-control
+        // Auto ack for non-control
         if(!["ack", "welcome", "hello", "heartbeat"].includes(msg.type)) {
             this.#enqueue(this.#createACKMessage(msg));
         }
@@ -313,93 +509,113 @@ export class RpcClient {
                 clearTimeout(pending.timer);
                 pending.resolve(true);
                 this.pending.delete(msg.correlatesTo);
+                pending.onFinally?.();
             }
             return;
         }
 
         if(msg.type === "cancel" || msg.type === "unsubscribe") {
-            console.log("Subscriptions:", this.subscriptions);
-            console.log("Looking for subscription ", msg.correlatesTo);
             const subscription = this.subscriptions.get(msg.correlatesTo);
-            console.log("Sub", subscription);
-
             if(subscription && typeof subscription._jsOnCancel === "function") {
                 console.log(`Calling cancel on subscription ${msg.correlatesTo}`);
-                try {
-                    subscription._jsOnCancel(msg);
-                } catch(err) {
-                    console.warn(`Error caught during cancelling of subscription, error: ${err.message}`, err, msg);
-                }
+                try { subscription._jsOnCancel(msg); }
+                catch(err) { console.warn(`Error caught during subscription cancel: ${err?.message}`, err, msg); }
             }
-            this.subscriptions.delete(subscription.id);
+            this.subscriptions.delete(msg.correlatesTo);
             return;
         }
     }
 
+    /**
+     * @param {import("./types").RPCMessage} msg
+     * @param {string} lane
+     * @param {object} opts
+     */
     #sendWithReply(msg, lane, opts) {
-        const cap = this.settings.protocol.maxInFlightPerLane ?? 64;
-        const laneState = this.laneStates.get(lane) || { nextSeq: 1, peerAck: 0, inFlight: 0 };
-        if(laneState.inFlight >= cap) {
-            return Promise.reject(new Error("LANE_BACKPRESSURE"));
-        }
-        laneState.inFlight++;
-        this.laneStates.set(lane, laneState);
+        const classCfg = this.#resolveClassCfg(opts);
+        const waitMs = Math.min(
+            (msg.budgetMs ?? classCfg.serviceTtlMs) + (classCfg.clientPatienceExtraMs ?? 200),
+            (this.settings?.http?.timeoutCapMs ?? 30000)
+        );
 
         return new Promise((resolve, reject) => {
-            const classCfg = this.#resolveClassCfg(opts);
-            const waitMs = Math.min(
-                (msg.budgetMs ?? classCfg.serviceTtlMs) + (classCfg.clientPatienceExtraMs ?? 200),
-                (this.settings.http?.timeoutCapMs ?? 30000)
-            );
-            const timer = setTimeout(() => {
-                if(msg?.origin)
-                    // Used only for tracing/logging, not for auth
-                    this.cancel(msg.id, {origin: msg.origin});
-                else
-                    this.cancel(msg.id);
+            const entry = {
+                resolve,
+                reject,
+                timer: null,
+                laneKey: lane,
+                wantAck: false,
+                onFinally: () => this.#onLaneDone(lane),
+            }
+            
+            this.pending.set(msg.id, entry);
+
+            entry.timer = setTimeout(() => {
+                this.pending.delete(msg.id);
+                entry.onFinally?.();
+                // Best effort cancel on the wire
+                if(msg?.origin) this.cancel(msg.id, {origin: msg.origin});
+                else this.cancel(msg.id);
                 reject(new Error("TIMEOUT"));
             }, waitMs);
-            this.pending.set(msg.id, { resolve, reject, timer, laneKey: lane, onFinally: () => {
-                const laneState = this.laneStates.get(lane) || { inFlight: 1 };
-                laneState.inFlight = Math.max(0, (laneState.inFlight || 1) - 1);
-                this.laneStates.set(lane, laneState);
-            }});
-            this.#enqueue(msg);
+
+            this.#scheduleSend(msg, () => this.#enqueue(msg));
         });
     }
 
+    /**
+     * @param {import("./types").RPCMessage} msg
+     */
     #sendWithAck(msg) {
         return new Promise((resolve, reject) => {
-            const timer = setTimeout(() => reject(new Error("NO_ACK")), this.settings.protocol.ackWaitMs);
-            this.pending.set(msg.id, { resolve, reject, timer, laneKey: msg.lane, wantAck: true });
-            this.#enqueue(msg);
+            const ackWait = this.settings?.protocol?.ackWaitMs ?? 250;
+            const entry = {
+                resolve,
+                reject,
+                timer: null,
+                laneKey: msg.lane,
+                wantAck: true,
+                onFinally: () => this.#onLaneDone(msg.lane),
+            }
+
+            this.pending.set(msg.id, entry);
+
+            entry.timer = setTimeout(() => {
+                this.pending.delete(msg.id);
+                entry.onFinally?.();
+                reject(new Error("NO_ACK"));
+            }, ackWait);
+            
+            this.#scheduleSend(msg, () => this.#enqueue(msg));
         });
     }
 
-    #logOutgoingStr(str) {
-        if(!str) debugger;
-
-        // If debugged
-        if(this.settings.debug.frontend.rpc.outgoingMessages.log) {
-            // and message is not of ignored type
-            if(this.settings.debug.frontend.rpc.outgoingMessages.ignoreTypes.every(element => !str.includes(`"type":"${element}"`)))
-                console.log(`[RPC] sending: ${str}`);
-        }
+    #logOutgoingStr(rpcMessageOrStr) {
+        const dbg = this.settings?.debug?.frontend?.rpc?.outgoingMessages;
+        if(!dbg?.log) return;
+        const notIgnored = (dbg.ignoreTypes || []).every(element => {
+            if(typeof rpcMessageOrStr === "string") return !rpcMessageOrStr.includes(`"type":"${element}"`);
+            return rpcMessageOrStr.type !== element;
+        });
+        if(notIgnored) console.log("[RPC] sending:", rpcMessageOrStr);
     }
 
-    #logIncomingStr(str) {
-        // If debugged
-        if(this.settings.debug.frontend.rpc.incomingMessages.log) {
-            // and message is not of ignored type
-            if(this.settings.debug.frontend.rpc.incomingMessages.ignoreTypes.every(element => !str.includes(`"type":"${element}"`)))
-                console.log(`[RPC] incoming: ${str}`);
-        }
+    #logIncomingStr(rpcMessageOrStr) {
+        const dbg = this.settings?.debug?.frontend?.rpc?.incomingMessages;
+        if(!dbg?.log) return;
+        const notIgnored = (dbg.ignoreTypes || []).every(element => {
+            if(typeof rpcMessageOrStr === "string") return !rpcMessageOrStr.includes(`"type":"${element}"`);
+            return rpcMessageOrStr.type !== element;
+        });
+        if(notIgnored) console.log('[RPC] incoming:', rpcMessageOrStr);
     }
 
     #enqueue(obj) {
         if(this.webSocket && this.webSocket.readyState === WebSocket.OPEN) {
             this.#sendRaw(obj)
         } else {
+            const maxOfflineQueue = this.settings?.protocol?.maxOfflineQueue ?? 2000;
+            if(this.offlineQueue.length >= maxOfflineQueue) this.offlineQueue.shift();
             this.offlineQueue.push(obj);
         }
     }
@@ -415,9 +631,9 @@ export class RpcClient {
      * Automatically construct ACK message for given `toMsg`. `props` object
      * can be used to override the properties of final ACK message by custom values.
      * `opts` can be used to provide data for creator to generate properties.
-     * @param {import("./types").RPCMessage} toMsg The message ACK should be created for.
-     * @param {import("./types").RPCMessage} props For overriding properties of ACK message.
-     * @param {Object} opts Additional options which can be used to populate properties.
+     * @param {import("./types").RPCMessage} toMsg The RPCMessage ACK should be created for.
+     * @param {import("./types").RPCMessage} [props] For overriding properties of ACK RPCMessage.
+     * @param {Object} [opts] Additional options which can be used to populate properties.
      * @returns {import("./types").RPCMessage}
      */
     #createACKMessage(toMsg, props = {}, opts = {}) {
@@ -428,13 +644,16 @@ export class RpcClient {
             type: "ack",
             lane: "sys",
             correlatesTo: toMsg.id,
-            budgetMs: this.settings.protocol.ackWaitMs,
+            budgetMs: this.settings?.protocol?.ackWaitMs ?? 250,
         }, opts);
 
         return message;
     }
 
     /**
+     * @param {import("./types").RPCMessage} toMsg The original RPCMessage containing id.
+     * @param {import("./types").RPCMessage} [props] For overriding properties of stateUpdate RPCMessage.
+     * @param {Object} [opts] Additional options which can be used to populate properties.
      * @returns {import("./types").RPCMessage}
      */
     #createStateUpdateMessage(toMsg, props = {}, opts = {}) {
@@ -450,20 +669,21 @@ export class RpcClient {
     }
 
     /**
+     * @param {import("./types").RPCMessage} [props] For properties of subscribe RPCMessage.
+     * @param {Object} [opts] Additional options which can be used to populate properties.
      * @returns {import("./types").RPCMessage}
      */
     #createSubscribeMessage(props = {}, opts = {}) {
         if(!props.route) throw new Error("Request RPC message must have a route!");
-
         if(!opts) opts = {};
         if(!opts.priority) opts.priority = "low";
         const {origin, ...optsWithoutOrigin} = opts;
+
         /** @type {import("./types").RPCMessage} */
         const message = this.#createRPCMessage({
             ...props,
             v: "0.1",
             type: "subscribe",
-            op: "none",
             budgetMs: this.#pickBudgetMs(opts),
             payload: {...optsWithoutOrigin},
         }, opts);
@@ -473,6 +693,8 @@ export class RpcClient {
     }
 
     /**
+     * @param {import("./types").RPCMessage} [props] For properties of cancel RPCMessage.
+     * @param {Object} [opts] Additional options which can be used to populate properties.
      * @returns {import("./types").RPCMessage}
      */
     #createCancelMessage(props = {}, opts = {}) {
@@ -484,13 +706,15 @@ export class RpcClient {
             v: "0.1",
             type: "cancel",
             lane: "sys",
-            budgetMs: this.settings.protocol.ackWaitMs,
+            budgetMs: this.settings?.protocol?.ackWaitMs ?? 250,
         }, opts);
 
         return message;
     }
 
     /**
+     * @param {import("./types").RPCMessage} [props] For properties of unsubscribe RPCMessage.
+     * @param {Object} [opts] Additional options which can be used to populate properties.
      * @returns {import("./types").RPCMessage}
      */
     #createUnsubscribeMessage(props = {}, opts = {}) {
@@ -502,13 +726,15 @@ export class RpcClient {
             v: "0.1",
             type: "unsubscribe",
             lane: "sys",
-            budgetMs: this.settings.protocol.ackWaitMs,
+            budgetMs: this.settings?.protocol?.ackWaitMs ?? 250,
         }, opts);
 
         return message;
     }
 
     /**
+     * @param {import("./types").RPCMessage} [props] For properties of hello RPCMessage.
+     * @param {Object} [opts] Additional options which can be used to populate properties.
      * @returns {import("./types").RPCMessage}
      */
     #createHelloMessage(props = {}, opts = {}) {
@@ -518,12 +744,16 @@ export class RpcClient {
             v: "0.1",
             type: "hello",
             lane: "sys",
-            budgetMs: this.settings.protocol.ackWaitMs,
+            budgetMs: this.settings?.protocol?.ackWaitMs ?? 250,
+            gen: {num: -1, salt: "salt"},
         }, opts);
         return message;
     }
 
     /**
+     * @param {import("./types").RPCMessage} toMsg The original RPCMessage containing id.
+     * @param {import("./types").RPCMessage} [props] For properties of reply RPCMessage.
+     * @param {Object} [opts] Additional options which can be used to populate properties.
      * @returns {import("./types").RPCMessage}
      */
     #createReplyMessage(toMsg, props = {}, opts = {}) {
@@ -540,10 +770,11 @@ export class RpcClient {
     }
 
     /**
+     * @param {import("./types").RPCMessage} [props] For properties of request RPCMessage.
+     * @param {Object} [opts] Additional options which can be used to populate properties.
      * @returns {import("./types").RPCMessage}
      */
     #createRequestMessage(props = {}, opts = {}) {
-        //console.log("createRequestMessage", props);
         if(!props.route) throw new Error("Request RPC message must have a route!");
 
         /** @type {import("./types").RPCMessage} */
@@ -557,17 +788,16 @@ export class RpcClient {
         message.idempotencyKey = opts?.idempotencyKey ?? message.id;
         // TODO: Where does the signal resides again?
         if(opts?.signal) opts.signal.addEventListener("abort", () => {
-            if(message.origin) {
-                this.cancel(message.id, {origin: message.origin});
-            } else {
-                this.cancel(message.id);
-            }
-        }, { once: true });
+            if(message.origin) this.cancel(message.id, {origin: message.origin});
+            else this.cancel(message.id);
+        }, {once: true});
         
         return message;
     }
 
     /**
+     * @param {import("./types").RPCMessage} [props] For properties of emit RPCMessage.
+     * @param {Object} [opts] Additional options which can be used to populate properties.
      * @returns {import("./types").RPCMessage}
      */
     #createEmitMessage(props = {}, opts = {}) {
@@ -587,6 +817,37 @@ export class RpcClient {
     }
 
     /**
+     * @param {import("./types").RPCMessage} [props] For properties of clientReady RPCMessage.
+     * @param {Object} [opts] Additional options which can be used to populate properties.
+     * @returns {import("./types").RPCMessage}
+     */
+    #createClientReadyMessage(props = {}, opts = {}) {
+        const _props = {...props};
+        // Empty arrays are allowed
+        const loaded = Array.isArray(_props?.payload?.loaded ?? _props?.loaded) ? (_props?.payload?.loaded ?? _props?.loaded) : [];
+        const failed = Array.isArray(_props?.payload?.failed ?? _props?.failed) ? (_props?.payload?.failed ?? _props?.failed) : [];
+        const modsHash = _props?.payload?.modsHash ?? _props?.modsHash;
+
+        // Clean possible top level mirrors
+        delete _props.loaded;
+        delete _props.failed;
+        delete _props.modsHash;
+
+        /** @type {import("./types").RPCMessage} */
+        const message = this.#createRPCMessage({
+            v: "0.1",
+            ..._props,
+            type: "clientReady",
+            lane: "sys",
+            payload: {loaded, failed, modsHash},
+        }, opts);
+
+        return message;
+    }
+
+    /**
+     * @param {import("./types").RPCMessage} [props] For properties of heartbeat RPCMessage.
+     * @param {Object} [opts] Additional options which can be used to populate properties.
      * @returns {import("./types").RPCMessage}
      */
     #createHeartbeatMessage(props = {}, opts = {}) {
@@ -595,12 +856,16 @@ export class RpcClient {
             ...props,
             v: "0.1",
             type: "heartbeat",
+            lane: "sys",
         }, opts);
 
         return message;
     }
 
     /**
+     * @param {import("./types").RPCMessage} toMsg The original RPCMessage containing id.
+     * @param {import("./types").RPCMessage} [props] For properties of error RPCMessage.
+     * @param {Object} [opts] Additional options which can be used to populate properties.
      * @returns {import("./types").RPCMessage}
      */
     #createErrorMessage(toMsg, props = {}, opts = {}) {
@@ -608,11 +873,11 @@ export class RpcClient {
         if(props.code) { errorPayload.code = props.code; delete props.code; }
         if(props.message) { errorPayload.message = props.message; delete props.message; }
         if(props.err) { errorPayload.err = props.err; delete props.err; }
-        if(props.replyable) { errorPayload.replyable = props.replyable; delete props.replyable; }
+        if(props.retryable) { errorPayload.retryable = props.retryable; delete props.retryable; }
 
         if(!errorPayload.code) throw new Error("code or payload.code is required for error message");
         if(!errorPayload.message) errorPayload.message = "";
-        if(!errorPayload.replyable) errorPayload.replyable = false;
+        if(!errorPayload.retryable) errorPayload.retryable = false;
 
         /** @type {import("./types").RPCMessage} */
         const message = this.#createRPCMessage({
@@ -628,17 +893,17 @@ export class RpcClient {
     }
 
     /**
-     * @param {import("./types").RPCMessage} [props={}] 
+     * @param {import("./types").RPCMessage} [props] For properties of RPCMessage.
+     * @param {Object} [opts] Additional options which can be used to populate properties.
      * @returns {import("./types").RPCMessage}
      */
     #createRPCMessage(props={}, opts={}) {
-        //console.log("createRPCMessage", props);
         /** @type {import("./types").RPCMessage} */
         const message = {
             ...props,
             id: uuidv7(),
             ts: this.#now(),
-            gen: this.#generation,
+            gen: props.gen ?? this.#generation,
         };
         if(opts?.origin) message.origin = opts.origin;
         
@@ -653,25 +918,14 @@ export class RpcClient {
         if(message.lane && message.lane !== "sys") message.seq = this.#nextSeq(message.lane);
 
         if(!message.payload) message.payload = {};
-
-        //console.log("createRPCMessage =>", message);
         return message;
     }
 
     #startHeartbeat() {
-        const period = Math.max(1000, this.settings.protocol.heartbeatMs || 5000);
+        const period = Math.max(1000, this.settings?.protocol?.heartbeatMs ?? 5000);
         this.#stopHeartbeat();
         this.heartbeatTimer = setInterval(() => {
             if(this.webSocket && this.webSocket.readyState === WebSocket.OPEN) {
-                // const lane = "sys";
-                // this.webSocket.send(JSON.stringify({
-                //     v: "0.1",
-                //     type: "heartbeat",
-                //     id: uuidv7(),
-                //     lane: lane,
-                //     ts: this.#now(),
-                //     seq: this.#nextSeq(lane),
-                // }));
                 this.#sendRaw(this.#createRPCMessage({
                     v: "0.1",
                     type: "heartbeat",
@@ -684,7 +938,7 @@ export class RpcClient {
         this.awolTimer = setInterval(() => {
             if(!this.webSocket) return;
             if(this.webSocket.readyState === WebSocket.CLOSED || this.webSocket.readyState === WebSocket.CLOSING) return;
-            // If open but we stalled, rely on server-side idle timout
+            // If open but stalled, rely on server idle timeout or explicit tick
         }, awolCap);
     }
 
@@ -698,9 +952,7 @@ export class RpcClient {
     #tickHeartbeat() {
         if(!this.webSocket || this.webSocket.readyState !== WebSocket.OPEN) return;
         
-        try {
-            this.#sendRaw(this.#createHeartbeatMessage());
-        } catch { /* Ignore errors */ }
+        try { this.#sendRaw(this.#createHeartbeatMessage()); } catch { /* Ignore errors */ }
 
         // Loss of connection detection - if more than 3 times interval, close socket.
         const awolMs = this.heartbeat.intervalMs * 3;
@@ -709,33 +961,84 @@ export class RpcClient {
         }
     }
 
-    #sendRaw(obj) {
-        if(this.webSocket && this.webSocket.readyState === WebSocket.OPEN) {
-            let str = JSON.stringify(obj);
-            this.webSocket.send(str);
-            this.#logOutgoingStr(str);
+    #sendRaw(rpcMessage) {
+        if(!this.webSocket || this.webSocket.readyState !== WebSocket.OPEN) return;
+        try {
+            this.#logOutgoingStr(rpcMessage);
+            this.webSocket.send(JSON.stringify(rpcMessage));
+        } catch(err) {
+            // Best-effort: if send fails, consider connection unhealthy
+            try { this.webSocket.close() } catch {}
         }
     }
     
-    #laneKey(route, prio) { return route?.capability ? `cap:${route.capability}` : route?.object ? `obj:${route.object}` : "sys"; }
+    #shouldThrottle(msg) {
+        if(msg.lane === "sys") return false;
+        // Messages sent with #scheduleSend are all throttled, except "sys" lane
+        // Using #enqueue directly will bypass the limiter
+        return true;
+    }
+
+    #scheduleSend(msg, sendFn) {
+        const maxInFlight = this.settings?.protocol?.maxInFlightPerLane ?? 64;
+        const lane = msg.lane || "noLaneSet";
+        const laneState = this.#getLaneState(lane);
+
+        if(!this.#shouldThrottle(msg) || laneState.inFlight < maxInFlight) {
+            if(this.#shouldThrottle(msg)) laneState.inFlight++;
+            sendFn(msg); // Actually send
+        } else {
+            // Bound the queue to avoid memory blow-up
+            const maxQueue = this.settings?.protocol?.maxQueue ?? 1024;
+            if(laneState.queue.length >= maxQueue) laneState.queue.shift(); // Drop oldest
+            laneState.queue.push({msg, sendFn});
+        }
+    }
+
+    #onLaneDone(lane) {
+        const laneState = this.#getLaneState(lane);
+        laneState.inFlight = Math.max(0, laneState.inFlight - 1);
+        // Drain one queued item if any
+        while(laneState.queue.length > 0 && laneState.inFlight < (this.settings?.protocol?.maxInFlightPerLane ?? 64)) {
+            const {msg, sendFn} = laneState.queue.shift();
+            laneState.inFlight++;
+            sendFn(msg); // Actually send
+            break; // Drain one per completion
+        }
+    }
+
+    #getLaneState(lane) {
+        let laneState = this.laneStates.get(lane);
+        if(!laneState) {
+            laneState = {nextSeq: 1, peerAck: 0, inFlight: 0, queue: []};
+            this.laneStates.set(lane, laneState);
+        }
+        return laneState;
+    }
+
+    #laneKey(route, _prio) {
+        return route?.capability ? `cap:${route.capability}` : (route?.object ? `obj:${route.object}` : "noValidRouteLane");
+    }
 
     #nextSeq(lane) {
-        const laneState = this.laneStates.get(lane) || { nextSeq: 1, peerAck: 0, inFlight: 0 };
-        this.laneStates.set(lane, laneState);
+        const laneState = this.#getLaneState(lane);
         return (laneState.nextSeq++);
     }
 
-    #pickBudgetMs(opts) { return opts?.budgetMs ?? this.#resolveClassCfg(opts).serviceTtlMs; }
+    #pickBudgetMs(opts) {
+        return opts?.budgetMs ?? this.#resolveClassCfg(opts).serviceTtlMs;
+    }
 
     #resolveClassCfg(opts) {
         const cls = opts?.class || "request.medium";
-        const cfg = (this.settings?.timeouts?.classes?.[cls]) || { serviceTtlMs: 3000, clientPatienceExtraMs: 200 };
+        const cfg = (this.settings?.timeouts?.classes?.[cls]) || {serviceTtlMs: 3000, clientPatienceExtraMs: 200};
         return cfg;
     }
 
     /**
      * @param {uuidv7} id 
-     * @param {import("./types").Invocation} invocation 
+     * @param {import("./types").Invocation} invocation
+     * @param {object} opts
      * @returns {import("./types").Subscription}
      */
     #makeSub(id, invocation, opts) {
@@ -744,12 +1047,14 @@ export class RpcClient {
         const sub = {
             on(event, fn) { listeners[event] = fn; },
             _emit(event, data) { listeners[event]?.(data); },
-            close: () => { self.unsubscribe(id); },
+            close: () => { self.unsubscribe(sub.id); },
         };
+
+        // Store a mutable id so resubscribe can update it
         Object.defineProperty(sub, "id", {
             value: id,
-            writable: false,
-            configurable: false,
+            writable: true,     // Allow update on reconnect
+            configurable: true, // Allow redefine if needed
             enumerable: true,
         });
         Object.defineProperty(sub, "invocation", {
@@ -769,18 +1074,16 @@ export class RpcClient {
 
     async #open() {
         await this.#connectOnce();
-        this.#startHeartbeat();
+        //this.#startHeartbeat();
         this.#flushQueue();
     }
 
     /**
      * Register a frontend capability the backend can call.
-     * 
-     * @param {string} capability - The name of the capability.
-     * @param {CapabilityHandlers} handlers - An object with methods to handle calls, emits and subscriptions.
+     * @param {string} capability The name of the capability.
+     * @param {CapabilityHandlers} handlers An object with methods to handle calls, emits and subscriptions.
      */
     expose(capability, handlers) {
-        console.log(`exposing capability "${capability}"`);
         if(this.localCaps.has(capability)) {
             throw new Error(`Capability already exposed: '${capability}'.`);
         }
@@ -793,7 +1096,7 @@ export function defaultSettings() {
     console.warn("Loading default settings - this shouldn't happen if everything is set up correctly!")
     return {
         loadedFromFrontendDefaults: true,
-        protocol: {ackWaitMs: 250, graceWindowMs: 150, maxInFlightPerLane: 64, heartbeatMs: 5000},
+        protocol: {ackWaitMs: 250, graceWindowMs: 150, maxInFlightPerLane: 64, heartbeatMs: 5000, maxQueue: 1024, maxOfflineQueue: 2000},
         timeouts: {classes: {
             "request.fast": {serviceTtlMs: 800, clientPatienceExtraMs: 150},
             "request.medium": {serviceTtlMs: 3000, clientPatienceExtraMs: 200},
@@ -803,7 +1106,7 @@ export function defaultSettings() {
         http: {retry: 2,backoff: {baseMs: 250, maxMs: 1000, jitterPct: 30}, timeoutCapMs: 30000},
         mods: {allowSymlinks: false},
         httpProxy: {
-            allowList: ["httpbin.org", "api.openai.com", "localhost", "127.0.0.1"],
+            allowList: ["httpbin.org", "api.openai.com", "localhost", "127.0.0.1", "::1"],
             buckets: {default: {rpm: 600, burst: 200}},
         },
         debug: {
