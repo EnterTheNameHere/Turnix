@@ -139,6 +139,8 @@ export class RpcClient {
     #ready = false; // Is websocket rpc ready for use?
     /** @type {import("./types").Gen|null} */
     #generation = null; // Connection generation epoch
+    #lastWelcome = null;
+    #welcomeDeferred = null;
 
     // TODO: Send settings if updated to backend, and receive settings from backend
     /**
@@ -170,14 +172,20 @@ export class RpcClient {
         this.heartbeatTimer = null;
         this.awolTimer = null;
         this.heartbeat = { timer: null, intervalMs: this.settings?.protocol?.heartbeatMs ?? 5000, lastSeen: Date.now() };
-    
+        
+        // To prevent race for "welcome"
+        this.#welcomeDeferred = this.#newDeferred();
+
         // Frontend events
         /** @type {ReturnType<typeof createEmitter>} */
         this.onReadyChange = createEmitter();
+        defineEventProperty(this, "onReadyChange", this.onReadyChange);
         /** @type {ReturnType<typeof createEmitter>} */
         this.onWelcome = createEmitter();
+        defineEventProperty(this, "onWelcome", this.onWelcome);
         /** @type {ReturnType<typeof createEmitter>} */
         this.onClientReady = createEmitter();
+        defineEventProperty(this, "onClientReady", this.onClientReady);
     }
 
     /**
@@ -331,6 +339,12 @@ export class RpcClient {
             this.#setReady(true);
             this.#flushQueue();
 
+            const welcomeState = msg.payload?.state ?? null;
+            this.#lastWelcome = welcomeState;
+            this.#welcomeDeferred.resolve(welcomeState);
+            // Prepare a new deferred for the *next* welcome (e.g., after reconnect)
+            this.#welcomeDeferred = this.#newDeferred();
+
             // Resume subscriptions (best effort)
             for(const [oldSubId, subscription] of [...this.subscriptions.entries()]) {
                 // Create a new subscribe with a new id, but keep the local sub object
@@ -351,7 +365,7 @@ export class RpcClient {
                 // Send and wait only for ACK so we don't stall whole connection
                 this.#sendWithAck(newMsg).catch(() => {});
             }
-            this.onWelcome.emit(msg.payload?.state);
+            this.onWelcome.emit(welcomeState);
         }
 
         // Drop stale messages
@@ -1035,8 +1049,36 @@ export class RpcClient {
         return cfg;
     }
 
+    #newDeferred() {
+        let resolve;
+        const promise = new Promise((resolve_) => (resolve = resolve_));
+        return {promise, resolve};
+    }
+
     /**
-     * @param {uuidv7} id 
+     * Get last seen welcome immediately, if available, otherwise await the next one;
+     * pass {fresh: true} to force waiting
+     */
+    waitForWelcome({fresh = false, signal} = {}) {
+        if(!fresh && this.#lastWelcome !== null) {
+            return Promise.resolve(this.#lastWelcome);
+        }
+        // Wait on the in-flight deferred
+        const prom = this.#welcomeDeferred.promise;
+        if(signal) {
+            // Optional cancellation support
+            return new Promise((resolve, reject) => {
+                const abort = () => reject(Object.assign(new Error("Aborted"), {name: "AbortError"}));
+                signal.addEventListener("abort", abort, {once: true});
+                prom.then(val => {signal.removeEventListener("abort", abort); resolve(val); },
+                          err => {signal.removeEventListener("abort", abort); reject(err); });
+            });
+        }
+        return prom;
+    }
+
+    /**
+     * @param {string} id 
      * @param {import("./types").Invocation} invocation
      * @param {object} opts
      * @returns {import("./types").Subscription}
