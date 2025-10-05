@@ -1170,7 +1170,7 @@ async def wsEndpoint(ws_: WebSocket):
         return
 
 
-
+# TODO: Make sure directory WEBROOT exists at this point, or FastAPI/Starlette throws here
 app.mount("/", StaticFiles(directory=WEBROOT, html=True), name="web")
 
 
