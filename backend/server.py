@@ -8,8 +8,8 @@ from contextlib import asynccontextmanager
 from pydantic import BaseModel, ValidationError, Field, ConfigDict, JsonValue, model_validator
 from pydantic.alias_generators import to_camel
 from pathlib import Path
-from typing import Any, Literal, Callable
-from collections.abc import AsyncIterator
+from typing import Any, Literal
+from collections.abc import AsyncIterator, Callable # pyright: ignore[reportShadowedImports]
 import json5, os, time, asyncio, uuid6, re, secrets, hashlib, importlib.util
 
 from core.logger import configureLogging
@@ -1515,7 +1515,7 @@ def tryJSONify(obj: Any) -> Any:
     import base64
     from datetime import date, datetime
     from pathlib import Path
-    from collections.abc import Mapping, Iterable
+    from collections.abc import Mapping, Iterable # pyright: ignore[reportShadowedImports]
 
     # Basic types
     if obj is None or isinstance(obj, (bool, int, float, str)):
