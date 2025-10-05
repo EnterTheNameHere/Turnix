@@ -57,11 +57,11 @@ async def request(
     - Raises RuntimeError for non-HTTP transport errors after exhausting retries.
     """
     # Separate connect/read/write/pool timeouts can be useful; keep single total here.
+    if timeoutMs <= 0:
+        timeoutMs = 1
     timeout = httpx.Timeout(timeoutMs / 1_000)
     attempt = 0
     method = str(method).upper()
-    if timeoutMs <= 0:
-        timeoutMs = 1
     retries = max(0, retries)
     if json is not None and data is not None:
         raise ValueError("Pass either 'json' or 'data', not both")
