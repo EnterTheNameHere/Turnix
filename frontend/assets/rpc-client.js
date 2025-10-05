@@ -507,6 +507,16 @@ export class RpcClient {
                 } finally {
                     pending.onFinally?.();
                 }
+                return;
+            }
+            const sub = this.subscriptions.get(msg.correlatesTo);
+            if(sub) {
+                if(msg.type === "reply") {
+                    sub?._emit("reply", msg.payload);
+                } else if(msg.type == "error") {
+                    sub?._emit("error", msg.payload);
+                }
+                return;
             }
             return;
         }
