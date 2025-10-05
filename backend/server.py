@@ -1367,9 +1367,9 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
         }))
         return
 
-async def handleRequestChat(ctx: HandlerContext, msg: RPCMessage):
+async def handleSubscribeChat(ctx: HandlerContext, msg: RPCMessage):
     """
-    Request: chat@1 (streaming, cancellable)
+    Subscribe: chat@1 (streaming, cancellable)
     """
     # Build OpenAI-style messages from payload
     userTurn = {
@@ -1472,10 +1472,10 @@ async def handleRequestGMNarration(ctx: HandlerContext, msg: RPCMessage):
 
 REQUEST_HANDLERS: dict[str, Callable[[HandlerContext, RPCMessage], Any]] = {
     "http.client@1":    handleRequestHttpClient,
-    "chat@1":           handleRequestChat,
     "gm.narration@1":   handleRequestGMNarration,
 }
 SUBSCRIBE_HANDLERS: dict[str, Callable[[HandlerContext, RPCMessage], Any]] = {
+    "chat@1":           handleSubscribeChat,
     "gm.world@1":       handleSubscribeGMWorld,
 }
 EMIT_HANDLERS: dict[str, Callable[[HandlerContext, RPCMessage], Any]] = {
