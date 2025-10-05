@@ -278,15 +278,11 @@ export class RpcClient {
      * @return {Promise<any>}
      */
     async subscribe(route, path, op, opts = {}) {
-        console.group("Subscribe");
-        console.log({route, path, op, opts});
-        
         const msg = this.#createSubscribeMessage({route, path, op}, opts);
         const subscription = this.#makeSub(msg.id, {route, path, op}, opts);
         console.log({subscription});
         this.subscriptions.set(msg.id, subscription);
         await this.#sendWithAck(msg);
-        console.groupEnd()
         return subscription;
     }
 
