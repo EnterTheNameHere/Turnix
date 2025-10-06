@@ -19,11 +19,19 @@
     --toast: #1f2937;
     --toast-warn: #9a6b10;
     --toast-error: #8b1c1c;
+    --toast-info: #2563eb;
+    --toast-success: #15803d;
 
     --focus: #60a5fa; /* focus ring */
     --radius: 12px;
     --radius-sm: 8px;
     --shadow: 0 6px 24px rgba(0,0,0,0.35);
+
+    /* Panel sizing knobs for the grid */
+    --top-h: 56px;
+    --bottom-h: 0;
+    --left-w: 280px;
+    --right-w: 0;
 }
 
 html, body { height: 100%; }
@@ -38,11 +46,95 @@ body {
     -moz-osx-font-smoothing: grayscale;
 }
 
-#app {
+.contents {
+    width: 100%;
     max-width: 900px;
     margin: 0 auto;
     padding: 16px;
 }
+
+.container.column-mode {
+    display: grid;
+    height: 100vh;
+    grid-template-rows: var(--top-h) 1fr var(--bottom-h);
+    grid-template-columns: var(--left-w) 1fr var(--right-w);
+    grid-template-areas:
+        "top    top      top"
+        "left   contents right"
+        "bottom bottom   bottom";
+}
+
+.container.column-mode .top      { grid-area: top; }
+.container.column-mode .bottom   { grid-area: bottom; }
+.container.column-mode .contents { grid-area: contents; }
+.container.column-mode .left     { grid-area: left; }
+.container.column-mode .right    { grid-area: right; }
+
+.container.--no-sides .contents {
+    max-width: min(1200px, 100%);
+}
+
+@media(max-width: 700px) {
+    .container.column-mode {
+        grid-template-columns: 1fr; /* Collapse side panels under content */
+        grid-template-rows: var(--top-h) auto auto auto var(--bottom-h);
+        grid-template-areas:
+            "top"
+            "contents"
+            "left"
+            "right"
+            "bottom";
+    }
+
+    /* If side panels are collapsed (aria-hidden="true"), don't reserve a row */
+    .container.column-mode .left[aria-hidden="true"],
+    .container.column-mode .right[aria-hidden="true"],
+    .container.column-mode .top[aria-hidden="true"],
+    .container.column-mode .bottom[aria-hidden="true"] {
+        display: none;
+    } 
+}
+
+/* Accessibility: hide until focused */
+.skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    z-index: 1000;
+    padding: 8px 12px;
+    background: var(--panel, #121622);
+    color: var(--ink, #e8eef6);
+    border-radius: 8px;
+}
+.skip-link:focus {
+    left: 8px;
+    top: 8px;
+    outline: 2px solid var(--btn, #3b82f6);
+}
+
+.noscript {
+    position: fixed;
+    inset: 0 auto auto 0;
+    margin: 12px;
+    padding: 10px 12px;
+    background: #8b1c1c;
+    color: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.35);
+}
+
+/* Header toolbar */
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background-color: var(--panel);
+    border-bottom: 1px solid var(--border);
+    border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.header h1 { margin: 0; font-size: 1.25rem; }
 
 /* Chat area */
 .chat {
@@ -52,18 +144,29 @@ body {
     background-color: var(--panel);
     height: 65vh;
     overflow: auto;
+    overscroll-behavior: contain;
 }
 
 .msg {
     margin: 8px 0;
+    max-width: 70%;
     padding: 10px 12px;
     border-radius: var(--radius-sm);
     white-space: pre-wrap;
-    word-wrap: break-word;
+    word-wrap: break-word;   /* legacy */
+    overflow-wrap: anywhere; /* modern, prevents overflow for long tokens */
 }
 
-.user { background-color: var(--user); }
-.assistant { background-color: var(--assistant); }
+.user {
+    background-color: var(--user);
+    align-self: flex-end;
+    margin-left: auto;
+}
+.assistant {
+    background-color: var(--assistant);
+    align-self: flex-start;
+    margin-right: auto;
+}
 
 /* Composer */
 .composer {
@@ -82,6 +185,18 @@ textarea {
     padding: 10px;
     background-color: #0f1420;
     color: var(--ink);
+}
+
+@media(max-width: 600px) {
+    .composer {
+        grid-template-columns: 1fr;
+    }
+    .composer textarea {
+        height: 80px;
+    }
+    .composer button {
+        width: 100%;
+    }
 }
 
 /* Code blocks */
@@ -112,12 +227,24 @@ button {
     color: var(--btn-ink);
     font-weight: 600;
     cursor: pointer;
-    transition: transform 120ms ease, filter 120 ease, opacity 120ms ease;
+    transition: transform 120ms ease, filter 120ms ease, opacity 120ms ease;
 }
 
 button:hover { filter: brightness(1.05); }
 button:active { transform: translateY(1px); }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
+button:hover:not(:disabled) { box-shadow: 0 2px 8px rgba(0,0,0,0.25); }
+
+textarea:focus {
+    border-color: var(--focus);
+    /* Fallback shadow + progressive enhancement for color-mix */
+    box-shadow: 0 0 0 2px rgba(96,165,250,0.35);
+}
+@supports(color: color-mix(in srgb, black 0%)) {
+    textarea:focus {
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 50%, transparent);
+    }
+}
 
 /* Focus visibility (keyboard) */
 button:focus-visible,
@@ -125,7 +252,14 @@ input:focus-visible,
 textarea:focus-visible {
     outline: 2px solid var(--focus);
     outline-offset: 2px;
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 40%, transparent);
+    box-shadow: 0 0 0 2px rgba(96,165,250,0.35);
+}
+@supports(color: color-mix(in srgb, black 0%)) {
+    button:focus-visible,
+    input:focus-visible,
+    textarea:focus-visible {
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 40%, transparent);
+    }
 }
 
 /* Toast */
@@ -154,6 +288,8 @@ textarea:focus-visible {
 
 .toast.warn { background-color: var(--toast-warn); }
 .toast.error { background-color: var(--toast-error); }
+.toast.info { background-color: var(--toast-info); }
+.toast.success { background-color: var(--toast-success); }
 
 /* Reduce motion */
 @media (prefers-reduced-motion: reduce) {
@@ -162,7 +298,10 @@ textarea:focus-visible {
 
 /* Scrollbar polish (WebKit-based) */
 .chat::-webkit-scrollbar,
-pre::-webkit-scrollbar { width: 10px; height: 10px; }
+pre::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
 
 .chat::-webkit-scrollbar-thumb,
 pre::-webkit-scrollbar-thumb {
@@ -170,3 +309,32 @@ pre::-webkit-scrollbar-thumb {
     border-radius: var(--radius-sm);
     border: 2px solid #0f1420;
 }
+
+.chat, pre {
+    scrollbar-width: thin;
+    scrollbar-color: #1c2434 #0f1420;
+}
+
+/* Resizer handles */
+.panel { position: relative; }
+.resizer {
+    position: absolute;
+    background-color: transparent;
+    z-index: 5;
+    touch-action: none;
+}
+.resizer.left   { cursor: col-resize; right: -4px; top: 0; bottom: 0; width: 8px; }
+.resizer.right  { cursor: col-resize; left:  -4px; top: 0; bottom: 0; width: 8px; }
+.resizer.top    { cursor: row-resize; left: 0; right: 0; bottom: -4px; height: 8px; }
+.resizer.bottom { cursor: row-resize; left: 0; right: 0; top: -4px;    height: 8px; }
+.resizer:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.resizer:hover { background: rgba(255,255,255,0.06); }
+
+/* High-contrast users get a bit more separation */
+@media(prefers-contrast: more) {
+    .panel, .chat, input, textarea { border-color: color-mix(in srgb, var(--border) 60%, white); }
+}
+
+/* Selection color (nice in dark UIs) */
+::selection { background: color-mix(in srgb, var(--focus) 35%, transparent); color: #ffffff; }
