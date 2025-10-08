@@ -811,66 +811,6 @@ async def wsEndpoint(ws_: WebSocket):
                     continue
                 await handler(HandlerContext(ws=ws, session=sessLocal), msg)
                 continue
-                # Following comments are contains old code, ignore them until next uncommented code
-                #     route = msg.route
-                #     capability = route.capability if isinstance(route, Route) else ""
-                #     if capability == "gm.world@1":
-                #         sess = sessLocal
-                #         if sess is None:
-                #             await sendRaw(ws, createErrorMessage(msg, {
-                #                 "gen": sessLocal.currentGeneration(),
-                #                 "payload": {
-                #                     "code": "UNAUTHORIZED",
-                #                     "message": "Handshake required",
-                #                 }
-                #             }))
-                #             continue
-                #
-                #         async def streamWorld(corrId: str, lane: str, sessLocal: Session):
-                #             try:
-                #                 while True:
-                #                     await asyncio.sleep(2.0)
-                #                     payload = {"turn": int(time.time()), "actors": ["goblin", "player"]}
-                #                     await ws.send_text(safeJsonDumps(RPCMessage(
-                #                         v="0.1",
-                #                         id=str(uuid6.uuid7()),
-                #                         type="stateUpdate",
-                #                         correlatesTo=corrId,
-                #                         lane=lane,
-                #                         ts=nowMonotonicMs(),
-                #                         gen=Gen.model_validate(sessLocal.currentGeneration()),
-                #                         payload=payload,
-                #                     )))
-                #             except asyncio.CancelledError:
-                #                 pass
-                #             except Exception:
-                #                 # client likely disconnected
-                #                 pass
-                #         corrId = msg.id
-                #         lane = msg.lane or "sys"
-                #         task = asyncio.create_task(streamWorld(corrId, lane, sess))
-                #         sess.subscriptions[corrId] = task
-                #         continue
-                #     else:
-                #         await sendRaw(ws, createErrorMessage(msg, {
-                #             "gen": sessLocal.currentGeneration(),
-                #             "payload": {
-                #                 "code": "UNKNOWN_SUBSCRIBE",
-                #                 "message": f"Cannot subscribe to '{capability}' as such capability doesn't exist."
-                #             }
-                #         }))
-                #         continue
-                #
-                # # Check if we already have a cached reply for this message
-                # key = sessLocal.dedupeKey(msg)
-                # if key in sessLocal.idCache and msgType in ("request", "emit"):
-                #     cached = sessLocal.replyCache.get(key)
-                #     if cached:
-                #         # We have, so resend it...
-                #         await ws.send_text(safeJsonDumps(cached))
-                #     continue
-                # if msgType in ("request", "emit"):
-                #     sessLocal.remember(key)
 
             if msgType == "request":
                 capability = (msg.route.capability if isinstance(msg.route, Route) else "") or ""
