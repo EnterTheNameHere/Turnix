@@ -391,7 +391,7 @@ def serveModAsset(modId: str, path: str):
 
 
 
-class Session:
+class RPCSession:
     """
     Holds per-connection state: idempotency cache, pending jobs, etc.
     """
@@ -442,7 +442,7 @@ class Session:
 
 
 
-def _gen(session: Session) -> Gen:
+def _gen(session: RPCSession) -> Gen:
     return Gen.model_validate(session.currentGeneration())
 
 
@@ -544,16 +544,16 @@ class LoggingWebSocket:
 
 
 
-SESSIONS: dict[tuple[str, str | None, str | None], Session] = {}
+RPC_SESSIONS: dict[tuple[str, str | None, str | None], RPCSession] = {}
 
 
 
-def getSession(viewId: str, clientId: str | None, sessionId: str | None) -> Session:
+def getSession(viewId: str, clientId: str | None, sessionId: str | None) -> RPCSession:
     key = (viewId, clientId, sessionId)
-    session = SESSIONS.get(key)
+    session = RPC_SESSIONS.get(key)
     if not session:
-        session = Session(key)
-        SESSIONS[key] = session
+        session = RPCSession(key)
+        RPC_SESSIONS[key] = session
     return session
 
 
@@ -729,7 +729,7 @@ async def pushToast(ws: LoggingWebSocket, level: Literal["info", "warn", "error"
 async def wsEndpoint(ws_: WebSocket):
     ws = LoggingWebSocket(ws_)
     await ws.accept()
-    sessLocal: Session | None = None
+    sessLocal: RPCSession | None = None
     
     try:
         while True:
@@ -959,13 +959,14 @@ from dataclasses import dataclass
 @dataclass
 class HandlerContext:
     ws: LoggingWebSocket
-    session: Session
+    session: RPCSession
+
 
 async def handleSubscribeGMWorld(ctx: HandlerContext, msg: RPCMessage):
     """
     Subscribe: gm.world@1
     """
-    async def streamWorld(correlatesTo: str, lane: str, session: Session):
+    async def streamWorld(correlatesTo: str, lane: str, session: RPCSession):
         try:
             while True:
                 await asyncio.sleep(2.0)
