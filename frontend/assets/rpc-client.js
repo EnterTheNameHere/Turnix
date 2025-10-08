@@ -280,19 +280,15 @@ export class RpcClient {
     async subscribe(route, path, op, opts = {}) {
         const msg = this.#createSubscribeMessage({route, path, op}, opts);
         const subscription = this.#makeSub(msg.id, {route, path, op}, opts);
-        console.log({subscription});
         this.subscriptions.set(msg.id, subscription);
         await this.#sendWithAck(msg);
         return subscription;
     }
 
     unsubscribe(subId, opts = {}) {
-        console.group("Unsubscribe");
-        console.log({subId, opts});
         const msg = this.#createUnsubscribeMessage({correlatesTo: subId}, opts);
         this.#enqueue(msg);
         this.subscriptions.delete(subId);
-        console.groupEnd();
     }
 
     cancel(correlatesTo, opts = {}) {
@@ -335,7 +331,7 @@ export class RpcClient {
             this.#setReady(true);
             this.#flushQueue();
 
-            const welcomeState = msg.payload?.state ?? null;
+            let welcomeState = msg.payload?.state ?? null;
             this.#lastWelcome = welcomeState;
             this.#welcomeDeferred.resolve(welcomeState);
             // Prepare a new deferred for the *next* welcome (e.g., after reconnect)
@@ -408,7 +404,6 @@ export class RpcClient {
                 // For a subscribe, we want to execute a subscribe()
                 else if(msg.type === "subscribe" && typeof cap.subscribe === "function") {
                     try {
-                        console.log("Capability object:", cap);
                         const push = async (payload) => {
                             const message = this.#createStateUpdateMessage(msg, {payload});
                             this.#enqueue(message);
@@ -417,7 +412,6 @@ export class RpcClient {
                         /** @type {import("./types").SubscribeCtx} */
                         const ctx = {id: msg.id, origin: msg.origin, signal: abortController.signal, push};
 
-                        console.log("Subscriptions:", this.subscriptions);
                         Promise.resolve()
                             .then(() => cap.subscribe(msg.path, msg.payload ?? {}, ctx))
                             .then((stream) => {
@@ -426,8 +420,6 @@ export class RpcClient {
                                     subscription = this.#makeSub(msg.id, {route: msg.route, path: msg.path, op: msg.op}, {});
                                     this.subscriptions.set(msg.id, subscription);
                                 }
-
-                                console.log("Subscriptions:", this.subscriptions);
 
                                 subscription._jsOnCancel = stream?.onCancel ?? null;
 
@@ -537,7 +529,6 @@ export class RpcClient {
         if(msg.type === "cancel" || msg.type === "unsubscribe") {
             const subscription = this.subscriptions.get(msg.correlatesTo);
             if(subscription && typeof subscription._jsOnCancel === "function") {
-                console.log(`Calling cancel on subscription ${msg.correlatesTo}`);
                 try { subscription._jsOnCancel(msg); }
                 catch(err) { console.warn(`Error caught during subscription cancel: ${err?.message}`, err, msg); }
             }
