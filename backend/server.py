@@ -1083,7 +1083,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
     # Allowlist check
     try:
         parsedUrl = urllib.parse.urlparse(url)
-        host = parsedUrl.hostname or ""
+        host = (parsedUrl.hostname or "").lower()
         if not host:
             await sendRaw(ctx.ws, createErrorMessage(msg, {
                 "gen": ctx.session.currentGeneration(),
@@ -1091,7 +1091,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
             }))
             return
         httpProxy = settings.get("httpProxy", {})
-        allowedHosts = httpProxy.get("allowList", [])
+        allowedHosts = [hh.lower() for hh in httpProxy.get("allowList", [])]
         if host not in allowedHosts:
             await sendRaw(ctx.ws, createErrorMessage(msg, {
                 "gen": ctx.session.currentGeneration(),
