@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,8 +8,8 @@ from contextlib import asynccontextmanager
 from pydantic import BaseModel, ValidationError, Field, ConfigDict, JsonValue, model_validator
 from pydantic.alias_generators import to_camel
 from pathlib import Path
-from typing import Any, Literal
-from collections.abc import AsyncIterator, Callable # pyright: ignore[reportShadowedImports]
+from typing import Any, Literal, TypedDict
+from collections.abc import AsyncIterator, Callable, Mapping # pyright: ignore[reportShadowedImports]
 import json5, os, time, asyncio, uuid6, re, secrets, hashlib, importlib.util
 
 from core.logger import configureLogging
@@ -417,9 +417,6 @@ class RPCSession:
         self.state = {
             "serverMessage": "Welcome to Turnix RPC",
             "serverBootTs": time.time(),
-            "mods": {
-                "frontend": listMods(),
-            }
         }
         self.genNum = 0
         self.genSalt = ""
@@ -477,19 +474,142 @@ def safeJsonDumps(obj: object | RPCMessage) -> str:
 
 # ---------- WebSocket RPC (minimal echo-capable with ACK) ----------
 
-def logIncomingStr(text: str) -> None:
-    if(loadSettings().get("debug", {}).get("backend", {}).get("rpc", {}).get("incomingMessages", {}).get("log", False)):
-        ignoreTypes = loadSettings().get("debug", {}).get("backend", {}).get("rpc", {}).get("incomingMessages", {}).get("ignoreTypes", [])
-        if all(f'"type":"{value}"' not in text for value in ignoreTypes):
-            logger.debug(f"[RPC] incoming: {text}")
+def evaluateOp(left: Any, op: str, right: Any) -> bool:
+    if op == "equals":
+        return left is right or left == right
+    if op == "notEquals":
+        return not (left is right or left == right)
+    if op == "in":
+        return isinstance(right, list) and any(val == left for val in right)
+    if op == "notIn":
+        return isinstance(right, list) and not any(val == left for val in right)
+    if op == "exists":
+        return left is not None
+    if op == "notExists":
+        return left is None
+    if op == "lt":
+        return isinstance(left, (int, float)) and isinstance(right, (int, float)) and left < right
+    if op == "lte":
+        return isinstance(left, (int, float)) and isinstance(right, (int, float)) and left <= right
+    if op == "gt":
+        return isinstance(left, (int, float)) and isinstance(right, (int, float)) and left > right
+    if op == "gte":
+        return isinstance(left, (int, float)) and isinstance(right, (int, float)) and left >= right
+    if op == "matches":
+        if not isinstance(left, str) or not isinstance(right, str):
+            return False
+        pattern, flags = right, ""
+        # ReDoS guard
+        if len(pattern) > 2000:
+            return False
+        mm = re.fullmatch(r"/(.+)/([a-z]*)", right)
+        if mm:
+            pattern, flags = mm.group(1), mm.group(2)
+        reFlags = 0
+        if "i" in flags:
+            reFlags |= re.IGNORECASE
+        if "m" in flags:
+            reFlags |= re.MULTILINE
+        if "s" in flags:
+            reFlags |= re.DOTALL
+        try:
+            return re.search(pattern, left, reFlags) is not None
+        except re.error:
+            return False
+    return False
 
 
 
-def logOutgoingStr(text: str) -> None:
-    if(loadSettings().get("debug", {}).get("backend", {}).get("rpc", {}).get("outgoingMessages", {}).get("log", False)):
-        ignoreTypes = loadSettings().get("debug", {}).get("backend", {}).get("rpc", {}).get("outgoingMessages", {}).get("ignoreTypes", [])
-        if all(f'"type":"{value}"' not in text for value in ignoreTypes):
-            logger.debug(f"[RPC] sending: {text}")
+def _splitPathWithEscapes(path: str) -> list[str]:
+    parts: list[str] = []
+    curr = []
+    esc = False
+    for ch in path:
+        if esc:
+            curr.append(ch)
+            esc = False
+            continue
+        if ch == "\\":
+            esc = True
+            continue
+        if ch in (".", "/"):
+            if curr:
+                parts.append("".join(curr))
+                curr = []
+            continue
+        curr.append(ch)
+    if curr:
+        parts.append("".join(curr))
+    return parts
+
+
+
+def _asMapping(obj: Any) -> Mapping[str, Any] | None:
+    if isinstance(obj, Mapping):
+        return obj
+    # Pydantic BaseModel
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump(by_alias=True, exclude_unset=True)
+    return None
+
+
+
+def getByPath(obj: Any, path: str) -> Any:
+    mapping = _asMapping(obj)
+    if mapping is None or not path:
+        return None
+    parts = _splitPathWithEscapes(path)
+    val: Any = mapping
+    for part in parts:
+        mm = _asMapping(val)
+        if mm is None or part not in mm:
+            return None
+        val = mm[part]
+    return val
+
+
+
+def shouldLogRpcMessage(msg: RPCMessage | None, cfg: dict[str, Any]) -> bool:
+    conf = cfg or {"log": False}
+    if not conf.get("log", False):
+        return False
+    
+    msgType = getattr(msg, "type", None)
+    
+    ignoreTypes = conf.get("ignoreTypes")
+    if isinstance(ignoreTypes, list) and msgType and msgType in ignoreTypes:
+        return False
+    
+    rules = conf.get("rules")
+    if not isinstance(rules, list):
+        # No type rule => fallback to global log, which by this time is true, so log message...¨
+        return True
+    
+    # Find rule by exact type or wildcard
+    rule = next((rl for rl in rules if rl.get("type") in (msgType, "*")), None)
+    if not rule:
+        # If no rule for this type, log it
+        return True
+    
+    tests = rule.get("tests")
+    if isinstance(tests, list):
+        for test in tests:
+            if not isinstance(test, dict):
+                continue
+            prop = test.get("property")
+            op = test.get("op")
+            val = test.get("value")
+            left = getByPath(msg, prop) if msg and prop else None
+            if op and evaluateOp(left, op, val):
+                return test.get("shouldLog", True)
+    
+    return rule.get("shouldLog", False)
+
+
+
+def _shorten(text: str, *, maxLen: int = 4096) -> str:
+    text = defaultRedactor(text)
+    return (text[:maxLen] + "…") if (maxLen and len(text) > maxLen) else text
 
 
 
@@ -502,57 +622,49 @@ def defaultRedactor(text: str) -> str:
 
 
 
-class LoggingWebSocket:
-    """
-    Proxy around fastapi.WebSocket that logs outgoing messages.
-    Only overrides send_text/send_json/send_bytes; everything else is delegated.
-    """
-    def __init__(self, ws: WebSocket, *, maxLen: int = 4096, redact: Callable[[str], str] = defaultRedactor):
-        self._ws = ws
-        self._maxLen = maxLen
-        self._redact = redact
-    
-    async def send_text(self, data: str) -> None:
-        logOutgoingStr(self._shorten(data))
-        await self._ws.send_text(data)
-    
-    async def send_json(self, data: Any, mode: str = "text") -> None:
-        if mode not in ("text", "binary"):
-            raise ValueError("mode must be 'text' or 'binary'")
-        
-        if mode == "text":
-            if isinstance(data, str):
-                payloadText = data
-            elif isinstance(data, (bytes, bytearray)):
-                payloadText = data.decode("utf-8", errors="replace")
-            else:
-                payloadText = safeJsonDumps(data)
-            logOutgoingStr(self._shorten(payloadText))
-            await self._ws.send_text(payloadText)
-        
-        else: # binary mode
-            if isinstance(data, (bytes, bytearray)):
-                payloadBytes = bytes(data)
-            elif isinstance(data, str):
-                payloadBytes = data.encode("utf-8")
-            else:
-                payloadBytes = safeJsonDumps(data).encode("utf-8")
-            preview = payloadBytes[:self._maxLen or 4096]
-            logOutgoingStr(self._shorten(preview.decode("utf-8", errors="replace")))
-            await self._ws.send_bytes(payloadBytes)
+def _rpcLogCfg(direction: Literal["incoming", "outgoing"]) -> dict[str, Any]:
+    dbg = loadSettings().get("debug", {})
+    side = dbg.get("backend", {}).get("rpc", {})
+    return (side.get("incomingMessages") if direction == "incoming" else side.get("outgoingMessages")) or {"log": False}
 
-    async def send_bytes(self, data: bytes) -> None:
-        logOutgoingStr(self._shorten(f"<{len(data)} bytes>"))
-        await self._ws.send_bytes(data)
 
-    def _shorten(self, payload: str) -> str:
-        payload = self._redact(payload)
-        if self._maxLen and len(payload) > self._maxLen:
-            return payload[:self._maxLen] + "…"
-        return payload
+
+def decideAndLog(
+    direction: Literal["incoming", "outgoing"],
+    *,
+    rpcMessage: RPCMessage | None,
+    text: str | None = None,
+    bytesLen: int | None = None
+) -> None:
+    # Hard guard on pathological text sizes. _shorten is running redaction which needs a whole text
+    # to avoid mistakingly not redacting a sliced part of text, so it's better to just display nothing...
+    maxChars = loadSettings().get("debug", {}).get("backend", {}).get("rpc", {}).get("maxPreviewChars", 1_000_000)
+    if text is not None and len(text) > maxChars: # 1MB
+        logger.debug(f"[RPC] {direction}: <{len(text)} chars, suppressed>")
+        return
     
-    def __getattr__(self, name: str):
-        return getattr(self._ws, name)
+    cfg = _rpcLogCfg(direction)
+    if not cfg.get("log", False):
+        return
+    
+    # If we have a validated RPCMessage, evaluate rules on the model
+    if rpcMessage is not None:
+        if not shouldLogRpcMessage(rpcMessage, cfg):
+            return
+        preview = text if text is not None else safeJsonDumps(rpcMessage)
+        logger.debug(f"[RPC] {direction}: {_shorten(preview)}")
+        return
+    
+    # No model → best effort
+    if bytesLen is not None:
+        logger.debug(f"[RPC] {direction}: <{bytesLen} bytes>")
+        return
+    if text is not None:
+        logger.debug(f"[RPC] {direction}: {_shorten(text)}")
+        return
+    
+    # Nothing to log
+    return
 
 
 
@@ -712,8 +824,18 @@ def resolveClassCfg(opts) -> dict:
 
 
 
-async def sendRaw(ws: LoggingWebSocket, message: RPCMessage):
-    await ws.send_text(safeJsonDumps(message))
+async def sendRPCMessage(ws: WebSocket, message: RPCMessage):
+    jsonText = safeJsonDumps(message)
+    decideAndLog("outgoing", rpcMessage=message, text=jsonText)
+    await ws.send_text(jsonText)
+
+async def sendText(ws: WebSocket, text: str):
+    decideAndLog("outgoing", rpcMessage=None, text=text)
+    await ws.send_text(text)
+
+async def sendBytes(ws: WebSocket, data: bytes):
+    decideAndLog("outgoing", rpcMessage=None, text=None, bytesLen=len(data))
+    await ws.send_bytes(data)
 
 
 
@@ -722,8 +844,8 @@ LLM = llmclientMod.LlamaCppClient()
 
 
 
-async def pushToast(ws: LoggingWebSocket, level: Literal["info", "warn", "error"], text: str, gen: dict, ttlMs: int = 5000) -> None:
-    await sendRaw(ws, RPCMessage(
+async def pushToast(ws: WebSocket, level: Literal["info", "warn", "error"], text: str, gen: dict, ttlMs: int = 5000) -> None:
+    await sendRPCMessage(ws, RPCMessage(
         id=uuidv7(),
         v="0.1",
         type="emit",
@@ -739,20 +861,35 @@ async def pushToast(ws: LoggingWebSocket, level: Literal["info", "warn", "error"
 
 
 @app.websocket("/ws")
-async def wsEndpoint(ws_: WebSocket):
-    ws = LoggingWebSocket(ws_)
+async def wsEndpoint(ws: WebSocket):
     await ws.accept()
     sessLocal: RPCSession | None = None
     
     try:
         while True:
-            raw = await ws.receive_text()
-            logIncomingStr(raw)
+            event = await ws.receive()
+            if event["type"] == "websocket.disconnect":
+                break
+            if event["type"] == "websocket.receive":
+                if "text" in event and event["text"] is not None:
+                    raw = event["text"]
+                elif "bytes" in event and event["bytes"] is not None:
+                    # Best-effort log (no rule eval; not JSON)
+                    decideAndLog("incoming", rpcMessage=None, text=None, bytesLen=len(event["bytes"]))
+                    continue
+                else:
+                    continue
+            else:
+                continue
 
             try:
+                # TODO: Consider rejecting or chunking >1MB payloads (currently we still parse it and only suppress logging)
                 msg = RPCMessage.model_validate_json(raw)
+                decideAndLog("incoming", rpcMessage=msg, text=raw)
             except ValidationError as verr:
                 logger.exception(f"Invalid JSON: {verr}")
+                # Best-effort log for broken input (no rules)
+                decideAndLog("incoming", rpcMessage=None, text=raw)
                 continue
             
             msgType = msg.type
@@ -765,12 +902,12 @@ async def wsEndpoint(ws_: WebSocket):
                 gen = sessLocal.newGeneration()
 
                 # Send snapshot state with welcome
-                await ws.send_text(safeJsonDumps(createWelcomeMessage({
+                view = viewManager.ensureViewForWs(ws=ws)
+                view.patchState(sessLocal.state)
+                await sendRPCMessage(ws, createWelcomeMessage({
                     "gen": gen,
-                    "payload": {
-                        "state": sessLocal.state,
-                    },
-                })))
+                    "payload": view.snapshot(),
+                }))
                 continue
 
             # Handshake is required!
@@ -789,7 +926,7 @@ async def wsEndpoint(ws_: WebSocket):
                         "modsHash": msg.payload.get("modsHash"),                    
                     }
                 }
-                await sendRaw(ws, createAckMessage(msg, {"gen": sessLocal.currentGeneration()}))
+                await sendRPCMessage(ws, createAckMessage(msg, {"gen": sessLocal.currentGeneration()}))
                 continue
 
             if msgType is None:
@@ -798,7 +935,7 @@ async def wsEndpoint(ws_: WebSocket):
 
             # Immediate ack for non-control messages
             if msgType not in ("ack", "heartbeat"):
-                await sendRaw(ws, createAckMessage(msg, { "gen": sessLocal.currentGeneration() }))
+                await sendRPCMessage(ws, createAckMessage(msg, { "gen": sessLocal.currentGeneration() }))
 
             # Cancel request or subscription
             if msgType == "cancel" or msgType == "unsubscribe":
@@ -817,7 +954,7 @@ async def wsEndpoint(ws_: WebSocket):
                 handler = SUBSCRIBE_HANDLERS.get(capability)
                 if not handler:
                     logger.warning(f"Unknown capability for subscribe: '{capability}'\n{msg}")
-                    await sendRaw(ws, createErrorMessage(msg, {
+                    await sendRPCMessage(ws, createErrorMessage(msg, {
                         "gen": sessLocal.currentGeneration(),
                         "payload": {"code":"CAPABILITY_NOT_FOUND","message":"Unknown capability/route for subscribe"}
                     }))
@@ -830,7 +967,7 @@ async def wsEndpoint(ws_: WebSocket):
                 handler = REQUEST_HANDLERS.get(capability)
                 if not handler:
                     logger.warning(f"Unknown capability for request: '{capability}'\n{msg}")
-                    await sendRaw(ws, createErrorMessage(msg, {
+                    await sendRPCMessage(ws, createErrorMessage(msg, {
                         "gen": sessLocal.currentGeneration(),
                         "payload": {"code":"CAPABILITY_NOT_FOUND","message":"Unknown capability/route for request"}
                     }))
@@ -843,7 +980,7 @@ async def wsEndpoint(ws_: WebSocket):
                 handler = EMIT_HANDLERS.get(capability)
                 if not handler:
                     logger.warning(f"Unknown capability for emit: '{capability}'\n{msg}")
-                    await sendRaw(ws, createErrorMessage(msg, {
+                    await sendRPCMessage(ws, createErrorMessage(msg, {
                         "gen": sessLocal.currentGeneration(),
                         "payload": {"code":"CAPABILITY_NOT_FOUND","message":"Unknown capability/route for emit"}
                     }))
@@ -851,14 +988,16 @@ async def wsEndpoint(ws_: WebSocket):
                 await handler(HandlerContext(ws=ws, session=sessLocal), msg)
                 continue
 
-    except WebSocketDisconnect:
+    finally:
         if sessLocal is not None:
-            # Cleanup pending tasks
             for task in list(sessLocal.pending.values()):
                 task.cancel()
             for task in list(sessLocal.subscriptions.values()):
                 task.cancel()
-        return
+        try:
+            viewManager.removeViewForWs(ws)
+        except Exception:
+            pass
 
 
 if WEBROOT.exists():
@@ -913,7 +1052,7 @@ def _filterHeaders(headers: dict[str, str], policy: dict) -> dict[str, str]:
 from dataclasses import dataclass
 @dataclass
 class HandlerContext:
-    ws: LoggingWebSocket
+    ws: WebSocket
     session: RPCSession
 
 # ------------------------
@@ -1034,7 +1173,7 @@ async def handleSubscribeGMWorld(ctx: HandlerContext, msg: RPCMessage):
             while True:
                 await asyncio.sleep(2.0)
                 payload = { "turn": int(time.time()), "actors": ["goblin", "player"] }
-                await sendRaw(ctx.ws, RPCMessage(
+                await sendRPCMessage(ctx.ws, RPCMessage(
                     v="0.1",
                     id=(uuidv7()),
                     type="stateUpdate",
@@ -1063,7 +1202,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
 
     args = msg.args or []
     if len(args) < 2:
-        await sendRaw(ctx.ws, createErrorMessage(msg, {
+        await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
             "gen": ctx.session.currentGeneration(),
             "payload": {"code": "BAD_REQUEST", "message": "Arguments required: method, url"},
         }))
@@ -1073,7 +1212,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
     opts = (args[2] if len(args) > 2 else {}) or {}
     method = str(method).upper()
     if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}:
-        await sendRaw(ctx.ws, createErrorMessage(msg, {
+        await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
             "gen": ctx.session.currentGeneration(),
             "payload": {"code": "BAD_REQUEST", "message": f"Invalid HTTP method: {method}"},
         }))
@@ -1085,7 +1224,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
         parsedUrl = urllib.parse.urlparse(url)
         host = (parsedUrl.hostname or "").lower()
         if not host:
-            await sendRaw(ctx.ws, createErrorMessage(msg, {
+            await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
                 "gen": ctx.session.currentGeneration(),
                 "payload": {"code": "BAD_REQUEST", "message": f"Invalid URL: {url}"},
             }))
@@ -1093,13 +1232,13 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
         httpProxy = settings.get("httpProxy", {})
         allowedHosts = [hh.lower() for hh in httpProxy.get("allowList", [])]
         if host not in allowedHosts:
-            await sendRaw(ctx.ws, createErrorMessage(msg, {
+            await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
                 "gen": ctx.session.currentGeneration(),
                 "payload": {"code": "FORBIDDEN_HOST", "message": f"Host {host} not allowed"}
             }))
             return
     except Exception as err:
-        await sendRaw(ctx.ws, createErrorMessage(msg, {
+        await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
             "gen": ctx.session.currentGeneration(),
             "payload": {"code": "BAD_URL", "message": str(err), "err": err}
         }))
@@ -1137,7 +1276,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
         responseHeaders = _filterHeaders(responseHeaders, responseHeadersPolicy)
 
         if not isinstance(response.get("status"), int):
-            await sendRaw(ctx.ws, createErrorMessage(msg, {
+            await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
                 "gen": _gen(ctx.session),
                 "payload": {"code":"HTTP_ERROR","message":"Received invalid status code."},
             }))
@@ -1157,13 +1296,13 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
         if response.get("json") is not None:
             payload["json"] = response["json"]
 
-        await sendRaw(ctx.ws, createReplyMessage(msg, {
+        await sendRPCMessage(ctx.ws, createReplyMessage(msg, {
             "gen": ctx.session.currentGeneration(),
             "payload": payload,
         }))
         return
     except Exception as err:
-        await sendRaw(ctx.ws, createErrorMessage(msg, {
+        await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
             "gen": ctx.session.currentGeneration(),
             "payload": {"code":"HTTP_ERROR","message":str(err),"err":err,"retryable": True},
         }))
@@ -1200,7 +1339,7 @@ async def handleSubscribeChat(ctx: HandlerContext, msg: RPCMessage):
                     break
 
                 if event.get("error"):
-                    await sendRaw(ctx.ws, createErrorMessage(msg, {
+                    await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
                         "gen": ctx.session.currentGeneration(),
                         "payload": {"code":"ERR_LLM_STREAM", "message": event.get("error"), "err": event},
                     }))
@@ -1214,7 +1353,7 @@ async def handleSubscribeChat(ctx: HandlerContext, msg: RPCMessage):
                 if not delta:
                     continue
                 assistantChunks.append(delta)
-                await sendRaw(ctx.ws, RPCMessage(
+                await sendRPCMessage(ctx.ws, RPCMessage(
                     id=uuidv7(),
                     v="0.1",
                     type="stateUpdate",
@@ -1226,13 +1365,13 @@ async def handleSubscribeChat(ctx: HandlerContext, msg: RPCMessage):
         except asyncio.CancelledError:
             pass
         except Exception as err:
-            await sendRaw(ctx.ws, createErrorMessage(msg, {
+            await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
                 "gen": ctx.session.currentGeneration(),
                 "payload": {"code":"ERR_LLM", "message":str(err), "err": err, "retryable": True},
             }))
         else:
             fullText = "".join(assistantChunks)
-            await sendRaw(ctx.ws, RPCMessage(
+            await sendRPCMessage(ctx.ws, RPCMessage(
                 id=uuidv7(),
                 v="0.1",
                 type="stateUpdate",
@@ -1264,7 +1403,7 @@ async def handleRequestGMNarration(ctx: HandlerContext, msg: RPCMessage):
                 "payload": {"text": text, "spentMs": nowMonotonicMs() - start},
             })
             ctx.session.putReply(ctx.session.dedupeKey(msg), reply)
-            await sendRaw(ctx.ws, reply)
+            await sendRPCMessage(ctx.ws, reply)
         except asyncio.CancelledError:
             pass
     
