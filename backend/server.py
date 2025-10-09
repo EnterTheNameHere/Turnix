@@ -727,6 +727,7 @@ async def pushToast(ws: LoggingWebSocket, level: Literal["info", "warn", "error"
         id=uuidv7(),
         v="0.1",
         type="emit",
+        budgetMs=ttlMs,
         route=Route(capability="ui.toast@1"),
         gen=Gen.model_validate(gen),
         payload={
