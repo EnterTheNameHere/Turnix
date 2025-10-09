@@ -273,14 +273,24 @@ def resolveSafe(root: Path, requested: str) -> Path:
         # Leaf itself must not be a symlink either
         if resolved.is_symlink():
             raise HTTPException(403, "Mod file symlink not allowed")
+        
+        # If caller is the root itself(requested "", ".", or "/"), skip the walk.
+        if resolved == rootResolved:
+            return resolved
+        
         # Parent chain must not include symlinks
         path = raw
         while True:
             if path.is_symlink():
                 raise HTTPException(403, "Mod path symlinks not allowed")
-            if path.parent == path:
+            
+            if path.resolve(strict=False) == rootResolved:
                 break
-            path = path.parent
+
+            parent = path.parent
+            if parent == path: # Filesystem root guard
+                break
+            path = parent
     return resolved
 
 
