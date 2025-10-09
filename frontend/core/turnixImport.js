@@ -1,7 +1,7 @@
 // NOTE: If you change this file, delete cache of your Electron, if you use it as client, for changes to be effective!
 // Electron might cache this file, so without deleting cache Electron might still use old version of this file...
 
-console.log("Are we running in dev mode?", isDevMode());
+console.log('Are we running in dev mode?', isDevMode());
 
 /**
  * @returns {boolean}
@@ -15,7 +15,7 @@ export function isDevMode() {
  */
 function getBaseForURL() {
     // href is always a full URL even under file:// in Electron
-    return window.location.href ?? "http://localhost/";
+    return window.location.href ?? 'http://localhost/';
 }
 
 /**
@@ -36,7 +36,7 @@ export function bustCache(path) {
     try {
         const url = new URL(asURLString(path), getBaseForURL());
         // Overwrite any existing ts param by stable one
-        url.searchParams.set("ts", globalThis.__turnixCacheBustToken);
+        url.searchParams.set('ts', globalThis.__turnixCacheBustToken);
         return url.toString();
     } catch {
         // If path is something weird (missing protocol and base failed),

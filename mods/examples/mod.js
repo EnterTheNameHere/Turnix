@@ -26,10 +26,10 @@ function showToast(text, ms = 2000, level='info') {
     toasts.appendChild(toast);
 
     // Animate in
-    requestAnimationFrame(() => toast.classList.add("show"));
+    requestAnimationFrame(() => toast.classList.add('show'));
 
     const hide = () => {
-        toast.classList.remove("show");
+        toast.classList.remove('show');
         toast.addEventListener(
             'transitionend',
             () => {
@@ -61,19 +61,19 @@ export async function onLoad(ctx) {
     const appEl = document.querySelector('.contents');
 
     // Chat area
-    const chatEl = document.createElement("div");
-    chatEl.id = "chat";
-    chatEl.className = "chat";
+    const chatEl = document.createElement('div');
+    chatEl.id = 'chat';
+    chatEl.className = 'chat';
     chatEl.setAttribute('role', 'log');
     chatEl.setAttribute('aria-live', 'polite');
     chatEl.setAttribute('aria-relevant', 'additions text');
 
     // Composer
     const composerEl = document.createElement('div');
-    composerEl.className = "composer";
+    composerEl.className = 'composer';
 
     const textareaEl = document.createElement('textarea');
-    textareaEl.id = "input";
+    textareaEl.id = 'input';
     textareaEl.placeholder = 'Type a message...';
 
     const btnSend = document.createElement('button');
@@ -90,30 +90,30 @@ export async function onLoad(ctx) {
     const startStream = async (text) => {
         // Cancel any previous stream
         if(activeChatSub) {
-            try { ctx.rpc.unsubscribe(activeChatSub.id); } catch {}
+            try { ctx.rpc.unsubscribe(activeChatSub.id); } catch {/* ignored */}
             activeChatSub = null;
         }
 
         // Render assistant bubble that we'll chunk-update
-        const assistantEl = appendMessage("assistant", "", chatEl);
+        const assistantEl = appendMessage('assistant', '', chatEl);
 
-        let buffer = "";
+        let buffer = '';
         let raf = null;
 
         btnSend.disabled = true;
         try {
             const sub = await ctx.rpc.subscribe(
-                {capability: "chat@1"},
-                "stream", // path; not used
-                "none", // op; not used
-                {role: "user", text: text} // opts → becomes payload on subscribe
+                {capability: 'chat@1'},
+                'stream', // path; not used
+                'none', // op; not used
+                {role: 'user', text: text} // opts → becomes payload on subscribe
             );
             activeChatSub = sub;
 
-            sub.on("update", (payload) => {
+            sub.on('update', (payload) => {
                 // Payload: {delta?: string, done?: boolean, text?: string}
                 if(!payload) return;
-                if(typeof payload.delta === "string") {
+                if(typeof payload.delta === 'string') {
                     buffer += payload.delta;
                     // Throttle DOM writes to animation frames
                     if(!raf) {
@@ -122,24 +122,24 @@ export async function onLoad(ctx) {
                             assistantEl.textContent = buffer;
                             if(stick) autoscroll();
                             raf = null;
-                        })
+                        });
                     }
                 }
-                if(typeof payload.done === "boolean" && payload.done) {
+                if(typeof payload.done === 'boolean' && payload.done) {
                     // Prefer authoritative full text
-                    if(typeof payload.text === "string") {
+                    if(typeof payload.text === 'string') {
                         buffer = payload.text;
                         assistantEl.textContent = buffer;
                         autoscroll();
                     }
                     // Cleanup
-                    try { ctx.rpc.unsubscribe(sub.id); } catch {}
+                    try { ctx.rpc.unsubscribe(sub.id); } catch {/* ignored */}
                     if(activeChatSub && activeChatSub.id === sub.id) activeChatSub = null;
                     btnSend.disabled = false;
                 }
             });
-            sub.on("error", (payload) => {
-                const msg = payload?.message ?? "Unexpected issue occurred";
+            sub.on('error', (payload) => {
+                const msg = payload?.message ?? 'Unexpected issue occurred';
                 assistantEl.textContent = `Error: ${msg}`;
                 Toast.error({text: `Chat failed: ${msg}`, ttlMs: 3000});
                 btnSend.disabled = false;
@@ -152,15 +152,15 @@ export async function onLoad(ctx) {
             btnSend.disabled = false;
             // TODO: subscription might be still fine, or error is fatal - think of how to report it...
         }
-    }
+    };
 
     const send = async () => {
-        const hasText = typeof textareaEl.value === "string" && textareaEl.value.trim().length !== 0;
-        const text = hasText ? textareaEl.value : "Hi! I'm UI, user didn't provide any message to send you... Introduce yourself as game master, ready to play a game with user. End it with a joke! Thank you, UI ends.";
+        const hasText = typeof textareaEl.value === 'string' && textareaEl.value.trim().length !== 0;
+        const text = hasText ? textareaEl.value : 'Hi! I\'m UI, user didn\'t provide any message to send you... Introduce yourself as game master, ready to play a game with user. End it with a joke! Thank you, UI ends.';
         
         // Render user bubble immediately
-        appendMessage("user", text, chatEl);
-        textareaEl.value = "";
+        appendMessage('user', text, chatEl);
+        textareaEl.value = '';
         textareaEl.focus();
 
         await startStream(text);
@@ -169,35 +169,35 @@ export async function onLoad(ctx) {
     btnSend.onclick = send;
 
     // Enter = send; Shift+Enter = newline
-    textareaEl.addEventListener("keydown", (ev) => {
-        if(ev.key === "Enter" && !ev.shiftKey) {
+    textareaEl.addEventListener('keydown', (ev) => {
+        if(ev.key === 'Enter' && !ev.shiftKey) {
             ev.preventDefault();
             btnSend.click();
         }
     });
 
     // Show a toast in the browser when backend asks
-    const disposeToast = await ctx.rpc.expose("ui.toast@1", {
+    await ctx.rpc.expose('ui.toast@1', {
         call: async(_path, args) => {
             console.log('ui.toast@1 - call is called!');
-            const [text = "Hello from backend!", ms = 1500, level = "info"] = args || [];
+            const [text = 'Hello from backend!', ms = 1500, level = 'info'] = args || [];
             showToast(text, ms, level);
             return {ok: true};
         }
     });
 
     // Subscribe to get latest time!
-    ctx.rpc.expose("time.service@1", {
+    ctx.rpc.expose('time.service@1', {
         subscribe: async(_path, _opts, ctx2) => {
             // Push time until cancelled
             let timer = setInterval(() => ctx2.push({ now: Date.now() }), 2500);
-            ctx2.signal.addEventListener("abort", () => clearInterval(timer));
-            return {initial: { now: Date.now() }, onCancel: () => clearInterval(timer)}
+            ctx2.signal.addEventListener('abort', () => clearInterval(timer));
+            return {initial: { now: Date.now() }, onCancel: () => clearInterval(timer)};
         }
     });
 
     addEventListener('beforeunload', () => {
-        try { if(activeChatSub) ctx.rpc.unsubscribe(activeChatSub.id); } catch {}
+        try { if(activeChatSub) ctx.rpc.unsubscribe(activeChatSub.id); } catch {/* ignored */}
         activeChatSub = null;
     });
 
@@ -205,7 +205,7 @@ export async function onLoad(ctx) {
     await ctx.rpc.expose('reset.layout@1', {
         call: async(_path, _args) => {
             const sizes = resetLayoutSizes();
-            Toast.info({text: "Layout reset to defaults", ttlMs: 1500});
+            Toast.info({text: 'Layout reset to defaults', ttlMs: 1500});
             return {ok: true, sizes};
         }
     });
@@ -214,7 +214,7 @@ export async function onLoad(ctx) {
     await ctx.rpc.expose('reset.chat@1', {
         call: async(_path, _args) => {
             const res = resetChatLog(chatEl);
-            Toast.info({text: "Chat cleared", ttlMs: 1200 });
+            Toast.info({text: 'Chat cleared', ttlMs: 1200 });
             return {ok: true, ...res};
         }
     });
@@ -274,8 +274,8 @@ function addHandle(panelEl, side) {
     const handle = document.createElement('div');
     handle.className = `resizer ${
         side === 'left' ? 'right' :
-        side === 'right' ? 'left' :
-        side === 'top' ? 'bottom' : 'top'
+            side === 'right' ? 'left' :
+                side === 'top' ? 'bottom' : 'top'
     }`;
     handle.tabIndex = 0;
     handle.setAttribute('role', 'separator');
@@ -313,7 +313,7 @@ function addHandle(panelEl, side) {
     function endDrag(ev) {
         if(!dragging) return;
         dragging = false;
-        try { handle.releasePointerCapture(ev.pointerId); } catch {}
+        try { handle.releasePointerCapture(ev.pointerId); } catch {/* ignored */}
         document.body.style.userSelect = prevUserSelect;
         persist(cfg.css, cfg.storage);
     }
@@ -392,7 +392,7 @@ function resetLayoutSizes() {
     // Remove inline overrides so browser falls back to stylesheet defaults
     for(const {css, storage} of Object.values(LAYOUT_VARS)) {
         document.documentElement.style.removeProperty(css);
-        try { localStorage.removeItem(storage); } catch {}
+        try { localStorage.removeItem(storage); } catch {/* ignored */}
     }
     // Read back effective values after reset (for return payload/logging)
     const cs = getComputedStyle(document.documentElement);
