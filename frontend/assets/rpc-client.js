@@ -1,6 +1,155 @@
 import { uuidv7 } from "uuidv7";
 
 /**
+ * Strict, portable ops with no type coercion.
+ * 
+ * 'equals':        left === right
+ * 'notEquals':     left !== right
+ * 'in':            right is array and contains left
+ * 'notIn':         right is array and does not contain left
+ * 'exists':        left is not undefined
+ * 'notExists':     left is undefined
+ * 'lt':            left < right
+ * 'lte':           left <= right
+ * 'gt':            left > right
+ * 'gte':           left >= right
+ * 'matches':       RegExp(right).test(left)
+ * 
+ * @param {unknown} left First value to compare, or check if it exists, or if it's in `right`, or matches against RegExp
+ * @param {'equals'|'notEquals'|'in'|'notIn'|'exists'|'notExists'|'lt'|'lte'|'gt'|'gte'|'matches'} op The evaluating operator
+ * @param {unknown} right Second value to compare against, being the array, or being RegExp pattern
+ * @return {boolean}
+ */
+export function evaluateOp(left, op, right) {
+    switch(op) {
+        case 'equals':      return left === right;
+        case 'notEquals':   return left !== right;
+        case 'in':          return Array.isArray(right) && right.some(val => val === left);
+        case 'notIn':       return Array.isArray(right) && !right.some(val => val === left);
+        case 'exists':      return left !== undefined;
+        case 'notExists':   return left === undefined;
+        case 'lt':          return typeof left === 'number' && typeof right === 'number' && left < right;
+        case 'lte':         return typeof left === 'number' && typeof right === 'number' && left <= right;
+        case 'gt':          return typeof left === 'number' && typeof right === 'number' && left > right;
+        case 'gte':         return typeof left === 'number' && typeof right === 'number' && left >= right;
+        case 'matches':     {
+            if(typeof left !== 'string' || typeof right !== 'string') return false;
+            let pattern = right, flags = '';
+            // Protect against ReDoS
+            if(pattern.length > 2000) return false;
+            const mm = /^\/(.+)\/([a-z]*)$/u.exec(right);
+            if(mm) { pattern = mm[1]; flags = mm[2]; }
+            try { return new RegExp(pattern, flags).test(left); }
+            catch { return false; } // Treat invalid regex as no match
+        }
+        default:            return false;
+    }
+}
+
+/**
+ * Returns value of property accessed using `path` string.
+ * - Accepts 'a.b.c' or 'a/b/c'.
+ * 
+ * @param {object} obj Object which properties to traverse.
+ * @param {string} path Path to traverse.
+ * @return {unknown} value found, or undefined.
+ */
+export function getByPath(obj, path) {
+    if(!obj || !path) return undefined;
+
+    const parts = [];
+    let curr = '', esc = false;
+    // Make sure to filter out escapes
+    for(const ch of path) {
+        if(esc) { curr += ch; esc = false; continue; }
+        if(ch === '\\') { esc = true; continue; }
+        if(ch === '.' || ch === '/') {
+            if(curr) parts.push(curr), curr = ''; continue;
+        }
+        curr += ch;
+    }
+    if(curr) parts.push(curr);
+
+    let val = obj;
+    for(const part of parts) {
+        if(val == null || typeof val !== 'object' || !(part in val)) return undefined;
+        val = val[part];
+    }
+    return val;
+}
+
+/**
+ * Normalize input (string or object) to a message object.
+ * @param {string|import("./types").RPCMessage} rpcMessageOrString
+ */
+export function normalizeMessage(rpcMessageOrString) {
+    if(typeof rpcMessageOrString === 'string') {
+        const text = rpcMessageOrString.trimStart();
+        if(!text) return null;
+
+        // Quickly check if text starts as valid JSON value.
+        const first = text[0];
+        // {} [] "" true false null (negative/positive) digit
+        if('{["tfn-+0123456789'.includes(first)) {
+            try { return JSON.parse(text); }
+            catch { return null; } // Not a valid JSON
+        }
+
+        // Message is not a JSON
+        return null;
+    }
+
+    if(rpcMessageOrString && typeof rpcMessageOrString === 'object') {
+        return rpcMessageOrString;
+    }
+
+    // We expect JSON or object and what we got is neither of that.
+    return null;
+}
+
+/**
+ * Decide if we should log.
+ * @param {import("./types").RPCMessage} msg
+ * @param {object} cfg
+ * @returns {boolean} 
+ */
+export function shouldLogRPCMessage(msg, cfg) {
+    const conf = cfg ?? {log: false};
+    if(conf.log === false) return false;
+
+    // Ignore by type
+    const msgType = msg?.type;
+    // TODO: warn ignored types is not array or is empty (which seems weird, as ack and heartbeat are spammy)
+    if(Array.isArray(conf.ignoreTypes) && msgType && conf.ignoreTypes.includes(msgType)) {
+        // Type is in ignore list
+        return false;
+    }
+
+    // Match by type rule
+    const rules = Array.isArray(conf.rules) ? conf.rules : [];
+    const rule = rules.find((rl) => rl.type === msgType || rl.type === "*");
+
+    if(!rule) {
+        // No type rule => fallback to global log, which by this time is true, so log message...
+        return true;
+    }
+
+    // Evaluate tests in order; first match wins
+    const tests = Array.isArray(rule.tests) ? rule.tests : [];
+    for(const test of tests) {
+        const left = msg ? getByPath(msg, test.property) : undefined;
+        // TODO: warn if test doesn't have correctly defined values - property, op, value, and whether to log
+        if(evaluateOp(left, test.op, test.value)) {
+            return test.shouldLog ?? true;
+        }
+    }
+
+    // No test matched => use capability default
+    // TODO: warn that category rule doesn't have whether it should log or not
+    return rule.shouldLog ?? false;
+}
+
+/**
  * @template {any[]} A
  * @returns {{
  *     add(fn: (...args: A) => void): { unsubscribe(): void, fn: (...args: A) => void };
@@ -602,23 +751,22 @@ export class RpcClient {
     }
 
     #logOutgoingStr(rpcMessageOrStr) {
-        const dbg = this.settings?.debug?.frontend?.rpc?.outgoingMessages;
-        if(!dbg?.log) return;
-        const notIgnored = (dbg.ignoreTypes || []).every(element => {
-            if(typeof rpcMessageOrStr === "string") return !rpcMessageOrStr.includes(`"type":"${element}"`);
-            return rpcMessageOrStr.type !== element;
-        });
-        if(notIgnored) console.log("[RPC] sending:", rpcMessageOrStr);
+        const cfg = this.settings?.debug?.frontend?.rpc?.outgoingMessages ?? {log: false};
+        if(!cfg?.log) return;
+        
+        const normalizedMessage = normalizeMessage(rpcMessageOrStr);
+        const wantToLog = shouldLogRPCMessage(normalizedMessage, cfg);
+        if(!wantToLog) return;
+        console.log('[RPC] sending:', normalizedMessage ?? rpcMessageOrStr);
     }
 
     #logIncomingStr(rpcMessageOrStr) {
-        const dbg = this.settings?.debug?.frontend?.rpc?.incomingMessages;
-        if(!dbg?.log) return;
-        const notIgnored = (dbg.ignoreTypes || []).every(element => {
-            if(typeof rpcMessageOrStr === "string") return !rpcMessageOrStr.includes(`"type":"${element}"`);
-            return rpcMessageOrStr.type !== element;
-        });
-        if(notIgnored) console.log('[RPC] incoming:', rpcMessageOrStr);
+        const cfg = this.settings?.debug?.frontend?.rpc?.incomingMessages ?? {log: false};
+        if(!cfg?.log) return;
+        const normalizedMessage = normalizeMessage(rpcMessageOrStr);
+        const wantToLog = shouldLogRPCMessage(normalizedMessage, cfg);
+        if(!wantToLog) return;
+        console.log('[RPC] incoming:', normalizedMessage ?? rpcMessageOrStr);
     }
 
     #enqueue(obj) {
