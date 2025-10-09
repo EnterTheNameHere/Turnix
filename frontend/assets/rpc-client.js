@@ -1208,18 +1208,27 @@ export class RpcClient {
         if(!fresh && this.#lastWelcome !== null) {
             return Promise.resolve(this.#lastWelcome);
         }
+
         // Wait on the in-flight deferred
         const prom = this.#welcomeDeferred.promise;
-        if(signal) {
-            // Optional cancellation support
-            return new Promise((resolve, reject) => {
-                const abort = () => reject(Object.assign(new Error("Aborted"), {name: "AbortError"}));
-                signal.addEventListener("abort", abort, {once: true});
-                prom.then(val => {signal.removeEventListener("abort", abort); resolve(val); },
-                          err => {signal.removeEventListener("abort", abort); reject(err); });
-            });
+        if(!signal) return prom;
+
+        if(signal.aborted) {
+            // Reject immediately with a proper AbortError
+            return Promise.reject(new DOMException('Aborted', 'AbortError'));
         }
-        return prom;
+
+        // Create a one-off abort promise and race it with `prom`
+        let onAbort;
+        const abortPromise = new Promise((_resolve, reject) => {
+            onAbort = () => reject(new DOMException('Aborted', 'AbortError'));
+            signal.addEventListener('abort', onAbort, {once: true});
+        });
+
+        return Promise.race([prom, abortPromise]).finally(() => {
+            // Cleanup if `prom` wins the race (no leak), or it's already removed if aborted
+            signal.removeEventListener('abort', onAbort);
+            });
     }
 
     /**
