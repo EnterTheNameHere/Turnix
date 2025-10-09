@@ -916,6 +916,114 @@ class HandlerContext:
     ws: LoggingWebSocket
     session: RPCSession
 
+# ------------------------
+#    View & ViewManager
+# ------------------------
+
+class ViewSnapshot(TypedDict):
+    viewId: str
+    template: str
+    version: int
+    state: dict[str, Any]
+    sessions: dict[str, dict[str, Any]]
+
+class Session:
+    """
+    Session (main/hidden/temporary) owned by a View.
+    Disctinct from the RPC Session (transport/handshake)
+    """
+    def __init__(self, kind: Literal["main", "hidden", "temporary"], sessionId: str | None = None) -> None:
+        import uuid6
+        self.kind = kind
+        self.id = sessionId or f"s_{uuid6.uuid7().hex[:12]}"
+        self.version = 0
+        self.state: dict[str, Any] = {} # Authoritative on backend
+        self.objects: dict[str, Any] = {}
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "version": self.version,
+            "state": self.state,
+            "objects": list(self.objects.keys()),
+        }
+    
+class View:
+    """
+    Backend representation of a single frontend instance (Electron's browser page/C# avatar/etc.)
+    - Authoritative state
+    - Owns sessions: one immortal "main", plus hidden/temporary when needed
+    """
+    def __init__(self, *, template: str | None = None, viewId: str | None = None):
+        import uuid6
+        self.id: str = viewId or f"v_{uuid6.uuid7().hex[:12]}"
+        self.template: str = template or "main_menu"
+        self.state: dict[str, Any] = {
+            "mods": {
+                "frontend": listMods(),
+            }
+        }
+        self.version = 0
+        self.sessions: dict[str, Session] = {}
+        self.mainSession = self.createSession("main")
+    
+    def createSession(self, kind: Literal["main", "hidden", "temporary"], sessionId: str | None = None) -> Session:
+        if kind == "main":
+            for sess in self.sessions.values():
+                if sess.kind == "main":
+                    return sess
+        # TODO: What if session exists?
+        sess = Session(kind=kind, sessionId=sessionId)
+        self.sessions[sess.id] = sess
+        return sess
+
+    def getSession(self, sessionId: str) -> Session | None:
+        return self.sessions.get(sessionId)
+    
+    def setTemplate(self, template: str) -> None:
+        self.template = template
+        self.version += 1
+
+    def patchState(self, patch: dict[str, Any]) -> int:
+        self.state.update(patch or {})
+        self.version += 1
+        return self.version
+    
+    def snapshot(self) -> ViewSnapshot:
+        return {
+            "viewId": self.id,
+            "template": self.template,
+            "version": self.version,
+            "state": self.state,
+            "sessions": {sessId: sess.snapshot() for sessId, sess in self.sessions.items()},
+        }
+
+class ViewManager:
+    """
+    Tracks the active View per connected WebSocket (1:1).
+    """
+    def __init__(self):
+        self._viewsByWs: dict[WebSocket, View] = {}
+    
+    def ensureViewForWs(self, *, ws: WebSocket, viewId: str | None = None) -> View:
+        view = self._viewsByWs.get(ws)
+        if view is None:
+            view = View(viewId=viewId)
+            self._viewsByWs[ws] = view
+            return view
+        else:
+            if viewId == view.id:
+                return view
+            else:
+                raise Exception(f"View for this websocket already exists! Id's mismatch - new: '{viewId}', old: '{view.id}'")
+    
+    def removeViewForWs(self, ws: WebSocket) -> None:
+        self._viewsByWs.pop(ws, None)
+
+viewManager = ViewManager()
+
+
 
 async def handleSubscribeGMWorld(ctx: HandlerContext, msg: RPCMessage):
     """
