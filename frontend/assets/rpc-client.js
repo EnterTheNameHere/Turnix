@@ -1149,10 +1149,12 @@ export function defaultSettings() {
             buckets: {default: {rpm: 600, burst: 200}},
         },
         debug: {
-            backend:  {rpc: {incomingMessages: {log: false, ignoreTypes: ["ack", "heartbeat"]},
-                             outgoingMessages: {log: false, ignoreTypes: ["ack", "heartbeat"]}}},
-            frontend: {rpc: {incomingMessages: {log: false, ignoreTypes: ["ack", "heartbeat"]},
-                             outgoingMessages: {log: false, ignoreTypes: ["ack", "heartbeat"]}}},
+            backend:  {rpc: {maxPreviewChars: 1_000_000,
+                             incomingMessages: {log: false, ignoreTypes: ['ack', 'heartbeat']},
+                             outgoingMessages: {log: false, ignoreTypes: ['ack', 'heartbeat'], rules: [{type: 'stateUpdate', shouldLog: true, tests: [{property: 'payload.done', op: 'notExists', value: true, shouldLog: false}]}]}}},
+            frontend: {rpc: {maxPreviewChars: 1_000_000,
+                             incomingMessages: {log: false, ignoreTypes: ['ack', 'heartbeat'], rules: [{type: 'stateUpdate', shouldLog: true, tests: [{property: 'payload.done', op: 'notExists', value: true, shouldLog: false}]}]},
+                             outgoingMessages: {log: false, ignoreTypes: ['ack', 'heartbeat']}}},
         },
     };
 }

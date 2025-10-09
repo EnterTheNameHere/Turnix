@@ -72,10 +72,12 @@ SETTINGS = json5.loads(SETTINGS_DEFAULT_PATH.read_text()) if SETTINGS_DEFAULT_PA
         "allowList": ["httpbin.org", "api.openai.com", "localhost", "127.0.0.1", "::1"],
         "buckets": { "default": {"rpm": 600, "burst": 200}},
     },
-    "debug": {"backend":  {"rpc": {"incomingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"]},
-                                   "outgoingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"]}}},
-              "frontend": {"rpc": {"incomingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"]},
-                                   "outgoingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"]}}},
+    "debug": {"backend":  {"rpc": {"maxPreviewChars": 1_000_000,
+                                   "incomingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"]},
+                                   "outgoingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"], "rules": [{"type": "stateUpdate", "shouldLog": True, "tests": [{"property": "payload.done", "op": "notExists", "value": True, "shouldLog": False}]}]}}},
+              "frontend": {"rpc": {"maxPreviewChars": 1_000_000,
+                                   "incomingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"], "rules": [{"type": "stateUpdate", "shouldLog": True, "tests": [{"property": "payload.done", "op": "notExists", "value": True, "shouldLog": False}]}]},
+                                   "outgoingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"]}}}
     },
 }
 
