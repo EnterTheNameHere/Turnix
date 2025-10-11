@@ -975,7 +975,7 @@ async def wsEndpoint(ws: WebSocket):
                 await handler(HandlerContext(ws=ws, session=sessLocal), msg)
                 continue
 
-            if msg.type == "emit":
+            if msgType == "emit":
                 capability = (msg.route.capability if isinstance(msg.route, Route) else "") or ""
                 handler = EMIT_HANDLERS.get(capability)
                 if not handler:
