@@ -1014,11 +1014,6 @@ async def sendBytes(ws: WebSocket, data: bytes):
 
 
 
-llmclientMod = quickImport(Path("mods/first-party/drivers/llamacpp/llamacpp_client.py"))
-LLM = llmclientMod.LlamaCppClient()
-
-
-
 async def pushToast(ws: WebSocket, level: Literal["info", "warn", "error"], text: str, gen: dict, ttlMs: int = 5000) -> None:
     await sendRPCMessage(ws, RPCMessage(
         id=uuidv7(),
