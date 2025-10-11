@@ -10,6 +10,8 @@ from pydantic.alias_generators import to_camel
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 from collections.abc import AsyncIterator, Callable, Mapping # pyright: ignore[reportShadowedImports]
+from dataclasses import dataclass
+from functools import lru_cache
 import json5, os, time, asyncio, uuid6, re, secrets, hashlib, importlib.util
 
 from core.logger import configureLogging
@@ -35,15 +37,126 @@ BACKEND_DIR = Path(__file__).parent
 ROOT_DIR = BACKEND_DIR.parent
 WEBROOT = ROOT_DIR / "frontend"
 
+SERVICES: dict[str, Any] = {}
+PYMODS_LOADED: list[dict] = []
+PYMODS_FAILED: list[dict] = []
+
+
+
+@dataclass
+class LoadedPyMod:
+    modId: str
+    name: str
+    version: str
+    module: Any
+    entryPath: Path
+
+
+
+class PyModContext:
+    def __init__(self, services: dict[str, Any], settings: dict[str, Any]):
+        self._services = services
+        self.settings = settings
+
+    def registerService(self, name: str, service: Any):
+        if not name or not isinstance(name, str):
+            raise ValueError("Service name must be a non-empty string")
+        self._services[name] = service
+        logger.info(f"Registered backend service '{name}' via Python mod")
+
+
+
+async def loadPythonMods(*, settings: dict[str, Any]) -> tuple[list[LoadedPyMod], list[dict[str, Any]], dict[str, Any]]:
+    """
+    Returns (loaded, failed, services) where:
+      - loaded: list of LoadedPyMod
+      - failed: list of {id, reason, stack?}
+      - services: mapping registered by mods via ctx.registerService(name, instance)
+    """
+    discovered = scanMods()
+    enabled: list[tuple[ModManifest, Path, Path, RuntimeSpec]] = []
+
+    for _modId, (_root, moddir, manifest, _manFileName) in discovered.items():
+        rt = next((manifest.runtimes[key] for key in PY_RUNTIMES if key in manifest.runtimes), None)
+        if not rt or not rt.enabled:
+            continue
+
+        entryPath = moddir / rt.entry
+        enabled.append((manifest, moddir, entryPath, rt))
+    
+    services: dict[str, Any] = {}
+    loaded: list[LoadedPyMod] = []
+    failed: list[dict[str, Any]] = []
+
+    def _sortKey(t):
+        manifest, _moddir, _entryPath, runtime = t
+        return (runtime.order, manifest.id, manifest.version)
+
+    for manifest, moddir, entryPath, rt in sorted(enabled, key=_sortKey):
+        try:
+            if not entryPath.exists():
+                raise FileNotFoundError(f"'{manifest.id}' - entry file not found: '{entryPath}'")
+
+            module = _quickImport(entryPath.resolve())
+            onLoad = getattr(module, "onLoad", None)
+
+            ctx = PyModContext(services=services, settings=settings)
+            if asyncio.iscoroutinefunction(onLoad):
+                await onLoad(ctx) # async
+            elif callable(onLoad):
+                onLoad(ctx)       # sync
+            else:
+                logger.info("Python mod '%s' has no onLoad(); skipping initialization", manifest.id)
+            
+            loaded.append(LoadedPyMod(
+                modId=manifest.id,
+                name=manifest.name,
+                version=manifest.version,
+                module=module,
+                entryPath=entryPath,
+            ))
+            logger.info("Loaded Python mod: '%s@%s'", manifest.id, manifest.version)
+        except Exception as err:
+            import traceback
+            tb = traceback.format_exc()
+            logger.exception("Failed to load Python mod '%s': %s", manifest.id, err)
+            failed.append({
+                "id": manifest.id,
+                "runtime": "python",
+                "entry": str(entryPath),
+                "reason": str(err),
+                "stack": tb,
+            })
+    
+    return loaded, failed, services
+
+
+
 @asynccontextmanager
 async def life(app: FastAPI) -> AsyncIterator[None]:
     # startup
+    settings = loadSettings()
+    try:
+        loaded, failed, services = await loadPythonMods(settings=settings)
+        global SERVICES, PYMODS_LOADED, PYMODS_FAILED
+        SERVICES = services
+        PYMODS_LOADED = [{"id": m.modId, "name": m.name, "version": m.version} for m in loaded]
+        PYMODS_FAILED = failed
+    except Exception as err:
+        logger.exception("Python mod loading failed: %s", err)
+
     yield
+
     # shutdown
-    if hasattr(LLM, "aclose"):
-        res = LLM.aclose()
-        if asyncio.iscoroutine(res):
-            await res
+    # Close any services that support aclose()
+    for name, svc in list(SERVICES.items()):
+        try:
+            closer = getattr(svc, "aclose", None)
+            res = closer() if callable(closer) else None
+            if asyncio.iscoroutine(res):
+                await res
+        except Exception:
+            logger.exception("Error closing service '%s'", name)
 
 app = FastAPI(lifespan=life)
 app.add_middleware(
@@ -81,11 +194,12 @@ SETTINGS = json5.loads(SETTINGS_DEFAULT_PATH.read_text()) if SETTINGS_DEFAULT_PA
     },
 }
 
+def _allowSymlinks() -> bool:
+    return bool(loadSettings().get("mods", {}).get("allowSymlinks", False))
 
 
-def quickImport(path: str | Path):
-    """Dynamically import a Python file by path. Development helper only for quick testing."""
-    path = Path(path).resolve()
+
+def _quickImport(path: Path):
     spec = importlib.util.spec_from_file_location(path.stem, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Could not load module from {path}")
@@ -160,13 +274,25 @@ def sha256sumWithPath(path: str | Path) -> str:
 
 
 
+class RuntimeSpec(BaseModel):
+    entry: str
+    enabled: bool = True
+    order: int = 0
+    permissions: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
+
+
+
 class ModManifest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     id: str
     name: str
     version: str
-    entry: str = "main.js"
-    permissions: list[str] = Field(default_factory=list)
-    capabilities: list[str] = Field(default_factory=list)
+    description: str | None = None
+    author: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    hidden: bool = False
+    runtimes: dict[str, RuntimeSpec]
     assets: list[str] = Field(default_factory=list)
 
 
@@ -238,6 +364,7 @@ class RPCMessage(BaseModel):
         return self
 
 
+
 def defaultModRoots() -> list[tuple[Path, dict[str, Any]]]:
     roots: list[tuple[Path, dict[str, Any]]] = []
     roots.append((ROOT_DIR / "mods", {"writable": False, "trust": "unsigned-ok"}))
@@ -287,97 +414,133 @@ def resolveSafe(root: Path, requested: str) -> Path:
 
 
 
-def findManifestPath(dir: Path) -> Path|None:
-    if(dir / "mod.json5").exists():
-        return dir / "mod.json5"
-    if(dir / "mod.json").exists():
-        return dir / "mod.json"
+def findManifestPath(dir: Path) -> Path | None:
+    p1, p2 = dir / "mod.json5", dir / "mod.json"
+    if p1.exists() and p1.is_file(): return p1
+    if p2.exists() and p2.is_file(): return p2
     return None
 
 
 
+def _scanDir(root: Path, parent: Path, out: dict[str, tuple[Path, Path, ModManifest, str]]) -> None:
+    """
+    Recursively discover mods under `root`, honoring the symlink policy:
+    - If allowSymlinks == False:
+      • Do NOT descend into symlink directories
+      • Do NOT accept manifests that are symlinks
+    - Always ensure discovered directories remain within root
+    """
+    allowSymlinks = _allowSymlinks()
+    
+    # If parent itself is a symlink and symlinks are not allowed, stop here.
+    if not allowSymlinks and parent.is_symlink():
+        return
+
+    # Hard guard: parent must remain within the root
+    rootResolved = root.resolve(strict=True)
+    parentResolved = parent.resolve(strict=False)
+    if not parentResolved.is_relative_to(rootResolved):
+        return
+
+    # If this directory contains a manifest, validate it and stop descending
+    manifestPath = findManifestPath(parent)
+    if manifestPath:
+        # Skip manifest if symlink disallowed
+        if not allowSymlinks and manifestPath.is_symlink():
+            return
+        
+        try:
+            raw = json5.loads(manifestPath.read_text())
+            manifest = ModManifest.model_validate(raw)
+        except Exception as err:
+            logger.warning("Skipping mod at '%s' due to manifest error: %s", parent, err)
+            return
+        if manifest.id in out:
+            logger.warning(
+                "Mod id '%s' at '%s' has same id as existing mod at '%s'. Skipping this one.",
+                manifest.id, str(parent), str(out[manifest.id][1])
+            )
+            return
+        out[manifest.id] = (root, parent, manifest, manifestPath.name)
+        return
+    
+    # No manifest -> recurse into children
+    for ch in parent.iterdir():
+        if not ch.is_dir():
+            continue
+        if not allowSymlinks and ch.is_symlink():
+            continue
+        _scanDir(root, ch, out)
+
+
+
+@lru_cache(maxsize=1)
 def scanMods() -> dict[str, tuple[Path, Path, ModManifest, str]]:
     found: dict[str, tuple[Path, Path, ModManifest, str]] = {}
     for root, _cfg in MOD_ROOTS:
-        if not root.exists():
-            continue
-        for dir in root.iterdir():
-            if not dir.is_dir():
-                continue
-            manifestPath = findManifestPath(dir)
-            if not manifestPath:
-                logger.info("Skipping mod dir without manifest: %s", dir)
-                continue
-            try:
-                raw = json5.loads(manifestPath.read_text())
-                manifest = ModManifest.model_validate(raw)
-                found[manifest.id] = (root, dir, manifest, manifestPath.name)
-            except ValidationError as verr:
-                logger.error("Invalid manifest in %s: %s", manifestPath, verr)
-            except Exception as err:
-                logger.exception("Failed reading manifest %s: %s", manifestPath, err)
+        if not root.exists(): continue
+        _scanDir(root, root, found)
+    logger.info("Mods discovered (cached): %d", len(found))
     return found
 
 
 
+@app.get("/mod/refresh-scan")
+def refreshScan():
+    scanMods.cache_clear()
+    _ = scanMods()
+    return {"ok": True, "count": len(_)}
+
+
+
 @app.get("/mods/index")
-def listMods():
+def listFrontendMods():
+    return makeFrontendIndex()
+
+
+
+JS_RUNTIMES = {"javascript"}
+PY_RUNTIMES = {"python"}
+
+def makeFrontendIndex():
+    from urllib.parse import quote
     found = scanMods()
-    logger.info("Mods discovered: %d", len(found))
-    modManifests = []
-    for _modId, (_root, _dir, manifest, _fname) in found.items():
-        entry = f"/mods/load/{manifest.id}/{manifest.entry}"
-        modEntry ={
+    manifests = []
+    for _modId, (_root, moddir, manifest, _manFileName) in found.items():
+        rt = next((manifest.runtimes[key] for key in JS_RUNTIMES if key in manifest.runtimes), None)
+        if not rt or not rt.enabled:
+            continue
+        
+        entryPath = moddir / rt.entry
+        entryURL = f"/mods/load/{manifest.id}/{quote(rt.entry, safe='/')}"
+
+        item = {
             "id": manifest.id,
             "name": manifest.name,
             "version": manifest.version,
-            "entry": entry,
-            "permissions": manifest.permissions,
-            "capabilities": manifest.capabilities,
+            "entry": entryURL,
+            "runtime": "javascript",
+            "order": rt.order,
+            "permissions": rt.permissions,
+            "capabilities": rt.capabilities,
+            "hidden": manifest.hidden,
         }
-        entryPath = _dir / manifest.entry
-        if not entryPath.exists():
-            logger.warning("Missing entry file for mod '%s': '%s'", manifest.id, str(entryPath))
-            modEntry["problems"] = modEntry.get("problems", [])
-            modEntry["problems"].append({"error": f"Entry file not found."})
-            modEntry["enabled"] = False
+        if entryPath.exists():
+            item["hash"] = sha256sumWithPath(entryPath)
+            item["enabled"] = True
         else:
-            modEntry["hash"] = sha256sumWithPath(_dir / manifest.entry)
-            modEntry["enabled"] = True
-        modManifests.append(modEntry)
-    return {"modManifests": modManifests}
-
-
-
-@app.get("/mods/validate")
-def validateMods():
-    results = []
-    for root, _cfg in MOD_ROOTS:
-        if not root.exists(): continue
-        for dir in root.iterdir():
-            if not dir.is_dir(): continue
-            status = {"dir": str(dir), "status": "ok", "problems": []}
-            manifestPath = findManifestPath(dir)
-            if not manifestPath:
-                status["status"] = "missing-manifest"
-                results.append(status); continue
-            try:
-                raw = json5.loads(manifestPath.read_text())
-                manifest = ModManifest.model_validate(raw)
-                entryPath = dir / manifest.entry
-                if not entryPath.exists():
-                    status["status"] = "bad-entry"
-                    status["problems"].append(f"entry missing: {manifest.entry}")
-                results.append(status)
-            except ValidationError as verr:
-                status["status"] = "invalid-manifest"
-                status["problems"].append(str(verr))
-                results.append(status)
-            except Exception as err:
-                status["status"] = "unknown-error"
-                status["problems"].append(str(err))
-                results.append(status)
-    return {"results": results}
+            item["enabled"] = False
+            item["problems"] = [{
+                "id": item.get("id"),
+                "runtime": "javascript",
+                "entry": str(entryPath),
+                "reason": "Entry file not found.",
+                "stack": "",
+            }]
+        manifests.append(item)
+    
+    manifests.sort(key=lambda man: (man.get("order", 0), man["id"], man["version"]))
+    return {"modManifests": manifests}
 
 
 
@@ -1037,7 +1200,6 @@ def _filterHeaders(headers: dict[str, str], policy: dict) -> dict[str, str]:
 
 
 
-from dataclasses import dataclass
 @dataclass
 class HandlerContext:
     ws: WebSocket
@@ -1088,7 +1250,11 @@ class View:
         self.template: str = template or "main_menu"
         self.state: dict[str, Any] = {
             "mods": {
-                "frontend": listMods(),
+                "frontend": makeFrontendIndex(),
+                "backend": {
+                    "loaded": PYMODS_LOADED,
+                    "failed": PYMODS_FAILED, 
+                },
             }
         }
         self.version = 0
@@ -1300,6 +1466,14 @@ async def handleSubscribeChat(ctx: HandlerContext, msg: RPCMessage):
     """
     Subscribe: chat@1 (streaming, cancellable)
     """
+    llm = SERVICES.get("llm")
+    if llm is None:
+        await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
+            "gen": ctx.session.currentGeneration(),
+            "payload": {"code":"SERVICE_UNAVAILABLE", "message": "LLM driver is not available"}
+        }))
+        return
+
     # Build OpenAI-style messages from payload
     userTurn = {
         "id": msg.id + ".u",
@@ -1315,7 +1489,7 @@ async def handleSubscribeChat(ctx: HandlerContext, msg: RPCMessage):
     async def run():
         assistantChunks: list[str] = []
         try:
-            async for event in LLM.streamChat(
+            async for event in llm.streamChat(
                 messages,
                 model=msg.payload.get("model", ""),
                 temperature=msg.payload.get("temperature", 0.8),

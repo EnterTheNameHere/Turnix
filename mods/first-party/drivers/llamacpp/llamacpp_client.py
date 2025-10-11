@@ -274,3 +274,14 @@ class LlamaCppClient:
         except Exception as err:
             logger.debug("Token count failed: %r", err)
             return None
+
+async def onLoad(ctx):
+    """
+    Called by the backend mod loader.
+    Return the driver instance; it will be registered under a name.
+    """
+
+    # TODO: Read cxt.settings to support customization
+    client = LlamaCppClient()
+    ctx.registerService("llm", client)
+    return {"ok": True}
