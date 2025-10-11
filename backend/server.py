@@ -199,6 +199,26 @@ def _allowSymlinks() -> bool:
 
 
 
+# ---------- Permissions ----------
+
+from backend.core.permissions import PermissionManager, GrantPermission, GrantPermissionError
+
+PERMS = PermissionManager()
+PERMS.registerCapability(capability="http.client@1", serverVersion="1", risk="high")
+PERMS.registerCapability(capability="chat@1",        serverVersion="1", risk="medium")
+PERMS.registerCapability(capability="gm.narration@1",serverVersion="1", risk="low")
+PERMS.registerCapability(capability="gm.world@1",    serverVersion="1", risk="low")
+
+
+
+def resolvePrincipal(msg: RPCMessage) -> str:
+    origin = msg.origin or {}
+    # Common places a mod identity might live;
+    # TODO: We might want this required and inject it to every call
+    return str(origin.get("modId") or origin.get("principal") or "unknown")
+
+
+
 def _quickImport(path: Path):
     spec = importlib.util.spec_from_file_location(path.stem, path)
     if spec is None or spec.loader is None:
@@ -1110,6 +1130,23 @@ async def wsEndpoint(ws: WebSocket):
                         "payload": {"code":"CAPABILITY_NOT_FOUND","message":"Unknown capability/route for subscribe"}
                     }))
                     continue
+
+                # Permission check
+                try:
+                    principal = resolvePrincipal(msg)
+                    PERMS.ensure(principal=principal, capability=capability)
+                except GrantPermissionError as gperr:
+                    await sendRPCMessage(ws, createErrorMessage(msg, {
+                        "gen": sessLocal.currentGeneration(),
+                        "payload": {
+                            "code": gperr.code,
+                            "message": gperr.message,
+                            "retryable": gperr.retryable,
+                            "err": gperr.extra,
+                        }
+                    }))
+                    continue
+
                 await handler(HandlerContext(ws=ws, session=sessLocal), msg)
                 continue
 
@@ -1123,6 +1160,23 @@ async def wsEndpoint(ws: WebSocket):
                         "payload": {"code":"CAPABILITY_NOT_FOUND","message":"Unknown capability/route for request"}
                     }))
                     continue
+                
+                # Permission check
+                try:
+                    principal = resolvePrincipal(msg)
+                    PERMS.ensure(principal=principal, capability=capability)
+                except GrantPermissionError as gperr:
+                    await sendRPCMessage(ws, createErrorMessage(msg, {
+                        "gen": sessLocal.currentGeneration(),
+                        "payload": {
+                            "code": gperr.code,
+                            "message": gperr.message,
+                            "retryable": gperr.retryable,
+                            "err": gperr.extra,
+                        }
+                    }))
+                    continue
+
                 await handler(HandlerContext(ws=ws, session=sessLocal), msg)
                 continue
 
@@ -1136,6 +1190,23 @@ async def wsEndpoint(ws: WebSocket):
                         "payload": {"code":"CAPABILITY_NOT_FOUND","message":"Unknown capability/route for emit"}
                     }))
                     continue
+                
+                # Permission check
+                try:
+                    principal = resolvePrincipal(msg)
+                    PERMS.ensure(principal=principal, capability=capability)
+                except GrantPermissionError as gperr:
+                    await sendRPCMessage(ws, createErrorMessage(msg, {
+                        "gen": sessLocal.currentGeneration(),
+                        "payload": {
+                            "code": gperr.code,
+                            "message": gperr.message,
+                            "retryable": gperr.retryable,
+                            "err": gperr.extra,
+                        }
+                    }))
+                    continue
+
                 await handler(HandlerContext(ws=ws, session=sessLocal), msg)
                 continue
 
