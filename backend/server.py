@@ -929,10 +929,6 @@ async def wsEndpoint(ws: WebSocket):
                 await sendRPCMessage(ws, createAckMessage(msg, {"gen": sessLocal.currentGeneration()}))
                 continue
 
-            if msgType is None:
-                logger.warning(f"Received message where msg.type is None.")
-                raise HTTPException(status_code=400, detail="Invalid message type")
-
             # Immediate ack for non-control messages
             if msgType not in ("ack", "heartbeat"):
                 await sendRPCMessage(ws, createAckMessage(msg, { "gen": sessLocal.currentGeneration() }))
