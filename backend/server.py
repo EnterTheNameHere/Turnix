@@ -74,6 +74,10 @@ async def loadPythonMods(*, settings: dict[str, Any]) -> tuple[list[LoadedPyMod]
       - services: mapping registered by mods via ctx.registerService(name, instance)
     """
     discovered = scanMods()
+
+    # TODO: change by proper permission granting
+    autoGrantPermissionsForMods(PERMS, discovered)
+
     enabled: list[tuple[ModManifest, Path, Path, RuntimeSpec]] = []
 
     for _modId, (_root, moddir, manifest, _manFileName) in discovered.items():
@@ -201,7 +205,7 @@ def _allowSymlinks() -> bool:
 
 # ---------- Permissions ----------
 
-from backend.core.permissions import PermissionManager, GrantPermission, GrantPermissionError
+from backend.core.permissions import PermissionManager, GrantPermission, GrantPermissionError, parseCapability
 
 PERMS = PermissionManager()
 PERMS.registerCapability(capability="http.client@1", serverVersion="1", risk="high")
@@ -575,6 +579,53 @@ def serveModAsset(modId: str, path: str):
         raise HTTPException(404, "Requested path does not exists or is not a file.")
     # TODO: Add strict caching/versioning later; for now no-cache in dev
     return FileResponse(safe)
+
+
+
+def _serverBaselineRange(perms: PermissionManager, family: str) -> str:
+    meta = getattr(perms, "_capsMeta", {}).get(family, None)
+    return (meta or {}).get("serverRange", "*")
+
+
+
+def _familyAndRangeFromPerm(perms: PermissionManager, permStr: str) -> tuple[str, str]:
+    """
+    'chat@1' -> ('chat', '^1')
+    'chat@1.2' -> ('chat', '^1')
+    'chat' -> ('chat', server baseline for 'chat', e.g. '^1' if registered)
+    """
+    family, ver = parseCapability(permStr)
+    if ver is not None:
+        return family, f"^{ver.major}"
+    return family, _serverBaselineRange(perms, family)
+
+
+
+def autoGrantPermissionsForMods(perms: PermissionManager, discovered: dict[str, tuple[Path, Path, ModManifest, str]]) -> None:
+    """
+    Iterate manifests/runtimes and grant requested permissions programatically for each modId.
+    """
+    grantedCount = 0
+    for _modId, (_root, _moddir, manifest, _manFileName) in discovered.items():
+        principal = manifest.id
+        # Each runtime can request permissions
+        for rt in (manifest.runtimes or {}).values():
+            for permStr in (rt.permissions or []):
+                family, rangeExpr = _familyAndRangeFromPerm(perms, permStr)
+                if not family:
+                    continue
+                perms.putGrant(GrantPermission(
+                    principal=principal,
+                    family=family,
+                    rangeExpr=rangeExpr,
+                    decision="allow",
+                    scope=None,
+                    expiresAtMs=None,
+                ))
+                logger.info("Auto-granted permission '%s' to '%s' (range '%s')", family, principal, rangeExpr)
+                grantedCount += 1
+    if grantedCount:
+        logger.info("Auto-granted %d permission(s) from mod manifests.", grantedCount)
 
 
 
