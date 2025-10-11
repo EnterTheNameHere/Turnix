@@ -1309,6 +1309,9 @@ class Session:
             "objects": list(self.objects.keys()),
         }
     
+    def destroy(self) -> None:
+        pass
+    
 class View:
     """
     Backend representation of a single frontend instance (Electron's browser page/C# avatar/etc.)
@@ -1332,6 +1335,9 @@ class View:
         self.sessions: dict[str, Session] = {}
         self.mainSession = self.createSession("main")
     
+    def destroy(self) -> None:
+        pass
+
     def createSession(self, kind: Literal["main", "hidden", "temporary"], sessionId: str | None = None) -> Session:
         if kind == "main":
             for sess in self.sessions.values():
@@ -1341,13 +1347,35 @@ class View:
         sess = Session(kind=kind, sessionId=sessionId)
         self.sessions[sess.id] = sess
         return sess
+    
+    def destroySession(self, sessionId: str) -> dict[str, Any]:
+        sess = self.sessions.get(sessionId)
+        if not sess:
+            raise KeyError(f"session '{sessionId}' does not exist")
+        sess.destroy()
+        del self.sessions[sess.id]
+        self.version += 1
+        return {"ok": True, "version": self.version}
 
     def getSession(self, sessionId: str) -> Session | None:
         return self.sessions.get(sessionId)
     
-    def setTemplate(self, template: str) -> None:
+    def setTemplate(self, template: str) -> dict[str, Any]:
+        if not template:
+            raise ValueError("template must be non-empty")
         self.template = template
         self.version += 1
+        return {"ok": True, "version": self.version}
+
+    def getState(self) -> dict[str, Any]:
+        return {"viewId": self.id, "template": self.template, "state": self.state, "version": self.version}
+
+    def setState(self, patch: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(patch, dict):
+            raise ValueError("patch must be an object")
+        self.state.update(patch)
+        self.version += 1
+        return {"ok": True, "version": self.version}
 
     def patchState(self, patch: dict[str, Any]) -> int:
         self.state.update(patch or {})
