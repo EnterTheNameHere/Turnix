@@ -188,14 +188,6 @@ class Route(BaseModel):
 
 
 
-class Invocation(BaseModel):
-    route: Route
-    path: str | None = None
-    op: str | None = None
-    args: list | None = None
-
-
-
 class RPCMessage(BaseModel):
     model_config = ConfigDict(
         alias_generator=to_camel,
