@@ -582,7 +582,7 @@ def shouldLogRpcMessage(msg: RPCMessage | None, cfg: dict[str, Any]) -> bool:
     
     rules = conf.get("rules")
     if not isinstance(rules, list):
-        # No type rule => fallback to global log, which by this time is true, so log message...¨
+        # No type rule => fallback to global log, which by this time is true, so log message...
         return True
     
     # Find rule by exact type or wildcard
