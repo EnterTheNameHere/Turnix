@@ -1,3 +1,5 @@
+// frontend/bootstrap.js
+
 // ----- Fail-fast guards -----
 if(typeof globalThis.turnixImport !== 'function') {
     throw new Error('turnixImport is not defined. Ensure index.html is loaded first!');

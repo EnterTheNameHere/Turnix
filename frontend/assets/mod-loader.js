@@ -1,3 +1,5 @@
+// frontend/assets/mod-loader.js
+
 export async function sha256Hash(input) {
     if(!globalThis.crypto?.subtle?.digest) {
         throw new Error('Web Crypto API (crypto.subtle) is unavailable. Use a modern browser/runtime.');

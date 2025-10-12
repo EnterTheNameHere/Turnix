@@ -1,4 +1,4 @@
-// types.d.ts
+// frontend/assets/types.d.ts
 
 // ----- Unions & helpers (types) -----
 export type RPCMessageType =

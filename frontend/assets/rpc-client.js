@@ -1,3 +1,5 @@
+// frontend/assets/rpc-client.js
+
 import { uuidv7 } from 'uuidv7';
 
 /**

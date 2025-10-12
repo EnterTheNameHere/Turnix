@@ -1,3 +1,5 @@
+// frontend/mods/examples/mod.js
+
 let activeChatSub = null;
 
 const Toast = {
@@ -30,14 +32,10 @@ function showToast(text, ms = 2000, level='info') {
 
     const hide = () => {
         toast.classList.remove('show');
-        toast.addEventListener(
-            'transitionend',
-            () => {
+        toast.addEventListener('transitionend', () => {
                 toast.remove();
                 if(toasts.isConnected && toasts.childElementCount === 0) toasts.remove();
-            },
-            { once: true }
-        );
+        }, { once: true });
     };
 
     // Auto hide and click to dismiss
@@ -249,6 +247,7 @@ function readVar(cssVar) {
     // Convert px -> number; fallback 0 if empty
     return parseFloat(val || '0');
 }
+
 function writeVar(cssVar, px) {
     document.documentElement.style.setProperty(cssVar, `${Math.round(px)}px`);
 }
@@ -257,6 +256,7 @@ function loadPersisted(cssVar, key) {
     const saved = localStorage.getItem(key);
     if(saved) writeVar(cssVar, parseFloat(saved));
 }
+
 function persist(cssVar, key) {
     const val = readVar(cssVar);
     localStorage.setItem(key, String(val));
@@ -353,11 +353,13 @@ function addHandle(panelEl, side) {
         // Home/End: snap to min/max
         if(ev.key === 'Home') {
             ev.preventDefault();
-            writeVar(cfg.css, cfg.min); persist(cfg.css, cfg.storage);
+            writeVar(cfg.css, cfg.min);
+            persist(cfg.css, cfg.storage);
         }
         if(ev.key === 'End') {
             ev.preventDefault();
-            writeVar(cfg.css, cfg.max); persist(cfg.css, cfg.storage);
+            writeVar(cfg.css, cfg.max);
+            persist(cfg.css, cfg.storage);
         }
     });
 
@@ -417,7 +419,7 @@ function hasRealContent(panelEl) {
 function readDefaultSizes() {
     const cs = getComputedStyle(document.documentElement);
     return {
-        left:    parseFloat(cs.getPropertyValue('--left-w'))  || 0,
+        left:   parseFloat(cs.getPropertyValue('--left-w'))   || 0,
         right:  parseFloat(cs.getPropertyValue('--right-w'))  || 0,
         top:    parseFloat(cs.getPropertyValue('--top-h'))    || 0,
         bottom: parseFloat(cs.getPropertyValue('--bottom-h')) || 0,
