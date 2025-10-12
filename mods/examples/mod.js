@@ -33,26 +33,14 @@ function showToast(text, ms = 2000, level='info') {
     const hide = () => {
         toast.classList.remove('show');
         toast.addEventListener('transitionend', () => {
-                toast.remove();
-                if(toasts.isConnected && toasts.childElementCount === 0) toasts.remove();
+            toast.remove();
+            if(toasts.isConnected && toasts.childElementCount === 0) toasts.remove();
         }, { once: true });
     };
 
     // Auto hide and click to dismiss
     const timer = setTimeout(hide, ms);
-    toast.addEventListener('click', () => {
-        clearTimeout(timer);
-        hide();
-    });
-}
-
-function appendMessage(role, text, chatEl) {
-    const el = document.createElement('div');
-    el.className = `msg ${role}`;
-    el.textContent = text;
-    chatEl.appendChild(el);
-    chatEl.scrollTop = chatEl.scrollHeight;
-    return el;
+    toast.addEventListener('click', () => { clearTimeout(timer); hide(); });
 }
 
 export async function onLoad(ctx) {
@@ -85,83 +73,37 @@ export async function onLoad(ctx) {
 
     const autoscroll = () => { chatEl.scrollTop = chatEl.scrollHeight; };
 
-    const startStream = async (text) => {
-        // Cancel any previous stream
-        if(activeChatSub) {
-            try { ctx.rpc.unsubscribe(activeChatSub.id); } catch {/* ignored */}
-            activeChatSub = null;
-        }
-
-        // Render assistant bubble that we'll chunk-update
-        const assistantEl = appendMessage('assistant', '', chatEl);
-
-        let buffer = '';
-        let raf = null;
-
-        btnSend.disabled = true;
-        try {
-            const sub = await ctx.rpc.subscribe(
-                {capability: 'chat@1'},
-                'stream', // path; not used
-                'none', // op; not used
-                {role: 'user', text: text} // opts → becomes payload on subscribe
-            );
-            activeChatSub = sub;
-
-            sub.on('update', (payload) => {
-                // Payload: {delta?: string, done?: boolean, text?: string}
-                if(!payload) return;
-                if(typeof payload.delta === 'string') {
-                    buffer += payload.delta;
-                    // Throttle DOM writes to animation frames
-                    if(!raf) {
-                        const stick = isAtBottom();
-                        raf = requestAnimationFrame(() => {
-                            assistantEl.textContent = buffer;
-                            if(stick) autoscroll();
-                            raf = null;
-                        });
-                    }
-                }
-                if(typeof payload.done === 'boolean' && payload.done) {
-                    // Prefer authoritative full text
-                    if(typeof payload.text === 'string') {
-                        buffer = payload.text;
-                        assistantEl.textContent = buffer;
-                        autoscroll();
-                    }
-                    // Cleanup
-                    try { ctx.rpc.unsubscribe(sub.id); } catch {/* ignored */}
-                    if(activeChatSub && activeChatSub.id === sub.id) activeChatSub = null;
-                    btnSend.disabled = false;
-                }
-            });
-            sub.on('error', (payload) => {
-                const msg = payload?.message ?? 'Unexpected issue occurred';
-                assistantEl.textContent = `Error: ${msg}`;
-                Toast.error({text: `Chat failed: ${msg}`, ttlMs: 3000});
-                btnSend.disabled = false;
-                // TODO: subscription might be still fine, or error is fatal - think of how to report it...
-            });
-        } catch(err) {
-            const msg = err?.message ?? String(err);
-            assistantEl.textContent = `Error: ${msg}`;
-            Toast.error({text: `Chat failed: ${msg}`, ttlMs: 3000});
-            btnSend.disabled = false;
-            // TODO: subscription might be still fine, or error is fatal - think of how to report it...
-        }
-    };
-
+    // Send: starts pipeline via chat.start@1
     const send = async () => {
         const hasText = typeof textareaEl.value === 'string' && textareaEl.value.trim().length !== 0;
         const text = hasText ? textareaEl.value : 'Hi! I\'m UI, user didn\'t provide any message to send you... Introduce yourself as game master, ready to play a game with user. End it with a joke! Thank you, UI ends.';
         
-        // Render user bubble immediately
-        appendMessage('user', text, chatEl);
+        // Optimistic bubble
+        const tempEl = document.createElement('div');
+        tempEl.className = 'msg user';
+        tempEl.dataset.temp = 'true';
+        tempEl.textContent = text;
+        chatEl.appendChild(tempEl);
+        autoscroll();
+
         textareaEl.value = '';
         textareaEl.focus();
 
-        await startStream(text);
+        btnSend.disabled = true;
+        try {
+            const reply = await ctx.rpc.request(
+                { route: {capability: 'chat.start@1'}, path: 'run', op: 'call', args: [text] },
+                {},
+                { class: 'request.medium' },
+            );
+            console.debug('[ExampleMod] start runId', reply?.payload?.runId);
+            // Responses will arrive through chat.thread@1 deltas
+        } catch(err) {
+            console.error('[ExampleMod] startQuery error', err);
+            Toast.error({text: `Start failed: ${err?.message || err}`, ttlMs: 3000});
+        } finally {
+            btnSend.disabled = false;
+        }
     };
 
     btnSend.onclick = send;
@@ -220,16 +162,135 @@ export async function onLoad(ctx) {
     composerEl.append(textareaEl, btnSend);
     appEl.append(chatEl, composerEl);
 
+    // ---------- History rehydration + live updates ----------
+    const nodesByOid = new Map();
+
+    const resetChatLog = (node) => {
+        while(node.firstChild) node.removeChild(node.firstChild);
+        return {cleared: true};
+    };
+
+    function ensureBubble(oid, role) {
+        let el = nodesByOid.get(oid);
+        if(!el) {
+            el = document.createElement('div');
+            el.className = `msg ${role}`;
+            el.dataset.oid = oid;
+            nodesByOid.set(oid, el);
+        } else {
+            // If role changed, or we created it earlier with a fallback, correct the class
+            const want = `msg ${role}`;
+            if(el.className !== want) el.className = want;
+        }
+        return el;
+    }
+
+    function renderSnapshot(snapshot) {
+        // snapshot: {kind: 'threadSnapshot', order: [oid], headers: {oid:{role, preview}}}
+        chatEl.querySelectorAll('.msg.user[data-temp="true"]').forEach((node) => node.remove());
+        resetChatLog(chatEl);
+        nodesByOid.clear();
+
+        const {order = [], headers = {}} = snapshot;
+        for(const oid of order) {
+            const header = headers[oid] || {};
+            const role = header.role || 'assistant';
+            const el = ensureBubble(oid, role);
+            el.textContent = header.preview || '';
+            chatEl.appendChild(el);
+        }
+        autoscroll();
+    }
+
+    function applyThreadDelta(delta, headers) {
+        // delta: {kind:'threadDelta', op:'insert'|'remove', at, oids:[]}
+        chatEl.querySelectorAll('.msg.user[data-temp="true"]').forEach((node) => node.remove());
+        if(delta.op === 'insert') {
+            let at = Math.max(0, Math.min(chatEl.children.length, delta.at | 0));
+            for(const oid of delta.oids || []) {
+                const header = (headers && headers[oid]) || {};
+                const role = header.role || 'user';
+                const el = ensureBubble(oid, role);
+
+                // Seed text from header.preview for user turns as no messageDelta coming
+                if(!el.textContent && typeof header.preview === 'string' && header.preview.length) {
+                    el.textContent = header.preview;
+                }
+
+                if(at >= chatEl.children.length) chatEl.appendChild(el);
+                else chatEl.insertBefore(el, chatEl.children[at]);
+                at += 1;
+            }
+            autoscroll();
+        } else if(delta.op === 'remove') {
+            for(const oid of delta.oids || []) {
+                const el = nodesByOid.get(oid);
+                if(el && el.parentNode === chatEl) {
+                    el.remove();
+                    nodesByOid.delete(oid);
+                }
+            }
+        }
+    }
+
+    function applyMessageDelta(delta, headers) {
+        // delta: {kind:'messageDelta', oid, textDelta?, text?, fields?}
+        const oid = delta.oid;
+        
+        // Prefer header role; otherwise keep current bubble's role; fallback to 'assistant'
+        const existing = nodesByOid.get(oid);
+        const currentRole =
+            existing?.classList.contains('user') ? 'user' :
+                existing?.classList.contains('assistant') ? 'assistant' : null;
+        
+        const role = (headers?.[oid]?.role) || currentRole || 'assistant';
+        
+        const el = ensureBubble(oid, role);
+        if(!el.isConnected) chatEl.appendChild(el);
+
+        if(typeof delta.textDelta === 'string' && delta.textDelta) {
+            el.textContent = (el.textContent || '') + delta.textDelta;
+        }
+        if(typeof delta.text === 'string') {
+            el.textContent = delta.text;
+        }
+        if(delta.fields?.status) {
+            el.dataset.status = delta.fields.status; // e.g., 'streaming' | 'final' | 'error'
+        }
+
+        if(isAtBottom()) autoscroll();
+    }
+
+    // Subscribe to server-owned thread (rehydrates on reload)
+    console.log('[ExampleMod] subscribing to chat.thread@1 ...');
+    const threadSub = await ctx.rpc.subscribe(
+        { capability: 'chat.thread@1' },
+        'stream',
+        'none',
+        {},
+    );
+    activeChatSub = threadSub;
+
+    threadSub.on('update', (payload) => {
+        if(!payload || !payload.kind) return;
+        if(payload.kind === 'threadSnapshot') {
+            renderSnapshot(payload);
+        } else if(payload.kind === 'threadDelta') {
+            applyThreadDelta(payload, payload.headers || null);
+        } else if(payload.kind === 'messageDelta') {
+            applyMessageDelta(payload, payload.headers || null);
+        }
+    });
+
+    threadSub.on('error', (err) => {
+        console.error('[ExampleMod] thread subscribe error', err);
+        Toast.error({text: `Thread subscribe error: ${err.message || err}`, ttlMs: 3000});
+    });
+
     // Enable draggable panel resizers
     initResizers();
     // Auto-collapse empty panels
     initAutoCollapsePanels();
-}
-
-function resetChatLog(chatEl) {
-    // Keep the node (and its ARIA props), just clear children
-    while(chatEl.firstChild) chatEl.removeChild(chatEl.firstChild);
-    return {cleared: true};
 }
 
 // ----- Layout resizers ----------------------------------------------------------------------------
@@ -511,8 +572,8 @@ function initAutoCollapsePanels() {
 function updateNoSidesClass() {
     const container = document.querySelector('.container');
     if(!container) return;
-    const leftW = readVar('--left-w');
-    const rightW = readVar('--right-w');
+    const leftW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--left-w')) || 0;
+    const rightW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--right-w')) || 0;
     const noSides = (leftW === 0 && rightW === 0);
     container.classList.toggle('--no-sides', noSides);
 }
