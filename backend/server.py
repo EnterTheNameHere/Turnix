@@ -214,6 +214,8 @@ PERMS.registerCapability(capability="http.client@1", serverVersion="1", risk="hi
 PERMS.registerCapability(capability="chat@1",        serverVersion="1", risk="medium")
 PERMS.registerCapability(capability="gm.narration@1",serverVersion="1", risk="low")
 PERMS.registerCapability(capability="gm.world@1",    serverVersion="1", risk="low")
+PERMS.registerCapability(capability="chat.thread@1", serverVersion="1", risk="low")
+PERMS.registerCapability(capability="chat.start@1",  serverVersion="1", risk="medium")
 
 
 
@@ -1166,6 +1168,11 @@ async def wsEndpoint(ws: WebSocket):
                 if corrId and corrId in sessLocal.subscriptions:
                     sessLocal.subscriptions[corrId].cancel()
                     sessLocal.subscriptions.pop(corrId, None)
+                try:
+                    # TODO: make this non main session when we implement multiple sessions for view
+                    view.mainSession.chat["subs"].discard(corrId)
+                except Exception:
+                    pass
                 continue
 
             if msgType == "subscribe":
@@ -1195,10 +1202,15 @@ async def wsEndpoint(ws: WebSocket):
                     }))
                     continue
 
-                await handler(HandlerContext(ws=ws, session=sessLocal), msg)
+                await handler(HandlerContext(ws=ws, rpcSession=sessLocal, view=view, session=view.mainSession), msg)
                 continue
 
             if msgType == "request":
+                obj = (msg.route.object if isinstance(msg.route, Route) else None) or None
+                if obj:
+                    # TODO: Enforce object-level permission if we use them
+                    await handleRequestObject(HandlerContext(ws=ws, rpcSession=sessLocal, view=view, session=view.mainSession), msg)
+                    continue
                 capability = (msg.route.capability if isinstance(msg.route, Route) else "") or ""
                 handler = REQUEST_HANDLERS.get(capability)
                 if not handler:
@@ -1225,7 +1237,7 @@ async def wsEndpoint(ws: WebSocket):
                     }))
                     continue
 
-                await handler(HandlerContext(ws=ws, session=sessLocal), msg)
+                await handler(HandlerContext(ws=ws, rpcSession=sessLocal, view=view, session=view.mainSession), msg)
                 continue
 
             if msgType == "emit":
@@ -1255,7 +1267,7 @@ async def wsEndpoint(ws: WebSocket):
                     }))
                     continue
 
-                await handler(HandlerContext(ws=ws, session=sessLocal), msg)
+                await handler(HandlerContext(ws=ws, rpcSession=sessLocal, view=view, session=view.mainSession), msg)
                 continue
 
     finally:
@@ -1322,7 +1334,9 @@ def _filterHeaders(headers: dict[str, str], policy: dict) -> dict[str, str]:
 @dataclass
 class HandlerContext:
     ws: WebSocket
-    session: RPCSession
+    rpcSession: RPCSession # Transport session (handshake, pending tasks, etc.)
+    view: View             # Authorative UI state
+    session: Session       # Inference state
 
 # ------------------------
 #    View & ViewManager
@@ -1347,6 +1361,20 @@ class Session:
         self.version = 0
         self.state: dict[str, Any] = {} # Authoritative on backend
         self.objects: dict[str, Any] = {}
+        self.chat = {
+            "threadId": f"t_{uuid6.uuid7().hex[:12]}",
+            "order": [],          # [oid]
+            "headers": {},        # oid -> {role, ts, preview}
+            "messages": {},       # oid -> {role, content?, status, ts, runId?}
+            "historyPolicy": {
+                "strategy": "window",
+                "userTail": 6,
+                "assistantTail": 6,
+                "maxTokens": 2048,
+                "alwaysIncludeSystem": True,
+            },
+            "subs": set() # correlatesTo ids of chat.thread@1 subscribers
+        }
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -1463,6 +1491,87 @@ class ViewManager:
 
 viewManager = ViewManager()
 
+class Receiver:
+    """Executes get/set/call/snapshot on a concrete Python object."""
+    def __init__(self, oid: str, obj: object, *, kind: str = "generic"):
+        self.oid = oid
+        self.obj = obj
+        self.kind = kind
+        self.version = 0
+        # Allowlist of method names frontend side can call
+        self.allowedMethods: set[str] = set()
+    
+    def allow(self, *names: str) -> Receiver:
+        self.allowedMethods.update(names)
+        return self
+    
+    def get(self, path: str | None) -> Any:
+        if not path:
+            return None
+        parts = _splitPathWithEscapes(path)
+        target = self.obj
+        for part in parts:
+            mm = _asMapping(target)
+            if mm is not None and part in mm:
+                target = mm[part]
+                continue
+            target = getattr(target, part)
+        return tryJSONify(target)
+
+    def set(self, path: str, value: Any) -> int:
+        parts = _splitPathWithEscapes(path)
+        target = self.obj
+        for part in parts[:-1]:
+            mm = _asMapping(target)
+            if mm is not None and part in mm:
+                target = mm[part]
+                continue
+            target = getattr(target, part)
+        last = parts[-1]
+        if isinstance(target, dict):
+            target[last] = value
+        else:
+            setattr(target, last, value)
+        self.version += 1
+        return self.version
+    
+    def call(self, method: str, args: list[Any] | None, kwargs: dict[str, Any] | None) -> Any:
+        if method not in self.allowedMethods:
+            raise PermissionError(f"Method '{method}' not allowed on '{self.kind}'")
+        fn = getattr(self.obj, method, None)
+        if not callable(fn):
+            raise AttributeError(f"No method '{method}'")
+        res = fn(*(args or []), **(kwargs or {}))
+        # Awaitable support without forcing async everywhere
+        if asyncio.iscoroutine(res):
+            async def _awaitAndBump():
+                rr = await res
+                self.version += 1
+                return tryJSONify(rr)
+            return _awaitAndBump()
+        self.version += 1
+        return tryJSONify(res)
+
+    def snapshot(self) -> dict[str, Any]:
+        if hasattr(self.obj, "snapshot") and callable(self.obj.snapshot): # type: ignore[attr-defined]
+            snap = self.obj.snapshot() # type: ignore[attr-defined]
+        else:
+            snap = {}
+
+        return {"oid": self.oid, "kind": self.kind, "version": self.version, "state": snap}
+
+OBJECTS: dict[str, Receiver] = {}
+
+def registerObject(rcv: Receiver) -> str:
+    OBJECTS[rcv.oid] = rcv
+    return rcv.oid
+
+def getObject(oid: str) -> Receiver:
+    rr = OBJECTS.get(oid)
+    if not rr:
+        raise KeyError(f"Unknown object '{oid}'")
+    return rr
+
 
 
 async def handleSubscribeGMWorld(ctx: HandlerContext, msg: RPCMessage):
@@ -1491,8 +1600,8 @@ async def handleSubscribeGMWorld(ctx: HandlerContext, msg: RPCMessage):
             pass
     correlatesTo = msg.id
     lane = msg.lane
-    task = asyncio.create_task(streamWorld(correlatesTo=correlatesTo, lane=lane, session=ctx.session))
-    ctx.session.subscriptions[correlatesTo] = task
+    task = asyncio.create_task(streamWorld(correlatesTo=correlatesTo, lane=lane, session=ctx.rpcSession))
+    ctx.rpcSession.subscriptions[correlatesTo] = task
 
 async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
     """
@@ -1504,7 +1613,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
     args = msg.args or []
     if len(args) < 2:
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-            "gen": ctx.session.currentGeneration(),
+            "gen": ctx.rpcSession.currentGeneration(),
             "payload": {"code": "BAD_REQUEST", "message": "Arguments required: method, url"},
         }))
         return
@@ -1514,7 +1623,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
     method = str(method).upper()
     if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}:
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-            "gen": ctx.session.currentGeneration(),
+            "gen": ctx.rpcSession.currentGeneration(),
             "payload": {"code": "BAD_REQUEST", "message": f"Invalid HTTP method: {method}"},
         }))
         return
@@ -1526,7 +1635,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
         host = (parsedUrl.hostname or "").lower()
         if not host:
             await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-                "gen": ctx.session.currentGeneration(),
+                "gen": ctx.rpcSession.currentGeneration(),
                 "payload": {"code": "BAD_REQUEST", "message": f"Invalid URL: {url}"},
             }))
             return
@@ -1534,13 +1643,13 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
         allowedHosts = [hh.lower() for hh in httpProxy.get("allowList", [])]
         if host not in allowedHosts:
             await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-                "gen": ctx.session.currentGeneration(),
+                "gen": ctx.rpcSession.currentGeneration(),
                 "payload": {"code": "FORBIDDEN_HOST", "message": f"Host {host} not allowed"}
             }))
             return
     except Exception as err:
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-            "gen": ctx.session.currentGeneration(),
+            "gen": ctx.rpcSession.currentGeneration(),
             "payload": {"code": "BAD_URL", "message": str(err), "err": err}
         }))
         return
@@ -1578,7 +1687,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
 
         if not isinstance(response.get("status"), int):
             await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-                "gen": _gen(ctx.session),
+                "gen": _gen(ctx.rpcSession),
                 "payload": {"code":"HTTP_ERROR","message":"Received invalid status code."},
             }))
             return
@@ -1598,13 +1707,13 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
             payload["json"] = response["json"]
 
         await sendRPCMessage(ctx.ws, createReplyMessage(msg, {
-            "gen": ctx.session.currentGeneration(),
+            "gen": ctx.rpcSession.currentGeneration(),
             "payload": payload,
         }))
         return
     except Exception as err:
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-            "gen": ctx.session.currentGeneration(),
+            "gen": ctx.rpcSession.currentGeneration(),
             "payload": {"code":"HTTP_ERROR","message":str(err),"err":err,"retryable": True},
         }))
         return
@@ -1616,7 +1725,7 @@ async def handleSubscribeChat(ctx: HandlerContext, msg: RPCMessage):
     llm = SERVICES.get("llm")
     if llm is None:
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-            "gen": ctx.session.currentGeneration(),
+            "gen": ctx.rpcSession.currentGeneration(),
             "payload": {"code":"SERVICE_UNAVAILABLE", "message": "LLM driver is not available"}
         }))
         return
@@ -1644,12 +1753,12 @@ async def handleSubscribeChat(ctx: HandlerContext, msg: RPCMessage):
                 top_p=msg.payload.get("top_p"),
                 extra=msg.payload.get("extra"),
             ):
-                if msg.id in ctx.session.cancelled:
+                if msg.id in ctx.rpcSession.cancelled:
                     break
 
                 if event.get("error"):
                     await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-                        "gen": ctx.session.currentGeneration(),
+                        "gen": ctx.rpcSession.currentGeneration(),
                         "payload": {"code":"ERR_LLM_STREAM", "message": event.get("error"), "err": event},
                     }))
                     break
@@ -1667,7 +1776,7 @@ async def handleSubscribeChat(ctx: HandlerContext, msg: RPCMessage):
                     v="0.1",
                     type="stateUpdate",
                     lane=msg.lane,
-                    gen=_gen(ctx.session),
+                    gen=_gen(ctx.rpcSession),
                     correlatesTo=msg.id,
                     payload={"delta": delta}
                 ))
@@ -1675,7 +1784,7 @@ async def handleSubscribeChat(ctx: HandlerContext, msg: RPCMessage):
             pass
         except Exception as err:
             await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-                "gen": ctx.session.currentGeneration(),
+                "gen": ctx.rpcSession.currentGeneration(),
                 "payload": {"code":"ERR_LLM", "message":str(err), "err": err, "retryable": True},
             }))
         else:
@@ -1685,14 +1794,14 @@ async def handleSubscribeChat(ctx: HandlerContext, msg: RPCMessage):
                 v="0.1",
                 type="stateUpdate",
                 lane=msg.lane,
-                gen=_gen(ctx.session),
+                gen=_gen(ctx.rpcSession),
                 correlatesTo=msg.id,
                 payload={"text": fullText, "delta": "", "done": True},
             ))
     
     task = asyncio.create_task(run())
-    ctx.session.pending[msg.id] = task
-    task.add_done_callback(lambda _t, lSession=ctx.session, lMsgId=msg.id: (lSession.pending.pop(lMsgId, None), lSession.cancelled.discard(lMsgId)))
+    ctx.rpcSession.pending[msg.id] = task
+    task.add_done_callback(lambda _t, lSession=ctx.rpcSession, lMsgId=msg.id: (lSession.pending.pop(lMsgId, None), lSession.cancelled.discard(lMsgId)))
 
 async def handleRequestGMNarration(ctx: HandlerContext, msg: RPCMessage):
     """
@@ -1703,30 +1812,242 @@ async def handleRequestGMNarration(ctx: HandlerContext, msg: RPCMessage):
         try:
             toSleep = min(0.2, (msg.budgetMs or 3_000)/1_000)
             await asyncio.sleep(toSleep)
-            if msg.id in ctx.session.cancelled:
+            if msg.id in ctx.rpcSession.cancelled:
                 return
             action = (msg.args or ["(silence)"])[0]
             text = f"The GM considers your action {action!r} and responds with a twist."
             reply = createReplyMessage(msg, {
-                "gen": ctx.session.currentGeneration(),
+                "gen": ctx.rpcSession.currentGeneration(),
                 "payload": {"text": text, "spentMs": nowMonotonicMs() - start},
             })
-            ctx.session.putReply(ctx.session.dedupeKey(msg), reply)
+            ctx.rpcSession.putReply(ctx.rpcSession.dedupeKey(msg), reply)
             await sendRPCMessage(ctx.ws, reply)
         except asyncio.CancelledError:
             pass
     
     task = asyncio.create_task(run())
-    ctx.session.pending[msg.id] = task
-    task.add_done_callback(lambda _t, lSession=ctx.session, lMsgId=msg.id: (lSession.pending.pop(lMsgId, None), lSession.cancelled.discard(lMsgId)))
+    ctx.rpcSession.pending[msg.id] = task
+    task.add_done_callback(lambda _t, lSession=ctx.rpcSession, lMsgId=msg.id: (lSession.pending.pop(lMsgId, None), lSession.cancelled.discard(lMsgId)))
+
+
+
+async def handleRequestObject(ctx: HandlerContext, msg: RPCMessage):
+    """
+    Request: route.object=<oid>
+    op: "get" | "set" | "call" | "snapshot"
+    - get: payload.path -> value
+    - set: payload.path, payload.value -> {version}
+    - call: payload.method, payload.args?, payload.kwargs? -> result
+    - snapshot: -> {oid, kind, version, state}
+    """
+    oid = (msg.route.object if isinstance(msg.route, Route) else None) or ""
+    try:
+        rcv = getObject(oid)
+    except KeyError:
+        await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
+            "gen": ctx.rpcSession.currentGeneration(),
+            "payload": {"code":"OBJECT_NOT_FOUND","message":f"Unknown object '{oid}'"},
+        }))
+        return
+    
+    op = (msg.op or "").strip()
+    payload = msg.payload or {}
+
+    try:
+        if op == "get":
+            path = payload.get("path") or msg.path
+            value = rcv.get(path)
+            await sendRPCMessage(ctx.ws, createReplyMessage(msg, {
+                "gen": ctx.rpcSession.currentGeneration(),
+                "payload": {"value": value, "version": rcv.version},
+            }))
+            return
+
+        if op == "set":
+            path = payload.get("path") or msg.path
+            if not isinstance(path, str) or not path:
+                raise ValueError("set requires 'path'")
+            version = rcv.set(path, payload.get("value"))
+            await sendRPCMessage(ctx.ws, createReplyMessage(msg, {
+                "gen": ctx.rpcSession.currentGeneration(),
+                "payload": {"ok": True, "version": version},
+            }))
+            return
+        
+        if op == "call":
+            method: str = str(payload.get("method"))
+            args: list = payload.get("args") or msg.args or []
+            kwargs: dict = payload.get("kwargs") or {}
+            res = rcv.call(method, args, kwargs)
+            if asyncio.iscoroutine(res):
+                res = await res
+            await sendRPCMessage(ctx.ws, createReplyMessage(msg, {
+                "gen": ctx.rpcSession.currentGeneration(),
+                "payload": {"result": res, "version": rcv.version},
+            }))
+            return
+        
+        if op == "snapshot":
+            snap = rcv.snapshot()
+            await sendRPCMessage(ctx.ws, createReplyMessage(msg, {
+                "gen": ctx.rpcSession.currentGeneration(),
+                "payload": snap,
+            }))
+            return
+        
+        await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
+            "gen": ctx.rpcSession.currentGeneration(),
+            "payload": {"code":"UNKNOWN_OP","message":f"Unsupported op '{op}' for object '{rcv.kind}'"},
+        }))
+    
+    except Exception as err:
+        await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
+            "gen": ctx.rpcSession.currentGeneration(),
+            "payload": {"code":"OBJECT_ERROR","message":str(err),"err":err},
+        }))
+
+
+
+async def handleSubscribeChatThread(ctx: HandlerContext, msg: RPCMessage):
+    # Register subscriber
+    ctx.session.chat["subs"].add(msg.id)
+
+    # Initial snapshot
+    thread = ctx.session.chat
+    snapshot = {
+        "kind": "threadSnapshot",
+        "threadId": thread["threadId"],
+        "order": list(thread["order"]),
+        "headers": dict(thread["headers"]),
+    }
+    await sendRPCMessage(ctx.ws, RPCMessage(
+        id=uuidv7(),
+        v="0.1",
+        type="stateUpdate",
+        correlatesTo=msg.id,
+        lane=msg.lane,
+        gen=_gen(ctx.rpcSession),
+        payload=snapshot,
+    ))
+
+
+
+async def handleRequestChatStart(ctx: HandlerContext, msg: RPCMessage):
+    """
+    Request: chat.start@1 -> starts a pipeline run and returns {runId}
+    Payload/args: text (required), model/temperature/.. (optional)
+    Effects: Emits threadDelta/messageDelta over chat.thread@1
+    """
+    llm = SERVICES.get("llm")
+    if llm is None:
+        await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
+            "gen": ctx.rpcSession.currentGeneration(),
+            "payload": {"code":"SERVICE_UNAVAILABLE", "message":"LLM driver is not available"}
+        }))
+        return
+
+    text = (msg.args or [None])[0] or msg.payload.get("text")
+    if not isinstance(text, str) or not text.strip():
+        await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
+            "gen": ctx.rpcSession.currentGeneration(),
+            "payload": {"code":"BAD_REQUEST", "message":"'text' is required"}
+        }))
+        return
+
+    runId = f"r_{uuid6.uuid7().hex[:10]}"
+
+    # Input stage: persist user message
+    user_oid = _appendMessage(ctx.session, role="user", content=text, status="final", runId=runId)
+    await _pushThreadUpdate(ctx, {
+        "kind":"threadDelta",
+        "op":"insert",
+        "at": len(ctx.session.chat["order"])-1,
+        "oids":[user_oid],
+        "headers": {user_oid: ctx.session.chat["headers"][user_oid]},
+    })
+    await _pushThreadUpdate(ctx, {
+        "kind":"messageDelta",
+        "oid":user_oid,
+        "text":text,
+        "fields":{"status":"final"}
+    })
+
+    # Build prompt (createQuery stage)
+    promptMsgs = _buildPromptFromHistory(ctx.session, text)
+
+    # Assistant placeholder (streaming)
+    asst_oid = _appendMessage(ctx.session, role="assistant", content="", status="streaming", runId=runId)
+    await _pushThreadUpdate(ctx, {
+        "kind":"threadDelta",
+        "op":"insert",
+        "at": len(ctx.session.chat["order"])-1,
+        "oids":[asst_oid],
+        "headers": {asst_oid: ctx.session.chat["headers"][asst_oid]},
+    })
+
+    # Kick off the driver stream in background, reply immediately with runId
+    await sendRPCMessage(ctx.ws, createReplyMessage(msg, {
+        "gen": ctx.rpcSession.currentGeneration(),
+        "payload": {"runId": runId}
+    }))
+
+    async def _run():
+        try:
+            assistantChunks: list[str] = []
+            async for event in llm.streamChat(
+                promptMsgs,
+                model=msg.payload.get("model", ""),
+                temperature=msg.payload.get("temperature", 0.8),
+                max_tokens=msg.payload.get("max_tokens", 256),
+                top_p=msg.payload.get("top_p"),
+                extra=msg.payload.get("extra"),
+            ):
+                if msg.id in ctx.rpcSession.cancelled:
+                    break
+
+                if event.get("error"):
+                    _updateMessage(ctx.session, asst_oid, status="error")
+                    await _pushThreadUpdate(ctx, {"kind":"messageDelta", "oid":asst_oid, "fields":{"status":"error"}})
+                    break
+
+                if event.get("done"):
+                    break
+
+                ch = (event.get("choices") or [{}])[0]
+                delta = (ch.get("delta") or {}).get("content") or ""
+                if not delta:
+                    continue
+                assistantChunks.append(delta)
+                _updateMessage(ctx.session, asst_oid, append=delta)
+                await _pushThreadUpdate(ctx, {"kind":"messageDelta", "oid":asst_oid, "textDelta":delta})
+
+            # Finalize
+            finalText = "".join(assistantChunks)
+            _updateMessage(ctx.session, asst_oid, setText=finalText, status="final")
+            await _pushThreadUpdate(ctx, {"kind":"messageDelta", "oid":asst_oid, "text":finalText, "fields":{"status":"final"}})
+        except asyncio.CancelledError:
+            _updateMessage(ctx.session, asst_oid, status="error")
+            await _pushThreadUpdate(ctx, {"kind":"messageDelta", "oid":asst_oid, "fields":{"status":"error"}})
+        except Exception as err:
+            _updateMessage(ctx.session, asst_oid, status="error")
+            await _pushThreadUpdate(ctx, {"kind":"messageDelta", "oid":asst_oid, "fields":{"status":"error"}})
+            logger.exception("chat.start pipeline error: %s", err)
+    
+    task = asyncio.create_task(_run())
+    ctx.rpcSession.pending[msg.id] = task
+    task.add_done_callback(lambda _t, lRpcSession=ctx.rpcSession, lMsgId=msg.id: (lRpcSession.pending.pop(lMsgId, None), lRpcSession.cancelled.discard(lMsgId)))
+
+
 
 REQUEST_HANDLERS: dict[str, Callable[[HandlerContext, RPCMessage], Any]] = {
     "http.client@1":    handleRequestHttpClient,
     "gm.narration@1":   handleRequestGMNarration,
+    "chat.start@1":     handleRequestChatStart,
 }
 SUBSCRIBE_HANDLERS: dict[str, Callable[[HandlerContext, RPCMessage], Any]] = {
     "chat@1":           handleSubscribeChat,
     "gm.world@1":       handleSubscribeGMWorld,
+    "chat.thread@1":    handleSubscribeChatThread,
 }
 EMIT_HANDLERS: dict[str, Callable[[HandlerContext, RPCMessage], Any]] = {
     
@@ -1801,3 +2122,90 @@ def tryJSONify(obj: Any) -> Any:
     
     # Fallback: string representation
     return str(obj)
+
+def _newMsgOid() -> str:
+    return f"m_{uuid6.uuid7().hex[:12]}"
+
+async def _pushThreadUpdate(ctx: HandlerContext, payload: dict):
+    # Fan-out to all active chat.thread@1 subscribers tied to the same Session
+    for subId in list(ctx.session.chat["subs"]):
+        try:
+            await sendRPCMessage(ctx.ws, RPCMessage(
+                id=uuidv7(),
+                v="0.1",
+                type="stateUpdate",
+                route=Route(capability="chat.thread@1"),
+                gen=_gen(ctx.rpcSession),
+                correlatesTo=subId,
+                payload=payload,
+            ))
+        except Exception:
+            # If websocket closes, the wsEndpoint cleanup removes subs, so ignore here
+            pass
+
+def _appendMessage(sess: Session, *, role: str, content: str, status: str, runId: str | None):
+    oid = _newMsgOid()
+    ts = nowMonotonicMs()
+    sess.chat["messages"][oid] = {
+        "oid": oid,
+        "role": role,
+        "content": content,
+        "status": status,
+        "runId": runId,
+        "ts": ts,
+    }
+    preview = content[:200]
+    sess.chat["headers"][oid] = {
+        "role": role,
+        "preview": preview,
+        "ts": ts,
+    }
+    sess.chat["order"].append(oid)
+    return oid
+
+def _updateMessage(sess: Session, oid: str, *, append: str | None = None, setText: str | None = None, status: str | None = None):
+    msg = sess.chat["messages"].get(oid)
+    if not msg:
+        raise KeyError(f"message '{oid}' not found")
+    if append:
+        msg["content"] = (msg.get("content") or "") + append
+    if setText is not None:
+        msg["content"] = setText
+    if status:
+        msg["status"] = status
+    # Keep header.preview coherent enough for the list
+    if "content" in msg:
+        pv = (msg.get("content") or "")[:200]
+        sess.chat["headers"][oid]["preview"] = pv
+    return msg
+
+def _buildPromptFromHistory(sess: Session, userText: str):
+    histPolicy = sess.chat["historyPolicy"]
+    order = sess.chat["order"]
+    msgs = sess.chat["messages"]
+
+    # Take tails by role
+    turns = []
+    for oid in order:
+        msg = msgs[oid]
+        if msg["role"] in ("user", "assistant") and msg.get("content"):
+            turns.append({"role": msg["role"], "content": msg["content"]})
+    
+    # Keep last N pairs (userTail/assistantTail)
+    userKept = []
+    asstKept = []
+    kept = []
+    for it in reversed(turns):
+        if it["role"] == "user" and len(userKept) < histPolicy["userTail"]:
+            userKept.append(it)
+            kept.append(it)
+        elif it["role"] == "assistant" and len(asstKept) < histPolicy["assistantTail"]:
+            asstKept.append(it)
+            kept.append(it)
+        if len(userKept) >= histPolicy["userTail"] and len(asstKept) >= histPolicy["assistantTail"]:
+            break
+    kept = list(reversed(kept))
+
+    # Append the new user input
+    kept.append({"role": "user", "content": userText})
+    return kept
