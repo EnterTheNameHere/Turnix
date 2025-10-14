@@ -386,9 +386,14 @@ export class RpcClient {
         this.pending.clear();
 
         // Subscriptions are kept for resuming later
-        const base = 250, max = 3000;
+        const cfg = this.settings?.reconnect ?? {initialDelayMs: 500, maxDelayMs: 15000, factor: 2.0, jitterRatio: 0.25};
+        const base = cfg.initialDelayMs;
+        const max = cfg.maxDelayMs;
+        const factor = cfg.factor;
+        const jitter = cfg.jitterRatio;
         const attempt = ++this.reconnectAttempts;
-        const delay = Math.min(max, base * Math.pow(2, attempt - 1)) + Math.floor(Math.random() * 100);
+        const raw = Math.min(max, base * Math.pow(factor, attempt - 1));
+        const delay = Math.floor(raw * (1 - jitter + Math.random() * (2 * jitter)));
         setTimeout(() => {
             this.#connectOnce()
                 .then(() => this.#flushQueue())
