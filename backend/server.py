@@ -623,7 +623,7 @@ def serveModAsset(modId: str, path: str):
     _root, moddir, _manifest, _fname = found[modId]
     safe = resolveSafe(moddir, path or "main.js")
     if not safe.exists() or not safe.is_file():
-        raise HTTPException(404, "Requested path does not exists or is not a file.")
+        raise HTTPException(404, "Requested path does not exist or is not a file.")
     # TODO: Add strict caching/versioning later; for now no-cache in dev
     return FileResponse(safe)
 
