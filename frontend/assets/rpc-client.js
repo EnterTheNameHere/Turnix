@@ -279,8 +279,8 @@ export class PerLaneSerializer {
 }
 
 export class RpcClient {
-    static async connect(url, {token, settings} = {}) {
-        const client = new RpcClient(url, settings ?? defaultSettings(), token);
+    static async connect(url, {token, settings, hello} = {}) {
+        const client = new RpcClient(url, settings ?? defaultSettings(), token, hello);
         client.token = token;
         await client.#open();
         return client;
@@ -299,10 +299,11 @@ export class RpcClient {
      * @param {ReturnType<typeof defaultSettings>|any} settings
      * @param {string|undefined} token
      */
-    constructor(url, settings, token) {
+    constructor(url, settings, token, hello) {
         this.url = url;
         this.token = token;
         this.settings = settings || defaultSettings();
+        this.hello = hello ?? {payload: {}};
         
         /** @type {WebSocket|null} */
         this.webSocket = null;
@@ -365,7 +366,7 @@ export class RpcClient {
         this.reconnectAttempts = 0;
 
         // Send hello
-        this.#sendRaw(this.#createHelloMessage());
+        this.#sendRaw(this.#createHelloMessage(this.hello));
     }
 
     #onClose() {
@@ -910,6 +911,8 @@ export class RpcClient {
             budgetMs: this.settings?.protocol?.ackWaitMs ?? 250,
             gen: {num: -1, salt: 'salt'},
         }, opts);
+        // Ensure payload exists
+        message.payload = {...(message.payload ?? {})};
         return message;
     }
 
