@@ -74,7 +74,7 @@ export function getByPath(obj, path) {
 
     let val = obj;
     for(const part of parts) {
-        if(val == null || typeof val !== 'object' || !(part in val)) return undefined;
+        if(val == null || typeof val !== 'object' || !Object.prototype.hasOwnProperty.call(val, part)) return undefined;
         val = val[part];
     }
     return val;
