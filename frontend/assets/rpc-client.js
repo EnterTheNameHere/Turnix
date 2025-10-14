@@ -81,8 +81,9 @@ export function getByPath(obj, path) {
 }
 
 /**
- * Normalize input (string or object) to a message object.
+ * Normalize input (string or object) to a message object. Return null on failure to normalize.
  * @param {string|import("./types").RPCMessage} rpcMessageOrString
+ * @returns {import("./types").RPCMessage|null}
  */
 export function normalizeMessage(rpcMessageOrString) {
     if(typeof rpcMessageOrString === 'string') {
