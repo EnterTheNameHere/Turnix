@@ -1308,8 +1308,8 @@ async def wsEndpoint(ws: WebSocket):
                 try:
                     # TODO: make this non main session when we implement multiple sessions for view
                     view.mainSession.chat["subs"].discard(corrId)
-                except Exception:
-                    pass
+                except AttributeError as aerr:
+                    logger.exception("Unexpected chat unsubscribe state: %s", aerr)
                 continue
 
             if msgType == "subscribe":
