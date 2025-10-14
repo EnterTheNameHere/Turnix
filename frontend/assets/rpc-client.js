@@ -321,9 +321,12 @@ export class RpcClient {
         this.subscriptions = new Map();  // subId -> subscription object
         this.localCaps = new Map();      // capability -> { call?, emit?, subscribe? }
 
-        this.heartbeatTimer = null;
-        this.awolTimer = null;
-        this.heartbeat = { timer: null, intervalMs: this.settings?.protocol?.heartbeatMs ?? 5000, lastSeen: Date.now() };
+        this.heartbeat = {
+            timer: null,
+            intervalMs: this.settings?.protocol?.heartbeatMs ?? 5000,
+            lastSeen: Date.now(),
+            awolFactor: 3,               // For stall detectrion
+        };
         
         // To prevent race for "welcome"
         this.#welcomeDeferred = this.#newDeferred();
@@ -1088,42 +1091,31 @@ export class RpcClient {
     }
 
     #startHeartbeat() {
-        const period = Math.max(1000, this.settings?.protocol?.heartbeatMs ?? 5000);
         this.#stopHeartbeat();
-        this.heartbeatTimer = setInterval(() => {
-            if(this.webSocket && this.webSocket.readyState === WebSocket.OPEN) {
-                this.#sendRaw(this.#createRPCMessage({
-                    v: '0.1',
-                    type: 'heartbeat',
-                    lane: 'sys',
-                }));
-            }
-        }, period);
-
-        const awolCap = Math.max(period * 3, 10000);
-        this.awolTimer = setInterval(() => {
-            if(!this.webSocket) return;
-            if(this.webSocket.readyState === WebSocket.CLOSED || this.webSocket.readyState === WebSocket.CLOSING) return;
-            // If open but stalled, rely on server idle timeout or explicit tick
-        }, awolCap);
+        
+        const period = Math.max(1000, this.heartbeat.intervalMs);
+        this.heartbeat.timer = setInterval(() => this.#tickHeartbeat(), period);
     }
 
     #stopHeartbeat() {
-        if(this.heartbeatTimer) clearInterval(this.heartbeatTimer);
-        if(this.awolTimer) clearInterval(this.awolTimer);
-        this.heartbeatTimer = null;
-        this.awolTimer = null;
+        if(this.heartbeat.timer) clearInterval(this.heartbeat.timer);
+        this.heartbeat.timer = null;
+        console.log('Inside #stopHeartbeat now');
     }
 
     #tickHeartbeat() {
-        if(!this.webSocket || this.webSocket.readyState !== WebSocket.OPEN) return;
-        
-        try { this.#sendRaw(this.#createHeartbeatMessage()); } catch { /* Ignore errors */ }
+        // 1) Send heartbeat if OPEN
+        if(this.webSocket && this.webSocket.readyState === WebSocket.OPEN) {
+            try { this.#sendRaw(this.#createHeartbeatMessage()); } catch {/* ignore */}
+        }
 
-        // Loss of connection detection - if more than 3 times interval, close socket.
-        const awolMs = this.heartbeat.intervalMs * 3;
+        // 2) AWOL check (check if connection stalled)
+        if(this.webSocket && this.webSocket.readyState === WebSocket.OPEN) {
+            const factor = typeof this.heartbeat.awolFactor === 'number' ? this.heartbeat.awolFactor : 3;
+            const awolMs = Math.max(this.heartbeat.intervalMs * factor, 10000);
         if(Date.now() - this.heartbeat.lastSeen > awolMs) {
-            try { this.webSocket.close(); } catch { /* ignore */ }
+                try { this.webSocket.close(); console.log('AWOL detected, closing websocket.'); } catch {/* ignore */}
+            }
         }
     }
 
@@ -1277,7 +1269,7 @@ export class RpcClient {
 
     async #open() {
         await this.#connectOnce();
-        //this.#startHeartbeat();
+        this.#startHeartbeat();
         this.#flushQueue();
     }
 
