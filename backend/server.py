@@ -394,7 +394,7 @@ class RPCMessage(BaseModel):
 
     v: str                          # RPCMessage schema version
     id: str                         # UUIDv7
-    type: Literal["ack","hello","welcome","clientReady","request","emit","reply","subscribe","stateUpdate","unsubscribe","cancel","error"]
+    type: Literal["ack","heartbeat","hello","welcome","clientReady","request","emit","reply","subscribe","stateUpdate","unsubscribe","cancel","error"]
     correlatesTo: str | None = None # UUIDv7 of previous message, if in sequence.
     gen: Gen                        # generation of connection as set by server
     ts: int = Field(default_factory=nowMonotonicMs) # Monotonic time of sending
@@ -695,6 +695,7 @@ class RPCSession:
         self.genSalt = ""
         # Last clientReady payload
         self.lastClientReady: dict | None = None
+        self.lastHeartbeatTs = 0
         self.clientReadyGens: set[int] = set()
 
     def newGeneration(self) -> dict:
@@ -1286,6 +1287,13 @@ async def wsEndpoint(ws: WebSocket):
             # Immediate ack for non-control messages
             if msgType not in ("ack", "heartbeat"):
                 await sendRPCMessage(ws, createAckMessage(msg, { "gen": sessLocal.currentGeneration() }))
+
+            if msgType == "heartbeat":
+                sessLocal.lastHeartbeatTs = nowMonotonicMs()
+                await sendRPCMessage(ws, createAckMessage(msg, {
+                    "gen": sessLocal.currentGeneration(),
+                }))
+                continue
 
             # Cancel request or subscription
             if msgType == "cancel" or msgType == "unsubscribe":
