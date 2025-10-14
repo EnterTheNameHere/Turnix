@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import logging
-from fastapi import FastAPI, WebSocket, HTTPException
+from fastapi import FastAPI, WebSocket, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,6 +42,12 @@ WEBROOT = ROOT_DIR / "frontend"
 SERVICES: dict[str, Any] = {}
 PYMODS_LOADED: list[dict] = []
 PYMODS_FAILED: list[dict] = []
+
+
+
+class ReactorScramError(Exception):
+    """This error means Turnix violated a core invariant and hit the shutdown button."""
+    pass
 
 
 
@@ -275,6 +281,43 @@ async def getSettings():
 async def health():
     # TODO: add llama.cpp or other driver health here too
     return {"ok": True, "ts": int(time.time() * 1000)}
+
+
+
+@app.post("/api/bootstrap")
+async def apiBootstrap(request: Request):
+    # Ensure/assign clientId via cookie
+    reqCookies = request.cookies or {}
+    clientId = viewRegistry.ensureClientId(reqCookies)
+
+    view, token = viewRegistry.getOrCreateViewForClient(clientId)
+    payload = {
+        "viewId": view.id,
+        "viewToken": token,
+        "serverGen": view.version, # Use View.version as a single gen id for now
+    }
+    resp = JSONResponse(payload)
+    # Set HttpOnly cookie if missing / rotate to keep it fresh
+    if reqCookies.get("clientId") != clientId:
+        resp.set_cookie(
+            key="clientId",
+            value=clientId,
+            httponly=True,
+            samesite="lax",
+            secure=False,
+            path="/",
+        )
+    
+    logger.info(
+        "[BOOTSTRAP] clientId='%s' viewId='%s' hasCookie='%s' -> returning token='%s'",
+        clientId,
+        view.id,
+        "clientId" in reqCookies,
+        token[:8] + "…" # shortened for readability
+    )
+    logger.debug("[BOOTSTRAP] Payload: %s", payload)
+
+    return resp
 
 
 
@@ -652,6 +695,7 @@ class RPCSession:
         self.genSalt = ""
         # Last clientReady payload
         self.lastClientReady: dict | None = None
+        self.clientReadyGens: set[int] = set()
 
     def newGeneration(self) -> dict:
         self.genNum += 1
@@ -915,6 +959,9 @@ def getSession(viewId: str, clientId: str | None, sessionId: str | None) -> RPCS
 def uuidv7() -> str:
     return str(uuid6.uuid7())
 
+def uuid_12(prefix = "") -> str:
+    return str(f"{prefix}{uuid6.uuid7().hex[:12]}")
+
 
 
 def createWelcomeMessage(props: dict[str, Any], opts: dict[str, Any] | None = None):
@@ -1089,6 +1136,8 @@ async def pushToast(ws: WebSocket, level: Literal["info", "warn", "error"], text
 async def wsEndpoint(ws: WebSocket):
     await ws.accept()
     sessLocal: RPCSession | None = None
+    view: View | None = None
+    clientId: str | None = None
     
     try:
         while True:
@@ -1123,11 +1172,32 @@ async def wsEndpoint(ws: WebSocket):
 
             # ----- Handshake -----
             if msgType == "hello":
-                sessLocal = getSession("view-1", "client-1", "session-1")
+                clientId = ws.cookies.get("clientId")
+                if not clientId or not clientId.strip():
+                    clientId = viewRegistry.ensureClientId(ws.cookies)
+
+                payload = msg.payload or {}
+                viewId = payload.get("viewId")
+                viewToken = payload.get("viewToken")
+                clientInstanceId = payload.get("clientInstanceId")
+                lastKnownGen = int(payload.get("lastKnownGen") or 0)
+
+                if viewId and viewToken and viewRegistry.validateToken(viewId, clientId, viewToken):
+                    view = viewRegistry.getViewById(viewId)
+                    if not view:
+                        view = View(viewId=viewId)
+                        viewRegistry.viewsById[viewId] = view
+                        viewRegistry.bindClientToView(clientId, viewId)
+                else:
+                    # Bind by clientId - default singleplayer path
+                    view, _ = viewRegistry.getOrCreateViewForClient(clientId)
+
+                viewManager.bind(ws=ws, view=view)
+
+                sessLocal = getSession(view.id, clientId, "session-1")
                 gen = sessLocal.newGeneration()
 
                 # Send snapshot state with welcome
-                view = viewManager.ensureViewForWs(ws=ws)
                 view.patchState(sessLocal.state)
                 await sendRPCMessage(ws, createWelcomeMessage({
                     "gen": gen,
@@ -1140,17 +1210,76 @@ async def wsEndpoint(ws: WebSocket):
                 # Ignore anything before hello
                 continue
 
+            # View by this point should be available!
+            if view is None:
+                raise ReactorScramError(
+                    f"View for client {clientId} not found! This shouldn't happen! "
+                    f"The stability of the application is not guaranteed! Jokes are no longer funny! "
+                    f"Dogs and cats are living together! We should've given penguins the voting rights when we had chance!")
+
             if msgType == "clientReady":
                 # Frontend declares it has finished loading/initializing
+                currGenNum = sessLocal.genNum
+
+                # If someone sends a stale clientReady, ignore it
+                if msg.gen and hasattr(msg.gen, "num"):
+                    clientReportedGen = getattr(msg.gen, "num", None)
+                    if isinstance(clientReportedGen, int) and clientReportedGen != currGenNum:
+                        logger.debug(
+                            "Stale clientReady for gen='%s' arrived, while current gen is '%s' - just ACK and ignore",
+                            clientReportedGen, currGenNum,
+                        )
+                        await sendRPCMessage(ws, createAckMessage(msg, {"gen": sessLocal.currentGeneration()}))
+                        continue
+
+                # If we've already processed clientReady for this generation, just ACK and ignore
+                if currGenNum in sessLocal.clientReadyGens:
+                    logger.debug(
+                        "Ignoring duplicate clientReady for gen='%s' (viewId='%s', clientId='%s')",
+                        currGenNum, getattr(view, "id", "?"), clientId,
+                    )
+                    await sendRPCMessage(ws, createAckMessage(msg, {"gen": sessLocal.currentGeneration()}))
+                    continue
+                
+                sessLocal.clientReadyGens.add(currGenNum)
+                if len(sessLocal.clientReadyGens) > 256:
+                    # Keep only the most recent 64 gens
+                    base = currGenNum - 64
+                    sessLocal.clientReadyGens = {gg for gg in sessLocal.clientReadyGens if gg >= base}
+
+                loaded = msg.payload.get("loaded") or []
+                failed = msg.payload.get("failed") or []
+                modsHash = msg.payload.get("modsHash")
+
                 sessLocal.lastClientReady = {
                     "gen": msg.gen,
                     "ts": msg.ts,
                     "mods": {
-                        "loaded": msg.payload.get("mods", {}).get("loaded") or [],
-                        "failed": msg.payload.get("mods", {}).get("failed") or [],
-                        "modsHash": msg.payload.get("modsHash"),                    
+                        "loaded": loaded,
+                        "failed": failed,
+                        "modsHash": modsHash,                    
                     }
                 }
+
+                try:
+                    view.patchState({
+                        "clientReady": {
+                            "gen": currGenNum,
+                            "ts": msg.ts,
+                            "mods": sessLocal.lastClientReady["mods"],
+                        }
+                    })
+                except Exception:
+                    # non-fatal, keep going
+                    pass
+                
+                logger.info(
+                    "[clientReady] accepted for gen='%s' (viewId='%s', clientId='%s') mods: loaded='%d' failed='%d'",
+                    currGenNum, getattr(view, "id", "?"), clientId,
+                    len(loaded),
+                    len(failed),
+                )
+
                 await sendRPCMessage(ws, createAckMessage(msg, {"gen": sessLocal.currentGeneration()}))
                 continue
 
@@ -1469,27 +1598,127 @@ class View:
 
 class ViewManager:
     """
-    Tracks the active View per connected WebSocket (1:1).
+    Tracks which View a WebSocket is attached to.
     """
     def __init__(self):
-        self._viewsByWs: dict[WebSocket, View] = {}
+        self._viewIdByWs: dict[WebSocket, str] = {}
+        self._wsByViewId: dict[str, set[WebSocket]] = {}
+
+    def bind(self, *, ws: WebSocket, view: View) -> None:
+        if not isinstance(ws, WebSocket):
+            raise TypeError("Expected a WebSocket")
+        if not isinstance(view, View):
+            raise TypeError("Expected a View")
+
+        oldViewId = self._viewIdByWs.get(ws)
+        if oldViewId and oldViewId != view.id:
+            # Detach from old
+            self._wsByViewId.get(oldViewId, set()).discard(ws)
+        self._viewIdByWs[ws] = view.id
+        self._wsByViewId.setdefault(view.id, set()).add(ws)
     
-    def ensureViewForWs(self, *, ws: WebSocket, viewId: str | None = None) -> View:
-        view = self._viewsByWs.get(ws)
-        if view is None:
-            view = View(viewId=viewId)
-            self._viewsByWs[ws] = view
-            return view
-        else:
-            if viewId == view.id:
-                return view
-            else:
-                raise Exception(f"View for this websocket already exists! Id's mismatch - new: '{viewId}', old: '{view.id}'")
-    
+    def getViewForWs(self, ws: WebSocket) -> View | None:
+        if not isinstance(ws, WebSocket):
+            raise TypeError("Expected a WebSocket")
+        
+        viewId = self._viewIdByWs.get(ws)
+        return viewRegistry.getViewById(viewId) if viewId else None
+
     def removeViewForWs(self, ws: WebSocket) -> None:
-        self._viewsByWs.pop(ws, None)
+        if not isinstance(ws, WebSocket):
+            raise TypeError("Expected a WebSocket")
+
+        viewId = self._viewIdByWs.pop(ws, None)
+        if viewId:
+            webSocket = self._wsByViewId.get(viewId)
+            if webSocket:
+                webSocket.discard(ws)
+                if not webSocket:
+                    self._wsByViewId.pop(viewId, None)
 
 viewManager = ViewManager()
+
+
+
+class ViewRegistry:
+    def __init__(self):
+        # viewId -> View
+        self.viewsById: dict[str, View] = {}
+        # clientId -> viewId
+        self.bindingsByClientId: dict[str, str] = {}
+        # (viewId, clientId) -> viewToken
+        self.tokens: dict[tuple[str, str], str] = {}
+    
+    def _mintViewToken(self) -> str:
+        return secrets.token_urlsafe(24)
+    
+    def ensureClientId(self, reqCookies: Mapping[str, str] | None) -> str:
+        cookies = reqCookies or {}
+        cid = cookies.get("clientId")
+        if cid and isinstance(cid, str) and cid.strip():
+            return cid
+        # First ever client: nobody else connected yet, so this is "first"
+        return uuid_12("c_")
+
+    def getOrCreateViewForClient(self, clientId: str) -> tuple[View, str]:
+        """
+        Returns (view, viewTokenForThisClient)
+        Creates a new View if none bound yet; otherwise returns exitsting + (rotated) token.
+        """
+        if not isinstance(clientId, str) or not clientId.strip():
+            raise ValueError(f"'clientId' must be non-empty string; got {repr(clientId)}")
+
+        viewId = self.bindingsByClientId.get(clientId)
+        if viewId:
+            view = self.viewsById[viewId]
+        else:
+            view = View()
+            self.viewsById[view.id] = view
+            self.bindingsByClientId[clientId] = view.id
+        
+        key = (view.id, clientId)
+        token = self._mintViewToken()
+        self.tokens[key] = token
+        return view, token
+    
+    # TODO: What if someone tries forging minting token for existing client and view?
+    def issueToken(self, viewId: str, clientId: str) -> str:
+        if not isinstance(viewId, str) or not viewId.strip():
+            raise ValueError(f"'viewId' must be non-empty string; got {repr(viewId)}")
+        if not isinstance(clientId, str) or not clientId.strip():
+            raise ValueError(f"'clientId' must be non-empty string; got {repr(clientId)}")
+
+        key = (viewId, clientId)
+        token = self._mintViewToken()
+        self.tokens[key] = token
+        return token
+    
+    def validateToken(self, viewId: str, clientId: str, token: str) -> bool:
+        if not viewId or not clientId or not token:
+            return False
+        
+        key = (viewId, clientId)
+        return self.tokens.get(key) == token
+    
+    def getViewById(self, viewId: str) -> View | None:
+        if not isinstance(viewId, str) or not viewId.strip():
+            raise ValueError(f"'viewId' must be non-empty string; got {repr(viewId)}")
+        
+        return self.viewsById.get(viewId)
+    
+    def bindClientToView(self, clientId: str, viewId: str) -> None:
+        if not isinstance(viewId, str) or not viewId.strip():
+            raise ValueError(f"'viewId' must be non-empty string; got {repr(viewId)}")
+        if not isinstance(clientId, str) or not clientId.strip():
+            raise ValueError(f"'clientId' must be non-empty string; got {repr(clientId)}")
+
+        self.bindingsByClientId[clientId] = viewId
+        if viewId not in self.viewsById:
+            self.viewsById[viewId] = View(viewId=viewId)
+
+viewRegistry = ViewRegistry()
+
+
 
 class Receiver:
     """Executes get/set/call/snapshot on a concrete Python object."""
