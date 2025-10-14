@@ -142,15 +142,15 @@ const sentForGen = new Set();
     if(state?.version != null) {
         safeSet(lastKnownGenKey, String(state.version));
     }
-    
+
     /** @type {import("./assets/types").ModManifest[]} */
     const manifests = state?.mods?.frontend?.modManifests ?? [];
 
     let loaded = [], failed = [], modsHash = '';
     try {
         ({loaded, failed, modsHash} = await loadMods(manifests, {
-        makeRpcForMod: makeRpcForMod,
-        settings: state?.settings ?? {__source: 'none'}
+            makeRpcForMod: makeRpcForMod,
+            settings: state?.settings ?? {__source: 'none'}
         }));
     } catch(err) {
         console.error('loadMods failed:', err);
@@ -161,7 +161,7 @@ const sentForGen = new Set();
         lastClientReadyPayload = {loaded, failed, modsHash};
         if(!sentClientReady) {
             sentClientReady = true;
-        await rpc.clientReady({loaded, failed, modsHash});
+            await rpc.clientReady({loaded, failed, modsHash});
             // Mark current gen as sent if state.version is known
             if(typeof state?.version === 'number') sentForGen.add(state.version);
         }

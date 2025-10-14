@@ -1119,7 +1119,7 @@ export class RpcClient {
         if(this.webSocket && this.webSocket.readyState === WebSocket.OPEN) {
             const factor = typeof this.heartbeat.awolFactor === 'number' ? this.heartbeat.awolFactor : 3;
             const awolMs = Math.max(this.heartbeat.intervalMs * factor, 10000);
-        if(Date.now() - this.heartbeat.lastSeen > awolMs) {
+            if(Date.now() - this.heartbeat.lastSeen > awolMs) {
                 try { this.webSocket.close(); console.log('AWOL detected, closing websocket.'); } catch {/* ignore */}
             }
         }
