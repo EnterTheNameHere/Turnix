@@ -199,5 +199,5 @@ rpc.onWelcome = async (state) => {
 };
 
 rpc.onClientReady = (state) => {
-    console.debug('[RPC] clientReady:', state);
+    console.debug('[rpc] clientReady:', state);
 };

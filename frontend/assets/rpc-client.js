@@ -479,7 +479,7 @@ export class RpcClient {
             this.#logIncomingStr(msg);
         } catch(err) {
             this.#logIncomingStr(ev.data);
-            console.error('[RPC] Error parsing message received.', err, ev);
+            console.error('[rpc] Error parsing message received.', err, ev);
             return;
         }
 
@@ -771,7 +771,7 @@ export class RpcClient {
         const normalizedMessage = normalizeMessage(rpcMessageOrStr);
         const wantToLog = shouldLogRPCMessage(normalizedMessage, cfg);
         if(!wantToLog) return;
-        console.log('[RPC] sending:', normalizedMessage ?? rpcMessageOrStr);
+        console.log('[rpc] sending:', normalizedMessage ?? rpcMessageOrStr);
     }
 
     #logIncomingStr(rpcMessageOrStr) {
@@ -780,7 +780,7 @@ export class RpcClient {
         const normalizedMessage = normalizeMessage(rpcMessageOrStr);
         const wantToLog = shouldLogRPCMessage(normalizedMessage, cfg);
         if(!wantToLog) return;
-        console.log('[RPC] incoming:', normalizedMessage ?? rpcMessageOrStr);
+        console.log('[rpc] incoming:', normalizedMessage ?? rpcMessageOrStr);
     }
 
     #enqueue(obj) {
