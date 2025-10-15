@@ -6,24 +6,7 @@ from pydantic import BaseModel, Field, ConfigDict, model_validator
 from pydantic.alias_generators import to_camel
 from backend.core.time import nowMonotonicMs
 
-__all__ = ["MessageType", "Gen", "Route", "RPCMessage"]
-
-
-
-class MessageType(str, Enum):
-    ACK = "ack"
-    HEARTBEAT = "heartbeat"
-    HELLO = "hello"
-    WELCOME = "welcome"
-    CLIENT_READY = "clientReady"
-    REQUEST = "request"
-    EMIT = "emit"
-    REPLY = "reply"
-    SUBSCRIBE = "subscribe"
-    STATE_UPDATE = "stateUpdate"
-    UNSUBSCRIBE = "unsubscribe"
-    CANCEL = "cancel"
-    ERROR = "error"
+__all__ = ["Gen", "Route", "RPCMessage"]
 
 
 
@@ -56,7 +39,7 @@ class RPCMessage(BaseModel):
 
     v: str                          # RPCMessage schema version
     id: str                         # UUIDv7
-    type: MessageType | Literal["ack","heartbeat","hello","welcome","clientReady","request","emit","reply","subscribe","stateUpdate","unsubscribe","cancel","error"]
+    type: Literal["ack","heartbeat","hello","welcome","clientReady","request","emit","reply","subscribe","stateUpdate","unsubscribe","cancel","error"]
     correlatesTo: str | None = None # UUIDv7 of previous message, if in sequence.
     gen: Gen                        # generation of connection as set by server
     ts: int = Field(default_factory=nowMonotonicMs) # Monotonic time of sending
