@@ -36,9 +36,11 @@ def createApp(*, extraRouters: Sequence[APIRouter] = ()) -> FastAPI:
     # ----- Routers first -----
     from backend.app.web import router as webRouter
     from backend.api.bootstrap import router as bootstrapRouter
+    from backend.mods.frontend_index import router as frontendRouter
 
     app.include_router(webRouter)
     app.include_router(bootstrapRouter)
+    app.include_router(frontendRouter)
 
     for router in extraRouters:
         app.include_router(router)
