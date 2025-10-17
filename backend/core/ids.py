@@ -6,15 +6,15 @@ __all__ = ["uuidv7", "uuidv4", "uuid_10", "uuid_12", "shortToken"]
 
 
 
-def uuidv7() -> str:
-    """Returns a UUIDv7 string (time-ordered)."""
-    return str(uuid6.uuid7())
+def uuidv7(*, prefix: str = "") -> str:
+    """Returns a UUIDv7 string (time-ordered), optionally prefixed."""
+    return prefix + str(uuid6.uuid7())
 
 
 
-def uuidv4() -> str:
-    """Returns a pure random UUIDv4 string."""
-    return str(uuid.uuid4())
+def uuidv4(*, prefix: str = "") -> str:
+    """Returns a pure random UUIDv4 string, optionally prefixed."""
+    return prefix + str(uuid.uuid4())
 
 
 
