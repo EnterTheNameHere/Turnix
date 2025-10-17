@@ -148,7 +148,7 @@ class PermissionManager:
         # family -> {"serverSpec": NpmSpec, "risk": "low"|"medium"|"high" }
         self._capsMeta: dict[str, dict[str, Any]] = {}
     
-    def registerCapability(self, *, capability: str, serverVersion: str, risk: str = "low") -> None:
+    def registerCapability(self, *, capability: str, risk: str = "low") -> None:
         """
         Register a capability family and the baseline as an npm range, e.g.:
           "chat@^1", "http.client@>=1.5 <2", "gm.world@*"
