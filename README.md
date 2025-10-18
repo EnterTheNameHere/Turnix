@@ -55,7 +55,8 @@ The goal is to provide a general and extensible foundation for modular AI intera
 ```
 Turnix/
 ├── backend/
-│   ├── http_client.py
+│   ├── http/
+│   │   └── client.py
 │   ├── settings_default.json5
 │   └── ...
 │
