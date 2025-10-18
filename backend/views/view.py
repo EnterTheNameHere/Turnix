@@ -123,6 +123,9 @@ class Session:
                 "alwaysIncludeSystem": True,
             },
             "subs": set() # correlatesTo ids of chat.thread@1 subscribers
+                          # NOTE(single-socket): subscription IDs are tracked per-session
+                          # but fanout currently sends only via the caller's ws.
+                          # If multiple sockets attach to the same session, they won’t all receive updates.
         }
 
     def snapshot(self) -> dict[str, Any]:
