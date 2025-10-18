@@ -10,6 +10,7 @@ from backend.app.settings import settings
 from backend.app.lifecycle import life
 from backend.app.static_mount import mountStatic
 from backend.core.logger import configureLogging
+from backend.rpc.transport import mountWebSocket
 
 
 
@@ -44,6 +45,9 @@ def createApp(*, extraRouters: Sequence[APIRouter] = ()) -> FastAPI:
 
     for router in extraRouters:
         app.include_router(router)
+
+    # ----- WebSocket endpoint -----
+    mountWebSocket(app)
 
     # ----- Static comes last so it doesn't shadow routes -----
     mountStatic(app)
