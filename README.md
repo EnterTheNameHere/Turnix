@@ -130,7 +130,7 @@ or manually from the `electron/` directory:
 npm run start
 ```
 
-This launches the desktop shell that loads the frontend from  
+This launches the desktop shell that loads the frontend from
 `http://localhost:63726/`.
 
 ### 4. Start Llama.cpp
@@ -140,6 +140,15 @@ launcher.bat
 ```
 
 Currently models and server location are hard-coded. Since you obviously don't have them where I have, edit `launcher_llama_cpp_presets.json5` and set your preferred model paths. Launcher automatically escapes Windows paths.
+
+### 5. Run Tests
+
+Install the optional test dependencies and execute the suite with `pytest`:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
 
 ---
 
