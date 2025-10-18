@@ -1298,20 +1298,21 @@ export function defaultSettings() {
     console.warn('Loading default settings - this shouldn\'t happen if everything is set up correctly!');
     return {
         __source: 'FRONTEND_DEFAULTS',
-        protocol: {ackWaitMs: 250, graceWindowMs: 150, maxInFlightPerLane: 64, heartbeatMs: 5000, maxQueue: 1024, maxOfflineQueue: 2000},
+        protocol: {ackWaitMs: 250, graceWindowMs: 150, maxInFlightPerLane: 64, heartbeatMs: 5_000, maxQueue: 1_024, maxOfflineQueue: 2_000},
         timeouts: {classes: {
             'request.fast': {serviceTtlMs: 800, clientPatienceExtraMs: 150},
-            'request.medium': {serviceTtlMs: 3000, clientPatienceExtraMs: 200},
-            'request.heavy': {serviceTtlMs: 30000, clientPatienceExtraMs: 250}},
+            'request.medium': {serviceTtlMs: 3_000, clientPatienceExtraMs: 200},
+            'request.heavy': {serviceTtlMs: 30_000, clientPatienceExtraMs: 250}},
         },
         streams: {default: {targetHz: 10, maxQueueMs: 200, coalesce: 'drop-oldest'}},
-        http: {retry: 2,backoff: {baseMs: 250, maxMs: 1000, jitterPct: 30}, timeoutCapMs: 30000},
+        http: {retry: 2, backoff: {baseMs: 250, maxMs: 1_000, jitterPct: 30}, timeoutCapMs: 30_000, cookie:{sameSite:'lax', secure:false, maxAgeSec: 2_592_000},cors:{allowOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173']}},
         mods: {allowSymlinks: false},
         httpProxy: {
             allowList: ['httpbin.org', 'api.openai.com', 'localhost', '127.0.0.1', '::1'],
             buckets: {default: {rpm: 600, burst: 200}},
         },
         debug: {
+            tracebackCharLimit: 4_000,
             backend:  {rpc: {maxPreviewChars: 1_000_000,
                              incomingMessages: {log: false, ignoreTypes: ['ack', 'heartbeat']},
                              outgoingMessages: {log: false, ignoreTypes: ['ack', 'heartbeat'], rules: [{type: 'stateUpdate', shouldLog: true, tests: [{property: 'payload.done', op: 'notExists', value: true, shouldLog: false}]}]}}},

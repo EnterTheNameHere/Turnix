@@ -3,7 +3,7 @@ from __future__ import annotations
 import json5, os
 from pydantic import JsonValue
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast # pyright: ignore[reportShadowedImports]
 from functools import lru_cache
 
 from backend.app.paths import BACKEND_DIR
@@ -33,18 +33,44 @@ SETTINGS: JsonValue = (
             "request.heavy":  {"serviceTtlMs": 30000,"clientPatienceExtraMs": 250}}
         },
         "streams": {"default": {"targetHz": 10, "maxQueueMs": 200, "coalesce": "drop-oldest"}},
-        "http": {"retry": 2, "backoff": {"baseMs": 250, "maxMs": 1000, "jitterPct": 30}, "timeoutCapMs": 30000},
+        "http": {
+            "retry": 2,
+            "backoff": {
+                "baseMs": 250,
+                "maxMs": 1000,
+                "jitterPct": 30
+            },
+            "timeoutCapMs": 30000,
+            "cookie": {
+                "sameSite": "lax",
+                "secure": False,
+                "maxAgeSec": 2_592_000
+            },
+            "cors": {
+                "allowOrigins": ['http://localhost:5173', 'http://127.0.0.1:5173']
+            },
+        },
         "mods": {"allowSymlinks": False},
         "httpProxy": {
             "allowList": ["httpbin.org", "api.openai.com", "localhost", "127.0.0.1", "::1"],
             "buckets": {"default": {"rpm": 600, "burst": 200}},
         },
-        "debug": {"backend":  {"rpc": {"maxPreviewChars": 1_000_000,
-                                    "incomingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"]},
-                                    "outgoingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"], "rules": [{"type": "stateUpdate", "shouldLog": True, "tests": [{"property": "payload.done", "op": "notExists", "value": True, "shouldLog": False}]}]}}},
-                  "frontend": {"rpc": {"maxPreviewChars": 1_000_000,
-                                    "incomingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"], "rules": [{"type": "stateUpdate", "shouldLog": True, "tests": [{"property": "payload.done", "op": "notExists", "value": True, "shouldLog": False}]}]},
-                                    "outgoingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"]}}}
+        "debug": {
+            "tracebackCharLimit": 4_000,
+            "backend": {
+                "rpc": {
+                    "maxPreviewChars": 1_000_000,
+                    "incomingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"]},
+                    "outgoingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"], "rules": [{"type": "stateUpdate", "shouldLog": True, "tests": [{"property": "payload.done", "op": "notExists", "value": True, "shouldLog": False}]}]},
+                },
+            },
+            "frontend": {
+                "rpc": {
+                    "maxPreviewChars": 1_000_000,
+                    "incomingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"], "rules": [{"type": "stateUpdate", "shouldLog": True, "tests": [{"property": "payload.done", "op": "notExists", "value": True, "shouldLog": False}]}]},
+                    "outgoingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"]},
+                },
+            },
         },
     }
 )
