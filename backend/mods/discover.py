@@ -1,7 +1,7 @@
 # backend/mods/discover.py
 from __future__ import annotations
 import os, json5
-from typing import Any, Mapping
+from typing import Any, Mapping # pyright: ignore[reportShadowedImports]
 from pathlib import Path
 from functools import lru_cache
 
