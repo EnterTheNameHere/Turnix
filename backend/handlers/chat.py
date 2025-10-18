@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from backend.app.state import SERVICES
+from backend.app import state
 from backend.core.ids import uuidv7, uuid_10, uuid_12
 from backend.core.time import nowMonotonicMs
 from backend.handlers.context import HandlerContext
@@ -48,7 +48,7 @@ async def handleRequestChatStart(ctx: HandlerContext, msg: RPCMessage):
     Payload/args: text (required), model/temperature/.. (optional)
     Effects: Emits threadDelta/messageDelta over chat.thread@1
     """
-    llm = SERVICES.get("llm")
+    llm = state.SERVICES.get("llm")
     if llm is None:
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
             "gen": ctx.rpcSession.currentGeneration(),
@@ -161,7 +161,7 @@ async def handleSubscribeChat(ctx: HandlerContext, msg: RPCMessage):
     """
     Subscribe: chat@1 (streaming, cancellable)
     """
-    llm = SERVICES.get("llm")
+    llm = state.SERVICES.get("llm")
     if llm is None:
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
             "gen": ctx.rpcSession.currentGeneration(),
