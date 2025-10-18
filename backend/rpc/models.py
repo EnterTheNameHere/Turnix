@@ -1,6 +1,5 @@
 # backend/rpc/models.py
 from __future__ import annotations
-from enum import Enum
 from typing import Literal, Any
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 from pydantic.alias_generators import to_camel
