@@ -35,7 +35,7 @@ async def apiBootstrap(request: Request):
     cookieSameSite = str(settings("http.cookie.sameSite", "lax")).lower()
     if cookieSameSite not in ("lax", "strict", "none"):
         cookieSameSite = "lax"
-    cookieMaxAge = int(settings("http.cookies.maxAgeSec", 60*60*24*30)) # 30 days default
+    cookieMaxAge = int(settings("http.cookie.maxAgeSec", 60*60*24*30)) # 30 days default
 
     # Set HttpOnly cookie if missing / rotate to keep it fresh
     if reqCookies.get("clientId") != clientId:
