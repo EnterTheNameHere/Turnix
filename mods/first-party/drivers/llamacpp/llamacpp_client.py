@@ -5,7 +5,7 @@ import asyncio
 import httpx, json, math, secrets
 from typing import AsyncGenerator, Any
 
-from core.logger import getModLogger
+from backend.core.logger import getModLogger
 logger = getModLogger("llamacpp_client")
 
 DEFAULT_BASE_URL = "http://localhost:1234"
