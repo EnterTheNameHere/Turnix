@@ -4,7 +4,6 @@ from typing import Literal, Mapping, Any
 
 from backend.rpc.models import RPCMessage
 from backend.rpc.messages import createErrorMessage, createReplyMessage
-from backend.rpc.transport import sendRPCMessage
 from backend.handlers.context import HandlerContext
 from backend.app.settings import settings
 
@@ -15,6 +14,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
     Request: http.client@1
     """
     from backend.http.client import request as httpRequest
+    from backend.rpc.transport import sendRPCMessage
     import urllib.parse, base64
 
     args = msg.args or []

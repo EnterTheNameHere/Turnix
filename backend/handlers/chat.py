@@ -9,7 +9,6 @@ from backend.core.time import nowMonotonicMs
 from backend.handlers.context import HandlerContext
 from backend.rpc.messages import createErrorMessage, createReplyMessage
 from backend.rpc.models import RPCMessage, Route
-from backend.rpc.transport import sendRPCMessage
 from backend.views.view import Session
 
 logger = logging.getLogger(__name__)
@@ -19,6 +18,8 @@ logger = logging.getLogger(__name__)
 # NOTE(single-socket): we store subs in a session-level set and fanout via ctx.ws only.
 # Multiple sockets bound to the same session won’t all receive updates.
 async def handleSubscribeChatThread(ctx: HandlerContext, msg: RPCMessage):
+    from backend.rpc.transport import sendRPCMessage
+    
     # Register subscriber
     ctx.session.chat["subs"].add(msg.id)
 
@@ -48,6 +49,8 @@ async def handleRequestChatStart(ctx: HandlerContext, msg: RPCMessage):
     Payload/args: text (required), model/temperature/.. (optional)
     Effects: Emits threadDelta/messageDelta over chat.thread@1
     """
+    from backend.rpc.transport import sendRPCMessage
+
     llm = state.SERVICES.get("llm")
     if llm is None:
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
@@ -161,6 +164,8 @@ async def handleSubscribeChat(ctx: HandlerContext, msg: RPCMessage):
     """
     Subscribe: chat@1 (streaming, cancellable)
     """
+    from backend.rpc.transport import sendRPCMessage
+
     llm = state.SERVICES.get("llm")
     if llm is None:
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
@@ -324,6 +329,8 @@ def _appendMessage(sess: Session, *, role: str, content: str, status: str, runId
 async def _pushThreadUpdate(ctx: HandlerContext, payload: dict):
     # NOTE(single-socket): fanout sends to ctx.ws only. If the session has multiple sockets,
     # only the originating one gets updates. To support multi-socket, track subs per-socket.
+    from backend.rpc.transport import sendRPCMessage
+
     for subId in list(ctx.session.chat["subs"]):
         try:
             await sendRPCMessage(ctx.ws, RPCMessage(

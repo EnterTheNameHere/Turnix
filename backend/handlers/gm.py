@@ -12,7 +12,6 @@ from backend.handlers.context import HandlerContext
 from backend.rpc.messages import createReplyMessage
 from backend.rpc.models import RPCMessage
 from backend.rpc.session import RPCSession
-from backend.rpc.transport import sendRPCMessage
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +22,8 @@ async def handleSubscribeGMWorld(ctx: HandlerContext, msg: RPCMessage):
     Subscribe: gm.world@1
     """
     async def streamWorld(correlatesTo: str, lane: str, session: RPCSession):
+        from backend.rpc.transport import sendRPCMessage
+
         try:
             while True:
                 await asyncio.sleep(2.0)
@@ -60,6 +61,8 @@ async def handleRequestGMNarration(ctx: HandlerContext, msg: RPCMessage):
     Request: gm.narration@1 (simple, cancellable)
     """
     async def run():
+        from backend.rpc.transport import sendRPCMessage
+        
         start = nowMonotonicMs()
         try:
             # Quick demo latency but honor budget if smaller

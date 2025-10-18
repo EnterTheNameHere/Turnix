@@ -8,7 +8,6 @@ from backend.core.jsonutils import tryJSONify
 from backend.handlers.context import HandlerContext
 from backend.rpc.models import RPCMessage
 from backend.rpc.messages import createErrorMessage, createReplyMessage
-from backend.rpc.transport import sendRPCMessage
 
 OBJECTS: dict[str, Receiver] = {}
 
@@ -88,6 +87,8 @@ async def handleRequestObject(ctx: HandlerContext, msg: RPCMessage):
     - call: payload.method, payload.args?, payload.kwargs? -> result
     - snapshot: -> {oid, kind, version, state}
     """
+    from backend.rpc.transport import sendRPCMessage
+    
     oid = (msg.route.object or "").strip() if msg.route else ""
     try:
         rcv = getObject(oid)
