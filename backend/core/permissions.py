@@ -1,7 +1,6 @@
 # backend/core/permissions.py
 from __future__ import annotations
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import Any, Literal
 
 from semantic_version import Version, NpmSpec
