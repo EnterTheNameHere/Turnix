@@ -13,15 +13,15 @@ def evaluateOp(left: Any, op: str, right: Any) -> bool:
 
     if op == "equals":
         return left is right or left == right
-    if op == "notEquals":
+    if op == "notequals":
         return not (left is right or left == right)
     if op == "in":
         return isinstance(right, (list, set, tuple)) and left in right
-    if op == "notIn":
+    if op == "notin":
         return isinstance(right, (list, set, tuple)) and left not in right
     if op == "exists":
         return left is not None
-    if op == "notExists":
+    if op == "notexists":
         return left is None
     if op == "lt":
         return isinstance(left, (int, float)) and isinstance(right, (int, float)) and left < right
