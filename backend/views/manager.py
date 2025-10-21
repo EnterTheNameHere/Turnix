@@ -11,7 +11,8 @@ __all__ = ["ViewManager", "viewManager"]
 
 class ViewManager:
     """
-    Tracks which View a WebSocket is attached to.
+    Tracks which View a WebSocket is attached to and per-view subscription membership
+    for streaming fanout.
     """
     def __init__(self):
         # Note: WebSocket objects are hashable, so they can be used as dict keys.
@@ -60,10 +61,6 @@ class ViewManager:
                 if not wsSet:
                     self._wsByViewId.pop(viewId, None)
     
-    def socketsForView(self, viewId: str) -> set[WebSocket]:
-        """Return a snapshot set of sockets for a view (safe to iterate)."""
-        return set(self._wsByViewId.get(viewId, ()))
-
     def unbindAllForView(self, viewId: str) -> int:
         """
         Unbind all sockets currently attached to viewId.
@@ -77,6 +74,41 @@ class ViewManager:
             if self._viewIdByWs.pop(ws, None) == viewId:
                 count += 1
         return count
+
+    def socketsForView(self, viewId: str) -> set[WebSocket]:
+        """
+        Returns a snapshot set of sockets for a view (safe to iterate).
+        The returned set is a copy and won't mutate internal state.
+        """
+        return set(self._wsByViewId.get(viewId, ()))
+
+    def viewIds(self) -> set[str]:
+        """
+        Returns a snapshot set of all viewIds that currently have at least one socket.
+        """
+        return set(self._wsByViewId.keys())
+    
+    def socketsByViewSnapshot(self) -> dict[str, set[WebSocket]]:
+        """
+        Returns a snapshot mapping of viewId -> set(WebSocket).
+        Each set is a copy; safe to iterate and will not mutate internal state.
+        """
+        return {viewId: set(sockSet) for viewId, sockSet in self._wsByViewId.items()}
+    
+    def iterViews(self):
+        """
+        Yield (viewId, socketsSnapshot) for each active view.
+        socketsSnapshot is a copy (safe to iterate).
+        """
+        for viewId, sockSet in self._wsByViewId.items():
+            yield viewId, set(sockSet)
+    
+    def iterAllSockets(self):
+        """
+        Yield (ws, viewId) pairs for all currently bound sockets.
+        """
+        for ws, viewId in self._viewIdByWs.items():
+            yield ws, viewId
 
 
 
