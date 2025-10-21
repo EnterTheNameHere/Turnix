@@ -11,6 +11,7 @@ if (!globalThis.crypto?.subtle?.digest) {
 import { uuidv7 } from 'uuidv7'; // It's fine to use import here
 
 const { RpcClient } = await turnixImport('/assets/rpc-client.js');
+const { registerDevLogs } = await turnixImport('/assets/dev-logs.js');
 const { loadMods } = await turnixImport('/assets/mod-loader.js');
 
 function safeGet(key) {
@@ -82,6 +83,8 @@ const rpc = await RpcClient.connect(wsUrl, {
         }
     }
 });
+
+registerDevLogs(rpc, {ui: true});
 
 globalThis.Turnix = {settings};
 Object.freeze(globalThis.Turnix);
