@@ -11,7 +11,7 @@ from backend.core.time import nowMonotonicMs
 from backend.handlers.context import HandlerContext
 from backend.rpc.messages import createReplyMessage
 from backend.rpc.models import RPCMessage
-from backend.rpc.session import RPCConnection
+from backend.rpc.connection import RPCConnection
 
 logger = logging.getLogger(__name__)
 

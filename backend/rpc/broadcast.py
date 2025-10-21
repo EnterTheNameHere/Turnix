@@ -7,7 +7,7 @@ from fastapi import WebSocket
 
 from backend.views.manager import viewManager
 from backend.core.ids import uuidv7
-from backend.rpc.session import getRPCConnection
+from backend.rpc.connection import getRPCConnection
 from backend.rpc.transport import sendRPCMessage
 
 logger = logging.getLogger(__name__)

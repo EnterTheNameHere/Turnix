@@ -17,7 +17,7 @@ from backend.core.logging.handlers import getJSLogHandler
 from backend.rpc.logging import decideAndLog
 from backend.rpc.messages import createAckMessage, createWelcomeMessage, createErrorMessage
 from backend.rpc.models import RPCMessage, Route
-from backend.rpc.session import RPCConnection, getRPCConnection
+from backend.rpc.connection import RPCConnection, getRPCConnection
 from backend.views.manager import viewManager
 from backend.views.registry import viewRegistry
 from backend.views.view import View
