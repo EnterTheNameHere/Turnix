@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal, Mapping
 
 from backend.rpc.models import RPCMessage
-from backend.core.redaction import defaultRedactor
+from backend.core.redaction import redactText
 from backend.core.jsonutils import safeJsonDumps
 from backend.app.settings import settings
 from backend.core.dictpath import getByPath
@@ -17,7 +17,7 @@ __all__ = ["shouldLogRpcMessage", "decideAndLog"]
 
 
 def _shorten(text: str, *, maxLen: int = 4096) -> str:
-    text = defaultRedactor(text)
+    text = redactText(text)
     return (text[:maxLen] + "…") if (maxLen and len(text) > maxLen) else text
 
 
