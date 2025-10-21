@@ -13,6 +13,7 @@ from backend.core.time import nowMonotonicMs
 from backend.handlers.context import HandlerContext
 from backend.handlers.objects import handleRequestObject
 from backend.handlers.register import SUBSCRIBE_HANDLERS, REQUEST_HANDLERS, EMIT_HANDLERS
+from backend.core.logging.handlers import getJSLogHandler
 from backend.rpc.logging import decideAndLog
 from backend.rpc.messages import createAckMessage, createWelcomeMessage, createErrorMessage
 from backend.rpc.models import RPCMessage, Route
@@ -25,9 +26,23 @@ logger = logging.getLogger(__name__)
 
 
 
-async def sendRPCMessage(ws: WebSocket, message: RPCMessage):
+async def sendRPCMessage(ws: WebSocket, message: RPCMessage, *, override_shouldLog: bool | None = None):
+    """
+    Send an RPCMessage over WebSocket.
+
+    Parameters
+      - ws: WebSocket - Active websocket connection
+      - message: RPCMessage - Message to send over the WebSocket
+      - override_shouldLog: bool | None - Override the default logging behavior for this message.
+        • None  → Follow the default behavior as defined by decideAndLog()
+        • True  → Force logging even if globally disabled
+        • False → Do not log this message even if globally enabled
+    """
     jsonText = safeJsonDumps(message)
-    decideAndLog("outgoing", rpcMessage=message, text=jsonText)
+    
+    if override_shouldLog is None or override_shouldLog is True:
+        decideAndLog("outgoing", rpcMessage=message, text=jsonText)
+
     await ws.send_text(jsonText)
 
 
@@ -147,6 +162,9 @@ def mountWebSocket(app: FastAPI):
                         view, _ = viewRegistry.getOrCreateViewForClient(clientId)
 
                     viewManager.bind(ws=ws, view=view)
+                    
+                    # Enable JS log streaming once at first bind
+                    getJSLogHandler().setReady(True)
 
                     sessLocal = getSession(view.id, clientId, "session-1")
                     gen = sessLocal.newGeneration()
@@ -328,6 +346,8 @@ def mountWebSocket(app: FastAPI):
                     task.cancel()
             try:
                 viewManager.removeViewForWs(ws)
+                if not viewManager.viewIds():
+                    getJSLogHandler().setReady(False)
             except Exception:
                 pass
 
