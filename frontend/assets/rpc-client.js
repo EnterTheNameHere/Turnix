@@ -1322,9 +1322,9 @@ export function defaultSettings() {
             tracebackCharLimit: 4_000,
             backend:  {rpc: {maxPreviewChars: 1_000_000,
                              incomingMessages: {log: false, ignoreTypes: ['ack', 'heartbeat']},
-                             outgoingMessages: {log: false, ignoreTypes: ['ack', 'heartbeat'], rules: [{type: 'stateUpdate', shouldLog: true, tests: [{property: 'payload.done', op: 'notExists', value: true, shouldLog: false}]}]}}},
+                             outgoingMessages: {log: false, ignoreTypes: ['ack', 'heartbeat'], rules: [{type: 'stateUpdate', shouldLog: true, tests: [{property: 'payload.fields.status', op: 'notEquals', value: 'final', shouldLog: false}]}]}}},
             frontend: {rpc: {maxPreviewChars: 1_000_000,
-                             incomingMessages: {log: false, ignoreTypes: ['ack', 'heartbeat'], rules: [{type: 'stateUpdate', shouldLog: true, tests: [{property: 'payload.done', op: 'notExists', value: true, shouldLog: false}]}]},
+                             incomingMessages: {log: false, ignoreTypes: ['ack', 'heartbeat'], rules: [{type: 'stateUpdate', shouldLog: true, tests: [{property: 'payload.fields.status', op: 'notEquals', value: 'final', shouldLog: false}]}]},
                              outgoingMessages: {log: false, ignoreTypes: ['ack', 'heartbeat']}}},
         },
     };

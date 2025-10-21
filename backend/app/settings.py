@@ -69,13 +69,13 @@ SETTINGS: JsonValue = (
                 "rpc": {
                     "maxPreviewChars": 1_000_000,
                     "incomingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"]},
-                    "outgoingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"], "rules": [{"type": "stateUpdate", "shouldLog": True, "tests": [{"property": "payload.done", "op": "notExists", "value": True, "shouldLog": False}]}]},
+                    "outgoingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"], "rules": [{"type": "stateUpdate", "shouldLog": True, "tests": [{"property": "payload.fields.status", "op": "notEquals", "value": "final", "shouldLog": False}]}]},
                 },
             },
             "frontend": {
                 "rpc": {
                     "maxPreviewChars": 1_000_000,
-                    "incomingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"], "rules": [{"type": "stateUpdate", "shouldLog": True, "tests": [{"property": "payload.done", "op": "notExists", "value": True, "shouldLog": False}]}]},
+                    "incomingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"], "rules": [{"type": "stateUpdate", "shouldLog": True, "tests": [{"property": "payload.fields.status", "op": "notEquals", "value": "final", "shouldLog": False}]}]},
                     "outgoingMessages": {"log": False, "ignoreTypes": ["ack", "heartbeat"]},
                 },
             },
