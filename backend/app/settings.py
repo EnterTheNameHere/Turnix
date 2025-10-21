@@ -56,6 +56,14 @@ SETTINGS: JsonValue = (
             "buckets": {"default": {"rpm": 600, "burst": 200}},
         },
         "debug": {
+            "devModeEnabled": False,
+            "tracingEnabled": False,
+            "suppressRecurringMessages": {
+                "enabled": "true",
+                "windowSeconds": 60,
+                "maxPerWindow": 5,
+                "summaryLevel": "INFO",
+            },
             "tracebackCharLimit": 4_000,
             "backend": {
                 "rpc": {
