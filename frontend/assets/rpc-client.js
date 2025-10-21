@@ -1106,7 +1106,6 @@ export class RpcClient {
     #stopHeartbeat() {
         if(this.heartbeat.timer) clearInterval(this.heartbeat.timer);
         this.heartbeat.timer = null;
-        console.log('Inside #stopHeartbeat now');
     }
 
     #tickHeartbeat() {
