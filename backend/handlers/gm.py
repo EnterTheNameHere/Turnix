@@ -11,7 +11,7 @@ from backend.core.time import nowMonotonicMs
 from backend.handlers.context import HandlerContext
 from backend.rpc.messages import createReplyMessage
 from backend.rpc.models import RPCMessage
-from backend.rpc.session import RPCSession
+from backend.rpc.session import RPCConnection
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ async def handleSubscribeGMWorld(ctx: HandlerContext, msg: RPCMessage):
     """
     Subscribe: gm.world@1
     """
-    async def streamWorld(correlatesTo: str, lane: str, session: RPCSession):
+    async def streamWorld(correlatesTo: str, lane: str, rpcConnection: RPCConnection):
         from backend.rpc.transport import sendRPCMessage
 
         try:
@@ -34,7 +34,7 @@ async def handleSubscribeGMWorld(ctx: HandlerContext, msg: RPCMessage):
                     type="stateUpdate",
                     correlatesTo=correlatesTo,
                     lane=lane,
-                    gen=session.gen(),
+                    gen=rpcConnection.gen(),
                     payload=payload,
                 ))
         except asyncio.CancelledError:
@@ -47,12 +47,12 @@ async def handleSubscribeGMWorld(ctx: HandlerContext, msg: RPCMessage):
             logger.debug("gm.world stream stopped unexpectedly: %s", err)
         finally:
             # Ensure we drop the subscription record
-            ctx.rpcSession.subscriptions.pop(correlatesTo, None)
+            ctx.rpcConnection.subscriptions.pop(correlatesTo, None)
 
     correlatesTo = msg.id
     lane = msg.lane
-    task = asyncio.create_task(streamWorld(correlatesTo=correlatesTo, lane=lane, session=ctx.rpcSession))
-    ctx.rpcSession.subscriptions[correlatesTo] = task
+    task = asyncio.create_task(streamWorld(correlatesTo=correlatesTo, lane=lane, rpcConnection=ctx.rpcConnection))
+    ctx.rpcConnection.subscriptions[correlatesTo] = task
 
 
 
@@ -68,19 +68,19 @@ async def handleRequestGMNarration(ctx: HandlerContext, msg: RPCMessage):
             # Quick demo latency but honor budget if smaller
             toSleep = min(200, int(msg.budgetMs or 3_000)) / 1_000.0
             await asyncio.sleep(toSleep)
-            if msg.id in ctx.rpcSession.cancelled:
+            if msg.id in ctx.rpcConnection.cancelled:
                 return
             action = (msg.args or ["(silence)"])[0]
             text = f"The GM considers your action {action!r} and responds with a twist."
             reply = createReplyMessage(msg, {
-                "gen": ctx.rpcSession.gen(),
+                "gen": ctx.rpcConnection.gen(),
                 "payload": {"text": text, "spentMs": nowMonotonicMs() - start},
             })
-            ctx.rpcSession.putReply(ctx.rpcSession.dedupeKey(msg), reply)
+            ctx.rpcConnection.putReply(ctx.rpcConnection.dedupeKey(msg), reply)
             await sendRPCMessage(ctx.ws, reply)
         except asyncio.CancelledError:
             pass
     
     task = asyncio.create_task(run())
-    ctx.rpcSession.pending[msg.id] = task
-    task.add_done_callback(lambda _t, lSession=ctx.rpcSession, lMsgId=msg.id: (lSession.pending.pop(lMsgId, None), lSession.cancelled.discard(lMsgId)))
+    ctx.rpcConnection.pending[msg.id] = task
+    task.add_done_callback(lambda _t, lSession=ctx.rpcConnection, lMsgId=msg.id: (lSession.pending.pop(lMsgId, None), lSession.cancelled.discard(lMsgId)))

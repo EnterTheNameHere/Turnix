@@ -123,7 +123,7 @@ class Session:
                 "alwaysIncludeSystem": True,
             },
             "subs": set() # correlatesTo ids of chat.thread@1 subscribers
-                          # NOTE(single-socket): subscription IDs are tracked per-session
+                          # NOTE(single-socket): subscription IDs are tracked per-connection
                           # but fanout currently sends only via the caller's ws.
                           # If multiple sockets attach to the same session, they won’t all receive updates.
         }

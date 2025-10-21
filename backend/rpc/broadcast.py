@@ -7,7 +7,7 @@ from fastapi import WebSocket
 
 from backend.views.manager import viewManager
 from backend.core.ids import uuidv7
-from backend.rpc.session import getSession
+from backend.rpc.session import getRPCConnection
 from backend.rpc.transport import sendRPCMessage
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ async def _sendOne(ws: WebSocket, viewId: str, capability: str, payload: dict[st
         except Exception:
             clientId = None
         
-        sess = getSession(viewId, clientId, "session-1")
+        sess = getRPCConnection(viewId, clientId, "session-1")
         msg = RPCMessage(
             id=uuidv7(),
             v="0.1",

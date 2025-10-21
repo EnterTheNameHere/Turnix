@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 
-# NOTE(single-socket): we store subs in a session-level set and fanout via ctx.ws only.
+# NOTE(single-socket): we store subs in a connection-level set and fanout via ctx.ws only.
 # Multiple sockets bound to the same session won’t all receive updates.
 async def handleSubscribeChatThread(ctx: HandlerContext, msg: RPCMessage):
     from backend.rpc.transport import sendRPCMessage
@@ -37,7 +37,7 @@ async def handleSubscribeChatThread(ctx: HandlerContext, msg: RPCMessage):
         type="stateUpdate",
         correlatesTo=msg.id,
         lane=msg.lane,
-        gen=ctx.rpcSession.gen(),
+        gen=ctx.rpcConnection.gen(),
         payload=snapshot,
     ))
 
@@ -54,7 +54,7 @@ async def handleRequestChatStart(ctx: HandlerContext, msg: RPCMessage):
     llm = state.SERVICES.get("llm")
     if llm is None:
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-            "gen": ctx.rpcSession.currentGeneration(),
+            "gen": ctx.rpcConnection.currentGeneration(),
             "payload": {"code":"SERVICE_UNAVAILABLE", "message":"LLM driver is not available"}
         }))
         return
@@ -62,7 +62,7 @@ async def handleRequestChatStart(ctx: HandlerContext, msg: RPCMessage):
     text = (msg.args or [None])[0] or msg.payload.get("text")
     if not isinstance(text, str) or not text.strip():
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-            "gen": ctx.rpcSession.currentGeneration(),
+            "gen": ctx.rpcConnection.currentGeneration(),
             "payload": {"code":"BAD_REQUEST", "message":"'text' is required"}
         }))
         return
@@ -100,7 +100,7 @@ async def handleRequestChatStart(ctx: HandlerContext, msg: RPCMessage):
 
     # Kick off the driver stream in background, reply immediately with runId
     await sendRPCMessage(ctx.ws, createReplyMessage(msg, {
-        "gen": ctx.rpcSession.currentGeneration(),
+        "gen": ctx.rpcConnection.currentGeneration(),
         "payload": {"runId": runId}
     }))
 
@@ -119,7 +119,7 @@ async def handleRequestChatStart(ctx: HandlerContext, msg: RPCMessage):
                 top_p=payload.get("top_p"),
                 extra=payload.get("extra"),
             ):
-                if msg.id in ctx.rpcSession.cancelled:
+                if msg.id in ctx.rpcConnection.cancelled:
                     wasCancelled = True
                     break
 
@@ -155,8 +155,8 @@ async def handleRequestChatStart(ctx: HandlerContext, msg: RPCMessage):
             logger.exception("chat.start pipeline error: %s", err)
     
     task = asyncio.create_task(_run())
-    ctx.rpcSession.pending[msg.id] = task
-    task.add_done_callback(lambda _t, lRpcSession=ctx.rpcSession, lMsgId=msg.id: (lRpcSession.pending.pop(lMsgId, None), lRpcSession.cancelled.discard(lMsgId)))
+    ctx.rpcConnection.pending[msg.id] = task
+    task.add_done_callback(lambda _t, lRpcConnection=ctx.rpcConnection, lMsgId=msg.id: (lRpcConnection.pending.pop(lMsgId, None), lRpcConnection.cancelled.discard(lMsgId)))
 
 
 
@@ -169,7 +169,7 @@ async def handleSubscribeChat(ctx: HandlerContext, msg: RPCMessage):
     llm = state.SERVICES.get("llm")
     if llm is None:
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-            "gen": ctx.rpcSession.currentGeneration(),
+            "gen": ctx.rpcConnection.currentGeneration(),
             "payload": {"code":"SERVICE_UNAVAILABLE", "message": "LLM driver is not available"}
         }))
         return
@@ -199,12 +199,12 @@ async def handleSubscribeChat(ctx: HandlerContext, msg: RPCMessage):
                 top_p=msg.payload.get("top_p"),
                 extra=msg.payload.get("extra"),
             ):
-                if msg.id in ctx.rpcSession.cancelled:
+                if msg.id in ctx.rpcConnection.cancelled:
                     break
 
                 if event.get("error"):
                     await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-                        "gen": ctx.rpcSession.currentGeneration(),
+                        "gen": ctx.rpcConnection.currentGeneration(),
                         "payload": {"code":"ERR_LLM_STREAM", "message": event.get("error"), "err": event},
                     }))
                     break
@@ -222,7 +222,7 @@ async def handleSubscribeChat(ctx: HandlerContext, msg: RPCMessage):
                     v="0.1",
                     type="stateUpdate",
                     lane=msg.lane,
-                    gen=ctx.rpcSession.gen(),
+                    gen=ctx.rpcConnection.gen(),
                     correlatesTo=msg.id,
                     payload={"delta": delta}
                 ))
@@ -230,7 +230,7 @@ async def handleSubscribeChat(ctx: HandlerContext, msg: RPCMessage):
             pass
         except Exception as err:
             await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-                "gen": ctx.rpcSession.currentGeneration(),
+                "gen": ctx.rpcConnection.currentGeneration(),
                 "payload": {"code":"ERR_LLM", "message":str(err), "err": err, "retryable": True},
             }))
         else:
@@ -240,14 +240,14 @@ async def handleSubscribeChat(ctx: HandlerContext, msg: RPCMessage):
                 v="0.1",
                 type="stateUpdate",
                 lane=msg.lane,
-                gen=ctx.rpcSession.gen(),
+                gen=ctx.rpcConnection.gen(),
                 correlatesTo=msg.id,
                 payload={"text": fullText, "delta": "", "done": True},
             ))
     
     task = asyncio.create_task(run())
-    ctx.rpcSession.pending[msg.id] = task
-    task.add_done_callback(lambda _t, lSession=ctx.rpcSession, lMsgId=msg.id: (lSession.pending.pop(lMsgId, None), lSession.cancelled.discard(lMsgId)))
+    ctx.rpcConnection.pending[msg.id] = task
+    task.add_done_callback(lambda _t, lSession=ctx.rpcConnection, lMsgId=msg.id: (lSession.pending.pop(lMsgId, None), lSession.cancelled.discard(lMsgId)))
 
 
 
@@ -338,7 +338,7 @@ async def _pushThreadUpdate(ctx: HandlerContext, payload: dict):
                 v="0.1",
                 type="stateUpdate",
                 route=Route(capability="chat.thread@1"),
-                gen=ctx.rpcSession.gen(),
+                gen=ctx.rpcConnection.gen(),
                 correlatesTo=subId,
                 payload=payload,
             ))

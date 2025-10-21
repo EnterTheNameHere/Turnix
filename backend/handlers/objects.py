@@ -94,7 +94,7 @@ async def handleRequestObject(ctx: HandlerContext, msg: RPCMessage):
         rcv = getObject(oid)
     except KeyError:
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-            "gen": ctx.rpcSession.gen(),
+            "gen": ctx.rpcConnection.gen(),
             "payload": {"code": "OBJECT_NOT_FOUND", "message": f"Unknown object '{oid}'"},
         }))
         return
@@ -107,7 +107,7 @@ async def handleRequestObject(ctx: HandlerContext, msg: RPCMessage):
             path = payload.get("path") or msg.path
             value = rcv.get(path)
             await sendRPCMessage(ctx.ws, createReplyMessage(msg, {
-                "gen": ctx.rpcSession.gen(),
+                "gen": ctx.rpcConnection.gen(),
                 "payload": {"value": value, "version": rcv.version},
             }))
             return
@@ -118,7 +118,7 @@ async def handleRequestObject(ctx: HandlerContext, msg: RPCMessage):
                 raise ValueError("set requires 'path'")
             version = rcv.set(path, payload.get("value"))
             await sendRPCMessage(ctx.ws, createReplyMessage(msg, {
-                "gen": ctx.rpcSession.gen(),
+                "gen": ctx.rpcConnection.gen(),
                 "payload": {"ok": True, "version": version},
             }))
             return
@@ -127,7 +127,7 @@ async def handleRequestObject(ctx: HandlerContext, msg: RPCMessage):
             raw_method = payload.get("method")
             if not isinstance(raw_method, str):
                 await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-                    "gen": ctx.rpcSession.gen(),
+                    "gen": ctx.rpcConnection.gen(),
                     "payload": {
                         "code": "OBJECT_CALL_FAIL_INVALID_METHOD_NAME",
                         "message": f"'method' to call must be a string ('{oid}')"
@@ -137,7 +137,7 @@ async def handleRequestObject(ctx: HandlerContext, msg: RPCMessage):
             method = raw_method.strip()
             if not method:
                 await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-                    "gen": ctx.rpcSession.gen(),
+                    "gen": ctx.rpcConnection.gen(),
                     "payload": {
                         "code": "OBJECT_CALL_FAIL_METHOD_NAME_EMPTY",
                         "message": f"'method' to call cannot be empty ('{oid}')"
@@ -155,7 +155,7 @@ async def handleRequestObject(ctx: HandlerContext, msg: RPCMessage):
             if asyncio.iscoroutine(res):
                 res = await res
             await sendRPCMessage(ctx.ws, createReplyMessage(msg, {
-                "gen": ctx.rpcSession.gen(),
+                "gen": ctx.rpcConnection.gen(),
                 "payload": {"result": res, "version": rcv.version},
             }))
             return
@@ -163,18 +163,18 @@ async def handleRequestObject(ctx: HandlerContext, msg: RPCMessage):
         if op == "snapshot":
             snap = rcv.snapshot()
             await sendRPCMessage(ctx.ws, createReplyMessage(msg, {
-                "gen": ctx.rpcSession.gen(),
+                "gen": ctx.rpcConnection.gen(),
                 "payload": snap,
             }))
             return
         
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-            "gen": ctx.rpcSession.gen(),
+            "gen": ctx.rpcConnection.gen(),
             "payload": {"code": "UNKNOWN_OP", "message": f"Unsupported op '{op}' for object '{rcv.kind}'"},
         }))
     
     except Exception as err:
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-            "gen": ctx.rpcSession.gen(),
+            "gen": ctx.rpcConnection.gen(),
             "payload": {"code": "OBJECT_ERROR", "message": str(err), "err": err},
         }))

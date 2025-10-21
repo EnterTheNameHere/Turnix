@@ -17,7 +17,7 @@ from backend.core.logging.handlers import getJSLogHandler
 from backend.rpc.logging import decideAndLog
 from backend.rpc.messages import createAckMessage, createWelcomeMessage, createErrorMessage
 from backend.rpc.models import RPCMessage, Route
-from backend.rpc.session import RPCSession, getSession
+from backend.rpc.session import RPCConnection, getRPCConnection
 from backend.views.manager import viewManager
 from backend.views.registry import viewRegistry
 from backend.views.view import View
@@ -59,7 +59,7 @@ async def sendBytes(ws: WebSocket, data: bytes):
 
 
 
-async def _ensureCapabilityOrError(ws: WebSocket, sess: RPCSession, msg: RPCMessage, capability: str) -> bool:
+async def _ensureCapabilityOrError(ws: WebSocket, sess: RPCConnection, msg: RPCMessage, capability: str) -> bool:
     """Resolve principal and enforce capability permission. Reply with error on denial."""
     try:
         principal = resolvePrincipal(msg)
@@ -83,7 +83,7 @@ def mountWebSocket(app: FastAPI):
     @app.websocket("/ws")
     async def wsEndpoint(ws: WebSocket):
         await ws.accept()
-        sessLocal: RPCSession | None = None
+        sessLocal: RPCConnection | None = None
         view: View | None = None
         clientId: str | None = None
         
@@ -166,7 +166,7 @@ def mountWebSocket(app: FastAPI):
                     # Enable JS log streaming once at first bind
                     getJSLogHandler().setReady(True)
 
-                    sessLocal = getSession(view.id, clientId, "session-1")
+                    sessLocal = getRPCConnection(view.id, clientId, "session-1")
                     gen = sessLocal.newGeneration()
 
                     # Send snapshot state with welcome
@@ -294,14 +294,14 @@ def mountWebSocket(app: FastAPI):
                     if not await _ensureCapabilityOrError(ws, sessLocal, msg, capability):
                         continue
 
-                    await handler(HandlerContext(ws=ws, rpcSession=sessLocal, view=view, session=view.mainSession), msg)
+                    await handler(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=view.mainSession), msg)
                     continue
 
                 if msgType == "request":
                     obj = (msg.route.object if isinstance(msg.route, Route) else None) or None
                     if obj:
                         # TODO: Enforce object-level permission if we use them
-                        await handleRequestObject(HandlerContext(ws=ws, rpcSession=sessLocal, view=view, session=view.mainSession), msg)
+                        await handleRequestObject(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=view.mainSession), msg)
                         continue
                     capability = (msg.route.capability or "").strip() if msg.route else ""
                     handler = REQUEST_HANDLERS.get(capability)
@@ -317,7 +317,7 @@ def mountWebSocket(app: FastAPI):
                     if not await _ensureCapabilityOrError(ws, sessLocal, msg, capability):
                         continue
 
-                    await handler(HandlerContext(ws=ws, rpcSession=sessLocal, view=view, session=view.mainSession), msg)
+                    await handler(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=view.mainSession), msg)
                     continue
 
                 if msgType == "emit":
@@ -335,7 +335,7 @@ def mountWebSocket(app: FastAPI):
                     if not await _ensureCapabilityOrError(ws, sessLocal, msg, capability):
                         continue
 
-                    await handler(HandlerContext(ws=ws, rpcSession=sessLocal, view=view, session=view.mainSession), msg)
+                    await handler(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=view.mainSession), msg)
                     continue
 
         finally:

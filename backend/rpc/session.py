@@ -5,11 +5,11 @@ from typing import Any
 
 from backend.rpc.models import RPCMessage, Gen
 
-__all__ = ["RPCSession", "RPC_SESSIONS", "getSession"]
+__all__ = ["RPCConnection", "RPC_CONNECTIONS", "getRPCConnection"]
 
 
 
-class RPCSession:
+class RPCConnection:
     """
     Holds per-connection state: idempotency cache, pending jobs, etc.
     key: (viewId, clientId | None, sessionId | None)
@@ -80,14 +80,14 @@ class RPCSession:
 
 
 
-RPC_SESSIONS: dict[tuple[str, str | None, str | None], RPCSession] = {}
+RPC_CONNECTIONS: dict[tuple[str, str | None, str | None], RPCConnection] = {}
 
 
 
-def getSession(viewId: str, clientId: str | None, sessionId: str | None) -> RPCSession:
+def getRPCConnection(viewId: str, clientId: str | None, sessionId: str | None) -> RPCConnection:
     key = (viewId, clientId, sessionId)
-    session = RPC_SESSIONS.get(key)
-    if not session:
-        session = RPCSession(key)
-        RPC_SESSIONS[key] = session
-    return session
+    rpcConn = RPC_CONNECTIONS.get(key)
+    if not rpcConn:
+        rpcConn = RPCConnection(key)
+        RPC_CONNECTIONS[key] = rpcConn
+    return rpcConn

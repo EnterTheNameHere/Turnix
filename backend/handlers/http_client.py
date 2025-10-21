@@ -20,7 +20,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
     args = msg.args or []
     if len(args) < 2:
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-            "gen": ctx.rpcSession.gen(),
+            "gen": ctx.rpcConnection.gen(),
             "payload": {"code": "BAD_REQUEST", "message": "Arguments required: method, url"},
         }))
         return
@@ -30,7 +30,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
     method = str(method).upper()
     if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}:
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-            "gen": ctx.rpcSession.gen(),
+            "gen": ctx.rpcConnection.gen(),
             "payload": {"code": "BAD_REQUEST", "message": f"Invalid HTTP method: {method}"},
         }))
         return
@@ -40,7 +40,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
         parsedUrl = urllib.parse.urlparse(url)
         if parsedUrl.scheme not in ("http", "https"):
             await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-                "gen": ctx.rpcSession.gen(),
+                "gen": ctx.rpcConnection.gen(),
                 "payload": {"code": "BAD_URL", "message": f"Unsupported scheme: {parsedUrl.scheme}"}
             }))
             return
@@ -48,7 +48,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
         host = (parsedUrl.hostname or "").lower()
         if not host:
             await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-                "gen": ctx.rpcSession.gen(),
+                "gen": ctx.rpcConnection.gen(),
                 "payload": {"code": "BAD_URL", "message": f"Invalid URL: {url}"},
             }))
             return
@@ -62,7 +62,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
         
         if host not in allowedHosts:
             await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-                "gen": ctx.rpcSession.gen(),
+                "gen": ctx.rpcConnection.gen(),
                 "payload": {
                     "code": "FORBIDDEN_HOST",
                     "message": f"Host {host} not allowed",
@@ -72,7 +72,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
             return
     except Exception as err:
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-            "gen": ctx.rpcSession.gen(),
+            "gen": ctx.rpcConnection.gen(),
             "payload": {"code": "BAD_URL", "message": str(err), "err": err}
         }))
         return
@@ -105,7 +105,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
 
         if not isinstance(response.get("status"), int):
             await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-                "gen": ctx.rpcSession.gen(),
+                "gen": ctx.rpcConnection.gen(),
                 "payload": {"code":"HTTP_ERROR","message":"Received invalid status code."},
             }))
             return
@@ -125,13 +125,13 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
             payload["json"] = response["json"]
 
         await sendRPCMessage(ctx.ws, createReplyMessage(msg, {
-            "gen": ctx.rpcSession.gen(),
+            "gen": ctx.rpcConnection.gen(),
             "payload": payload,
         }))
         return
     except Exception as err:
         await sendRPCMessage(ctx.ws, createErrorMessage(msg, {
-            "gen": ctx.rpcSession.gen(),
+            "gen": ctx.rpcConnection.gen(),
             "payload": {"code":"HTTP_ERROR","message":str(err),"err":err,"retryable": True},
         }))
         return
