@@ -13,9 +13,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "SETTINGS_DEFAULT_PATH", "SETTINGS", "loadUserSettings",
-    "loadSettings", "deepMerge", "allowSymlinks", "pickBudgetMs",
-    "resolveClassCfg"
+    "SETTINGS_DEFAULT_PATH", "SETTINGS", "settings", "settings_bool",
+    "loadUserSettings", "loadSettings", "deepMerge", "allowSymlinks",
+    "pickBudgetMs", "resolveClassCfg"
 ]
 
 
