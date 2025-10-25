@@ -1,7 +1,6 @@
-import asyncio
-from collections.abc import Awaitable, Callable
-
+import sys
 import pytest
+
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -17,21 +16,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
-def _run_async(func: Callable[..., Awaitable], *args, **kwargs):
-    """Run the given coroutine function to completion."""
-    loop = asyncio.new_event_loop()
-    try:
-        asyncio.set_event_loop(loop)
-        return loop.run_until_complete(func(*args, **kwargs))
-    finally:
-        try:
-            loop.run_until_complete(loop.shutdown_asyncgens())
-        finally:
-            asyncio.set_event_loop(None)
-            loop.close()
-
 
 def pytest_configure(config: pytest.Config) -> None:
+    if sys.flags.optimize:
+        raise RuntimeError("Assertions are disabled (optimize > 0)")
+    
     mode = config.getini("asyncio_mode")
     if mode != "strict":
         raise pytest.UsageError(
@@ -45,18 +34,3 @@ def pytest_configure(config: pytest.Config) -> None:
         )
 
     config.addinivalue_line("markers", "asyncio: mark a test to run inside an event loop")
-
-
-@pytest.hookimpl(tryfirst=True)
-def pytest_pyfunc_call(pyfuncitem: pytest.Function) -> bool:
-    marker = pyfuncitem.get_closest_marker("asyncio")
-    if marker is None:
-        return False
-
-    func = pyfuncitem.obj
-    if not asyncio.iscoroutinefunction(func):
-        return False
-
-    kwargs = {arg: pyfuncitem.funcargs[arg] for arg in pyfuncitem._fixtureinfo.argnames}
-    _run_async(func, **kwargs)
-    return True
