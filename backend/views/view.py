@@ -4,9 +4,11 @@ from typing import Any, Literal, TypedDict # pyright: ignore[reportShadowedImpor
 
 from backend.app import state
 from backend.core.ids import uuid_12
+from backend.game.realm import GameRealm
 from backend.mods.frontend_index import makeFrontendIndex
+from backend.sessions.session import Session
 
-__all__ = ["ViewSnapshot", "View", "Session"]
+__all__ = ["ViewSnapshot", "View"]
 
 
 
@@ -15,15 +17,15 @@ class ViewSnapshot(TypedDict):
     template: str
     version: int
     state: dict[str, Any]
-    sessions: dict[str, dict[str, Any]]
+    attachedSessionIds: list[str]
 
 
 
 class View:
     """
     Backend representation of a single frontend instance (Electron's browser page/C# avatar/etc.)
-    - Authoritative state
-    - Owns sessions: one immortal "main", plus hidden/temporary when needed
+    - Authoritative *UI* state.
+    - Attaches to world Session(s) owned by GameRealm (main, temporary, hidden).
     """
     def __init__(self, *, template: str | None = None, viewId: str | None = None):
         self.id: str = viewId or uuid_12("v_")
@@ -37,36 +39,32 @@ class View:
                 },
             }
         }
-        self.version = 0
-        self.sessions: dict[str, Session] = {}
-        self.mainSession = self.createSession("main")
+        self.version: int = 0
+        self.attachedSessionIds: set[str] = set()
     
     def destroy(self) -> None:
         pass
 
-    def createSession(self, kind: Literal["main", "hidden", "temporary"], sessionId: str | None = None) -> Session:
-        if kind == "main":
-            for sess in self.sessions.values():
-                if sess.kind == "main":
-                    return sess
-        # TODO: What if session exists?
-        sess = Session(kind=kind, sessionId=sessionId)
-        self.sessions[sess.id] = sess
-        return sess
+    def attachMainSession(self, realm: GameRealm) -> str:
+        self.attachedSessionIds.add(realm.mainSession.id)
+        self.version += 1
+        return realm.mainSession.id
+
+    def attachSession(self, sessionId: str) -> dict[str, Any]:
+        self.attachedSessionIds.add(sessionId)
+        self.version += 1
+        return {"ok": True, "version": self.version}
     
-    def destroySession(self, sessionId: str) -> dict[str, Any]:
-        sess = self.sessions.get(sessionId)
-        if not sess:
-            raise KeyError(f"session '{sessionId}' does not exist")
-        sess.destroy()
-        del self.sessions[sess.id]
+    def detachSession(self, sessionId: str) -> dict[str, Any]:
+        self.attachedSessionIds.discard(sessionId)
         self.version += 1
         return {"ok": True, "version": self.version}
 
-    def getSession(self, sessionId: str) -> Session | None:
-        return self.sessions.get(sessionId)
-    
+    def isAttached(self, sessionId: str) -> bool:
+        return sessionId in self.attachedSessionIds
+
     def setTemplate(self, template: str) -> dict[str, Any]:
+        template = (template or "").strip()
         if not template:
             raise ValueError("template must be non-empty")
         self.template = template
@@ -94,48 +92,31 @@ class View:
             "template": self.template,
             "version": self.version,
             "state": self.state,
-            "sessions": {sessId: sess.snapshot() for sessId, sess in self.sessions.items()},
+            "attachedSessionIds": sorted(self.attachedSessionIds),
         }
 
-
-
-class Session:
-    """
-    Session (main/hidden/temporary) owned by a View.
-    Distinct from the RPC Session (transport/handshake)
-    """
-    def __init__(self, kind: Literal["main", "hidden", "temporary"], sessionId: str | None = None) -> None:
-        self.kind = kind
-        self.id = sessionId or uuid_12("s_")
-        self.version = 0
-        self.state: dict[str, Any] = {} # Authoritative on backend
-        self.objects: dict[str, Any] = {}
-        self.chat = {
-            "threadId": uuid_12("t_"),
-            "order": [],          # [oid]
-            "headers": {},        # oid -> {role, ts, preview}
-            "messages": {},       # oid -> {role, content?, status, ts, runId?}
-            "historyPolicy": {
-                "strategy": "window",
-                "userTail": 6,
-                "assistantTail": 6,
-                "maxTokens": 2048,
-                "alwaysIncludeSystem": True,
-            },
-            "subs": set() # correlatesTo ids of chat.thread@1 subscribers
-                          # NOTE(single-socket): subscription IDs are tracked per-connection
-                          # but fanout currently sends only via the caller's ws.
-                          # If multiple sockets attach to the same session, they won’t all receive updates.
-        }
-
-    def snapshot(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "kind": self.kind,
-            "version": self.version,
-            "state": self.state,
-            "objects": list(self.objects.keys()),
-        }
-    
-    def destroy(self) -> None:
-        pass
+    def resolveMainSession(self) -> Session:
+        """
+        Resolve the 'main' Session for this View:
+          1) If a GameRealm exists, return it's main Session
+          2) Else fallback to the AppShell's shell Session
+        This MUST always succeed, otherwise the process state is undefined.
+        """
+        realm = state.GAME_REALM
+        if realm is not None:
+            return realm.mainSession
+        
+        # No GameRealm running, use AppShell
+        shell = state.APP_SHELL
+        if shell is not None:
+            return shell.shellSession
+        
+        # If we got here, the app state is corrupted and the UI cannot function.
+        from backend.core.errors import ReactorScramError
+        raise ReactorScramError(
+            "No main session available: neither GAME_REALM nor APP_SHELL is set."
+            " The runtime cannot continue safely. And we don't want to continue unsafely."
+            " Safety is our priority. Wait a moment... Oh, our safety officer has quit the job."
+            " He is fleeing the ship. Oh sure, everybody is fleeing. You should see it - but the UI"
+            " doesn't work, so you can't see anything. Oh well, it was nice knowing you. Ah, the water's here."
+        )
