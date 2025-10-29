@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from backend.app.config import config, configBool
 from backend.views.registry import viewRegistry
+from backend.app import state
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -20,6 +21,12 @@ async def apiBootstrap(request: Request):
     clientId = viewRegistry.ensureClientId(reqCookies)
 
     view, token = viewRegistry.getOrCreateViewForClient(clientId)
+    
+    # Ensure the view has access to at least the shell session while in menu.
+    shell = state.APP_SHELL
+    if shell and not view.isAttached(shell.shellSession.id):
+        view.attachSession(shell.shellSession.id)
+    
     payload = {
         "viewId": view.id,
         "viewToken": token,
