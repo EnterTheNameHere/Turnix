@@ -272,11 +272,9 @@ def mountWebSocket(app: FastAPI):
                     if corrId and corrId in sessLocal.subscriptions:
                         sessLocal.subscriptions[corrId].cancel()
                         sessLocal.subscriptions.pop(corrId, None)
-                    try:
-                        # TODO: make this non main session when we implement multiple sessions for view
-                        view.mainSession.chat["subs"].discard(corrId)
-                    except AttributeError as aerr:
-                        logger.exception("Chat unsubscribe on missing mainSession/subs (corrId=%r): %s", corrId, aerr)
+                    
+                    session = view.resolveMainSession()
+                    session.chat["subs"].discard(corrId)
                     continue
 
                 if msgType == "subscribe":
@@ -293,15 +291,17 @@ def mountWebSocket(app: FastAPI):
                     # Permission check
                     if not await _ensureCapabilityOrError(ws, sessLocal, msg, capability):
                         continue
-
-                    await handler(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=view.mainSession), msg)
+                    
+                    session = view.resolveMainSession()
+                    await handler(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=session), msg)
                     continue
 
                 if msgType == "request":
                     obj = (msg.route.object if isinstance(msg.route, Route) else None) or None
                     if obj:
                         # TODO: Enforce object-level permission if we use them
-                        await handleRequestObject(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=view.mainSession), msg)
+                        session = view.resolveMainSession()
+                        await handleRequestObject(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=session), msg)
                         continue
                     capability = (msg.route.capability or "").strip() if msg.route else ""
                     handler = REQUEST_HANDLERS.get(capability)
@@ -316,8 +316,9 @@ def mountWebSocket(app: FastAPI):
                     # Permission check
                     if not await _ensureCapabilityOrError(ws, sessLocal, msg, capability):
                         continue
-
-                    await handler(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=view.mainSession), msg)
+                    
+                    session = view.resolveMainSession()
+                    await handler(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=session), msg)
                     continue
 
                 if msgType == "emit":
@@ -334,8 +335,9 @@ def mountWebSocket(app: FastAPI):
                     # Permission check
                     if not await _ensureCapabilityOrError(ws, sessLocal, msg, capability):
                         continue
-
-                    await handler(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=view.mainSession), msg)
+                    
+                    session = view.resolveMainSession()
+                    await handler(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=session), msg)
                     continue
 
         finally:
