@@ -9,7 +9,7 @@ from backend.core.time import nowMonotonicMs
 from backend.handlers.context import HandlerContext
 from backend.rpc.messages import createErrorMessage, createReplyMessage
 from backend.rpc.models import RPCMessage, Route
-from backend.views.view import Session
+from backend.sessions.session import Session
 
 logger = logging.getLogger(__name__)
 

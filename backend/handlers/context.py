@@ -5,7 +5,8 @@ from dataclasses import dataclass # pyright: ignore[reportShadowedImports]
 from fastapi import WebSocket
 
 from backend.rpc.connection import RPCConnection
-from backend.views.view import View, Session
+from backend.views.view import View
+from backend.sessions.session import Session
 
 __all__ = ["HandlerContext"]
 
