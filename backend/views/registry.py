@@ -124,7 +124,7 @@ class ViewRegistry:
             return False
         
         # Unbind all clients pointing to this view (with or without a token)
-        for vid, cid in list(self.bindingsByClientId.items()):
+        for cid, vid in list(self.bindingsByClientId.items()):
             if vid == viewId:
                 self.bindingsByClientId.pop(cid, None)
                 self.tokens.pop((viewId, cid), None)
