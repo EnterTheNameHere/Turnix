@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import logging.handlers
 
-from backend.app.settings import settings_bool, settings
+from backend.app.config import config, configBool
 from .formatters import DevFormatter, JsonFormatter, RedactingFormatter
 from .filters import RecurringSuppressFilter
 from .handlers import getJSLogHandler
@@ -44,7 +44,7 @@ def configureLogging():
       - PII scrubbing active
       - Optional recurring suppression (toggle)
     """
-    devMode = settings_bool("debug.devModeEnabled", True)
+    devMode = configBool("debug.devModeEnabled", True)
     rootLevel = logging.DEBUG if devMode else logging.INFO
 
     root = logging.getLogger()
@@ -77,14 +77,14 @@ def configureLogging():
     jsHandler.setFormatter(jsonFmt)
 
     # Optional recurring suppression (disabled by default)
-    if settings_bool("debug.suppressRecurringMessages.enabled", False):
+    if configBool("debug.suppressRecurringMessages.enabled", False):
         # Resolve summaryLevel string like "INFO" → logging.INFO, fallback safe
-        levelName = str(settings("debug.suppressRecurringMessages.summaryLevel", "INFO")).upper()
+        levelName = str(config("debug.suppressRecurringMessages.summaryLevel", "INFO")).upper()
         summaryLevel = getattr(logging, levelName, logging.INFO)
 
         suppressFilter = RecurringSuppressFilter(
-            windowSeconds=int(settings("debug.suppressRecurringMessages.windowSeconds", 60)),
-            maxPerWindow=int(settings("debug.suppressRecurringMessages.maxPerWindow", 5)),
+            windowSeconds=int(config("debug.suppressRecurringMessages.windowSeconds", 60)),
+            maxPerWindow=int(config("debug.suppressRecurringMessages.maxPerWindow", 5)),
             summaryLevel=summaryLevel,
         )
         consoleHandler.addFilter(suppressFilter)

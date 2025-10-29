@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from backend.rpc.models import RPCMessage, Gen
 from backend.core.ids import uuidv7
 from backend.core.jsonutils import serializeError
-from backend.app.settings import pickBudgetMs, settings
+from backend.app.config import pickBudgetMs, config
 
 __all__ = ["createWelcomeMessage", "createAckMessage", "createErrorMessage", "createReplyMessage"]
 
@@ -58,7 +58,7 @@ def createAckMessage(toMsg: RPCMessage, props: dict[str, Any]) -> RPCMessage:
         id=uuidv7(),
         v="0.1",
         type="ack",
-        budgetMs=int(settings("protocol.ackWaitMs", 250)),
+        budgetMs=int(config("protocol.ackWaitMs", 250)),
         gen=gen,
         route=toMsg.route,
         lane="sys",

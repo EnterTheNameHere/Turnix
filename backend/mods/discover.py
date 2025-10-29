@@ -5,7 +5,7 @@ from typing import Any, Mapping # pyright: ignore[reportShadowedImports]
 from pathlib import Path
 from functools import lru_cache
 
-from backend.app.settings import settings_bool
+from backend.app.config import configBool
 from backend.mods.manifest import ModManifest
 from backend.app.paths import ROOT_DIR
 
@@ -40,7 +40,7 @@ def _scanDir(root: Path, parent: Path, out: dict[str, tuple[Path, Path, ModManif
       • Do NOT accept manifests that are symlinks
     - Always ensure discovered directories remain within root
     """
-    allowSymlinks = settings_bool("mods.allowSymlinks", False)
+    allowSymlinks = configBool("mods.allowSymlinks", False)
 
     # Hard guard: parent must remain within the root
     try:
@@ -120,7 +120,7 @@ def scanMods() -> dict[str, tuple[Path, Path, ModManifest, str]]:
     logger.info(
         "Mods discovered (cached): %d (allowSymlinks=%s)",
         len(found),
-        settings_bool("mods.allowSymlinks", False)
+        configBool("mods.allowSymlinks", False)
     )
     return found
 

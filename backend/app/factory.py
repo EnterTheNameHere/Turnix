@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.settings import settings
+from backend.app.config import config
 from backend.app.lifecycle import life
 from backend.app.static_mount import mountStatic
 from backend.core.logger import configureLogging
@@ -22,7 +22,7 @@ def createApp(*, extraRouters: Sequence[APIRouter] = ()) -> FastAPI:
     app = FastAPI(lifespan=life)
 
     # ----- CORS (cookies-ready) -----
-    corsOrigins = settings("http.cors.allowOrigins", ["http://localhost:5173", "http://127.0.0.1:5173"])
+    corsOrigins = config("http.cors.allowOrigins", ["http://localhost:5173", "http://127.0.0.1:5173"])
     if not isinstance(corsOrigins, list):
         corsOrigins = []
 

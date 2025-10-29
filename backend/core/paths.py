@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from os import PathLike
 from fastapi import HTTPException
-from backend.app.settings import settings_bool
+from backend.app.config import configBool
 
 
 
@@ -25,7 +25,7 @@ def resolveSafe(root: Path, requested: str | PathLike[str] | None) -> Path:
     if not resolved.is_relative_to(rootResolved):
         raise HTTPException(403, "Mod path points outside of mod root directory")
 
-    allow_symlinks = settings_bool("mods.allowSymlinks", False)
+    allow_symlinks = configBool("mods.allowSymlinks", False)
     if not allow_symlinks:
         # Leaf itself must not be a symlink either
         if resolved.is_symlink():

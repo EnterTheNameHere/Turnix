@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from backend.app.settings import settings_bool, settings
+from backend.app.config import config, configBool
 from backend.views.registry import viewRegistry
 
 logger = logging.getLogger(__name__)
@@ -31,11 +31,11 @@ async def apiBootstrap(request: Request):
     # Decide cookie flags
     scheme = request.url.scheme
     cookieArrivedBySecure = (scheme == "https")
-    cookieSecure = settings_bool("http.cookie.secure", cookieArrivedBySecure)
-    cookieSameSite = str(settings("http.cookie.sameSite", "lax")).lower()
+    cookieSecure = configBool("http.cookie.secure", cookieArrivedBySecure)
+    cookieSameSite = str(config("http.cookie.sameSite", "lax")).lower()
     if cookieSameSite not in ("lax", "strict", "none"):
         cookieSameSite = "lax"
-    cookieMaxAge = int(settings("http.cookie.maxAgeSec", 60*60*24*30)) # 30 days default
+    cookieMaxAge = int(config("http.cookie.maxAgeSec", 60*60*24*30)) # 30 days default
 
     # Set HttpOnly cookie if missing / rotate to keep it fresh
     if reqCookies.get("clientId") != clientId:

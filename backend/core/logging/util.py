@@ -2,7 +2,7 @@
 from __future__ import annotations
 import logging
 
-from backend.app.settings import settings_bool
+from backend.app.config import configBool
 
 
 
@@ -27,7 +27,7 @@ def getLogger(name: str, side: str = "") -> logging.Logger:
     return logging.getLogger(f"{side}.{name}" if side else name)
 
 def getModLogger(modId: str) -> ModLogger:
-    traceEnabled = settings_bool("debug.tracingEnabled", False)
+    traceEnabled = configBool("debug.tracingEnabled", False)
     return ModLogger(logging.getLogger(f"mod.{modId}"), traceEnabled)
 
 def getProfilerLogger() -> logging.Logger:

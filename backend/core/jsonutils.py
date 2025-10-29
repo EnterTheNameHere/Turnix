@@ -10,7 +10,6 @@ from enum import Enum
 import json, traceback, base64
 
 from backend.rpc.models import RPCMessage
-from backend.app.settings import settings
 
 __all__ = ["safeJsonDumps", "serializeError", "tryJSONify"]
 
@@ -55,6 +54,7 @@ def serializeError(err: Any) -> dict[str, Any]:
         "error text"      -> {"message": "error text"}
         None              -> {}
     """
+    from backend.app.config import config
     if err is None:
         return {}
     
@@ -73,7 +73,7 @@ def serializeError(err: Any) -> dict[str, Any]:
         if traceBack:
             que: deque[str] = deque()
             total = 0
-            limit = int(settings("debug.tracebackCharLimit", 4000))
+            limit = int(config("debug.tracebackCharLimit", 4000))
             truncated = False
 
             for part in traceback.format_tb(traceBack):

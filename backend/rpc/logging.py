@@ -5,7 +5,7 @@ from typing import Any, Literal, Mapping
 from backend.rpc.models import RPCMessage
 from backend.core.redaction import redactText
 from backend.core.jsonutils import safeJsonDumps
-from backend.app.settings import settings
+from backend.app.config import config
 from backend.core.dictpath import getByPath
 from backend.core.ops import evaluateOp
 
@@ -23,7 +23,7 @@ def _shorten(text: str, *, maxLen: int = 4096) -> str:
 
 
 def _rpcLogCfg(direction: Literal["incoming", "outgoing"]) -> Mapping[str, Any]:
-    side = settings("debug.backend.rpc", {}) # May not be a dict
+    side = config("debug.backend.rpc", {}) # May not be a dict
     if not isinstance(side, dict):
         return {"log": False}
     cfg = side.get("incomingMessages") if direction == "incoming" else side.get("outgoingMessages")
@@ -76,7 +76,7 @@ def decideAndLog(
 ) -> None:
     # Hard guard on pathological text sizes. _shorten is running redaction which needs a whole text
     # to avoid mistakingly not redacting a sliced part of text, so it's better to just display nothing...
-    maxChars = int(settings("debug.backend.rpc.maxPreviewChars", 1_000_000))
+    maxChars = int(config("debug.backend.rpc.maxPreviewChars", 1_000_000))
     if text is not None and len(text) > maxChars: # 1MB
         logger.debug(f"[RPC] {direction}: <{len(text)} chars, suppressed>")
         return

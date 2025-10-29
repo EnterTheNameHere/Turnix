@@ -5,7 +5,7 @@ from typing import Literal, Mapping, Any
 from backend.rpc.models import RPCMessage
 from backend.rpc.messages import createErrorMessage, createReplyMessage
 from backend.handlers.context import HandlerContext
-from backend.app.settings import settings
+from backend.app.config import config
 
 
 
@@ -53,7 +53,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
             }))
             return
         
-        rawAllowList = settings("httpProxy.allowList", [])
+        rawAllowList = config("httpProxy.allowList", [])
         if isinstance(rawAllowList, (list, tuple, set)):
             allowedHosts = [str(hh).lower() for hh in rawAllowList]
         else:
@@ -77,7 +77,7 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
         }))
         return
     
-    timeoutCapMs = int(settings("http.timeoutCapMs", 30_000))
+    timeoutCapMs = int(config("http.timeoutCapMs", 30_000))
     timeoutMs = min(int(msg.budgetMs if msg.budgetMs is not None else 3_000), timeoutCapMs)
 
     # Header policies
@@ -94,9 +94,9 @@ async def handleRequestHttpClient(ctx: HandlerContext, msg: RPCMessage):
             data=opts.get("data"),
             params=opts.get("params"),
             timeoutMs=timeoutMs,
-            retries=int(settings("http.retry", 2)),
-            backoffBaseMs=int(settings("http.backoff.baseMs", 250)),
-            backoffMaxMs=int(settings("http.backoff.maxMs", 1_000)),
+            retries=int(config("http.retry", 2)),
+            backoffBaseMs=int(config("http.backoff.baseMs", 250)),
+            backoffMaxMs=int(config("http.backoff.maxMs", 1_000)),
             followRedirects=bool(opts.get("followRedirects", True)),
         )
 
@@ -155,7 +155,7 @@ def _pickPolicy(
         kind: Literal["requestHeaders","responseHeaders"],
         cap: str | None = None,
         host: str | None = None ) -> dict:
-    httpProxy = settings("httpProxy", {})
+    httpProxy = config("httpProxy", {})
     base = dict(httpProxy.get(kind, {})) if isinstance(httpProxy, dict) else {} # Base policy
     policy = dict(base)
 
