@@ -5,7 +5,7 @@ import time
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from backend.app.settings import loadSettings
+from backend.app.config import getGlobalConfig
 
 router = APIRouter()
 
@@ -13,7 +13,7 @@ router = APIRouter()
 
 @router.get("/settings")
 async def getSettings():
-    return JSONResponse(loadSettings(), status_code=200)
+    return JSONResponse(getGlobalConfig().snapshot(), status_code=200)
 
 
 
