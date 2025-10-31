@@ -1,11 +1,13 @@
 # backend/core/permissions.py
 from __future__ import annotations
+import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
 from semantic_version import Version, NpmSpec
 
-import logging
+from backend.core.time import nowMs
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -57,14 +59,8 @@ class GrantPermissionError(Exception):
 #                    Utilities
 # ------------------------------------------------
 
-def _nowMs() -> int:
-    import time as _t
-    return int(_t.time() * 1000)
-
-
-
 def _isExpired(grantPerm: GrantPermission) -> bool:
-    return grantPerm.expiresAtMs is not None and _nowMs() > grantPerm.expiresAtMs
+    return grantPerm.expiresAtMs is not None and nowMs() > grantPerm.expiresAtMs
 
 
 

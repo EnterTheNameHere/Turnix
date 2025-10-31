@@ -2,6 +2,8 @@
 from __future__ import annotations
 import time
 
+__all__ = ["nowMonotonicMs", "nowMs"]
+
 
 
 def nowMonotonicMs() -> int:
@@ -16,3 +18,9 @@ def nowMonotonicMs() -> int:
     except Exception:
         # Fallback: not monotonic, but ensures timestamp
         return int(time.time() * 1000)
+
+
+
+def nowMs() -> int:
+    import time as _t
+    return int(_t.time() * 1000)
