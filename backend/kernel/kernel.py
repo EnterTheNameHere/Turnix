@@ -2,7 +2,7 @@
 from __future__ import annotations
 from pathlib import Path
 
-from backend.memory_layer import (
+from backend.memory.memory_layer import (
     DictMemoryLayer,
     ReadOnlyMemoryLayer,
     MemoryLayer,
