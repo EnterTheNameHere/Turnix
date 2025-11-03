@@ -2,12 +2,15 @@
 from __future__ import annotations
 from pathlib import Path
 
+from backend.app.context import PROCESS_REGISTRY
 from backend.memory.memory_layer import (
     DictMemoryLayer,
     ReadOnlyMemoryLayer,
     MemoryLayer,
 )
 from backend.runtimes.base import BaseRuntime
+
+__all__ = ["Kernel"]
 
 
 
@@ -19,6 +22,9 @@ class Kernel:
     - Can switch active runtimes (game, main menu, headless).
     """
     def __init__(self) -> None:
+        # Make globally discoverable
+        PROCESS_REGISTRY.register("kernel", self, overwrite=True)
+        
         # Process-wide memory
         self.kernelRuntimeMemory: MemoryLayer = DictMemoryLayer("kernelRuntime")
         self.kernelStaticMemory:  MemoryLayer = ReadOnlyMemoryLayer("kernelStatic", {})
@@ -41,13 +47,14 @@ class Kernel:
         self.switchRuntime(br)
         return br
 
-    def switchRuntime(self, runtime: "BaseRuntime") -> None:
+    def switchRuntime(self, runtime: BaseRuntime) -> None:
         """
         Activate given runtime (game, menu, headless...).
         """
         self.activeRuntime = runtime
+        PROCESS_REGISTRY.register("runtime.active", runtime, overwrite=True)
     
-    def getActiveRuntime(self) -> "BaseRuntime | None":
+    def getActiveRuntime(self) -> BaseRuntime | None:
         return self.activeRuntime
     
     def getKernelBottomLayers(self) -> list[MemoryLayer]:
