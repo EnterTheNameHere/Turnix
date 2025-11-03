@@ -4,7 +4,7 @@ import logging
 from fastapi import FastAPI, WebSocket
 from pydantic import ValidationError
 
-from backend.app.state import PERMS
+from backend.app.globals import getPermissions
 from backend.core.auth import resolvePrincipal
 from backend.core.errors import ReactorScramError
 from backend.core.jsonutils import safeJsonDumps
@@ -63,7 +63,7 @@ async def _ensureCapabilityOrError(ws: WebSocket, sess: RPCConnection, msg: RPCM
     """Resolve principal and enforce capability permission. Reply with error on denial."""
     try:
         principal = resolvePrincipal(msg)
-        PERMS.ensure(principal=principal, capability=capability)
+        getPermissions().ensure(principal=principal, capability=capability)
         return True
     except GrantPermissionError as gperr:
         await sendRPCMessage(ws, createErrorMessage(msg, {
