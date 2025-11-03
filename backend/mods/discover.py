@@ -1,16 +1,25 @@
 # backend/mods/discover.py
 from __future__ import annotations
-import os, json5
-from typing import Any, Mapping # pyright: ignore[reportShadowedImports]
+import os
+import json5
+import logging
+from collections.abc import Iterable
 from pathlib import Path
-from functools import lru_cache
+from threading import RLock
+from typing import Any, Mapping # pyright: ignore[reportShadowedImports]
 
 from backend.app.config import configBool
-from backend.mods.manifest import ModManifest
 from backend.app.paths import ROOT_DIR
+from backend.mods.manifest import ModManifest
+from backend.mods.roots_registry import getRoots as getRegisteredRoots
 
-import logging
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "defaultModRoots", "MOD_ROOTS", "scanMods",
+    "rescanMods", "findManifestPath", "scanModsForMount",
+    "rescanModsForMount"
+]
 
 
 
@@ -28,11 +37,36 @@ def defaultModRoots() -> list[tuple[Path, Mapping[str, Any]]]:
 
 
 
+# Key: tuple[str, ...] of resolved root paths ('' means "use defaults")
+_SCAN_CACHE: dict[tuple[str, ...], dict[str, tuple[Path, Path, ModManifest, str]]] = {}
+_SCAN_LOCK = RLock()
 MOD_ROOTS = defaultModRoots()
+IGNORE_DIRS = {".git", "node_modules", "__pycache__"}
 
 
 
-def _scanDir(root: Path, parent: Path, out: dict[str, tuple[Path, Path, ModManifest, str]]) -> None:
+def _normalizeRoots(overrideRoots: Iterable[Path] | None) -> tuple[tuple[Path, ...], tuple[str, ...]]:
+    """
+    Returns (rootsTuple, cacheKey)
+    When overrideRoots is None → use MOD_ROOTS and cacheKey = ('',)
+    """
+    if overrideRoots is None:
+        roots = tuple(root for (root, _cfg) in MOD_ROOTS)
+        key = ('',) # Default sentinel
+        return roots, key
+    rootsTuple = tuple(Path(root).resolve() for root in overrideRoots)
+    key = tuple(str(root) for root in rootsTuple)
+    return rootsTuple, key
+
+
+
+def _scanDir(
+    root: Path,
+    parent: Path,
+    out: dict[str, tuple[Path, Path, ModManifest, str]],
+    *,
+    allowSymlinks: bool,
+) -> None:
     """
     Recursively discover mods under `root`, honoring the symlink policy:
     - If allowSymlinks == False:
@@ -40,8 +74,6 @@ def _scanDir(root: Path, parent: Path, out: dict[str, tuple[Path, Path, ModManif
       • Do NOT accept manifests that are symlinks
     - Always ensure discovered directories remain within root
     """
-    allowSymlinks = configBool("mods.allowSymlinks", False)
-
     # Hard guard: parent must remain within the root
     try:
         rootResolved = root.resolve(strict=True)        # Must exist
@@ -64,7 +96,7 @@ def _scanDir(root: Path, parent: Path, out: dict[str, tuple[Path, Path, ModManif
             return
         
         try:
-            raw = json5.loads(manifestPath.read_text())
+            raw = json5.loads(manifestPath.read_text(encoding="utf-8"))
             manifest = ModManifest.model_validate(raw)
         except Exception as err:
             logger.warning("Skipping mod at '%s' due to manifest error: %s", parent, err)
@@ -89,6 +121,9 @@ def _scanDir(root: Path, parent: Path, out: dict[str, tuple[Path, Path, ModManif
 
     for ch in entries:
         try:
+            name = ch.name
+            if name in IGNORE_DIRS:
+                continue
             if not ch.is_dir():
                 continue
             if not allowSymlinks and ch.is_symlink():
@@ -97,39 +132,54 @@ def _scanDir(root: Path, parent: Path, out: dict[str, tuple[Path, Path, ModManif
             # If any error occurs for this entry, just skip it
             continue
 
-        _scanDir(root, ch, out)
+        _scanDir(root, ch, out, allowSymlinks=allowSymlinks)
 
 
 
-@lru_cache(maxsize=1)
-def scanMods() -> dict[str, tuple[Path, Path, ModManifest, str]]:
+def scanMods(overrideRoots: Iterable[Path] | None = None) -> dict[str, tuple[Path, Path, ModManifest, str]]:
     """
     Returns a mapping:
       modId -> (root, moddir, manifest, manifestFileName)
-    Results are cached. Use rescanMods() to force rescanning.
+    Results are cached per root-set. Use rescanMods() to force rescanning.
     """
+    roots, cacheKey = _normalizeRoots(overrideRoots)
+    
+    with _SCAN_LOCK:
+        cached = _SCAN_CACHE.get(cacheKey)
+        if cached is not None:
+            return cached
+    
     found: dict[str, tuple[Path, Path, ModManifest, str]] = {}
-    for root, _cfg in MOD_ROOTS:
+    allowSymlinks = configBool("mods.allowSymlinks", False)
+
+    for root in roots:
         try:
             if not root.exists():
                 continue
         except Exception:
             continue
-        _scanDir(root, root, found)
+        _scanDir(root, root, found, allowSymlinks=allowSymlinks)
 
     logger.info(
-        "Mods discovered (cached): %d (allowSymlinks=%s)",
+        "Mods discovered: %d (allowSymlinks=%s)",
         len(found),
-        configBool("mods.allowSymlinks", False)
+        allowSymlinks
     )
+    
+    with _SCAN_LOCK:
+        _SCAN_CACHE[cacheKey] = found
     return found
 
 
 
-def rescanMods() -> dict[str, tuple[Path, Path, ModManifest, str]]:
-    """Clears the scan cache and returns a fresh scan result."""
-    scanMods.cache_clear()
-    return scanMods()
+def rescanMods(overrideRoots: Iterable[Path] | None = None) -> dict[str, tuple[Path, Path, ModManifest, str]]:
+    """
+    Clears the cache for the given root-set (or the default set) and rescans.
+    """
+    _roots, cacheKey = _normalizeRoots(overrideRoots)
+    with _SCAN_LOCK:
+        _SCAN_CACHE.pop(cacheKey, None)
+    return scanMods(overrideRoots)
 
 
 
@@ -138,3 +188,19 @@ def findManifestPath(dir: Path) -> Path | None:
     if p1.exists() and p1.is_file(): return p1
     if p2.exists() and p2.is_file(): return p2
     return None
+
+
+
+def scanModsForMount(mountId: str) -> dict[str, tuple[Path, Path, ModManifest, str]]:
+    roots = getRegisteredRoots(mountId)
+    if not roots:
+        return {}
+    return scanMods(roots)
+
+
+
+def rescanModsForMount(mountId: str) -> dict[str, tuple[Path, Path, ModManifest, str]]:
+    roots = getRegisteredRoots(mountId)
+    if not roots:
+        return {}
+    return rescanMods(roots)
