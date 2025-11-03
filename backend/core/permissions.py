@@ -6,11 +6,13 @@ from typing import Any, Literal
 
 from semantic_version import Version, NpmSpec
 
+from backend.app.context import PROCESS_REGISTRY
 from backend.core.time import nowMs
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "initPermissions",
     "Decision",
     "GrantPermission",
     "GrantPermissionError",
@@ -24,11 +26,29 @@ __all__ = [
 
 Decision = Literal["allow", "deny"]
 
+# ------------------------------------------------------------------ #
+# Module singletons
+# ------------------------------------------------------------------ #
 
+_PERMISSION_MANAGER: PermissionManager | None = None
 
-# ------------------------------------------------
-#               Grants / error types
-# ------------------------------------------------
+# ------------------------------------------------------------------ #
+# Core initialization
+# ------------------------------------------------------------------ #
+
+def initPermissions() -> None:
+    global _PERMISSION_MANAGER
+    
+    if _PERMISSION_MANAGER is not None:
+        # Already initialized
+        return
+    _PERMISSION_MANAGER = PermissionManager()
+
+    PROCESS_REGISTRY.register("permissions", _PERMISSION_MANAGER, overwrite=True)
+
+# ------------------------------------------------------------------ #
+# Grants / error types
+# ------------------------------------------------------------------ #
 
 @dataclass(frozen=True)
 class GrantPermission:
@@ -55,9 +75,9 @@ class GrantPermissionError(Exception):
 
 
 
-# ------------------------------------------------
-#                    Utilities
-# ------------------------------------------------
+# ------------------------------------------------------------------ #
+# Utilities
+# ------------------------------------------------------------------ #
 
 def _isExpired(grantPerm: GrantPermission) -> bool:
     return grantPerm.expiresAtMs is not None and nowMs() > grantPerm.expiresAtMs
@@ -88,12 +108,18 @@ def parseCapability(capStr: str) -> tuple[str, Version | None]:
     """
     capStr = (capStr or "").strip()
     if "@" not in capStr:
-        family, verStr = capStr, ""
-    else:
-        family, verStr = capStr.split("@", 1)
+        return capStr, None
+    
+    family, verStr = capStr.split("@", 1)
     verStr = verStr.strip()
+    if not verStr:
+        return family, None
 
-    return family, Version.coerce(verStr) # will raise ValueError if invalid
+    try:
+        return family, Version.coerce(verStr)
+    except ValueError:
+        # Malformed -> treat as "no version", per your doc
+        return family, None
 
 
 
@@ -119,9 +145,9 @@ def parseCapabilityRange(capStr: str) -> tuple[str, NpmSpec]:
 
 
 
-# ------------------------------------------------
-#                    Utilities
-# ------------------------------------------------
+# ------------------------------------------------------------------ #
+# Utilities
+# ------------------------------------------------------------------ #
 
 class PermissionManager:
     """
@@ -192,7 +218,7 @@ class PermissionManager:
                 "PERMISSION_DENIED",
                 f"Principal '{principal}' lacks permission grant for '{family}'",
                 retryable=False,
-                extra={"family": family, "decission": "denied"},
+                extra={"family": family, "decision": "denied"},
             )
         
         if grant.decision != "allow":
@@ -213,5 +239,9 @@ class PermissionManager:
                     retryable=False,
                     extra={"family": family, "requested": str(reqVer), "grant_range": str(grant.rangeSpec), "decision": grant.decision},
                 )
+        
+        if reqVer is None:
+            # Caller asked for "family" only, we already know grant is allow
+            return
         
         return # No further checks, you can proceed.
