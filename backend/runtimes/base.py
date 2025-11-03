@@ -29,6 +29,7 @@ class BaseRuntime:
         runtimeId: str | None = None,
         kernelMemoryLayers: list[MemoryLayer] | None = None,
         saveRoot: Path | str | None = None,
+        createMainSession: bool = True,
     ) -> None:
         self.id = runtimeId or uuid_12("runtime_")
         self.createdTs: float = time.time()
@@ -45,14 +46,19 @@ class BaseRuntime:
         self.sessionsById: dict[str, Session] = {}
 
         # Where this runtime wants to store its sessions
-        # default: saves/runtimes/<runtimeId>/
+        # default: saves/<runtimeId>/
         if saveRoot is None:
-            self.saveRoot: Path = Path("saves") / "runtimes" / self.id
+            self.saveRoot: Path = Path("saves") / self.id
         else:
             self.saveRoot = Path(saveRoot)
         
         if self.saveRoot is not None:
             self.saveRoot.mkdir(parents=True, exist_ok=True)
+        
+        # Main session
+        self.mainSession: Session | None = None
+        if createMainSession:
+            self.mainSession = self.makeSession(kind="main")
 
     def makeSession(
         self,
@@ -68,7 +74,11 @@ class BaseRuntime:
             self.staticMemory,
             *self.kernelBottom,
         ]
-
+        
+        # Enforce single main session
+        if kind == "main" and self.mainSession is not None:
+            raise ValueError(f"Runtime '{self.id}' already has main session '{self.mainSession.id}'")
+        
         sess = Session(
             kind=kind,
             sessionId=sessionId,
@@ -79,6 +89,8 @@ class BaseRuntime:
         )
 
         self.sessionsById[sess.id] = sess
+        if kind == "main":
+            self.mainSession = sess
         self.version += 1
         return sess
     
@@ -86,9 +98,12 @@ class BaseRuntime:
         return self.sessionsById.get(sessionId)
     
     def destroySession(self, sessionId: str) -> dict[str, Any]:
+        # Protect main session
+        if self.mainSession is not None and sessionId == self.mainSession.id:
+            raise ValueError("Cannot destroy main session")
         sess = self.sessionsById.get(sessionId)
         if not sess:
-            raise KeyError(f"session '{sessionId}' does not exist")
+            raise KeyError(f"Session '{sessionId}' does not exist")
         sess.destroy()
         del self.sessionsById[sessionId]
         self.version += 1
@@ -105,6 +120,7 @@ class BaseRuntime:
             "runtimeId": self.id,
             "version": self.version,
             "createdTs": self.createdTs,
+            "mainSessionId": self.mainSession.id if self.mainSession else None,
             "sessions": {sid: sess.snapshot() for sid, sess in self.sessionsById.items()},
         }
 
@@ -112,10 +128,13 @@ class BaseRuntime:
         for sessId, sess in list(self.sessionsById.items()):
             if not sess:
                 continue
-            if keepMain and sess.kind == "main":
+            if keepMain and self.mainSession and sessId == self.mainSession.id:
                 continue
             try:
                 sess.destroy()
             finally:
                 self.sessionsById.pop(sessId, None)
+        # If we removed the main session, forget the pointer
+        if self.mainSession and self.mainSession.id not in self.sessionsById:
+            self.mainSession = None
         self.version += 1
