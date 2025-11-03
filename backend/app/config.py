@@ -1,9 +1,12 @@
-# backend/app/settings.py
+# backend/app/config.py
 from __future__ import annotations
 import logging
 from typing import Any
 
+from backend.app.context import PROCESS_REGISTRY
 from backend.config.service import ConfigService
+from backend.config.schema_loader import SchemaRegistry
+from backend.config.store import ConfigStore
 from backend.core.dictpath import getByPath
 
 logger = logging.getLogger(__name__)
@@ -13,15 +16,15 @@ __all__ = [
     "configBool", "allowSymlinks", "pickBudgetMs", "resolveClassCfg",
 ]
 
-# ----------------------------------------------
-#               Module singletons
-# ----------------------------------------------
+# ------------------------------------------------------------------ #
+# Module singletons
+# ------------------------------------------------------------------ #
 
 _CONFIG_SERVICE: ConfigService | None = None
 
-# ----------------------------------------------
-#              Core initialization
-# ----------------------------------------------
+# ------------------------------------------------------------------ #
+# Core initialization
+# ------------------------------------------------------------------ #
 
 def initConfig() -> None:
     """
@@ -34,6 +37,9 @@ def initConfig() -> None:
         # Already initialized
         return
     _CONFIG_SERVICE = ConfigService.bootstrap()
+    PROCESS_REGISTRY.register("config.service", _CONFIG_SERVICE, overwrite=True)
+    PROCESS_REGISTRY.register("config.global", _CONFIG_SERVICE.globalStore, overwrite=True)
+    PROCESS_REGISTRY.register("config.registry", _CONFIG_SERVICE.registry, overwrite=True)
     logger.info("Config initialized (registry + global store ready)")
 
 
@@ -45,7 +51,7 @@ def _ensure() -> ConfigService:
     assert _CONFIG_SERVICE is not None
     return _CONFIG_SERVICE
 
-def getRegistry():
+def getRegistry() -> SchemaRegistry:
     """
     Returns the process-wide SchemaRegistry.
     """
@@ -53,7 +59,7 @@ def getRegistry():
 
 
 
-def getGlobalConfig():
+def getGlobalConfig() -> ConfigStore:
     """
     Returns the global ConfigStore.
     """
@@ -97,12 +103,10 @@ def allowSymlinks() -> bool:
 
 
 def pickBudgetMs(opts) -> int:
-    if isinstance(opts, dict):
-        budgetMs = opts.get("budgetMs")
-        if budgetMs is None:
-            return int(resolveClassCfg(opts).get("serviceTtlMs", 3000))
-        return int(budgetMs)
-    return 3000
+    if not isinstance(opts, dict):
+        return 3000
+    budgetMs = opts.get("budgetMs")
+    return int(budgetMs or resolveClassCfg(opts).get("serviceTtlMs", 3000))
 
 
 
