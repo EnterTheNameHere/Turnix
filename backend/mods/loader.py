@@ -7,7 +7,7 @@ from typing import Any # pyright: ignore[reportShadowedImports]
 from dataclasses import dataclass
 from pathlib import Path
 
-from backend.app.state import PERMS
+from backend.app.globals import getPermissions
 from backend.core.permissions import PermissionManager, GrantPermission, parseCapabilityRange
 from backend.mods.constants import PY_RUNTIMES
 from backend.mods.discover import scanMods
@@ -50,7 +50,7 @@ async def loadPythonMods(*, settings: dict[str, Any]) -> tuple[list[LoadedPyMod]
     discovered = scanMods()
 
     # TODO: replace with proper permission prompting/flow
-    autoGrantPermissionsForMods(PERMS, discovered)
+    autoGrantPermissionsForMods(getPermissions(), discovered)
 
     enabled: list[tuple[ModManifest, Path, Path, RuntimeSpec]] = []
 
