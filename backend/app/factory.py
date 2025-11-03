@@ -10,6 +10,7 @@ from backend.app.config import config
 from backend.app.lifecycle import life
 from backend.app.static_mount import mountStatic
 from backend.core.logger import configureLogging
+from backend.kernel import Kernel
 from backend.rpc.transport import mountWebSocket
 
 
@@ -19,6 +20,9 @@ def createApp(*, extraRouters: Sequence[APIRouter] = ()) -> FastAPI:
     configureLogging()
     logger = logging.getLogger(__name__)
 
+    # Turnix Boss. It registers itself to globals.
+    kernel = Kernel()
+    
     app = FastAPI(lifespan=life)
 
     # ----- CORS (cookies-ready) -----
