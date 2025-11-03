@@ -9,9 +9,11 @@ from typing import Any
 from fastapi import FastAPI
 
 from backend.app.config import initConfig, getGlobalConfig, getRegistry, _ensure
+from backend.app.globals import getKernel, getPermissions
 from backend.app import state
+from backend.core.permissions import initPermissions
 from backend.mods.loader import loadPythonMods
-from backend.app.shell import AppShell
+from backend.runtimes.main_menu_runtime import MainMenuRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,9 @@ async def life(app: FastAPI) -> AsyncIterator[None]:
     try:
         # Initialize schema registry + global config (idempotent)
         initConfig()
+        
+        # Init permission system
+        initPermissions()
         
         unresolved = getRegistry().findUnresolvedRefs()
         if unresolved:
@@ -38,16 +43,20 @@ async def life(app: FastAPI) -> AsyncIterator[None]:
         state.PYMODS_LOADED = [{"id": m.modId, "name": m.name, "version": m.version} for m in loaded]
         state.PYMODS_FAILED = failed
 
-        # Create the AppShell (main menu) so a shell session exists
-        if state.APP_SHELL is None:
-            state.APP_SHELL = AppShell(configService=_ensure())
+        # Create main menu runtime
+        getKernel().switchRuntime(MainMenuRuntime(
+            configService=_ensure(),
+            configRegistry=getRegistry(),
+            globalConfigView=getGlobalConfig(),
+        ))
 
-        state.PERMS.registerCapability(capability="http.client@1", risk="high")
-        state.PERMS.registerCapability(capability="chat@1",        risk="medium")
-        state.PERMS.registerCapability(capability="gm.narration@1",risk="low")
-        state.PERMS.registerCapability(capability="gm.world@1",    risk="low")
-        state.PERMS.registerCapability(capability="chat.thread@1", risk="low")
-        state.PERMS.registerCapability(capability="chat.start@1",  risk="medium")
+        perms = getPermissions()
+        perms.registerCapability(capability="http.client@1", risk="high")
+        perms.registerCapability(capability="chat@1",        risk="medium")
+        perms.registerCapability(capability="gm.narration@1",risk="low")
+        perms.registerCapability(capability="gm.world@1",    risk="low")
+        perms.registerCapability(capability="chat.thread@1", risk="low")
+        perms.registerCapability(capability="chat.start@1",  risk="medium")
 
     except Exception as err:
         logger.exception("Python mod loading failed: %s", err)
