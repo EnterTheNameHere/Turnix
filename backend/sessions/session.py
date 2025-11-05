@@ -197,7 +197,6 @@ class Session:
             "ownerViewId": self.ownerViewId,
             "visibility": self.visibility,
             "state": self.state,
-            "objects": list(self.objects.keys()),
             "memoryLayers": [layer.name for layer in self.memoryLayers],
         }
     
