@@ -1,5 +1,6 @@
 # backend/runtimes/base.py
 from __future__ import annotations
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -11,9 +12,10 @@ from backend.memory.memory_layer import (
     MemoryLayer,
 )
 from backend.sessions.session import Session, SessionKind, SessionVisibility
-from backend.app.globals import config
 
 __all__ = ["RuntimeInstance"]
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -25,15 +27,31 @@ class RuntimeInstance:
     def __init__(
         self,
         *,
-        runtimeId: str | None = None, # id of the runtime instance
-        appPackId: str | None = None, # id of the appPack which is this instance based on
-        overrideSaveDirectory: Path | str | None = None, # overrides save directory; uses default saves@ otherwise
+        appPackId: str, # id of the appPack which is this instance based on
+        runtimeInstanceId: str | None = None, # id of the runtime instance
+        saveBaseDirectory: Path | str | None = None, # overrides save directory; uses default saves@ otherwise
         kernelMemoryLayers: list[MemoryLayer] | None = None,
         createMainSession: bool = True,
     ) -> None:
-        self.id = runtimeId or uuid_12("runtimeInstance_")
-        self.appPackId = appPackId
-        self.saveDirectory = overrideSaveDirectory or config.get("global.directories.saves", "saves@")
+        self.appPackId = appPackId.strip()
+        if not self.appPackId:
+            raise ValueError(f"appPackId must be a non-empty string")
+        logger.debug("runtimeInstanceId: '%s', appPackId: '%s', saveBaseDirectory: '%s', kernelMemoryLayers: '%d', createMainSession: '%s'",
+            runtimeInstanceId,
+            appPackId,
+            saveBaseDirectory,
+            len(kernelMemoryLayers) if kernelMemoryLayers else 0,
+            "True" if createMainSession is True else "False",
+        )
+        
+        self.id = runtimeInstanceId or uuid_12("runtimeInstance_")
+        
+        baseSaveDir = Path(saveBaseDirectory) if saveBaseDirectory is not None else Path("saves")
+        logger.debug("baseSaveDir '%s'", baseSaveDir)
+        self.saveRoot: Path = baseSaveDir / self.appPackId / self.id
+        logger.debug("RuntimeInstance '%s' created at '%s'", self.id, self.saveRoot)
+        self.saveRoot.mkdir(parents=True, exist_ok=True)
+        
         self.createdTs: float = time.time()
         self.version: int = 0
 
@@ -47,16 +65,6 @@ class RuntimeInstance:
         # Sessions owned by this runtime
         self.sessionsById: dict[str, Session] = {}
 
-        # Where this runtime wants to store its sessions
-        # default: saves/<runtimeId>/
-        if overrideSaveDirectory is None:
-            self.saveRoot: Path = Path("saves") / self.id
-        else:
-            self.saveRoot = Path(overrideSaveDirectory)
-        
-        if self.saveRoot is not None:
-            self.saveRoot.mkdir(parents=True, exist_ok=True)
-        
         # Main session
         self.mainSession: Session | None = None
         if createMainSession:
@@ -70,16 +78,16 @@ class RuntimeInstance:
         ownerViewId: str | None = None,
         visibility: SessionVisibility = SessionVisibility("public"),
     ) -> Session:
+        # Enforce single main session
+        if kind == "main" and self.mainSession is not None:
+            raise ValueError(f"Runtime '{self.id}' already has main session '{self.mainSession.id}'")
+        
         # Order: higher to lower; kernel is last = lowest priority (gets accessed as last)
         bottom: list[MemoryLayer] = [
             self.runtimeMemory,
             self.staticMemory,
             *self.kernelBottom,
         ]
-        
-        # Enforce single main session
-        if kind == "main" and self.mainSession is not None:
-            raise ValueError(f"Runtime '{self.id}' already has main session '{self.mainSession.id}'")
         
         sess = Session(
             kind=kind,
