@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from os import PathLike
 from fastapi import HTTPException
-from backend.app.config import configBool
+from backend.app.globals import configBool
 
 
 

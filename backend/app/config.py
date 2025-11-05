@@ -1,19 +1,17 @@
 # backend/app/config.py
 from __future__ import annotations
 import logging
-from typing import Any
 
 from backend.app.context import PROCESS_REGISTRY
 from backend.config.service import ConfigService
 from backend.config.schema_loader import SchemaRegistry
 from backend.config.store import ConfigStore
-from backend.core.dictpath import getByPath
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "initConfig", "getRegistry", "getGlobalConfig", "config",
-    "configBool", "allowSymlinks", "pickBudgetMs", "resolveClassCfg",
+    "initConfig", "getRegistry", "getGlobalConfig",
+    "allowSymlinks", "pickBudgetMs", "resolveClassCfg",
 ]
 
 # ------------------------------------------------------------------ #
@@ -67,37 +65,8 @@ def getGlobalConfig() -> ConfigStore:
 
 
 
-def config(path: str, default: Any = None) -> Any:
-    """
-    Read a dotted path from the merged global configuration.
-
-    Uses a snapshot (nested dicts supported). Returns `default` when the path is not found.
-    
-    Example:
-      value = config("timeouts.classes.request.fast.serviceTtlMs") # returns 800
-      value = config("non.existing.path", 300)                     # returns 300
-    """
-    store = getGlobalConfig()
-    snap = store.snapshot()
-    val = getByPath(snap, path)
-    return default if val is None else val
-
-
-
-def configBool(path: str, default: bool = False) -> bool:
-    """
-    Read a boolean from the merged global configuration.
-    """
-    val = config(path, None)
-    if isinstance(val, bool):
-        return val
-    if val is None:
-        return default
-    return bool(val)
-
-
-
 def allowSymlinks() -> bool:
+    from backend.app.globals import configBool
     return configBool("mods.allowSymlinks", False)
 
 
@@ -111,6 +80,7 @@ def pickBudgetMs(opts) -> int:
 
 
 def resolveClassCfg(opts) -> dict:
+    from backend.app.globals import config
     cls = opts.get("class") or "request.medium"
     classes = config("timeouts.classes", {})
     cfg = classes.get(cls) if isinstance(classes, dict) else None

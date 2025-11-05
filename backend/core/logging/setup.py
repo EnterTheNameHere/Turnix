@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import logging.handlers
 
-from backend.app.config import config, configBool
+from backend.app.globals import config, configBool
 from .formatters import DevFormatter, JsonFormatter, RedactingFormatter
 from .filters import RecurringSuppressFilter
 from .handlers import getJSLogHandler

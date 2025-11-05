@@ -8,7 +8,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Mapping # pyright: ignore[reportShadowedImports]
 
-from backend.app.config import configBool
+from backend.app.globals import configBool
 from backend.app.paths import ROOT_DIR
 from backend.mods.manifest import ModManifest
 from backend.mods.roots_registry import getRoots as getRegisteredRoots

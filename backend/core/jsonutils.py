@@ -54,7 +54,7 @@ def serializeError(err: Any) -> dict[str, Any]:
         "error text"      -> {"message": "error text"}
         None              -> {}
     """
-    from backend.app.config import config
+    from backend.app.globals import config
     if err is None:
         return {}
     

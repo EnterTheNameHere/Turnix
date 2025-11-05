@@ -5,7 +5,7 @@ from typing import Literal, Mapping, Any
 from backend.rpc.models import RPCMessage
 from backend.rpc.messages import createErrorMessage, createReplyMessage
 from backend.handlers.context import HandlerContext
-from backend.app.config import config
+from backend.app.globals import config
 
 
 

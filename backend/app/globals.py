@@ -1,8 +1,9 @@
 # backend/app/globals.py
 from __future__ import annotations
-from typing import TYPE_CHECKING, cast
+from typing import Any, cast, TYPE_CHECKING
 
 from backend.app.context import PROCESS_REGISTRY
+from backend.core.dictpath import getByPath
 from backend.core.errors import ReactorScramError
 
 if TYPE_CHECKING:
@@ -84,3 +85,33 @@ def getMainSessionOrScram() -> Session:
         "UI needs Runtime to show Session. Runtime show UI. Session Runtime None. Main UI. Run."
         "(Some runtimes might not use main session. If you use such runtime, don't ask for main session.)"
     )
+
+
+
+def config(path: str, default: Any = None) -> Any:
+    """
+    Read a dotted path from the merged global configuration.
+
+    Uses a snapshot (nested dicts supported). Returns `default` when the path is not found.
+    
+    Example:
+      value = config("timeouts.classes.request.fast.serviceTtlMs") # returns 800
+      value = config("non.existing.path", 300)                     # returns 300
+    """
+    store = getConfigService().globalStore
+    snap = store.snapshot()
+    val = getByPath(snap, path)
+    return default if val is None else val
+
+
+
+def configBool(path: str, default: bool = False) -> bool:
+    """
+    Read a boolean from the merged global configuration.
+    """
+    val = config(path, None)
+    if isinstance(val, bool):
+        return val
+    if val is None:
+        return default
+    return bool(val)
