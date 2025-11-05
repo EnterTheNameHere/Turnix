@@ -1,5 +1,6 @@
 # backend/runtimes/main_menu_runtime.py
 from __future__ import annotations
+from pathlib import Path
 from typing import Any
 
 from backend.config.providers import (
@@ -13,7 +14,6 @@ from backend.config.store import ConfigStore
 from backend.core.schema_registry import SchemaRegistry
 from backend.memory.memory_layer import MemoryLayer
 from backend.runtimes.instance import RuntimeInstance
-from backend.sessions.session import Session
 
 __all__ = ["MainMenuRuntime"]
 
@@ -27,22 +27,26 @@ class MainMenuRuntime(RuntimeInstance):
     def __init__(
         self,
         *,
-        runtimeId: str | None = None,
+        appPackId: str = "assets/main_menu",
+        runtimeId: str = "turnix_main_menu",
         configService: ConfigService,
         kernelMemoryLayers: list[MemoryLayer] | None = None,
         configRegistry: SchemaRegistry,
         globalConfigView: ConfigStore,
+        saveBaseDirectory: str | Path = "assets/main_menu/saves",
     ) -> None:
-        from backend.sessions.session import Session
-
-        super().__init__(runtimeId=runtimeId, kernelMemoryLayers=kernelMemoryLayers)
+        super().__init__(
+            appPackId=appPackId,
+            runtimeInstanceId=runtimeId,
+            kernelMemoryLayers=kernelMemoryLayers,
+            saveBaseDirectory=saveBaseDirectory,
+            createMainSession=True,
+        )
 
         self.config = self._initConfig(configRegistry, globalConfigView)
         self.configService = configService
         self.globalConfig: ConfigStore = self.configService.globalStore
-        
-        self.mainSession: Session = self.makeSession(kind="main")
-        
+
         self.recentSaves: list[dict[str, Any]] = []
 
     def _initConfig(self, reg: SchemaRegistry, globalConfig: ConfigStore) -> ConfigStore:
@@ -52,7 +56,7 @@ class MainMenuRuntime(RuntimeInstance):
         savePath = self.saveRoot / "config.json5"
 
         providers = [
-            DefaultsProvider(path="assets/config/defaults/runtime.json5"),  # Runtime defaults
+            DefaultsProvider(path="assets/config/defaults/global.json5"),  # Runtime defaults
             # A "view provider" that reads from global (read-only)
             ViewProvider(globalConfig),   # Inhering global values as a lower layer
             FileProvider(path=str(savePath), readOnly=False),
