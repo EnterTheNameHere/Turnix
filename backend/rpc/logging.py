@@ -5,7 +5,7 @@ from typing import Any, Literal, Mapping
 from backend.rpc.models import RPCMessage
 from backend.core.redaction import redactText
 from backend.core.jsonutils import safeJsonDumps
-from backend.app.config import config
+from backend.app.globals import config
 from backend.core.dictpath import getByPath
 from backend.core.ops import evaluateOp
 

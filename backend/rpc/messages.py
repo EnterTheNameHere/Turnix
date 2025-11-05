@@ -6,7 +6,8 @@ from pydantic import ValidationError
 from backend.rpc.models import RPCMessage, Gen
 from backend.core.ids import uuidv7
 from backend.core.jsonutils import serializeError
-from backend.app.config import pickBudgetMs, config
+from backend.app.config import pickBudgetMs
+from backend.app.globals import config
 
 __all__ = ["createWelcomeMessage", "createAckMessage", "createErrorMessage", "createReplyMessage"]
 
