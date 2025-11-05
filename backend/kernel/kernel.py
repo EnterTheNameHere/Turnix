@@ -33,16 +33,20 @@ class Kernel:
     def createRuntime(
         self,
         *,
+        appPackId: str,
         runtimeId: str | None = None,
-        saveRoot: Path | str | None = None,
+        saveBaseDirectory: Path | str | None = None,
+        createMainSession: bool = True,
     ) -> RuntimeInstance:
         """
         Factory for a plain BaseRuntime that is already wired to kernel layers.
         """
         br = RuntimeInstance(
-            runtimeId=runtimeId,
+            appPackId=appPackId,
+            runtimeInstanceId=runtimeId,
             kernelMemoryLayers=self.getKernelBottomLayers(),
-            overrideSaveDirectory=saveRoot,
+            saveBaseDirectory=saveBaseDirectory,
+            createMainSession=createMainSession,
         )
         self.switchRuntime(br)
         return br
