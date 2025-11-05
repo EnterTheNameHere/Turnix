@@ -10,7 +10,7 @@ from backend.app.lifecycle import life
 from backend.app.static_mount import mountStatic
 from backend.kernel import Kernel
 from backend.rpc.transport import mountWebSocket
-from backend.runtimes.base import RuntimeInstance
+from backend.runtimes.instance import RuntimeInstance
 from backend.runtimes.main_menu_runtime import MainMenuRuntime
 
 

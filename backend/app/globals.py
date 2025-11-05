@@ -8,7 +8,7 @@ from backend.core.errors import ReactorScramError
 
 if TYPE_CHECKING:
     from backend.kernel import Kernel
-    from backend.runtimes.base import RuntimeInstance
+    from backend.runtimes.instance import RuntimeInstance
     from backend.config.service import ConfigService
     from backend.core.permissions import PermissionManager
     from backend.sessions.session import Session
