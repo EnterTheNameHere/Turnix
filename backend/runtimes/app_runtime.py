@@ -8,7 +8,7 @@ from backend.config.providers import DefaultsProvider, FileProvider, RuntimeProv
 from backend.config.service import ConfigService
 from backend.config.store import ConfigStore
 from backend.core.schema_registry import SchemaRegistry
-from backend.runtimes.base import RuntimeInstance
+from backend.runtimes.instance import RuntimeInstance
 
 __all__ = ["AppRuntime"]
 
