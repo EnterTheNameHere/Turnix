@@ -4,7 +4,7 @@ import logging
 from fastapi import FastAPI, WebSocket
 from pydantic import ValidationError
 
-from backend.app.globals import getPermissions
+from backend.app.globals import getPermissions, getMainSessionOrScram
 from backend.core.auth import resolvePrincipal
 from backend.core.errors import ReactorScramError
 from backend.core.jsonutils import safeJsonDumps
@@ -273,7 +273,7 @@ def mountWebSocket(app: FastAPI):
                         sessLocal.subscriptions[corrId].cancel()
                         sessLocal.subscriptions.pop(corrId, None)
                     
-                    session = view.resolveMainSession()
+                    session = getMainSessionOrScram()
                     session.chat["subs"].discard(corrId)
                     continue
 
@@ -292,7 +292,7 @@ def mountWebSocket(app: FastAPI):
                     if not await _ensureCapabilityOrError(ws, sessLocal, msg, capability):
                         continue
                     
-                    session = view.resolveMainSession()
+                    session = getMainSessionOrScram()
                     await handler(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=session), msg)
                     continue
 
@@ -300,7 +300,7 @@ def mountWebSocket(app: FastAPI):
                     obj = (msg.route.object if isinstance(msg.route, Route) else None) or None
                     if obj:
                         # TODO: Enforce object-level permission if we use them
-                        session = view.resolveMainSession()
+                        session = getMainSessionOrScram()
                         await handleRequestObject(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=session), msg)
                         continue
                     capability = (msg.route.capability or "").strip() if msg.route else ""
@@ -317,7 +317,7 @@ def mountWebSocket(app: FastAPI):
                     if not await _ensureCapabilityOrError(ws, sessLocal, msg, capability):
                         continue
                     
-                    session = view.resolveMainSession()
+                    session = getMainSessionOrScram()
                     await handler(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=session), msg)
                     continue
 
@@ -336,7 +336,7 @@ def mountWebSocket(app: FastAPI):
                     if not await _ensureCapabilityOrError(ws, sessLocal, msg, capability):
                         continue
                     
-                    session = view.resolveMainSession()
+                    session = getMainSessionOrScram()
                     await handler(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=session), msg)
                     continue
 

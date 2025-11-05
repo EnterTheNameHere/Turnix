@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from backend.runtimes.base import BaseRuntime
     from backend.config.service import ConfigService
     from backend.core.permissions import PermissionManager
+    from backend.sessions.session import Session
 
 
 
@@ -63,3 +64,23 @@ def getPermissions() -> PermissionManager:
             "There are no rules. No laws. Only unchecked function calls."
         )
     return cast("PermissionManager", perms)
+
+
+
+def getMainSessionOrScram() -> Session:
+    """
+    returns active Runtime's main Session. It raises if no main session exists.
+    """
+    runtime = getActiveRuntime()
+    if runtime is not None and runtime.mainSession is not None:
+        return runtime.mainSession
+    
+    # If we got here, the app state is corrupted and the UI cannot function.
+    raise ReactorScramError(
+        "Main session is None\n"
+        "⚠️ MAIN SESSION MISSING ⚠️\n"
+        "Runtime doesn't have a main session. View's purpose is to show UI. But it doesn't have a main session. "
+        "We need UI to show the session. But we don't have None to UI. But Session is to show Runtime. "
+        "UI needs Runtime to show Session. Runtime show UI. Session Runtime None. Main UI. Run."
+        "(Some runtimes might not use main session. If you use such runtime, don't ask for main session.)"
+    )
