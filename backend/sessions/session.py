@@ -2,6 +2,7 @@
 from __future__ import annotations
 import logging
 import time
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
@@ -23,8 +24,16 @@ __all__ = ["Session", "SessionKind", "SessionVisibility"]
 
 
 
-SessionKind = Literal["main", "hidden", "temporary"]
-SessionVisibility = Literal["public", "private"]
+class SessionKind(StrEnum):
+    MAIN = "main"
+    HIDDEN = "hidden"
+    TEMPORARY = "temporary"
+
+
+
+class SessionVisibility(StrEnum):
+    PUBLIC = "public"
+    PRIVATE = "private"
 
 
 
@@ -44,7 +53,7 @@ class Session:
         kind: SessionKind,
         sessionId: str | None = None,
         ownerViewId: str | None = None,
-        visibility: SessionVisibility = "public",
+        visibility: SessionVisibility = SessionVisibility("public"),
         sharedBottomLayers: list[MemoryLayer] | None = None,
         savePath: Path | str | None = None,
     ):

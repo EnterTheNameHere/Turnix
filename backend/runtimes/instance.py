@@ -60,7 +60,7 @@ class RuntimeInstance:
         # Main session
         self.mainSession: Session | None = None
         if createMainSession:
-            self.mainSession = self.makeSession(kind="main")
+            self.mainSession = self.makeSession(kind=SessionKind("main"))
 
     def makeSession(
         self,
@@ -68,7 +68,7 @@ class RuntimeInstance:
         kind: SessionKind,
         sessionId: str | None = None,
         ownerViewId: str | None = None,
-        visibility: SessionVisibility = "public",
+        visibility: SessionVisibility = SessionVisibility("public"),
     ) -> Session:
         # Order: higher to lower; kernel is last = lowest priority (gets accessed as last)
         bottom: list[MemoryLayer] = [
