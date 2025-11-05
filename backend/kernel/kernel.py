@@ -8,7 +8,7 @@ from backend.memory.memory_layer import (
     ReadOnlyMemoryLayer,
     MemoryLayer,
 )
-from backend.runtimes.base import BaseRuntime
+from backend.runtimes.base import RuntimeInstance
 
 __all__ = ["Kernel"]
 
@@ -28,33 +28,33 @@ class Kernel:
         # Process-wide memory
         self.kernelRuntimeMemory: MemoryLayer = DictMemoryLayer("kernelRuntime")
         self.kernelStaticMemory:  MemoryLayer = ReadOnlyMemoryLayer("kernelStatic", {})
-        self.activeRuntime: BaseRuntime | None = None
+        self.activeRuntime: RuntimeInstance | None = None
 
     def createRuntime(
         self,
         *,
         runtimeId: str | None = None,
         saveRoot: Path | str | None = None,
-    ) -> BaseRuntime:
+    ) -> RuntimeInstance:
         """
         Factory for a plain BaseRuntime that is already wired to kernel layers.
         """
-        br = BaseRuntime(
+        br = RuntimeInstance(
             runtimeId=runtimeId,
             kernelMemoryLayers=self.getKernelBottomLayers(),
-            saveRoot=saveRoot,
+            overrideSaveDirectory=saveRoot,
         )
         self.switchRuntime(br)
         return br
 
-    def switchRuntime(self, runtime: BaseRuntime) -> None:
+    def switchRuntime(self, runtime: RuntimeInstance) -> None:
         """
         Activate given runtime (game, menu, headless...).
         """
         self.activeRuntime = runtime
         PROCESS_REGISTRY.register("runtime.active", runtime, overwrite=True)
     
-    def getActiveRuntime(self) -> BaseRuntime | None:
+    def getActiveRuntime(self) -> RuntimeInstance | None:
         return self.activeRuntime
     
     def getKernelBottomLayers(self) -> list[MemoryLayer]:

@@ -12,14 +12,14 @@ from backend.config.service import ConfigService
 from backend.config.store import ConfigStore
 from backend.core.schema_registry import SchemaRegistry
 from backend.memory.memory_layer import MemoryLayer
-from backend.runtimes.base import BaseRuntime
+from backend.runtimes.base import RuntimeInstance
 from backend.sessions.session import Session
 
 __all__ = ["MainMenuRuntime"]
 
 
 
-class MainMenuRuntime(BaseRuntime):
+class MainMenuRuntime(RuntimeInstance):
     """
     Launcher/menu state that exists when no AppRuntime is active.
     Owns a main Session so we can run helper pipelines (LLM tips, save search, etc.)

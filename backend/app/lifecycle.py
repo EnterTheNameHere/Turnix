@@ -8,12 +8,9 @@ from typing import Any
 
 from fastapi import FastAPI
 
-from backend.app.config import initConfig, getGlobalConfig, getRegistry, _ensure
-from backend.app.globals import getKernel, getPermissions
 from backend.app import state
-from backend.core.permissions import initPermissions
+from backend.app.globals import getPermissions, getConfigService
 from backend.mods.loader import loadPythonMods
-from backend.runtimes.main_menu_runtime import MainMenuRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -24,31 +21,16 @@ async def life(app: FastAPI) -> AsyncIterator[None]:
     # --------------- Startup ---------------
 
     try:
-        # Initialize schema registry + global config (idempotent)
-        initConfig()
+        configService = getConfigService()
         
-        # Init permission system
-        initPermissions()
-        
-        unresolved = getRegistry().findUnresolvedRefs()
-        if unresolved:
-            logger.warning("Config: unresolved $ref ids: %s", ", ".join(unresolved))
-
         # Give mods a plain snapshot of merged global config
-        configSnapshot: dict[str, Any] = getGlobalConfig().snapshot()
+        configSnapshot: dict[str, Any] = configService.globalStore.snapshot()
         loaded, failed, services = await loadPythonMods(settings=configSnapshot)
         
         # Publish into global state module
         state.SERVICES = services
         state.PYMODS_LOADED = [{"id": m.modId, "name": m.name, "version": m.version} for m in loaded]
         state.PYMODS_FAILED = failed
-
-        # Create main menu runtime
-        getKernel().switchRuntime(MainMenuRuntime(
-            configService=_ensure(),
-            configRegistry=getRegistry(),
-            globalConfigView=getGlobalConfig(),
-        ))
 
         perms = getPermissions()
         perms.registerCapability(capability="http.client@1", risk="high")
@@ -57,10 +39,8 @@ async def life(app: FastAPI) -> AsyncIterator[None]:
         perms.registerCapability(capability="gm.world@1",    risk="low")
         perms.registerCapability(capability="chat.thread@1", risk="low")
         perms.registerCapability(capability="chat.start@1",  risk="medium")
-
     except Exception as err:
         logger.exception("Python mod loading failed: %s", err)
-
     yield
 
     # --------------- Shutdown ---------------

@@ -11,27 +11,29 @@ from backend.memory.memory_layer import (
     MemoryLayer,
 )
 from backend.sessions.session import Session, SessionKind, SessionVisibility
+from backend.app.globals import config
 
-__all__ = ["BaseRuntime"]
+__all__ = ["RuntimeInstance"]
 
 
 
-class BaseRuntime:
+class RuntimeInstance:
     """
-    Generic runtime:
-    - has its own runtime/static memory
-    - can create sessions and inject these layers into them
-    - defines a base dir where its sessions can persist
+    Base class for the runtime, representing an active, in-memory instance.
+    Manages active sessions, runtime state, and mod interactions.
     """
     def __init__(
         self,
         *,
-        runtimeId: str | None = None,
+        runtimeId: str | None = None, # id of the runtime instance
+        appPackId: str | None = None, # id of the appPack which is this instance based on
+        overrideSaveDirectory: Path | str | None = None, # overrides save directory; uses default saves@ otherwise
         kernelMemoryLayers: list[MemoryLayer] | None = None,
-        saveRoot: Path | str | None = None,
         createMainSession: bool = True,
     ) -> None:
-        self.id = runtimeId or uuid_12("runtime_")
+        self.id = runtimeId or uuid_12("runtimeInstance_")
+        self.appPackId = appPackId
+        self.saveDirectory = overrideSaveDirectory or config.get("global.directories.saves", "saves@")
         self.createdTs: float = time.time()
         self.version: int = 0
 
@@ -47,10 +49,10 @@ class BaseRuntime:
 
         # Where this runtime wants to store its sessions
         # default: saves/<runtimeId>/
-        if saveRoot is None:
+        if overrideSaveDirectory is None:
             self.saveRoot: Path = Path("saves") / self.id
         else:
-            self.saveRoot = Path(saveRoot)
+            self.saveRoot = Path(overrideSaveDirectory)
         
         if self.saveRoot is not None:
             self.saveRoot.mkdir(parents=True, exist_ok=True)

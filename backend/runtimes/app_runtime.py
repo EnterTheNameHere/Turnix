@@ -8,13 +8,13 @@ from backend.config.providers import DefaultsProvider, FileProvider, RuntimeProv
 from backend.config.service import ConfigService
 from backend.config.store import ConfigStore
 from backend.core.schema_registry import SchemaRegistry
-from backend.runtimes.base import BaseRuntime
+from backend.runtimes.base import RuntimeInstance
 
 __all__ = ["AppRuntime"]
 
 
 
-class AppRuntime(BaseRuntime):
+class AppRuntime(RuntimeInstance):
     """
     Authoritative runtime container.
     - Owns the main Session (global timeline)

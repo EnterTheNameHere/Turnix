@@ -8,7 +8,7 @@ from backend.core.errors import ReactorScramError
 
 if TYPE_CHECKING:
     from backend.kernel import Kernel
-    from backend.runtimes.base import BaseRuntime
+    from backend.runtimes.base import RuntimeInstance
     from backend.config.service import ConfigService
     from backend.core.permissions import PermissionManager
     from backend.sessions.session import Session
@@ -29,7 +29,7 @@ def getKernel() -> Kernel:
 
 
 
-def getActiveRuntime() -> BaseRuntime:
+def getActiveRuntime() -> RuntimeInstance:
     runtime = PROCESS_REGISTRY.get("runtime.active")
     if runtime is None:
         raise ReactorScramError(
@@ -38,7 +38,7 @@ def getActiveRuntime() -> BaseRuntime:
             "Turnix looked for the current runtime and found philosophical emptiness.\n"
             "This slot should contain: main menu, game, or literally any runtime.\n"
         )
-    return cast("BaseRuntime", runtime)
+    return cast("RuntimeInstance", runtime)
 
 
 
