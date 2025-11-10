@@ -9,7 +9,10 @@ from backend.core.jsonutils import serializeError
 from backend.app.config import pickBudgetMs
 from backend.app.globals import config
 
-__all__ = ["createWelcomeMessage", "createAckMessage", "createErrorMessage", "createReplyMessage"]
+__all__ = [
+    "createWelcomeMessage", "createAckMessage", "createErrorMessage",
+    "createReplyMessage", "createReplyMessage",
+]
 
 
 
@@ -114,6 +117,27 @@ def createReplyMessage(toMsg: RPCMessage, props: dict[str, Any], opts: dict[str,
         type="reply",
         correlatesTo=toMsg.id,
         idempotencyKey=toMsg.idempotencyKey,
+        route=toMsg.route,
+        lane=toMsg.lane,
+        gen=gen,
+        budgetMs=pickBudgetMs(opts),
+        payload=payload,
+    )
+
+
+
+def createStateUpdateMessage(toMsg: RPCMessage, props: dict[str, Any], opts: dict[str, Any] | None = None) -> RPCMessage:
+    if not isinstance(toMsg, RPCMessage): raise TypeError("toMsg must be a valid RPCMessage")
+    if not isinstance(props, dict): raise TypeError("props must be a dict")
+
+    gen = _requireGen(props)
+    payload = _requireDict(props, "payload", default={})
+
+    return RPCMessage(
+        id=uuidv7(),
+        v="0.1",
+        type="stateUpdate",
+        correlatesTo=toMsg.id,
         route=toMsg.route,
         lane=toMsg.lane,
         gen=gen,
