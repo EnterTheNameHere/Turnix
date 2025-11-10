@@ -5,6 +5,7 @@ import htmlParser from '@html-eslint/parser';
 import htmlRules from '@html-eslint/eslint-plugin';
 import importPlugin from 'eslint-plugin-import';
 import promisePlugin from 'eslint-plugin-promise';
+import stylistic from '@stylistic/eslint-plugin';
 import globals from 'globals';
 
 // ---------- Shared JavaScript config ----------
@@ -21,6 +22,7 @@ const jsCommon = {
     plugins: {
         import: importPlugin,
         promise: promisePlugin,
+        '@stylistic': stylistic,
     },
     settings: {
         // Help import/no-unresolved resolve None/Electron-style imports
@@ -43,9 +45,12 @@ const jsCommon = {
         // Custom rules
         'no-unused-vars': ['warn', {argsIgnorePattern: '^_'}],
         'no-undef': ['error'],
-        'semi': ['error', 'always'],
-        'quotes': ['error', 'single'],
-        'indent': ['error', 4, {SwitchCase: 1}],
+        '@stylistic/semi': ['error', 'always'],
+        '@stylistic/quotes': ['error', 'single'],
+        '@stylistic/indent': ['error', 4, {
+            SwitchCase: 1,
+            'ignoredNodes': ['ConditionalExpression']
+        }],
         'no-invalid-this': ['error'],
         'default-param-last': ['error'],
         'no-param-reassign': ['error'],
