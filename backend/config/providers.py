@@ -9,7 +9,7 @@ import logging
 
 import json5
 
-from backend.core.dictpath import getByPath
+from backend.core.dictpath import getByPath, setByPath, deleteByPath
 from backend.core.utils import deepCopy
 from .types import ConfigProvider, ConfigStore
 
@@ -37,9 +37,10 @@ class RuntimeProvider(ConfigProvider):
     
     def set(self, key: str, value: Any) -> None:
         if value is None:
-            self._data.pop(key, None)
-        else:
-            self._data[key] = deepCopy(value)
+            deleteByPath(self._data, key, pruneEmptyParents=True)
+            return
+        
+        setByPath(self._data, key, deepCopy(value), createIfMissing=True)
     
     def to_dict(self) -> dict[str, Any]:
         return deepCopy(self._data)
@@ -105,14 +106,18 @@ class DefaultsProvider(ConfigProvider):
 
         if path is not None:
             path = Path(path)
+            
             if not path.exists():
                 if strict:
                     raise FileNotFoundError(f"{type(self).__name__}: defaults file '{path}' not found")
-            self.data: Mapping[str, Any] = {} # Not strict on file existence so return empty dict
+                # strict=False → use empty data and bail out immediately
+                self.data = {}
+                return
         
             if not path.is_file():
                 raise FileNotFoundError(f"{type(self).__name__}: '{str(path)}' is not a file")
             
+            # File exists by here → parse normally
             try:
                 parsed = json5.loads(path.read_text("utf-8"))
             except Exception as err:
@@ -120,14 +125,14 @@ class DefaultsProvider(ConfigProvider):
 
             if not isinstance(parsed, Mapping):
                 raise TypeError(
-                    f"{type(self).__name__}: file content must be a JSON object, not '{type(self.data).__name__}'"
+                    f"{type(self).__name__}: file content must be a JSON object, not '{type(parsed).__name__}'"
                 )
             
             self.data = cast(Mapping[str, Any], parsed)
         
         elif data is not None:
-            if not isinstance(self.data, Mapping):
-                raise TypeError(f"{type(self).__name__}: 'data' must be a Mapping, not '{type(self.data).__name__}'")
+            if not isinstance(data, Mapping):
+                raise TypeError(f"{type(self).__name__}: 'data' must be a Mapping, not '{type(data).__name__}'")
             self.data = data
 
         else:
@@ -220,9 +225,10 @@ class FileProvider(ConfigProvider):
             raise RuntimeError(f"{type(self).__name__}({self.path}) is read-only")
         
         if value is None:
-            self._data.pop(key, None)
-        else:
-            self._data[key] = deepCopy(value, strict=False)
+            deleteByPath(self._data, key, pruneEmptyParents=True)
+            return
+        
+        setByPath(self._data, key, deepCopy(value, strict=False), createIfMissing=True)
 
     def to_dict(self) -> dict[str, Any]:
         return deepCopy(self._data, strict=False)
@@ -272,7 +278,7 @@ class ViewProvider(ConfigProvider):
         raise RuntimeError("ViewProvider is read-only")
 
     def to_dict(self) -> dict[str, Any]:
-        return self._store.snapshot()["values"]
+        return deepCopy(self._store.snapshot()["values"])
     
     def save(self) -> None:
         return
