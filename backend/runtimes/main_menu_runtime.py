@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from backend.app.globals import getRootsService
 from backend.config.providers import (
     DefaultsProvider,
     FileProvider,
@@ -27,14 +28,23 @@ class MainMenuRuntime(RuntimeInstance):
     def __init__(
         self,
         *,
-        appPackId: str = "assets/main_menu",
-        runtimeId: str = "turnix_main_menu",
         configService: ConfigService,
-        kernelMemoryLayers: list[MemoryLayer] | None = None,
         configRegistry: SchemaRegistry,
         globalConfigView: ConfigStore,
-        saveBaseDirectory: str | Path = "assets/main_menu/saves",
+        appPackId: str = "Turnix@main_menu",
+        runtimeId: str = "turnix_main_menu",
+        kernelMemoryLayers: list[MemoryLayer] | None = None,
+        saveBaseDirectory: str | Path | None = None,
     ) -> None:
+        if saveBaseDirectory is None:
+            # Default: keep main menu saves within assets/main_menu/saves
+            assetsRoots = getRootsService().rootsFor("assets")
+            if not assetsRoots:
+                # Fallback to generic saves root if assets missing (shouldn't happen with validated repo)
+                saveBaseDirectory = getRootsService().getWriteDir("saves")
+            else:
+                saveBaseDirectory = assetsRoots[0] / "main_menu" / "saves"
+        
         super().__init__(
             appPackId=appPackId,
             runtimeInstanceId=runtimeId,
@@ -52,13 +62,15 @@ class MainMenuRuntime(RuntimeInstance):
     def _initConfig(self, reg: SchemaRegistry, globalConfig: ConfigStore) -> ConfigStore:
         validator = reg.getValidator("config", "runtime")
 
-        # reuse runtime's save root
+        # Reuse runtime's save root
         savePath = self.saveRoot / "config.json5"
+        
+        defaultsPath = getRootsService().rootsFor("assets")[0] / "config" / "defaults" / "global.json5"
 
         providers = [
-            DefaultsProvider(path="assets/config/defaults/global.json5"),  # Runtime defaults
+            DefaultsProvider(path=str(defaultsPath)),  # Runtime defaults
             # A "view provider" that reads from global (read-only)
-            ViewProvider(globalConfig),   # Inhering global values as a lower layer
+            ViewProvider(globalConfig),   # Inherit global values as a lower layer (read-only)
             FileProvider(path=str(savePath), readOnly=False),
             RuntimeProvider(),
         ]
