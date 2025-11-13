@@ -1,7 +1,5 @@
 // frontend/mods/examples/mod.js
 
-let activeChatSub = null;
-
 const Toast = {
     info:  ({text, ttlMs}) => showToast(text, ttlMs, 'info'),
     warn:  ({text, ttlMs}) => showToast(text, ttlMs, 'warn'),
@@ -65,6 +63,17 @@ export async function onLoad(ctx) {
     const btnSend = document.createElement('button');
     btnSend.textContent = 'Send';
 
+    const btnStop = document.createElement('button');
+    btnStop.textContent = 'Stop';
+    btnStop.disabled = true;
+
+    let lastRunId = null;
+    let stageSub = null;
+    let currentAssistantEl = null;
+    let currentUserTempEl = null;
+    let lastUserEl = null;
+    let lastUserText = '';
+
     // Keep scroll pinned to bottom only if user is already near bottom
     const isAtBottom = () => {
         const slack = 48; // Tolerance before auto-stick in px.
@@ -73,8 +82,9 @@ export async function onLoad(ctx) {
 
     const autoscroll = () => { chatEl.scrollTop = chatEl.scrollHeight; };
 
-    // Send: starts pipeline via chat.start@1
+    // Send: starts pipeline via llm.pipeline@1/run
     const send = async () => {
+        let runStarted = false;
         const hasText = typeof textareaEl.value === 'string' && textareaEl.value.trim().length !== 0;
         const text = hasText ? textareaEl.value : 'Hi! I\'m UI, user didn\'t provide any message to send you... Introduce yourself as game master, ready to play a game with user. End it with a joke! Thank you, UI ends.';
         
@@ -85,6 +95,10 @@ export async function onLoad(ctx) {
         tempEl.textContent = text;
         chatEl.appendChild(tempEl);
         autoscroll();
+        currentUserTempEl = tempEl;
+        lastUserEl = tempEl;
+        // Only keep real user messages for retry.
+        lastUserText = hasText ? text : '';
 
         textareaEl.value = '';
         textareaEl.focus();
@@ -92,21 +106,193 @@ export async function onLoad(ctx) {
         btnSend.disabled = true;
         try {
             const reply = await ctx.rpc.request(
-                { route: {capability: 'chat.start@1'}, path: 'run', op: 'call', args: [text] },
+                {
+                    route: {capability: 'llm.pipeline@1'},
+                    path: 'run',
+                    op: 'call',
+                    args: [{ threadId: 'default', userText: text, options: {} }],
+                },
                 {},
                 { class: 'request.medium' },
             );
-            console.debug('[ExampleMod] start runId', reply?.payload?.runId);
-            // Responses will arrive through chat.thread@1 deltas
+            const runId = reply?.runId ?? null;
+            if(runId) {
+                runStarted = true;
+                lastRunId = runId;
+                // Keep the optimistic user bubble (make it permanent)
+                if(currentUserTempEl) {
+                    delete currentUserTempEl.dataset.temp;
+                    currentUserTempEl = null;
+                }
+
+                btnStop.disabled = false; // Streaming → allow cancel
+                
+                currentAssistantEl = document.createElement('div');
+                currentAssistantEl.className = 'msg assistant';
+                currentAssistantEl.dataset.oid = `assistant:${runId}`;
+                currentAssistantEl.dataset.status = 'streaming';
+                currentAssistantEl.textContent = '';
+                chatEl.appendChild(currentAssistantEl);
+                if(isAtBottom()) autoscroll();
+
+                if(stageSub) {
+                    try {
+                        stageSub.close();
+                    } catch {
+                        /* Ignored */
+                    }
+                    stageSub = null;
+                }
+                stageSub = await ctx.rpc.subscribe(
+                    {capability: 'llm.pipeline@1'},
+                    'stage',
+                    'none',
+                    {runId, stage: 'ParseStreamedResponse'},
+                );
+                stageSub.on('update', (msg) => {
+                    console.debug("[ExampleMod] stage update:", msg);
+                    if(!msg || !currentAssistantEl) return;
+
+                    if(msg.kind === 'chunk') {
+                        const delta = typeof msg.deltaText === 'string' ? msg.deltaText : '';
+                        if(delta) {
+                            currentAssistantEl.textContent = (currentAssistantEl.textContent || '') + delta;
+                            if(isAtBottom()) autoscroll();
+                        }
+                        if(msg.fields?.status) currentAssistantEl.dataset.status = msg.fields.status;
+                        return;
+                    }
+                    
+                    if(msg.kind === 'done' || msg.kind === 'error') {
+                        const isError = msg.kind === 'error';
+                        const hasText = !!(currentAssistantEl?.textContent
+                                        && currentAssistantEl.textContent.trim().length);
+                        
+                        if(msg.fields?.status) currentAssistantEl.dataset.status = msg.fields.status;
+                        currentAssistantEl.dataset.status =
+                            currentAssistantEl.dataset.status || (isError ? 'error' : 'final');
+                        
+                        btnStop.disabled = true;
+                        lastRunId = null;
+                        
+                        try { stageSub?.close?.(); } catch {/* Ignore */}
+                        stageSub = null;
+
+                        if(isError && !hasText) {
+                            // Hard failure before any visible output → restore input
+                            if(currentAssistantEl && currentAssistantEl.parentNode === chatEl) {
+                                chatEl.removeChild(currentAssistantEl);
+                            }
+                            currentAssistantEl = null;
+
+                            if(lastUserEl && lastUserEl.parentNode === chatEl) {
+                                chatEl.removeChild(lastUserEl);
+                            }
+                            lastUserEl = null;
+
+                            if(lastUserText) {
+                                textareaEl.value = lastUserText;
+                                textareaEl.focus();
+                            }
+                        } else {
+                            // Either success, or error after some output → keep bubbles
+                            lastUserText = '';
+                            lastUserEl = null;
+                            currentAssistantEl.dataset.status =
+                                currentAssistantEl.dataset.status || (isError ? 'error' : 'final');
+                        }
+
+                        btnSend.disabled = false;
+                    }
+                });
+
+                stageSub.on?.('error', (err) => {
+                    console.error('[ExampleMod] stage subscribe error', err);
+                    Toast.error({text: `Stream error: ${err?.message || err}`, ttlMs: 3000});
+                    
+                    btnStop.disabled = true;
+                    lastRunId = null;
+                    
+                    const hasText = !!(currentAssistantEl?.textContent
+                                    && currentAssistantEl.textContent.trim().length);
+                    
+                    if(!hasText) {
+                        // Only nuke bubbles if nothing visible was produced
+                        if(currentAssistantEl && currentAssistantEl.parentNode === chatEl) {
+                            chatEl.removeChild(currentAssistantEl);
+                        }
+                        currentAssistantEl = null;
+
+                        if(lastUserEl && lastUserEl.parentNode === chatEl) {
+                            chatEl.removeChild(lastUserEl);
+                        }
+                        lastUserEl = null;
+
+                        if(lastUserText) {
+                            textareaEl.value = lastUserText;
+                            textareaEl.focus();
+                        }
+                    } else {
+                        // Keep partial answer. Just mark assistant as errored
+                        if(currentAssistantEl) {
+                            currentAssistantEl.dataset.status =
+                                currentAssistantEl.dataset.status || 'error';
+                        }
+                        lastUserText = '';
+                        lastUserEl = null;
+                    }
+
+                    btnSend.disabled = false;
+                    try { stageSub?.close?.(); } catch {/* Ignore */}
+                    stageSub = null;
+                });
+            } else {
+                // No run started → allow re-send
+                btnSend.disabled = false;
+                // Remove optimistic bubble as nothing actually started
+                chatEl.querySelectorAll('.msg.user[data-temp="true"]').forEach((item) => item.remove());
+            }
+            console.debug('[ExampleMod] start runId', runId);
         } catch(err) {
             console.error('[ExampleMod] startQuery error', err);
             Toast.error({text: `Start failed: ${err?.message || err}`, ttlMs: 3000});
         } finally {
-            btnSend.disabled = false;
+            // This is the "run failed to start at all" path.
+            if(!runStarted) {
+                btnSend.disabled = false;
+                chatEl.querySelectorAll('.msg.user[data-temp="true"]').forEach((item) => item.remove());
+                currentUserTempEl = null;
+                lastUserEl = null;
+                if(lastUserText) {
+                    textareaEl.value = lastUserText;
+                    textareaEl.focus();
+                }
+            }
         }
     };
 
     btnSend.onclick = send;
+
+    btnStop.onclick = async () => {
+        if(!lastRunId) return;
+        try {
+            btnStop.disabled = true; // Prevent double-click spam. Button resets on runCompleted
+            await ctx.rpc.request(
+                {
+                    route: {capability: 'llm.pipeline@1'},
+                    path: 'cancel',
+                    op: 'call',
+                    args: [{runId: lastRunId}]},
+                {},
+                { class: 'request.low' }
+            );
+        } catch(err) {
+            console.error('[ExampleMod] cancel error', err);
+            Toast.error({text: `Cancel failed: ${err?.message || err}`, ttlMs: 3000});
+            // If cancel failed, re-enable Stop so user can try again
+            btnStop.disabled = false;
+        }
+    };
 
     // Enter = send; Shift+Enter = newline
     textareaEl.addEventListener('keydown', (ev) => {
@@ -136,11 +322,6 @@ export async function onLoad(ctx) {
         }
     });
 
-    addEventListener('beforeunload', () => {
-        try { if(activeChatSub) ctx.rpc.unsubscribe(activeChatSub.id); } catch {/* ignored */}
-        activeChatSub = null;
-    });
-
     // reset.layout@1 - Reset panel sizes to stylesheet defaults
     await ctx.rpc.expose('reset.layout@1', {
         call: async(_path, _args) => {
@@ -150,6 +331,11 @@ export async function onLoad(ctx) {
         }
     });
 
+    const resetChatLog = (node) => {
+        while(node.firstChild) node.removeChild(node.firstChild);
+        return {cleared: true};
+    };
+    
     // reset.chat@1 - Clear current chat log
     await ctx.rpc.expose('reset.chat@1', {
         call: async(_path, _args) => {
@@ -159,133 +345,17 @@ export async function onLoad(ctx) {
         }
     });
 
-    composerEl.append(textareaEl, btnSend);
+    composerEl.append(textareaEl, btnSend, btnStop);
     appEl.append(chatEl, composerEl);
 
-    // ---------- History rehydration + live updates ----------
-    const nodesByOid = new Map();
-
-    const resetChatLog = (node) => {
-        while(node.firstChild) node.removeChild(node.firstChild);
-        return {cleared: true};
-    };
-
-    function ensureBubble(oid, role) {
-        let el = nodesByOid.get(oid);
-        if(!el) {
-            el = document.createElement('div');
-            el.className = `msg ${role}`;
-            el.dataset.oid = oid;
-            nodesByOid.set(oid, el);
-        } else {
-            // If role changed, or we created it earlier with a fallback, correct the class
-            const want = `msg ${role}`;
-            if(el.className !== want) el.className = want;
-        }
-        return el;
-    }
-
-    function renderSnapshot(snapshot) {
-        // snapshot: {kind: 'threadSnapshot', order: [oid], headers: {oid:{role, preview}}}
-        chatEl.querySelectorAll('.msg.user[data-temp="true"]').forEach((node) => node.remove());
-        resetChatLog(chatEl);
-        nodesByOid.clear();
-
-        const {order = [], headers = {}} = snapshot;
-        for(const oid of order) {
-            const header = headers[oid] || {};
-            const role = header.role || 'assistant';
-            const el = ensureBubble(oid, role);
-            el.textContent = header.preview || '';
-            chatEl.appendChild(el);
-        }
-        autoscroll();
-    }
-
-    function applyThreadDelta(delta, headers) {
-        // delta: {kind:'threadDelta', op:'insert'|'remove', at, oids:[]}
-        chatEl.querySelectorAll('.msg.user[data-temp="true"]').forEach((node) => node.remove());
-        if(delta.op === 'insert') {
-            let at = Math.max(0, Math.min(chatEl.children.length, delta.at | 0));
-            for(const oid of delta.oids || []) {
-                const header = (headers && headers[oid]) || {};
-                const role = header.role || 'user';
-                const el = ensureBubble(oid, role);
-
-                // Seed text from header.preview for user turns as no messageDelta coming
-                if(!el.textContent && typeof header.preview === 'string' && header.preview.length) {
-                    el.textContent = header.preview;
-                }
-
-                if(at >= chatEl.children.length) chatEl.appendChild(el);
-                else chatEl.insertBefore(el, chatEl.children[at]);
-                at += 1;
-            }
-            autoscroll();
-        } else if(delta.op === 'remove') {
-            for(const oid of delta.oids || []) {
-                const el = nodesByOid.get(oid);
-                if(el && el.parentNode === chatEl) {
-                    el.remove();
-                    nodesByOid.delete(oid);
-                }
-            }
-        }
-    }
-
-    function applyMessageDelta(delta, headers) {
-        // delta: {kind:'messageDelta', oid, textDelta?, text?, fields?}
-        const oid = delta.oid;
-        
-        // Prefer header role; otherwise keep current bubble's role; fallback to 'assistant'
-        const existing = nodesByOid.get(oid);
-        const currentRole =
-            existing?.classList.contains('user') ? 'user' :
-                existing?.classList.contains('assistant') ? 'assistant' : null;
-        
-        const role = (headers?.[oid]?.role) || currentRole || 'assistant';
-        
-        const el = ensureBubble(oid, role);
-        if(!el.isConnected) chatEl.appendChild(el);
-
-        if(typeof delta.textDelta === 'string' && delta.textDelta) {
-            el.textContent = (el.textContent || '') + delta.textDelta;
-        }
-        if(typeof delta.text === 'string') {
-            el.textContent = delta.text;
-        }
-        if(delta.fields?.status) {
-            el.dataset.status = delta.fields.status; // e.g., 'streaming' | 'final' | 'error'
-        }
-
-        if(isAtBottom()) autoscroll();
-    }
-
-    // Subscribe to server-owned thread (rehydrates on reload)
-    console.log('[ExampleMod] subscribing to chat.thread@1 ...');
-    const threadSub = await ctx.rpc.subscribe(
-        { capability: 'chat.thread@1' },
-        'stream',
-        'none',
-        {},
-    );
-    activeChatSub = threadSub;
-
-    threadSub.on('update', (payload) => {
-        if(!payload || !payload.kind) return;
-        if(payload.kind === 'threadSnapshot') {
-            renderSnapshot(payload);
-        } else if(payload.kind === 'threadDelta') {
-            applyThreadDelta(payload, payload.headers || null);
-        } else if(payload.kind === 'messageDelta') {
-            applyMessageDelta(payload, payload.headers || null);
-        }
+    addEventListener('beforeunload', () => {
+        try { if(stageSub) ctx.rpc.unsubscribe(stageSub.id); } catch {/* Ignored */}
     });
 
-    threadSub.on('error', (err) => {
-        console.error('[ExampleMod] thread subscribe error', err);
-        Toast.error({text: `Thread subscribe error: ${err.message || err}`, ttlMs: 3000});
-    });
+
+    // ---------- Streaming-only UI (no thread subscription) ----------
+    // History is owned by backend chat-history. This mod shows only the current turn stream.
+    // Remove thread subscription & delta logic.
 
     // Enable draggable panel resizers
     initResizers();
@@ -335,8 +405,8 @@ function addHandle(panelEl, side) {
     const handle = document.createElement('div');
     handle.className = `resizer ${
         side === 'left' ? 'right' :
-            side === 'right' ? 'left' :
-                side === 'top' ? 'bottom' : 'top'
+        side === 'right' ? 'left' :
+        side === 'top' ? 'bottom' : 'top'
     }`;
     handle.tabIndex = 0;
     handle.setAttribute('role', 'separator');
