@@ -4,7 +4,7 @@ import logging
 import time
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from backend.core.ids import uuid_12
 from backend.memory.memory_layer import (
@@ -15,8 +15,8 @@ from backend.memory.memory_layer import (
     LayeredMemory,
     MemoryPropagator,
 )
-from backend.memory.memory_persistence import saveLayersToFile, loadLayersFromFile
-from backend.pipeline.llmpipeline import LLMPipeline
+from backend.memory.memory_persistence import loadLayersFromDir
+from backend.memory.memory_save_manager import MemorySavePolicy, MemorySaveManager
 
 logger = logging.getLogger(__name__)
 
@@ -53,16 +53,18 @@ class Session:
         kind: SessionKind,
         sessionId: str | None = None,
         ownerViewId: str | None = None,
-        visibility: SessionVisibility = SessionVisibility("public"),
+        visibility: SessionVisibility = SessionVisibility.PUBLIC,
         sharedBottomLayers: list[MemoryLayer] | None = None,
         savePath: Path | str | None = None,
     ):
+        from backend.pipeline.llmpipeline import LLMPipeline
+        
         self.kind: SessionKind = kind
         self.id: str = sessionId or uuid_12({
             "main": "mainSession_",
             "hidden": "hiddenSession_",
             "temporary": "temporarySession_",
-        }[kind])
+        }[kind.value])
         self.version: int = 0
         self.createdTs: float = time.time()
 
@@ -86,25 +88,25 @@ class Session:
             *(sharedBottomLayers or [])
         ]
 
-        self.savePath: Path | None = None
         # Save path resolution
+        self.savePath: Path | None = None
+        self.layersSaveDir: Path | None = None
         if savePath is not None:
-            path = Path(savePath)
-            if path.is_dir():
+            basePath = Path(savePath)
+            if basePath.is_dir():
                 # Directory: derive file name from session id
-                path = path / f"{self.id}.json5"
+                self.savePath = basePath / f"{self.id}.json5"
             else:
-                # File path: use as-is (even if it doesn't exist yet)
-                if not path.suffix:
-                    # Optional safety — default to .json5 if user gave bare filename
-                    path = path.with_suffix(".json5")
-            self.savePath = path
+                self.savePath = basePath if basePath.suffix else basePath.with_suffix(".json5")
+            # Per-layer dir next to session file
+            self.layersSaveDir = self.savePath.parent / f"{self.id}_layers"
 
-        if self.savePath is not None and self.savePath.exists():
+        # Load existing per-layer data if any
+        if self.layersSaveDir is not None:
             try:
-                loadLayersFromFile(self.memoryLayers, self.savePath)
+                loadLayersFromDir(self.memoryLayers, self.layersSaveDir, missingOk=True)
             except Exception:
-                logger.exception("Failed to load session memory from %s", self.savePath)
+                logger.exception("Failed to load session memory from %s", self.layersSaveDir)
 
         # Resolver: map user-friendly prefixes to actual layer names
         nsMap: dict[str, str] = {
@@ -125,31 +127,22 @@ class Session:
             txn=self.txnMemoryLayer,
         )
 
-        # Authoritative session memory/state (backend)
+        # Orchestration
         self.state: dict[str, Any] = {}
         self.objects: dict[str, Any] = {}
-
-        # Each Session has one orchestration Pipeline
         self.pipeline: LLMPipeline = LLMPipeline(ownerSession=self)
 
-        # Chat storage for conversational history
-        self.chat = {
-            "threadId": uuid_12("t_"),
-            "order": [],          # [oid]
-            "headers": {},        # oid -> {role, ts, preview}
-            "messages": {},       # oid -> {role, content?, status, ts, runId?}
-            "historyPolicy": {
-                "strategy": "window",
-                "userTail": 6,
-                "assistantTail": 6,
-                "maxTokens": 2048,
-                "alwaysIncludeSystem": True,
-            },
-            "subs": set() # correlatesTo ids of chat.thread@1 subscribers
-                          # NOTE(single-socket): subscription IDs are tracked per-connection
-                          # but fanout currently sends only via the caller's ws.
-                          # If multiple sockets attach to the same session, they won’t all receive updates.
-        }
+        # ----- Per-layer save manager -----
+        self.saveManager: MemorySaveManager | None = None
+        if self.layersSaveDir is not None:
+            mgr = MemorySaveManager(self.layersSaveDir)
+            # Register all non-txn DictMemoryLayers. Default policy: save immediately on change.
+            for layer in self.memoryLayers:
+                if isinstance(layer, TransactionalMemoryLayer):
+                    continue
+                mgr.registerLayer(layer, fileName=f"{layer.name}.json5",
+                                  policy=MemorySavePolicy()) # Tweak per layer if needed
+            self.saveManager = mgr
 
     # ------------------------------------------------------------------ #
     # Memory operations (delegation to the layer stack)
@@ -176,23 +169,60 @@ class Session:
         self.txnMemoryLayer.set(fullName, memObj)
         self.version += 1
     
-    def saveMemory(self) -> None:
+    def saveMemory(self) -> bool:
         """
-        Commit txn to real layers.
-        If self.savePath write to disk.
+        Commit txn to real layers and persist changed layers per policy.
+        Raise on commit/persist failure.
+        Returns True on success.
         """
-        
-        try:
-            propagator = MemoryPropagator(self.memoryResolver)
-            changes = propagator.commit(self.memoryLayers)
+        propagator = MemoryPropagator(self.memoryResolver)
+        result = propagator.commit(self.memoryLayers)
 
-            if self.savePath is None or changes == 0:
-                return
+        # Per-layer autosave (may raise)
+        if self.saveManager is not None and not result.isEmpty():
+            self.saveManager.onCommitted(result)
             
-            saveLayersToFile(self.memoryLayers, self.savePath)
-        except Exception:
-            logger.exception("Failed to save session memory to %s", self.savePath)
+        # Defensive: txn should be empty after a successful commit
+        txn = self.txnMemoryLayer
+        if txn.staged or txn.changes:
+            raise RuntimeError("commitIncomplete")
+        
+        self.version += 1
+        
+        return True
+            
+    
+    def flushLayer(self, layerName: str) -> bool:
+        return self.saveManager.flushLayer(layerName) if self.saveManager else False
 
+    # ------------------------------------------------------------------ #
+    # Persistence policy control
+    # ------------------------------------------------------------------ #
+    
+    def registerLayerPolicy(
+        self,
+        layerName: str,
+        *,
+        debounceMs: int = 0,
+        maxIntervalMs: int = 0,
+        maxDirtyItems: int = 0,
+    ) -> bool:
+        """
+        Override save policy for a registered (non-txn) layer at runtime.
+        Returns True if a policy was updated, False if the layer wasn't registered.
+        """
+        if self.saveManager is None:
+            return False
+        reg = self.saveManager.byName.get(layerName)
+        if reg is None:
+            return False
+        reg.policy = MemorySavePolicy(
+            debounceMs=debounceMs,
+            maxIntervalMs=maxIntervalMs,
+            maxDirtyItems=maxDirtyItems,
+        )
+        return True
+    
     # ------------------------------------------------------------------ #
     # Lifecycle
     # ------------------------------------------------------------------ #
@@ -200,14 +230,48 @@ class Session:
     def snapshot(self) -> dict[str, Any]:
         return {
             "id": self.id,
-            "kind": self.kind,
+            "kind": self.kind.value,
             "version": self.version,
             "createdTs": self.createdTs,
             "ownerViewId": self.ownerViewId,
-            "visibility": self.visibility,
+            "visibility": self.visibility.value,
             "state": self.state,
             "memoryLayers": [layer.name for layer in self.memoryLayers],
+            "savePath": str(self.savePath) if self.savePath is not None else None,
         }
+    
+    @classmethod
+    def fromSnapshot(
+        cls,
+        snapshot: dict[str, Any],
+        *,
+        sharedBottomLayers: list[MemoryLayer] | None = None,
+        savePath: Path | str | None = None,
+    ) -> Session:
+        """
+        Rehydrate a Session with the expected memory stack and resolver.
+        Callers (e.g., RuntimeInstance.fromSnapshot) should pass the bottom layers and savePath.
+        """
+        try:
+            kind = SessionKind(snapshot.get("kind", SessionKind.TEMPORARY))
+            visibility = SessionVisibility(snapshot.get("visibility", SessionVisibility.PUBLIC))
+            
+            session = cls(
+                kind=kind,
+                sessionId=snapshot.get("id"),
+                ownerViewId=snapshot.get("ownerViewId"),
+                visibility=visibility,
+                sharedBottomLayers=sharedBottomLayers,
+                savePath=savePath,
+            )
+            
+            session.version = int(snapshot.get("version", 0))
+            session.createdTs = float(snapshot.get("createdTs", time.time()))
+            session.state = snapshot.get("state", {})
+            return session
+        except Exception:
+            logger.exception("Error creating session from snapshot")
+            raise
     
     def destroy(self, *, persist: bool = False) -> None:
         """
@@ -222,9 +286,27 @@ class Session:
 
         try:
             if persist:
-                self.saveMemory()
+                # Flush everything once (propagate exceptions to caller)
+                try:
+                    self.saveMemory()
+                    if self.saveManager is not None:
+                        self.saveManager.flushAll()
+                except Exception:
+                    # On failure, try rollback and continue teardown
+                    try:
+                        propagator = MemoryPropagator(self.memoryResolver)
+                        propagator.rollback(self.memoryLayers)
+                    except Exception:
+                        logger.exception("Error rolling back memory")
+                        pass
+                    raise
             else:
-                propagator = MemoryPropagator(self.memoryResolver)
-                propagator.rollback(self.memoryLayers)
+                try:
+                    propagator = MemoryPropagator(self.memoryResolver)
+                    propagator.rollback(self.memoryLayers)
+                except Exception:
+                    # Best effort teardown even if resolver/layers are already half-torn
+                    logger.exception("Error rolling back memory")
+                    pass
         finally:
             self.memoryLayers.clear()
