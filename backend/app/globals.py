@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from backend.config.service import ConfigService
     from backend.core.permissions import PermissionManager
     from backend.sessions.session import Session
+    from backend.content.roots import RootsService
 
 
 
@@ -68,6 +69,21 @@ def getPermissions() -> PermissionManager:
 
 
 
+def getRootsService() -> RootsService:
+    roots = PROCESS_REGISTRY.get("roots.service")
+    if roots is None:
+        raise ReactorScramError(
+            "RootsService is None.\n"
+            "⚠️ ROOTS SERVICE MISSING ⚠️\n"
+            "Oh dear.\n"
+            "It appears the RootsService has not been set up.\n"
+            "One could carry on, but that would be... ill-advised.\n"
+            "Kettle’s going on. Tea?"
+        )
+    return cast("RootsService", roots)
+
+
+
 def getMainSessionOrScram() -> Session:
     """
     returns active Runtime's main Session. It raises if no main session exists.
@@ -101,6 +117,8 @@ def config(path: str, default: Any = None) -> Any:
     store = getConfigService().globalStore
     snap = store.snapshot()
     val = getByPath(snap, path)
+    if val is None:
+        val = getByPath(snap, "values." + path)
     return default if val is None else val
 
 

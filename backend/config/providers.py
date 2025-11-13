@@ -9,6 +9,7 @@ import logging
 
 import json5
 
+from backend.core.dictpath import getByPath
 from backend.core.utils import deepCopy
 from .types import ConfigProvider, ConfigStore
 
@@ -31,7 +32,8 @@ class RuntimeProvider(ConfigProvider):
         self._data: dict[str, Any] = {}
     
     def get(self, key: str) -> Any | None:
-        return self._data.get(key)
+        value = getByPath(self._data, key, None)
+        return value
     
     def set(self, key: str, value: Any) -> None:
         if value is None:
@@ -58,7 +60,8 @@ class DictProvider(ConfigProvider):
     data: Mapping[str, Any]
 
     def get(self, key: str) -> Any | None:
-        return self.data.get(key)
+        value = getByPath(self.data, key, None)
+        return value
 
     def set(self, key: str, value: Any) -> None:
         raise RuntimeError("DictProvider is read-only")
@@ -131,7 +134,8 @@ class DefaultsProvider(ConfigProvider):
             raise ValueError(f"{type(self).__name__}: either 'data' or 'path' must be provided")
         
     def get(self, key: str) -> Any | None:
-        return self.data.get(key)
+        value = getByPath(self.data, key, None)
+        return value
     
     def set(self, key: str, value: Any) -> None:
         raise RuntimeError(f"{type(self).__name__}: is read-only")
@@ -208,7 +212,8 @@ class FileProvider(ConfigProvider):
         self._data = dict(parsed)
 
     def get(self, key: str) -> Any | None:
-        return self._data.get(key)
+        value = getByPath(self._data, key, None)
+        return value
 
     def set(self, key: str, value: Any) -> None:
         if self.readOnly:
