@@ -1,9 +1,11 @@
-# backend/rpc/session.py
+# backend/rpc/connection.py
 from __future__ import annotations
 import secrets, time, asyncio
 from typing import Any
+from collections.abc import Callable
 
 from backend.rpc.models import RPCMessage, Gen
+from backend.rpc.types import SubscriptionEntry, PendingRequestEntry
 
 __all__ = ["RPCConnection", "RPC_CONNECTIONS", "getRPCConnection"]
 
@@ -20,9 +22,9 @@ class RPCConnection:
         self.key = key
         self.idCache: set[str] = set()
         self.replyCache: dict[str, RPCMessage] = {}
-        self.pending: dict[str, asyncio.Task[Any]] = {}
+        self.pending: dict[str, PendingRequestEntry] = {}
         self.cancelled: set[str] = set()
-        self.subscriptions: dict[str, asyncio.Task[Any]] = {} # correlatesTo -> task
+        self.subscriptions: dict[str, SubscriptionEntry] = {}
         self.state = {
             "serverMessage": "Welcome to Turnix RPC",
             "serverBootTs": time.time(),
@@ -50,7 +52,7 @@ class RPCConnection:
         return msg.idempotencyKey or msg.id
 
     def remember(self, key: str):
-        """Stores an idempotency key; prunes arbitrarily when beyong soft limit."""
+        """Stores an idempotency key; prunes arbitrarily when beyond soft limit."""
         self.idCache.add(key)
         if len(self.idCache) > self._MAX_CACHE:
             # simple prune: drop ~1/4
@@ -67,15 +69,36 @@ class RPCConnection:
 
     def cancelPending(self) -> None:
         """Cancels all pending request tasks."""
-        for task in list(self.pending.values()):
-            task.cancel()
+        # PendingRequestEntry
+        for entry in list(self.pending.values()):
+            try:
+                task: asyncio.Task | None = getattr(entry, "task", None)
+                if task is not None and hasattr(task, "done") and hasattr(task, "cancel") and not task.done():
+                    try: task.cancel()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         self.pending.clear()
         self.cancelled.clear()
     
     def cancelSubscriptions(self) -> None:
         """Cancels all subscription tasks."""
-        for task in list(self.subscriptions.values()):
-            task.cancel()
+        # SubscriptionEntry
+        for entry in list(self.subscriptions.values()):
+            signal: asyncio.Event | None = getattr(entry, "signal", None)
+            onCancel: Callable[[], None] | None = getattr(entry, "onCancel", None)
+            task: asyncio.Task[Any] | None = getattr(entry, "task", None)
+            if signal is not None:
+                try: signal.set()
+                except Exception: pass
+            if callable(onCancel):
+                try: onCancel()
+                except Exception: pass
+            if task is not None and hasattr(task, "cancel") and hasattr(task, "done") and not task.done():
+                try: task.cancel()
+                except Exception: pass
+        
         self.subscriptions.clear()
 
 
