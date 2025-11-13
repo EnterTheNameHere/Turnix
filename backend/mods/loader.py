@@ -112,7 +112,7 @@ async def loadPythonMods(*, settings: dict[str, Any]) -> tuple[list[LoadedPyMod]
 
 def autoGrantPermissionsForMods(perms: PermissionManager, discovered: dict[str, tuple[Path, Path, ModManifest, str]]) -> None:
     """
-    Iterate manifests/runtimes and grant requested permissions programatically for each modId.
+    Iterate manifests/runtimes and grant requested permissions programmatically for each modId.
     """
     grantedCount = 0
     for _modId, (_root, _moddir, manifest, _manFileName) in discovered.items():
