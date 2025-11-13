@@ -11,7 +11,7 @@ from backend.app.globals import config
 
 __all__ = [
     "createWelcomeMessage", "createAckMessage", "createErrorMessage",
-    "createReplyMessage", "createReplyMessage",
+    "createStateUpdateMessage", "createReplyMessage",
 ]
 
 
