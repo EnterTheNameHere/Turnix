@@ -1,5 +1,6 @@
 # backend/memory/memory_layer.py
 from __future__ import annotations
+from collections.abc import Iterable
 
 from backend.core.ids import uuidv7
 
@@ -64,19 +65,38 @@ class QueryItem(MemoryObject):
 
 
 class MemoryLayer:
+    """
+    Minimal interface. Layers do not know about other layers.
+    """
     name: str
 
-    def get(self, key: str):
+    def get(self, key: str) -> MemoryObject | None:
         raise NotImplementedError
     
-    def set(self, key: str, value):
+    def set(self, key: str, value: MemoryObject) -> None:
         raise NotImplementedError
     
-    def delete(self, key: str):
+    def delete(self, key: str) -> None:
         raise NotImplementedError
     
     def canWrite(self) -> bool:
         return True
+    
+    # ----- Persistence helpers / Telemetry -----
+    def getDirtyKeys(self) -> set[str]:
+        return set()
+    
+    def clearDirty(self) -> None:
+        pass
+    
+    def getRevision(self) -> int:
+        return 0
+    
+    def markCleanSnapshot(self) -> None:
+        """
+        Called after successful save. Can store counters for policy decisions.
+        """
+        pass
 
 
 
@@ -85,13 +105,13 @@ class ReadOnlyMemoryLayer(MemoryLayer):
         self.name = name
         self.data = data
 
-    def get(self, key: str):
+    def get(self, key: str) -> MemoryObject | None:
         return self.data.get(key)
     
-    def set(self, key: str, value):
+    def set(self, key: str, value: MemoryObject) -> None:
         raise RuntimeError("Read-only layer")
     
-    def delete(self, key: str):
+    def delete(self, key: str) -> None:
         raise RuntimeError("Read-only layer")
     
     def canWrite(self) -> bool:
@@ -102,19 +122,24 @@ class ReadOnlyMemoryLayer(MemoryLayer):
 class DictMemoryLayer(MemoryLayer):
     """
     Generic mutable layer: session, runtime, party, persistent, whatever.
+    - Keeps last N versions per key.
+    - Tracks dirty keys and monotonically increasing revision for change detection.
     """
     def __init__(self, name: str, maxVersionsToKeep: int = 3):
         self.name = name
         self.maxVersionsToKeep = maxVersionsToKeep
         self.data: dict[str, list[MemoryObject]] = {}
+        self._dirty: set[str] = set()
+        self._revision: int = 0
+        self._lastSavedRevision: int = 0
     
-    def get(self, key: str):
+    def get(self, key: str) -> MemoryObject | None:
         versions = self.data.get(key)
         if not versions:
             return None
         return versions[-1]
     
-    def set(self, key: str, value: MemoryObject):
+    def set(self, key: str, value: MemoryObject) -> None:
         versions = self.data.get(key)
         if not versions:
             versions = []
@@ -123,16 +148,37 @@ class DictMemoryLayer(MemoryLayer):
         if len(versions) > self.maxVersionsToKeep:
             # Keep last N
             self.data[key] = versions[-self.maxVersionsToKeep :]
+        self._dirty.add(key)
+        self._revision += 1
 
-    def delete(self, key: str):
-        self.data.pop(key, None)
+    def setMany(self, items: Iterable[tuple[str, MemoryObject]]) -> None:
+        for key, value in items:
+            self.set(key, value)
+    
+    def delete(self, key: str) -> None:
+        if key in self.data:
+            del self.data[key]
+        self._dirty.add(key)
+        self._revision += 1
+        
+    def getDirtyKeys(self) -> set[str]:
+        return set(self._dirty)
+    
+    def clearDirty(self) -> None:
+        self._dirty.clear()
 
+    def getRevision(self) -> int:
+        return self._revision
+
+    def markCleanSnapshot(self) -> None:
+        self._lastSavedRevision = self._revision
+        
 
 
 class TransactionalMemoryLayer(MemoryLayer):
     """
     Top layer: per-pipeline-run.
-    Stores staged changes as (key, obj).
+    Stores staged changes as (key, obj). Not persisted directly.
     """
     def __init__(self, name: str = "txn") -> None:
         self.name = name
@@ -140,16 +186,16 @@ class TransactionalMemoryLayer(MemoryLayer):
         self.changes: list[tuple[str, MemoryObject | None]] = []
         self.allowWrites = True
     
-    def get(self, key: str):
+    def get(self, key: str) -> MemoryObject | None:
         return self.staged.get(key)
 
-    def set(self, key: str, value: MemoryObject):
+    def set(self, key: str, value: MemoryObject) -> None:
         if not self.allowWrites:
             raise RuntimeError("Writes are not allowed in this transaction phase")
         self.staged[key] = value
         self.changes.append((key, value))
     
-    def delete(self, key: str):
+    def delete(self, key: str) -> None:
         if key in self.staged:
             del self.staged[key]
         self.changes.append((key, None))
@@ -157,7 +203,7 @@ class TransactionalMemoryLayer(MemoryLayer):
     def canWrite(self) -> bool:
         return self.allowWrites
     
-    def clear(self):
+    def clear(self) -> None:
         self.staged.clear()
         self.changes.clear()
 
@@ -242,7 +288,29 @@ class LayeredMemory:
                 return self._ensureOrigin(obj, layer.name, key)
         return None
     
-    def save(self, obj: MemoryObject):
+    def getByPath(self, path: str) -> MemoryObject | None:
+        """
+        Fetch by fully qualified or implicitly resolved path.
+        Alias for get().
+        """
+        return self.get(path)
+    
+    def getByUuid(self, uuidStr: str, includeTxn: bool = False) -> tuple[str, MemoryObject] | None:
+        """
+        Linear scan for now. Returns (layerName, obj) or None.
+        """
+        for layer in self.layers:
+            if isinstance(layer, DictMemoryLayer):
+                for key, versions in layer.data.items():
+                    if versions and versions[-1].uuidStr == uuidStr:
+                        return (layer.name, versions[-1])
+        if includeTxn and isinstance(self.txn, TransactionalMemoryLayer):
+            for key, obj in self.txn.staged.items():
+                if obj.uuidStr == uuidStr:
+                    return (self.txn.name, obj)
+        return None
+    
+    def save(self, obj: MemoryObject) -> str:
         # Transactional save
         key = obj.path
         if not key:
@@ -253,8 +321,9 @@ class LayeredMemory:
                 key = f"txn.{obj.uuidStr}"
             obj.path = key
         self.txn.set(key, obj)
+        return key
     
-    def savePersistent(self, obj: MemoryObject):
+    def savePersistent(self, obj: MemoryObject) -> str:
         key = obj.path
         if not key:
             if obj.originLayer:
@@ -266,7 +335,9 @@ class LayeredMemory:
         # If obj has no origin yet
         if not obj.originLayer:
             obj.originLayer = target.name
-        target.set(self.resolver.stripNamespace(key), obj)
+        cleanKey = self.resolver.stripNamespace(key)
+        target.set(cleanKey, obj)
+        return key
     
     def _getLayerByName(self, name: str) -> MemoryLayer:
         for layer in self.layers:
@@ -286,37 +357,58 @@ class LayeredMemory:
 # Propagator
 # ----------------------------------------------
 
+class CommitResult:
+    """
+    Summary of what changed, grouped per target layer.
+    """
+    def __init__(self):
+        self.byLayer: dict[str, dict[str, int]] = {} # {layer: {"set": n, "del": n}}
+    
+    def add(self, layerName: str, op: str) -> None:
+        entries = self.byLayer.get(layerName) or {"set": 0, "del": 0}
+        entries["set" if op == "set" else "del"] += 1
+        self.byLayer[layerName] = entries
+    
+    def isEmpty(self) -> bool:
+        return not self.byLayer
+
+
+
 class MemoryPropagator:
     def __init__(self, resolver: MemoryResolver):
         self.resolver = resolver
 
-    def commit(self, layers: list[MemoryLayer]) -> int:
+    def commit(self, layers: list[MemoryLayer]) -> CommitResult:
         if not layers or len(layers) < 2:
-            raise ValueError("commit() expects at least two layers: txn at index 0 and at least one real layer after it.")
+            raise ValueError(
+                "commit() expects at least two layers: txn at index 0 and at least one real layer after it."
+            )
         
         txn = layers[0]
         if not isinstance(txn, TransactionalMemoryLayer):
             raise ValueError("commit() expects layers[0] to be TransactionalMemoryLayer")
 
+        result = CommitResult()
         if not txn.changes:
-            return 0
+            return result
         
-        numOfChanges = 0
         for key, obj in txn.changes:
             # Skip txn layer at index 0 – propagate only to real/persistent layers
             target = self.resolver.pickTargetLayer(key, layers[1:])
+            cleanKey = self.resolver.stripNamespace(key)
             if obj is None:
                 # Delete
-                target.delete(self.resolver.stripNamespace(key))
+                target.delete(cleanKey)
+                result.add(target.name, "del")
             else:
                 # Normal set
-                target.set(self.resolver.stripNamespace(key), obj)
-            numOfChanges += 1
+                target.set(cleanKey, obj)
+                result.add(target.name, "set")
         
         txn.clear()
-        return numOfChanges
+        return result
     
-    def rollback(self, layers: list[MemoryLayer]):
+    def rollback(self, layers: list[MemoryLayer]) -> None:
         if not layers or not isinstance(layers[0], TransactionalMemoryLayer):
             raise ValueError("rollback() expects txn layer at index 0")
         layers[0].clear()
