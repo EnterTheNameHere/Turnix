@@ -6,10 +6,11 @@ from typing import Any
 import json5
 
 from backend.memory.memory_layer import (
-    MemoryLayer,
     DictMemoryLayer,
-    TransactionalMemoryLayer,
+    MemoryLayer,
     MemoryObject,
+    ReadOnlyMemoryLayer,
+    TransactionalMemoryLayer,
 )
 
 
@@ -17,8 +18,7 @@ from backend.memory.memory_layer import (
 def makeLayerSnapshot(layer: MemoryLayer) -> dict[str, Any]:
     """
     Turns a single layer into a serializable dict.
-    Only dict-like layers are supported here. Read-only/static layers are assumed
-    to be reconstructed from assets and thus not saved.
+    Only dict-like layers are supported here. Read-only/static layers are not saved here.
     """
     # We only know how to snapshot DictMemoryLayer right now
     if not isinstance(layer, DictMemoryLayer):
@@ -26,14 +26,15 @@ def makeLayerSnapshot(layer: MemoryLayer) -> dict[str, Any]:
             "name": layer.name,
             "kind": type(layer).__name__,
             "entries": {},
+            "revision": layer.getRevision(),
         }
     
-    out: dict[str, Any] = {}
+    entries: dict[str, Any] = {}
     for key, versions in layer.data.items():
         if not versions:
             continue
         obj: MemoryObject = versions[-1] # Keep only the latest
-        out[key] = {
+        entries[key] = {
             "id": obj.id,
             "path": obj.path,
             "originLayer": obj.originLayer,
@@ -46,60 +47,37 @@ def makeLayerSnapshot(layer: MemoryLayer) -> dict[str, Any]:
     return {
         "name": layer.name,
         "kind": "DictMemoryLayer",
-        "entries": out,
-    }
-
-def snapshotLayers(layers: list[MemoryLayer]) -> dict[str, Any]:
-    """
-    Compose a full snapshot out of all non-txn layers.
-    Result shape:
-
-    {
-        "version": 1,
-        "layers": [
-            {"name": "session:mainSession_...", "kind": "DictMemoryLayer", "entries": {...}}
-            {"name": "runtime", "kind": "DictMemoryLayer", "entries": {...}}
-            ...
-        ]
-    }
-    """
-    snapshots: list[dict[str, Any]] = []
-    for layer in layers:
-        # txn is never persisted
-        if isinstance(layer, TransactionalMemoryLayer):
-            continue
-        snap = makeLayerSnapshot(layer)
-        snapshots.append(snap)
-    return {
-        "version": 1,
-        "format": "turnix.memory.layers",
-        "layers": snapshots,
+        "entries": entries,
+        "revision": layer.getRevision(),
     }
 
 
 
-def saveLayersToFile(layers: list[MemoryLayer], path: Path | str) -> None:
+def saveLayerToFile(layer: MemoryLayer, path: Path | str) -> None:
     """
-    Write all DictMemoryLayer instances to a JSON file.
-    Creates a parent directory if it doesn't exist yet.
+    Write a single DictMemoryLayer to a JSON5 file.
     """
     path = Path(path)
-    data = snapshotLayers(layers)
+    data = makeLayerSnapshot(layer)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json5.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    # Mark clean after a successful write
+    if isinstance(layer, DictMemoryLayer):
+        layer.clearDirty()
+        layer.markCleanSnapshot()
 
 
 
-def loadLayersFromFile(
-    layers: list[MemoryLayer],
+def loadLayerFromFile(
+    layer: MemoryLayer,
     path: Path | str,
     *,
     missingOk: bool = True,
 ) -> None:
     """
-    Load a file and populate existing layers by name.
-    We do NOT create new layers here - we only hydrate the ones we already have.
-    Unknown layers in the file are ignored.
+    Load a file and populate existing layer by name.
+    We do NOT create new layer here - we only hydrate the one we have.
+    Unknown fields are ignored.
     """
     path = Path(path)
     if not path.exists():
@@ -111,38 +89,65 @@ def loadLayersFromFile(
     if not isinstance(data, dict):
         return
     
-    layerSnapshots = data.get("layers")
-    if not isinstance(layerSnapshots, list):
+    # Only hydrate dict layers for now
+    if not isinstance(layer, DictMemoryLayer):
         return
     
-    # Map for quick lookup
-    byName: dict[str, MemoryLayer] = {layer.name: layer for layer in layers}
+    entries = data.get("entries") or {}
+    
+    # Overwrite existing content
+    layer.data.clear()
+    
+    for key, entry in entries.items():
+        obj = MemoryObject(
+            id=entry.get("id", key),
+            payload=entry.get("payload"),
+            path=entry.get("path", key),
+            originLayer=entry.get("originLayer", layer.name),
+            uuidStr=entry.get("uuidStr", ""),
+            version=entry.get("version", 1),
+            meta=entry.get("meta") if isinstance(entry.get("meta"), dict) else {}
+        )
+        layer.data[key] = [obj]
+    
+    # Clear dirty and set revision if provided
+    layer.clearDirty()
+    rev = data.get("revision")
+    if isinstance(rev, int):
+        # `DictMemoryLayer` exposes getRevision() only but we
+        # can bump by setting a private attr if present
+        try:
+            layer._revision = rev
+            layer.markCleanSnapshot()
+        except Exception:
+            pass
 
-    for layerSnapshot in layerSnapshots:
-        name = layerSnapshot.get("name")
-        if not name or name not in byName:
+
+
+def saveLayersToDir(layers: list[MemoryLayer], dirPath: Path | str) -> None:
+    """
+    Save each DictMemoryLayer as its own file: <dirPath>/<layer.name>.json5
+    """
+    base = Path(dirPath)
+    base.mkdir(parents=True, exist_ok=True)
+    for layer in layers:
+        if isinstance(layer, TransactionalMemoryLayer) or isinstance(layer, ReadOnlyMemoryLayer):
             continue
-        
-        layer = byName[name]
-        
-        # Only hydrate dict layers for now
-        if isinstance(layer, DictMemoryLayer):
-            entries = layerSnapshot.get("entries") or {}
-            
-            # Overwrite existing content
-            layer.data.clear()
-            
-            for key, entry in entries.items():
-                obj = MemoryObject(
-                    id=entry.get("id", key),
-                    payload=entry.get("payload"),
-                    path=entry.get("path", key),
-                    originLayer=entry.get("originLayer", layer.name),
-                    uuidStr=entry.get("uuidStr", ""),
-                    version=entry.get("version", 1),
-                    meta=entry.get("meta") if isinstance(entry.get("meta"), dict) else {}
-                )
-                layer.data[key] = [obj]
-        else:
-            # Other layer kind - ignore for now
+        saveLayerToFile(layer, base / f"{layer.name}.json5")
+
+
+
+def loadLayersFromDir(
+    layers: list[MemoryLayer],
+    dirPath: Path | str,
+    *,
+    missingOk=True
+) -> None:
+    """
+    Load each DictMemoryLayer from <dirPath>/<layer.name>.json5 if present.
+    """
+    base = Path(dirPath)
+    for layer in layers:
+        if isinstance(layer, TransactionalMemoryLayer):
             continue
+        loadLayerFromFile(layer, base / f"{layer.name}.json5", missingOk=missingOk)
