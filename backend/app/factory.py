@@ -17,6 +17,8 @@ from backend.runtimes.main_menu_runtime import MainMenuRuntime
 
 def createApp(*, extraRouters: Sequence[APIRouter] = (), initialRuntime: RuntimeInstance | None = None) -> FastAPI:
     # Early, process-wide bootstrap (idempotent)
+    from backend.content.roots import initRoots
+    initRoots() # TODO: Add cli options
     from backend.app.config import initConfig
     initConfig()
     from backend.core.logger import configureLogging
