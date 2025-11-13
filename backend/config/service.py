@@ -29,7 +29,7 @@ class ConfigService:
         # Register config schemas (e.g., config:global, config:realm, config:mod)
         loaded = loadConfigSchemas(registry, SCHEMAS_DIR)
         if loaded == 0:
-            logger.warning
+            logger.warning("No config schemas loaded.")
 
         globalValidator = registry.getValidator("config", "global")
         globalStore = ConfigStore(
