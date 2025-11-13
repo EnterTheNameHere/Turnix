@@ -1,7 +1,11 @@
 # backend/rpc/transport.py
 from __future__ import annotations
+import asyncio
 import logging
+from typing import Any
+
 from fastapi import FastAPI, WebSocket
+from starlette.websockets import WebSocketState
 from pydantic import ValidationError
 
 from backend.app.globals import getPermissions, getMainSessionOrScram
@@ -10,19 +14,38 @@ from backend.core.errors import ReactorScramError
 from backend.core.jsonutils import safeJsonDumps
 from backend.core.permissions import GrantPermissionError
 from backend.core.time import nowMonotonicMs
-from backend.handlers.context import HandlerContext
-from backend.handlers.objects import handleRequestObject
-from backend.handlers.register import SUBSCRIBE_HANDLERS, REQUEST_HANDLERS, EMIT_HANDLERS
 from backend.core.logging.handlers import getJSLogHandler
-from backend.rpc.logging import decideAndLog
-from backend.rpc.messages import createAckMessage, createWelcomeMessage, createErrorMessage
-from backend.rpc.models import RPCMessage, Route
+from backend.rpc.api import (
+    getCapability, routeRequest, routeEmit,
+    routeSubscribe, ActiveSubscription,
+)
 from backend.rpc.connection import RPCConnection, getRPCConnection
+from backend.rpc.context import CallContext, EmitContext, SubscribeContext
+from backend.rpc.logging import decideAndLog
+from backend.rpc.messages import (
+    createAckMessage, createWelcomeMessage, createErrorMessage,
+    createStateUpdateMessage, createReplyMessage
+)
+from backend.rpc.models import RPCMessage, Gen
+from backend.rpc.types import SubscriptionEntry, PendingRequestEntry
 from backend.views.manager import viewManager
 from backend.views.registry import viewRegistry
 from backend.views.view import View
 
 logger = logging.getLogger(__name__)
+
+
+
+_DEFAULT_REQUEST_TIMEOUT_MS = 30_000 # If msg.budgetMs is None; TODO: Make this default on RPCMessage in future?
+
+
+
+def _safeCancel(task: asyncio.Task | None) -> None:
+    try:
+        if task and not task.done():
+            task.cancel()
+    except Exception:
+        pass
 
 
 
@@ -59,7 +82,7 @@ async def sendBytes(ws: WebSocket, data: bytes):
 
 
 
-async def _ensureCapabilityOrError(ws: WebSocket, sess: RPCConnection, msg: RPCMessage, capability: str) -> bool:
+async def _ensureCapabilityOrError(ws: WebSocket, session: RPCConnection, msg: RPCMessage, capability: str) -> bool:
     """Resolve principal and enforce capability permission. Reply with error on denial."""
     try:
         principal = resolvePrincipal(msg)
@@ -67,7 +90,7 @@ async def _ensureCapabilityOrError(ws: WebSocket, sess: RPCConnection, msg: RPCM
         return True
     except GrantPermissionError as gperr:
         await sendRPCMessage(ws, createErrorMessage(msg, {
-            "gen": sess.gen(),
+            "gen": session.gen(),
             "payload": {
                 "code": gperr.code,
                 "message": gperr.message,
@@ -83,7 +106,7 @@ def mountWebSocket(app: FastAPI):
     @app.websocket("/ws")
     async def wsEndpoint(ws: WebSocket):
         await ws.accept()
-        sessLocal: RPCConnection | None = None
+        rpcConnection: RPCConnection | None = None
         view: View | None = None
         clientId: str | None = None
         
@@ -158,7 +181,7 @@ def mountWebSocket(app: FastAPI):
                         # Keep binding fresh
                         viewRegistry.bindClientToView(clientId, viewId)
                     else:
-                        # Bind by clientId - default singleplayer path
+                        # Bind by clientId - default single-player path
                         view, _ = viewRegistry.getOrCreateViewForClient(clientId)
 
                     viewManager.bind(ws=ws, view=view)
@@ -166,11 +189,11 @@ def mountWebSocket(app: FastAPI):
                     # Enable JS log streaming once at first bind
                     getJSLogHandler().setReady(True)
 
-                    sessLocal = getRPCConnection(view.id, clientId, "session-1")
-                    gen = sessLocal.newGeneration()
+                    rpcConnection = getRPCConnection(view.id, clientId, "session-1")
+                    gen = rpcConnection.newGeneration()
 
                     # Send snapshot state with welcome
-                    view.patchState(sessLocal.state)
+                    view.patchState(rpcConnection.state)
                     await sendRPCMessage(ws, createWelcomeMessage({
                         "gen": gen,
                         "payload": view.snapshot(),
@@ -178,7 +201,7 @@ def mountWebSocket(app: FastAPI):
                     continue
 
                 # Handshake is required!
-                if sessLocal is None:
+                if rpcConnection is None:
                     # Ignore anything before hello
                     continue
 
@@ -191,7 +214,7 @@ def mountWebSocket(app: FastAPI):
 
                 if msgType == "clientReady":
                     # Frontend declares it has finished loading/initializing
-                    currGenNum = sessLocal.genNum
+                    currGenNum = rpcConnection.genNum
 
                     # If someone sends a stale clientReady, ignore it (but ACK it)
                     if msg.gen and hasattr(msg.gen, "num"):
@@ -201,29 +224,29 @@ def mountWebSocket(app: FastAPI):
                                 "Stale clientReady for gen='%s' (current='%s'); ACKing and ignoring",
                                 clientReportedGen, currGenNum,
                             )
-                            await sendRPCMessage(ws, createAckMessage(msg, {"gen": sessLocal.gen()}))
+                            await sendRPCMessage(ws, createAckMessage(msg, {"gen": rpcConnection.gen()}))
                             continue
 
                     # Ignore duplicate clientReady from this gen (ACK anyway)
-                    if currGenNum in sessLocal.clientReadyGens:
+                    if currGenNum in rpcConnection.clientReadyGens:
                         logger.debug(
                             "Duplicate clientReady for gen='%s' (viewId='%s', clientId='%s'). ACKing and ignoring",
                             currGenNum, getattr(view, "id", "?"), clientId,
                         )
-                        await sendRPCMessage(ws, createAckMessage(msg, {"gen": sessLocal.gen()}))
+                        await sendRPCMessage(ws, createAckMessage(msg, {"gen": rpcConnection.gen()}))
                         continue
                     
-                    sessLocal.clientReadyGens.add(currGenNum)
-                    if len(sessLocal.clientReadyGens) > 256:
+                    rpcConnection.clientReadyGens.add(currGenNum)
+                    if len(rpcConnection.clientReadyGens) > 256:
                         # Keep only the most recent 64 gens
                         base = currGenNum - 64
-                        sessLocal.clientReadyGens = {gg for gg in sessLocal.clientReadyGens if gg >= base}
+                        rpcConnection.clientReadyGens = {gg for gg in rpcConnection.clientReadyGens if gg >= base}
 
                     loaded = msg.payload.get("loaded") or []
                     failed = msg.payload.get("failed") or []
                     modsHash = msg.payload.get("modsHash")
 
-                    sessLocal.lastClientReady = {
+                    rpcConnection.lastClientReady = {
                         "gen": msg.gen,
                         "ts": msg.ts,
                         "mods": {
@@ -238,7 +261,7 @@ def mountWebSocket(app: FastAPI):
                             "clientReady": {
                                 "gen": currGenNum,
                                 "ts": msg.ts,
-                                "mods": sessLocal.lastClientReady["mods"],
+                                "mods": rpcConnection.lastClientReady["mods"],
                             }
                         })
                     except Exception:
@@ -250,102 +273,257 @@ def mountWebSocket(app: FastAPI):
                         currGenNum, getattr(view, "id", "?"), clientId, len(loaded), len(failed),
                     )
 
-                    await sendRPCMessage(ws, createAckMessage(msg, {"gen": sessLocal.gen()}))
+                    await sendRPCMessage(ws, createAckMessage(msg, {"gen": rpcConnection.gen()}))
                     continue
 
                 # Immediate ack for non-control messages
                 if msgType not in ("ack", "heartbeat"):
-                    await sendRPCMessage(ws, createAckMessage(msg, {"gen": sessLocal.gen()}))
+                    await sendRPCMessage(ws, createAckMessage(msg, {"gen": rpcConnection.gen()}))
 
                 if msgType == "heartbeat":
-                    sessLocal.lastHeartbeatTs = nowMonotonicMs()
-                    await sendRPCMessage(ws, createAckMessage(msg, {"gen": sessLocal.gen()}))
+                    rpcConnection.lastHeartbeatTs = nowMonotonicMs()
+                    await sendRPCMessage(ws, createAckMessage(msg, {"gen": rpcConnection.gen()}))
                     continue
 
                 # Cancel request or subscription
                 if msgType in ("cancel", "unsubscribe"):
                     corrId = msg.correlatesTo
-                    if corrId and corrId in sessLocal.pending:
-                        sessLocal.cancelled.add(corrId)
-                        sessLocal.pending[corrId].cancel()
-                        sessLocal.pending.pop(corrId, None)
-                    if corrId and corrId in sessLocal.subscriptions:
-                        sessLocal.subscriptions[corrId].cancel()
-                        sessLocal.subscriptions.pop(corrId, None)
-                    
-                    session = getMainSessionOrScram()
-                    session.chat["subs"].discard(corrId)
+                    if corrId:
+                        # Cancel an in-flight request
+                        if corrId in rpcConnection.pending:
+                            rpcConnection.cancelled.add(corrId)
+                            pendingEntry: PendingRequestEntry | None = rpcConnection.pending.pop(corrId)
+                            task: asyncio.Task[Any] | None = getattr(pendingEntry, "task", None)
+                            _safeCancel(task)
+                            # Proactively notify client that the request ended via cancellation
+                            origMsg: RPCMessage | None = getattr(pendingEntry, "msg", None)
+                            try:
+                                if isinstance(origMsg, RPCMessage):
+                                    await sendRPCMessage(ws, createErrorMessage(origMsg, {
+                                        "gen": rpcConnection.gen(),
+                                        "payload": {
+                                            "code": "REQUEST_CANCELLED",
+                                            "message": "Request cancelled by client",
+                                            "retryable": False,
+                                        },
+                                    }))
+                            except Exception:
+                                logger.warning("Failed to notify request '%s' was cancelled.", corrId, exc_info=True)
+                        # Cancel an active subscription
+                        if corrId in rpcConnection.subscriptions:
+                            subscriptionEntry: SubscriptionEntry = rpcConnection.subscriptions.pop(corrId) # type: ignore[assignment]
+                            try:
+                                subscriptionEntry.signal.set()
+                                if callable(subscriptionEntry.onCancel):
+                                    subscriptionEntry.onCancel()
+                            finally:
+                                if not subscriptionEntry.task.done():
+                                    subscriptionEntry.task.cancel()
                     continue
 
                 if msgType == "subscribe":
                     capability = (msg.route.capability or "").strip() if msg.route else ""
-                    handler = SUBSCRIBE_HANDLERS.get(capability)
-                    if not handler:
-                        logger.warning("Unknown capability for subscribe: %r", capability)
+                    if not getCapability(capability):
+                        logger.warning("Unknown capability for subscribe: '%s'", capability)
                         await sendRPCMessage(ws, createErrorMessage(msg, {
-                            "gen": sessLocal.gen(),
-                            "payload": {"code":"CAPABILITY_NOT_FOUND","message":"Unknown capability/route for subscribe"}
+                            "gen": rpcConnection.gen(),
+                            "payload": {"code":"CAPABILITY_NOT_FOUND","message":f"Unknown capability '{capability}' for subscribe."}
                         }))
                         continue
 
                     # Permission check
-                    if not await _ensureCapabilityOrError(ws, sessLocal, msg, capability):
+                    if not await _ensureCapabilityOrError(ws, rpcConnection, msg, capability):
                         continue
                     
-                    session = getMainSessionOrScram()
-                    await handler(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=session), msg)
+                    # Build SubscribeCtx over HandlerContext with a push → WS bridge
+                    signal = asyncio.Event()
+                    
+                    # Snapshot values for this request to avoid late-binding bugs in the async task...
+                    localGen = rpcConnection.gen()
+                    localWs = ws
+                    localRPC = rpcConnection
+                    localMsg = msg
+                    def _pushToWs(ev: dict) -> None:
+                        # Fire-and-forget. Never block capability.    
+                        async def _send(ev: dict = ev, ws: WebSocket = localWs, rpc: RPCConnection = localRPC, gen: Gen = localGen, msg=localMsg):
+                            # Drop if generation changed (client re-hello'd) or socket is gone
+                            if rpc.genNum != gen.num or ws.application_state != WebSocketState.CONNECTED:
+                                return
+                            try:
+                                await sendRPCMessage(ws, createStateUpdateMessage(msg, {
+                                    "gen": localGen,
+                                    "payload": ev or {},
+                                }))
+                            except Exception:
+                                logger.debug("subscribe push send failed", exc_info=True)
+                        asyncio.create_task(_send())
+                    
+                    ctx = SubscribeContext(id=msg.id, origin=msg.origin, signal=signal, _push=_pushToWs)
+                    
+                    try:
+                        desc: ActiveSubscription = await routeSubscribe(
+                            capability, (msg.path or ""), msg.payload or {}, ctx,
+                        )
+                    except Exception as err:
+                        await sendRPCMessage(ws, createErrorMessage(msg, {
+                            "gen": rpcConnection.gen(),
+                            "payload": {"code":"SUBSCRIBE_ERROR","message":str(err),"err":err,"retryable": False}
+                        }))
+                        continue
+                    
+                    # Optional initial payload
+                    if desc.initial is not None:
+                        await sendRPCMessage(ws, createStateUpdateMessage(msg, {
+                            "gen": rpcConnection.gen(),
+                            "payload": desc.initial,
+                        }))
+                    
+                    # Keep a trivial "liveness" task that just waits on the signal
+                    async def _hold():
+                        try:
+                            await signal.wait()
+                        except asyncio.CancelledError:
+                            pass
+                    
+                    entry = asyncio.create_task(_hold(), name=f"sub:{capability}:{msg.id}")
+                    rpcConnection.subscriptions[msg.id] = SubscriptionEntry(entry, desc.onCancel, signal)
                     continue
 
                 if msgType == "request":
-                    obj = (msg.route.object if isinstance(msg.route, Route) else None) or None
-                    if obj:
-                        # TODO: Enforce object-level permission if we use them
-                        session = getMainSessionOrScram()
-                        await handleRequestObject(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=session), msg)
-                        continue
                     capability = (msg.route.capability or "").strip() if msg.route else ""
-                    handler = REQUEST_HANDLERS.get(capability)
-                    if not handler:
+                    if not getCapability(capability):
                         logger.warning("Unknown capability for request: %r", capability)
                         await sendRPCMessage(ws, createErrorMessage(msg, {
-                            "gen": sessLocal.gen(),
+                            "gen": rpcConnection.gen(),
                             "payload": {"code":"CAPABILITY_NOT_FOUND","message":"Unknown capability/route for request"}
                         }))
                         continue
                     
                     # Permission check
-                    if not await _ensureCapabilityOrError(ws, sessLocal, msg, capability):
+                    if not await _ensureCapabilityOrError(ws, rpcConnection, msg, capability):
                         continue
                     
-                    session = getMainSessionOrScram()
-                    await handler(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=session), msg)
+                    ctx = CallContext(id=msg.id, origin=msg.origin)
+                    timeoutMs = msg.budgetMs if isinstance(msg.budgetMs, int) and msg.budgetMs > 0 else _DEFAULT_REQUEST_TIMEOUT_MS
+                    
+                    # Snapshot values for this request to avoid late-binding bugs in the async task...
+                    localGen = rpcConnection.gen()
+                    localWs = ws
+                    localRPC = rpcConnection
+                    localMsg = msg
+                    localCapability = capability
+                    localCtx = ctx
+                    localTimeoutMs = timeoutMs
+                    async def _runRequest(
+                        ws: WebSocket = localWs,
+                        rpc: RPCConnection = localRPC,
+                        gen: Gen = localGen,
+                        msg: RPCMessage = localMsg,
+                        capability: str = localCapability,
+                        ctx: CallContext = localCtx,
+                        timeoutMs: int = localTimeoutMs
+                    ):
+                        try:
+                            result = await asyncio.wait_for(
+                                routeRequest(capability, (msg.path or ""), msg.args or [], ctx),
+                                timeout=timeoutMs / 1000.0
+                            )
+                            # Drop if generation changed (client re-hello'd) or socket is gone
+                            if rpc.genNum != gen.num or ws.application_state != WebSocketState.CONNECTED:
+                                return
+                            # Ensure dict payload.
+                            payload = result if isinstance(result, dict) else {"result": result}
+                            try:
+                                # Drop if cancelled
+                                if msg.id in rpc.cancelled:
+                                    return
+                                await sendRPCMessage(ws, createReplyMessage(msg, {
+                                    "gen": gen,
+                                    "payload": payload,
+                                }))
+                            except Exception:
+                                logger.debug("_runRequest sending reply failed (likely disconnect happened)", exc_info=True)
+                                return
+                        except asyncio.TimeoutError as err:
+                            # Drop if generation changed (client re-hello'd) or socket is gone
+                            if rpc.genNum != gen.num or ws.application_state != WebSocketState.CONNECTED:
+                                return
+                            try:
+                                # Drop if cancelled
+                                if msg.id in rpc.cancelled:
+                                    return
+                                await sendRPCMessage(ws, createErrorMessage(msg, {
+                                    "gen": gen,
+                                    "payload": {
+                                        "code": "REQUEST_TIMEOUT",
+                                        "message": f"Request exceeded {timeoutMs} ms.",
+                                        "err": err,
+                                        "retryable": True,
+                                    },
+                                }))
+                            except Exception:
+                                logger.debug("_runRequest sending TimeoutError notification failed (likely disconnect happened)", exc_info=True)
+                                return
+                        except asyncio.CancelledError:
+                            # Cancellation reply is handled by cancel branch
+                            raise
+                        except Exception as err:
+                            # Drop if generation changed (client re-hello'd) or socket is gone
+                            if rpc.genNum != gen.num or ws.application_state != WebSocketState.CONNECTED:
+                                return
+                            try:
+                                # Drop if cancelled
+                                if msg.id in rpc.cancelled:
+                                    return
+                                await sendRPCMessage(ws, createErrorMessage(msg, {
+                                    "gen": gen,
+                                    "payload": {"code":"REQUEST_ERROR","message":str(err),"err":err,"retryable":False}
+                                }))
+                            except Exception:
+                                logger.debug("_runRequest sending Error notification failed (likely disconnect happened)", exc_info=True)
+                                return
+                        finally:
+                            rpc.pending.pop(msg.id, None)
+                    
+                    task = asyncio.create_task(_runRequest(), name=f"request:{capability}:{msg.id}")
+                    rpcConnection.pending[msg.id] = PendingRequestEntry(task=task, msg=msg)
                     continue
 
                 if msgType == "emit":
                     capability = (msg.route.capability or "").strip() if msg.route else ""
-                    handler = EMIT_HANDLERS.get(capability)
-                    if not handler:
+                    if not getCapability(capability):
                         logger.warning("Unknown capability for emit: %r", capability)
                         await sendRPCMessage(ws, createErrorMessage(msg, {
-                            "gen": sessLocal.gen(),
+                            "gen": rpcConnection.gen(),
                             "payload": {"code":"CAPABILITY_NOT_FOUND","message":"Unknown capability/route for emit"}
                         }))
                         continue
                     
                     # Permission check
-                    if not await _ensureCapabilityOrError(ws, sessLocal, msg, capability):
+                    if not await _ensureCapabilityOrError(ws, rpcConnection, msg, capability):
                         continue
                     
                     session = getMainSessionOrScram()
-                    await handler(HandlerContext(ws=ws, rpcConnection=sessLocal, view=view, session=session), msg)
+                    ctx = EmitContext(id=msg.id, origin=msg.origin)
+                    # Fire-and-forget. Errors are swallowed inside routeEmit
+                    routeEmit(capability, (msg.path or ""), msg.payload or {}, ctx) 
                     continue
 
         finally:
-            if sessLocal is not None:
-                for task in list(sessLocal.pending.values()):
-                    task.cancel()
-                for task in list(sessLocal.subscriptions.values()):
-                    task.cancel()
+            if rpcConnection is not None:
+                # Cancel pending requests
+                for existingPendingEntry in rpcConnection.pending.values():
+                    _safeCancel(existingPendingEntry.task)
+                # Cancel subs and call onCancel
+                for corrId, existingSubscriptionEntry in list(rpcConnection.subscriptions.items()):
+                    try:
+                        existingSubscriptionEntry.signal.set()
+                        if callable(existingSubscriptionEntry.onCancel):
+                            existingSubscriptionEntry.onCancel()
+                    finally:
+                        if not existingSubscriptionEntry.task.done():
+                            existingSubscriptionEntry.task.cancel()
+                        rpcConnection.subscriptions.pop(corrId, None)
             try:
                 viewManager.removeViewForWs(ws)
                 if not viewManager.viewIds():
