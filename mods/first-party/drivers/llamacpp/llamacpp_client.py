@@ -5,7 +5,7 @@ import asyncio
 import httpx, json, math, secrets
 from typing import AsyncGenerator, Any
 
-from backend.core.logging.setup import getModLogger
+from backend.core.logger import getModLogger
 logger = getModLogger("llamacpp_client")
 
 DEFAULT_BASE_URL = "http://localhost:1234"
@@ -194,7 +194,7 @@ class LlamaCppClient:
                         continue
 
                     if line.startswith((":", "event:", "id:", "retry:")):
-                        continue # comment/keepalive/ignored event types
+                        continue # comment/keep-alive/ignored event types
                     if line.startswith("data:"):
                         buf.append(line[5:].lstrip())
                         continue
@@ -286,4 +286,23 @@ async def onLoad(ctx):
     # TODO: Read cxt.settings to support customization
     client = LlamaCppClient()
     ctx.registerService("llm", client)
+    
+    # Wire the engine adapter into the main session pipeline
+    from backend.app.globals import getActiveRuntime
+    rt = getActiveRuntime()
+    if rt and rt.mainSession:
+        pipe = rt.mainSession.pipeline
+        async def engineAdapter(run):
+            request = (run.get("engineRequest") or {})
+            msgs = request.get("messages") or []
+            model = request.get("model") or ""
+            temperature = request.get("temperature", 0.6)
+            max_tokens = request.get("max_tokens", 8192)
+            top_p = request.get("top_p", 1.0)
+            extra = request.get("extra")
+            # Return the async generator. Pipeline will iterate it.
+            return client.streamChat(msgs, model, temperature, max_tokens, top_p=top_p, extra=extra)
+        pipe.setEngineCaller(engineAdapter)
+        pipe.setEngineCallOrder(beforeFanout=True)
+    
     return {"ok": True}
