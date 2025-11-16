@@ -2,6 +2,7 @@
 from __future__ import annotations
 from collections.abc import Iterable
 
+from backend.app.globals import getTracer
 from backend.core.ids import uuidv7
 
 
@@ -379,36 +380,172 @@ class MemoryPropagator:
         self.resolver = resolver
 
     def commit(self, layers: list[MemoryLayer]) -> CommitResult:
-        if not layers or len(layers) < 2:
-            raise ValueError(
-                "commit() expects at least two layers: txn at index 0 and at least one real layer after it."
+        tracer = getTracer()
+        span = None
+        try:
+            span = tracer.startSpan(
+                "memory.commit",
+                attrs={"layerCount": len(layers) if layers is not None else 0},
+                tags=["memory"],
             )
+            tracer.traceEvent(
+                "memory.commit.start",
+                attrs={"layerCount": len(layers) if layers is not None else 0},
+                tags=["memory"],
+                span=span,
+            )
+        except Exception:
+            span = None
         
-        txn = layers[0]
-        if not isinstance(txn, TransactionalMemoryLayer):
-            raise ValueError("commit() expects layers[0] to be TransactionalMemoryLayer")
+        try:
+            if not layers or len(layers) < 2:
+                raise ValueError(
+                    "commit() expects at least two layers: txn at index 0 and at least one real layer after it."
+                )
+            
+            txn = layers[0]
+            if not isinstance(txn, TransactionalMemoryLayer):
+                raise ValueError("commit() expects layers[0] to be TransactionalMemoryLayer")
 
-        result = CommitResult()
-        if not txn.changes:
+            result = CommitResult()
+            if not txn.changes:
+                if span is not None:
+                    attrs = {
+                        "empty": True,
+                        "totalChanges": 0,
+                        "layersTouched": 0,
+                    }
+                    tracer.traceEvent(
+                        "memory.commit.end",
+                        attrs=attrs,
+                        tags=["memory"],
+                        span=span,
+                    )
+                    tracer.endSpan(
+                        span,
+                        status="ok",
+                        level="debug",
+                        tags=["memory"],
+                        attrs=attrs,
+                    )
+                return result
+
+            totalChanges = len(txn.changes)
+        
+            for key, obj in txn.changes:
+                # Skip txn layer at index 0 – propagate only to real/persistent layers
+                target = self.resolver.pickTargetLayer(key, layers[1:])
+                cleanKey = self.resolver.stripNamespace(key)
+                if obj is None:
+                    # Delete
+                    target.delete(cleanKey)
+                    result.add(target.name, "del")
+                else:
+                    # Normal set
+                    target.set(cleanKey, obj)
+                    result.add(target.name, "set")
+        
+            txn.clear()
+            
+            if span is not None:
+                attrs = {
+                    "empty": False,
+                    "totalChanges": totalChanges,
+                    "layersTouched": len(result.byLayer),
+                }
+                tracer.traceEvent(
+                    "memory.commit.end",
+                    attrs=attrs,
+                    level="info",
+                    tags=["memory"],
+                    span=span,
+                )
+                tracer.endSpan(
+                    span,
+                    status="ok",
+                    tags=["memory"],
+                    attrs=attrs,
+                )
             return result
-        
-        for key, obj in txn.changes:
-            # Skip txn layer at index 0 – propagate only to real/persistent layers
-            target = self.resolver.pickTargetLayer(key, layers[1:])
-            cleanKey = self.resolver.stripNamespace(key)
-            if obj is None:
-                # Delete
-                target.delete(cleanKey)
-                result.add(target.name, "del")
-            else:
-                # Normal set
-                target.set(cleanKey, obj)
-                result.add(target.name, "set")
-        
-        txn.clear()
-        return result
+        except Exception as err:
+            if span is not None:
+                try:
+                    attrs = {"error": str(err)}
+                    tracer.traceEvent(
+                        "memory.commit.error",
+                        attrs=attrs,
+                        level="error",
+                        tags=["memory"],
+                        span=span,
+                    )
+                    tracer.endSpan(
+                        span,
+                        status="error",
+                        level="error",
+                        tags=["memory"],
+                        attrs=attrs,
+                    )
+                except Exception:
+                    pass
+            raise
     
     def rollback(self, layers: list[MemoryLayer]) -> None:
-        if not layers or not isinstance(layers[0], TransactionalMemoryLayer):
-            raise ValueError("rollback() expects txn layer at index 0")
-        layers[0].clear()
+        tracer = getTracer()
+        span = None
+        try:
+            span = tracer.startSpan(
+                "memory.rollback",
+                attrs={"layerCount": len(layers) if layers is not None else 0},
+                tags=["memory"],
+            )
+            tracer.traceEvent(
+                "memory.rollback.start",
+                attrs={"layerCount": len(layers) if layers is not None else 0},
+                tags=["memory"],
+                span=span,
+            )
+        except Exception:
+            span = None
+        
+        try:
+            if not layers or not isinstance(layers[0], TransactionalMemoryLayer):
+                raise ValueError("rollback() expects txn layer at index 0")
+            layers[0].clear()
+            
+            if span is not None:
+                attrs = {"ok": True}
+                tracer.traceEvent(
+                    "memory.rollback.end",
+                    attrs=attrs,
+                    level="debug",
+                    tags=["memory"],
+                    span=span,
+                )
+                tracer.endSpan(
+                    span,
+                    status="ok",
+                    level="debug",
+                    tags=["memory"],
+                    attrs=attrs,
+                )
+        except Exception as err:
+            if span is not None:
+                try:
+                    attrs = {"error": str(err)}
+                    tracer.traceEvent(
+                        "memory.rollback.error",
+                        attrs=attrs,
+                        level="error",
+                        tags=["memory"],
+                        span=span,
+                    )
+                    tracer.endSpan(
+                        span,
+                        status="error",
+                        level="error",
+                        tags=["memory"],
+                        attrs=attrs,
+                    )
+                except Exception:
+                    pass
+            raise

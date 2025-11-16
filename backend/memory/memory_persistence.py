@@ -5,6 +5,7 @@ from typing import Any
 
 import json5
 
+from backend.app.globals import getTracer
 from backend.memory.memory_layer import (
     DictMemoryLayer,
     MemoryLayer,
@@ -57,15 +58,83 @@ def saveLayerToFile(layer: MemoryLayer, path: Path | str) -> None:
     """
     Write a single DictMemoryLayer to a JSON5 file.
     """
-    path = Path(path)
-    data = makeLayerSnapshot(layer)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json5.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-    # Mark clean after a successful write
-    if isinstance(layer, DictMemoryLayer):
-        layer.clearDirty()
-        layer.markCleanSnapshot()
+    tracer = getTracer()
+    span = None
+    try:
+        span = tracer.startSpan(
+            "memory.layer.save",
+            attrs={"layerName": getattr(layer, "name", "")},
+            tags=["memory", "persistence"],
+        )
+        tracer.traceEvent(
+            "memory.layer.save.start",
+            attrs={
+                "layerName": getattr(layer, "name", ""),
+                "path": str(path),
+            },
+            tags=["memory", "persistence"],
+            span=span,
+        )
+    except Exception:
+        span = None
+    
+    try:
+        path = Path(path)
+        data = makeLayerSnapshot(layer)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json5.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        # Mark clean after a successful write
+        if isinstance(layer, DictMemoryLayer):
+            layer.clearDirty()
+            layer.markCleanSnapshot()
 
+        if span is not None:
+            entries = 0
+            if isinstance(layer, DictMemoryLayer):
+                entries = len(layer.data)
+            attrs = {
+                "layerName": getattr(layer, "name", ""),
+                "path": str(path),
+                "entries": entries,
+            }
+            tracer.traceEvent(
+                "memory.layer.save.end",
+                attrs=attrs,
+                level="info",
+                tags=["memory", "persistence"],
+                span=span,
+            )
+            tracer.endSpan(
+                span,
+                status="ok",
+                tags=["memory", "persistence"],
+                attrs=attrs,
+            )
+    except Exception as err:
+        if span is not None:
+            try:
+                attrs = {
+                    "layerName": getattr(layer, "name", ""),
+                    "path": str(path),
+                    "error": str(err),
+                }
+                tracer.traceEvent(
+                    "memory.layer.save.error",
+                    attrs=attrs,
+                    level="error",
+                    tags=["memory", "persistence"],
+                    span=span,
+                )
+                tracer.endSpan(
+                    span,
+                    status="error",
+                    level="error",
+                    tags=["memory", "persistence"],
+                    attrs=attrs,
+                )
+            except Exception:
+                pass
+        raise
 
 
 def loadLayerFromFile(
@@ -79,48 +148,179 @@ def loadLayerFromFile(
     We do NOT create new layer here - we only hydrate the one we have.
     Unknown fields are ignored.
     """
-    path = Path(path)
-    if not path.exists():
-        if missingOk:
-            return
-        raise FileNotFoundError(f"File '{path}' does not exist.")
-    
-    data = json5.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        return
-    
-    # Only hydrate dict layers for now
-    if not isinstance(layer, DictMemoryLayer):
-        return
-    
-    entries = data.get("entries") or {}
-    
-    # Overwrite existing content
-    layer.data.clear()
-    
-    for key, entry in entries.items():
-        obj = MemoryObject(
-            id=entry.get("id", key),
-            payload=entry.get("payload"),
-            path=entry.get("path", key),
-            originLayer=entry.get("originLayer", layer.name),
-            uuidStr=entry.get("uuidStr", ""),
-            version=entry.get("version", 1),
-            meta=entry.get("meta") if isinstance(entry.get("meta"), dict) else {}
+    tracer = getTracer()
+    span = None
+    try:
+        span = tracer.startSpan(
+            "memory.layer.load",
+            attrs={"layerName": getattr(layer, "name", "")},
+            tags=["memory", "persistence"],
         )
-        layer.data[key] = [obj]
+        tracer.traceEvent(
+            "memory.layer.load.start",
+            attrs={
+                "layerName": getattr(layer, "name", ""),
+                "path": str(path),
+            },
+            tags=["memory", "persistence"],
+            span=span,
+        )
+    except Exception:
+        span = None
     
-    # Clear dirty and set revision if provided
-    layer.clearDirty()
-    rev = data.get("revision")
-    if isinstance(rev, int):
-        # `DictMemoryLayer` exposes getRevision() only but we
-        # can bump by setting a private attr if present
-        try:
-            layer._revision = rev
-            layer.markCleanSnapshot()
-        except Exception:
-            pass
+    try:
+        path = Path(path)
+        if not path.exists():
+            
+            if span is not None:
+                attrs = {
+                    "layerName": getattr(layer, "name", ""),
+                    "path": str(path),
+                    "reason": "missingFile",
+                    "missingOk": missingOk,
+                }
+                tracer.traceEvent(
+                    "memory.layer.load.skip",
+                    attrs=attrs,
+                    tags=["memory", "persistence"],
+                    span=span,
+                )
+                tracer.endSpan(
+                    span,
+                    status="ok",
+                    level="debug",
+                    tags=["memory", "persistence"],
+                    attrs=attrs,
+                )
+            
+            if missingOk:
+                return
+            raise FileNotFoundError(f"File '{path}' does not exist.")
+        
+        data = json5.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            
+            if span is not None:
+                attrs = {
+                    "layerName": getattr(layer, "name", ""),
+                    "path": str(path),
+                    "reason": "notADict",
+                }
+                tracer.traceEvent(
+                    "memory.layer.load.skip",
+                    attrs=attrs,
+                    tags=["memory", "persistence"],
+                    span=span,
+                )
+                tracer.endSpan(
+                    span,
+                    status="ok",
+                    level="debug",
+                    tags=["memory", "persistence"],
+                    attrs=attrs,
+                )
+            
+            return
+        
+        # Only hydrate dict layers for now
+        if not isinstance(layer, DictMemoryLayer):
+            
+            if span is not None:
+                attrs = {
+                    "layerName": getattr(layer, "name", ""),
+                    "path": str(path),
+                    "reason": "unsupportedLayerType",
+                }
+                tracer.traceEvent(
+                    "memory.layer.load.skip",
+                    attrs=attrs,
+                    tags=["memory", "persistence"],
+                    span=span,
+                )
+                tracer.endSpan(
+                    span,
+                    status="ok",
+                    level="debug",
+                    tags=["memory", "persistence"],
+                    attrs=attrs,
+                )
+
+            return
+        
+        entries = data.get("entries") or {}
+        
+        # Overwrite existing content
+        layer.data.clear()
+        
+        for key, entry in entries.items():
+            obj = MemoryObject(
+                id=entry.get("id", key),
+                payload=entry.get("payload"),
+                path=entry.get("path", key),
+                originLayer=entry.get("originLayer", layer.name),
+                uuidStr=entry.get("uuidStr", ""),
+                version=entry.get("version", 1),
+                meta=entry.get("meta") if isinstance(entry.get("meta"), dict) else {}
+            )
+            layer.data[key] = [obj]
+        
+        # Clear dirty and set revision if provided
+        layer.clearDirty()
+        rev = data.get("revision")
+        if isinstance(rev, int):
+            # `DictMemoryLayer` exposes getRevision() only but we
+            # can bump by setting a private attr if present
+            try:
+                layer._revision = rev
+                layer.markCleanSnapshot()
+            except Exception:
+                pass
+        
+        if span is not None:
+            attrs = {
+                "layerName": getattr(layer, "name", ""),
+                "path": str(path),
+                "entries": len(entries),
+            }
+            tracer.traceEvent(
+                "memory.layer.load.end",
+                attrs=attrs,
+                level="info",
+                tags=["memory", "persistence"],
+                span=span,
+            )
+            tracer.endSpan(
+                span,
+                status="ok",
+                level="info",
+                tags=["memory", "persistence"],
+                attrs=attrs,
+            )
+    except Exception as err:
+        if span is not None:
+            try:
+                attrs = {
+                    "layerName": getattr(layer, "name", ""),
+                    "path": str(path),
+                    "error": str(err),
+                }
+                tracer.traceEvent(
+                    "memory.layer.load.error",
+                    attrs=attrs,
+                    level="error",
+                    tags=["memory", "persistence"],
+                    span=span,
+                )
+                tracer.endSpan(
+                    span,
+                    status="error",
+                    level="error",
+                    tags=["memory", "persistence"],
+                    attrs=attrs,
+                )
+            except Exception:
+                pass
+        raise
 
 
 
