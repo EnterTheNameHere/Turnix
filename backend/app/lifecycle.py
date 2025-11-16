@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from backend.app import state
-from backend.app.globals import getPermissions, getConfigService
+from backend.app.globals import getPermissions, getConfigService, getTracer
 from backend.mods.loader import loadPythonMods
 
 logger = logging.getLogger(__name__)
@@ -53,3 +53,6 @@ async def life(app: FastAPI) -> AsyncIterator[None]:
                 await res
         except Exception:
             logger.exception("Error closing service '%s'", name)
+    
+    tracer = getTracer()
+    tracer.endProcessSpan(status="ok")
