@@ -75,7 +75,7 @@ def decideAndLog(
     bytesLen: int | None = None
 ) -> None:
     # Hard guard on pathological text sizes. _shorten is running redaction which needs a whole text
-    # to avoid mistakingly not redacting a sliced part of text, so it's better to just display nothing...
+    # to avoid mistakenly not redacting a sliced part of text, so it's better to just display nothing...
     maxChars = int(config("debug.backend.rpc.maxPreviewChars", 1_000_000))
     if text is not None and len(text) > maxChars: # 1MB
         logger.debug(f"[RPC] {direction}: <{len(text)} chars, suppressed>")
