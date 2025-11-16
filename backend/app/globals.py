@@ -5,6 +5,7 @@ from typing import Any, cast, TYPE_CHECKING
 from backend.app.context import PROCESS_REGISTRY
 from backend.core.dictpath import getByPath
 from backend.core.errors import ReactorScramError
+from backend.core.tracing import getTracer as _getCoreTracer, getTraceHub as _getCoreTraceHub
 
 if TYPE_CHECKING:
     from backend.kernel import Kernel
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
     from backend.core.permissions import PermissionManager
     from backend.sessions.session import Session
     from backend.content.roots import RootsService
+    from backend.core.tracing import Tracer, TraceHub
 
 
 
@@ -101,6 +103,27 @@ def getMainSessionOrScram() -> Session:
         "UI needs Runtime to show Session. Runtime show UI. Session Runtime None. Main UI. Run."
         "(Some runtimes might not use main session. If you use such runtime, don't ask for main session.)"
     )
+
+
+
+def getTracer() -> Tracer:
+    """
+    Global access point for the Tracer singleton.
+    
+    Prefer using this instead of importing backend.core.tracing directly,
+    so future changes to tracer wiring stay localized.
+    """
+    return cast("Tracer", _getCoreTracer())
+
+
+
+def getTraceHub() -> TraceHub:
+    """
+    Global access point for the TraceHub singleton.
+    
+    Used mainly by the trace WebSocket endpoint and tools.
+    """
+    return cast("TraceHub", _getCoreTracer())
 
 
 
