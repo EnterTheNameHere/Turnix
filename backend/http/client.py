@@ -11,7 +11,7 @@ class HTTPError(Exception):
         self.body = body
 
 def _parseRetryAfter(value: str | None) -> float | None:
-    """Return seconds suggested by Retry-After header, if parseable."""
+    """Return seconds suggested by Retry-After header, if parsable."""
     if not value:
         return None
     # Retry-After: seconds
