@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal, get_args
 
 from backend.app.context import PROCESS_REGISTRY
+from backend.app.globals import getTracer
 from backend.core.errors import ReactorScramError
 
 __all__ = [
@@ -180,74 +181,143 @@ class RootsService:
         """
         Constructs the service per specified ordering and policies.
         """
-        roots: list[RootSet] = []
-        
-        # 1) CLI --root (must exist - if not, create)
-        if cliRoot:
-            rootSet = _declareRoot(_resolve(cliRoot), priority=1000, label="cli", createDirectories=True)
-            roots.append(rootSet)
-
-        # 2) env TURNIX_ROOT (only if the base exists)
-        envRoot = os.getenv("TURNIX_ROOT")
-        if envRoot:
-            base = _resolve(envRoot)
-            if base.exists():
-                roots.append(_declareRoot(base, priority=900, label="env", createDirectories=False))
-        
-        # 3) OS user dirs (only if exists)
-        if _isWindows():
-            # a) My Games
-            # Try to locate "Documents\My Games\Turnix". If Documents was moved, USERPROFILE-based fallback.
-            userprofile = os.getenv("USERPROFILE")
-            docs = None
-            if userprofile:
-                docs = _resolve(Path(userprofile) / "Documents")
-            if docs is None or not docs.exists():
-                docs = _resolve(Path.home() / "Documents")
-            myGamesBase = docs / "My Games" / "Turnix"
-            if myGamesBase.exists():
-                roots.append(_declareRoot(myGamesBase, priority=800, label="my-games", createDirectories=False))
-            
-            # b) Roaming
-            roaming = os.getenv("APPDATA")
-            if roaming:
-                appdataBase = _resolve(Path(roaming) / "Turnix")
-                if appdataBase.exists():
-                    roots.append(_declareRoot(appdataBase, priority=700, label="appdata", createDirectories=False))
-        else:
-            # a) XDG data (~/.local/share/turnix or $XDG_DATA_HOME/turnix)
-            xdgDataHome = os.getenv("XDG_DATA_HOME")
-            xdgDataBase = _resolve(xdgDataHome) if xdgDataHome else _resolve(Path.home() / ".local" / "share" / "turnix")
-            if xdgDataBase.exists():
-                roots.append(_declareRoot(xdgDataBase, priority=800, label="xdg-data", createDirectories=False))
-            
-            # b) XDG config (~/.config/turnix or $XDG_CONFIG_HOME/turnix)
-            xdgCfg = os.getenv("XDG_CONFIG_HOME")
-            xdgCfgBase = _resolve(xdgCfg) if xdgCfg else _resolve(Path.home() / ".config" / "turnix")
-            if xdgCfgBase.exists():
-                roots.append(_declareRoot(xdgCfgBase, priority=700, label="xdg-config", createDirectories=False))
-
-        # 4) Repo root (MUST be last, MUST have all five subdirectories or raises error)
-        repoBase = ROOT_DIR
-        if not _hasAllSubdirs(repoBase):
-            raise ReactorScramError(
-                "“Success begins with structure.”\n"
-                "Your directory structure: Not Found.\n"
-                f"Needed: assets, downloaded, saves, userdata, custom under '{repoBase}'.\n"
-                "Turnix has seized up while reconsidering life goals. Please build folders, achieve greatness, "
-                "avoid meltdown. Redownload Turnix?"
+        tracer = getTracer()
+        span = None
+        try:
+            span = tracer.startSpan(
+                "roots.build",
+                attrs={
+                    "cliRoot": cliRoot or "",
+                    "cliUserdata": cliUserdata or "",
+                    "cliSaves": cliSaves or "",
+                    "platform": platform.system(),
+                },
+                tags=["roots"],
             )
-        roots.append(_declareRoot(repoBase, priority=100, label="repo", createDirectories=False))
+            tracer.traceEvent(
+                "roots.build.start",
+                level="info",
+                tags=["roots"],
+                span=span,
+            )
+        except Exception:
+            span = None
         
-        # Sort by priority desc, then by base for determinism. (We also override below)
-        roots.sort(key=lambda root: (-root.priority, str(root.base)))
+        try:
+            roots: list[RootSet] = []
+            
+            # 1) CLI --root (must exist - if not, create)
+            if cliRoot:
+                rootSet = _declareRoot(_resolve(cliRoot), priority=1000, label="cli", createDirectories=True)
+                roots.append(rootSet)
+
+            # 2) env TURNIX_ROOT (only if the base exists)
+            envRoot = os.getenv("TURNIX_ROOT")
+            if envRoot:
+                base = _resolve(envRoot)
+                if base.exists():
+                    roots.append(_declareRoot(base, priority=900, label="env", createDirectories=False))
+            
+            # 3) OS user dirs (only if exists)
+            if _isWindows():
+                # a) My Games
+                # Try to locate "Documents\My Games\Turnix". If Documents was moved, USERPROFILE-based fallback.
+                userprofile = os.getenv("USERPROFILE")
+                docs = None
+                if userprofile:
+                    docs = _resolve(Path(userprofile) / "Documents")
+                if docs is None or not docs.exists():
+                    docs = _resolve(Path.home() / "Documents")
+                myGamesBase = docs / "My Games" / "Turnix"
+                if myGamesBase.exists():
+                    roots.append(_declareRoot(myGamesBase, priority=800, label="my-games", createDirectories=False))
+                
+                # b) Roaming
+                roaming = os.getenv("APPDATA")
+                if roaming:
+                    appdataBase = _resolve(Path(roaming) / "Turnix")
+                    if appdataBase.exists():
+                        roots.append(_declareRoot(appdataBase, priority=700, label="appdata", createDirectories=False))
+            else:
+                # a) XDG data (~/.local/share/turnix or $XDG_DATA_HOME/turnix)
+                xdgDataHome = os.getenv("XDG_DATA_HOME")
+                xdgDataBase = _resolve(xdgDataHome) if xdgDataHome else _resolve(Path.home() / ".local" / "share" / "turnix")
+                if xdgDataBase.exists():
+                    roots.append(_declareRoot(xdgDataBase, priority=800, label="xdg-data", createDirectories=False))
+                
+                # b) XDG config (~/.config/turnix or $XDG_CONFIG_HOME/turnix)
+                xdgCfg = os.getenv("XDG_CONFIG_HOME")
+                xdgCfgBase = _resolve(xdgCfg) if xdgCfg else _resolve(Path.home() / ".config" / "turnix")
+                if xdgCfgBase.exists():
+                    roots.append(_declareRoot(xdgCfgBase, priority=700, label="xdg-config", createDirectories=False))
+
+            # 4) Repo root (MUST be last, MUST have all five subdirectories or raises error)
+            repoBase = ROOT_DIR
+            if not _hasAllSubdirs(repoBase):
+                raise ReactorScramError(
+                    "“Success begins with structure.”\n"
+                    "Your directory structure: Not Found.\n"
+                    f"Needed: assets, downloaded, saves, userdata, custom under '{repoBase}'.\n"
+                    "Turnix has seized up while reconsidering life goals. Please build folders, achieve greatness, "
+                    "avoid meltdown. Redownload Turnix?"
+                )
+            roots.append(_declareRoot(repoBase, priority=100, label="repo", createDirectories=False))
+            
+            # Sort by priority desc, then by base for determinism. (We also override below)
+            roots.sort(key=lambda root: (-root.priority, str(root.base)))
+            
+            service = cls(_roots=roots)
+            if cliUserdata:
+                service.setCliOverride("userdata", _resolve(cliUserdata))
+            if cliSaves:
+                service.setCliOverride("saves", _resolve(cliSaves))
+            
+            if span is not None:
+                try:
+                    tracer.traceEvent(
+                        "roots.build.done",
+                        level="info",
+                        tags=["roots"],
+                        span=span,
+                        attrs={
+                            "rootCount": len(service._roots),
+                            "labels": [root.label for root in service._roots],
+                        },
+                    )
+                    tracer.endSpan(
+                        span,
+                        status="ok",
+                        tags=["roots"],
+                    )
+                except Exception:
+                    pass
+            
+            return service
         
-        service = cls(_roots=roots)
-        if cliUserdata:
-            service.setCliOverride("userdata", _resolve(cliUserdata))
-        if cliSaves:
-            service.setCliOverride("saves", _resolve(cliSaves))
-        return service
+        except Exception as err:
+            if span is not None:
+                try:
+                    tracer.traceEvent(
+                        "roots.build.error",
+                        level="error",
+                        tags=["roots", "error"],
+                        span=span,
+                        attrs={
+                            "errorType": type(err).__name__,
+                            "errorMessage": str(err),
+                        },
+                    )
+                    tracer.endSpan(
+                        span,
+                        status="error",
+                        tags=["roots", "error"],
+                        errorType=type(err).__name__,
+                        errorMessage=str(err),
+                    )
+                except Exception:
+                    pass
+            
+            raise
     
     # ----- Overrides / preferences -----
     
@@ -336,36 +406,58 @@ class RootsService:
           2) Preferred write base (set through UI/config), if set
           3) Repo root (default)
         """
+        tracer = getTracer()
+        source = "repo"
+        
         # CLI override wins
         if kind == "userdata" and self._cliUserdata:
             _mkDir(self._cliUserdata)
-            return self._cliUserdata
-        if kind == "saves" and self._cliSaves:
+            chosen = self._cliUserdata
+            source = "cli"
+        elif kind == "saves" and self._cliSaves:
             _mkDir(self._cliSaves)
-            return self._cliSaves
-
-        # Preferred base → map to its subdir for the kind
-        basePref = self._preferredUserdataBase if kind == "userdata" else self._preferredSavesBase
-        if basePref:
-            sub = _resolve(basePref) / kind
-            _mkDir(sub)
-            return sub
+            chosen = self._cliSaves
+            source = "cli"
+        else:
+            # Preferred base → map to its subdir for the kind
+            basePref = self._preferredUserdataBase if kind == "userdata" else self._preferredSavesBase
+            if basePref:
+                sub = _resolve(basePref) / kind
+                _mkDir(sub)
+                chosen = sub
+                source = "preferred"
+            else:
+                # Default = repo root subdir
+                repo = next((root for root in self._roots if root.label == "repo"), None)
+                if not repo:
+                    raise ReactorScramError(
+                        "Repo root not found.\n"
+                        "Tried CLI, env vars, roaming, My Games, prayer.exe.\n"
+                        "If this is truly happening, either storage snapped or reality did.\n"
+                        "Set repo root and press F to continue.\n"
+                        "Actually - do not press F.\n"
+                        "I repeat - DO NOT PRESS F.\n"
+                        "But try reinstalling Turnix, maybe..."
+                    )
+                sub = getattr(repo, kind)
+                _mkDir(sub)
+                chosen = sub
         
-        # Default = repo root subdir
-        repo = next((root for root in self._roots if root.label == "repo"), None)
-        if not repo:
-            raise ReactorScramError(
-                "Repo root not found.\n"
-                "Tried CLI, env vars, roaming, My Games, prayer.exe.\n"
-                "If this is truly happening, either storage snapped or reality did.\n"
-                "Set repo root and press F to continue.\n"
-                "Actually - do not press F.\n"
-                "I repeat - DO NOT PRESS F.\n"
-                "But try reinstalling Turnix, maybe..."
+        try:
+            tracer.traceEvent(
+                "roots.writeDir",
+                level="debug",
+                tags=["roots"],
+                attrs={
+                    "kind": kind,
+                    "path": str(chosen),
+                    "source": source,
+                },
             )
-        sub = getattr(repo, kind)
-        _mkDir(sub)
-        return sub
+        except Exception:
+            pass
+        
+        return chosen
     
     def listWriteCandidates(self, kind: Literal["userdata", "saves"]) -> list[tuple[str, Path, bool]]:
         """
