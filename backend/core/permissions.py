@@ -204,7 +204,7 @@ class PermissionManager:
           - "family@version"       - version is coerced, or raises ValueError if invalid.
           - "family" (no version)  - we only check that an "allow" grant exists.
         
-        NOTE: semantic_version doesn't impement npm ranges intersection and other libraries are
+        NOTE: semantic_version doesn't implement npm ranges intersection and other libraries are
               not matching requirements or are orphaned. Use a specific version when requesting a grant.
         
         Raises GrantPermissionError if not allowed.
