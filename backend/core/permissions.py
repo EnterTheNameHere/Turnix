@@ -7,6 +7,7 @@ from typing import Any, Literal
 from semantic_version import Version, NpmSpec
 
 from backend.app.context import PROCESS_REGISTRY
+from backend.app.globals import getTracer
 from backend.core.time import nowMs
 
 logger = logging.getLogger(__name__)
@@ -98,7 +99,7 @@ def parseCapability(capStr: str) -> tuple[str, Version | None]:
     Examples:
       "chat@1.5"       -> ("chat", Version("1.5.0"))
       "chat@1.2.3"     -> ("chat", Version("1.2.3"))
-      "chat"           -> raises ValueError
+      "chat"           -> ("chat", None)
       "chat@^1"        -> raises ValueError
       "chat@v1.5"      -> raises ValueError
       "chat@banana"    -> raises ValueError
@@ -182,6 +183,23 @@ class PermissionManager:
             "risk": risk
         }
         
+        try:
+            tracer = getTracer()
+            tracer.traceEvent(
+                "permissions.registerCapability",
+                level="info",
+                tags=["permissions"],
+                attrs={
+                    "family": family,
+                    "capability": capability,
+                    "risk": risk,
+                    "serverSpec": str(serverSpec),
+                },
+            )
+        except Exception:
+            # Tracing must never break capability registration.
+            pass
+        
     # ---------- Grant management ----------
     def putGrant(self, grant: GrantPermission) -> None:
         self._grants[(grant.principal, grant.family)] = grant
@@ -214,6 +232,21 @@ class PermissionManager:
         # Find existing grant
         grant = self.getGrant(principal, family)
         if not grant:
+            try:
+                tracer = getTracer()
+                tracer.traceEvent(
+                    "permissions.ensure.denied",
+                    level="warning",
+                    tags=["permissions", "deny", "grant.missing"],
+                    attrs={
+                        "principal": principal,
+                        "family": family,
+                        "capability": capability,
+                        "reason": "missing_grant",
+                    },
+                )
+            except Exception:
+                pass
             raise GrantPermissionError(
                 "PERMISSION_DENIED",
                 f"Principal '{principal}' lacks permission grant for '{family}'",
@@ -222,6 +255,23 @@ class PermissionManager:
             )
         
         if grant.decision != "allow":
+            try:
+                tracer = getTracer()
+                tracer.traceEvent(
+                    "permissions.ensure.denied",
+                    level="warning",
+                    tags=["permissions", "deny"],
+                    attrs={
+                        "principal": principal,
+                        "family": family,
+                        "capability": capability,
+                        "decision": grant.decision,
+                        "grantRange": str(grant.rangeSpec),
+                        "reason": "permission_not_allowed",
+                    },
+                )
+            except Exception:
+                pass
             raise GrantPermissionError(
                 "PERMISSION_DENIED",
                 f"Permission grant for '{family}' is denied",
@@ -233,6 +283,24 @@ class PermissionManager:
             # Caller asked for a concrete version -> check against the granted range.
             ok = versionInRange(reqVer, grant.rangeSpec)
             if not ok:
+                try:
+                    tracer = getTracer()
+                    tracer.traceEvent(
+                        "permissions.ensure.denied",
+                        level="warning",
+                        tags=["permissions", "deny", "version.mismatch"],
+                        attrs={
+                            "principal": principal,
+                            "family": family,
+                            "capability": capability,
+                            "requestedVersion": str(reqVer),
+                            "grantRange": str(grant.rangeSpec),
+                            "decision": grant.decision,
+                            "reason": "version_out_of_range",
+                        },
+                    )
+                except Exception:
+                    pass
                 raise GrantPermissionError(
                     "PERMISSION_DENIED",
                     f"Requested '{family}@{reqVer}' outside granted rangeExpr '{grant.rangeSpec}'",
@@ -242,6 +310,36 @@ class PermissionManager:
         
         if reqVer is None:
             # Caller asked for "family" only, we already know grant is allow
+            try:
+                tracer = getTracer()
+                tracer.traceEvent(
+                    "permissions.ensure.allow",
+                    tags=["permissions", "allow"],
+                    attrs={
+                        "principal": principal,
+                        "family": family,
+                        "capability": capability,
+                        "grantRange": str(grant.rangeSpec),
+                    },
+                )
+            except Exception:
+                pass
             return
         
+        # reqVer is not None and matches granted range.
+        try:
+            tracer = getTracer()
+            tracer.traceEvent(
+                "permissions.ensure.allow",
+                tags=["permissions", "allow"],
+                attrs={
+                    "principal": principal,
+                    "family": family,
+                    "capability": capability,
+                    "requestedVersion": str(reqVer),
+                    "grantRange": str(grant.rangeSpec),
+                },
+            )
+        except Exception:
+            pass
         return # No further checks, you can proceed.
