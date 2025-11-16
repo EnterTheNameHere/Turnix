@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from backend.app.globals import getRootsService
+from backend.app.globals import getRootsService, getTracer
 from backend.core.ids import uuid_12
 from backend.memory.memory_layer import (
     DictMemoryLayer,
@@ -52,6 +52,34 @@ class RuntimeInstance:
         
         self.createdTs: float = time.time()
         self.version: int = 0
+        self._traceSpan = None
+        
+        tracer = getTracer()
+        tracer.updateTraceContext({
+            "runtimeInstanceId": self.id,
+        })
+        try:
+            self._traceSpan = tracer.startSpan(
+                "runtime.lifecycle",
+                attrs={"appPackId": self.appPackId},
+                tags=["runtime"],
+                contextOverrides={
+                    "runtimeInstanceId": self.id,
+                },
+            )
+            tracer.traceEvent(
+                "runtime.create",
+                attrs={
+                    "appPackId": self.appPackId,
+                    "runtimeInstanceId": self.id,
+                },
+                level="info",
+                tags=["runtime"],
+                span=self._traceSpan,
+            )
+        except Exception:
+            # Tracing must never break runtime construction.
+            self._traceSpan = None
 
         # Runtime-local (e.g. game state, menu state)
         self.runtimeMemory: MemoryLayer = DictMemoryLayer("runtime")
@@ -200,3 +228,31 @@ class RuntimeInstance:
         if self.mainSession and self.mainSession.id not in self.sessionsById:
             self.mainSession = None
         self.version += 1
+        
+        span = getattr(self, "_traceSpan", None)
+        if span is not None:
+            tracer = getTracer()
+            try:
+                tracer.traceEvent(
+                    "runtime.destroy",
+                    attrs={
+                        "keepMain": keepMain,
+                        "runtimeInstanceId": self.id,
+                    },
+                    level="info",
+                    tags=["runtime"],
+                    span=span,
+                )
+                tracer.endSpan(
+                    span,
+                    status="ok",
+                    tags=["runtime"],
+                    attrs={
+                        "destroyedTs": time.time(),
+                        "keepMain": keepMain,
+                    },
+                )
+            except Exception:
+                # Tracing errors must not interfere with destruction
+                pass
+            self._traceSpan = None
