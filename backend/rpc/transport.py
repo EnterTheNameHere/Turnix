@@ -8,7 +8,7 @@ from fastapi import FastAPI, WebSocket
 from starlette.websockets import WebSocketState
 from pydantic import ValidationError
 
-from backend.app.globals import getPermissions, getMainSessionOrScram
+from backend.app.globals import getPermissions, getMainSessionOrScram, getTracer
 from backend.core.auth import resolvePrincipal
 from backend.core.errors import ReactorScramError
 from backend.core.jsonutils import safeJsonDumps
@@ -110,6 +110,19 @@ def mountWebSocket(app: FastAPI):
         view: View | None = None
         clientId: str | None = None
         
+        tracer = getTracer()
+        client = ws.client
+        connSpan = tracer.startSpan(
+            "rpc.connection",
+            attrs={
+                "remote": (
+                    f"{client.host}:{client.port}" if client is not None else "None",
+                ),
+            },
+            level="info",
+            tags=["rpc", "connection"],
+        )
+        
         try:
             while True:
                 event = await ws.receive()
@@ -185,6 +198,22 @@ def mountWebSocket(app: FastAPI):
                         view, _ = viewRegistry.getOrCreateViewForClient(clientId)
 
                     viewManager.bind(ws=ws, view=view)
+                    
+                    # Update trace context now that we know view + client
+                    tracer.updateTraceContext({
+                        "viewId": getattr(view, "id", None),
+                        "clientId": clientId,
+                        "rpcKind": "ws",
+                    })
+                    tracer.traceEvent(
+                        "rpc.hello.accepted",
+                        attrs={
+                            "viewId": getattr(view, "id", None),
+                            "clientId": clientId,
+                        },
+                        level="info",
+                        tags=["rpc", "hello"],
+                    )
                     
                     # Enable JS log streaming once at first bind
                     getJSLogHandler().setReady(True)
@@ -267,6 +296,19 @@ def mountWebSocket(app: FastAPI):
                     except Exception:
                         # non-fatal, keep going
                         pass
+                    
+                    tracer.traceEvent(
+                        "rpc.clientReady.accepted",
+                        attrs={
+                            "viewId": getattr(view, "id", None),
+                            "clientId": clientId,
+                            "genNum": currGenNum,
+                            "loadedMods": len(loaded),
+                            "failedMods": len(failed),
+                        },
+                        level="info",
+                        tags=["rpc", "clientReady"],
+                    )
                     
                     logger.info(
                         "[clientReady] accepted for gen='%s' (viewId='%s', clientId='%s') mods: loaded='%d' failed='%d'",
@@ -423,11 +465,35 @@ def mountWebSocket(app: FastAPI):
                         ctx: CallContext = localCtx,
                         timeoutMs: int = localTimeoutMs
                     ):
+                        tracer = getTracer()
+                        reqSpan = tracer.startSpan(
+                            "rpc.request",
+                            attrs={
+                                "msgId": msg.id,
+                                "capability": capability,
+                                "path": msg.path or "",
+                            },
+                            level="info",
+                            tags=["rpc", "request"],
+                        )
+                        
                         try:
                             result = await asyncio.wait_for(
                                 routeRequest(capability, (msg.path or ""), msg.args or [], ctx),
                                 timeout=timeoutMs / 1000.0
                             )
+                            
+                            # Request finished successfully (from backend's point of view)
+                            tracer.endSpan(
+                                reqSpan,
+                                status="ok",
+                                level="info",
+                                tags=["rpc", "request"],
+                                attrs={
+                                    "resultType": type(result).__name__,
+                                },
+                            )
+                            
                             # Drop if generation changed (client re-hello'd) or socket is gone
                             if rpc.genNum != gen.num or ws.application_state != WebSocketState.CONNECTED:
                                 return
@@ -445,6 +511,15 @@ def mountWebSocket(app: FastAPI):
                                 logger.debug("_runRequest sending reply failed (likely disconnect happened)", exc_info=True)
                                 return
                         except asyncio.TimeoutError as err:
+                            tracer.endSpan(
+                                reqSpan,
+                                status="timeout",
+                                level="warning",
+                                tags=["rpc", "request"],
+                                errorType=type(err).__name__,
+                                errorMessage=str(err),
+                            )
+                            
                             # Drop if generation changed (client re-hello'd) or socket is gone
                             if rpc.genNum != gen.num or ws.application_state != WebSocketState.CONNECTED:
                                 return
@@ -465,9 +540,27 @@ def mountWebSocket(app: FastAPI):
                                 logger.debug("_runRequest sending TimeoutError notification failed (likely disconnect happened)", exc_info=True)
                                 return
                         except asyncio.CancelledError:
+                            tracer.endSpan(
+                                reqSpan,
+                                status="cancelled",
+                                level="info",
+                                tags=["rpc", "request"],
+                                errorType="CancelledError",
+                                errorMessage="Request task cancelled",
+                            )
+                            
                             # Cancellation reply is handled by cancel branch
                             raise
                         except Exception as err:
+                            tracer.endSpan(
+                                reqSpan,
+                                status="error",
+                                level="error",
+                                tags=["rpc", "request"],
+                                errorType=type(err).__name__,
+                                errorMessage=str(err),
+                            )
+                            
                             # Drop if generation changed (client re-hello'd) or socket is gone
                             if rpc.genNum != gen.num or ws.application_state != WebSocketState.CONNECTED:
                                 return
@@ -534,4 +627,20 @@ def mountWebSocket(app: FastAPI):
             try:
                 await ws.close()
             except Exception:
+                pass
+            
+            # Close connection span
+            try:
+                tracer.endSpan(
+                    connSpan,
+                    status="ok",
+                    level="info",
+                    tags=["rpc", "connection"],
+                    attrs={
+                        "viewId": getattr(view, "id", None),
+                        "clientId": clientId,
+                    },
+                )
+            except Exception:
+                # Tracing must not break shutdown
                 pass
