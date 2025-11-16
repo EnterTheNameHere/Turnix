@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from enum import Enum
 from typing import Any, Literal
 
+from backend.app.globals import getTracer
 from backend.core.ids import uuid_12
 from backend.memory.memory_layer import MemoryPropagator
 from backend.sessions.session import Session, SessionKind, SessionVisibility
@@ -195,14 +196,43 @@ class LLMPipeline:
             kind=kind,
             initialInput=initialInput,
         )
+        getTracer().updateTraceContext({
+            "sessionId": getattr(self.ownerSession, "sessionId", None),
+            "pipelineRunId": run.runId,
+        })
         task = asyncio.create_task(self._runTask(run), name=f"llmpipeline:{run.runId}")
         self._activeRuns[run.runId] = task
         return run
 
     async def _runTask(self, run: LLMPipelineRun) -> None:
+        tracer = getTracer()
+        span = tracer.startSpan(
+            "pipeline.run",
+            attrs={"kind": run.kind},
+            tags=["pipeline"],
+            contextOverrides={
+                "sessionId": getattr(run.ownerSession, "sessionId", None),
+                "pipelineRunId": run.runId,
+            },
+        )
+        tracer.traceEvent(
+            "pipeline.start",
+            attrs={"kind": run.kind},
+            level="info",
+            tags=["pipeline"],
+            span=span,
+        )
+        
         try:
             for stage in self.stageOrder:
                 run.stage = stage
+                
+                tracer.traceEvent(
+                    "pipeline.stage.enter",
+                    attrs={"stage": stage.value},
+                    tags=["pipeline", "stage"],
+                    span=span,
+                )
                 
                 if stage == LLMPipelineStages.EngineCall and self._engineCaller is not None:
                     # Optionally let observers tweak engineRequest before starting the stream
@@ -247,6 +277,13 @@ class LLMPipeline:
                     # Normal stages: full fanout (ParseStreamedResponse is chunk-only. Skip here)
                     if stage != LLMPipelineStages.ParseStreamedResponse:
                         await self._fanout(stage, run, None)
+                
+                tracer.traceEvent(
+                    "pipeline.stage.exit",
+                    attrs={"stage": stage.value, "status": run.status},
+                    tags=["pipeline", "stage"],
+                    span=span,
+                )
                 
                 if run.status != "running":
                     # Handler might cancel/fail the run
@@ -293,6 +330,45 @@ class LLMPipeline:
             raise
         finally:
             self._activeRuns.pop(run.runId, None)
+            
+            try:
+                status = run.status
+                statusMap = {
+                    "succeeded": "ok",
+                    "failed": "error",
+                    "cancelled": "cancelled",
+                    "running": "error",
+                }
+                traceStatus = statusMap.get(status, "error")
+                attrs: dict[str, Any] = {"runStatus": status}
+                
+                err = run.runCtx.get("error")
+                if isinstance(err, str) and err:
+                    attrs["error"] = err
+                
+                cancelReason = run.runCtx.get("cancelReason")
+                if isinstance(cancelReason, str) and cancelReason:
+                    attrs["cancelReason"] = cancelReason
+                
+                tracer.traceEvent(
+                    "pipeline.end",
+                    attrs={"status": status},
+                    level="info",
+                    tags=["pipeline"],
+                    span=span,
+                )
+                
+                tracer.endSpan(
+                    span,
+                    status=traceStatus,
+                    level="info",
+                    tags=["pipeline"],
+                    attrs=attrs,
+                )
+            except Exception:
+                # Tracing must never break pipeline teardown.
+                pass
+            
 
     async def _fanout(self, stage: LLMPipelineStages, run: LLMPipelineRun, payload: dict | None = None) -> dict | None:
         """
