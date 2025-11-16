@@ -32,7 +32,7 @@ class MainMenuRuntime(RuntimeInstance):
         configRegistry: SchemaRegistry,
         globalConfigView: ConfigStore,
         appPackId: str = "Turnix@main_menu",
-        runtimeId: str = "turnix_main_menu",
+        runtimeInstanceId: str = "turnix_main_menu",
         kernelMemoryLayers: list[MemoryLayer] | None = None,
         saveBaseDirectory: str | Path | None = None,
     ) -> None:
@@ -47,7 +47,7 @@ class MainMenuRuntime(RuntimeInstance):
         
         super().__init__(
             appPackId=appPackId,
-            runtimeInstanceId=runtimeId,
+            runtimeInstanceId=runtimeInstanceId,
             kernelMemoryLayers=kernelMemoryLayers,
             saveBaseDirectory=saveBaseDirectory,
             createMainSession=True,

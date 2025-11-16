@@ -34,7 +34,7 @@ class Kernel:
         self,
         *,
         appPackId: str,
-        runtimeId: str | None = None,
+        runtimeInstanceId: str | None = None,
         saveBaseDirectory: Path | str | None = None,
         createMainSession: bool = True,
     ) -> RuntimeInstance:
@@ -43,7 +43,7 @@ class Kernel:
         """
         br = RuntimeInstance(
             appPackId=appPackId,
-            runtimeInstanceId=runtimeId,
+            runtimeInstanceId=runtimeInstanceId,
             kernelMemoryLayers=self.getKernelBottomLayers(),
             saveBaseDirectory=saveBaseDirectory,
             createMainSession=createMainSession,
