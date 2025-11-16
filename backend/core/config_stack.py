@@ -5,6 +5,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 import copy
 
+from backend.core.tracing import getTracer
+
 __all__ = [
     "MergeStrategy", "mergeWithStrategy", "ConfigLayer",
     "ConfigStack", "ConfigView",
@@ -240,6 +242,23 @@ class ConfigStack:
             newLayers.append(ConfigLayer(name=layer.name, scope=layer.scope, data=data, tags=layer.tags))
         self._layers = newLayers
         self._version += 1
+        
+        # Tracing: record overlay mutation (no span, just a point event).
+        try:
+            tracer = getTracer()
+            tracer.traceEvent(
+                "config.overlay.set",
+                attrs={
+                    "overlayName": name,
+                    "modId": modId,
+                    "assetId": assetId,
+                    "path": path,
+                },
+                tags=["config", "overlay"],
+            )
+        except Exception:
+            # Never let tracing break config.
+            pass
     
     def setOverlayMany(self, *, modId: str | None, assetId: str | None, entries: dict[str, Any]) -> None:
         """Batch set multiple paths into the overlay."""
@@ -259,6 +278,21 @@ class ConfigStack:
             newLayers.append(ConfigLayer(name=layer.name, scope=layer.scope, data=data, tags=layer.tags))
         self._layers = newLayers
         self._version += 1
+        
+        try:
+            tracer = getTracer()
+            tracer.traceEvent(
+                "config.overlay.setMany",
+                attrs={
+                    "overlayName": name,
+                    "modId": modId,
+                    "assetId": assetId,
+                    "paths": list(entries.keys()),
+                },
+                tags=["config", "overlay"],
+            )
+        except Exception:
+            pass
     
     def clearOverlayMany(self, *, modId: str | None, assetId: str | None, path: str | None = None) -> None:
         """Clear entire overlay or a single path."""
@@ -270,14 +304,31 @@ class ConfigStack:
         if path is None:
             del self._layers[idx]
             self._version += 1
-            return
-        # Remove only the path (recreate layer immutably)
-        layer = self._layers[idx]
-        data = dict(layer.data)
-        deleteByPath(data, path)
-        self._layers[idx] = ConfigLayer(name=layer.name, scope=layer.scope, data=data, tags=layer.tags)
-        self._version += 1
+            clearedKind = "overlay"
+        else:
+            # Remove only the path (recreate layer immutably)
+            layer = self._layers[idx]
+            data = dict(layer.data)
+            deleteByPath(data, path)
+            self._layers[idx] = ConfigLayer(name=layer.name, scope=layer.scope, data=data, tags=layer.tags)
+            self._version += 1
+            clearedKind = "path"
 
+        try:
+            tracer = getTracer()
+            tracer.traceEvent(
+                "config.overlay.clear",
+                attrs={
+                    "overlayName": name,
+                    "modId": modId,
+                    "assetId": assetId,
+                    "path": path,
+                    "kind": clearedKind,
+                },
+                tags=["config", "overlay"]
+            )
+        except Exception:
+            pass
 
 
 class ConfigView:
