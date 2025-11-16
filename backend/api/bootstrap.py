@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from backend.app.globals import getActiveRuntime, config, configBool
+from backend.app.globals import getActiveRuntime, config, configBool, getTracer
 from backend.views.registry import viewRegistry
 
 logger = logging.getLogger(__name__)
@@ -55,13 +55,30 @@ async def apiBootstrap(request: Request):
             max_age=cookieMaxAge,
         )
     
-    logger.info(
-        "[BOOTSTRAP] clientId='%s' viewId='%s' hasCookie='%s' -> token='%s'",
-        clientId,
-        view.id,
-        "clientId" in reqCookies,
-        token[:8] + "…" # shortened for readability
-    )
+    hasCookie = "clientId" in reqCookies
+    
+    # Trace bootstrap boundary so the viewer can see who got which view.
+    tracer = getTracer()
+    try:
+        tracer.traceEvent(
+            "http.bootstrap",
+            level="info",
+            tags=["http", "bootstrap"],
+            attrs={
+                "clientId": clientId,
+                "viewId": view.id,
+                "hasCookie": hasCookie,
+                "scheme": scheme,
+                "cookieSameSite": cookieSameSite,
+                "cookieSecure": cookieSecure,
+                "cookieMaxAgeSec": cookieMaxAge,
+                "tokenPreview": token[:8] + "…",
+            },
+        )
+    except Exception:
+        # Tracing must not break bootstrap.
+        pass
+    
     logger.debug("[BOOTSTRAP] Payload: %s", payload)
 
     return resp
