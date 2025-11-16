@@ -8,7 +8,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Mapping # pyright: ignore[reportShadowedImports]
 
-from backend.app.globals import configBool
+from backend.app.globals import configBool, getTracer
 from backend.app.paths import ROOT_DIR
 from backend.mods.manifest import ModManifest
 from backend.mods.roots_registry import getRoots as getRegisteredRoots
@@ -142,33 +142,120 @@ def scanMods(overrideRoots: Iterable[Path] | None = None) -> dict[str, tuple[Pat
       modId -> (root, moddir, manifest, manifestFileName)
     Results are cached per root-set. Use rescanMods() to force rescanning.
     """
+    tracer = getTracer()
+    span = None
+    
     roots, cacheKey = _normalizeRoots(overrideRoots)
     
-    with _SCAN_LOCK:
-        cached = _SCAN_CACHE.get(cacheKey)
-        if cached is not None:
-            return cached
+    try:
+        span = tracer.startSpan(
+            "mods.scan",
+            attrs={
+                "overrideRoots": overrideRoots is not None,
+                "rootCount": len(roots),
+            },
+            tags=["mods", "scan"],
+        )
+        tracer.traceEvent(
+            "mods.scan.start",
+            level="debug",
+            tags=["mods", "scan"],
+            span=span,
+        )
+    except Exception:
+        span = None
     
-    found: dict[str, tuple[Path, Path, ModManifest, str]] = {}
-    allowSymlinks = configBool("mods.allowSymlinks", False)
+    try:
+        with _SCAN_LOCK:
+            cached = _SCAN_CACHE.get(cacheKey)
+            if cached is not None:
+                
+                if span is not None:
+                    try:
+                        tracer.traceEvent(
+                            "mods.scan.cacheHit",
+                            level="debug",
+                            tags=["mods", "scan"],
+                            span=span,
+                            attrs={"modCount": len(cached)},
+                        )
+                        tracer.endSpan(
+                            span,
+                            status="ok",
+                            tags=["mods", "scan"],
+                            attrs={"cacheHit": True},
+                        )
+                    except Exception:
+                        pass
+                
+                return cached
+        
+        found: dict[str, tuple[Path, Path, ModManifest, str]] = {}
+        allowSymlinks = configBool("mods.allowSymlinks", False)
 
-    for root in roots:
-        try:
-            if not root.exists():
+        for root in roots:
+            try:
+                if not root.exists():
+                    continue
+            except Exception:
                 continue
-        except Exception:
-            continue
-        _scanDir(root, root, found, allowSymlinks=allowSymlinks)
+            _scanDir(root, root, found, allowSymlinks=allowSymlinks)
 
-    logger.info(
-        "Mods discovered: %d (allowSymlinks=%s)",
-        len(found),
-        allowSymlinks
-    )
-    
-    with _SCAN_LOCK:
-        _SCAN_CACHE[cacheKey] = found
-    return found
+        logger.info(
+            "Mods discovered: %d (allowSymlinks=%s)",
+            len(found),
+            allowSymlinks
+        )
+        
+        with _SCAN_LOCK:
+            _SCAN_CACHE[cacheKey] = found
+        
+        if span is not None:
+            try:
+                tracer.traceEvent(
+                    "mods.scan.done",
+                    level="debug",
+                    tags=["mods", "scan"],
+                    span=span,
+                    attrs={
+                        "modCount": len(found),
+                        "allowSymlinks": allowSymlinks,
+                        "cacheHit": False,
+                    },
+                )
+                tracer.endSpan(
+                    span,
+                    status="ok",
+                    tags=["mods", "scan"],
+                )
+            except Exception:
+                pass
+        
+        return found
+
+    except Exception as err:
+        if span is not None:
+            try:
+                tracer.traceEvent(
+                    "mods.scan.error",
+                    level="error",
+                    tags=["mods", "scan", "error"],
+                    span=span,
+                    attrs={
+                        "errorType": type(err).__name__,
+                        "errorMessage": str(err),
+                    },
+                )
+                tracer.endSpan(
+                    span,
+                    status="error",
+                    tags=["mods", "scan", "error"],
+                    errorType=type(err).__name__,
+                    errorMessage=str(err),
+                )
+            except Exception:
+                pass
+        raise
 
 
 
@@ -176,6 +263,17 @@ def rescanMods(overrideRoots: Iterable[Path] | None = None) -> dict[str, tuple[P
     """
     Clears the cache for the given root-set (or the default set) and rescans.
     """
+    tracer = getTracer()
+    try:
+        tracer.traceEvent(
+            "mods.rescan",
+            level="info",
+            tags=["mods", "scan"],
+            attrs={"overrideRoots": overrideRoots is not None},
+        )
+    except Exception:
+        pass
+    
     _roots, cacheKey = _normalizeRoots(overrideRoots)
     with _SCAN_LOCK:
         _SCAN_CACHE.pop(cacheKey, None)

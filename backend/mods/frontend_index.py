@@ -5,6 +5,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
+from backend.app.globals import getTracer
 from backend.core.hashing import sha256sumWithPath
 from backend.core.paths import resolveSafe
 from backend.mods.constants import JS_RUNTIMES
@@ -71,6 +72,24 @@ def makeFrontendIndex(
     
     manifests.sort(key=lambda man: (man.get("order", 0), man["id"], man["version"]))
     errors = sum(1 for manifest in manifests if not manifest.get("enabled"))
+    
+    try:
+        tracer = getTracer()
+        tracer.traceEvent(
+            "mods.frontend.indexBuild",
+            level="debug",
+            tags=["mods", "frontend"],
+            attrs={
+                "base": base,
+                "mountId": mountId or "",
+                "count": len(manifests),
+                "errors": errors,
+                "ids": [man["id"] for man in manifests],
+            },
+        )
+    except Exception:
+        pass
+    
     return {
         "modManifests": manifests,
         "meta": {
@@ -137,6 +156,17 @@ def serveModAssetForMount(mountId: str, modId: str, path: str):
 
 @router.get("/mod/rescan")
 def modsRescanMods():
+    tracer = getTracer()
+    try:
+        tracer.traceEvent(
+            "mods.frontend.rescanAll",
+            level="info",
+            tags=["mods", "frontend"],
+            attrs={},
+        )
+    except Exception:
+        pass
+    
     fresh = rescanMods()
     index = makeFrontendIndex(fresh, base="/mods/load", mountId=None)
     index["ok"] = True
@@ -146,6 +176,17 @@ def modsRescanMods():
 
 @router.get("/mod/{mountId}/rescan")
 def modsRescanMount(mountId: str):
+    tracer = getTracer()
+    try:
+        tracer.traceEvent(
+            "mods.frontend.rescanMount",
+            level="info",
+            tags=["mods", "frontend"],
+            attrs={"mountId": mountId},
+        )
+    except Exception:
+        pass
+    
     fresh = rescanModsForMount(mountId)
     index = makeFrontendIndex(fresh, base=f"/mods/{mountId}/load", mountId=mountId)
     index["ok"] = True

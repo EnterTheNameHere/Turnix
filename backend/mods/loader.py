@@ -7,7 +7,7 @@ from typing import Any # pyright: ignore[reportShadowedImports]
 from dataclasses import dataclass
 from pathlib import Path
 
-from backend.app.globals import getPermissions
+from backend.app.globals import getPermissions, getTracer
 from backend.core.permissions import PermissionManager, GrantPermission, parseCapabilityRange
 from backend.mods.constants import PY_RUNTIMES
 from backend.mods.discover import scanMods
@@ -47,66 +47,205 @@ async def loadPythonMods(*, settings: dict[str, Any]) -> tuple[list[LoadedPyMod]
       - failed: list of {id, reason, stack?}
       - services: mapping registered by mods via ctx.registerService(name, instance)
     """
-    discovered = scanMods()
-
-    # TODO: replace with proper permission prompting/flow
-    autoGrantPermissionsForMods(getPermissions(), discovered)
-
-    enabled: list[tuple[ModManifest, Path, Path, RuntimeSpec]] = []
-
-    for _modId, (_root, moddir, manifest, _manFileName) in discovered.items():
-        rt = next((manifest.runtimes[key] for key in PY_RUNTIMES if key in manifest.runtimes), None)
-        if not rt or not rt.enabled:
-            continue
-
-        entryPath = moddir / rt.entry
-        enabled.append((manifest, moddir, entryPath, rt))
+    tracer = getTracer()
+    span = None
     
-    services: dict[str, Any] = {}
-    loaded: list[LoadedPyMod] = []
-    failed: list[dict[str, Any]] = []
+    try:
+        span = tracer.startSpan(
+            "mods.load.python",
+            attrs={
+                "settingsKeys": sorted(settings.keys()),
+            },
+            tags=["mods", "python"],
+        )
+        tracer.traceEvent(
+            "mods.load.python.start",
+            level="info",
+            tags=["mods", "python"],
+            span=span,
+        )
+    except Exception:
+        span = None
+    
+    try:
+        discovered = scanMods()
 
-    def _sortKey(entry):
-        manifest, _moddir, _entryPath, runtime = entry
-        return (runtime.order, manifest.id, manifest.version)
+        if span is not None:
+            try:
+                tracer.traceEvent(
+                    "mods.load.python.discovered",
+                    level="debug",
+                    tags=["mods", "python"],
+                    span=span,
+                    attrs={"modCount": len(discovered)},
+                )
+            except Exception:
+                pass
+        
+        # TODO: replace with proper permission prompting/flow
+        autoGrantPermissionsForMods(getPermissions(), discovered)
 
-    for manifest, moddir, entryPath, rt in sorted(enabled, key=_sortKey):
-        try:
-            if not entryPath.exists():
-                raise FileNotFoundError(f"'{manifest.id}' - entry file not found: '{entryPath}'")
+        enabled: list[tuple[ModManifest, Path, Path, RuntimeSpec]] = []
 
-            module = _quickImport(entryPath.resolve())
-            onLoad = getattr(module, "onLoad", None)
+        for _modId, (_root, moddir, manifest, _manFileName) in discovered.items():
+            rt = next((manifest.runtimes[key] for key in PY_RUNTIMES if key in manifest.runtimes), None)
+            if not rt or not rt.enabled:
+                continue
 
-            ctx = PyModContext(services=services, settings=settings)
-            if asyncio.iscoroutinefunction(onLoad):
-                await onLoad(ctx) # async
-            elif callable(onLoad):
-                onLoad(ctx)       # sync
-            else:
-                logger.info("Python mod '%s' has no onLoad(); skipping initialization", manifest.id)
+            entryPath = moddir / rt.entry
+            enabled.append((manifest, moddir, entryPath, rt))
+        
+        services: dict[str, Any] = {}
+        loaded: list[LoadedPyMod] = []
+        failed: list[dict[str, Any]] = []
+
+        def _sortKey(entry):
+            manifest, _moddir, _entryPath, runtime = entry
+            return (runtime.order, manifest.id, manifest.version)
+
+        for manifest, moddir, entryPath, rt in sorted(enabled, key=_sortKey):
             
-            loaded.append(LoadedPyMod(
-                modId=manifest.id,
-                name=manifest.name,
-                version=manifest.version,
-                module=module,
-                entryPath=entryPath,
-            ))
-            logger.info("Loaded Python mod: '%s@%s'", manifest.id, manifest.version)
-        except Exception as err:
-            import traceback
-            tb = traceback.format_exc()
-            logger.exception("Failed to load Python mod '%s': %s", manifest.id, err)
-            failed.append({
-                "id": manifest.id,
-                "runtime": "python",
-                "entry": str(entryPath),
-                "reason": str(err),
-                "stack": tb,
-            })
+            # Enrich ambient trace context so all records get modId/modRuntime
+            try:
+                tracer.updateTraceContext({
+                    "modId": manifest.id,
+                    "modRuntime": "python",
+                })
+            except Exception:
+                # Context is best-effort. Ignore failures.
+                pass
+            
+            if span is not None:
+                try:
+                    tracer.traceEvent(
+                        "mods.load.python.modStart",
+                        level="debug",
+                        tags=["mods", "python"],
+                        span=span,
+                        attrs={
+                            "modId": manifest.id,
+                            "version": manifest.version,
+                            "entryPath": str(entryPath),
+                            "order": rt.order,
+                        },
+                    )
+                except Exception:
+                    pass
+            
+            try:
+                if not entryPath.exists():
+                    raise FileNotFoundError(f"'{manifest.id}' - entry file not found: '{entryPath}'")
+
+                module = _quickImport(entryPath.resolve())
+                onLoad = getattr(module, "onLoad", None)
+
+                ctx = PyModContext(services=services, settings=settings)
+                if asyncio.iscoroutinefunction(onLoad):
+                    await onLoad(ctx) # async
+                elif callable(onLoad):
+                    onLoad(ctx)       # sync
+                else:
+                    logger.info("Python mod '%s' has no onLoad(); skipping initialization", manifest.id)
+                
+                loaded.append(LoadedPyMod(
+                    modId=manifest.id,
+                    name=manifest.name,
+                    version=manifest.version,
+                    module=module,
+                    entryPath=entryPath,
+                ))
+                logger.info("Loaded Python mod: '%s@%s'", manifest.id, manifest.version)
+                
+                if span is not None:
+                    try:
+                        tracer.traceEvent(
+                            "mods.load.python.modLoaded",
+                            level="debug",
+                            tags=["mods", "python"],
+                            span=span,
+                            attrs={
+                                "modId": manifest.id,
+                                "version": manifest.version,
+                            },
+                        )
+                    except Exception:
+                        pass
+                
+            except Exception as err:
+                import traceback
+                tb = traceback.format_exc()
+                logger.exception("Failed to load Python mod '%s': %s", manifest.id, err)
+                failed.append({
+                    "id": manifest.id,
+                    "runtime": "python",
+                    "entry": str(entryPath),
+                    "reason": str(err),
+                    "stack": tb,
+                })
+                
+                if span is not None:
+                    try:
+                        tracer.traceEvent(
+                            "mods.load.python.modFailed",
+                            level="error",
+                            tags=["mods", "python", "error"],
+                            span=span,
+                            attrs={
+                                "modId": manifest.id,
+                                "version": manifest.version,
+                                "errorType": type(err).__name__,
+                                "errorMessage": str(err),
+                            },
+                        )
+                    except Exception:
+                        pass
+        
+        if span is not None:
+            try:
+                tracer.traceEvent(
+                    "mods.load.python.done",
+                    level="info",
+                    tags=["mods", "python"],
+                    span=span,
+                    attrs={
+                        "loadedCount": len(loaded),
+                        "failedCount": len(failed),
+                    },
+                )
+                tracer.endSpan(
+                    span,
+                    status="ok",
+                    tags=["mods", "python"],
+                )
+            except Exception:
+                pass
+                
+        return loaded, failed, services
     
-    return loaded, failed, services
+    except Exception as err:
+        if span is not None:
+            try:
+                tracer.traceEvent(
+                    "mods.load.python.error",
+                    level="error",
+                    tags=["mods", "python", "error"],
+                    span=span,
+                    attrs={
+                        "errorType": type(err).__name__,
+                        "errorMessage": str(err),
+                    },
+                )
+                tracer.endSpan(
+                    span,
+                    status="error",
+                    tags=["mods", "python", "error"],
+                    errorType=type(err).__name__,
+                    errorMessage=str(err),
+                )
+            except Exception:
+                pass
+        
+        raise
 
 
 
