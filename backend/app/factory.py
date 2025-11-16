@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.app.globals import getTracer
 from backend.app.lifecycle import life
 from backend.app.static_mount import mountStatic
 from backend.kernel import Kernel
@@ -17,6 +18,8 @@ from backend.runtimes.main_menu_runtime import MainMenuRuntime
 
 def createApp(*, extraRouters: Sequence[APIRouter] = (), initialRuntime: RuntimeInstance | None = None) -> FastAPI:
     # Early, process-wide bootstrap (idempotent)
+    tracer = getTracer()
+    tracer.startProcessSpan({"phase": "factory.createApp"})
     from backend.content.roots import initRoots
     initRoots() # TODO: Add cli options
     from backend.app.config import initConfig
@@ -64,12 +67,14 @@ def createApp(*, extraRouters: Sequence[APIRouter] = (), initialRuntime: Runtime
     )
 
     # ----- Routers first -----
-    from backend.app.web import router as webRouter
     from backend.api.bootstrap import router as bootstrapRouter
+    from backend.app.trace_ws import router as traceRouter
+    from backend.app.web import router as webRouter
     from backend.mods.frontend_index import router as frontendRouter
 
-    app.include_router(webRouter)
     app.include_router(bootstrapRouter)
+    app.include_router(traceRouter)
+    app.include_router(webRouter)
     app.include_router(frontendRouter)
 
     for router in extraRouters:
