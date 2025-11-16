@@ -6,6 +6,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from backend.app.globals import getTracer
 from backend.core.ids import uuid_12
 from backend.memory.memory_layer import (
     DictMemoryLayer,
@@ -67,6 +68,41 @@ class Session:
         }[kind.value])
         self.version: int = 0
         self.createdTs: float = time.time()
+        self._traceSpan = None
+        
+        tracer = getTracer()
+        tracer.updateTraceContext({
+            "sessionId": self.id,
+            "sessionKind": self.kind.value,
+        })
+        try:
+            self._traceSpan = tracer.startSpan(
+                "session.lifecycle",
+                attrs={
+                    "kind": self.kind.value,
+                    "visibility": visibility.value,
+                },
+                tags=["session"],
+                contextOverrides={
+                    "sessionId": self.id,
+                    "sessionKind": self.kind.value,
+                },
+            )
+            tracer.traceEvent(
+                "session.create",
+                attrs={
+                    "sessionId": self.id,
+                    "kind": self.kind.value,
+                    "visibility": visibility.value,
+                    "ownerViewId": ownerViewId,
+                },
+                level="info",
+                tags=["session"],
+                span=self._traceSpan,
+            )
+        except Exception:
+            # Tracing must never break session construction.
+            self._traceSpan = None
 
         # Access metadata
         self.ownerViewId: str | None = ownerViewId
@@ -279,34 +315,72 @@ class Session:
         By default we DO NOT persist on destroy, because destroy may be called from
         error/teardown paths where the state is not guaranteed to be consistent.
         """
+        status = "ok"
         try:
-            self.pipeline.cancelAllRuns()
-        except Exception:
-            pass
-
-        try:
-            if persist:
-                # Flush everything once (propagate exceptions to caller)
+            try:
                 try:
-                    self.saveMemory()
-                    if self.saveManager is not None:
-                        self.saveManager.flushAll()
+                    self.pipeline.cancelAllRuns()
                 except Exception:
-                    # On failure, try rollback and continue teardown
-                    try:
-                        propagator = MemoryPropagator(self.memoryResolver)
-                        propagator.rollback(self.memoryLayers)
-                    except Exception:
-                        logger.exception("Error rolling back memory")
-                        pass
-                    raise
-            else:
-                try:
-                    propagator = MemoryPropagator(self.memoryResolver)
-                    propagator.rollback(self.memoryLayers)
-                except Exception:
-                    # Best effort teardown even if resolver/layers are already half-torn
-                    logger.exception("Error rolling back memory")
                     pass
+
+                try:
+                    if persist:
+                        # Flush everything once (propagate exceptions to caller)
+                        try:
+                            self.saveMemory()
+                            if self.saveManager is not None:
+                                self.saveManager.flushAll()
+                        except Exception:
+                            # On failure, try rollback and continue teardown
+                            try:
+                                propagator = MemoryPropagator(self.memoryResolver)
+                                propagator.rollback(self.memoryLayers)
+                            except Exception:
+                                logger.exception("Error rolling back memory")
+                                pass
+                            raise
+                    else:
+                        try:
+                            propagator = MemoryPropagator(self.memoryResolver)
+                            propagator.rollback(self.memoryLayers)
+                        except Exception:
+                            # Best effort teardown even if resolver/layers are already half-torn
+                            logger.exception("Error rolling back memory")
+                            pass
+                finally:
+                    self.memoryLayers.clear()
+            except Exception:
+                status = "error"
+                raise
         finally:
-            self.memoryLayers.clear()
+            span = getattr(self, "_traceSpan", None)
+            if span is not None:
+                tracer = getTracer()
+                try:
+                    tracer.traceEvent(
+                        "session.destroy",
+                        attrs={
+                            "sessionId": self.id,
+                            "persist": persist,
+                            "status": status,
+                        },
+                        level="info",
+                        tags=["session"],
+                        span=span,
+                    )
+                    traceStatus = "ok" if status == "ok" else "error"
+                    tracer.endSpan(
+                        span,
+                        status=traceStatus,
+                        level="info",
+                        tags=["session"],
+                        attrs={
+                            "destroyedTs": time.time(),
+                            "persist": persist,
+                            "finalStatus": status,
+                        },
+                    )
+                except Exception:
+                    # Tracing must not interfere with teardown.
+                    pass
+                self._traceSpan = None
