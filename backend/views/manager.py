@@ -2,6 +2,7 @@
 from __future__ import annotations
 from fastapi import WebSocket
 
+from backend.app.globals import getTracer
 from backend.views.view import View
 from backend.views.registry import viewRegistry
 
@@ -37,6 +38,19 @@ class ViewManager:
         # Attach to new view
         self._viewIdByWs[ws] = view.id
         self._wsByViewId.setdefault(view.id, set()).add(ws)
+        
+        tracer = getTracer()
+        tracer.traceEvent(
+            "viewManager.bind",
+            attrs={
+                "viewId": view.id,
+                "oldViewId": oldViewId,
+                "socketId": id(ws),
+                "rebind": bool(oldViewId and oldViewId != view.id),
+            },
+            level="info",
+            tags=["viewManager", "view"]
+        )
     
     def getViewForWs(self, ws: WebSocket) -> View | None:
         if not isinstance(ws, WebSocket):
@@ -60,6 +74,18 @@ class ViewManager:
                 wsSet.discard(ws)
                 if not wsSet:
                     self._wsByViewId.pop(viewId, None)
+        
+        tracer = getTracer()
+        tracer.traceEvent(
+            "viewManager.removeViewForWs",
+            attrs={
+                "viewId": viewId,
+                "socketId": id(ws),
+                "hadBinding": bool(viewId),
+            },
+            level="info",
+            tags=["viewManager", "view"],
+        )
     
     def unbindAllForView(self, viewId: str) -> int:
         """
@@ -68,11 +94,33 @@ class ViewManager:
         """
         wsSet = self._wsByViewId.pop(viewId, None)
         if not wsSet:
+            tracer = getTracer()
+            tracer.traceEvent(
+                "viewManager.unbindAllForView",
+                attrs={
+                    "viewId": viewId,
+                    "unboundCount": 0,
+                },
+                level="debug",
+                tags=["viewManager", "view"]
+            )
             return 0
         count = 0
         for ws in list(wsSet):
             if self._viewIdByWs.pop(ws, None) == viewId:
                 count += 1
+        
+        tracer = getTracer()
+        tracer.traceEvent(
+            "viewManager.unbindAllForView",
+            attrs={
+                "viewId": viewId,
+                "unboundCount": count,
+            },
+            level="info",
+            tags=["viewManager", "view"]
+        )
+        
         return count
 
     def socketsForView(self, viewId: str) -> set[WebSocket]:
