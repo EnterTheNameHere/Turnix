@@ -50,7 +50,7 @@ class AppRuntime(RuntimeInstance):
         validator = reg.getValidator("config", "runtime")
         savePath = ROOT_DIR / "saves" / self.id / "config.json5"
         providers = [
-            DefaultsProvider(path=str(ROOT_DIR / "assets" / "config" / "defaults" / "runtime.json5")),  # Runtime defaults
+            DefaultsProvider(path=str(ROOT_DIR / "first-party" / "config" / "defaults" / "runtime.json5")),  # Runtime defaults
             # A "view provider" that reads from global (read-only)
             ViewProvider(globalConfig),   # Inhering global values as a lower layer
             FileProvider(path=str(savePath), readOnly=False),

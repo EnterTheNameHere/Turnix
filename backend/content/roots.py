@@ -18,8 +18,8 @@ __all__ = [
     "defaultUserRoot",
     "ROOT_DIR",
     "WEB_ROOT",
-    "DEFAULT_ASSETS_DIR",
-    "DEFAULT_DOWNLOADED_DIR",
+    "DEFAULT_FIRST_PARTY_DIR",
+    "DEFAULT_THIRD_PARTY_DIR",
 ]
 
 logger = logging.getLogger(__name__)
@@ -33,8 +33,15 @@ ROOT_DIR = BACKEND_DIR.parent                        # repository root
 WEB_ROOT = ROOT_DIR / "frontend"
 
 # Subfolder kinds under a Turnix "root":
-RootKind = Literal["assets", "downloaded", "userdata", "saves", "custom"]
+RootKind = Literal["first-party", "third-party", "userdata", "saves", "custom"]
 _REQUIRED_SUBDIRS: tuple[str, ...] = get_args(RootKind)
+_ATTR_BY_KIND: dict[RootKind, str] = {
+    "first-party": "firstParty",
+    "third-party": "thirdParty",
+    "custom": "custom",
+    "userdata": "userdata",
+    "saves": "saves",
+}
 
 # ------------------------------------------------------------------ #
 # Helpers
@@ -96,8 +103,8 @@ class RootSet:
     - Repo root must contain all the directories or error is raised.
     """
     base: Path
-    assets: Path
-    downloaded: Path
+    firstParty: Path
+    thirdParty: Path
     userdata: Path
     saves: Path
     custom: Path
@@ -105,7 +112,8 @@ class RootSet:
     label: str = "default" # For diagnostics
     
     def subdir(self, kind: RootKind) -> Path:
-        return getattr(self, kind)
+        attr = _ATTR_BY_KIND[kind]
+        return getattr(self, attr)
 
 
 
@@ -115,21 +123,21 @@ def _declareRoot(base: Path, *, priority: int, label: str, createDirectories: bo
     Other roots are NOT supposed to create anything here.
     """
     base = _resolve(base)
-    assets = base / "assets"
-    downloaded = base / "downloaded"
+    firstParty = base / "first-party"
+    thirdParty = base / "third-party"
     userdata = base / "userdata"
     saves = base / "saves"
     custom = base / "custom"
     
     if createDirectories:
         # CLI --root must exist and be ready if used
-        for path in (base, assets, downloaded, userdata, saves, custom):
+        for path in (base, firstParty, thirdParty, userdata, saves, custom):
             _mkDir(path)
 
     return RootSet(
         base=base,
-        assets=assets,
-        downloaded=downloaded,
+        firstParty=firstParty,
+        thirdParty=thirdParty,
         userdata=userdata,
         saves=saves,
         custom=custom,
@@ -257,7 +265,7 @@ class RootsService:
                 raise ReactorScramError(
                     "“Success begins with structure.”\n"
                     "Your directory structure: Not Found.\n"
-                    f"Needed: assets, downloaded, saves, userdata, custom under '{repoBase}'.\n"
+                    f"Needed: first-party, third-party, custom, userdata, saves under '{repoBase}'.\n"
                     "Turnix has seized up while reconsidering life goals. Please build folders, achieve greatness, "
                     "avoid meltdown. Redownload Turnix?"
                 )
@@ -388,11 +396,11 @@ class RootsService:
     
     def contentRoots(self) -> list[Path]:
         """
-        Reading list of content-hosting roots (assets/downloaded/custom), existing-only, in priority order.
+        Reading list of content-hosting roots (first-party/third-party/custom), existing-only, in priority order.
         """
         out: list[Path] = []
         for rootSet in self._roots:
-            for sub in (rootSet.assets, rootSet.downloaded, rootSet.custom):
+            for sub in (rootSet.firstParty, rootSet.thirdParty, rootSet.custom):
                 if sub.exists():
                     out.append(sub)
         return _dedupePaths(out)
@@ -491,8 +499,8 @@ class RootsService:
 # Convenience exports
 # ------------------------------------------------------------------ #
 
-DEFAULT_ASSETS_DIR = _resolve(ROOT_DIR / "assets")
-DEFAULT_DOWNLOADED_DIR = _resolve(ROOT_DIR / "downloaded")
+DEFAULT_FIRST_PARTY_DIR = _resolve(ROOT_DIR / "first-party")
+DEFAULT_THIRD_PARTY_DIR = _resolve(ROOT_DIR / "third-party")
 
 def defaultUserRoot() -> Path:
     """

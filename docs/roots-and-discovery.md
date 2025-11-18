@@ -182,6 +182,7 @@ Turnix defines the following types of packs:
 - Defines saved state of active `RuntimeInstance`.
 - Expected to be found at `saves/` directory, under `<appPackId>` and `<runtimeInstanceId>` sub-directories.
 - Can contain copies of packs copied during appPack initialization, in which case it should load those packs with higher priority for compatibility.
+- Copies live inside `saves/<appPackId>/<runtimeInstanceId>/packs/<kind>/...` and are indexed by `pack-manifest.json5`.
 
 **Nesting model**:
 ```

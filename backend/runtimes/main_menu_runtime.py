@@ -37,8 +37,8 @@ class MainMenuRuntime(RuntimeInstance):
         saveBaseDirectory: str | Path | None = None,
     ) -> None:
         if saveBaseDirectory is None:
-            # Default: keep main menu saves within assets/main_menu/saves
-            assetsRoots = getRootsService().rootsFor("assets")
+            # Default: keep main menu saves within first-party/main_menu/saves
+            assetsRoots = getRootsService().rootsFor("first-party")
             if not assetsRoots:
                 # Fallback to generic saves root if assets missing (shouldn't happen with validated repo)
                 saveBaseDirectory = getRootsService().getWriteDir("saves")
@@ -65,7 +65,7 @@ class MainMenuRuntime(RuntimeInstance):
         # Reuse runtime's save root
         savePath = self.saveRoot / "config.json5"
         
-        defaultsPath = getRootsService().rootsFor("assets")[0] / "config" / "defaults" / "global.json5"
+        defaultsPath = getRootsService().rootsFor("first-party")[0] / "config" / "defaults" / "global.json5"
 
         providers = [
             DefaultsProvider(path=str(defaultsPath)),  # Runtime defaults
