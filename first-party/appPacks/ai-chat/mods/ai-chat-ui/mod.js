@@ -1,4 +1,4 @@
-// frontend/mods/examples/mod.js
+// first-party/appPacks/ai-chat/mods/ai-chat-ui/mod.js
 
 const Toast = {
     info:  ({text, ttlMs}) => showToast(text, ttlMs, 'info'),
@@ -150,7 +150,7 @@ export async function onLoad(ctx) {
                     {runId, stage: 'ParseStreamedResponse'},
                 );
                 stageSub.on('update', (msg) => {
-                    console.debug("[ExampleMod] stage update:", msg);
+                    console.debug('[ExampleMod] stage update:', msg);
                     if(!msg || !currentAssistantEl) return;
 
                     if(msg.kind === 'chunk') {
