@@ -12,9 +12,9 @@ from backend.config.schema_loader import loadConfigSchemas
 
 logger = logging.getLogger(__name__)
 
-ASSETS_DEFAULTS_DIR = ROOT_DIR / "assets" / "config" / "defaults"
+ASSETS_DEFAULTS_DIR = ROOT_DIR / "first-party" / "config" / "defaults"
 USERDATA_CFG        = ROOT_DIR / "userdata" / "config"
-SCHEMAS_DIR         = ROOT_DIR / "assets" / "config" / "schema"
+SCHEMAS_DIR         = ROOT_DIR / "first-party" / "config" / "schema"
 
 
 
