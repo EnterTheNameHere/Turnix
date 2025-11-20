@@ -2,6 +2,7 @@
 from __future__ import annotations
 import re
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -13,10 +14,17 @@ from backend.core.schema_registry import SEMVER_PATTERN_RE
 
 __all__ = [
     "PackManifest", "ResolvedPack", "PackResolver",
-    "parseQualifiedPackId",
+    "parseQualifiedPackId", "PACK_KIND_DIRS",
 ]
 
 _MANIFEST_NAMES = ("manifest.json5", "manifest.json")
+PACK_KIND_DIRS: Mapping[str, str] = {
+    "appPack": "appPacks",
+    "viewPack": "viewPacks",
+    "contentPack": "contentPacks",
+    "mod": "mods",
+}
+_KNOWN_PACK_KINDS = frozenset((*PACK_KIND_DIRS.keys(), "savePack"))
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _AUTHOR_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -36,7 +44,7 @@ class PackManifest:
     name: str
     version: str
     author: str | None = None
-    kind: str = "appPack" # "mod", "modPack", "dataPack", ...
+    kind: str = "appPack" # "mod", "contentPack", ...
     # Optional metadata bag (languages, images dir, etc.)
     meta: dict[str, Any] | None = None
 
