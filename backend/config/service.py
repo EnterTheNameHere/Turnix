@@ -7,8 +7,8 @@ from typing import Final
 from backend.core.schema_registry import SchemaRegistry
 from backend.config.store import ConfigStore
 from backend.config.providers import DefaultsProvider, FileProvider, RuntimeProvider, ViewProvider
-from backend.app.paths import ROOT_DIR
 from backend.config.schema_loader import loadConfigSchemas
+from backend.content.roots import ROOT_DIR
 
 logger = logging.getLogger(__name__)
 
