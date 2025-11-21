@@ -228,7 +228,7 @@ If `--userdata=` is used, that wins over all others. This folder never contains 
 
 Saved to:
 ```bash
-<root>/saves/<appPackId>/<runtimeId>/
+<root>/saves/<appPackId>/<runtimeInstanceId>/
 ```
 
 If `--saves=` is used, that wins over all others. If pack copies exist inside the SavePack, they take **priority** over any external version for this runtime instance.
