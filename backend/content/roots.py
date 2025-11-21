@@ -17,8 +17,8 @@ __all__ = [
     "defaultUserRoot",
     "ROOT_DIR",
     "WEB_ROOT",
-    "DEFAULT_ASSETS_DIR",
-    "DEFAULT_DOWNLOADED_DIR",
+    "DEFAULT_FIRST_PARTY_DIR",
+    "DEFAULT_THIRD_PARTY_DIR",
 ]
 
 # ------------------------------------------------------------------ #
@@ -500,8 +500,8 @@ class RootsService:
 # Convenience exports
 # ------------------------------------------------------------------ #
 
-DEFAULT_ASSETS_DIR = _resolve(ROOT_DIR / "first-party")
-DEFAULT_DOWNLOADED_DIR = _resolve(ROOT_DIR / "third-party")
+DEFAULT_FIRST_PARTY_DIR = _resolve(ROOT_DIR / "first-party")
+DEFAULT_THIRD_PARTY_DIR = _resolve(ROOT_DIR / "third-party")
 
 def defaultUserRoot() -> Path:
     """
