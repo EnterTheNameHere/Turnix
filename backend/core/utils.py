@@ -59,7 +59,7 @@ def deepEquals(first: Any, second: Any, *, strict: bool = True) -> bool:
         (non-bool result, exception during __eq__, or NotImplemented).
       - strict=False: prefers structured fallbacks over repr():
           1) bool result from == if available
-          2) compare tryJSONify(...) results resursively (order sensitive for
+          2) compare tryJSONify(...) results recursively (order sensitive for
              lists/tuples and keys for dicts)
           3) last resort: repr() comparison
       

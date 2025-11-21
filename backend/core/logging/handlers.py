@@ -13,7 +13,7 @@ class JSLogHandler(logging.Handler):
     Streams logs to connected frontends via RPC "emit" messages.
 
     - Batches messages (size + time)
-    - Apply backpressure (requeue on failure, bounded)
+    - Apply back-pressure (requeue on failure, bounded)
     - Uses JSON formatter so the UI can parse structured entries
     - Publishes through backend.rpc.broadcast.pushEvent()
     """

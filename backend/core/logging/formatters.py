@@ -40,7 +40,7 @@ class JsonFormatter(logging.Formatter):
         }
 
         if record.exc_info:
-            # Safely etract exception information
+            # Safely extract exception information
             excType = record.exc_info[0]
             excValue = record.exc_info[1]
             try:

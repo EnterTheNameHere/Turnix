@@ -71,12 +71,12 @@ async def _sendOne(ws: WebSocket, viewId: str, capability: str, payload: dict[st
         except Exception:
             clientId = None
         
-        sess = getRPCConnection(viewId, clientId, "session-1")
+        session = getRPCConnection(viewId, clientId, "session-1")
         msg = RPCMessage(
             id=uuidv7(),
             v="0.1",
             type="emit",
-            gen=sess.gen(),
+            gen=session.gen(),
             route=Route(capability=capability, object=None),
             payload=payload or {},
         )

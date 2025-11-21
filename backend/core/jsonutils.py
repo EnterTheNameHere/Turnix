@@ -120,7 +120,7 @@ def tryJSONify(obj: Any, *, _seen: set[int] | None = None, _depth: int = 0, _max
     
     Recursion guards:
       • _seen prevents cycles.
-      • _maxDepth stops deep recursion; when explicitely set to None, recursion guard is turned off.
+      • _maxDepth stops deep recursion; when explicitly set to None, recursion guard is turned off.
     """
     if _seen is None:
         _seen = set()
