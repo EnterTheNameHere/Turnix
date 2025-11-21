@@ -12,7 +12,6 @@ from backend.app.static_mount import mountStatic
 from backend.kernel import Kernel
 from backend.rpc.transport import mountWebSocket
 from backend.runtimes.instance import RuntimeInstance
-from backend.runtimes.main_menu_runtime import MainMenuRuntime
 
 
 
@@ -43,10 +42,10 @@ def createApp(*, extraRouters: Sequence[APIRouter] = (), initialRuntime: Runtime
     # Create main menu runtime
     configService = getConfigService()
     if initialRuntime is None:
-        initialRuntime = MainMenuRuntime(
-            configService=configService,
-            configRegistry=configService.registry,
-            globalConfigView=configService.globalStore,
+        initialRuntime = RuntimeInstance(
+            appPackId="appPack://Turnix@main-menu",
+            saveBaseDirectory="appPack://Turnix@main-menu/saves/",
+            runtimeInstanceId="turnix-main-menu",
         )
     kernel.switchRuntime(initialRuntime)
     
