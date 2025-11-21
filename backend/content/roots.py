@@ -1,11 +1,10 @@
 # backend/content/roots.py
 from __future__ import annotations
-import logging
 import os
 import platform
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, get_args
+from typing import Literal
 
 from backend.app.context import PROCESS_REGISTRY
 from backend.app.globals import getTracer
@@ -22,19 +21,23 @@ __all__ = [
     "DEFAULT_DOWNLOADED_DIR",
 ]
 
-logger = logging.getLogger(__name__)
-
 # ------------------------------------------------------------------ #
 # Static paths (repo layout)
 # ------------------------------------------------------------------ #
 
-BACKEND_DIR = Path(__file__).resolve().parent.parent
-ROOT_DIR = BACKEND_DIR.parent                        # repository root
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent # repository root
 WEB_ROOT = ROOT_DIR / "frontend"
 
 # Subfolder kinds under a Turnix "root":
-RootKind = Literal["assets", "downloaded", "userdata", "saves", "custom"]
-_REQUIRED_SUBDIRS: tuple[str, ...] = get_args(RootKind)
+RootKind = Literal["first-party", "third-party", "custom", "userdata", "saves"]
+_ROOT_KINDS_TO_ATTR: dict[str, str] = {
+    "first-party": "firstParty",
+    "third-party": "thirdParty",
+    "custom": "custom",
+    "userdata": "userdata",
+    "saves": "saves"
+}
+_REQUIRED_SUBDIRS: tuple[str, ...] = tuple(_ROOT_KINDS_TO_ATTR.keys())
 
 # ------------------------------------------------------------------ #
 # Helpers
@@ -96,43 +99,43 @@ class RootSet:
     - Repo root must contain all the directories or error is raised.
     """
     base: Path
-    assets: Path
-    downloaded: Path
+    firstParty: Path
+    thirdParty: Path
+    custom: Path
     userdata: Path
     saves: Path
-    custom: Path
     priority: int = 0      # Higher value wins in resolution
     label: str = "default" # For diagnostics
     
     def subdir(self, kind: RootKind) -> Path:
-        return getattr(self, kind)
+        return getattr(self, _ROOT_KINDS_TO_ATTR[kind])
 
 
 
-def _declareRoot(base: Path, *, priority: int, label: str, createDirectories: bool = False) -> RootSet:
+def _declareRoot(base: Path | str, *, priority: int, label: str, createDirectories: bool = False) -> RootSet:
     """
     createDirectories=True should only be used for CLI --root to create base + all 5 subdirectories.
     Other roots are NOT supposed to create anything here.
     """
     base = _resolve(base)
-    assets = base / "assets"
-    downloaded = base / "downloaded"
+    firstParty = base / "first-party"
+    thirdParty = base / "third-party"
+    custom = base / "custom"
     userdata = base / "userdata"
     saves = base / "saves"
-    custom = base / "custom"
     
     if createDirectories:
         # CLI --root must exist and be ready if used
-        for path in (base, assets, downloaded, userdata, saves, custom):
+        for path in (base, firstParty, thirdParty, userdata, saves, custom):
             _mkDir(path)
 
     return RootSet(
         base=base,
-        assets=assets,
-        downloaded=downloaded,
+        firstParty=firstParty,
+        thirdParty=thirdParty,
+        custom=custom,
         userdata=userdata,
         saves=saves,
-        custom=custom,
         priority=priority,
         label=label,
     )
@@ -208,13 +211,13 @@ class RootsService:
             
             # 1) CLI --root (must exist - if not, create)
             if cliRoot:
-                rootSet = _declareRoot(_resolve(cliRoot), priority=1000, label="cli", createDirectories=True)
+                rootSet = _declareRoot(cliRoot, priority=1000, label="cli", createDirectories=True)
                 roots.append(rootSet)
 
             # 2) env TURNIX_ROOT (only if the base exists)
             envRoot = os.getenv("TURNIX_ROOT")
             if envRoot:
-                base = _resolve(envRoot)
+                base = Path(envRoot).expanduser()
                 if base.exists():
                     roots.append(_declareRoot(base, priority=900, label="env", createDirectories=False))
             
@@ -225,9 +228,9 @@ class RootsService:
                 userprofile = os.getenv("USERPROFILE")
                 docs = None
                 if userprofile:
-                    docs = _resolve(Path(userprofile) / "Documents")
+                    docs = Path(userprofile).expanduser() / "Documents"
                 if docs is None or not docs.exists():
-                    docs = _resolve(Path.home() / "Documents")
+                    docs = Path.home() / "Documents"
                 myGamesBase = docs / "My Games" / "Turnix"
                 if myGamesBase.exists():
                     roots.append(_declareRoot(myGamesBase, priority=800, label="my-games", createDirectories=False))
@@ -235,19 +238,19 @@ class RootsService:
                 # b) Roaming
                 roaming = os.getenv("APPDATA")
                 if roaming:
-                    appdataBase = _resolve(Path(roaming) / "Turnix")
+                    appdataBase = Path(roaming).expanduser() / "Turnix"
                     if appdataBase.exists():
                         roots.append(_declareRoot(appdataBase, priority=700, label="appdata", createDirectories=False))
             else:
                 # a) XDG data (~/.local/share/turnix or $XDG_DATA_HOME/turnix)
                 xdgDataHome = os.getenv("XDG_DATA_HOME")
-                xdgDataBase = _resolve(xdgDataHome) if xdgDataHome else _resolve(Path.home() / ".local" / "share" / "turnix")
+                xdgDataBase = Path(xdgDataHome).expanduser() if xdgDataHome else Path.home() / ".local" / "share" / "turnix"
                 if xdgDataBase.exists():
                     roots.append(_declareRoot(xdgDataBase, priority=800, label="xdg-data", createDirectories=False))
                 
                 # b) XDG config (~/.config/turnix or $XDG_CONFIG_HOME/turnix)
                 xdgCfg = os.getenv("XDG_CONFIG_HOME")
-                xdgCfgBase = _resolve(xdgCfg) if xdgCfg else _resolve(Path.home() / ".config" / "turnix")
+                xdgCfgBase = Path(xdgCfg).expanduser() if xdgCfg else Path.home() / ".config" / "turnix"
                 if xdgCfgBase.exists():
                     roots.append(_declareRoot(xdgCfgBase, priority=700, label="xdg-config", createDirectories=False))
 
@@ -257,7 +260,7 @@ class RootsService:
                 raise ReactorScramError(
                     "“Success begins with structure.”\n"
                     "Your directory structure: Not Found.\n"
-                    f"Needed: assets, downloaded, saves, userdata, custom under '{repoBase}'.\n"
+                    f"Needed: {', '.join(_ROOT_KINDS_TO_ATTR.keys())} under '{repoBase}'.\n"
                     "Turnix has seized up while reconsidering life goals. Please build folders, achieve greatness, "
                     "avoid meltdown. Redownload Turnix?"
                 )
@@ -268,9 +271,9 @@ class RootsService:
             
             service = cls(_roots=roots)
             if cliUserdata:
-                service.setCliOverride("userdata", _resolve(cliUserdata))
+                service.setCliOverride("userdata", cliUserdata)
             if cliSaves:
-                service.setCliOverride("saves", _resolve(cliSaves))
+                service.setCliOverride("saves", cliSaves)
             
             if span is not None:
                 try:
@@ -321,7 +324,7 @@ class RootsService:
     
     # ----- Overrides / preferences -----
     
-    def setCliOverride(self, kind: Literal["userdata", "saves"], path: Path) -> None:
+    def setCliOverride(self, kind: Literal["userdata", "saves"], path: Path | str) -> None:
         """
         CLI --userdata/--saves: highest priority for reading, forced for writing. Created on write.
         Defensive: ignore empty paths. Normalize on set.
@@ -388,15 +391,21 @@ class RootsService:
     
     def contentRoots(self) -> list[Path]:
         """
-        Reading list of content-hosting roots (assets/downloaded/custom), existing-only, in priority order.
+        Reading list of content-hosting roots (first-party/third-party/custom), existing-only, in priority order.
         """
         out: list[Path] = []
         for rootSet in self._roots:
-            for sub in (rootSet.assets, rootSet.downloaded, rootSet.custom):
+            for sub in (rootSet.firstParty, rootSet.thirdParty, rootSet.custom):
                 if sub.exists():
                     out.append(sub)
         return _dedupePaths(out)
 
+    def packRoots(self) -> list[Path]:
+        """
+        Alias for discovery callers that operate on pack-hosting roots.
+        """
+        return self.contentRoots()
+    
     # ----- Writing: choose/create the directory -----
     
     def getWriteDir(self, kind: Literal["userdata", "saves"]) -> Path:
@@ -406,7 +415,6 @@ class RootsService:
           2) Preferred write base (set through UI/config), if set
           3) Repo root (default)
         """
-        tracer = getTracer()
         source = "repo"
         
         # CLI override wins
@@ -444,6 +452,7 @@ class RootsService:
                 chosen = sub
         
         try:
+            tracer = getTracer()
             tracer.traceEvent(
                 "roots.writeDir",
                 level="debug",
@@ -491,8 +500,8 @@ class RootsService:
 # Convenience exports
 # ------------------------------------------------------------------ #
 
-DEFAULT_ASSETS_DIR = _resolve(ROOT_DIR / "assets")
-DEFAULT_DOWNLOADED_DIR = _resolve(ROOT_DIR / "downloaded")
+DEFAULT_ASSETS_DIR = _resolve(ROOT_DIR / "first-party")
+DEFAULT_DOWNLOADED_DIR = _resolve(ROOT_DIR / "third-party")
 
 def defaultUserRoot() -> Path:
     """
