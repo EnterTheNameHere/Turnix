@@ -1,4 +1,4 @@
-# mods/first-party/llm-pipeline-cap/llm-pipeline-cap.py
+# first-party/mods/llm-pipeline-cap/llm-pipeline-cap.py
 from __future__ import annotations
 import asyncio
 from typing import Any

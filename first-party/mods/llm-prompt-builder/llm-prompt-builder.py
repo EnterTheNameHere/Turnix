@@ -1,4 +1,4 @@
-# mods/first-party/llm-prompt-builder/llm-prompt-builder.py
+# first-party/mods/llm-prompt-builder/llm-prompt-builder.py
 from __future__ import annotations
 from typing import Any
 

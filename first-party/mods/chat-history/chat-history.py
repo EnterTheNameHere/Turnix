@@ -1,4 +1,4 @@
-# mods/first-party/chat-history/chat-history.py
+# first-party/mods/chat-history/chat-history.py
 from __future__ import annotations
 import asyncio
 import time
