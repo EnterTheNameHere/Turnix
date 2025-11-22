@@ -1,158 +1,174 @@
 # backend/mods/discover.py
 from __future__ import annotations
-import os
-import json5
 import logging
 from collections.abc import Iterable
 from pathlib import Path
 from threading import RLock
-from typing import Any, Mapping # pyright: ignore[reportShadowedImports]
+from typing import TypeAlias
 
-from backend.app.globals import configBool, getTracer
-from backend.app.paths import ROOT_DIR
+import json5
+
+from backend.app.globals import configBool, getTracer, getRootsService
+from backend.content.packs import ResolvedPack
 from backend.mods.manifest import ModManifest
 from backend.mods.roots_registry import getRoots as getRegisteredRoots
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "defaultModRoots", "MOD_ROOTS", "scanMods",
-    "rescanMods", "findManifestPath", "scanModsForMount",
-    "rescanModsForMount"
+    "scanMods", "rescanMods", "findManifestPath",
+    "scanModsForMount", "rescanModsForMount"
 ]
 
-
-
-def defaultModRoots() -> list[tuple[Path, Mapping[str, Any]]]:
-    """
-    Returns the ordered list of mod roots. First repo mods/, then user mods folder.
-    """
-    roots: list[tuple[Path, Mapping[str, Any]]] = []
-    roots.append((ROOT_DIR / "mods", {"writable": False, "trust": "unsigned-ok"}))
-    
-    usermods = Path(os.path.expanduser("~/Documents/My Games/Turnix/mods"))
-    usermods.mkdir(parents=True, exist_ok=True)
-    roots.append((usermods, {"writable": True, "trust": "unsigned-ok"}))
-    return roots
-
-
-
-# Key: tuple[str, ...] of resolved root paths ('' means "use defaults")
-_SCAN_CACHE: dict[tuple[str, ...], dict[str, tuple[Path, Path, ModManifest, str]]] = {}
+_IGNORE_DIRS = {".git", "node_modules", "__pycache__", "pytest_cache", ".vscode"}
 _SCAN_LOCK = RLock()
-MOD_ROOTS = defaultModRoots()
-IGNORE_DIRS = {".git", "node_modules", "__pycache__"}
+
+ModInfo: TypeAlias = tuple[Path, Path, ModManifest, str]
+ModMap: TypeAlias = dict[str, ModInfo]
 
 
 
-def _normalizeRoots(overrideRoots: Iterable[Path] | None) -> tuple[tuple[Path, ...], tuple[str, ...]]:
-    """
-    Returns (rootsTuple, cacheKey)
-    When overrideRoots is None → use MOD_ROOTS and cacheKey = ('',)
-    """
-    if overrideRoots is None:
-        roots = tuple(root for (root, _cfg) in MOD_ROOTS)
-        key = ('',) # Default sentinel
-        return roots, key
-    rootsTuple = tuple(Path(root).resolve() for root in overrideRoots)
-    key = tuple(str(root) for root in rootsTuple)
-    return rootsTuple, key
+def findManifestPath(path: Path) -> Path | None:
+    p1, p2 = path / "manifest.json5", path / "manifest.json"
+    if p1.is_file(): return p1
+    if p2.is_file(): return p2
+    return None
 
 
 
-def _scanDir(
+def _dedupe(paths: Iterable[Path]) -> list[Path]:
+    out: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        key = str(Path(path).resolve())
+        if key not in seen:
+            out.append(Path(path))
+            seen.add(key)
+    return out
+
+
+
+def _loadManifest(manifestPath: Path) -> ModManifest | None:
+    try:
+        raw = json5.loads(manifestPath.read_text(encoding="utf-8"))
+        return ModManifest.model_validate(raw)
+    except Exception as err:
+        logger.warning("Skipping mod manifest at '%s': %s", manifestPath, err, exc_info=True)
+        return None
+
+
+
+def _scanRoot(
     root: Path,
-    parent: Path,
-    out: dict[str, tuple[Path, Path, ModManifest, str]],
+    out: ModMap,
     *,
+    allowedIds: set[str] | None,
     allowSymlinks: bool,
 ) -> None:
-    """
-    Recursively discover mods under `root`, honoring the symlink policy:
-    - If allowSymlinks == False:
-      • Do NOT descend into symlink directories
-      • Do NOT accept manifests that are symlinks
-    - Always ensure discovered directories remain within root
-    """
-    # Hard guard: parent must remain within the root
     try:
-        rootResolved = root.resolve(strict=True)        # Must exist
-        parentResolved = parent.resolve(strict=False)   # May not exist yet
+        rootResolved = root.resolve(strict=False)
     except Exception:
         return
-    
-    if not parentResolved.is_relative_to(rootResolved):
-        return
-    
-    # If parent itself is a symlink and symlinks are not allowed, stop here.
-    if not allowSymlinks and parent.is_symlink():
+
+    if not rootResolved.exists() or not rootResolved.is_dir():
         return
 
-    # If this directory contains a manifest, validate it and stop descending.
-    manifestPath = findManifestPath(parent)
-    if manifestPath:
-        # Skip manifest if symlink disallowed and this file is a symlink
-        if not allowSymlinks and manifestPath.is_symlink():
-            return
-        
-        try:
-            raw = json5.loads(manifestPath.read_text(encoding="utf-8"))
-            manifest = ModManifest.model_validate(raw)
-        except Exception as err:
-            logger.warning("Skipping mod at '%s' due to manifest error: %s", parent, err)
-            return
-        
-        if manifest.id in out:
-            logger.warning(
-                "Mod id '%s' at '%s' has same id as existing mod at '%s'. Skipping this one.",
-                manifest.id, str(parent), str(out[manifest.id][1])
-            )
-            return
-        
-        out[manifest.id] = (root, parent, manifest, manifestPath.name)
-        return
-    
-    # No manifest -> recurse into children
     try:
-        entries = list(parent.iterdir())
+        entries = list(root.iterdir())
     except Exception as err:
-        logger.debug("Skipping '%s' as iterdir failed: %s", parent, err)
+        logger.debug("Skipping root '%s' due to error: %s", root, err, exc_info=True)
         return
 
-    for ch in entries:
+    for child in entries:
         try:
-            name = ch.name
-            if name in IGNORE_DIRS:
+            if child.name in _IGNORE_DIRS:
                 continue
-            if not ch.is_dir():
+            if not allowSymlinks and child.is_symlink():
                 continue
-            if not allowSymlinks and ch.is_symlink():
+            if not child.is_dir():
+                continue
+            resolvedChild = child.resolve(strict=False)
+            if not resolvedChild.is_relative_to(rootResolved): # Do not step out of root
                 continue
         except Exception:
-            # If any error occurs for this entry, just skip it
             continue
 
-        _scanDir(root, ch, out, allowSymlinks=allowSymlinks)
+        manifestPath = findManifestPath(child)
+        if not manifestPath:
+            continue
+        if not allowSymlinks and manifestPath.is_symlink():
+            continue
+        manifest = _loadManifest(manifestPath)
+        if not manifest:
+            continue
+        if allowedIds is not None and manifest.id not in allowedIds:
+            continue
+        if manifest.id in out:
+            # Higher priority root wins
+            continue
+        
+        out[manifest.id] = (
+            rootResolved,
+            resolvedChild,
+            manifest,
+            manifestPath.name,
+        )
 
 
 
-def scanMods(overrideRoots: Iterable[Path] | None = None) -> dict[str, tuple[Path, Path, ModManifest, str]]:
+def _modSearchRoots(
+    *,
+    appPack: ResolvedPack | None,
+    saveRoot: Path | None,
+    extraRoots: Iterable[Path] | None,
+) -> list[Path]:
+    roots: list[Path] = []
+    if saveRoot:
+        roots.append(Path(saveRoot) / "mods")
+    if appPack:
+        roots.append(appPack.rootDir / "mods")
+    roots.extend((base / "mods") for base in getRootsService().packRoots())
+    if extraRoots:
+        roots.extend(extraRoots)
+    return _dedupe(roots)
+
+
+
+def scanMods(
+    *,
+    allowedIds: Iterable[str] | None = None,
+    appPack: ResolvedPack | None = None,
+    saveRoot: Path | None = None,
+    extraRoots: Iterable[Path] | None = None,
+) -> ModMap:
     """
     Returns a mapping:
       modId -> (root, moddir, manifest, manifestFileName)
-    Results are cached per root-set. Use rescanMods() to force rescanning.
+    Only mods whose ids are in allowedIds are returned when the iterable is not None.
+    Search order:
+      1) saveRoot/mods (if present)
+      2) appPack/mods (if present)
+      3) each configured pack root's `mods` directory (first-party, third-party, custom)
+      4) extraRoots (mount-specific overrides)
     """
     tracer = getTracer()
     span = None
     
-    roots, cacheKey = _normalizeRoots(overrideRoots)
+    allowedSet = set(allowedIds) if allowedIds is not None else None
+    roots = _modSearchRoots(
+        appPack=appPack,
+        saveRoot=saveRoot,
+        extraRoots=extraRoots,
+    )
+    allowSymlinks = configBool("mods.allowSymlinks", False)
     
     try:
         span = tracer.startSpan(
             "mods.scan",
             attrs={
-                "overrideRoots": overrideRoots is not None,
                 "rootCount": len(roots),
+                "allowSymlinks": allowSymlinks,
+                "allowed": sorted(allowedSet) if allowedSet is not None else [],
             },
             tags=["mods", "scan"],
         )
@@ -165,77 +181,32 @@ def scanMods(overrideRoots: Iterable[Path] | None = None) -> dict[str, tuple[Pat
     except Exception:
         span = None
     
-    try:
-        with _SCAN_LOCK:
-            cached = _SCAN_CACHE.get(cacheKey)
-            if cached is not None:
-                
-                if span is not None:
-                    try:
-                        tracer.traceEvent(
-                            "mods.scan.cacheHit",
-                            level="debug",
-                            tags=["mods", "scan"],
-                            span=span,
-                            attrs={"modCount": len(cached)},
-                        )
-                        tracer.endSpan(
-                            span,
-                            status="ok",
-                            tags=["mods", "scan"],
-                            attrs={"cacheHit": True},
-                        )
-                    except Exception:
-                        pass
-                
-                return cached
-        
-        found: dict[str, tuple[Path, Path, ModManifest, str]] = {}
-        allowSymlinks = configBool("mods.allowSymlinks", False)
+    found: ModMap = {}
 
-        for root in roots:
-            try:
-                if not root.exists():
-                    continue
-            except Exception:
-                continue
-            _scanDir(root, root, found, allowSymlinks=allowSymlinks)
-
-        logger.info(
-            "Mods discovered: %d (allowSymlinks=%s)",
-            len(found),
-            allowSymlinks
-        )
-        
-        with _SCAN_LOCK:
-            _SCAN_CACHE[cacheKey] = found
-        
-        if span is not None:
-            try:
+    with _SCAN_LOCK:
+        try:
+            for root in roots:
+                _scanRoot(
+                    root,
+                    found,
+                    allowedIds=allowedSet,
+                    allowSymlinks=allowSymlinks
+                )
+            if span is not None:
                 tracer.traceEvent(
                     "mods.scan.done",
                     level="debug",
                     tags=["mods", "scan"],
                     span=span,
-                    attrs={
-                        "modCount": len(found),
-                        "allowSymlinks": allowSymlinks,
-                        "cacheHit": False,
-                    },
+                    attrs={"modCount": len(found)},
                 )
                 tracer.endSpan(
                     span,
                     status="ok",
                     tags=["mods", "scan"],
                 )
-            except Exception:
-                pass
-        
-        return found
-
-    except Exception as err:
-        if span is not None:
-            try:
+        except Exception as err:
+            if span is not None:
                 tracer.traceEvent(
                     "mods.scan.error",
                     level="error",
@@ -253,52 +224,61 @@ def scanMods(overrideRoots: Iterable[Path] | None = None) -> dict[str, tuple[Pat
                     errorType=type(err).__name__,
                     errorMessage=str(err),
                 )
-            except Exception:
-                pass
-        raise
-
-
-
-def rescanMods(overrideRoots: Iterable[Path] | None = None) -> dict[str, tuple[Path, Path, ModManifest, str]]:
-    """
-    Clears the cache for the given root-set (or the default set) and rescans.
-    """
-    tracer = getTracer()
-    try:
-        tracer.traceEvent(
-            "mods.rescan",
-            level="info",
-            tags=["mods", "scan"],
-            attrs={"overrideRoots": overrideRoots is not None},
-        )
-    except Exception:
-        pass
+            raise
     
-    _roots, cacheKey = _normalizeRoots(overrideRoots)
-    with _SCAN_LOCK:
-        _SCAN_CACHE.pop(cacheKey, None)
-    return scanMods(overrideRoots)
+    logger.info(
+        "Mods discovered: %d (allowSymlinks=%s, allowedIds=%s)",
+        len(found),
+        allowSymlinks,
+        sorted(allowedSet) if allowedSet is not None else "*",
+    )
+    return found
 
 
 
-def findManifestPath(dir: Path) -> Path | None:
-    p1, p2 = dir / "mod.json5", dir / "mod.json"
-    if p1.exists() and p1.is_file(): return p1
-    if p2.exists() and p2.is_file(): return p2
-    return None
+def rescanMods(
+    *,
+    allowedIds: Iterable[str] | None = None,
+    appPack: ResolvedPack | None = None,
+    saveRoot: Path | None = None,
+    extraRoots: Iterable[Path] | None = None,
+) -> ModMap:
+    return scanMods(
+        allowedIds=allowedIds,
+        appPack=appPack,
+        saveRoot=saveRoot,
+        extraRoots=extraRoots,
+    )
 
 
 
-def scanModsForMount(mountId: str) -> dict[str, tuple[Path, Path, ModManifest, str]]:
+def scanModsForMount(
+    mountId: str,
+    *,
+    allowedIds: Iterable[str] | None = None,
+    appPack: ResolvedPack | None = None,
+    saveRoot: Path | None = None,
+) -> ModMap:
     roots = getRegisteredRoots(mountId)
-    if not roots:
-        return {}
-    return scanMods(roots)
+    return scanMods(
+        allowedIds=allowedIds,
+        appPack=appPack,
+        saveRoot=saveRoot,
+        extraRoots=roots,
+    )
 
 
 
-def rescanModsForMount(mountId: str) -> dict[str, tuple[Path, Path, ModManifest, str]]:
-    roots = getRegisteredRoots(mountId)
-    if not roots:
-        return {}
-    return rescanMods(roots)
+def rescanModsForMount(
+    mountId: str,
+    *,
+    allowedIds: Iterable[str] | None = None,
+    appPack: ResolvedPack | None = None,
+    saveRoot: Path | None = None,
+) -> ModMap:
+    return scanModsForMount(
+        mountId,
+        allowedIds=allowedIds,
+        appPack=appPack,
+        saveRoot=saveRoot,
+    )
