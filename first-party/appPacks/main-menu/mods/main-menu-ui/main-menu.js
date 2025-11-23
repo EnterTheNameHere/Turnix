@@ -338,7 +338,7 @@ async function showNewDialog(ctx) {
     runtimeLabel.innerHTML = 'Save Name<input type="text" placeholder="auto" />';
     const runtimeInstanceIdInput = runtimeLabel.querySelector('input');
     const labelField = document.createElement('label');
-    labelField.innerHTML = 'Label<input type="text" placeholder="My Adventure"> />';
+    labelField.innerHTML = 'Label<input type="text" placeholder="My Adventure" />';
     form.append(list, runtimeLabel, labelField);
 
     createDialog({
