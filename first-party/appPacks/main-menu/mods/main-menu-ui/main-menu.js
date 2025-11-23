@@ -188,7 +188,7 @@ function createDialog({title, body, actions = []}) {
         footer.appendChild(btn);
     });
 
-    panel.appendChild(heading, bodyWrap, footer);
+    panel.append(heading, bodyWrap, footer);
     overlay.appendChild(panel);
     overlay.addEventListener('click', (ev) => {
         if(ev.target === overlay) overlay.remove();
