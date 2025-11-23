@@ -5,11 +5,12 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from backend.app.globals import getTracer
+from backend.app.globals import getActiveAppPack, getActiveRuntime, getTracer
 from backend.core.hashing import sha256sumWithPath
 from backend.core.paths import resolveSafe
 from backend.mods.constants import JS_RUNTIMES
 from backend.mods.discover import scanMods, rescanMods, scanModsForMount, rescanModsForMount
+from backend.mods.runtime_state import getModRuntimeSnapshot
 
 router = APIRouter()
 
@@ -104,13 +105,34 @@ def makeFrontendIndex(
 
 @router.get("/mods/index")
 def listFrontendMods() -> dict:
-    return makeFrontendIndex(scanMods(), base="/mods/load", mountId=None)
+    snapshot = getModRuntimeSnapshot()
+    runtimeInstance = getActiveRuntime()
+    return makeFrontendIndex(
+        scanMods(
+            allowedIds=snapshot.allowed or None,
+            appPack=getActiveAppPack(),
+            saveRoot=getattr(runtimeInstance, "saveRoot", None),
+        ),
+        base="/mods/load",
+        mountId=None,
+    )
 
 
 
 @router.get("/mods/{mountId}/index")
 def listFrontendModsForMount(mountId: str) -> dict:
-    return makeFrontendIndex(scanModsForMount(mountId), base=f"/mods/{mountId}/load",mountId=mountId)
+    snapshot = getModRuntimeSnapshot()
+    runtimeInstance = getActiveRuntime()
+    return makeFrontendIndex(
+        scanModsForMount(
+            mountId,
+            allowedIds=snapshot.allowed or None,
+            appPack=getActiveAppPack(),
+            saveRoot=getattr(runtimeInstance, "saveRoot", None),
+        ),
+        base=f"/mods/{mountId}/load",
+        mountId=mountId,
+    )
 
 
 
@@ -119,7 +141,13 @@ def serveModAsset(modId: str, path: str):
     """
     Default (unmounted) asset serving: /mods/load/{modId}/{entry-or-asset-path}
     """
-    found = scanMods()
+    snapshot = getModRuntimeSnapshot()
+    runtimeInstance = getActiveRuntime()
+    found = scanMods(
+        allowedIds=snapshot.allowed or None,
+        appPack=getActiveAppPack(),
+        saveRoot=getattr(runtimeInstance, "saveRoot", None),
+    )
     if modId not in found:
         raise HTTPException(404, "Unknown mod")
     _root, moddir, manifest, fname = found[modId]
@@ -138,7 +166,14 @@ def serveModAssetForMount(mountId: str, modId: str, path: str):
     """
     Mounted asset serving: /mods/{mountId}/load/{modId}/{entry-or-asset-path}
     """
-    found = scanModsForMount(mountId)
+    snapshot = getModRuntimeSnapshot()
+    runtimeInstance = getActiveRuntime()
+    found = scanModsForMount(
+        mountId,
+        allowedIds=snapshot.allowed or None,
+        appPack=getActiveAppPack(),
+        saveRoot=getattr(runtimeInstance, "saveRoot", None),
+    )
     if not found:
         raise HTTPException(404, "Unknown mount")
     if modId not in found:
@@ -167,7 +202,13 @@ def modsRescanMods():
     except Exception:
         pass
     
-    fresh = rescanMods()
+    snapshot = getModRuntimeSnapshot()
+    runtimeInstance = getActiveRuntime()
+    fresh = rescanMods(
+        allowedIds=snapshot.allowed or None,
+        appPack=getActiveAppPack(),
+        saveRoot=getattr(runtimeInstance, "saveRoot", None),
+    )
     index = makeFrontendIndex(fresh, base="/mods/load", mountId=None)
     index["ok"] = True
     return index
@@ -187,7 +228,14 @@ def modsRescanMount(mountId: str):
     except Exception:
         pass
     
-    fresh = rescanModsForMount(mountId)
+    snapshot = getModRuntimeSnapshot()
+    runtimeInstance = getModRuntimeSnapshot()
+    fresh = rescanModsForMount(
+        mountId,
+        allowedIds=snapshot.allowed or None,
+        appPack=getActiveAppPack(),
+        saveRoot=getattr(runtimeInstance, "saveRoot", None),
+    )
     index = makeFrontendIndex(fresh, base=f"/mods/{mountId}/load", mountId=mountId)
     index["ok"] = True
     return index
