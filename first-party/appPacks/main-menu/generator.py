@@ -2,7 +2,7 @@
 """
 Generator for the Turnix main menu app pack.
 
-This module is executed by the runtime controller to ensure that the 
+This module is executed by the runtime controller to ensure that the
 main menu runtime has an on-disk save to restore from.
 """
 from __future__ import annotations
@@ -40,7 +40,7 @@ def generate(context: Mapping[str, Any] | None = None) -> dict[str, Any]:
     ctx = dict(context or {})
     appPackId = str(ctx.get("appPackId") or APP_PACK_ID)
     runtimeInstanceId = str(ctx.get("runtimeInstanceId") or DEFAULT_RUNTIME_INSTANCE_ID)
-    saveDirOverride = _coercePath(str(ctx.get("saveDir")))
+    saveDirOverride = _coercePath(ctx.get("saveDir"))
     label = str(ctx.get("label") or "Main Menu")
     
     # When a save directory is provided, use its parent as the base so the
