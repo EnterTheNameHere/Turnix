@@ -75,6 +75,7 @@ async def life(app: FastAPI) -> AsyncIterator[None]:
         perms.registerCapability(capability="gm.world@1",    risk="low")
         perms.registerCapability(capability="chat.thread@1", risk="low")
         perms.registerCapability(capability="chat.start@1",  risk="medium")
+        perms.registerCapability(capability="main.menu@1",   risk="medium")
     except Exception as err:
         logger.exception("Python mod loading failed: %s", err)
     yield
