@@ -6,10 +6,13 @@ from collections.abc import Sequence
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.app.context import PROCESS_REGISTRY
 from backend.app.globals import getTracer
 from backend.app.lifecycle import life
 from backend.app.static_mount import mountStatic
+from backend.content.runtime_bootstrap import ensureRuntimeForAppPack
 from backend.kernel import Kernel
+from backend.mods.runtime_state import setAllowedMods
 from backend.rpc.transport import mountWebSocket
 from backend.runtimes.instance import RuntimeInstance
 
@@ -39,15 +42,22 @@ def createApp(*, extraRouters: Sequence[APIRouter] = (), initialRuntime: Runtime
     # Turnix Boss. It registers itself to globals.
     kernel = Kernel()
     
-    # Create main menu runtime
-    configService = getConfigService()
+    # Create or load main menu runtime
+    activeAppPack = None
+    allowedMods: set[str] = set()
     if initialRuntime is None:
-        initialRuntime = RuntimeInstance(
-            appPackId="appPack://Turnix@main-menu",
-            saveBaseDirectory="appPack://Turnix@main-menu/saves/",
-            runtimeInstanceId="turnix-main-menu",
+        runtimeInstance, appPack, allowedMods = ensureRuntimeForAppPack(
+            "Turnix@main-menu",
+            preferEmbeddedSaves=True
         )
-    kernel.switchRuntime(initialRuntime)
+        activeAppPack = appPack
+    else:
+        runtimeInstance = initialRuntime
+    
+    kernel.switchRuntime(runtimeInstance)
+    if activeAppPack is not None:
+        PROCESS_REGISTRY.register("runtime.active.appPack", activeAppPack, overwrite=True)
+    setAllowedMods(allowedMods)
     
     app = FastAPI(lifespan=life)
     
