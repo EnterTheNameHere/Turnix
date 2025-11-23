@@ -138,6 +138,8 @@ const STYLE = `
 }
 `;
 
+const _APP_PACK_ID = 'Turnix@main-menu';
+
 function ensureStyles() {
     if(document.getElementById('turnix-main-menu-style')) return;
     const style = document.createElement('style');
@@ -214,6 +216,12 @@ async function fetchAppPacks(ctx) {
         {},
         { class: 'request.medium' },
     );
+
+    // In case this appPack (Turnix's main-menu) is on the list, remove it...
+    if(Array.isArray(res?.appPacks)) {
+        res.appPacks = res.appPacks.filter(item => item.id !== _APP_PACK_ID);
+    }
+
     return Array.isArray(res?.appPacks) ? res.appPacks : [];
 }
 
