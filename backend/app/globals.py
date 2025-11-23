@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from backend.kernel import Kernel
     from backend.runtimes.instance import RuntimeInstance
     from backend.config.service import ConfigService
+    from backend.content.packs import ResolvedPack
     from backend.core.permissions import PermissionManager
     from backend.sessions.session import Session
     from backend.content.roots import RootsService
@@ -124,6 +125,35 @@ def getTraceHub() -> TraceHub:
     Used mainly by the trace WebSocket endpoint and tools.
     """
     return cast("TraceHub", _getCoreTracer())
+
+
+
+def getActiveAppPack() -> ResolvedPack | None:
+    appPack = PROCESS_REGISTRY.get("runtime.active.appPack")
+    if appPack is None:
+        return None
+    return cast("ResolvedPack", appPack)
+
+
+
+def getAllowedModIds() -> set[str]:
+    from backend.mods.runtime_state import getModRuntimeSnapshot
+    snapshot = getModRuntimeSnapshot()
+    return set(snapshot.allowed)
+
+
+
+def getModServices() -> dict[str, Any]:
+    services = PROCESS_REGISTRY.get("mods.services")
+    if isinstance(services, dict):
+        return services
+    return {}
+
+
+
+def getModService(name: str) -> Any | None:
+    services = getModServices()
+    return services.get(name)
 
 
 
