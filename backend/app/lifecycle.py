@@ -2,15 +2,25 @@
 from __future__ import annotations
 import asyncio
 import logging
-from collections.abc import AsyncIterator # pyright: ignore[reportShadowedImports] - one of our requirement ships typings extra, but Python 3.12 already includes them
-from contextlib import asynccontextmanager # pyright: ignore[reportShadowedImports]
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
 
-from backend.app import state
-from backend.app.globals import getPermissions, getConfigService, getTracer
+from backend.app.context import PROCESS_REGISTRY
+from backend.app.globals import (
+    getActiveAppPack,
+    getActiveRuntime,
+    getAllowedModIds,
+    getPermissions,
+    getConfigService,
+    getTracer
+)
+from backend.mods.discover import scanMods
+from backend.mods.frontend_index import makeFrontendIndex
 from backend.mods.loader import loadPythonMods
+from backend.mods.runtime_state import ModRuntimeSnapshot, setModRuntimeSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -20,18 +30,44 @@ logger = logging.getLogger(__name__)
 async def life(app: FastAPI) -> AsyncIterator[None]:
     # --------------- Startup ---------------
 
+    modsServices: dict[str, Any] = {}
     try:
         configService = getConfigService()
         
+        runtimeInstance = getActiveRuntime()
+        appPack = getActiveAppPack()
+        allowedMods = getAllowedModIds()
+        
         # Give mods a plain snapshot of merged global config
         configSnapshot: dict[str, Any] = configService.globalStore.snapshot()
-        loaded, failed, services = await loadPythonMods(settings=configSnapshot)
+        loaded, failed, services = await loadPythonMods(
+            settings=configSnapshot,
+            allowedModIds=allowedMods,
+            appPack=appPack,
+            saveRoot=getattr(runtimeInstance, "saveRoot", None),
+        )
         
-        # Publish into global state module
-        state.SERVICES = services
-        state.PYMODS_LOADED = [{"id": m.modId, "name": m.name, "version": m.version} for m in loaded]
-        state.PYMODS_FAILED = failed
-
+        frontendMods = scanMods(
+            allowedIds=allowedMods,
+            appPack=appPack,
+            saveRoot=getattr(runtimeInstance, "saveRoot", None),
+        )
+        
+        frontendIndex = makeFrontendIndex(
+            frontendMods,
+            base="/mods/load",
+            mountId=None,
+        )
+        
+        snapshot = ModRuntimeSnapshot(
+            allowed=set(allowedMods),
+            backendLoaded=[{"id": mod.modId, "name": mod.name, "version": mod.version} for mod in loaded],
+            backendFailed=failed,
+            frontendIndex=frontendIndex,
+        )
+        setModRuntimeSnapshot(snapshot)
+        PROCESS_REGISTRY.register("mods.services", modsServices, overwrite=True)
+        
         perms = getPermissions()
         perms.registerCapability(capability="http.client@1", risk="high")
         perms.registerCapability(capability="chat@1",        risk="medium")
@@ -45,7 +81,7 @@ async def life(app: FastAPI) -> AsyncIterator[None]:
 
     # --------------- Shutdown ---------------
     # Close any services that support aclose()
-    for name, svc in list(state.SERVICES.items()):
+    for name, svc in list((PROCESS_REGISTRY.get("mods.services") or {}).items()):
         try:
             closer = getattr(svc, "aclose", None)
             res = closer() if callable(closer) else None
