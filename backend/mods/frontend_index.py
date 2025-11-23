@@ -40,7 +40,7 @@ def makeFrontendIndex(
 
         item = {
             "id": manifest.id,
-            "name": manifest.name,
+            "displayName": manifest.displayName,
             "version": manifest.version,
             "entry": entryRel,
             "runtime": "javascript",

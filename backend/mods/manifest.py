@@ -22,8 +22,9 @@ class ModManifest(BaseModel):
     """Represents a validated mod manifest."""
     model_config = ConfigDict(extra="forbid")
     
+    kind: str
     id: str
-    name: str
+    displayName: str
     version: str
     description: str | None = None
     author: str | None = None
