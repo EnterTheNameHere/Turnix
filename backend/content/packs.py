@@ -113,7 +113,7 @@ def _readManifest(dirpath: Path) -> PackManifest | None:
             if author is not None and (not isinstance(author, str) or not _AUTHOR_RE.fullmatch(author)):
                 author = None
             if not kind or kind not in _KNOWN_PACK_KINDS:
-                raise ValueError(f"kind must be one of {' '.join(_KNOWN_PACK_KINDS)}. Got {kind!r} instead.")
+                raise ValueError(f"kind must be one of [{', '.join(repr(key) for key in _KNOWN_PACK_KINDS)}]. Got {kind!r} instead.")
             if not version or not SEMVER_PATTERN_RE.match(version):
                 # Allow non-semver now
                 pass
