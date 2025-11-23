@@ -2,11 +2,12 @@
 from __future__ import annotations
 from typing import Any, TypedDict
 
-from backend.app.globals import getTracer
+from backend.app.globals import getActiveAppPack, getActiveRuntime, getTracer
 from backend.core.ids import uuid_12
 from backend.core.tracing import TraceSpan
 from backend.mods.frontend_index import makeFrontendIndex
 from backend.mods.discover import scanMods, scanModsForMount
+from backend.mods.runtime_state import getModRuntimeSnapshot
 
 __all__ = ["ViewSnapshot", "View"]
 
@@ -47,19 +48,28 @@ class View:
         )
         self._traceSpan = span
         
-        # Build initial frontend mod index from default (unmounted) roots.
+        # Build initial frontend mod index from allowed mods (loaded during loading)
         # If/when a runtime supplies a custom mountId, call refreshFrontendIndex(mountId=...) later. 
-        frontendIndex = makeFrontendIndex(
-            scanMods(),
-            base="/mods/load",
-            mountId=None,
-        )
+        snapshot = getModRuntimeSnapshot()
+        if snapshot.frontendIndex:
+            frontendIndex = snapshot.frontendIndex
+        else:
+            frontendIndex = makeFrontendIndex(
+                scanMods(
+                    allowedIds=snapshot.allowed or None,
+                    appPack=getActiveAppPack(),
+                    saveRoot=getattr(getActiveRuntime(), "saveRoot", None),
+                ),
+                base="/mods/load",
+                mountId=None,
+            )
+        
         self.state: dict[str, Any] = {
             "mods": {
                 "frontend": frontendIndex,
                 "backend": {
-                    "loaded": state.PYMODS_LOADED,
-                    "failed": state.PYMODS_FAILED, 
+                    "loaded": snapshot.backendLoaded,
+                    "failed": snapshot.backendFailed, 
                 },
             }
         }
