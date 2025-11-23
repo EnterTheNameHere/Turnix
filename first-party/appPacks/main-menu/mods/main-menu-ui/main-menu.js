@@ -74,7 +74,7 @@ const STYLE = `
     border: 1px solid rgba(255,255,255,0.08);
     border-radius: 12px;
     overflow: auto;
-    max-heigh: 360px;
+    max-height: 360px;
 }
 
 .turnix-mm-dialog__item {
@@ -104,7 +104,7 @@ const STYLE = `
 
 .turnix-mm-form label {
     display: flex;
-    flex-directory: column;
+    flex-direction: column;
     gap: 0.35rem;
     font-size: 0.85rem;
     color: rgba(255,255,255,0.75);
