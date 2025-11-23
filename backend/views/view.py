@@ -2,7 +2,6 @@
 from __future__ import annotations
 from typing import Any, TypedDict
 
-from backend.app import state
 from backend.app.globals import getTracer
 from backend.core.ids import uuid_12
 from backend.core.tracing import TraceSpan
