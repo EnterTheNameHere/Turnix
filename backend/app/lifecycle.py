@@ -61,7 +61,7 @@ async def life(app: FastAPI) -> AsyncIterator[None]:
         
         snapshot = ModRuntimeSnapshot(
             allowed=set(allowedMods),
-            backendLoaded=[{"id": mod.modId, "name": mod.name, "version": mod.version} for mod in loaded],
+            backendLoaded=[{"id": mod.modId, "name": mod.displayName, "version": mod.version} for mod in loaded],
             backendFailed=failed,
             frontendIndex=frontendIndex,
         )
