@@ -33,7 +33,7 @@ from backend.views.registry import viewRegistry
 
 logger = getModLogger("main-menu-service")
 
-_CAP_NAME = "main@menu@1"
+_CAP_NAME = "main.menu@1"
 
 
 
