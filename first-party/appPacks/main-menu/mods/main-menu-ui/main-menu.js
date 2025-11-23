@@ -329,7 +329,7 @@ async function showNewDialog(ctx) {
         [...list.children].forEach((child) => child.dataset.selected = 'false');
         row.dataset.selected = 'true';
         selected = packs.find((pack) => pack.id === row.dataset.value) || null;
-        if(selected && !runtimeInstanceIdInput.value) runtimeInstanceIdInput.value = randomRuntimeInstanceId();
+        if(selected && !runtimeInstanceIdInput.value) runtimeInstanceIdInput.value = randomRuntimeInstanceId(selected.id);
     });
 
     const form = document.createElement('div');
