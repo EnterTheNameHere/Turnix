@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import logging
-from typing import Any # pyright: ignore[reportShadowedImports]
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from backend.app.globals import getPermissions, getTracer
 from backend.core.permissions import PermissionManager, GrantPermission, parseCapabilityRange
+from backend.content.packs import ResolvedPack
 from backend.mods.constants import PY_RUNTIMES
 from backend.mods.discover import scanMods
 from backend.mods.manifest import RuntimeSpec, ModManifest
@@ -40,7 +42,13 @@ class PyModContext:
 
 
 
-async def loadPythonMods(*, settings: dict[str, Any]) -> tuple[list[LoadedPyMod], list[dict[str, Any]], dict[str, Any]]:
+async def loadPythonMods(
+    *,
+    settings: dict[str, Any],
+    allowedModIds: Iterable[str] | None = None,
+    appPack: ResolvedPack | None = None,
+    saveRoot: Path | None = None,
+) -> tuple[list[LoadedPyMod], list[dict[str, Any]], dict[str, Any]]:
     """
     Returns (loaded, failed, services) where:
       - loaded: list of LoadedPyMod
@@ -68,7 +76,11 @@ async def loadPythonMods(*, settings: dict[str, Any]) -> tuple[list[LoadedPyMod]
         span = None
     
     try:
-        discovered = scanMods()
+        discovered = scanMods(
+            allowedIds=set(allowedModIds) if isinstance(allowedModIds, set) else None,
+            appPack=appPack,
+            saveRoot=saveRoot
+        )
 
         if span is not None:
             try:
