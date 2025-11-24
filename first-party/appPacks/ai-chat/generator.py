@@ -59,6 +59,6 @@ def generate(context: Mapping[str, Any] | None = None) -> dict[str, Any]:
     
     return {
         "saveDir": runtimeInstance.saveRoot,
-        "runtimeInstanceId": runtimeInstanceId,
-        "appPackId": appPackId,
+        "runtimeInstanceId": runtimeInstance.id,
+        "appPackId": runtimeInstance.appPackId,
     }
