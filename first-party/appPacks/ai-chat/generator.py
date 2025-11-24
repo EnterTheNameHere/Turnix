@@ -32,8 +32,10 @@ def generate(context: Mapping[str, Any] | None = None) -> dict[str, Any]:
     appPackId = str(ctx.get("appPackId") or APP_PACK_ID)
     runtimeInstanceId = str(ctx.get("runtimeInstanceId") or DEFAULT_RUNTIME_INSTANCE_ID)
     label = str(ctx.get("label") or APP_PACK_DISPLAY_NAME)
+    # When a save directory is provided, use its parent as the base of the saves root
+    # so the runtime writes exactly into the requested path (.../saves/appPackId/runtimeInstanceId).
     saveDirOverride = _coercePath(ctx.get("saveDir"))
-    saveBase = saveDirOverride.parent if saveDirOverride else None
+    saveBase = saveDirOverride.parent.parent if saveDirOverride else None
     
     runtimeInstance = RuntimeInstance(
         appPackId=appPackId,
