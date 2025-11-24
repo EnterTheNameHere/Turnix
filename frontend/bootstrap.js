@@ -89,6 +89,28 @@ registerDevLogs(rpc, {ui: true});
 globalThis.Turnix = {settings};
 Object.freeze(globalThis.Turnix);
 
+// Allow backend to request a full page reload without severing the socket from server side
+let reloadInFlight = false;
+rpc.expose('turnix.client', {
+    emit(_path, payload) {
+        if(payload?.['op'] !== 'reload') return;
+        if(reloadInFlight) return;
+
+        reloadInFlight = true;
+        const delayMs = Number(payload?.delayMs) || 0;
+        const targetUrl = typeof payload?.url === 'string' && payload.url ? payload.url : null;
+
+        const triggerReload = () => {
+            console.info('[turnix.client] Reload of webpage requested', payload);
+            if(targetUrl) window.location.href = targetUrl;
+            else window.location.reload();
+        };
+
+        if(delayMs > 0) setTimeout(triggerReload, delayMs);
+        else triggerReload();
+    }
+});
+
 /**
  * @param {import("./assets/types").ModManifest} manifest
 */
