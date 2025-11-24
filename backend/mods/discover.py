@@ -9,15 +9,15 @@ from typing import TypeAlias
 import json5
 
 from backend.app.globals import configBool, getTracer, getRootsService
-from backend.content.packs import ResolvedPack
+from backend.content.packs import ResolvedPack, PackScanner
 from backend.mods.manifest import ModManifest
 from backend.mods.roots_registry import getRoots as getRegisteredRoots
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "scanMods", "rescanMods", "findManifestPath",
-    "scanModsForMount", "rescanModsForMount"
+    "scanMods", "rescanMods", "scanModsForMount",
+    "rescanModsForMount"
 ]
 
 _IGNORE_DIRS = {".git", "node_modules", "__pycache__", "pytest_cache", ".vscode"}
@@ -28,19 +28,11 @@ ModMap: TypeAlias = dict[str, ModInfo]
 
 
 
-def findManifestPath(path: Path) -> Path | None:
-    p1, p2 = path / "manifest.json5", path / "manifest.json"
-    if p1.is_file(): return p1
-    if p2.is_file(): return p2
-    return None
-
-
-
 def _dedupe(paths: Iterable[Path]) -> list[Path]:
     out: list[Path] = []
     seen: set[str] = set()
     for path in paths:
-        key = str(Path(path).resolve())
+        key = str(Path(path).resolve(strict=False))
         if key not in seen:
             out.append(Path(path))
             seen.add(key)
@@ -58,79 +50,70 @@ def _loadManifest(manifestPath: Path) -> ModManifest | None:
 
 
 
-def _scanRoot(
-    root: Path,
-    out: ModMap,
-    *,
-    allowedIds: set[str] | None,
-    allowSymlinks: bool,
-) -> None:
-    try:
-        rootResolved = root.resolve(strict=False)
-    except Exception:
-        return
-
-    if not rootResolved.exists() or not rootResolved.is_dir():
-        return
-
-    try:
-        entries = list(root.iterdir())
-    except Exception as err:
-        logger.debug("Skipping root '%s' due to error: %s", root, err, exc_info=True)
-        return
-
-    for child in entries:
-        try:
-            if child.name in _IGNORE_DIRS:
-                continue
-            if not allowSymlinks and child.is_symlink():
-                continue
-            if not child.is_dir():
-                continue
-            resolvedChild = child.resolve(strict=False)
-            if not resolvedChild.is_relative_to(rootResolved): # Do not step out of root
-                continue
-        except Exception:
-            continue
-
-        manifestPath = findManifestPath(child)
-        if not manifestPath:
-            continue
-        if not allowSymlinks and manifestPath.is_symlink():
-            continue
-        manifest = _loadManifest(manifestPath)
-        if not manifest:
-            continue
-        if allowedIds is not None and manifest.id not in allowedIds:
-            continue
-        if manifest.id in out:
-            # Higher priority root wins
-            continue
-        
-        out[manifest.id] = (
-            rootResolved,
-            resolvedChild,
-            manifest,
-            manifestPath.name,
-        )
-
-
-
 def _modSearchRoots(
     *,
     appPack: ResolvedPack | None,
     saveRoot: Path | None,
     extraRoots: Iterable[Path] | None,
 ) -> list[Path]:
+    """
+    Build a list of base roots for mod packs.
+    
+    These are *content roots* from which PackScanner will look into the
+    "mods" subdirectory (PACK_KIND_DIRS["mod"]) just like for other pack kinds.
+    """
     roots: list[Path] = []
+    
     if saveRoot:
-        roots.append(Path(saveRoot) / "mods")
+        # Treat saveRoot as a content root: mods live under saveRoot / "mods".
+        roots.append(Path(saveRoot))
+    
     if appPack:
-        roots.append(appPack.rootDir / "mods")
-    roots.extend((base / "mods") for base in getRootsService().packRoots())
+        # Allow mods nested under the appPack root: appPack.rootDir / "mods".
+        roots.append(appPack.rootDir)
+    
+    # Global configured content roots (first-party, third-party, custom, ...)
+    roots.extend(getRootsService().contentRoots())
+    
+    # Mount-specific or extra roots are treated as additional content roots.
     if extraRoots:
         roots.extend(extraRoots)
-    return _dedupe(roots)
+    
+    dedupedRoots = _dedupe(roots)
+    
+    # Trace root collisions (multiple entries resolving to the same path).
+    try:
+        tracer = getTracer()
+        dropped = len(roots) - len(dedupedRoots)
+        if dropped > 0:
+            # Build collision groups: resolvedPath -> [originalPaths]
+            resolvedMap: dict[str, list[str]] = {}
+            for root in roots:
+                resolved = str(Path(root).resolve(strict=False))
+                resolvedMap.setdefault(resolved, []).append(str(root))
+                
+            collisionGroups = {
+                resolved: originals
+                for resolved, originals in resolvedMap.items()
+                if len(originals) > 1
+            }
+            
+            tracer.traceEvent(
+                "mods.rootCollision",
+                attrs={
+                    "requestedRoots": [str(root) for root in roots],
+                    "finalRoots": [str(root) for root in dedupedRoots],
+                    "droppedCount": dropped,
+                    "collisionGroups": collisionGroups,
+                },
+                level="debug",
+                tags=["mods", "roots"],
+            )
+    except Exception:
+        # Tracing must not break discovery.
+        pass
+    
+    return dedupedRoots
 
 
 
@@ -185,13 +168,86 @@ def scanMods(
 
     with _SCAN_LOCK:
         try:
-            for root in roots:
-                _scanRoot(
-                    root,
-                    found,
-                    allowedIds=allowedSet,
-                    allowSymlinks=allowSymlinks
+            scanner = PackScanner(allowSymlinks=allowSymlinks)
+            discoveredPacks = scanner.scanPacks(roots=roots, kinds={"mod"})
+            
+            for pack in discoveredPacks:
+                # pack.manifestPath is the pack-level manifest, but we still validate
+                # against the ModManifest schema.
+                manifest = _loadManifest(pack.manifestPath)
+                if not manifest:
+                    continue
+                
+                if allowedSet is not None and manifest.id not in allowedSet:
+                    # Mod is present but not in the allowedIds filter.
+                    try:
+                        tracer.traceEvent(
+                            "mods.modFilteredByAllowedIds",
+                            attrs={
+                                "modId": manifest.id,
+                                "version": getattr(manifest, "version", None),
+                                "sourceRoot": str(pack.sourceRoot),
+                                "modDir": str(pack.rootDir),
+                                "manifestPath": str(pack.manifestPath),
+                            },
+                            level="debug",
+                            tags=["mods", "filter"],
+                            span=span,
+                        )
+                    except Exception:
+                        pass
+                    continue
+                
+                if manifest.id in found:
+                    # Earlier roots (by precedence) already provided this mod.
+                    existingRoot, existingDir, existingManifest, existingFileName = found[manifest.id]
+                    try:
+                        tracer.traceEvent(
+                            "mods.modCollision",
+                            attrs={
+                                "modId": manifest.id,
+                                "existingRoot": str(existingRoot),
+                                "existingDir": str(existingDir),
+                                "existingVersion": getattr(existingManifest, "version", None),
+                                "existingManifestPath": str(existingDir / existingFileName),
+                                "newSourceRoot": str(pack.sourceRoot),
+                                "newDir": str(pack.rootDir),
+                                "newVersion": getattr(manifest, "version", None),
+                                "newManifestPath": str(pack.manifestPath),
+                            },
+                            level="warn",
+                            tags=["mods", "collision"],
+                            span=span,
+                        )
+                    except Exception:
+                        pass
+                    continue
+                
+                found[manifest.id] = (
+                    pack.sourceRoot,
+                    pack.rootDir,
+                    manifest,
+                    pack.manifestPath.name,
                 )
+
+                # Successful registration of this mod
+                try:
+                    tracer.traceEvent(
+                        "mods.modRegistered",
+                        attrs={
+                            "modId": manifest.id,
+                            "version": getattr(manifest, "version", None),
+                            "sourceRoot": str(pack.sourceRoot),
+                            "modDir": str(pack.rootDir),
+                            "manifestPath": str(pack.manifestPath),
+                        },
+                        level="debug",
+                        tags=["mods", "register"],
+                        span=span,
+                    )
+                except Exception:
+                    pass
+            
             if span is not None:
                 tracer.traceEvent(
                     "mods.scan.done",
