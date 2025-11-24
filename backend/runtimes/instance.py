@@ -44,10 +44,15 @@ class RuntimeInstance:
         
         if saveBaseDirectory is None:
             baseSaves = getRootsService().getWriteDir("saves")
+            self.saveRoot: Path = (Path(baseSaves) / self.appPackId / self.id).resolve()
         else:
             baseSaves = Path(saveBaseDirectory)
-        
-        self.saveRoot: Path = (Path(baseSaves) / self.appPackId / self.id).resolve()
+            # If the supplied base already points at this runtime's save directory, reuse it
+            # as-is to avoid duplicating the appPack/runtimeInstance path segments.
+            if baseSaves.name == self.id and baseSaves.parent.name == self.appPackId:
+                self.saveRoot = baseSaves
+            else:
+                self.saveRoot = (baseSaves / self.appPackId / self.id).resolve()
         self.saveRoot.mkdir(parents=True, exist_ok=True)
         
         self.createdTs: float = time.time()
