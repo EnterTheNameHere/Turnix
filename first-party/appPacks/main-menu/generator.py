@@ -72,7 +72,7 @@ def generate(context: Mapping[str, Any] | None = None) -> dict[str, Any]:
     logger.info("Generated main menu runtime save as %s", manifestPath.parent)
 
     return {
-        "saveDir": runtime.saveRoot,
+        "saveDir": str(runtime.saveRoot),
         "runtimeInstanceId": runtime.id,
         "appPackId": runtime.appPackId,
     }
