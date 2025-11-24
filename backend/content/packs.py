@@ -10,7 +10,7 @@ from typing import Any
 
 import json5
 
-from backend.app.globals import configBool, getRootsService
+from backend.app.globals import configBool, getRootsService, getTracer
 from backend.core.schema_registry import SEMVER_PATTERN_RE
 
 logger = logging.getLogger(__name__)
@@ -127,8 +127,23 @@ def _readManifest(dirpath: Path) -> PackManifest | None:
                 rawJson=raw,
             )
             return manifest
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed to read manifest file %s", path)
+            try:
+                tracer = getTracer()
+                tracer.traceEvent(
+                    "packs.manifestInvalid",
+                    attrs={
+                        "manifestPath": str(path),
+                        "errorType": type(exc).__name__,
+                        "errorMessage": str(exc),
+                    },
+                    level="warn",
+                    tags=["packs", "manifest", "error"],
+                )
+            except Exception:
+                # Tracing must not break manifest reading
+                pass
             return None
     return None
             
@@ -147,85 +162,294 @@ def parseQualifiedPackId(qid: str) -> tuple[str | None, str, str | None, str | N
     version = matched.group("version")
     rest = matched.group("rest")
     return author, packId, version, rest
+
+
+
+class PackScanner:
+    """
+    Low-level pack scanner. Walks roots and discovers ResolvedPacks.
+    """
+    def __init__(self, *, allowSymlinks: bool):
+        self.allowSymlinks = allowSymlinks
+        self.tracer = getTracer()
     
+    def findManifestPath(self, dirPath: Path) -> Path:
+        for path in ((dirPath / name) for name in _MANIFEST_NAMES):
+            if path.is_file():
+                return path
+        raise FileNotFoundError(f"No manifest found in '{dirPath}'")
+    
+    def walkForManifests(
+        self,
+        dirPath: Path,
+        baseResolved: Path,
+        *,
+        rootIndex: int,
+        packKind: str,
+        kinds: set[str] | None,
+        seen: set[tuple[str, str | None, str, Path]],
+        tempOut: list[tuple[int, str, ResolvedPack]],
+        pathStack: tuple[Path, ...],
+    ) -> None:
+        """
+        Recursively walk directories until a manifest is found.
+        If a directory has a manifest, treat it as a pack root and stop descending.
+        """
+        try:
+            if not dirPath.is_dir():
+                try:
+                    self.tracer.traceEvent(
+                        "packs.dirSkipped",
+                        attrs={
+                            "path": str(dirPath),
+                            "reason": "notDir",
+                        },
+                        level="debug",
+                        tags=["packs", "fs", "skip"],
+                    )
+                except Exception:
+                    pass
+                return
+            if dirPath.is_symlink() and not self.allowSymlinks:
+                try:
+                    self.tracer.traceEvent(
+                        "packs.dirSkipped",
+                        attrs={
+                            "path": str(dirPath),
+                            "reason": "symlinkNotAllowed",
+                        },
+                        level="debug",
+                        tags=["packs", "fs", "skip"],
+                    )
+                except Exception:
+                    pass
+                return
+            resolved = dirPath.resolve(strict=False)
+            # Guard against escaping the discovery root
+            if not resolved.is_relative_to(baseResolved):
+                try:
+                    self.tracer.traceEvent(
+                        "packs.dirSkipped",
+                        attrs={
+                            "path": str(resolved),
+                            "reason": "outsideBaseRoot",
+                            "baseRoot": str(baseResolved),
+                        },
+                        level="debug",
+                        tags=["packs", "fs", "skip"],
+                    )
+                except Exception:
+                    pass
+                return
+        except Exception as exc:
+            try:
+                self.tracer.traceEvent(
+                    "packs.dirSkipped",
+                    attrs={
+                        "path": str(dirPath),
+                        "reason": "statError",
+                        "errorType": type(exc).__name__,
+                        "errorMessage": str(exc),
+                    },
+                    level="debug",
+                    tags=["packs", "fs", "skip"],
+                )
+            except Exception:
+                pass
+            return
+        
+        # Symlink / directory loop detection: if this resolved path is already in the
+        # current stack, bail out to avoid infinite recursion.
+        if resolved in pathStack:
+            if dirPath.is_symlink():
+                logger.warning("Detected symlink loop while scanning packs: '%s' (base '%s')", resolved, baseResolved)
+                try:
+                    self.tracer.traceEvent(
+                        "packs.symlinkLoop",
+                        attrs={
+                            "resolvedPath": str(resolved),
+                            "baseRoot": str(baseResolved),
+                        },
+                        level="warn",
+                        tags=["packs", "fs", "symlink"],
+                    )
+                except Exception:
+                    # Tracing must not break scanning
+                    pass
+            return
+        
+        nextStack = pathStack + (resolved,)
+        
+        manifest = _readManifest(dirPath)
+        if manifest:
+            if manifest.kind == packKind and (not kinds or manifest.kind in kinds):
+                key = (manifest.id, manifest.author, manifest.version, resolved)
+                if key not in seen:
+                    seen.add(key)
+                    try:
+                        manifestPath = self.findManifestPath(dirPath).resolve()
+                    except Exception:
+                        return
+                    
+                    # --- Tracing: manifest found ---
+                    try:
+                        self.tracer.traceEvent(
+                            "packs.manifestFound",
+                            attrs={
+                                "packId": manifest.id,
+                                "packName": manifest.name,
+                                "kind": manifest.kind,
+                                "author": manifest.author,
+                                "version": manifest.version,
+                                "dir": str(resolved),
+                                "manifestPath": str(manifestPath),
+                                "rootIndex": rootIndex,
+                                "sourceRoot": str(baseResolved),
+                            },
+                            level="info",
+                            tags=["packs", "manifest"],
+                        )
+                    except Exception:
+                        # Do not break scanning if tracing fails
+                        pass
+                    
+                    tempOut.append((
+                        rootIndex,
+                        dirPath.name.lower(),
+                        ResolvedPack(
+                            id=manifest.id,
+                            name=manifest.name,
+                            author=manifest.author,
+                            version=manifest.version,
+                            kind=manifest.kind,
+                            rootDir=resolved,
+                            manifestPath=manifestPath,
+                            sourceRoot=baseResolved,
+                            rawJson=manifest.rawJson,
+                        ),
+                    ))
+            else:
+                # Manifest present but not used due to kind or filter mismatch
+                reason = "kindMismatch"
+                if kinds is not None and manifest.kind not in kinds:
+                    reason = "filteredByKinds"
+                try:
+                    self.tracer.traceEvent(
+                        "packs.packRootIgnored",
+                        attrs={
+                            "packId": manifest.id,
+                            "packName": manifest.name,
+                            "kind": manifest.kind,
+                            "author": manifest.author,
+                            "version": manifest.version,
+                            "dir": str(resolved),
+                            "rootIndex": rootIndex,
+                            "sourceRoot": str(baseResolved),
+                            "expectedPackKind": packKind,
+                            "kindsFilter": sorted(kinds) if kinds else None,
+                            "reason": reason,
+                        },
+                        level="debug",
+                        tags=["packs", "manifest", "ignored"],
+                    )
+                except Exception:
+                    pass
+            # Stop descent - this directory is a pack root
+            return
+        
+        # No manifest → descent deeper
+        try:
+            for subDir in dirPath.iterdir():
+                self.walkForManifests(
+                    subDir,
+                    baseResolved,
+                    rootIndex=rootIndex,
+                    packKind=packKind,
+                    kinds=kinds,
+                    seen=seen,
+                    tempOut=tempOut,
+                    pathStack=nextStack,
+                )
+        except Exception:
+            return
 
-
-class PackResolver:
-    """
-    Scans content roots (assets/, downloaded/, custom/) for content directories,
-    reads manifest, and resolved by author/id/version with precedence by roots order.
-    """
-    def listPacks(self, *, kinds: set[str] | None = None) -> list[ResolvedPack]:
+    def scanPacks(self, *, roots: list[Path], kinds: set[str] | None = None) -> list[ResolvedPack]:
         tempOut: list[tuple[int, str, ResolvedPack]] = []
         seen: set[tuple[str, str | None, str, Path]] = set() # (id, author, version, rootDir)
-        rootsService = getRootsService()
-        allowSymlinks = configBool("roots.followSymlinks", False)
-        
-        def findManifestPath(child: Path) -> Path:
-            for path in ((child / name) for name in _MANIFEST_NAMES):
-                if path.is_file():
-                    return path
-            raise FileNotFoundError(f"No manifest found in {child}")
-        
-        for rootIndex, base in enumerate(rootsService.contentRoots()):
+
+        for rootIndex, base in enumerate(roots):
             try:
                 baseResolved = base.resolve(strict=False)
             except Exception:
-                    continue
+                continue
             
             for packKind, packDirName in PACK_KIND_DIRS.items():
                 packRoot = base / packDirName
                 if not packRoot.exists() or not packRoot.is_dir():
                     continue
-                
-                for child in packRoot.iterdir():
-                    try:
-                        if not child.is_dir():
-                            continue
-                        if child.is_symlink() and not allowSymlinks:
-                            continue
-                        resolvedChild = child.resolve(strict=False)
-                        # Guard against escaping the discovery root
-                        if not resolvedChild.is_relative_to(baseResolved):
-                            continue
-                    except Exception:
-                        continue
-                    
-                    manifest = _readManifest(child)
-                    if not manifest:
-                        continue
-                    
-                    if kinds and manifest.kind not in kinds:
-                        continue
-                    
-                    if manifest.kind != packKind:
-                        continue
-                    
-                    key = (manifest.id, manifest.author, manifest.version, resolvedChild)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    try:
-                        manifestPath = findManifestPath(child).resolve()
-                    except Exception:
-                        continue
-                    
-                    resolvedPack = ResolvedPack(
-                        id=manifest.id,
-                        name=manifest.name,
-                        author=manifest.author,
-                        version=manifest.version,
-                        kind=manifest.kind,
-                        rootDir=resolvedChild,
-                        manifestPath=manifestPath,
-                        sourceRoot=baseResolved,
-                        rawJson=manifest.rawJson,
-                    )
-                    tempOut.append((rootIndex, child.name.lower(), resolvedPack))
+            
+                # Recursive pack discovery
+                try:
+                    for child in packRoot.iterdir():
+                        self.walkForManifests(
+                            child,
+                            baseResolved,
+                            rootIndex=rootIndex,
+                            packKind=packKind,
+                            kinds=kinds,
+                            seen=seen,
+                            tempOut=tempOut,
+                            pathStack=(),
+                        )
+                except Exception:
+                    continue
         
         # Sort by (root precedence, folder name) to be deterministically but keep precedence.
         tempOut.sort(key=lambda item: (item[0], item[1]))
         return [item[2] for item in tempOut]
+
+
+
+class PackResolver:
+    """
+    Scans content roots (first-party/, third-party/, custom/) for content directories,
+    reads manifest, and resolved by author/id/version with precedence by roots order.
+    """
+    def listPacks(self, *, kinds: set[str] | None = None) -> list[ResolvedPack]:
+        rootsService = getRootsService()
+        allowSymlinks = configBool("roots.followSymlinks", False)
+        roots = list(rootsService.contentRoots())
+        
+        tracer = getTracer()
+        span = tracer.startSpan(
+            "packs.scan",
+            attrs={
+                "kinds": sorted(kinds) if kinds else None,
+                "rootCount": len(roots),
+            },
+            level="info",
+            tags=["packs"],
+        )
+        
+        try:
+            scanner = PackScanner(allowSymlinks=allowSymlinks)
+            packs = scanner.scanPacks(roots=roots, kinds=kinds)
+            tracer.endSpan(
+                span,
+                status="ok",
+                attrs={
+                    "packCount": len(packs),
+                },
+            )
+            return packs
+        except Exception as exc:
+            tracer.endSpan(
+                span,
+                status="error",
+                errorType=type(exc).__name__,
+                errorMessage=str(exc),
+            )
+            raise
 
     def resolveAppPack(self, qidOrId: str) -> ResolvedPack | None:
         """
