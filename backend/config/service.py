@@ -4,16 +4,18 @@ import logging
 from dataclasses import dataclass
 from typing import Final
 
-from backend.core.schema_registry import SchemaRegistry
-from backend.config.store import ConfigStore
+from backend.app.globals import getRootsService
 from backend.config.providers import DefaultsProvider, FileProvider, RuntimeProvider, ViewProvider
 from backend.config.schema_loader import loadConfigSchemas
+from backend.config.store import ConfigStore
+from backend.content.packs import ResolvedPack
+from backend.content.saves import SaveManager
+from backend.core.schema_registry import SchemaRegistry
 from backend.content.roots import ROOT_DIR
 
 logger = logging.getLogger(__name__)
 
 ASSETS_DEFAULTS_DIR = ROOT_DIR / "first-party" / "config" / "defaults"
-USERDATA_CFG        = ROOT_DIR / "userdata" / "config"
 SCHEMAS_DIR         = ROOT_DIR / "first-party" / "config" / "schema"
 
 
@@ -32,27 +34,100 @@ class ConfigService:
             logger.warning("No config schemas loaded.")
 
         globalValidator = registry.getValidator("config", "global")
+        
+        # User config lives under the selected userdata root:
+        #     <userdata-root>/config/global.json5
+        roots = getRootsService()
+        userdataBase = roots.getWriteDir("userdata") # Creates <base>/userdata if missing
+        userdataCfgDir = userdataBase / "config"
+        try:
+            userdataCfgDir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            # If directory creation fails, FileProvider will surface the error on save
+            logger.exception("Failed to create userdata config directory at '%s'", userdataCfgDir)
+        
         globalStore = ConfigStore(
             namespace="config:global",
             validator=globalValidator,
             providers=[
                 DefaultsProvider(path=str(ASSETS_DEFAULTS_DIR / "global.json5")),
-                FileProvider(path=str(USERDATA_CFG / "global.json5"), readOnly=False),
+                FileProvider(path=str(userdataCfgDir / "global.json5"), readOnly=False),
                 RuntimeProvider(),
             ],
         )
         return cls(registry=registry, globalStore=globalStore)
 
-    def makeRealmStore(self, *, realmId: str) -> ConfigStore:
-        realmValidator = self.registry.getValidator("config", "realm")
-        savePath: Final = ROOT_DIR / "saves" / realmId / "config.json5"
+    def makeRuntimeInstanceStore(self, *, appPack: ResolvedPack, runtimeInstanceId: str) -> ConfigStore:
+        validator = self.registry.getValidator("config", "runtimeInstance")
+        roots = getRootsService()
+        
+        # TODO(runtime-config):
+        #    This is a temporary, minimal implementation.
+        #    In the future, runtimeInstance defaults should be built from a
+        #    fully resolved pack graph (appPack + viewPacks + contentPacks + mods),
+        #    collecting and merging all pack-level default config trees into a
+        #    single flattened snapshot that is stored with the runtimeInstance.
+        
+        savesBase = roots.getWriteDir("saves")
+        appKey = SaveManager().appIdToKey(appPack.id)
+        saveDir = savesBase / appKey / runtimeInstanceId
+        try:
+            saveDir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            logger.exception(
+                "Failed to create directory for appPack/runtimeInstance '%s/%s' at '%s' to store config",
+                appPack.id,
+                runtimeInstanceId,
+                saveDir,
+            )
+        
         return ConfigStore(
-            namespace=f"config:realm:{realmId}",
-            validator=realmValidator,
+            namespace=f"config:runtimeInstance:{appPack.id}:{runtimeInstanceId}",
+            validator=validator,
             providers=[
-                DefaultsProvider(path=str(ASSETS_DEFAULTS_DIR / "realm.json5")),
+                DefaultsProvider(path=str(appPack.rootDir / "config.json5")),
                 ViewProvider(self.globalStore),
-                FileProvider(path=str(savePath), readOnly=False),
+                FileProvider(path=str(saveDir / "config.json5")),
                 RuntimeProvider(),
             ],
+        )
+
+    def makePackStore(self, *, pack: ResolvedPack) -> ConfigStore:
+        validator = self.registry.getValidator("config", f"pack:{pack.kind}")
+        roots = getRootsService()
+        
+        userdataBase = roots.getWriteDir("userdata")
+        packConfigDir: Final = userdataBase / "config" / pack.kind
+        try:
+            packConfigDir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            logger.exception(
+                "Failed to create directory for pack='%s' at '%s' to store config",
+                pack.id,
+                str(packConfigDir),
+            )
+        
+        
+        # TODO(pack-config):
+        #    This is a temporary heuristic for pack-level defaults.
+        #    Later, we should support a richer discovery scheme, e.g.:
+        #      - pack.rootDir / "config.json5"
+        #      - pack.rootDir / "config/defaults.json5"
+        #      - pack.rootDir / "config/<kind>.json5" or similar
+        #    and possibly allow packs to declare where their config lives
+        #    in the manifest, so we do not hard-code file names here.
+        packDefaultConfigFile = pack.rootDir / "config.json5"
+        defaultsFilePath = packDefaultConfigFile if packDefaultConfigFile.is_file() else None
+        
+        providers = []
+        if defaultsFilePath:
+            providers.append(DefaultsProvider(path=str(defaultsFilePath)))
+        providers.append(ViewProvider(self.globalStore))
+        providers.append(FileProvider(path=str(packConfigDir / f"{pack.id}.json5"), readOnly=False))
+        providers.append(RuntimeProvider())
+        
+        return ConfigStore(
+            namespace=f"config:pack:{pack.kind}:{pack.id}",
+            validator=validator,
+            providers=providers,
         )
