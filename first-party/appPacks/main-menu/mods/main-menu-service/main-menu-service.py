@@ -27,6 +27,7 @@ from backend.mods.frontend_index import makeFrontendIndex
 from backend.mods.loader import loadPythonMods
 from backend.mods.runtime_state import ModRuntimeSnapshot, setAllowedMods, setModRuntimeSnapshot
 from backend.rpc.api import registerCapabilityInstance, unregisterCapability
+from backend.rpc.broadcast import pushEvent
 from backend.runtimes.persistence import loadRuntime
 from backend.views.manager import viewManager
 from backend.views.registry import viewRegistry
@@ -257,13 +258,14 @@ class _MainMenuCapability:
             except Exception:
                 logger.debug("Failed to refresh view '%s'", getattr(view, "id", "?"), exc_info=True)
         
-        # Force clients to reconnect so they receive the updated welcome status
-        for viewId in viewManager.viewIds():
-            for ws in viewManager.socketsForView(viewId):
-                try:
-                    await ws.close(code=1012, reason="RuntimeInstance switched")
-                except Exception:
-                    logger.debug("Failed to close socket for view '%s'", viewId, exc_info=True)
+        # Ask clients to reload themselves so they reconnect with fresh runtime state
+        await pushEvent(
+            "turnix.client",
+            {
+                "op": "reload",
+                "reason": "runtime_instance_switched",
+            },
+        )
     
     async def _closeServices(self, services: dict[str, Any]) -> None:
         for name, svc in list(services.items()):
