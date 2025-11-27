@@ -326,7 +326,7 @@ export class RpcClient {
             timer: null,
             intervalMs: this.settings?.protocol?.heartbeatMs ?? 5000,
             lastSeen: Date.now(),
-            awolFactor: 3,               // For stall detectrion
+            awolFactor: 3,               // For stall detection
         };
         
         // To prevent race for "welcome"
@@ -1179,7 +1179,7 @@ export class RpcClient {
         return laneState;
     }
 
-    #laneKey(route, _prio) {
+    #laneKey(route, _priority) {
         return route?.capability ? `cap:${route.capability}` : (route?.object ? `obj:${route.object}` : 'noValidRouteLane');
     }
 
