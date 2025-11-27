@@ -98,4 +98,19 @@ export default [
             '@html-eslint/require-doctype': ['error'],
         },
     },
+    // ---------- Electron main / preload ----------
+    {
+        files: ['electron/main.js', 'electron/preload.js'],
+        languageOptions: {
+            ...jsCommon.languageOptions,
+            sourceType: 'script', // require
+            globals: {
+                ...globals.node, // require, __dirname, process
+                ...globals.es2024,
+            },
+        },
+        plugins: jsCommon.plugins,
+        settings: jsCommon.settings,
+        rules: jsCommon.rules,
+    },
 ];
