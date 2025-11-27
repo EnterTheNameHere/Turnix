@@ -1329,4 +1329,4 @@ export function defaultSettings() {
         },
     };
 }
-/* eslint-enable indent */
+/* eslint-enable @stylistic/indent */
