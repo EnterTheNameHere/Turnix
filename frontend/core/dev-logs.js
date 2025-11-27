@@ -46,13 +46,13 @@ export function registerDevLogs(rpc, {ui = true, maxEntries = 500} = {}) {
         /**
          * Listen to individual parsed entries.
          * @param {(entry: any) => void} fn
-         * @returns {{unsubscibe(): void, fn:(entry:any) => void}}
+         * @returns {{unsubscribe(): void, fn:(entry:any) => void}}
          */
         onLog: (fn) => onLog.add(fn),
         /**
          * Listen to raw string batches.
          * @param {(entries: string[]) => void} fn
-         * @returns {{unsubscibe(): void, fn:(entries:string[]) => void}}
+         * @returns {{unsubscribe(): void, fn:(entries:string[]) => void}}
          */
         onBatch: (fn) => onBatch.add(fn),
         destroy() {
