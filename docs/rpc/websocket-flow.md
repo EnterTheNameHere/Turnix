@@ -33,7 +33,7 @@ their shared `clientId` while minting distinct tokens for each tab.【F:backend/
    attempting to validate them as `RPCMessage` instances.【F:backend/rpc/transport.py†L105-L167】
 2. **Client hello** – Immediately after `WebSocket.OPEN`, the frontend sends a
    hello frame containing optional view metadata.  The helper enforces the
-   standard schema version, `sys` lane, and placeholder generation.【F:frontend/assets/rpc-client.js†L356-L374】【F:frontend/assets/rpc-client.js†L908-L926】
+   standard schema version, `sys` lane, and placeholder generation.【F:frontend/core/rpc-client.js†L356-L374】【F:frontend/core/rpc-client.js†L908-L926】
 3. **Welcome** – On the first valid `hello`, the server resolves or creates a
    view, binds the WebSocket to that view, allocates a new generation via
    `RPCConnection.newGeneration`, patches view state, and returns a `welcome`
@@ -42,14 +42,14 @@ their shared `clientId` while minting distinct tokens for each tab.【F:backend/
    as ready, flushes queued messages, and resumes subscriptions.  It can then
    report module load status via `clientReady`, which the backend acknowledges
    while recording module metadata and preventing duplicate processing per
-   generation.【F:frontend/assets/rpc-client.js†L474-L522】【F:frontend/assets/rpc-client.js†L450-L466】【F:backend/rpc/transport.py†L244-L319】
+   generation.【F:frontend/core/rpc-client.js†L474-L522】【F:frontend/core/rpc-client.js†L450-L466】【F:backend/rpc/transport.py†L244-L319】
 5. **Heartbeat** – Both sides maintain liveness.  The client periodically sends
    `heartbeat` frames; the server updates its timestamp and ACKs them.  Missed
-   heartbeats trigger reconnection logic in the browser.【F:backend/rpc/transport.py†L321-L328】【F:frontend/assets/rpc-client.js†L1099-L1126】
+   heartbeats trigger reconnection logic in the browser.【F:backend/rpc/transport.py†L321-L328】【F:frontend/core/rpc-client.js†L1099-L1126】
 6. **Disconnect** – When the socket closes, outstanding request and subscription
    tasks are cancelled on the server, the view binding is removed, and the socket
    is closed.  The client tears down timers, rejects pending promises, and
-   schedules exponential backoff reconnect attempts.【F:backend/rpc/transport.py†L605-L646】【F:frontend/assets/rpc-client.js†L376-L403】
+   schedules exponential backoff reconnect attempts.【F:backend/rpc/transport.py†L605-L646】【F:frontend/core/rpc-client.js†L376-L403】
 
 ## Session and generation tracking
 
@@ -57,7 +57,7 @@ their shared `clientId` while minting distinct tokens for each tab.【F:backend/
 subscription coroutines, and generation metadata.  Each successful `hello`
 bumps the generation counter and salt, ensuring replayed messages from older
 sessions can be ignored.【F:backend/rpc/connection.py†L21-L60】  The frontend stores the
-most recent generation and discards any message that does not match it.【F:frontend/assets/rpc-client.js†L489-L527】
+most recent generation and discards any message that does not match it.【F:frontend/core/rpc-client.js†L489-L527】
 
 ## Message dispatch
 
@@ -77,21 +77,21 @@ message and dispatches based on the `type` and `route`:
 On the browser, incoming workload messages targeting exposed capabilities are
 ACKed automatically, then routed to the registered `call`, `emit`, or
 `subscribe` handler.  Replies and errors resolve or reject pending promises,
-while subscription updates trigger local event emitters.【F:frontend/assets/rpc-client.js†L529-L665】
+while subscription updates trigger local event emitters.【F:frontend/core/rpc-client.js†L529-L665】
 
 ## Acknowledgements and flow control
 
 - **Automatic ACKs** – The backend ACKs every message other than `ack` and
   `heartbeat`, and the frontend mirrors this rule for all messages except the
   handshake/control set.  Both sides use helper constructors to tie the ACK to
-  the original message ID and to place it on the `sys` lane.【F:backend/rpc/transport.py†L321-L348】【F:frontend/assets/rpc-client.js†L645-L653】【F:backend/rpc/messages.py†L55-L71】
+  the original message ID and to place it on the `sys` lane.【F:backend/rpc/transport.py†L321-L348】【F:frontend/core/rpc-client.js†L645-L653】【F:backend/rpc/messages.py†L55-L71】
 - **Budget and retry windows** – Request and emit helpers populate `budgetMs`
   from timeout classes.  The browser keeps per-lane in-flight counters and
   queues additional work until ACKs or replies arrive, preventing overload while
-  providing best-effort cancellation on timeout.【F:frontend/assets/rpc-client.js†L952-L999】【F:frontend/assets/rpc-client.js†L703-L765】【F:frontend/assets/rpc-client.js†L1146-L1194】
+  providing best-effort cancellation on timeout.【F:frontend/core/rpc-client.js†L952-L999】【F:frontend/core/rpc-client.js†L703-L765】【F:frontend/core/rpc-client.js†L1146-L1194】
 - **Idempotency** – Client helpers copy an `idempotencyKey` for request/emit
   messages.  The server connection caches IDs and previous replies so repeated
-  invocations can be deduplicated.【F:frontend/assets/rpc-client.js†L952-L990】【F:backend/rpc/connection.py†L21-L68】
+  invocations can be deduplicated.【F:frontend/core/rpc-client.js†L952-L990】【F:backend/rpc/connection.py†L21-L68】
 
 ## Permissions and principals
 
@@ -105,4 +105,4 @@ client can surface clean feedback.【F:backend/rpc/transport.py†L85-L101】
 Each outbound frame is serialized via `safeJsonDumps` and passed through the RPC
 logging decision engine, enabling centrally controlled logging on both sides of
 the connection.  The browser offers matching logging hooks that honor the same
-filters to keep debugging consistent.【F:backend/rpc/transport.py†L52-L69】【F:frontend/assets/rpc-client.js†L767-L784】
+filters to keep debugging consistent.【F:backend/rpc/transport.py†L52-L69】【F:frontend/core/rpc-client.js†L767-L784】

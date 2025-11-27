@@ -1,4 +1,4 @@
-// frontend/assets/mod-loader.js
+// frontend/core/mod-loader.js
 
 export async function sha256Hash(input) {
     if(!globalThis.crypto?.subtle?.digest) {
@@ -13,7 +13,7 @@ export async function sha256Hash(input) {
 }
 
 /**
- * @param {import("./types").ModManifest[]} manifests
+ * @param {import("../assets/types").ModManifest[]} manifests
  */
 export async function loadMods(manifests, {makeRpcForMod, settings = {}} = {}) {
     if(!manifests) throw new Error('[mod-loader] loadMods() expects manifests list as an argument');

@@ -1,5 +1,5 @@
-// frontend/assets/dev-logs.js
-const { createEmitter } = await turnixImport('./assets/rpc-client.js');
+// frontend/core/dev-logs.js
+const { createEmitter } = await turnixImport('./core/rpc-client.js');
 
 /**
  * DevLogs: receives backend "system.logs" emits and fans them out to listeners.

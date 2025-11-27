@@ -1,4 +1,4 @@
-// frontend/assets/rpc-client.js
+// frontend/core/rpc-client.js
 
 import { uuidv7 } from 'uuidv7';
 
@@ -82,8 +82,8 @@ export function getByPath(obj, path) {
 
 /**
  * Normalize input (string or object) to a message object. Return null on failure to normalize.
- * @param {string|import("./types").RPCMessage} rpcMessageOrString
- * @returns {import("./types").RPCMessage|null}
+ * @param {string|import("../assets/types").RPCMessage} rpcMessageOrString
+ * @returns {import("../assets/types").RPCMessage|null}
  */
 export function normalizeMessage(rpcMessageOrString) {
     if(typeof rpcMessageOrString === 'string') {
@@ -112,7 +112,7 @@ export function normalizeMessage(rpcMessageOrString) {
 
 /**
  * Decide if we should log.
- * @param {import("./types").RPCMessage} msg
+ * @param {import("../assets/types").RPCMessage} msg
  * @param {object} cfg
  * @returns {boolean} 
  */
@@ -289,7 +289,7 @@ export class RpcClient {
 
     /** @type {boolean} */
     #ready = false; // Is websocket rpc ready for use?
-    /** @type {import("./types").Gen|null} */
+    /** @type {import("../assets/types").Gen|null} */
     #generation = null; // Connection generation epoch
     #lastWelcome = null;
     #welcomeDeferred = null;
@@ -310,7 +310,7 @@ export class RpcClient {
         this.webSocket = null;
         this.connected = false;
         this.reconnectAttempts = 0;
-        /** @type {import("./types").Gen|null} */
+        /** @type {import("../assets/types").Gen|null} */
         this.#generation = null;
         
         this.offlineQueue = [];          // Used to collect messages when connection is not OPEN; sent once connection is OPEN
@@ -318,7 +318,7 @@ export class RpcClient {
         this.laneStates = new Map();
         /** @type {Map<string, {resolve:Function, reject:Function, timer:any, laneKey?:string, wantAck?:boolean, onFinally?:Function}>} */
         this.pending = new Map();        // id -> { resolve, reject, timer, opts }
-        /** @type {Map<string, import("./types").Subscription>} */
+        /** @type {Map<string, import("../assets/types").Subscription>} */
         this.subscriptions = new Map();  // subId -> subscription object
         this.localCaps = new Map();      // capability -> { call?, emit?, subscribe? }
 
@@ -403,11 +403,11 @@ export class RpcClient {
 
     /**
      * @param {Object} p0
-     * @param {import("./types").Route} p0.route 
+     * @param {import("../assets/types").Route} p0.route 
      * @param {string} p0.path 
      * @param {string} p0.op 
      * @param {unknown[]} p0.args
-     * @param {import("./types").Payload} [payload={}]
+     * @param {import("../assets/types").Payload} [payload={}]
      * @param {{}} [opts={}] 
      */
     request({route, path, op, args}, payload = {}, opts = {}) {
@@ -416,9 +416,9 @@ export class RpcClient {
     }
 
     /**
-     * @param {import("./types").Route} route
+     * @param {import("../assets/types").Route} route
      * @param {string} path
-     * @param {import("./types").Payload} [payload={}]
+     * @param {import("../assets/types").Payload} [payload={}]
      * @param {{noAck?:boolean}} [opts={}]
      * @return {Promise<boolean>}
      */
@@ -432,7 +432,7 @@ export class RpcClient {
     }
 
     /**
-     * @param {import("./types").Route} route
+     * @param {import("../assets/types").Route} route
      * @param {string} path
      * @param {string} op
      * @param {{noAck?:boolean}} [opts={}]
@@ -472,7 +472,7 @@ export class RpcClient {
     }
 
     #onMessage(ev) {
-        /** @type {import("./types").RPCMessage|null} */
+        /** @type {import("../assets/types").RPCMessage|null} */
         let msg;
         try {
             msg = JSON.parse(ev.data);
@@ -571,7 +571,7 @@ export class RpcClient {
                             this.#enqueue(message);
                         };
                         const abortController = new AbortController();
-                        /** @type {import("./types").SubscribeCtx} */
+                        /** @type {import("../assets/types").SubscribeCtx} */
                         const ctx = {id: msg.id, origin: msg.origin, signal: abortController.signal, push};
 
                         Promise.resolve()
@@ -701,7 +701,7 @@ export class RpcClient {
     }
 
     /**
-     * @param {import("./types").RPCMessage} msg
+     * @param {import("../assets/types").RPCMessage} msg
      * @param {string} lane
      * @param {object} opts
      */
@@ -738,7 +738,7 @@ export class RpcClient {
     }
 
     /**
-     * @param {import("./types").RPCMessage} msg
+     * @param {import("../assets/types").RPCMessage} msg
      */
     #sendWithAck(msg) {
         return new Promise((resolve, reject) => {
@@ -804,13 +804,13 @@ export class RpcClient {
      * Automatically construct ACK message for given `toMsg`. `props` object
      * can be used to override the properties of final ACK message by custom values.
      * `opts` can be used to provide data for creator to generate properties.
-     * @param {import("./types").RPCMessage} toMsg The RPCMessage ACK should be created for.
-     * @param {import("./types").RPCMessage} [props] For overriding properties of ACK RPCMessage.
+     * @param {import("../assets/types").RPCMessage} toMsg The RPCMessage ACK should be created for.
+     * @param {import("../assets/types").RPCMessage} [props] For overriding properties of ACK RPCMessage.
      * @param {Object} [opts] Additional options which can be used to populate properties.
-     * @returns {import("./types").RPCMessage}
+     * @returns {import("../assets/types").RPCMessage}
      */
     #createACKMessage(toMsg, props = {}, opts = {}) {
-        /** @type {import("./types").RPCMessage} */
+        /** @type {import("../assets/types").RPCMessage} */
         const message = this.#createRPCMessage({
             ...props,
             v: '0.1',
@@ -824,13 +824,13 @@ export class RpcClient {
     }
 
     /**
-     * @param {import("./types").RPCMessage} toMsg The original RPCMessage containing id.
-     * @param {import("./types").RPCMessage} [props] For overriding properties of stateUpdate RPCMessage.
+     * @param {import("../assets/types").RPCMessage} toMsg The original RPCMessage containing id.
+     * @param {import("../assets/types").RPCMessage} [props] For overriding properties of stateUpdate RPCMessage.
      * @param {Object} [opts] Additional options which can be used to populate properties.
-     * @returns {import("./types").RPCMessage}
+     * @returns {import("../assets/types").RPCMessage}
      */
     #createStateUpdateMessage(toMsg, props = {}, opts = {}) {
-        /** @type {import("./types").RPCMessage} */
+        /** @type {import("../assets/types").RPCMessage} */
         const message = this.#createRPCMessage({
             ...props,
             v: '0.1',
@@ -842,9 +842,9 @@ export class RpcClient {
     }
 
     /**
-     * @param {import("./types").RPCMessage} [props] For properties of subscribe RPCMessage.
+     * @param {import("../assets/types").RPCMessage} [props] For properties of subscribe RPCMessage.
      * @param {Object} [opts] Additional options which can be used to populate properties.
-     * @returns {import("./types").RPCMessage}
+     * @returns {import("../assets/types").RPCMessage}
      */
     #createSubscribeMessage(props = {}, opts = {}) {
         if(!props.route) throw new Error('Request RPC message must have a route!');
@@ -852,7 +852,7 @@ export class RpcClient {
         if(!options.priority) options.priority = 'low';
         const {origin, ...optsWithoutOrigin} = options;
 
-        /** @type {import("./types").RPCMessage} */
+        /** @type {import("../assets/types").RPCMessage} */
         const message = this.#createRPCMessage({
             ...props,
             v: '0.1',
@@ -866,14 +866,14 @@ export class RpcClient {
     }
 
     /**
-     * @param {import("./types").RPCMessage} [props] For properties of cancel RPCMessage.
+     * @param {import("../assets/types").RPCMessage} [props] For properties of cancel RPCMessage.
      * @param {Object} [opts] Additional options which can be used to populate properties.
-     * @returns {import("./types").RPCMessage}
+     * @returns {import("../assets/types").RPCMessage}
      */
     #createCancelMessage(props = {}, opts = {}) {
         if(!props.correlatesTo) throw new Error('Request RPC message must have a correlatesTo!');
 
-        /** @type {import("./types").RPCMessage} */
+        /** @type {import("../assets/types").RPCMessage} */
         const message = this.#createRPCMessage({
             ...props,
             v: '0.1',
@@ -886,14 +886,14 @@ export class RpcClient {
     }
 
     /**
-     * @param {import("./types").RPCMessage} [props] For properties of unsubscribe RPCMessage.
+     * @param {import("../assets/types").RPCMessage} [props] For properties of unsubscribe RPCMessage.
      * @param {Object} [opts] Additional options which can be used to populate properties.
-     * @returns {import("./types").RPCMessage}
+     * @returns {import("../assets/types").RPCMessage}
      */
     #createUnsubscribeMessage(props = {}, opts = {}) {
         if(!props.correlatesTo) throw new Error('Request RPC message must have a correlatesTo!');
 
-        /** @type {import("./types").RPCMessage} */
+        /** @type {import("../assets/types").RPCMessage} */
         const message = this.#createRPCMessage({
             ...props,
             v: '0.1',
@@ -906,12 +906,12 @@ export class RpcClient {
     }
 
     /**
-     * @param {import("./types").RPCMessage} [props] For properties of hello RPCMessage.
+     * @param {import("../assets/types").RPCMessage} [props] For properties of hello RPCMessage.
      * @param {Object} [opts] Additional options which can be used to populate properties.
-     * @returns {import("./types").RPCMessage}
+     * @returns {import("../assets/types").RPCMessage}
      */
     #createHelloMessage(props = {}, opts = {}) {
-        /** @type {import("./types").RPCMessage} */
+        /** @type {import("../assets/types").RPCMessage} */
         const message = this.#createRPCMessage({
             ...props,
             v: '0.1',
@@ -926,13 +926,13 @@ export class RpcClient {
     }
 
     /**
-     * @param {import("./types").RPCMessage} toMsg The original RPCMessage containing id.
-     * @param {import("./types").RPCMessage} [props] For properties of reply RPCMessage.
+     * @param {import("../assets/types").RPCMessage} toMsg The original RPCMessage containing id.
+     * @param {import("../assets/types").RPCMessage} [props] For properties of reply RPCMessage.
      * @param {Object} [opts] Additional options which can be used to populate properties.
-     * @returns {import("./types").RPCMessage}
+     * @returns {import("../assets/types").RPCMessage}
      */
     #createReplyMessage(toMsg, props = {}, opts = {}) {
-        /** @type {import("./types").RPCMessage} */
+        /** @type {import("../assets/types").RPCMessage} */
         const message = this.#createRPCMessage({
             ...props,
             v: '0.1',
@@ -945,14 +945,14 @@ export class RpcClient {
     }
 
     /**
-     * @param {import("./types").RPCMessage} [props] For properties of request RPCMessage.
+     * @param {import("../assets/types").RPCMessage} [props] For properties of request RPCMessage.
      * @param {Object} [opts] Additional options which can be used to populate properties.
-     * @returns {import("./types").RPCMessage}
+     * @returns {import("../assets/types").RPCMessage}
      */
     #createRequestMessage(props = {}, opts = {}) {
         if(!props.route) throw new Error('Request RPC message must have a route!');
 
-        /** @type {import("./types").RPCMessage} */
+        /** @type {import("../assets/types").RPCMessage} */
         const message = this.#createRPCMessage({
             ...props,
             v: '0.1',
@@ -971,14 +971,14 @@ export class RpcClient {
     }
 
     /**
-     * @param {import("./types").RPCMessage} [props] For properties of emit RPCMessage.
+     * @param {import("../assets/types").RPCMessage} [props] For properties of emit RPCMessage.
      * @param {Object} [opts] Additional options which can be used to populate properties.
-     * @returns {import("./types").RPCMessage}
+     * @returns {import("../assets/types").RPCMessage}
      */
     #createEmitMessage(props = {}, opts = {}) {
         if(!props.route) throw new Error('Emit RPC message must have a route!');
         
-        /** @type {import("./types").RPCMessage} */
+        /** @type {import("../assets/types").RPCMessage} */
         const message = this.#createRPCMessage({
             ...props,
             v: '0.1',
@@ -992,9 +992,9 @@ export class RpcClient {
     }
 
     /**
-     * @param {import("./types").RPCMessage} [props] For properties of clientReady RPCMessage.
+     * @param {import("../assets/types").RPCMessage} [props] For properties of clientReady RPCMessage.
      * @param {Object} [opts] Additional options which can be used to populate properties.
-     * @returns {import("./types").RPCMessage}
+     * @returns {import("../assets/types").RPCMessage}
      */
     #createClientReadyMessage(props = {}, opts = {}) {
         const _props = {...props};
@@ -1008,7 +1008,7 @@ export class RpcClient {
         delete _props.failed;
         delete _props.modsHash;
 
-        /** @type {import("./types").RPCMessage} */
+        /** @type {import("../assets/types").RPCMessage} */
         const message = this.#createRPCMessage({
             v: '0.1',
             ..._props,
@@ -1021,12 +1021,12 @@ export class RpcClient {
     }
 
     /**
-     * @param {import("./types").RPCMessage} [props] For properties of heartbeat RPCMessage.
+     * @param {import("../assets/types").RPCMessage} [props] For properties of heartbeat RPCMessage.
      * @param {Object} [opts] Additional options which can be used to populate properties.
-     * @returns {import("./types").RPCMessage}
+     * @returns {import("../assets/types").RPCMessage}
      */
     #createHeartbeatMessage(props = {}, opts = {}) {
-        /** @type {import("./types").RPCMessage} */
+        /** @type {import("../assets/types").RPCMessage} */
         const message = this.#createRPCMessage({
             ...props,
             v: '0.1',
@@ -1038,10 +1038,10 @@ export class RpcClient {
     }
 
     /**
-     * @param {import("./types").RPCMessage} toMsg The original RPCMessage containing id.
-     * @param {import("./types").RPCMessage} [props] For properties of error RPCMessage.
+     * @param {import("../assets/types").RPCMessage} toMsg The original RPCMessage containing id.
+     * @param {import("../assets/types").RPCMessage} [props] For properties of error RPCMessage.
      * @param {Object} [opts] Additional options which can be used to populate properties.
-     * @returns {import("./types").RPCMessage}
+     * @returns {import("../assets/types").RPCMessage}
      */
     #createErrorMessage(toMsg, props = {}, opts = {}) {
         const errorPayload = props.payload ?? {};
@@ -1054,7 +1054,7 @@ export class RpcClient {
         if(!errorPayload.message) errorPayload.message = '';
         if(!errorPayload.retryable) errorPayload.retryable = false;
 
-        /** @type {import("./types").RPCMessage} */
+        /** @type {import("../assets/types").RPCMessage} */
         const message = this.#createRPCMessage({
             ...props,
             v: '0.1',
@@ -1068,12 +1068,12 @@ export class RpcClient {
     }
 
     /**
-     * @param {import("./types").RPCMessage} [props] For properties of RPCMessage.
+     * @param {import("../assets/types").RPCMessage} [props] For properties of RPCMessage.
      * @param {Object} [opts] Additional options which can be used to populate properties.
-     * @returns {import("./types").RPCMessage}
+     * @returns {import("../assets/types").RPCMessage}
      */
     #createRPCMessage(props={}, opts={}) {
-        /** @type {import("./types").RPCMessage} */
+        /** @type {import("../assets/types").RPCMessage} */
         const message = {
             ...props,
             id: uuidv7(),
@@ -1237,9 +1237,9 @@ export class RpcClient {
 
     /**
      * @param {string} id 
-     * @param {import("./types").Invocation} invocation
+     * @param {import("../assets/types").Invocation} invocation
      * @param {object} opts
-     * @returns {import("./types").Subscription}
+     * @returns {import("../assets/types").Subscription}
      */
     #makeSub(id, invocation, opts) {
         const self = this;
