@@ -13,6 +13,7 @@ import { uuidv7 } from 'uuidv7'; // It's fine to use import here
 const { RpcClient } = await turnixImport('/core/rpc-client.js');
 const { registerDevLogs } = await turnixImport('/core/dev-logs.js');
 const { loadMods } = await turnixImport('/core/mod-loader.js');
+const layout = await turnixImport('/core/layout.js');
 
 function safeGet(key) {
     try { return localStorage.getItem(key); }
@@ -85,6 +86,15 @@ const rpc = await RpcClient.connect(wsUrl, {
 });
 
 registerDevLogs(rpc, {ui: true});
+
+// Initialize shared layout (panels, resizers, auto-collapse) once per view.
+// Mods can assume panels exist.
+try {
+    layout.initResizers();
+    layout.initAutoCollapsePanels();
+} catch(err) {
+    console.error('[bootstrap] Failed to initialize layout panels:', err);
+}
 
 globalThis.Turnix = {settings};
 Object.freeze(globalThis.Turnix);
