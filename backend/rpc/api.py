@@ -11,8 +11,8 @@ __all__ = [
     "exposeCapability", "listCapabilities", "getCapability",
     "routeRequest", "routeEmit", "routeSubscribe",
     "registerCapability", "unregisterCapability", "resetCapabilityInstance",
-    "registerCapabilityInstance", "CapabilityFactory", "CallCtx",
-    "EmitCtx", "SubscribeCtx", "ActiveSubscription",
+    "registerCapabilityInstance", "CapabilityFactory", "ICallContext",
+    "IEmitContext", "ISubscribeContext", "ActiveSubscription",
 ]
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ def getCapability(name: str):
 
 
 
-async def routeRequest(capability: str, path: str, args: list[Any] | None, ctx: "CallCtx") -> Any:
+async def routeRequest(capability: str, path: str, args: list[Any] | None, ctx: "ICallContext") -> Any:
     if not isinstance(capability, str) or not capability:
         raise ValueError("capability must be a non-empty string")
     if not isinstance(path, str) or not path:
@@ -72,7 +72,7 @@ async def routeRequest(capability: str, path: str, args: list[Any] | None, ctx: 
 
 
 
-def routeEmit(capability: str, path: str, payload: dict[str, Any] | None, ctx: "EmitCtx") -> None:
+def routeEmit(capability: str, path: str, payload: dict[str, Any] | None, ctx: "IEmitContext") -> None:
     if not isinstance(capability, str) or not capability:
         return
     if not isinstance(path, str) or not path:
@@ -117,7 +117,7 @@ async def routeSubscribe(
     capability: str,
     path: str,
     payload: dict[str, Any] | None,
-    ctx: "SubscribeCtx"
+    ctx: "ISubscribeContext"
 ) -> "ActiveSubscription":
     if not isinstance(capability, str) or not capability:
         raise ValueError("capability must be non-empty string")
@@ -273,19 +273,19 @@ class CapabilityFactory:
 
 
 
-class CallCtx(Protocol):
+class ICallContext(Protocol):
     id: str
     origin: dict[str, Any] | None
 
 
 
-class EmitCtx(Protocol):
+class IEmitContext(Protocol):
     id: str
     origin: dict[str, Any] | None
 
 
 
-class SubscribeCtx(Protocol):
+class ISubscribeContext(Protocol):
     id: str
     origin: dict[str, Any] | None
     signal: asyncio.Event

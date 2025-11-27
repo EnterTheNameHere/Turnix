@@ -377,7 +377,7 @@ def mountWebSocket(app: FastAPI):
                     if not await _ensureCapabilityOrError(ws, rpcConnection, msg, capability):
                         continue
                     
-                    # Build SubscribeCtx over HandlerContext with a push → WS bridge
+                    # Build SubscribeContext over HandlerContext with a push → WS bridge
                     signal = asyncio.Event()
                     
                     # Snapshot values for this request to avoid late-binding bugs in the async task...
