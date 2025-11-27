@@ -1292,7 +1292,7 @@ export class RpcClient {
     }
 }
 
-/* eslint-disable indent */
+/* eslint-disable @stylistic/indent */
 export function defaultSettings() {
     console.warn('Loading default settings - this shouldn\'t happen if everything is set up correctly!');
     return {
