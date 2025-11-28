@@ -60,7 +60,13 @@ def _modSearchRoots(
     Build a list of base roots for mod packs.
     
     These are *content roots* from which PackScanner will look into the
-    "mods" subdirectory (PACK_KIND_DIRS["mod"]) just like for other pack kinds.
+    "mods" subdirectory just like for other pack kinds.
+    
+    Precedence (earlier wins on collisions):
+      1) saveRoot         - per-save overrides (if present)
+      2) appPack.rootDir  - app-local mods
+      3) extraRoots       - e.g. viewPack.rootDir, other deep/local contexts
+      4) global content roots (first-party, third-party, custom)
     """
     roots: list[Path] = []
     
@@ -72,12 +78,12 @@ def _modSearchRoots(
         # Allow mods nested under the appPack root: appPack.rootDir / "mods".
         roots.append(appPack.rootDir)
     
-    # Global configured content roots (first-party, third-party, custom, ...)
-    roots.extend(getRootsService().contentRoots())
-    
-    # Mount-specific or extra roots are treated as additional content roots.
+    # Mount-specific or extra roots (e.g. viewPack roots).
     if extraRoots:
         roots.extend(extraRoots)
+    
+    # Global configured content roots (first-party, third-party, custom, ...)
+    roots.extend(getRootsService().contentRoots())
     
     dedupedRoots = _dedupe(roots)
     
@@ -127,12 +133,14 @@ def scanMods(
     """
     Returns a mapping:
       modId -> (root, moddir, manifest, manifestFileName)
+    
     Only mods whose ids are in allowedIds are returned when the iterable is not None.
-    Search order:
+    
+    Search order (earlier roots win on collisions):
       1) saveRoot/mods (if present)
-      2) appPack/mods (if present)
-      3) each configured pack root's `mods` directory (first-party, third-party, custom)
-      4) extraRoots (mount-specific overrides)
+      2) appPack.rootDir/mods (if present)
+      3) extraRoots/<mods> (mount-specific or viewPack-local)
+      4) each configured pack root's `mods` directory (first-party, third-party, custom)
     """
     tracer = getTracer()
     span = None
