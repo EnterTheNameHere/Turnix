@@ -15,7 +15,7 @@ function createMainWindow() {
         },
     });
 
-    win.loadURL('http://localhost:63726/');
+    win.loadURL('http://localhost:63726/?viewKind=main');
 
     if(globalThis.__turnixDevMode) {
         win.webContents.openDevTools();
@@ -35,7 +35,7 @@ function createTurnixDevToolsWindow() {
         },
     });
 
-    win.loadURL('http://localhost:63726/turnixdevtools');
+    win.loadURL('http://localhost:63726/?viewKind=turnixdevtools');
 
     return win;
 }
