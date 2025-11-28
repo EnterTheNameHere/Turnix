@@ -19,7 +19,16 @@ async def apiBootstrap(request: Request):
     reqCookies = request.cookies or {}
     clientId = viewRegistry.ensureClientId(reqCookies)
 
-    view, token = viewRegistry.getOrCreateViewForClient(clientId)
+    # Read viewKind from JSON body (frontend sends it)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    viewKind = (body or {}).get("viewKind") or "main"
+    viewKind = str(viewKind).strip() or "main"
+    
+    # Let the registry decide which view to attach for this client + kind
+    view, token = viewRegistry.getOrCreateViewForClient(clientId, viewKind=viewKind)
     
     # Ensure the view has access to at least the shell session while in menu.
     runtime = getActiveRuntime()
@@ -29,6 +38,7 @@ async def apiBootstrap(request: Request):
     payload = {
         "viewId": view.id,
         "viewToken": token,
+        "viewKind": viewKind,
         "serverGen": view.version, # Use View.version as a single gen id for now
     }
 
@@ -67,6 +77,7 @@ async def apiBootstrap(request: Request):
             attrs={
                 "clientId": clientId,
                 "viewId": view.id,
+                "viewKind": viewKind,
                 "hasCookie": hasCookie,
                 "scheme": scheme,
                 "cookieSameSite": cookieSameSite,
