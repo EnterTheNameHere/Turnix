@@ -245,7 +245,7 @@ function collapsePanel(panelEl, side) {
     removeExistingHandle(panelEl);
 }
 
-function updateNoSidesClass() {
+export function updateNoSidesClass() {
     const container = document.querySelector('.container');
     if(!container) return;
     const cs = getComputedStyle(document.documentElement);
