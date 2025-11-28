@@ -2,6 +2,7 @@
 from __future__ import annotations
 import importlib.util
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,25 @@ from backend.runtimes.instance import RuntimeInstance
 from backend.runtimes.persistence import loadRuntime
 
 logger = logging.getLogger(__name__)
+
+
+
+@dataclass(frozen=True)
+class ViewContext:
+    """
+    Bundles everything needed to bootstrap a view:
+        - runtime instance (already ensured / generated)
+        - appPack + viewPack (if any)
+        - normalized viewKind
+        - allowedMods as derived from the appPack manifest
+        - extraModRoots: roots that should be passed into mod discovery for this view
+    """
+    runtimeInstance: RuntimeInstance
+    appPack: ResolvedPack
+    viewPack: ResolvedPack | None
+    viewKind: str
+    allowedMods: set[str]
+    extraModRoots: tuple[Path, ...]
 
 
 
@@ -172,3 +192,47 @@ def ensureRuntimeForAppPack(
     
     runtimeInstance = loadRuntime(saveDir)
     return runtimeInstance, appPack, allowedMods
+
+
+
+def ensureViewContext(
+    appPackIdOrQId: str,
+    viewKind: str | None = None,
+    *,
+    preferEmbeddedSaves: bool = False,
+) -> ViewContext:
+    """
+    High-level helper that:
+      1) Ensures a RuntimeInstance + appPack + allowedMods exist.
+      2) Normalizes viewKind (defaults to "main").
+      3) Resolves the viewPack for the given appPack + viewKind, with the
+         rules implemented by PackResolver.resolveViewPackForApp()
+      4) Computes extraModRoots for this view (currently: [viewPack.rootDir]
+         when a viewPack is resolved, otherwise empty).
+    """
+    # Step 1: runtime + appPack + allowedMods
+    runtimeInstance, appPack, allowedMods = ensureRuntimeForAppPack(
+        appPackIdOrQId,
+        preferEmbeddedSaves=preferEmbeddedSaves,
+    )
+    
+    # Step 2: normalize viewKind
+    normalizedViewKind = (viewKind or "main").strip() or "main"
+    
+    # Step 3: resolve viewPack within appPack scope
+    resolver = PackResolver()
+    viewPack = resolver.resolveViewPackForApp(appPack, normalizedViewKind)
+    
+    # Step 4: extra mod roots for this view (for use with loadPythonMods → extraRoots)
+    extraRoots: list[Path] = []
+    if viewPack is not None:
+        extraRoots.append(viewPack.rootDir)
+    
+    return ViewContext(
+        runtimeInstance=runtimeInstance,
+        appPack=appPack,
+        viewPack=viewPack,
+        viewKind=normalizedViewKind,
+        allowedMods=allowedMods,
+        extraModRoots=tuple(extraRoots),
+    )
