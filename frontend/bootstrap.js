@@ -58,11 +58,15 @@ const settings = await fetch('/settings').then(response=>response.json());
 
 // ----- Bootstrap to get view identity via cookie+JSON -----
 async function getBootstrap() {
+    const url = new URL(location.href);
+    const viewKindParam = url.searchParams.get('viewKind');
+    const viewKind = viewKindParam || 'main';
+
     const res = await fetch('/api/bootstrap', {
         method: 'POST',
         credentials: 'include',
         headers: {'content-type': 'application/json'},
-        body: '{}',
+        body: JSON.stringify({viewKind}),
     });
     console.log('[bootstrap] /api/bootstrap status:', res.status);
 
