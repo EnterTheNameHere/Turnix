@@ -124,7 +124,7 @@ def getTraceHub() -> TraceHub:
     
     Used mainly by the trace WebSocket endpoint and tools.
     """
-    return cast("TraceHub", _getCoreTracer())
+    return cast("TraceHub", _getCoreTraceHub())
 
 
 
