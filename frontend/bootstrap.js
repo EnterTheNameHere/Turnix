@@ -15,6 +15,23 @@ const { registerDevLogs } = await turnixImport('/core/dev-logs.js');
 const { loadMods } = await turnixImport('/core/mod-loader.js');
 const layout = await turnixImport('/core/layout.js');
 
+// Initialize shared layout (panels, resizers, auto-collapse) once per view.
+// Mods can assume panels exist.
+function initLayoutSafe() {
+    try {
+        layout.initResizers();
+        layout.initAutoCollapsePanels();
+    } catch(err) {
+        console.error('[bootstrap] Failed to initialize layout panels:', err);
+    }
+}
+
+if(document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', initLayoutSafe);
+} else {
+    initLayoutSafe();
+}
+
 function safeGet(key) {
     try { return localStorage.getItem(key); }
     catch { console.log('localSession.getItem thrown! Shouldn\'t happen. Use Electron instead...'); return null; }
@@ -86,15 +103,6 @@ const rpc = await RpcClient.connect(wsUrl, {
 });
 
 registerDevLogs(rpc, {ui: true});
-
-// Initialize shared layout (panels, resizers, auto-collapse) once per view.
-// Mods can assume panels exist.
-try {
-    layout.initResizers();
-    layout.initAutoCollapsePanels();
-} catch(err) {
-    console.error('[bootstrap] Failed to initialize layout panels:', err);
-}
 
 globalThis.Turnix = {settings};
 Object.freeze(globalThis.Turnix);
