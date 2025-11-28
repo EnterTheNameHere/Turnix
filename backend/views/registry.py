@@ -13,8 +13,8 @@ class ViewRegistry:
     def __init__(self):
         # viewId -> View
         self.viewsById: dict[str, View] = {}
-        # clientId -> viewId
-        self.bindingsByClientId: dict[str, str] = {}
+        # (clientId, viewKind) -> viewId
+        self.bindingsByClientAndViewKindKey: dict[tuple[str, str], str] = {}
         # (viewId, clientId) -> viewToken
         self.tokens: dict[tuple[str, str], str] = {}
     
@@ -37,10 +37,10 @@ class ViewRegistry:
         )
         return clientId
 
-    def getOrCreateViewForClient(self, clientId: str) -> tuple[View, str]:
+    def getOrCreateViewForClient(self, clientId: str, *, viewKind: str = "main") -> tuple[View, str]:
         """
         Returns (view, viewTokenForThisClient)
-        Creates a new View if none bound yet; otherwise returns existing + (rotated) token.
+        Creates a new View if none bound for this (clientId, viewKind); otherwise returns existing + (rotated) token.
         """
         if not isinstance(clientId, str) or not clientId.strip():
             raise ValueError(f"'clientId' must be non-empty string; got {repr(clientId)}")
@@ -48,8 +48,11 @@ class ViewRegistry:
         tracer = getTracer()
         createdNew = False
         
+        viewKind = (viewKind or "main").strip() or "main"
+        key = (clientId, viewKind)
+        
         # Race begun
-        existingId = self.bindingsByClientId.get(clientId)
+        existingId = self.bindingsByClientAndViewKindKey.get(key)
         if existingId:
             if existingId not in self.viewsById:
                 # Invariant violation: binding points to missing view, which shouldn't happen
@@ -57,9 +60,9 @@ class ViewRegistry:
             view = self.viewsById[existingId]
         else:
             # Optimistically create a new view, then atomically "claim" the binding.
-            newView = View()
+            newView = View(viewKind=viewKind)
             # NOTE: In case of needing more hardening, use asyncio.Lock
-            boundId = self.bindingsByClientId.setdefault(clientId, newView.id)
+            boundId = self.bindingsByClientAndViewKindKey.setdefault(key, newView.id)
             if boundId == newView.id:
                 # We won the race - store the new view
                 self.viewsById[newView.id] = newView
@@ -73,15 +76,16 @@ class ViewRegistry:
                 except KeyError:
                     raise LookupError(f"View {boundId!r} not found!")
         
-        key = (view.id, clientId)
+        tokenKey = (view.id, clientId)
         token = self._mintViewToken()
-        self.tokens[key] = token
+        self.tokens[tokenKey] = token
         
         tracer.traceEvent(
             "viewRegistry.getOrCreateViewForClient",
             attrs={
                 "clientId": clientId,
                 "viewId": view.id,
+                "viewKind": view.viewKind,
                 "createdNew": createdNew,
             },
             level="info",
@@ -160,19 +164,26 @@ class ViewRegistry:
         
         return self.viewsById.get(viewId)
     
-    def bindClientToView(self, clientId: str, viewId: str) -> None:
+    def bindClientToView(self, clientId: str, viewId: str, viewKind: str | None = None) -> None:
         if not isinstance(viewId, str) or not viewId.strip():
             raise ValueError(f"'viewId' must be non-empty string; got {repr(viewId)}")
         if not isinstance(clientId, str) or not clientId.strip():
             raise ValueError(f"'clientId' must be non-empty string; got {repr(clientId)}")
 
-        oldViewId = self.bindingsByClientId.get(clientId)
+        if viewKind is None:
+            # Derive from existing view if present. Fallback to "main"
+            existing = self.viewsById.get(viewId)
+            viewKind = getattr(existing, "viewKind", "main") if existing else "main"
+        viewKind = (viewKind or "main").strip() or "main"
+        
+        key = (clientId, viewKind)
+        oldViewId = self.bindingsByClientAndViewKindKey.get(key)
         if oldViewId and oldViewId != viewId:
             self.tokens.pop((oldViewId, clientId), None)
         
-        self.bindingsByClientId[clientId] = viewId
+        self.bindingsByClientAndViewKindKey[key] = viewId
         if viewId not in self.viewsById:
-            self.viewsById[viewId] = View(viewId=viewId)
+            self.viewsById[viewId] = View(viewId=viewId, viewKind=viewKind)
         
         tracer = getTracer()
         tracer.traceEvent(
@@ -180,6 +191,7 @@ class ViewRegistry:
             attrs={
                 "clientId": clientId,
                 "viewId": viewId,
+                "viewKind": viewKind,
                 "previousViewId": oldViewId,
             },
             level="info",
@@ -187,25 +199,37 @@ class ViewRegistry:
         )
     
     def unbindClient(self, clientId: str) -> bool:
-        """Removes the clientId binding and any token associated with it."""
-        viewId = self.bindingsByClientId.pop(clientId, None)
-        removedToken = False
-        if viewId:
-            removedToken = self.tokens.pop((viewId, clientId), None) is not None
+        """
+        Removes all bindings for this clientId and any tokens associated with them.
+        """
+        removedAny = False
+        removedTokens = 0
+        removedViewIds: set[str] = set()
+        
+        for (cid, viewKind), viewId in list(self.bindingsByClientAndViewKindKey.items()):
+            if cid != clientId:
+                continue
+            self.bindingsByClientAndViewKindKey.pop((cid, viewKind), None)
+            removedAny = True
+            removedViewIds.add(viewId)
+            if self.tokens.pop((viewId, clientId), None) is not None:
+                removedTokens += 1
         
         tracer = getTracer()
         tracer.traceEvent(
             "viewRegistry.unbindClient",
             attrs={
                 "clientId": clientId,
-                "viewId": viewId,
-                "hadToken": removedToken,
+                "removedViewIds": sorted(removedViewIds),
+                "hadBindings": removedAny,
+                "hadToken": bool(removedTokens),
+                "removedTokenCount": removedTokens,
             },
             level="info",
             tags=["viewRegistry"],
         )
         
-        return viewId is not None
+        return removedAny
 
     def destroyView(self, viewId: str) -> bool:
         view = self.viewsById.pop(viewId, None)
@@ -232,11 +256,12 @@ class ViewRegistry:
         
         # Unbind all clients pointing to this view (with or without a token)
         unboundClients = 0
-        for cid, vid in list(self.bindingsByClientId.items()):
-            if vid == viewId:
-                self.bindingsByClientId.pop(cid, None)
-                self.tokens.pop((viewId, cid), None)
-                unboundClients += 1
+        for (cid, viewKind), vid in list(self.bindingsByClientAndViewKindKey.items()):
+            if vid != viewId:
+                continue
+            self.bindingsByClientAndViewKindKey.pop((cid, viewKind), None)
+            self.tokens.pop((viewId, cid), None)
+            unboundClients += 1
         
         tracer.traceEvent(
             "viewRegistry.destroyView",
