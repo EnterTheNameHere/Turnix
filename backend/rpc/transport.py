@@ -191,11 +191,12 @@ def mountWebSocket(app: FastAPI):
                                 f"Reality's integrity irrecoverably fragmented. "
                                 f"May the garbage collector have mercy."
                             )
-                        # Keep binding fresh
-                        viewRegistry.bindClientToView(clientId, viewId)
+                        # Keep binding fresh. Preserve viewKind so the same client
+                        # can have multiple views (main, devtools, ...)
+                        viewRegistry.bindClientToView(clientId, viewId, getattr(view, "viewKind", "main"))
                     else:
                         # Bind by clientId - default single-player path
-                        view, _ = viewRegistry.getOrCreateViewForClient(clientId)
+                        view, _ = viewRegistry.getOrCreateViewForClient(clientId, viewKind="main")
 
                     viewManager.bind(ws=ws, view=view)
                     
