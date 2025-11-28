@@ -48,12 +48,17 @@ async def loadPythonMods(
     allowedModIds: Iterable[str] | None = None,
     appPack: ResolvedPack | None = None,
     saveRoot: Path | None = None,
+    extraRoots: Iterable[Path] | None = None,
 ) -> tuple[list[LoadedPyMod], list[dict[str, Any]], dict[str, Any]]:
     """
     Returns (loaded, failed, services) where:
       - loaded: list of LoadedPyMod
       - failed: list of {id, reason, stack?}
       - services: mapping registered by mods via ctx.registerService(name, instance)
+    
+    extraRoots:
+      Optional iterable of additional pack roots for this load, typically used
+      by view context to include viewPack-local mods.
     """
     tracer = getTracer()
     span = None
@@ -77,9 +82,10 @@ async def loadPythonMods(
     
     try:
         discovered = scanMods(
-            allowedIds=set(allowedModIds) if isinstance(allowedModIds, set) else None,
+            allowedIds=allowedModIds,
             appPack=appPack,
-            saveRoot=saveRoot
+            saveRoot=saveRoot,
+            extraRoots=extraRoots
         )
 
         if span is not None:
