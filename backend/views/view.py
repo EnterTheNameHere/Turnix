@@ -15,6 +15,7 @@ __all__ = ["ViewSnapshot", "View"]
 
 class ViewSnapshot(TypedDict):
     viewId: str
+    viewKind: str
     appPackId: str
     version: int
     state: dict[str, Any]
@@ -28,8 +29,16 @@ class View:
     - Authoritative *UI* state.
     - Attaches to world Session(s) owned by GameRealm (main, temporary, hidden).
     """
-    def __init__(self, *, appPackId: str | None = None, viewId: str | None = None):
+    def __init__(
+        self,
+        *,
+        appPackId: str | None = None,
+        viewId: str | None = None,
+        viewKind: str = "main",
+    ):
+        print("    >>>> View: ", appPackId, viewId, viewKind)
         self.id: str = viewId or uuid_12("view_")
+        self.viewKind: str = viewKind or "main"
         self.appPackId: str = appPackId or "turnix@main_menu"
         
         self._traceSpan: TraceSpan | None = None
@@ -44,6 +53,7 @@ class View:
             tags=["view"],
             contextOverrides={
                 "viewId": self.id,
+                "viewKind": self.viewKind,
             },
         )
         self._traceSpan = span
@@ -65,6 +75,7 @@ class View:
             )
         
         self.state: dict[str, Any] = {
+            "viewKind": self.viewKind,
             "mods": {
                 "frontend": frontendIndex,
                 "backend": {
@@ -88,6 +99,7 @@ class View:
                     attrs={
                         "viewId": self.id,
                         "appPackId": self.appPackId,
+                        "viewKind": self.viewKind,
                         "attachedSessionIds": sorted(self.attachedSessionIds),
                         "version": self.version,
                     },
@@ -107,6 +119,7 @@ class View:
                 "view.attachSession",
                 attrs={
                     "viewId": self.id,
+                    "viewKind": self.viewKind,
                     "sessionId": sessionId,
                     "version": self.version,
                 },
@@ -127,6 +140,7 @@ class View:
                 "view.detachSession",
                 attrs={
                     "viewId": self.id,
+                    "viewKind": self.viewKind,
                     "sessionId": sessionId,
                     "version": self.version,
                 },
@@ -153,6 +167,7 @@ class View:
                 "view.setAppPackId",
                 attrs={
                     "viewId": self.id,
+                    "viewKind": self.viewKind,
                     "appPackId": self.appPackId,
                     "version": self.version,
                 },
@@ -167,6 +182,7 @@ class View:
         return {
             "viewId": self.id,
             "appPackId": self.appPackId,
+            "viewKind": self.viewKind,
             "state": self.state,
             "version": self.version,
         }
@@ -217,6 +233,7 @@ class View:
         return {
             "viewId": self.id,
             "appPackId": self.appPackId,
+            "viewKind": self.viewKind,
             "version": self.version,
             "state": self.state,
             "attachedSessionIds": sorted(self.attachedSessionIds),
