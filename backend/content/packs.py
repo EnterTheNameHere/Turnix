@@ -415,10 +415,33 @@ class PackResolver:
     Scans content roots (first-party/, third-party/, custom/) for content directories,
     reads manifest, and resolved by author/id/version with precedence by roots order.
     """
-    def listPacks(self, *, kinds: set[str] | None = None) -> list[ResolvedPack]:
+    def listPacks(self, *, kinds: set[str] | None = None, roots: list[Path] | None = None) -> list[ResolvedPack]:
+        """
+        List packs of given kinds across one or more base roots.
+        
+        - If roots is None, scan the configured pack roots (first-party, third-party, custom).
+        - If roots is provided, scan only those base directories.
+        - Discovery always:
+            • descends thought directories without a manifest
+            • stops descending at a directory that has a manifest (treat it as a pack root)
+        """
         rootsService = getRootsService()
         allowSymlinks = configBool("roots.followSymlinks", False)
-        roots = list(rootsService.contentRoots())
+        if roots is None:
+            # Default: all pack-hosting content roots (first-party, third-party, custom)
+            roots = list(rootsService.contentRoots())
+        else:
+            # Normalize and dedupe given roots
+            normRoots: list[Path] = []
+            seen: set[str] = set()
+            for base in roots:
+                resolved = str(Path(base).expanduser().resolve(strict=False))
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                normRoots.append(Path(resolved))
+            roots = normRoots
+        
         
         tracer = getTracer()
         span = tracer.startSpan(
@@ -451,19 +474,28 @@ class PackResolver:
             )
             raise
 
-    def resolveAppPack(self, qidOrId: str) -> ResolvedPack | None:
+    def resolvePack(
+        self,
+        kind: str,
+        qidOrId: str,
+        *,
+        roots: list[Path] | None = None,
+    ) -> ResolvedPack | None:
         """
-        Resolve by:
+        Resolve a pack of a given kind by:
           - exact author@id:version
           - or "id:version"
           - or "author@id"
           - or "id" (select latest by version if comparable, otherwise first by roots precedence)
+        
+        If roots is provided, only packs discovered under those base directories
+        are considered. Otherwise, all configured pack roots are scanned.
         """
-        author, packId, version, _rest = parseQualifiedPackId(qidOrId)
-        candidates = [
-            pack for pack in self.listPacks(kinds={"appPack"})
-            if pack.id == packId and (author is None or pack.author == author)
+        # Discover packs of requested kind in the requested roots (or global).
+        packs = [
+            pack for pack in self.listPacks(kinds={kind}, roots=roots)
         ]
+        candidates, version, packId = self._filterCandidatesByQualifiedId(packs, qidOrId)
         if not candidates:
             return None
         if version:
@@ -485,3 +517,103 @@ class PackResolver:
             return (major, minor, patch, isStable)
         candidates.sort(key=lambda pack: semverKey(pack.version))
         return candidates[-1]
+
+    def resolveAppPack(self, qidOrId: str) -> ResolvedPack | None:
+        """
+        Convenience wrapper for resolvePack(kind="appPack").
+        """
+        return self.resolvePack("appPack", qidOrId)
+    
+    def resolveViewPack(
+        self,
+        qidOrId: str,
+        *,
+        roots: list[Path] | None = None,
+    ) -> ResolvedPack | None:
+        """
+        Resolve a viewPack by qualified id in an optional scope.
+        
+        Typical usage:
+          - Global: resolveViewPack("testView")
+          - Inside an appPack: resolveViewPack("testView", roots=[appPack.rootDir])
+        """
+        return self.resolvePack("viewPack", qidOrId, roots=roots)
+    
+    def resolveViewPackForApp(
+        self,
+        appPack: ResolvedPack,
+        viewKind: str | None,
+    ) -> ResolvedPack | None:
+        """
+        Resolve a viewPack for a given appPack + viewKind with these rules:
+        
+            - viewKind is normalized to a non-empty string, defaulting to "main".
+            - AppPack can declare which viewPacks it owns via meta.viewPacks
+              in its manifest (list | dict | string).
+            - If viewKind == "main":
+                • Only ever resolved from inside the appPack (roots=[appPack.rootDir]).
+                • Never resolved from global roots, so nothing external can override it.
+                • If not found locally, returns None (no viewPack → plain appPack mods).
+            - If viewKind != "main":
+                • If declared in appPack.meta.viewPacks → resolve locally only
+                  (roots=[appPack.rootDir]). No global fallback.
+                • If NOT declared in appPack.meta.viewPacks → try global viewPacks
+                  (roots=None), which means any external viewPack with that id
+                  can be used.
+        """
+        viewKind = (viewKind or "main").strip() or "main"
+        
+        raw = appPack.rawJson or {}
+        meta = raw.get("meta") if isinstance(raw, dict) else None
+        
+        declared: set[str] = set()
+        if isinstance(meta, dict):
+            metaViewPacks = meta.get("viewPacks")
+            if isinstance(metaViewPacks, str):
+                name = metaViewPacks.strip()
+                if name:
+                    declared.add(name)
+            elif isinstance(metaViewPacks, list):
+                for item in metaViewPacks:
+                    name = str(item or "").strip()
+                    if name:
+                        declared.add(name)
+            elif isinstance(metaViewPacks, dict):
+                for key in metaViewPacks.keys():
+                    name = str(key or "").strip()
+                    if name:
+                        declared.add(name)
+        
+        # Special handling for "main":
+        #   - Do NOT search globally (no override of default main).
+        #   - Only resolve from inside the appPack. If not found, return None.
+        if viewKind == "main":
+            local = self.resolveViewPack(viewKind, roots=[appPack.rootDir])
+            return local
+        
+        # Non-main viewKind:
+        # If the appPack declares this viewPack, we treat it as owned
+        # and resolve ONLY from inside the appPack.
+        if viewKind in declared:
+            return self.resolveViewPack(viewKind, roots=[appPack.rootDir])
+
+        # AppPack does not declare this viewKind → allow external/global viewPack.
+        # This is the "check viewPacks out of the appPack" case.
+        return self.resolveViewPack(viewKind)
+    
+    def _filterCandidatesByQualifiedId(
+        self,
+        packs: list[ResolvedPack],
+        qidOrId: str
+    ) -> tuple[list[ResolvedPack], str | None, str]:
+        """
+        Apply qualified-id filtering (author@id:version) to a list of packs.
+        Returns (candidates, version, packId).
+        """
+        author, packId, version, _rest = parseQualifiedPackId(qidOrId)
+        candidates = [
+            pack
+            for pack in packs
+            if pack.id == packId and (author is None or pack.author == author)
+        ]
+        return candidates, version, packId
