@@ -69,13 +69,14 @@ async def life(app: FastAPI) -> AsyncIterator[None]:
         PROCESS_REGISTRY.register("mods.services", modsServices, overwrite=True)
         
         perms = getPermissions()
-        perms.registerCapability(capability="http.client@1", risk="high")
-        perms.registerCapability(capability="chat@1",        risk="medium")
-        perms.registerCapability(capability="gm.narration@1",risk="low")
-        perms.registerCapability(capability="gm.world@1",    risk="low")
-        perms.registerCapability(capability="chat.thread@1", risk="low")
-        perms.registerCapability(capability="chat.start@1",  risk="medium")
-        perms.registerCapability(capability="main.menu@1",   risk="medium")
+        perms.registerCapability(capability="http.client@1",  risk="high")
+        perms.registerCapability(capability="chat@1",         risk="medium")
+        perms.registerCapability(capability="gm.narration@1", risk="low")
+        perms.registerCapability(capability="gm.world@1",     risk="low")
+        perms.registerCapability(capability="chat.thread@1",  risk="low")
+        perms.registerCapability(capability="chat.start@1",   risk="medium")
+        perms.registerCapability(capability="main.menu@1",    risk="medium")
+        perms.registerCapability(capability="trace.stream@1", risk="medium")
     except Exception as err:
         logger.exception("Python mod loading failed: %s", err)
     yield
