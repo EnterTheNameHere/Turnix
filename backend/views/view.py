@@ -65,7 +65,7 @@ class View:
                 "frontend": self.frontendModsIndex,
                 "backend": {
                     "loaded": activeInstance.backendPacksLoaded,
-                    "failed": activeInstance.backendPacksLoaded, 
+                    "failed": activeInstance.backendPacksFailed, 
                 },
             }
         }
