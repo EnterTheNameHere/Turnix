@@ -32,7 +32,7 @@ class ViewContext:
         - extraModRoots: roots that should be passed into mod discovery for this view
     """
     runtimeInstance: RuntimeInstance
-    appPack: ResolvedPack
+    appPack: ResolvedPack | None
     viewPack: ResolvedPack | None
     viewKind: str
     allowedMods: set[str]
