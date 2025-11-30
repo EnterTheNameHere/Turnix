@@ -2,9 +2,10 @@
 from __future__ import annotations
 import importlib.util
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from backend.app.globals import getRootsService
 from backend.content.packs import PackResolver, ResolvedPack
@@ -13,6 +14,10 @@ from backend.runtimes.instance import RuntimeInstance
 from backend.runtimes.persistence import loadRuntime
 
 logger = logging.getLogger(__name__)
+
+
+
+GeneratorFn = Callable[[dict[str, Any]], dict[str, Any] | None]
 
 
 
@@ -91,8 +96,18 @@ def _runGenerator(generatorPath: Path, context: dict[str, Any]) -> dict[str, Any
     generate = getattr(module, "generate", None)
     if not callable(generate):
         raise RuntimeError(f"Generator at '{generatorPath}' does not expose generate()")
-    result = generate(context)
-    return result or {}
+    
+    generatorFn = cast(GeneratorFn, generate)
+    result = generatorFn(context)
+    if result is None:
+        return {}
+    
+    if not isinstance(result, dict):
+        raise TypeError(
+            f"Generator at '{generatorPath}' must return dict[str, Any] or None, got {type(result).__name__}"
+        )
+    
+    return result
 
 
 
