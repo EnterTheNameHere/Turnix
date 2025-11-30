@@ -8,7 +8,6 @@ from typing import Any, cast, Literal
 import json5
 
 from backend.app.globals import getRootsService
-from backend.content.roots import RootKind
 
 __all__ = [
     "SaveBinding",
