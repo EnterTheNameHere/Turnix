@@ -1,7 +1,7 @@
 # backend/mods/frontend_index.py
 from __future__ import annotations
 
-from urllib.parse import quote
+import urllib.parse
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
@@ -9,8 +9,7 @@ from backend.app.globals import getActiveAppPack, getActiveRuntime, getTracer
 from backend.core.hashing import sha256sumWithPath
 from backend.core.paths import resolveSafe
 from backend.mods.constants import JS_RUNTIMES
-from backend.mods.discover import scanMods, rescanMods, scanModsForMount, rescanModsForMount
-from backend.mods.runtime_state import getModRuntimeSnapshot
+from backend.mods.discover import scanMods
 
 router = APIRouter()
 
@@ -19,11 +18,8 @@ router = APIRouter()
 def makeFrontendIndex(
     found: dict,
     *,
-    base: str,
-    mountId: str | None = None,
+    viewId: str,
 ) -> dict:
-    # Avoid trailing slash issues ("/x" and "/x/" behave the same)
-    base = "/" + base.strip("/")
     manifests: list[dict] = []
 
     for _modId, (_root, moddir, manifest, _manFileName) in found.items():
@@ -32,12 +28,8 @@ def makeFrontendIndex(
             continue
         
         entryPath = moddir / rt.entry
-        # Compose URL with caller-supplied base (agnostic)
-        # Caller passes:
-        #   base="/mods/load"            → /mods/load/{modId}/{entry}
-        #   base=f"/mods/{mountId}/load" → /mods/{mountId}/load/{modId}/{entry}
-        modIdQuoted = quote(manifest.id, safe='@._-~')
-        entryRel = f"{base}/{modIdQuoted}/{quote(rt.entry, safe='/')}"
+        modIdQuoted = urllib.parse.quote(manifest.id, safe='@._-~')
+        entryRel = f"views/{viewId}/mods/load/{modIdQuoted}/{urllib.parse.quote(rt.entry, safe='/')}"
 
         item = {
             "id": manifest.id,
@@ -81,8 +73,6 @@ def makeFrontendIndex(
             level="debug",
             tags=["mods", "frontend"],
             attrs={
-                "base": base,
-                "mountId": mountId or "",
                 "count": len(manifests),
                 "errors": errors,
                 "ids": [man["id"] for man in manifests],
@@ -94,8 +84,6 @@ def makeFrontendIndex(
     return {
         "modManifests": manifests,
         "meta": {
-            "base": base,
-            "mountId": mountId,
             "count": len(manifests),
             "errors": errors,
         },
@@ -103,139 +91,77 @@ def makeFrontendIndex(
 
 
 
-@router.get("/mods/index")
-def listFrontendMods() -> dict:
-    snapshot = getModRuntimeSnapshot()
+@router.get("/views/{viewId}/mods/index")
+def listFrontendModsForView(viewId: str) -> dict:
+    tracer = getTracer()
+    try:
+        tracer.traceEvent(
+            "mods.frontend.listFrontendModsForView",
+            level="info",
+            tags=["mods", "frontend"],
+            attrs={"viewId": viewId},
+        )
+    except Exception:
+        pass
+    
     runtimeInstance = getActiveRuntime()
-    return makeFrontendIndex(
+    result = makeFrontendIndex(
         scanMods(
-            allowedIds=snapshot.allowed or None,
+            allowedIds=runtimeInstance.getAllowedPacks(),
             appPack=getActiveAppPack(),
-            saveRoot=getattr(runtimeInstance, "saveRoot", None),
+            saveRoot=runtimeInstance.saveRoot
         ),
-        base="/mods/load",
-        mountId=None,
+        viewId=viewId,
     )
+    return result
 
 
 
-@router.get("/mods/{mountId}/index")
-def listFrontendModsForMount(mountId: str) -> dict:
-    snapshot = getModRuntimeSnapshot()
-    runtimeInstance = getActiveRuntime()
-    return makeFrontendIndex(
-        scanModsForMount(
-            mountId,
-            allowedIds=snapshot.allowed or None,
-            appPack=getActiveAppPack(),
-            saveRoot=getattr(runtimeInstance, "saveRoot", None),
-        ),
-        base=f"/mods/{mountId}/load",
-        mountId=mountId,
-    )
-
-
-
-@router.get("/mods/load/{modId}/{path:path}")
-def serveModAsset(modId: str, path: str):
-    """
-    Default (unmounted) asset serving: /mods/load/{modId}/{entry-or-asset-path}
-    """
-    snapshot = getModRuntimeSnapshot()
-    runtimeInstance = getActiveRuntime()
+@router.get("/views/{viewId}/mods/load/{modId}/{path:path}")
+def serveModAssetForView(viewId: str, modId: str, path: str) -> FileResponse:
+    tracer = getTracer()
+    try:
+        tracer.traceEvent(
+            "mods.frontend.serveModAssetForView",
+            level="info",
+            tags=["mods", "frontend"],
+            attrs={"viewId": viewId},
+        )
+    except Exception:
+        pass
+    
+    activeRuntime = getActiveRuntime()
+    if activeRuntime is None:
+        raise HTTPException(status_code=404, detail="Unknown View.")
     found = scanMods(
-        allowedIds=snapshot.allowed or None,
+        allowedIds=activeRuntime.allowedPacks,
         appPack=getActiveAppPack(),
-        saveRoot=getattr(runtimeInstance, "saveRoot", None),
+        saveRoot=getActiveRuntime().saveRoot or None,
     )
     if modId not in found:
-        raise HTTPException(404, "Unknown mod")
-    _root, moddir, manifest, fname = found[modId]
-    safe = resolveSafe(moddir, path or "main.js")
+        raise HTTPException(404, "Unknown mod.")
+    _root, moddir, _manifest, _manifestFileName = found[modId]
+    safe = resolveSafe(moddir, path)
     if not safe.exists() or not safe.is_file():
         raise HTTPException(404, "Requested path doesn't exist or is not a file.")
-    resp = FileResponse(safe)
+    response = FileResponse(safe)
     # TODO: Make it configurable
-    resp.headers["Cache-Control"] = "no-store"
-    return resp
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 
-@router.get("/mods/{mountId}/load/{modId}/{path:path}")
-def serveModAssetForMount(mountId: str, modId: str, path: str):
-    """
-    Mounted asset serving: /mods/{mountId}/load/{modId}/{entry-or-asset-path}
-    """
-    snapshot = getModRuntimeSnapshot()
-    runtimeInstance = getActiveRuntime()
-    found = scanModsForMount(
-        mountId,
-        allowedIds=snapshot.allowed or None,
-        appPack=getActiveAppPack(),
-        saveRoot=getattr(runtimeInstance, "saveRoot", None),
-    )
-    if not found:
-        raise HTTPException(404, "Unknown mount")
-    if modId not in found:
-        raise HTTPException(404, "Unknown mod for mount")
-    _root, moddir, _manifest, _fname = found[modId]
-    safe = resolveSafe(moddir, path or "main.js")
-    if not safe.exists() or not safe.is_file():
-        raise HTTPException(404, "Requested path does not exist or is not a file.")
-    resp = FileResponse(safe)
-    # TODO: Make it configurable
-    resp.headers["Cache-Control"] = "no-store"
-    return resp
-
-
-
-@router.get("/mod/rescan")
-def modsRescanMods():
+@router.get("/views/{viewId}/mods/rescan")
+def rescanModsForView(viewId: str) -> dict:
     tracer = getTracer()
     try:
         tracer.traceEvent(
-            "mods.frontend.rescanAll",
+            "mods.frontend.rescanModsForView",
             level="info",
             tags=["mods", "frontend"],
-            attrs={},
+            attrs={"viewId": viewId},
         )
     except Exception:
         pass
     
-    snapshot = getModRuntimeSnapshot()
-    runtimeInstance = getActiveRuntime()
-    fresh = rescanMods(
-        allowedIds=snapshot.allowed or None,
-        appPack=getActiveAppPack(),
-        saveRoot=getattr(runtimeInstance, "saveRoot", None),
-    )
-    index = makeFrontendIndex(fresh, base="/mods/load", mountId=None)
-    index["ok"] = True
-    return index
-
-
-
-@router.get("/mod/{mountId}/rescan")
-def modsRescanMount(mountId: str):
-    tracer = getTracer()
-    try:
-        tracer.traceEvent(
-            "mods.frontend.rescanMount",
-            level="info",
-            tags=["mods", "frontend"],
-            attrs={"mountId": mountId},
-        )
-    except Exception:
-        pass
-    
-    snapshot = getModRuntimeSnapshot()
-    runtimeInstance = getModRuntimeSnapshot()
-    fresh = rescanModsForMount(
-        mountId,
-        allowedIds=snapshot.allowed or None,
-        appPack=getActiveAppPack(),
-        saveRoot=getattr(runtimeInstance, "saveRoot", None),
-    )
-    index = makeFrontendIndex(fresh, base=f"/mods/{mountId}/load", mountId=mountId)
-    index["ok"] = True
-    return index
+    return listFrontendModsForView(viewId)

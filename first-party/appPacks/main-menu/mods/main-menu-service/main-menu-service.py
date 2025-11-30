@@ -22,14 +22,10 @@ from backend.content.runtime_bootstrap import (
 )
 from backend.content.saves import SaveManager
 from backend.core.logger import getModLogger
-from backend.mods.discover import scanMods
-from backend.mods.frontend_index import makeFrontendIndex
 from backend.mods.loader import loadPythonMods
-from backend.mods.runtime_state import ModRuntimeSnapshot, setAllowedMods, setModRuntimeSnapshot
 from backend.rpc.api import registerCapabilityInstance, unregisterCapability
 from backend.rpc.broadcast import pushEvent
 from backend.runtimes.persistence import loadRuntime
-from backend.views.manager import viewManager
 from backend.views.registry import viewRegistry
 
 logger = getModLogger("main-menu-service")
@@ -190,7 +186,7 @@ class _MainMenuCapability:
     
     async def _activateRuntime(self, runtimeInstance: Any, appPack: ResolvedPack) -> None:
         allowedMods = _extractMods(appPack)
-        setAllowedMods(allowedMods)
+        runtimeInstance.setAllowedPacks(allowedMods)
         
         kernel = getKernel()
         kernel.switchRuntime(runtimeInstance)
@@ -215,24 +211,14 @@ class _MainMenuCapability:
             saveRoot=getattr(runtimeInstance, "saveRoot", None),
         )
         
-        frontendMods = scanMods(
-            allowedIds=allowedMods,
-            appPack=appPack,
-            saveRoot=getattr(runtimeInstance, "saveRoot", None),
-        )
+        print("\033[92m    >>>> _reloadMods >>>>\033[0m", "loaded", loaded, "failed", failed)
         
-        frontendIndex = makeFrontendIndex(frontendMods, base="/mods/load", mountId=None)
-        
-        snapshot = ModRuntimeSnapshot(
-            allowed=set(allowedMods),
-            backendLoaded=[{"id": mod.modId, "name": mod.displayName, "version": mod.version} for mod in loaded],
-            backendFailed=failed,
-            frontendIndex=frontendIndex,
-        )
-        setModRuntimeSnapshot(snapshot)
+        runtimeInstance.setAllowedPacks(set(allowedMods))
+        runtimeInstance.backendPacksLoaded = list([{"id": mod.modId, "name": mod.displayName, "version": mod.version} for mod in loaded])
+        runtimeInstance.backendPacksFailed = list(failed)
         PROCESS_REGISTRY.register("mods.services", services, overwrite=True)
         
-        return frontendIndex, snapshot.backendLoaded, snapshot.backendFailed
+        return {}, runtimeInstance.backendPacksLoaded, runtimeInstance.backendPacksFailed
     
     async def _refreshViews(
         self,
@@ -255,6 +241,7 @@ class _MainMenuCapability:
             try:
                 view.setAppPackId(canonicalId)
                 view.patchState(statePatch)
+                view.refreshFrontendIndex()
             except Exception:
                 logger.debug("Failed to refresh view '%s'", getattr(view, "id", "?"), exc_info=True)
         

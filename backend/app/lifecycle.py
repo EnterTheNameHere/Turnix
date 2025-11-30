@@ -12,15 +12,11 @@ from backend.app.context import PROCESS_REGISTRY
 from backend.app.globals import (
     getActiveAppPack,
     getActiveRuntime,
-    getAllowedModIds,
     getPermissions,
     getConfigService,
     getTracer
 )
-from backend.mods.discover import scanMods
-from backend.mods.frontend_index import makeFrontendIndex
 from backend.mods.loader import loadPythonMods
-from backend.mods.runtime_state import ModRuntimeSnapshot, setModRuntimeSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +32,7 @@ async def life(app: FastAPI) -> AsyncIterator[None]:
         
         runtimeInstance = getActiveRuntime()
         appPack = getActiveAppPack()
-        allowedMods = getAllowedModIds()
+        allowedMods = runtimeInstance.getAllowedPacks()
         
         # Give mods a plain snapshot of merged global config
         configSnapshot: dict[str, Any] = configService.globalStore.snapshot()
@@ -47,25 +43,10 @@ async def life(app: FastAPI) -> AsyncIterator[None]:
             saveRoot=getattr(runtimeInstance, "saveRoot", None),
         )
         
-        frontendMods = scanMods(
-            allowedIds=allowedMods,
-            appPack=appPack,
-            saveRoot=getattr(runtimeInstance, "saveRoot", None),
-        )
         
-        frontendIndex = makeFrontendIndex(
-            frontendMods,
-            base="/mods/load",
-            mountId=None,
-        )
-        
-        snapshot = ModRuntimeSnapshot(
-            allowed=set(allowedMods),
-            backendLoaded=[{"id": mod.modId, "name": mod.displayName, "version": mod.version} for mod in loaded],
-            backendFailed=failed,
-            frontendIndex=frontendIndex,
-        )
-        setModRuntimeSnapshot(snapshot)
+        runtimeInstance.setAllowedPacks(set(allowedMods))
+        runtimeInstance.backendPacksLoaded = list([{"id": mod.modId, "name": mod.displayName, "version": mod.version} for mod in loaded])
+        runtimeInstance.backendPacksFailed = list(failed)
         PROCESS_REGISTRY.register("mods.services", modsServices, overwrite=True)
         
         perms = getPermissions()

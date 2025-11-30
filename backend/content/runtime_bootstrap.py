@@ -161,7 +161,7 @@ def ensureRuntimeForAppPack(
     appPackIdOrQId: str,
     *,
     preferEmbeddedSaves: bool = False,
-) -> tuple[RuntimeInstance, ResolvedPack, set[str]]:
+) -> tuple[RuntimeInstance, ResolvedPack]:
     resolver = PackResolver()
     # Perform discovery so all packs are visible before save loading/generation...
     resolver.listPacks()
@@ -171,7 +171,6 @@ def ensureRuntimeForAppPack(
     
     canonicalId = _canonicalAppPackId(appPack)
     runtimeInstanceId = _defaultInstanceId(appPack)
-    allowedMods = _extractMods(appPack)
     
     baseCandidates: list[Path] = []
     if preferEmbeddedSaves:
@@ -191,7 +190,9 @@ def ensureRuntimeForAppPack(
         )
     
     runtimeInstance = loadRuntime(saveDir)
-    return runtimeInstance, appPack, allowedMods
+    runtimeInstance.setAllowedPacks(_extractMods(appPack))
+    
+    return runtimeInstance, appPack
 
 
 
@@ -211,7 +212,7 @@ def ensureViewContext(
          when a viewPack is resolved, otherwise empty).
     """
     # Step 1: runtime + appPack + allowedMods
-    runtimeInstance, appPack, allowedMods = ensureRuntimeForAppPack(
+    runtimeInstance, appPack = ensureRuntimeForAppPack(
         appPackIdOrQId,
         preferEmbeddedSaves=preferEmbeddedSaves,
     )
@@ -233,6 +234,6 @@ def ensureViewContext(
         appPack=appPack,
         viewPack=viewPack,
         viewKind=normalizedViewKind,
-        allowedMods=allowedMods,
+        allowedMods=runtimeInstance.allowedPacks,
         extraModRoots=tuple(extraRoots),
     )

@@ -100,6 +100,13 @@ class RuntimeInstance:
         self.mainSession: Session | None = None
         if createMainSession:
             self.mainSession = self.makeSession(kind=SessionKind.MAIN)
+        
+        # Packs allowed to be used by this runtime - set later, empty by default
+        self.allowedPacks: set[str] = set()
+        
+        # Information about python mods
+        self.backendPacksLoaded: list[dict[str, Any]] = []
+        self.backendPacksFailed: list[dict[str, Any]] = []
 
     def makeSession(
         self,
@@ -158,6 +165,14 @@ class RuntimeInstance:
         kindNorm = SessionKind(kind) if isinstance(kind, str) else kind
         return sorted([sessionId for sessionId, session in self.sessionsById.items() if session.kind == kindNorm])
 
+    def setAllowedPacks(self, allowedPacks: set[str]) -> None:
+        """Set the allowed packs for this runtime instance."""
+        self.allowedPacks = allowedPacks
+    
+    def getAllowedPacks(self) -> set[str]:
+        """Return the allowed packs for this runtime instance."""
+        return self.allowedPacks
+    
     def snapshot(self) -> dict[str, object]:
         return {
             "appPackId": self.appPackId,

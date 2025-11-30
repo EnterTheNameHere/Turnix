@@ -136,13 +136,6 @@ def getActiveAppPack() -> ResolvedPack | None:
 
 
 
-def getAllowedModIds() -> set[str]:
-    from backend.mods.runtime_state import getModRuntimeSnapshot
-    snapshot = getModRuntimeSnapshot()
-    return set(snapshot.allowed)
-
-
-
 def getModServices() -> dict[str, Any]:
     services = PROCESS_REGISTRY.get("mods.services")
     if isinstance(services, dict):

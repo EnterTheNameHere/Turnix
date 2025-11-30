@@ -2,12 +2,12 @@
 from __future__ import annotations
 from typing import Any, TypedDict
 
-from backend.app.globals import getActiveAppPack, getActiveRuntime, getTracer
+from backend.app.globals import getActiveRuntime, getTracer, getActiveAppPack
+from backend.content.packs import PackResolver
 from backend.core.ids import uuid_12
 from backend.core.tracing import TraceSpan
 from backend.mods.frontend_index import makeFrontendIndex
-from backend.mods.discover import scanMods, scanModsForMount
-from backend.mods.runtime_state import getModRuntimeSnapshot
+from backend.mods.discover import scanMods
 
 __all__ = ["ViewSnapshot", "View"]
 
@@ -36,10 +36,10 @@ class View:
         viewId: str | None = None,
         viewKind: str = "main",
     ):
-        print("    >>>> View: ", appPackId, viewId, viewKind)
         self.id: str = viewId or uuid_12("view_")
         self.viewKind: str = viewKind or "main"
         self.appPackId: str = appPackId or "turnix@main_menu"
+        self.frontendModsIndex: dict[str, Any] = {}
         
         self._traceSpan: TraceSpan | None = None
         tracer = getTracer()
@@ -58,35 +58,22 @@ class View:
         )
         self._traceSpan = span
         
-        # Build initial frontend mod index from allowed mods (loaded during loading)
-        # If/when a runtime supplies a custom mountId, call refreshFrontendIndex(mountId=...) later. 
-        snapshot = getModRuntimeSnapshot()
-        if snapshot.frontendIndex:
-            frontendIndex = snapshot.frontendIndex
-        else:
-            frontendIndex = makeFrontendIndex(
-                scanMods(
-                    allowedIds=snapshot.allowed or None,
-                    appPack=getActiveAppPack(),
-                    saveRoot=getattr(getActiveRuntime(), "saveRoot", None),
-                ),
-                base="/mods/load",
-                mountId=None,
-            )
-        
+        activeInstance = getActiveRuntime()
         self.state: dict[str, Any] = {
             "viewKind": self.viewKind,
             "mods": {
-                "frontend": frontendIndex,
+                "frontend": self.frontendModsIndex,
                 "backend": {
-                    "loaded": snapshot.backendLoaded,
-                    "failed": snapshot.backendFailed, 
+                    "loaded": activeInstance.backendPacksLoaded,
+                    "failed": activeInstance.backendPacksLoaded, 
                 },
             }
         }
         self.version: int = 0
         self.attachedSessionIds: set[str] = set()
-    
+        
+        self.refreshFrontendIndex()
+        
     def destroy(self) -> None:
         tracer = getTracer()
         if self._traceSpan is not None:
@@ -239,20 +226,26 @@ class View:
             "attachedSessionIds": sorted(self.attachedSessionIds),
         }
 
-    def refreshFrontendIndex(self, *, mountId: str | None = None) -> dict[str, Any]:
+    def refreshFrontendIndex(self) -> dict[str, Any]:
         """
         Rebuild and store the frontend mod manifest index.
-        - mountId=None → default roots (/mods/load)
-        - mountId="xzy" → mounted roots /mods/{xzy}/load
         """
-        if mountId:
-            base = f"/mods/{mountId}/load"
-            found = scanModsForMount(mountId)
-            index = makeFrontendIndex(found, base=base, mountId=mountId)
-        else:
-            found = scanMods()
-            index = makeFrontendIndex(found, base="/mods/load", mountId=None)
-        self.state.setdefault("mods", {})["frontend"] = index
+        activeRuntime = getActiveRuntime()
+        appPack = getActiveAppPack()
+        resolver = PackResolver()
+        if appPack is not None:
+            viewPack = resolver.resolveViewPackForApp(appPack, self.viewKind)
+        if viewPack is None:
+            viewPack = resolver.resolveViewPack(self.viewKind)
+        extraRoots = viewPack.rootDir if viewPack is not None else None
+        found = scanMods(
+            allowedIds=activeRuntime.allowedPacks,
+            appPack=getActiveAppPack(),
+            saveRoot=activeRuntime.saveRoot,
+            extraRoots=[extraRoots] if extraRoots is not None else None
+        )
+        self.frontendModsIndex = makeFrontendIndex(found, viewId=self.id)
+        self.state.setdefault("mods", {})["frontend"] = self.frontendModsIndex
         self.version += 1
         
         tracer = getTracer()
@@ -261,7 +254,6 @@ class View:
                 "view.refreshFrontendIndex",
                 attrs={
                     "viewId": self.id,
-                    "mountId": mountId,
                     "foundCount": len(found),
                     "version": self.version,
                 },

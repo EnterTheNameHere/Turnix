@@ -317,13 +317,13 @@ def rescanMods(
 
 
 def scanModsForMount(
-    mountId: str,
+    viewKind: str,
     *,
     allowedIds: Iterable[str] | None = None,
     appPack: ResolvedPack | None = None,
     saveRoot: Path | None = None,
 ) -> ModMap:
-    roots = getRegisteredRoots(mountId)
+    roots = getRegisteredRoots(viewKind)
     return scanMods(
         allowedIds=allowedIds,
         appPack=appPack,
@@ -334,14 +334,14 @@ def scanModsForMount(
 
 
 def rescanModsForMount(
-    mountId: str,
+    viewKind: str,
     *,
     allowedIds: Iterable[str] | None = None,
     appPack: ResolvedPack | None = None,
     saveRoot: Path | None = None,
 ) -> ModMap:
     return scanModsForMount(
-        mountId,
+        viewKind,
         allowedIds=allowedIds,
         appPack=appPack,
         saveRoot=saveRoot,
