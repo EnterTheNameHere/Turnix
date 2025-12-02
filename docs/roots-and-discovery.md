@@ -143,7 +143,7 @@ When allowed:
 
 ### 4.4 Pack Manifest Requirements
 
-Every pack manifest must explicitly declare its **pack type**. Valid values are:
+Every pack manifest must explicitly declare its **kind** (see `docs/pack-manifest-structure.txt` for the full schema). Valid values are:
 
 - `appPack`
 - `viewPack`
@@ -152,10 +152,11 @@ Every pack manifest must explicitly declare its **pack type**. Valid values are:
 - `savePack`
 
 Rules:
-- `type` must appear at the top level of the manifest.
-- The value must be exactly one of the permitted pack types.
+- `kind` must appear at the top level of the manifest.
+- The value must be exactly one of the permitted pack kinds.
 - The loader must reject missing or ambiguous values.
-- The declared `type` determines how the pack is loaded and which nesting rules apply.
+- The declared `kind` determines how the pack is loaded and which nesting rules apply.
+- Pack identifiers (`id`) must follow the character rules from `pack-manifest-structure.txt` (no `@`, `.`, spaces, or semver strings).
 
 ## 5. Pack Types and Nesting
 

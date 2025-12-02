@@ -12,6 +12,9 @@ This spec defines:
 - How assets are declared and resolved via the "assets" field.
 - Constraints and invariants (no lazy discovery during resolution).
 
+**Authority note:** Manifest shape, defaults, and field semantics are defined in `docs/pack-manifest-structure.txt`. This document
+ focuses on resolution and runtime handling and should not contradict the manifest authority file.
+
 
 ============================================================
 1. TERMINOLOGY
@@ -75,7 +78,7 @@ There are three levels related to "id":
     - Constraints:
         - Must NOT contain '@'.
         - Must NOT contain a semver string.
-        - Recommended: no '.' (dot) to keep dots free for hierarchy.
+        - Must NOT contain '.' (dot); dots are reserved for hierarchy construction.
     - Examples:
         "ui"
         "trace"
@@ -124,6 +127,12 @@ Fields (conceptual):
         manifestPath: Path            # path to manifest.json5
         layer: "first-party" | "third-party" | "custom" | "saves"
         parent: PackMeta | None       # parent in pack tree
+        visibility: "public" | "private"  # governs export from parent trees
+        importFromParent: bool        # whether dependencies are inherited from parent
+        exports: dict | None          # export lists such as {"packs": [...], "capabilities": [...]} or None
+        recommendedPacks: list[PackRequest]   # optional compatibility hints
+        supportedPacks: list[PackRequest]     # optional compatibility hints
+        unsupportedPacks: list[PackRequest]   # optional compatibility hints
         assets: dict[str, AssetMeta]  # logicalName -> AssetMeta
         runtimeEntries: dict[str, list[Path]]
             # e.g. { "python": ["service.py"], "javascript": ["ui.js"] }
@@ -215,10 +224,14 @@ Discovery steps (high level):
         effectiveAuthor = declaredAuthor or parent.effectiveAuthor or "unknown"
         effectiveSemverPackVersion =
             declaredSemverPackVersion or parent.effectiveSemverPackVersion or engineDefault
-
+        visibility = manifest.visibility if present else default
+            # default: if parent.kind == "contentPack" -> "public" else "private"
+        importFromParent = manifest.importFromParent if present else default
+            # default: false for viewPack, true otherwise
+        exports = manifest.exports or None
+        recommendedPacks/supportedPacks/unsupportedPacks = manifest values or []
     - Build runtimeEntries (optional lazily).
     - Process "assets" (see section 7) and fill PackMeta.assets.
-
 3. Register all PackMeta objects into a PackMetaRegistry.
    The registry must support queries by:
     - packTreeId

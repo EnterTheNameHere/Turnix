@@ -1,6 +1,6 @@
 # Turnix Pack URI and Resolution Specification
 
-**Authority note:** `pack-and-asset-resolution.txt` is the canonical source of truth for pack identity, semantic versioning, and PackMeta/PackResolver behaviour. This document only describes the URI surface and save-metadata examples. When in doubt, defer to `pack-and-asset-resolution.txt`.
+**Authority note:** `pack-manifest-structure.txt` is the canonical reference for manifest fields and their semantics. Identity, semantic versioning, and PackMeta/PackResolver behaviour continue to be covered in `pack-and-asset-resolution.txt`. This document only describes the URI surface and save-metadata examples. When in doubt, defer to the authoritative specs.
 
 This document defines the addressing scheme for packs and resources in Turnix. It is written as if for an automatic code generator: every term is precise and every component is described with clear responsibilities and inputs/outputs.
 
@@ -46,24 +46,25 @@ A **pack** is a directory with a manifest and additional files. Pack kinds inclu
 
 ### 2.2 Manifest fields (common)
 
-Manifest fields mirror the PackMeta inputs described in `pack-and-asset-resolution.txt`:
+Manifest fields mirror the PackMeta inputs described in `pack-manifest-structure.txt`:
 
 ```json5
 {
   "kind": "appPack" | "viewPack" | "mod" | "contentPack" | "savePack",
   "author": "Turnix",           // declaredAuthor; may be inherited by children
-  "id": "main-menu",            // PackLocalId; must not contain '@' or semver
-  "displayName": "Main Menu",
+  "id": "main-menu",            // PackLocalId; must not contain '@', '.' or semver
+  "name": "Main Menu",          // optional user-facing name (defaults to id)
   "version": "1.0.0",           // declaredSemverPackVersion
-  "hidden": true                // optional: for appPack or viewPack discovery UIs
-}
+  "visibility": "public",       // optional; see pack-manifest-structure.txt for defaults
+  "importFromParent": false       // optional; viewPack defaults to false, others true}
 ```
 
 Important notes:
 
 - `id` is the **stable, local slug** that feeds into the hierarchical `packTreeId` built during discovery.
-- `displayName` is purely for user interfaces and may contain spaces, capitalization, etc.
+- `name` is purely for user interfaces and may contain spaces, capitalization, etc.; omit to fall back to `id`.
 - `kind` drives how the pack is interpreted and where it is stored on disk.
+- Visibility and dependency inheritance (`importFromParent`) follow the defaults described in `pack-manifest-structure.txt`.
 - The effective author and version may be inherited from a parent pack as defined in the PackMeta rules.
 
 ### 2.3 Source kinds
