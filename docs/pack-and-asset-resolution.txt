@@ -1,0 +1,406 @@
+TURNIX PACK & ASSET RESOLUTION SPEC (DRAFT)
+
+============================================================
+0. OVERVIEW
+============================================================
+
+This spec defines:
+
+- How packs are discovered and represented (PackMeta).
+- How references to packs are written by creators (PackRefString / PackRequest).
+- How semantic versioning (Semver*) is used for packs.
+- How assets are declared and resolved via the "assets" field.
+- Constraints and invariants (no lazy discovery during resolution).
+
+
+============================================================
+1. TERMINOLOGY
+============================================================
+
+Pack kinds (kind):
+    - "appPack"
+    - "viewPack"
+    - "mod"
+    - "contentPack"
+    - "savePack"
+
+Roots:
+    - first-party
+    - third-party
+    - custom
+    - saves
+
+Pack directory:
+    A directory that contains a manifest file (e.g. manifest.json5).
+    That directory is the root of a pack tree (for that pack).
+
+
+============================================================
+2. SEMVER TERMINOLOGY
+============================================================
+
+SemverPackVersion:
+    - A semantic version string declared in a pack manifest.
+    - Examples: "1.0.0", "2.5.3", "0.1.0-alpha.1".
+
+SemverPackRequirement:
+    - A semantic version range requested by a dependency or by a PackRefString.
+    - Examples: "^2.5.0", ">=1.2 <2.0", "2.5.3", "*".
+    - If omitted, it is treated as: "no constraint", i.e. "any version".
+
+SemverMatchResult:
+    - Result of matching multiple SemverPackVersion values against one SemverPackRequirement.
+    - Contains:
+        kind: "none", "single", or "multiple"
+        matches: list of PackMeta (or (version, PackMeta) pairs)
+
+SemverResolver:
+    - Component responsible only for matching versions.
+    - Signature (conceptual):
+        match(
+            candidates: list[(SemverPackVersion, PackMeta)],
+            requirement: SemverPackRequirement | None
+        ) -> SemverMatchResult
+
+
+============================================================
+3. IDENTITY TERMINOLOGY
+============================================================
+
+There are three levels related to "id":
+
+3.1 PackLocalId (manifest-level id)
+    - The value of "id" in the manifest.
+    - Local to the pack tree; used as one segment in a hierarchical id.
+    - Constraints:
+        - Must NOT contain '@'.
+        - Must NOT contain a semver string.
+        - Recommended: no '.' (dot) to keep dots free for hierarchy.
+    - Examples:
+        "ui"
+        "trace"
+        "trace-view"
+
+3.2 packTreeId (hierarchical id)
+    - Hierarchical dotted name built from PackLocalIds along the parent chain.
+    - Constructed during discovery / PackMeta building.
+    - Rules:
+        - Root pack: packTreeId = PackLocalId
+        - Child:     packTreeId = parent.packTreeId + "." + localId
+    - Examples (contentPack "ui", mod "trace", mod "trace-view"):
+        "ui"                      (root)
+        "ui.trace"                (child of ui)
+        "ui.trace.trace-view"     (child of trace)
+
+3.3 Fully qualified reference string (PackRefString)
+    - What creators write in manifests to refer to other packs:
+        "<author?>@<packTreeId>[@<SemverPackRequirement>]"
+    - Examples:
+        "ui"                               (no author, no version requirement)
+        "Anthony@avatars"                  (author + id)
+        "Turnix@ui.trace.trace-list@2.5.3" (author + id + exact version)
+        "Turnix@main-menu.ui@^3"          (author + id + version range)
+
+
+============================================================
+4. PACK REPRESENTATION (PACKMETA)
+============================================================
+
+PackMeta is the immutable catalog entry for a single pack, created during discovery
+(scan / rescan). It is not modified during resolution.
+
+Fields (conceptual):
+
+    PackMeta:
+        localId: PackLocalId
+        packTreeId: str               # hierarchical id ("ui.trace.trace-view")
+        declaredAuthor: str | None    # as written in manifest
+        declaredSemverPackVersion: SemverPackVersion | None  # as in manifest
+        effectiveAuthor: str          # after inheritance from parent
+        effectiveSemverPackVersion: SemverPackVersion  # after inheritance
+        isVersionAgnostic: bool       # optional; true if Pack declares itself "serves all"
+        kind: str                     # "appPack", "mod", etc.
+        rootPath: Path                # directory of this pack
+        manifestPath: Path            # path to manifest.json5
+        layer: "first-party" | "third-party" | "custom" | "saves"
+        parent: PackMeta | None       # parent in pack tree
+        assets: dict[str, AssetMeta]  # logicalName -> AssetMeta
+        runtimeEntries: dict[str, list[Path]]
+            # e.g. { "python": ["service.py"], "javascript": ["ui.js"] }
+
+    AssetMeta:
+        logicalName: str   # e.g. "Sandy.png", "config.json", "mesh:hero"
+        relPath: Path      # path relative to pack root, e.g. "assets/Sandy.png"
+        kind: str          # "image", "config", "text", "binary", etc.
+
+Effective author + version:
+    - effectiveAuthor:
+        - If manifest declares "author": use it.
+        - Else, if parent exists: inherit parent's effectiveAuthor.
+        - Else: may be "unknown" or None (but collisions without author should be rejected).
+    - effectiveSemverPackVersion:
+        - If manifest declares "version": use it.
+        - Else, if parent exists: inherit parent's effectiveSemverPackVersion.
+        - Else: default to something defined by the engine (e.g. "0.0.0", or force author to specify).
+
+isVersionAgnostic:
+    - Optional semantic flag meaning "I conceptually serve all versions".
+    - Used by SemverResolver to decide priority when multiple candidates exist.
+    - Implementation detail; may be omitted initially.
+
+
+============================================================
+5. PACK REQUESTS (PACKREFSTRING, PACKREQUEST)
+============================================================
+
+PackRefString:
+    - Raw string written in manifest to depend on a pack.
+    - Grammar:
+        [<author>"@"]<packTreeId>["@"<SemverPackRequirement>]
+
+Examples:
+    "avatars"
+    "Anthony@avatars"
+    "Turnix@ui.trace.trace-list@2.5.3"
+    "Turnix@main-menu.ui@^3"
+
+PackRequest (parsed form):
+
+    PackRequest:
+        author: str | None                  # from prefix before first "@"
+        packTreeId: str                     # hierarchical id portion
+        semverRequirement: SemverPackRequirement | None  # suffix after last "@"
+        kind: str | None                    # optional filter: "mod", "contentPack", etc.
+
+Examples:
+
+    "Anthony@avatars"
+      -> PackRequest(author="Anthony", packTreeId="avatars", semverRequirement=None, kind=None)
+
+    "Turnix@ui.trace.trace-list@2.5.3"
+      -> PackRequest(author="Turnix", packTreeId="ui.trace.trace-list",
+                     semverRequirement="2.5.3", kind=None)
+
+
+============================================================
+6. DISCOVERY PHASE (SCAN → PACKMETA REGISTRY)
+============================================================
+
+There are two phases:
+
+Phase 1: Discovery (scan / rescan).
+Phase 2: Resolution (respond to PackRequests).
+
+Invariants:
+    - Discovery builds / updates the complete PackMeta registry.
+    - Resolution MUST NOT trigger new filesystem scanning or manifest discovery.
+    - Resolution uses only the current PackMeta registry snapshot.
+
+Discovery steps (high level):
+
+1. For each root (first-party, third-party, custom, saves):
+    - Walk directories.
+    - When a manifest file is found in a directory, treat that directory as a pack root.
+    - Create PackMeta for that root pack.
+    - Recursively search inside that directory for child pack directories with their own manifest files.
+
+2. For each pack discovered:
+    - Read manifest (at least: id, author, version, kind).
+    - Determine parent PackMeta (if any).
+    - Compute:
+        localId = manifest.id
+        packTreeId:
+            if parent is None: packTreeId = localId
+            else: packTreeId = parent.packTreeId + "." + localId
+        effectiveAuthor = declaredAuthor or parent.effectiveAuthor or "unknown"
+        effectiveSemverPackVersion =
+            declaredSemverPackVersion or parent.effectiveSemverPackVersion or engineDefault
+
+    - Build runtimeEntries (optional lazily).
+    - Process "assets" (see section 7) and fill PackMeta.assets.
+
+3. Register all PackMeta objects into a PackMetaRegistry.
+   The registry must support queries by:
+    - packTreeId
+    - (effectiveAuthor, packTreeId, kind)
+    - (effectiveAuthor, packTreeId, kind, version)
+
+No lazy discovery rule:
+    - Once discovery finishes (or a rescan completes), every pack that exists under roots
+      must appear in the PackMetaRegistry.
+    - Resolution must not trigger filesystem traversal or manifest probing.
+
+
+============================================================
+7. ASSET DECLARATION ("assets" FIELD)
+============================================================
+
+Goal:
+    - Allow creators to expose directories of assets without listing each file.
+    - Auto-include only files with safe extensions.
+    - Allow explicit inclusion of non-safe or unusual file types.
+
+Manifest key: "assets"
+
+Type:
+    "assets": [
+        "<dir-or-file-string>" | {
+            "dir": "<directory>",
+            "files": [ "<relative-file-or-subpath>", ... ],
+            "safeAuto": bool (optional, default true)
+        },
+        ...
+    ]
+
+String form:
+    "assets": ["assets", "images/portraits"]
+
+    For each string entry:
+        - Interpret as a directory path relative to pack root.
+        - At discovery, walk the directory recursively.
+        - Auto-include all files with "safe" extensions (see below) into PackMeta.assets.
+
+Object form:
+    "assets": [
+        {
+            "dir": "raw-avatars",
+            "files": ["avatar.dat", "special/mesh.bin"]
+        }
+    ]
+
+    Semantics:
+        - dir: directory base path relative to pack root.
+        - files: list of paths (relative to dir) that are explicitly allowed, even if extension is not safe.
+        - safeAuto (optional, default true):
+            - If true: include safe files under "dir" automatically, plus files in "files".
+            - If false: include ONLY the listed "files" from that dir.
+
+Safe extensions:
+    Engine-defined list, e.g.:
+        Images:  .png, .jpg, .jpeg, .webp, .gif
+        Text:    .txt, .json, .json5, .yml, .yaml, .toml, .ini, .csv, .tsv
+        (optional) Sounds: .wav, .ogg, etc.
+
+    These are auto-included for string entries and for object entries with safeAuto: true.
+
+Unknown/unsafe extensions:
+    - NOT auto-included.
+    - Only included if explicitly listed in an object entry's "files" array.
+
+PackMeta.assets construction (simplified):
+
+    For each "assets" entry:
+        - If entry is a string (dirPath):
+            - Recursively scan dirPath.
+            - For each file:
+                - If extension in safe list:
+                    logicalName = filename (or relative path, depending on design).
+                    assets[logicalName] = AssetMeta(...)
+
+        - If entry is an object:
+            - If safeAuto is true or unspecified:
+                - same as above: include safe files under dir.
+            - For each "file" in files:
+                - include that file regardless of extension.
+                - logicalName can be the filename or a customized alias if needed.
+
+Assets namespace resolution:
+    - By default, logicalName is just the filename ("Sandy.png").
+    - If multiple assets with same logicalName exist from different packs, the
+      pack context (which contentPack a mod depends on) disambiguates.
+
+
+============================================================
+8. RESOLUTION PHASE (PACKRESOLVER)
+============================================================
+
+PackResolver:
+    - Resolves PackRequest -> ResolvedPack using PackMetaRegistry.
+
+ResolvedPack (conceptual):
+
+    ResolvedPack:
+        meta: PackMeta          # the PackMeta that won
+        sourceLayer: str        # where the pack came from: "savePack", "first-party", etc.
+        replaced: list[PackMeta]# packs shadowed or replaced (optional)
+        # convenience mirrors:
+        author: str
+        packTreeId: str
+        semverPackVersion: SemverPackVersion
+        kind: str
+        rootPath: Path
+        manifestPath: Path
+        runtimeEntries: dict[str, list[Path]]
+        assets: dict[str, AssetMeta]
+
+Resolution steps (for pack):
+
+    def resolvePack(request: PackRequest, registry: PackMetaRegistry) -> ResolvedPack:
+        # 1. Filter by packTreeId, author, kind
+        candidates = [
+            m for m in registry.all()
+            if m.packTreeId == request.packTreeId
+            and (request.author is None or m.effectiveAuthor == request.author)
+            and (request.kind is None or m.kind == request.kind)
+        ]
+
+        # 2. Semver filtering
+        version_pairs = [(m.effectiveSemverPackVersion, m) for m in candidates]
+        match = SemverResolver.match(version_pairs, request.semverRequirement)
+
+        # 3. Interpret SemverMatchResult:
+        #    - none -> ResolutionError("No matching version")
+        #    - multiple -> ResolutionError("Ambiguous version")
+        #    - single -> build ResolvedPack from that PackMeta
+
+        return resolvedPack
+
+
+============================================================
+9. ASSET RESOLUTION API (CONCEPTUAL)
+============================================================
+
+AssetRequest (conceptual):
+
+    AssetRequest:
+        pack: PackRequest or ResolvedPack  # usually a ResolvedPack for contentPack
+        assetName: str                     # e.g. "Sandy.png"
+
+Runtime (mod) side (example):
+
+    // JS
+    const sandy = await ctx.assets.get("Sandy.png");
+
+    // Given that this mod declares:
+    //   packs: ["Anthony@avatars"]
+    // and "avatars" is resolved to some ResolvedPack "avatarsPack",
+
+AssetResolver:
+
+    def getAsset(resolvedPack: ResolvedPack, assetName: str) -> AssetMeta:
+        return resolvedPack.meta.assets.get(assetName)
+        # raise if not found; may support fallbacks later.
+
+
+============================================================
+10. INVARIANTS AND ERROR CASES
+============================================================
+
+- Discovery/rescan:
+    - Must build a complete PackMeta registry for all packs under roots.
+    - Must detect collisions where:
+        - two packs share same (effectiveAuthor, packTreeId, kind, version) and both appear in same precedence layer without an explicit override mechanism.
+    - May reject manifests with invalid or conflicting id/author/version fields.
+
+- Resolution:
+    - Must not touch filesystem or read manifests.
+    - Must fail clearly if:
+        - No PackMeta matches PackRequest.id / author / kind.
+        - SemverResolver returns "none" or "multiple" for a given request.
+    - Must treat PackRequests with missing author or missing semverRequirement as wildcards, not as errors.
+
+- Assets:
+    - Only files that appear in PackMeta.assets may be served via asset APIs.
+    - Unknown extensions are not served unless specifically configured in "files" list.
+
+End of spec (draft).
