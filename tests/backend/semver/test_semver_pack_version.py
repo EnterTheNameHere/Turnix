@@ -1,6 +1,7 @@
+# tests/semver/test_semver_pack_version.py
 import pytest
 
-from backend.semver.semver import parseSemverPackVersion, SemverPackVersion
+from backend.semver.semver import parseSemVerPackVersion, SemVerPackVersion
 
 
 @pytest.mark.parametrize(
@@ -19,8 +20,8 @@ from backend.semver.semver import parseSemverPackVersion, SemverPackVersion
         ("1.2.3-alpha+exp.sha",   (1, 2, 3, ("alpha",), ("exp", "sha"))),
     ],
 )
-def test_parseSemverPackVersion_valid(raw, expected):
-    v = parseSemverPackVersion(raw)
+def test_parseSemVerPackVersion_valid(raw, expected):
+    v = parseSemVerPackVersion(raw)
     major, minor, patch, pre, build = expected
     assert (v.major, v.minor, v.patch, v.prerelease, v.build) == expected
 
@@ -43,9 +44,9 @@ def test_parseSemverPackVersion_valid(raw, expected):
         "vv1.2.3",
     ],
 )
-def test_parseSemverPackVersion_invalid(raw):
+def test_parseSemVerPackVersion_invalid(raw):
     with pytest.raises(ValueError):
-        parseSemverPackVersion(raw)
+        parseSemVerPackVersion(raw)
 
 
 @pytest.mark.parametrize(
@@ -61,15 +62,15 @@ def test_parseSemverPackVersion_invalid(raw):
     ],
 )
 def test_semver_prerelease_order(a, b):
-    va = parseSemverPackVersion(a)
-    vb = parseSemverPackVersion(b)
+    va = parseSemVerPackVersion(a)
+    vb = parseSemVerPackVersion(b)
     assert va < vb
 
 
 def test_build_metadata_ignored_in_comparison():
-    a = parseSemverPackVersion("1.0.0+build.1")
-    b = parseSemverPackVersion("1.0.0+build.2")
-    c = parseSemverPackVersion("1.0.0")
+    a = parseSemVerPackVersion("1.0.0+build.1")
+    b = parseSemVerPackVersion("1.0.0+build.2")
+    c = parseSemVerPackVersion("1.0.0")
 
     assert a == b
     assert a == c
