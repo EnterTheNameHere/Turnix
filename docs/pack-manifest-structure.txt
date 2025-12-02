@@ -1,0 +1,520 @@
+TURNIX PACK MANIFEST STRUCTURE (DRAFT)
+======================================
+
+File name (recommended):
+    manifest.json5    (JSON5; JSON is a valid subset)
+
+All manifests share a common base structure, with additional fields depending
+on "kind" (appPack, viewPack, contentPack, mod, savePack).
+
+
+--------------------------------------
+1. COMMON FIELDS (ALL KINDS)
+--------------------------------------
+
+kind (required)
+    Type: string
+    Allowed values:
+        "appPack"
+        "viewPack"
+        "contentPack"
+        "mod"
+        "savePack"
+
+    Meaning:
+        Declares the category of this pack. Determines which additional fields
+        are allowed/required.
+
+author (optional)
+    Type: string OR object
+
+    a) String form:
+        "author": "Turnix"
+
+    b) Object form:
+        "author": {
+            "name":  "Turnix",
+            "email": "dev@example.com",   // optional
+            "url":   "https://example"    // optional
+        }
+
+    Internal model:
+        AuthorInfo:
+            name:  str | None
+            email: str | None
+            url:   str | None
+
+    Semantics:
+        - If string: treated as AuthorInfo(name=<string>).
+        - If object: fields populate AuthorInfo.
+        - May be omitted; effectiveAuthor is resolved in PackMeta (inherit or "unknown").
+
+contributors (optional)
+    Type: array of string OR AuthorInfo objects
+
+    Example:
+        "contributors": [
+            "Alice",
+            { "name": "Bob", "email": "bob@example.com" }
+        ]
+
+    Semantics:
+        - Informational only (metadata for humans / UI).
+
+id (required)
+    Type: string
+    Allowed characters:
+        [A–Z, a–z, 0–9, "_", "-"]
+    Disallowed:
+        ".", "@", whitespace, other punctuation.
+
+    This is the PackLocalId (local identifier).
+    Hierarchical ids (packTreeId) are built by the loader using parent relationships;
+    the manifest "id" is always a single segment and never includes dots or "@", and
+    never contains version information.
+
+name (optional)
+    Type: string
+    Default:
+        If omitted, the user-facing name is derived from `id`.
+
+    Semantics:
+        - Friendly display name in UI (PackManager, lists).
+        - Does not affect identity or resolution.
+
+version (optional)
+    Type: string (SemverPackVersion)
+
+    Example:
+        "version": "1.2.3"
+
+    Default:
+        - If omitted, the pack has no declared version; effectiveSemverPackVersion
+          will be inherited from parent or assigned by engine in PackMeta.
+
+description (optional)
+    Type: string
+    Default: None
+
+license (optional)
+    Type: string
+    Default: None
+    Example:
+        "MIT"
+        "GPL-3.0-only"
+
+keywords (optional)
+    Type: array of strings
+    Default: None
+
+homepage (optional)
+    Type: string (URL)
+    Default: None
+
+repository (optional)
+    Type: string OR object
+    Examples:
+        "repository": "https://github.com/user/repo"
+
+        "repository": {
+            "type": "git",
+            "url":  "https://github.com/user/repo.git"
+        }
+
+    Semantics:
+        - Informational; for linking to source code or homepage.
+
+visibility (optional)
+    Type: string
+    Allowed values:
+        "public"
+        "private"
+
+    Semantics:
+        - Controls whether this pack is considered "exported" outside its parent
+          when the parent is a contentPack (or any exporting parent).
+
+    Defaults:
+        - If parent.kind == "contentPack":
+              child.visibility default is "public"
+        - Else (appPack, viewPack, mod, savePack):
+              child.visibility default is "private"
+
+    Effect:
+        - When building PackMetaRegistry and determining which packTreeIds are
+          visible to other, unrelated packs:
+            - Children with visibility: "public" are treated as exported / visible.
+            - Children with visibility: "private" are considered internal to their
+              parent pack tree; they may still be used internally (parent and siblings),
+              but external PackRequests cannot resolve to them directly (or will
+              trigger a "not visible" error/warning).
+
+--------------------------------------
+2. DEPENDENCIES FIELD
+--------------------------------------
+
+packs (optional)
+    Type: array of PackRefString
+
+    Example:
+        "packs": [
+            "Turnix@ui@^2",
+            "Anthony@avatars",
+            "main-menu.service@^1.3.0"
+        ]
+
+    PackRefString grammar (recap):
+        [<author>"@"]<packTreeId>["@"<SemverPackRequirement>]
+
+        Examples:
+            "avatars"
+            "Anthony@avatars"
+            "Turnix@ui.trace.trace-list@2.5.3"
+            "Turnix@main-menu.ui@^3"
+
+    Semantics:
+        - Declares other packs this pack depends on.
+        - Parsed into PackRequest at load time.
+        - Resolution is done via PackResolver using PackMetaRegistry.
+        - Applies to all kinds:
+            - appPack: packs required by this application.
+            - viewPack: packs required by this view.
+            - contentPack: packs required to interpret its content.
+            - mod: packs it depends on (shared services, UI controls, etc.).
+            - savePack: packs referenced for reconstruction (typically with overrides).
+
+
+--------------------------------------
+3. ASSET DECLARATION
+--------------------------------------
+
+Manifest key: "assets"
+    Type: array of string or object entries.
+    Optional; default: no public assets.
+
+    Purpose:
+        - Declare asset directories and explicit asset files that are exposed for
+          use by mods and views.
+
+3.1 String entries
+    "assets": [
+        "assets",
+        "images/portraits"
+    ]
+
+    Semantics:
+        - Each string entry is a directory path relative to pack root.
+        - At discovery, the engine recursively scans this directory.
+        - All files with "safe" extensions are automatically exposed (images,
+          text, config, etc., as defined by engine).
+        - No explicit list needed for typical image/config packs.
+
+3.2 Object entries
+    "assets": [
+        "assets",
+        {
+            "dir": "raw-avatars",
+            "files": ["avatar.dat", "special/mesh.bin"],
+            "safeAuto": false
+        }
+    ]
+
+    Fields:
+        dir (required)
+            Type: string
+            Meaning: directory under pack root.
+
+        files (optional)
+            Type: array of strings
+            Meaning: explicit file paths (relative to "dir") to include even if
+                     their extensions are not in the safe list.
+
+        safeAuto (optional)
+            Type: boolean
+            Default: true
+
+            If true:
+                - Auto-include safe files under dir recursively, plus listed files.
+            If false:
+                - Include ONLY the listed files.
+
+    Safe extensions (engine-defined; examples):
+        .png, .jpg, .jpeg, .webp, .gif
+        .txt, .json, .json5, .yml, .yaml, .toml, .ini, .csv, .tsv
+        (and optionally some audio/font types)
+
+    Anything not in safe list is only included if explicitly listed in "files".
+
+
+--------------------------------------
+4. EXPORTS AND IMPORT FROM PARENT
+--------------------------------------
+
+These are optional fields controlling visibility/inheritance of packs and capabilities.
+
+exports (optional)
+    Type: object
+    Example (minimal initial design):
+
+        "exports": {
+            "packs": ["trace", "trace-view"],
+            "capabilities": ["Button", "TraceListView"]
+        }
+
+    Fields:
+        packs (optional)
+            Type: array of PackLocalId (local child ids)
+
+            Semantics:
+                - Marks which child packs are public / exported.
+                - Resolver may allow other packs to depend on these exported children.
+                - Local ids are converted to full packTreeId using the parent’s packTreeId.
+
+        capabilities (optional)
+            Type: array of strings
+
+            Semantics:
+                - Named capabilities this pack provides (e.g., UI components,
+                  services). Exact semantics will be defined by the capability
+                  system; here it’s just a declaration.
+
+    Defaults:
+        - If exports is omitted:
+            - Engine may treat all children as either internal or public, depending
+              on the policy you decide. A reasonable initial policy:
+                - contentPack: children (e.g. mods in a UI pack) are public by default.
+                - appPack: children are internal by default unless listed in exports.packs.
+
+importFromParent (optional)
+    Type: boolean OR object
+    Default: True
+
+    Simple form:
+        "importFromParent": true
+
+        Semantics:
+            - If true, this pack implicitly inherits its parent pack's "packs" as
+              dependencies, in addition to its own "packs" list.
+
+    Extended form (future, if needed):
+        "importFromParent": {
+            "packs": true
+        }
+
+    For kind == "viewPack":
+        - "importFromParent" default is FALSE.
+        - That is, a viewPack does NOT automatically inherit its appPack's dependencies
+          unless explicitly requested.
+
+    Example:
+        {
+          "kind": "viewPack",
+          "id": "trace-monitor",
+          "packs": [
+            "Turnix@trace-service@^1"
+          ]
+          // no importFromParent => does NOT automatically load appPack.packs javascript mods
+        }
+
+    If you want inheritance:
+        {
+          "kind": "viewPack",
+          "id": "trace-monitor",
+          // now DOES automatically load appPack.packs javascript mods
+          "importFromParent": true,
+          "packs": [
+            "Turnix@trace-service@^1"
+          ]
+        }
+
+--------------------------------------
+5. KIND-SPECIFIC FIELDS
+--------------------------------------
+
+5.1 appPack
+
+    Required:
+        kind: "appPack"
+        id: <PackLocalId>
+
+    Core fields:
+        packs: [...]  (dependencies)
+        assets: [...] (optional)
+        exports: {...} (optional)
+        importFromParent: (not typically used; appPacks are roots)
+
+    Semantics:
+        - Top-level application definition.
+        - Owns child packs in its directory (viewPacks, mods, contentPacks).
+
+
+5.2 viewPack
+
+    Required:
+        kind: "viewPack"
+        id: <PackLocalId>
+
+    Core fields:
+        packs: [...]           (dependencies)
+        assets: [...]          (optional)
+        exports: {...}         (optional)
+        importFromParent: bool (optional, typically used here)
+
+    Semantics:
+        - Defines a specific View (browser tab/window, 3D client, etc.).
+        - May inherit parent appPack’s packs via importFromParent.
+        - Contains mods and contentPacks which are only relevant to this view.
+
+
+5.3 contentPack
+
+    Required:
+        kind: "contentPack"
+        id: <PackLocalId>
+
+    Core fields:
+        packs: [...]   (dependencies)
+        assets: [...]  (likely common here)
+        exports: {...} (optional; may default to export all children)
+
+    Semantics:
+        - Holds assets and possibly child mods/other packs.
+        - Typical use: UI control library, avatar pack, level pack, etc.
+
+
+5.4 mod
+
+    Required:
+        kind: "mod"
+        id: <PackLocalId>
+
+    Additional fields (not detailed here but expected):
+        runtimes: {
+            "python"?:     [ "file.py", ... ],
+            "javascript"?: [ "file.js", ... ]
+        }
+
+    Core fields:
+        packs: [...]   (dependencies on other packs)
+        assets: [...]  (optional)
+        exports: {...} (optional, especially for services/capabilities)
+
+    Semantics:
+        - Executable code unit.
+        - Provides Python and/or JavaScript entries for runtime.
+
+
+5.5 savePack
+
+    Required:
+        kind: "savePack"
+        id: <PackLocalId>
+
+    Core fields:
+        packs: [...]  (snapshot of packs used for runtime reconstruction)
+        assets: [...] (e.g. per-save assets, data files)
+
+    Semantics:
+        - Holds save-specific state and possibly per-save overrides of other packs.
+        - Resolution rules prioritize savePack layer when conflicts exist.
+
+
+--------------------------------------
+6. DEFAULTS AND HANDLING OF MISSING FIELDS
+--------------------------------------
+
+- author:
+    - If missing: effectiveAuthor inherited from parent or set to "unknown".
+
+- version:
+    - If missing: no declared version; effectiveSemverPackVersion inherited from parent
+      or engine default.
+    - Version semantics (SemverPackVersion, SemverPackRequirement) handled by SemverResolver.
+
+- name:
+    - If missing: use `id` (PackLocalId) as user-facing name.
+
+- packs:
+    - If missing: pack has no declared dependencies.
+
+- assets:
+    - If missing: pack exposes no public assets.
+
+- exports:
+    - If missing: behavior depends on global policy:
+        - A simple rule is:
+            - contentPack: children considered public by default.
+            - appPack, mod, viewPack: children considered internal by default.
+
+- importFromParent:
+    - If missing: no implicit dependency inheritance.
+
+
+End of manifest structure spec (draft).
+
+--------------------------------------
+7. COMPATIBILITY / RELATIONSHIP HINTS
+--------------------------------------
+
+These fields are OPTIONAL and are NOT enforced by PackResolver.
+They are for Mod/Packs Manager UI and tooling (suggestions, badges, warnings).
+
+All three share the same value shape:
+
+    - Either a simple PackRefString:
+        "Turnix@turnix.ui@^3"
+
+    - Or an object:
+        {
+          "id": "Turnix@turnix.ui@^3",
+          "reason": "Includes standard UI controls used by this pack"
+        }
+
+    Where "id" is a PackRefString (author@packTreeId@SemverPackRequirement).
+
+
+recommendedPacks (optional)
+    Type: array of (PackRefString OR object with "id" and "reason")
+
+    Example:
+        "recommendedPacks": [
+          "Turnix@turnix.ui@^3",
+          { "id": "Anthony@avatars@1", "reason": "Provides default avatars" }
+        ]
+
+    Semantics:
+        - "These packs are not required, but are known to enhance or complement this pack."
+        - Mod/Packs Manager may:
+            - highlight them when this pack is selected,
+            - offer quick "install/enable recommended packs" actions.
+
+
+supportedPacks (optional)
+    Type: array of (PackRefString OR object with "id" and "reason")
+
+    Example:
+        "supportedPacks": [
+          "OtherDev@combat-system@^2",
+          { "id": "trevor@story-mode@^1", "reason": "Explicitly tested with story mode v1.x" }
+        ]
+
+    Semantics:
+        - "These packs are explicitly tested and known to work with this pack."
+        - UI may show "supported" badges when both packs are enabled.
+        - Resolver does NOT enforce this; it is informational.
+
+
+unsupportedPacks (optional)
+    Type: array of (PackRefString OR object with "id" and "reason")
+
+    Example:
+        "unsupportedPacks": [
+          { "id": "OtherDev@old-combat@<2", "reason": "Conflicts with new damage model" }
+        ]
+
+    Semantics:
+        - "These packs are known incompatible / broken with this pack."
+        - Mod/Packs Manager may:
+            - warn when user tries to enable them together,
+            - or optionally block the combination depending on policy.
+        - Resolver by default does NOT hard-block; conflict handling is a higher-level policy.
