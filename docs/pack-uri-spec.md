@@ -54,7 +54,7 @@ Manifest fields mirror the PackMeta inputs described in `pack-manifest-structure
   "author": "Turnix",           // declaredAuthor; may be inherited by children
   "id": "main-menu",            // PackLocalId; must not contain '@', '.' or semver
   "name": "Main Menu",          // optional user-facing name (defaults to id)
-  "version": "1.0.0",           // declaredSemverPackVersion
+  "version": "1.0.0",           // declaredSemVerPackVersion
   "visibility": "public",       // optional; see pack-manifest-structure.txt for defaults
   "importFromParent": false       // optional; viewPack defaults to false, others true}
 ```
@@ -86,7 +86,7 @@ Source kind is used for filesystem layout and for decisions about mutability and
 - **Pack reference string (PackRefString / PackRequest)**: a textual reference that may be partial and requires
   resolution:
   ```text
-  <author?>@<packTreeId>[@<SemverPackRequirement>]
+  <author?>@<packTreeId>[@<SemVerPackRequirement>]
   ```
 
   where `author` and version requirement are optional wildcards. Variant IDs are not part of the authoritative spec and should be handled separately if retained for tooling compatibility.
@@ -94,7 +94,7 @@ Source kind is used for filesystem layout and for decisions about mutability and
 - **Resolved pack id (ResolvedPackId)**: a canonical, fully-resolved reference that includes an exact version and scheme:
 
   ```text
-  <scheme>://<authorId>@<packTreeId>:<SemverPackVersion>
+  <scheme>://<authorId>@<packTreeId>:<SemVerPackVersion>
   ```
 
   Examples:
@@ -112,7 +112,7 @@ Source kind is used for filesystem layout and for decisions about mutability and
 A **resource URI** references a file inside a pack or directory:
 
 ```text
-<scheme>://<authorId?>@<packTreeIdOrDir>[@<SemverPackRequirement>][/inner/path...]
+<scheme>://<authorId?>@<packTreeIdOrDir>[@<SemVerPackRequirement>][/inner/path...]
 ```
 
 Examples:
@@ -141,7 +141,7 @@ Where:
 The general grammar for resource URIs is:
 
 ```text
-<scheme>://<authorId?>@<packTreeIdOrDir>[@<SemverPackRequirement>][/inner/path...]
+<scheme>://<authorId?>@<packTreeIdOrDir>[@<SemVerPackRequirement>][/inner/path...]
 ```
 
 Where:
@@ -151,7 +151,7 @@ Where:
 - `packTreeIdOrDir` is either:
   - the dotted `packTreeId` of a pack (for pack-ish schemes), or
   - a top-level directory (`config`, etc.) for `file://`.
-- `SemverPackRequirement` follows the semantics from `pack-and-asset-resolution.txt`.
+- `SemVerPackRequirement` follows the semantics from `pack-and-asset-resolution.txt`.
 - `inner/path` is optional. When omitted, the root of the pack is referenced.
 
 ### 3.2 Scheme-specific mapping rules
@@ -320,7 +320,7 @@ The resolution pipeline is organized into several conceptual components that Cod
 
 ### 5.1 PackSelectorParser
 
-**Input:** string of the form `<author?>@<packTreeId>[@<SemverPackRequirement>]`
+**Input:** string of the form `<author?>@<packTreeId>[@<SemVerPackRequirement>]`
 **Output:** structured selector object compatible with `PackRequest`:
 
 ```ts
@@ -693,7 +693,7 @@ This behaviour ensures that saves can evolve to newer compatible versions while 
 For code generation or manual implementation, the following main components are required:
 
 1. **PackSelectorParser**
-   - Parses `<author?>@<packTreeId>[@<SemverPackRequirement>]` into structured data compatible with `PackRequest`.
+   - Parses `<author?>@<packTreeId>[@<SemVerPackRequirement>]` into structured data compatible with `PackRequest`.
 
 2. **PackDiscoveryIndex**
    - Discovers packs on disk.

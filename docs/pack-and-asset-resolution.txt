@@ -8,7 +8,7 @@ This spec defines:
 
 - How packs are discovered and represented (PackMeta).
 - How references to packs are written by creators (PackRefString / PackRequest).
-- How semantic versioning (Semver*) is used for packs.
+- How semantic versioning (SemVer*) is used for packs.
 - How assets are declared and resolved via the "assets" field.
 - Constraints and invariants (no lazy discovery during resolution).
 
@@ -42,28 +42,28 @@ Pack directory:
 2. SEMVER TERMINOLOGY
 ============================================================
 
-SemverPackVersion:
+SemVerPackVersion:
     - A semantic version string declared in a pack manifest.
     - Examples: "1.0.0", "2.5.3", "0.1.0-alpha.1".
 
-SemverPackRequirement:
+SemVerPackRequirement:
     - A semantic version range requested by a dependency or by a PackRefString.
     - Examples: "^2.5.0", ">=1.2 <2.0", "2.5.3", "*".
     - If omitted, it is treated as: "no constraint", i.e. "any version".
 
-SemverMatchResult:
-    - Result of matching multiple SemverPackVersion values against one SemverPackRequirement.
+SemVerMatchResult:
+    - Result of matching multiple SemVerPackVersion values against one SemVerPackRequirement.
     - Contains:
         kind: "none", "single", or "multiple"
         matches: list of PackMeta (or (version, PackMeta) pairs)
 
-SemverResolver:
+SemVerResolver:
     - Component responsible only for matching versions.
     - Signature (conceptual):
         match(
-            candidates: list[(SemverPackVersion, PackMeta)],
-            requirement: SemverPackRequirement | None
-        ) -> SemverMatchResult
+            candidates: list[(SemVerPackVersion, PackMeta)],
+            requirement: SemVerPackRequirement | None
+        ) -> SemVerMatchResult
 
 
 ============================================================
@@ -97,7 +97,7 @@ There are three levels related to "id":
 
 3.3 Fully qualified reference string (PackRefString)
     - What creators write in manifests to refer to other packs:
-        "<author?>@<packTreeId>[@<SemverPackRequirement>]"
+        "<author?>@<packTreeId>[@<SemVerPackRequirement>]"
     - Examples:
         "ui"                               (no author, no version requirement)
         "Anthony@avatars"                  (author + id)
@@ -118,9 +118,9 @@ Fields (conceptual):
         localId: PackLocalId
         packTreeId: str               # hierarchical id ("ui.trace.trace-view")
         declaredAuthor: str | None    # as written in manifest
-        declaredSemverPackVersion: SemverPackVersion | None  # as in manifest
+        declaredSemVerPackVersion: SemVerPackVersion | None  # as in manifest
         effectiveAuthor: str          # after inheritance from parent
-        effectiveSemverPackVersion: SemverPackVersion  # after inheritance
+        effectiveSemVerPackVersion: SemVerPackVersion  # after inheritance
         isVersionAgnostic: bool       # optional; true if Pack declares itself "serves all"
         kind: str                     # "appPack", "mod", etc.
         rootPath: Path                # directory of this pack
@@ -147,14 +147,14 @@ Effective author + version:
         - If manifest declares "author": use it.
         - Else, if parent exists: inherit parent's effectiveAuthor.
         - Else: may be "unknown" or None (but collisions without author should be rejected).
-    - effectiveSemverPackVersion:
+    - effectiveSemVerPackVersion:
         - If manifest declares "version": use it.
-        - Else, if parent exists: inherit parent's effectiveSemverPackVersion.
+        - Else, if parent exists: inherit parent's effectiveSemVerPackVersion.
         - Else: default to something defined by the engine (e.g. "0.0.0", or force author to specify).
 
 isVersionAgnostic:
     - Optional semantic flag meaning "I conceptually serve all versions".
-    - Used by SemverResolver to decide priority when multiple candidates exist.
+    - Used by SemVerResolver to decide priority when multiple candidates exist.
     - Implementation detail; may be omitted initially.
 
 
@@ -165,7 +165,7 @@ isVersionAgnostic:
 PackRefString:
     - Raw string written in manifest to depend on a pack.
     - Grammar:
-        [<author>"@"]<packTreeId>["@"<SemverPackRequirement>]
+        [<author>"@"]<packTreeId>["@"<SemVerPackRequirement>]
 
 Examples:
     "avatars"
@@ -178,7 +178,7 @@ PackRequest (parsed form):
     PackRequest:
         author: str | None                  # from prefix before first "@"
         packTreeId: str                     # hierarchical id portion
-        semverRequirement: SemverPackRequirement | None  # suffix after last "@"
+        semverRequirement: SemVerPackRequirement | None  # suffix after last "@"
         kind: str | None                    # optional filter: "mod", "contentPack", etc.
 
 Examples:
@@ -222,8 +222,8 @@ Discovery steps (high level):
             if parent is None: packTreeId = localId
             else: packTreeId = parent.packTreeId + "." + localId
         effectiveAuthor = declaredAuthor or parent.effectiveAuthor or "unknown"
-        effectiveSemverPackVersion =
-            declaredSemverPackVersion or parent.effectiveSemverPackVersion or engineDefault
+        effectiveSemVerPackVersion =
+            declaredSemVerPackVersion or parent.effectiveSemVerPackVersion or engineDefault
         visibility = manifest.visibility if present else default
             # default: if parent.kind == "contentPack" -> "public" else "private"
         importFromParent = manifest.importFromParent if present else default
@@ -339,7 +339,7 @@ ResolvedPack (conceptual):
         # convenience mirrors:
         author: str
         packTreeId: str
-        semverPackVersion: SemverPackVersion
+        semverPackVersion: SemVerPackVersion
         kind: str
         rootPath: Path
         manifestPath: Path
@@ -357,11 +357,11 @@ Resolution steps (for pack):
             and (request.kind is None or m.kind == request.kind)
         ]
 
-        # 2. Semver filtering
-        version_pairs = [(m.effectiveSemverPackVersion, m) for m in candidates]
-        match = SemverResolver.match(version_pairs, request.semverRequirement)
+        # 2. SemVer filtering
+        version_pairs = [(m.effectiveSemVerPackVersion, m) for m in candidates]
+        match = SemVerResolver.match(version_pairs, request.semverRequirement)
 
-        # 3. Interpret SemverMatchResult:
+        # 3. Interpret SemVerMatchResult:
         #    - none -> ResolutionError("No matching version")
         #    - multiple -> ResolutionError("Ambiguous version")
         #    - single -> build ResolvedPack from that PackMeta
@@ -409,7 +409,7 @@ AssetResolver:
     - Must not touch filesystem or read manifests.
     - Must fail clearly if:
         - No PackMeta matches PackRequest.id / author / kind.
-        - SemverResolver returns "none" or "multiple" for a given request.
+        - SemVerResolver returns "none" or "multiple" for a given request.
     - Must treat PackRequests with missing author or missing semverRequirement as wildcards, not as errors.
 
 - Assets:
