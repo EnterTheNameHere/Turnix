@@ -2,6 +2,8 @@
 
 **Status:** Finalized model (2025-11)
 
+**Authority note:** `docs/pack-and-asset-resolution.txt` holds the authoritative rules for pack discovery, PackMeta construction, and resolution invariants. This document describes the root layout and complements those rules without redefining them.
+
 **Scope:** Root selection, directory semantics, discovery rules, write-permissions, and pack constraints.
 
 ## 1. Overview
@@ -18,12 +20,13 @@ Each root contains exactly **five** top-level directories:
 
 Only `userdata/` and `saves/` are writable at runtime.
 
-All pack discovery (mods, viewPacks, contentPacks, appPacks) happens inside these three roots:
+Pack discovery (mods, viewPacks, contentPacks, appPacks, savePacks) must cover these roots as defined by the PackMeta registry rules:
 - `first-party/`
 - `third-party/`
 - `custom/`
+- `saves/`
 
-`userdata/` and `saves/` **never** contains pack manifests.
+`userdata/` never contains pack manifests.
 
 ## 2. Priority Rules for Root Selection
 
@@ -102,16 +105,15 @@ Path traversal must never escape root boundaries.
 
 ### 4.1 Where packs may appear
 
-Packs (mods, viewPacks, contentPacks, appPacks) are discoverable only in subdirectories of:
+Packs (mods, viewPacks, contentPacks, appPacks, savePacks) are discoverable only in subdirectories of:
 - `first-party/`
 - `third-party/`
 - `custom/`
+- `saves/`
 
 `userdata/` never contains pack manifests.
 
-`saves/` contains **only SavePacks**.
-
-A SavePack may contain **copies** of mods/content/view/app packs. If present, these overrides must be used to resolve pack versions for that save.
+`saves/` primarily contains SavePacks. A SavePack may contain **copies** of mods/content/view/app packs. If present, these overrides must be used to resolve pack versions for that save when constructing the PackMeta registry.
 
 ### 4.2 Directory scanning rules
 
@@ -268,6 +270,7 @@ Writes allowed only in:
   Use `userdata/` or `saves/<appPackId>/<runtimeInstanceId>/` instead.
 
 - Pack scanning or loading must never traverse outside the permitted directories, including symlinks.
+- Discovery must build a complete PackMeta registry across `first-party/`, `third-party/`, `custom/`, and `saves/` before any resolution occurs; resolution itself never touches the filesystem.
 - Repo-root must contain all 5 directories (`first-party/`, `third-party`, `custom/`, `userdata/`, `saves/`) or launch fails.
 - Effective search path order is always deterministic.
 - If a SavePack contains a pack copy whose version conflicts with first/third/custom packs, the SavePack version must win.

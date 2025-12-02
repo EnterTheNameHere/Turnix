@@ -1,8 +1,8 @@
 # Turnix Pack URI and Resolution Specification
 
-This document defines the addressing scheme, manifest fields, and resolution pipeline for packs and resources
-in Turnix. It is written as if for an automatic code generator: every term is precise and every component
-is described with clear responsibilities and inputs/outputs.
+**Authority note:** `pack-and-asset-resolution.txt` is the canonical source of truth for pack identity, semantic versioning, and PackMeta/PackResolver behaviour. This document only describes the URI surface and save-metadata examples. When in doubt, defer to `pack-and-asset-resolution.txt`.
+
+This document defines the addressing scheme for packs and resources in Turnix. It is written as if for an automatic code generator: every term is precise and every component is described with clear responsibilities and inputs/outputs.
 
 The focus is on **what** must exist (interfaces, behaviours, invariants), not **how** it is implemented.
 
@@ -11,20 +11,16 @@ The focus is on **what** must exist (interfaces, behaviours, invariants), not **
 ## 1. Design goals
 
 1. **Stable identities for packs**  
-   Every pack (application pack, view pack, mod, content pack, save pack) has a stable identifier that
-   can be referenced in manifests and at runtime.
+   Every pack (application pack, view pack, mod, content pack, save pack) has a stable identifier that can be referenced in manifests and at runtime.
 
 2. **Uniform URI scheme**  
-   The same grammar is used to reference files and packs of different kinds, with a `scheme://author@id`
-   prefix indicating how to interpret the reference.
+   The same grammar is used to reference files and packs of different kinds, with a `scheme://author@id` prefix indicating how to interpret the reference.
 
 3. **Deterministic resolution**  
-   Given the same configuration, discovery set, and save metadata, the resolver must deterministically
-   select the same concrete pack and version unless the user explicitly chooses to upgrade.
+   Given the same configuration, discovery set, and save metadata, the resolver must deterministically select the same concrete pack and version unless the user explicitly chooses to upgrade.
 
 4. **Support for embedded and global packs**  
-   Packs may embed other packs (for example, an application pack containing local user interface mods),
-   and there are also globally installed packs. Resolution must consider both scopes in a predictable way.
+   Packs may embed other packs (for example, an application pack containing local user interface mods), and there are also globally installed packs. Resolution must consider both scopes in a predictable way.
 
 5. **Upgradeable but backwards-safe saves**  
    Saves remember both:
@@ -50,25 +46,25 @@ A **pack** is a directory with a manifest and additional files. Pack kinds inclu
 
 ### 2.2 Manifest fields (common)
 
-All pack manifests share a minimal common core:
+Manifest fields mirror the PackMeta inputs described in `pack-and-asset-resolution.txt`:
 
 ```json5
 {
   "kind": "appPack" | "viewPack" | "mod" | "contentPack" | "savePack",
-  "author": "Turnix",
-  "packId": "main-menu",
+  "author": "Turnix",           // declaredAuthor; may be inherited by children
+  "id": "main-menu",            // PackLocalId; must not contain '@' or semver
   "displayName": "Main Menu",
-  "version": "1.0.0",
-  "hidden": true // optional: for appPack or viewPack discovery UIs
+  "version": "1.0.0",           // declaredSemverPackVersion
+  "hidden": true                // optional: for appPack or viewPack discovery UIs
 }
 ```
 
 Important notes:
 
-- `packId` is the **stable, id-like slug**. It is used in URIs (`Turnix@main-menu`).
+- `id` is the **stable, local slug** that feeds into the hierarchical `packTreeId` built during discovery.
 - `displayName` is purely for user interfaces and may contain spaces, capitalization, etc.
 - `kind` drives how the pack is interpreted and where it is stored on disk.
-- `author` is mandatory and part of the pack identity.
+- The effective author and version may be inherited from a parent pack as defined in the PackMeta rules.
 
 ### 2.3 Source kinds
 
@@ -83,38 +79,39 @@ Source kind is used for filesystem layout and for decisions about mutability and
 
 ### 2.4 Pack identity and selectors
 
-- **Pack identity**: `(author, packId)`  
-  Example: `("Turnix", "main-menu")` or `("Enter", "listbox")`.
+- **Pack identity**: `(effectiveAuthor, packTreeId)`
+  - `packTreeId` is the dotted hierarchy (`ui.trace.trace-view`) derived from manifest `id` values; see `pack-and-asset-resolution.txt` for construction rules.
 
-- **Pack selector (PackSelector)**: a textual reference that may be partial and requires resolution:
+- **Pack reference string (PackRefString / PackRequest)**: a textual reference that may be partial and requires
+  resolution:
   ```text
-  [authorId@]packId[:versionSpec][:variantId]
+  <author?>@<packTreeId>[@<SemverPackRequirement>]
   ```
 
-  where:
-  - `authorId` is optional in manifests but mandatory in canonical strings.
-  - `versionSpec` is a semantic version selector (for example, `1.2.3`, `^1.0.0`, `>=1.0.0 <2.0.0`).
-  - `variantId` is an optional extra label (for example, `dev`, `hd`, `jp`).
+  where `author` and version requirement are optional wildcards. Variant IDs are not part of the authoritative spec and should be handled separately if retained for tooling compatibility.
 
-- **Resolved pack id (ResolvedPackId)**: a canonical, fully-resolved reference that includes an exact version
-  and scheme:
+- **Resolved pack id (ResolvedPackId)**: a canonical, fully-resolved reference that includes an exact version and scheme:
 
   ```text
-  <scheme>://<authorId>@<packId>:<exactVersion>[:<variantId>]
+  <scheme>://<authorId>@<packTreeId>:<SemverPackVersion>
   ```
 
   Examples:
   - `appPack://Turnix@main-menu:1.2.0`
   - `viewPack://Turnix@trace-monitor:1.0.0`
-  - `mod://Enter@listbox:1.0.0`
-  - `mod://Jan@listbox:1.1.0`
+  - `mod://Enter@ui.trace.listbox:1.0.0`
+  - `mod://Jan@ui.trace.listbox:1.1.0`
+
+> **Compatibility note:** Older references to `packId` in this document should be interpreted as the
+> `packTreeId` root segment. Where dotted `packTreeId` values appear, map each segment to a directory level
+> when constructing file-system paths.
 
 ### 2.5 Resource URIs
 
 A **resource URI** references a file inside a pack or directory:
 
 ```text
-<scheme>://<authorId>@<packIdOrDir>[:versionSpec][:variantId][/inner/path...]
+<scheme>://<authorId?>@<packTreeIdOrDir>[@<SemverPackRequirement>][/inner/path...]
 ```
 
 Examples:
@@ -143,18 +140,17 @@ Where:
 The general grammar for resource URIs is:
 
 ```text
-<scheme>://<authorId>@<packIdOrDir>[:versionSpec][:variantId][/inner/path...]
+<scheme>://<authorId?>@<packTreeIdOrDir>[@<SemverPackRequirement>][/inner/path...]
 ```
 
 Where:
 
 - `scheme` is a lowercase identifier (no spaces; no `://` inside).
-- `authorId` is taken from the manifest `author` field and is mandatory in canonical URIs.
-- `packIdOrDir` is either:
-  - the `packId` of a pack (for pack-ish schemes), or
+- `authorId` is taken from the manifest `author` field and is optional in requests but mandatory in canonical URIs.
+- `packTreeIdOrDir` is either:
+  - the dotted `packTreeId` of a pack (for pack-ish schemes), or
   - a top-level directory (`config`, etc.) for `file://`.
-- `versionSpec` is a semantic version specifier. If missing, the resolver chooses a version based on policy.
-- `variantId` is an optional extra selector label.
+- `SemverPackRequirement` follows the semantics from `pack-and-asset-resolution.txt`.
 - `inner/path` is optional. When omitted, the root of the pack is referenced.
 
 ### 3.2 Scheme-specific mapping rules
@@ -183,8 +179,7 @@ Resolution rules for `file://`:
 2. For other authors, optional extension (if needed in the future):
    - `<root>/third-party/config/<authorId>/...` or a similar pattern.
 
-No semantic pack resolution is performed; `file://` is primarily a convenience for first-party configuration
-files and similar resources.
+No semantic pack resolution is performed; `file://` is primarily a convenience for first-party configuration files and similar resources.
 
 #### 3.2.2 `appPack://`, `viewPack://`, `mod://`
 
@@ -228,8 +223,7 @@ Source kind controls mutability rules:
   controlled updates (installer or package manager).
 - `custom` and `save` directories are considered writable by the engine and tools.
 
-Any generator or runtime code attempting to write into a read-only directory must raise a controlled exception,
-which may be caught and handled by higher-level logic (for example, migrating writes into `saves/` or `userdata/`).
+Any generator or runtime code attempting to write into a read-only directory must raise a controlled exception, which may be caught and handled by higher-level logic (for example, migrating writes into `saves/` or `userdata/`).
 
 ---
 
@@ -321,27 +315,25 @@ User-global configuration and data can live under:
 
 ## 5. Resolution pipeline
 
-The resolution pipeline is organized into several conceptual components that Codex (or any code generator)
-can target as separate services or modules.
+The resolution pipeline is organized into several conceptual components that Codex (or any code generator) can target as separate services or modules.
 
 ### 5.1 PackSelectorParser
 
-**Input:** string of the form `[authorId@]packId[:versionSpec][:variantId]`  
-**Output:** structured selector object:
+**Input:** string of the form `<author?>@<packTreeId>[@<SemverPackRequirement>]`
+**Output:** structured selector object compatible with `PackRequest`:
 
 ```ts
 type PackSelector = {
-  authorId?: string;        // optional in manifests
-  packId: string;
-  versionSpec?: string;     // semver-ish selector
-  variantId?: string;       // optional label
+  authorId?: string;        // optional wildcard
+  packTreeId: string;       // dotted hierarchy built from manifest ids
+  semverRequirement?: string; // semver range per pack-and-asset-resolution
 }
 ```
 
 Responsibilities:
 
 - Parse a selector string into fields.
-- Enforce syntax rules (characters allowed in `authorId`, `packId`).
+- Enforce syntax rules (characters allowed in `authorId`, `packTreeId`).
 - Reject invalid or ambiguous strings with clear error messages.
 
 ### 5.2 PackDiscoveryIndex
@@ -356,7 +348,7 @@ type PackIndexEntry = {
   sourceKind: "first-party" | "third-party" | "custom" | "save";
   kind: "appPack" | "viewPack" | "mod" | "contentPack" | "savePack";
   authorId: string;
-  packId: string;
+  packTreeId: string;
   exactVersion: string;
   variantId?: string;
   rootPath: string;  // filesystem path to pack root
@@ -366,9 +358,9 @@ type PackIndexEntry = {
 
 Responsibilities:
 
-- Walk the directories under `<root>/first-party`, `<root>/third-party`, `<root>/custom`, and possibly `saves/`.
-- Detect manifests (`manifest.json5`, `manifest.json`) and parse kind, author, packId, version, etc.
-- Build a lookup structure keyed by `(kind, authorId, packId)` and full `(kind, authorId, packId, exactVersion)`.
+- Walk the directories under `<root>/first-party`, `<root>/third-party`, `<root>/custom`, and `saves/`.
+- Detect manifests (`manifest.json5`, `manifest.json`) and parse kind, author, `id`, version, etc., building the dotted `packTreeId` during traversal.
+- Build a lookup structure keyed by `(kind, authorId, packTreeId)` and full `(kind, authorId, packTreeId, exactVersion)`.
 
 ### 5.3 VersionChooser
 
@@ -391,8 +383,7 @@ Responsibilities:
 
 ### 5.4 ScopeResolver (local vs global)
 
-Packs can be embedded inside other packs (for example, UI mods in an application pack). The ScopeResolver
-determines where to look first.
+Packs can be embedded inside other packs (for example, UI mods in an application pack). The ScopeResolver determines where to look first.
 
 For a requesting pack `P` wanting a dependency with selector `S`:
 
@@ -410,8 +401,7 @@ Search order:
    - `packId` from the embedded manifest or directory name.
 
 2. **Global scope**  
-   If not found locally, use the `PackDiscoveryIndex` to find global candidates among first-party, third-party,
-   and custom packs.
+   If not found locally, use the `PackDiscoveryIndex` to find global candidates among first-party, third-party, and custom packs.
 
 The ScopeResolver returns a set of candidate `PackIndexEntry` objects to pass into `VersionChooser`.
 
@@ -429,8 +419,7 @@ Responsibilities:
 
 1. Ensure `authorId` is known. If missing:
    - In local scope, use the author of the requesting pack.
-   - In global scope, if multiple authors exist for the same `packId`, this is an error unless disambiguated
-     by configuration or user choice.
+   - In global scope, if multiple authors exist for the same `packId`, this is an error unless disambiguated by configuration or user choice.
 2. Use `ScopeResolver` to gather candidate packs by `(kind, authorId, packId)`.
 3. Use `VersionChooser` to pick an exact version.
 4. Return a canonical `ResolvedPackId`:
@@ -516,8 +505,7 @@ When loading a save:
 
 4. If the pack referenced in `resolvedMods` no longer exists:
    - This is an error; the save is no longer directly reproducible with the current installation.
-   - The system may offer to re-resolve from `requestedMods`, but must clearly indicate that behaviour is
-     no longer guaranteed identical.
+   - The system may offer to re-resolve from `requestedMods`, but must clearly indicate that behaviour is no longer guaranteed identical.
 
 ---
 
@@ -548,7 +536,7 @@ Default startup sequence when no `--loadSave` and no `--createAppPack` are provi
      {
        "kind": "appPack",
        "author": "Turnix",
-       "packId": "main-menu",
+       "id": "main-menu",
        "displayName": "Main Menu",
        "version": "1.0.0",
        "defaultRuntimeInstanceId": "turnix-main-menu",
@@ -560,10 +548,8 @@ Default startup sequence when no `--loadSave` and no `--createAppPack` are provi
      }
      ```
 
-   - Run `generator.js` to create a save (or a `savePack`) and initialize `resolvedMods` based on the manifest
-     and discovered packs.
-   - Respect read-only rules on `<root>/first-party` paths and redirect actual writable output to `saves/`
-     or `userdata/` as needed, while still maintaining logical `overrideSaveUri` semantics.
+   - Run `generator.js` to create a save (or a `savePack`) and initialize `resolvedMods` based on the manifest and discovered packs.
+   - Respect read-only rules on `<root>/first-party` paths and redirect actual writable output to `saves/` or `userdata/` as needed, while still maintaining logical `overrideSaveUri` semantics.
 
 4. Once the save is created, load it using the `savePack` semantics and normal resolution rules.
 
@@ -575,7 +561,7 @@ Default startup sequence when no `--loadSave` and no `--createAppPack` are provi
 {
   "kind": "appPack",
   "author": "Turnix",
-  "packId": "100floors",
+  "id": "100floors",
   "displayName": "100floors",
   "description": "A 100 floors dungeon example.",
   "version": "1.0.0",
@@ -597,7 +583,7 @@ Default startup sequence when no `--loadSave` and no `--createAppPack` are provi
 {
   "kind": "mod",
   "author": "Turnix",
-  "packId": "ui",
+  "id": "ui",
   "displayName": "Basic UI",
   "description": "Provides basic UI for application packs.",
   "version": "1.0.0",
@@ -638,7 +624,7 @@ Resolution flow for `"ui": "^1.0.0"`:
 {
   "kind": "viewPack",
   "author": "Turnix",
-  "packId": "trace-monitor",
+  "id": "trace-monitor",
   "displayName": "Trace Monitor",
   "version": "1.0.0",
   "mods": {
@@ -655,7 +641,7 @@ Listbox mod manifests:
 {
   "kind": "mod",
   "author": "Enter",
-  "packId": "listbox",
+  "id": "listbox",
   "displayName": "listbox",
   "description": "Scrollable list of items.",
   "version": "1.0.0"
@@ -665,7 +651,7 @@ Listbox mod manifests:
 {
   "kind": "mod",
   "author": "Jan",
-  "packId": "listbox",
+  "id": "listbox",
   "displayName": "listbox v2",
   "description": "Buffed listbox with filters.",
   "version": "1.1.0",
@@ -695,11 +681,9 @@ Later, Jan's `listbox:1.1.0` is installed:
 3. Because this differs from stored `resolvedMods["listbox"]` (`Enter@listbox:1.0.0`):
    - Prompt the user to upgrade.
    - On acceptance, attempt to load Jan's listbox.
-   - If successful, update `resolvedMods["listbox"]` to `mod://Jan@listbox:1.1.0` and create a backup of the
-     previous save state.
+   - If successful, update `resolvedMods["listbox"]` to `mod://Jan@listbox:1.1.0` and create a backup of the previous save state.
 
-This behaviour ensures that saves can evolve to newer compatible versions while still allowing explicit
-control and rollback.
+This behaviour ensures that saves can evolve to newer compatible versions while still allowing explicit control and rollback.
 
 ---
 
@@ -708,11 +692,11 @@ control and rollback.
 For code generation or manual implementation, the following main components are required:
 
 1. **PackSelectorParser**
-   - Parses `[authorId@]packId[:versionSpec][:variantId]` into structured data.
+   - Parses `<author?>@<packTreeId>[@<SemverPackRequirement>]` into structured data compatible with `PackRequest`.
 
 2. **PackDiscoveryIndex**
    - Discovers packs on disk.
-   - Indexes them by `kind`, `authorId`, `packId`, and `exactVersion`.
+   - Indexes them by `kind`, `authorId`, `packTreeId`, and `exactVersion`.
 
 3. **VersionChooser**
    - Given a version spec and a list of exact versions, chooses the best match or reports failure.
@@ -721,8 +705,7 @@ For code generation or manual implementation, the following main components are 
    - Implements local-then-global search for packs embedded inside other packs.
 
 5. **PackResolver**
-   - Combines selector parsing, scope resolution, and version choice to produce a `ResolvedPackId` and
-     a concrete pack entry.
+   - Combines selector parsing, scope resolution, and version choice to produce a `ResolvedPackId` and a concrete pack entry.
 
 6. **ResourceUriResolver**
    - Handles complete URIs (scheme + author + packId/directories + inner paths) and returns filesystem paths.
