@@ -9,6 +9,8 @@ from collections.abc import Mapping, Sequence
 
 import fastjsonschema
 
+from backend.core.utils import deepEquals
+
 __all__ = [
     "Descriptor",
     "SchemaDoc",
@@ -118,11 +120,7 @@ class SchemaRegistry:
     # ----- Internal: id/anchor indexing -----
 
     def _deepEqual(self, first: Any, second: Any) -> bool:
-        try:
-            return first == second
-        except Exception:
-            # Fallback - defensive; equality should work for JSON-like structures
-            return repr(first) == repr(second)
+        return deepEquals(first, second, strict=False)
         
     def _invalidateAllCaches(self) -> None:
         self._validators.clear()
