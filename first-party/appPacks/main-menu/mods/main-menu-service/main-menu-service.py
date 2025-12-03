@@ -87,7 +87,7 @@ class _MainMenuCapability:
                 "id": canonical,
                 "name": pack.name,
                 "version": pack.version,
-                "author": pack.author,
+                "author": pack.authorName,
                 "rootKind": _rootKind(pack.sourceRoot),
             })
         return out
@@ -214,7 +214,7 @@ class _MainMenuCapability:
         print("\033[92m    >>>> _reloadMods >>>>\033[0m", "loaded", loaded, "failed", failed)
         
         runtimeInstance.setAllowedPacks(set(allowedMods))
-        runtimeInstance.backendPacksLoaded = list([{"id": mod.modId, "name": mod.displayName, "version": mod.version} for mod in loaded])
+        runtimeInstance.backendPacksLoaded = list([{"id": mod.modId, "name": mod.name, "version": mod.version} for mod in loaded])
         runtimeInstance.backendPacksFailed = list(failed)
         PROCESS_REGISTRY.register("mods.services", services, overwrite=True)
         

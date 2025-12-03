@@ -538,7 +538,7 @@ Default startup sequence when no `--loadSave` and no `--createAppPack` are provi
        "kind": "appPack",
        "author": "Turnix",
        "id": "main-menu",
-       "displayName": "Main Menu",
+       "name": "Main Menu",
        "version": "1.0.0",
        "defaultRuntimeInstanceId": "turnix-main-menu",
        "overrideSaveUri": "appPack://Turnix@main-menu/save/",
@@ -563,7 +563,7 @@ Default startup sequence when no `--loadSave` and no `--createAppPack` are provi
   "kind": "appPack",
   "author": "Turnix",
   "id": "100floors",
-  "displayName": "100floors",
+  "name": "100floors",
   "description": "A 100 floors dungeon example.",
   "version": "1.0.0",
   "runtime": {
@@ -585,7 +585,7 @@ Default startup sequence when no `--loadSave` and no `--createAppPack` are provi
   "kind": "mod",
   "author": "Turnix",
   "id": "ui",
-  "displayName": "Basic UI",
+  "name": "Basic UI",
   "description": "Provides basic UI for application packs.",
   "version": "1.0.0",
   "runtimes": {
@@ -626,7 +626,7 @@ Resolution flow for `"ui": "^1.0.0"`:
   "kind": "viewPack",
   "author": "Turnix",
   "id": "trace-monitor",
-  "displayName": "Trace Monitor",
+  "name": "Trace Monitor",
   "version": "1.0.0",
   "mods": {
     "ui": "^1.0.0",
@@ -643,7 +643,7 @@ Listbox mod manifests:
   "kind": "mod",
   "author": "Enter",
   "id": "listbox",
-  "displayName": "listbox",
+  "name": "listbox",
   "description": "Scrollable list of items.",
   "version": "1.0.0"
 }
@@ -653,7 +653,7 @@ Listbox mod manifests:
   "kind": "mod",
   "author": "Jan",
   "id": "listbox",
-  "displayName": "listbox v2",
+  "name": "listbox v2",
   "description": "Buffed listbox with filters.",
   "version": "1.1.0",
   "extends": "Enter@listbox" // optional inheritance metadata

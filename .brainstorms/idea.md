@@ -93,7 +93,7 @@ Supports either YAML or NPM-style JSON:
 
 ```yaml
 modId: chat-ui
-displayName: "Chat Interface"
+name: "Chat Interface"
 version: "1.0.2"
 dependencies:
   - ui-button

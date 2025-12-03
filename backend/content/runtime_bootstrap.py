@@ -41,7 +41,7 @@ class ViewContext:
 
 
 def _canonicalAppPackId(appPack: ResolvedPack) -> str:
-    author = appPack.author or "unknown"
+    author = appPack.authorName or "unknown"
     return f"{author}@{appPack.id}"
 
 

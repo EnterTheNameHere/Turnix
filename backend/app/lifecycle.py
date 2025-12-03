@@ -45,7 +45,7 @@ async def life(app: FastAPI) -> AsyncIterator[None]:
         
         
         runtimeInstance.setAllowedPacks(set(allowedMods))
-        runtimeInstance.backendPacksLoaded = list([{"id": mod.modId, "name": mod.displayName, "version": mod.version} for mod in loaded])
+        runtimeInstance.backendPacksLoaded = list([{"id": mod.modId, "name": mod.name, "version": mod.version} for mod in loaded])
         runtimeInstance.backendPacksFailed = list(failed)
         PROCESS_REGISTRY.register("mods.services", modsServices, overwrite=True)
         

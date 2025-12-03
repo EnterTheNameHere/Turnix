@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class LoadedPyMod:
     modId: str
-    displayName: str
+    name: str
     version: str
     module: Any
     entryPath: Path
@@ -167,7 +167,7 @@ async def loadPythonMods(
                 
                 loaded.append(LoadedPyMod(
                     modId=manifest.id,
-                    displayName=manifest.displayName,
+                    name=manifest.name,
                     version=manifest.version,
                     module=module,
                     entryPath=entryPath,

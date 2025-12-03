@@ -24,7 +24,7 @@ class ModManifest(BaseModel):
     
     kind: str
     id: str
-    displayName: str
+    name: str
     version: str
     description: str | None = None
     author: str | None = None
