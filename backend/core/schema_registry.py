@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 import fastjsonschema
 
 from backend.core.utils import deepEquals
+from backend.semver.semver import SEMVER_PATTERN_RE
 
 __all__ = [
     "Descriptor",
@@ -30,15 +31,6 @@ JSONSchemaRoot: TypeAlias = dict[str, JSONValue] | bool
 
 # Type alias for compiled validators
 ValidatorFn: TypeAlias = Callable[[Any], None]
-
-SEMVER_PATTERN_RE = re.compile(
-    r"^v?(?P<major>0|[1-9]\d*)"
-    r"\.(?P<minor>0|[1-9]\d*)"
-    r"\.(?P<patch>0|[1-9]\d*)"
-    r"(?:-(?P<prerelease>(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
-    r"(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?"
-    r"(?:\+(?P<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
-)
 
 
 
