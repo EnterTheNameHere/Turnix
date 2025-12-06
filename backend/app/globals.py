@@ -9,7 +9,7 @@ from backend.core.tracing import getTracer as _getCoreTracer, getTraceHub as _ge
 
 if TYPE_CHECKING:
     from backend.kernel import Kernel
-    from backend.runtimes.instance import AppInstance
+    from backend.app.instance import AppInstance
     from backend.config.service import ConfigService
     from backend.content.packs import ResolvedPack
     from backend.core.permissions import PermissionManager

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.memory.memory_layer import MemoryObject
-from backend.runtimes.instance import AppInstance
+from backend.app.instance import AppInstance
 from backend.runtimes.persistence import save
 
 APP_PACK_ID = "ai-chat"

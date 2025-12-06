@@ -13,7 +13,7 @@ from backend.app.static_mount import mountStatic
 from backend.content.runtime_bootstrap import ensureAppInstanceForAppPack
 from backend.kernel import Kernel
 from backend.rpc.transport import mountWebSocket
-from backend.runtimes.instance import AppInstance
+from backend.app.instance import AppInstance
 
 
 

@@ -8,7 +8,7 @@ from backend.memory.memory_layer import (
     ReadOnlyMemoryLayer,
     MemoryLayer,
 )
-from backend.runtimes.instance import AppInstance
+from backend.app.instance import AppInstance
 
 __all__ = ["Kernel"]
 

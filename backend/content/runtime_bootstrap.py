@@ -10,7 +10,7 @@ from typing import Any, cast
 from backend.app.globals import getRootsService
 from backend.content.packs import PackResolver, ResolvedPack
 from backend.content.saves import SaveManager
-from backend.runtimes.instance import AppInstance
+from backend.app.instance import AppInstance
 from backend.runtimes.persistence import loadAppInstance
 
 logger = logging.getLogger(__name__)
