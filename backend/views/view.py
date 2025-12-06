@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Any, TypedDict
 
-from backend.app.globals import getActiveRuntime, getTracer, getActiveAppPack
+from backend.app.globals import getActiveAppInstance, getTracer, getActiveAppPack
 from backend.content.packs import PackResolver
 from backend.core.ids import uuid_12
 from backend.core.tracing import TraceSpan
@@ -58,7 +58,7 @@ class View:
         )
         self._traceSpan = span
         
-        activeInstance = getActiveRuntime()
+        activeInstance = getActiveAppInstance()
         self.state: dict[str, Any] = {
             "viewKind": self.viewKind,
             "mods": {
@@ -230,7 +230,7 @@ class View:
         """
         Rebuild and store the frontend mod manifest index.
         """
-        activeRuntime = getActiveRuntime()
+        appInstance = getActiveAppInstance()
         appPack = getActiveAppPack()
         resolver = PackResolver()
         if appPack is not None:
@@ -239,9 +239,9 @@ class View:
             viewPack = resolver.resolveViewPack(self.viewKind)
         extraRoots = viewPack.rootDir if viewPack is not None else None
         found = scanMods(
-            allowedIds=activeRuntime.allowedPacks,
+            allowedIds=appInstance.allowedPacks,
             appPack=getActiveAppPack(),
-            saveRoot=activeRuntime.saveRoot,
+            saveRoot=appInstance.saveRoot,
             extraRoots=[extraRoots] if extraRoots is not None else None
         )
         self.frontendModsIndex = makeFrontendIndex(found, viewId=self.id)

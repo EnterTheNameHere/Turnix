@@ -10,7 +10,7 @@ import json5
 
 from backend.app.globals import getTracer
 from backend.memory.memory_persistence import saveLayersToDir, loadLayersFromDir
-from backend.runtimes.instance import RuntimeInstance
+from backend.runtimes.instance import AppInstance
 from backend.sessions.session import Session
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # Layout under a save directory
 # ------------------------------------------------------------------ #
 # save.json5                         # top level manifest + file index + metadata
-# state/runtime.json5                # runtime snapshot
+# state/snapshot.json5               # AppInstance snapshot
 # state/sessions/<sessionId>.json5   # session snapshot (one per session)
 # state/sessions/<sessionId>_layers/ # per-layer files for that session (one file per DictMemoryLayer)
 # preview.png                        # optional thumbnail (not indexed/checksummed here)
@@ -90,39 +90,39 @@ def migrateIfNeeded(manifest: dict[str, Any], root: Path) -> dict[str, Any]:
 # ------------------------------------------------------------------ #
 
 def save(
-    runtimeInstance: RuntimeInstance,
+    appInstance: AppInstance,
     targetDir: Path | str,
     *,
     label: str | None = None,
     thumbnail: bytes | None = None,
 ) -> tuple[Path, str]:
     """
-    Saves a RuntimeInstance into targetDir.
+    Saves a AppInstance into targetDir.
     Returns (path to 'save.json5', sha256).
     """
     tracer = getTracer()
     span = None
     try:
         tracer.updateTraceContext({
-            "runtimeInstanceId": runtimeInstance.id,
-            "appPackId": runtimeInstance.appPackId,
+            "appInstanceId": appInstance.id,
+            "appPackId": appInstance.appPackId,
         })
         span = tracer.startSpan(
-            "runtime.save",
+            "appInstance.save",
             attrs={
                 "label": label or "",
                 "targetDir": str(targetDir),
             },
-            tags=["runtime", "save"],
+            tags=["appInstance", "save"],
         )
         tracer.traceEvent(
-            "runtime.save.start",
+            "appInstance.save.start",
             level="info",
-            tags=["runtime", "save"],
+            tags=["appInstance", "save"],
             span=span,
             attrs={
-                "runtimeInstanceId": runtimeInstance.id,
-                "appPackId": runtimeInstance.appPackId,
+                "appInstanceId": appInstance.id,
+                "appPackId": appInstance.appPackId,
             },
         )
     except Exception:
@@ -137,18 +137,18 @@ def save(
         ensureDir(stateDir)
         ensureDir(sessionsDir)
         
-        filesIndex = {"runtime": {}, "sessions": {}}
+        filesIndex = {"appInstance": {}, "sessions": {}}
         
-        # 1) Write runtime snapshot
-        runtimeSnapshot = runtimeInstance.snapshot()
-        runtimeFilePath = stateDir / "runtime.json5"
-        runtimeHash = writeTextJson5(runtimeFilePath, runtimeSnapshot)
-        filesIndex["runtime"]["path"] = toRelPath(root, runtimeFilePath)
-        filesIndex["runtime"]["sha256"] = runtimeHash
+        # 1) Write appInstance snapshot
+        appInstanceSnapshot = appInstance.snapshot()
+        snapshotFilePath = stateDir / "snapshot.json5"
+        snapshotHash = writeTextJson5(snapshotFilePath, appInstanceSnapshot)
+        filesIndex["appInstance"]["path"] = toRelPath(root, snapshotFilePath)
+        filesIndex["appInstance"]["sha256"] = snapshotHash
         
         # 2) Write each session snapshot + per-layer directory
         sessionHashes: dict[str, str] = {}
-        for sessionId, session in runtimeInstance.sessionsById.items():
+        for sessionId, session in appInstance.sessionsById.items():
             sessionSnapshot = session.snapshot()
             sessionFilePath = sessionsDir / f"{sessionId}.json5"
             sessionHash = writeTextJson5(sessionFilePath, sessionSnapshot)
@@ -170,45 +170,45 @@ def save(
         now = int(time.time())
         manifest = {
             "schemaVersion": "0.0.0", # We will use semver for updates to schemas of save files
-            "appPackId": runtimeInstance.appPackId,
-            "runtimeInstanceId": runtimeInstance.id,
-            "createdTs": int(runtimeInstance.createdTs),
+            "appPackId": appInstance.appPackId,
+            "appInstanceId": appInstance.id,
+            "createdTs": int(appInstance.createdTs),
             "savedTs": now,
             "label": label or "",
             "appVersion": "0.0.0", # TODO: Fill when we have build/version system
             "turnixVersion": "0.0.0", # TODO: Fill when we have build/version system
             "files": filesIndex,
             # Convenience for quick restore
-            "mainSessionId": runtimeInstance.mainSession.id if runtimeInstance.mainSession else None,
+            "mainSessionId": appInstance.mainSession.id if appInstance.mainSession else None,
         }
         
         manifestPath = root / "save.json5"
         manifestHash = writeTextJson5(manifestPath, manifest)
         
         logger.info(
-            "Saved runtime '%s' (appPack=%r) to %s (sessions=%d)",
-            runtimeInstance.id,
-            runtimeInstance.appPackId,
+            "Saved appInstance '%s' (appPack=%r) to %s (sessions=%d)",
+            appInstance.id,
+            appInstance.appPackId,
             str(root),
-            len(runtimeInstance.sessionsById),
+            len(appInstance.sessionsById),
         )
         
         if span is not None:
             try:
                 tracer.traceEvent(
-                    "runtime.save.done",
-                    tags=["runtime", "save"],
+                    "appInstance.save.done",
+                    tags=["appInstance", "save"],
                     level="info",
                     span=span,
                     attrs={
                         "manifestPath": str(manifestPath),
-                        "sessionCount": len(runtimeInstance.sessionsById),
+                        "sessionCount": len(appInstance.sessionsById),
                     },
                 )
                 tracer.endSpan(
                     span,
                     status="ok",
-                    tags=["runtime", "save"],
+                    tags=["appInstance", "save"],
                     attrs={
                         "savedTs": now,
                     },
@@ -222,9 +222,9 @@ def save(
         if span is not None:
             try:
                 tracer.traceEvent(
-                    "runtime.save.error",
+                    "appInstance.save.error",
                     level="error",
-                    tags=["runtime", "save", "error"],
+                    tags=["appInstance", "save", "error"],
                     span=span,
                     attrs={
                         "errorType": type(err).__name__,
@@ -234,7 +234,7 @@ def save(
                 tracer.endSpan(
                     span,
                     status="error",
-                    tags=["runtime", "save", "error"],
+                    tags=["appInstance", "save", "error"],
                     errorType=type(err).__name__,
                     errorMessage=str(err),
                 )
@@ -247,10 +247,10 @@ def save(
 # Load
 # ------------------------------------------------------------------ #
 
-def loadRuntime(sourceDir: Path | str) -> RuntimeInstance:
+def loadAppInstance(sourceDir: Path | str) -> AppInstance:
     """
-    Loads a RuntimeInstance from sourceDir.
-    Validates manifest, performs migrations, reconstructs runtime + sessions from snapshots,
+    Loads a AppInstance from sourceDir.
+    Validates manifest, performs migrations, reconstructs appInstance + sessions from snapshots,
     and hydrates session memory layers from per-layer directories.
     """
     tracer = getTracer()
@@ -258,18 +258,18 @@ def loadRuntime(sourceDir: Path | str) -> RuntimeInstance:
     rootDir = Path(sourceDir)
     
     try:
-        # We do not know appPackId/runtimeInstanceId yet. Set them after manifest loads.
+        # We do not know appPackId/appInstanceId yet. Set them after manifest loads.
         span = tracer.startSpan(
-            "runtime.load",
+            "appInstance.load",
             attrs={
                 "sourceDir": str(rootDir),
             },
-            tags=["runtime", "load"],
+            tags=["appInstance", "load"],
         )
         tracer.traceEvent(
-            "runtime.load.start",
+            "appInstance.load.start",
             level="info",
-            tags=["runtime", "load"],
+            tags=["appInstance", "load"],
             span=span,
             attrs={
                 "manifestPath": str(rootDir / "save.json5"),
@@ -289,53 +289,53 @@ def loadRuntime(sourceDir: Path | str) -> RuntimeInstance:
         if not isinstance(appPackId, str) or not appPackId:
             raise ValueError(f"Missing or invalid 'appPackId' in manifest: {manifestPath}")
         
-        runtimeInstanceId = manifest.get("runtimeInstanceId")
-        if not isinstance(runtimeInstanceId, str) or not runtimeInstanceId:
-            raise ValueError(f"Missing or invalid 'runtimeInstanceId' in manifest: {manifestPath}")
+        appInstanceId = manifest.get("appInstanceId")
+        if not isinstance(appInstanceId, str) or not appInstanceId:
+            raise ValueError(f"Missing or invalid 'appInstanceId' in manifest: {manifestPath}")
         
         tracer.updateTraceContext({
             "appPackId": appPackId,
-            "runtimeInstanceId": runtimeInstanceId
+            "appInstanceId": appInstanceId
         })
         if span is not None:
             try:
                 tracer.traceEvent(
-                    "runtime.load.manifest",
-                    tags=["runtime", "load"],
+                    "appInstance.load.manifest",
+                    tags=["appInstance", "load"],
                     span=span,
                     attrs={
                         "appPackId": appPackId,
-                        "runtimeInstanceId": runtimeInstanceId,
+                        "appInstanceId": appInstanceId,
                     },
                 )
             except Exception:
                 pass
         
-        # 1) Load runtime instance
-        runtimeFileMeta = manifest.get("files", {}).get("runtime") or {}
-        runtimeFileRelPath = runtimeFileMeta.get("path")
-        if not isinstance(runtimeFileRelPath, str) or not runtimeFileRelPath:
-            raise MissingSnapshotProperty("Manifest 'files.runtime.path' is missing")
+        # 1) Load appInstance instance
+        saveFileMeta = manifest.get("files", {}).get("appInstance") or {}
+        appInstanceSnapshotFileRelPath = saveFileMeta.get("path")
+        if not isinstance(appInstanceSnapshotFileRelPath, str) or not appInstanceSnapshotFileRelPath:
+            raise MissingSnapshotProperty("Manifest 'files.appInstance.path' is missing")
         
-        runtimePath = rootDir / runtimeFileRelPath
-        if not runtimePath.exists():
-            raise FileNotFoundError(f"Missing runtime snapshot file '{runtimePath}'")
+        appInstanceSnapshotPath = rootDir / appInstanceSnapshotFileRelPath
+        if not appInstanceSnapshotPath.exists():
+            raise FileNotFoundError(f"Missing appInstance snapshot file '{appInstanceSnapshotPath}'")
         
         # Optional checksum verification
-        expectedHash = runtimeFileMeta.get("sha256")
+        expectedHash = saveFileMeta.get("sha256")
         if isinstance(expectedHash, str):
-            actualHash = sha256Bytes(runtimePath.read_bytes())
+            actualHash = sha256Bytes(appInstanceSnapshotPath.read_bytes())
             if expectedHash != actualHash:
-                logger.warning("Checksum failed for '%s' (expected %s, got %s)", runtimePath, expectedHash, actualHash)
+                logger.warning("Checksum failed for '%s' (expected %s, got %s)", appInstanceSnapshotPath, expectedHash, actualHash)
 
-        runtimeSnapshot = readJson5(runtimePath)
-        snapshotAppPackId = runtimeSnapshot.get("appPackId")
+        appInstanceSnapshot = readJson5(appInstanceSnapshotPath)
+        snapshotAppPackId = appInstanceSnapshot.get("appPackId")
         if isinstance(snapshotAppPackId, str) and snapshotAppPackId and snapshotAppPackId != appPackId:
             logger.warning("Manifest appPackId=%r differs from save file's appPackId=%r", appPackId, snapshotAppPackId)
         
-        # Recreate RuntimeInstance shell with proper args per API
-        runtimeInstance = RuntimeInstance.fromSnapshot(
-            runtimeSnapshot,
+        # Recreate AppInstance shell with proper args per API
+        appInstance = AppInstance.fromSnapshot(
+            appInstanceSnapshot,
             appPackId=appPackId,
             saveBaseDirectory=rootDir, # Ensures session save paths resolve under this save root
             kernelMemoryLayers=None,
@@ -346,11 +346,11 @@ def loadRuntime(sourceDir: Path | str) -> RuntimeInstance:
         if not isinstance(sessionsMeta, dict):
             sessionsMeta = {}
         
-        # Compute the shared bottom layers (same order as RuntimeInstance.makeSession)
+        # Compute the shared bottom layers (same order as AppInstance.makeSession)
         sharedBottomLayers = [
-            runtimeInstance.runtimeMemory,
-            runtimeInstance.staticMemory,
-            *runtimeInstance.kernelBottom,
+            appInstance.runtimeMemory,
+            appInstance.staticMemory,
+            *appInstance.kernelBottom,
         ]
         
         for sessionId, meta in sessionsMeta.items():
@@ -389,53 +389,53 @@ def loadRuntime(sourceDir: Path | str) -> RuntimeInstance:
             except Exception:
                 logger.exception("Failed to load memory layers for session '%s' from '%s'", session.id, layersDir)
             
-            # Register into runtime
-            runtimeInstance.sessionsById[session.id] = session
+            # Register into appInstance
+            appInstance.sessionsById[session.id] = session
         
-        # 3) Restore main session pointer if present (manifest or runtime snapshot)
-        mainSessionId = manifest.get("mainSessionId") or runtimeSnapshot.get("mainSessionId")
-        if isinstance(mainSessionId, str) and mainSessionId in runtimeInstance.sessionsById:
-            runtimeInstance.mainSession = runtimeInstance.sessionsById[mainSessionId]
-        # No fallback as main session might be optional for some runtimes
+        # 3) Restore main session pointer if present (manifest or appInstance snapshot)
+        mainSessionId = manifest.get("mainSessionId") or appInstanceSnapshot.get("mainSessionId")
+        if isinstance(mainSessionId, str) and mainSessionId in appInstance.sessionsById:
+            appInstance.mainSession = appInstance.sessionsById[mainSessionId]
+        # No fallback as main session might be optional for some appInstances
         
         logger.info(
-            "Loaded runtime '%s' (appPack=%r) from '%s' (sessions=%d)",
-            runtimeInstance.id,
-            runtimeInstance.appPackId,
+            "Loaded appInstance '%s' (appPack=%r) from '%s' (sessions=%d)",
+            appInstance.id,
+            appInstance.appPackId,
             str(rootDir),
-            len(runtimeInstance.sessionsById),
+            len(appInstance.sessionsById),
         )
         
         if span is not None:
             try:
                 tracer.traceEvent(
-                    "runtime.load.done",
+                    "appInstance.load.done",
                     level="info",
-                    tags=["runtime", "load"],
+                    tags=["appInstance", "load"],
                     span=span,
                     attrs={
-                        "runtimeInstanceId": runtimeInstance.id,
-                        "appPackId": runtimeInstance.appPackId,
-                        "sessionCount": len(runtimeInstance.sessionsById),
+                        "appInstanceId": appInstance.id,
+                        "appPackId": appInstance.appPackId,
+                        "sessionCount": len(appInstance.sessionsById),
                     },
                 )
                 tracer.endSpan(
                     span,
                     status="ok",
-                    tags=["runtime", "load"],
+                    tags=["appInstance", "load"],
                 )
             except Exception:
                 pass
         
-        return runtimeInstance
+        return appInstance
 
     except Exception as err:
         if span is not None:
             try:
                 tracer.traceEvent(
-                    "runtime.load.error",
+                    "appInstance.load.error",
                     level="error",
-                    tags=["runtime", "load", "error"],
+                    tags=["appInstance", "load", "error"],
                     span=span,
                     attrs={
                         "errorType": type(err).__name__,
@@ -445,7 +445,7 @@ def loadRuntime(sourceDir: Path | str) -> RuntimeInstance:
                 tracer.endSpan(
                     span,
                     status="error",
-                    tags=["runtime", "load", "error"],
+                    tags=["appInstance", "load", "error"],
                     errorType=type(err).__name__,
                     errorMessage=str(err),
                 )

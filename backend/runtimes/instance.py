@@ -15,22 +15,32 @@ from backend.memory.memory_layer import (
 )
 from backend.sessions.session import Session, SessionKind, SessionVisibility
 
-__all__ = ["RuntimeInstance"]
+__all__ = ["AppInstance"]
 
 logger = logging.getLogger(__name__)
 
 
 
-class RuntimeInstance:
+class AppInstance:
     """
-    Base class for the runtime, representing an active, in-memory instance.
-    Manages active sessions, runtime state, and mod interactions.
+    Represents an active, in-memory instance of an application.
+    
+    - Manages sessions (creation, lookup, main session tracking)
+    - Holds override memory layers and kernel-provided layers
+    - Knows which packs/mods are allowed for this instance
+    - Provides the save directory for persistence
+    
+    Note:
+        An AppInstance is often derived from an appPack, but can exist
+        without one. The appPackId identifies the source pack if present.
+        
+        saveBaseDirectory is used to override the default save directory.
     """
     def __init__(
         self,
         *,
-        appPackId: str, # id of the appPack which is this instance based on
-        runtimeInstanceId: str | None = None, # id of the runtime instance
+        appPackId: str,
+        appInstanceId: str | None = None,
         saveBaseDirectory: Path | str | None = None, # overrides save directory; uses RootsService otherwise
         kernelMemoryLayers: list[MemoryLayer] | None = None,
         createMainSession: bool = True,
@@ -40,15 +50,15 @@ class RuntimeInstance:
             raise ValueError("appPackId contains invalid characters")
         if not self.appPackId:
             raise ValueError("appPackId must be a non-empty string")
-        self.id = runtimeInstanceId or uuid_12("runtimeInstance_")
+        self.id = appInstanceId or uuid_12("appInstanceId_")
         
         if saveBaseDirectory is None:
             baseSaves = getRootsService().getWriteDir("saves")
             self.saveRoot: Path = (Path(baseSaves) / self.appPackId / self.id).resolve()
         else:
             baseSaves = Path(saveBaseDirectory)
-            # If the supplied base already points at this runtime's save directory, reuse it
-            # as-is to avoid duplicating the appPack/runtimeInstance path segments.
+            # If the supplied base already points at this appInstance's save directory, reuse it
+            # as-is to avoid duplicating the appPack/appInstance path segments.
             if baseSaves.name == self.id and baseSaves.parent.name == self.appPackId:
                 self.saveRoot = baseSaves
             else:
@@ -61,29 +71,29 @@ class RuntimeInstance:
         
         tracer = getTracer()
         tracer.updateTraceContext({
-            "runtimeInstanceId": self.id,
+            "appInstanceId": self.id,
         })
         try:
             self._traceSpan = tracer.startSpan(
-                "runtime.lifecycle",
+                "appInstance.lifecycle",
                 attrs={"appPackId": self.appPackId},
-                tags=["runtime"],
+                tags=["appInstance"],
                 contextOverrides={
-                    "runtimeInstanceId": self.id,
+                    "appInstanceId": self.id,
                 },
             )
             tracer.traceEvent(
-                "runtime.create",
+                "appInstance.create",
                 attrs={
                     "appPackId": self.appPackId,
-                    "runtimeInstanceId": self.id,
+                    "appInstanceId": self.id,
                 },
                 level="info",
-                tags=["runtime"],
+                tags=["appInstance"],
                 span=self._traceSpan,
             )
         except Exception:
-            # Tracing must never break runtime construction.
+            # Tracing must never break appInstance construction.
             self._traceSpan = None
 
         # Runtime-local (e.g. game state, menu state)
@@ -93,7 +103,7 @@ class RuntimeInstance:
         # Kernel-level bottom layers (if kernel passed them)
         self.kernelBottom: list[MemoryLayer] = list(kernelMemoryLayers) if kernelMemoryLayers else []
 
-        # Sessions owned by this runtime
+        # Sessions owned by this appInstance
         self.sessionsById: dict[str, Session] = {}
 
         # Main session
@@ -101,7 +111,7 @@ class RuntimeInstance:
         if createMainSession:
             self.mainSession = self.makeSession(kind=SessionKind.MAIN)
         
-        # Packs allowed to be used by this runtime - set later, empty by default
+        # Packs allowed to be used by this appInstance - set later, empty by default
         self.allowedPacks: set[str] = set()
         
         # Information about python mods
@@ -118,7 +128,7 @@ class RuntimeInstance:
     ) -> Session:
         # Enforce single main session
         if kind == SessionKind.MAIN and self.mainSession is not None:
-            raise ValueError(f"Runtime '{self.id}' already has main session '{self.mainSession.id}'")
+            raise ValueError(f"appInstance '{self.id}' already has main session '{self.mainSession.id}'")
         
         # Order: higher to lower; kernel is last = lowest priority (gets accessed as last)
         bottom: list[MemoryLayer] = [
@@ -166,17 +176,17 @@ class RuntimeInstance:
         return sorted([sessionId for sessionId, session in self.sessionsById.items() if session.kind == kindNorm])
 
     def setAllowedPacks(self, allowedPacks: set[str]) -> None:
-        """Set the allowed packs for this runtime instance."""
+        """Set the allowed packs for this appInstance instance."""
         self.allowedPacks = allowedPacks
     
     def getAllowedPacks(self) -> set[str]:
-        """Return the allowed packs for this runtime instance."""
+        """Return the allowed packs for this appInstance instance."""
         return self.allowedPacks
     
     def snapshot(self) -> dict[str, object]:
         return {
             "appPackId": self.appPackId,
-            "runtimeInstanceId": self.id,
+            "appInstanceId": self.id,
             "saveRoot": str(self.saveRoot),
             "version": self.version,
             "createdTs": self.createdTs,
@@ -192,14 +202,14 @@ class RuntimeInstance:
         appPackId: str,
         saveBaseDirectory: Path | str | None = None,
         kernelMemoryLayers: list[MemoryLayer] | None = None,
-    ) -> RuntimeInstance:
+    ) -> AppInstance:
         """
-        Reconstruct a RuntimeInstance from a snapshot (pure data, no I/O).
+        Reconstruct a AppInstance from a snapshot (pure data, no I/O).
         You must pass appPackId and optional saveBaseDirectory to resolve paths.
         """
         instance = cls(
             appPackId=appPackId,
-            runtimeInstanceId=snapshot.get("runtimeInstanceId"),
+            appInstanceId=snapshot.get("appInstanceId"),
             saveBaseDirectory=saveBaseDirectory,
             kernelMemoryLayers=kernelMemoryLayers,
             createMainSession=False,
@@ -254,19 +264,19 @@ class RuntimeInstance:
             tracer = getTracer()
             try:
                 tracer.traceEvent(
-                    "runtime.destroy",
+                    "appInstance.destroy",
                     attrs={
                         "keepMain": keepMain,
-                        "runtimeInstanceId": self.id,
+                        "appInstanceId": self.id,
                     },
                     level="info",
-                    tags=["runtime"],
+                    tags=["appInstance"],
                     span=span,
                 )
                 tracer.endSpan(
                     span,
                     status="ok",
-                    tags=["runtime"],
+                    tags=["appInstance"],
                     attrs={
                         "destroyedTs": time.time(),
                         "keepMain": keepMain,

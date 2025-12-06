@@ -8,7 +8,7 @@ import json5
 import pytest
 
 from backend.config.providers import (
-    RuntimeProvider,
+    OverrideProvider,
     DictProvider,
     DefaultsProvider,
     FileProvider,
@@ -42,7 +42,7 @@ class DummyStore:
 # ----------------------------
 
 def test_runtimeProvider_setAndGet_pathCreatesNested() -> None:
-    provider = RuntimeProvider()
+    provider = OverrideProvider()
 
     provider.set("graphics.video.fullscreen", True)
     provider.set("graphics.video.vsync", False)
@@ -65,7 +65,7 @@ def test_runtimeProvider_setAndGet_pathCreatesNested() -> None:
 
 
 def test_runtimeProvider_delete_prunesEmptyParents() -> None:
-    provider = RuntimeProvider()
+    provider = OverrideProvider()
     provider.set("a.b.c", 123)
     provider.set("a.x", "keep")
 
@@ -256,7 +256,7 @@ def test_viewProvider_isReadOnly() -> None:
 
 
 def test_runtimeProvider_escapedDotInKey() -> None:
-    provider = RuntimeProvider()
+    provider = OverrideProvider()
 
     # "a\\.b.c" → ["a.b", "c"]
     provider.set("root.a\\.b.c", 123)
@@ -270,7 +270,7 @@ def test_runtimeProvider_escapedDotInKey() -> None:
 
 
 def test_runtimeProvider_invalidPath_get_returnsNone() -> None:
-    provider = RuntimeProvider()
+    provider = OverrideProvider()
     provider.set("a.b", 1)
 
     # Trailing backslash → invalid path; getByPath treats it as "not found"
@@ -278,7 +278,7 @@ def test_runtimeProvider_invalidPath_get_returnsNone() -> None:
 
 
 def test_runtimeProvider_invalidPath_set_raisesValueError() -> None:
-    provider = RuntimeProvider()
+    provider = OverrideProvider()
 
     # Trailing backslash should propagate ValueError from setByPath
     with pytest.raises(ValueError):

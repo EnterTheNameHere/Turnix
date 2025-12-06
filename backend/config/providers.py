@@ -16,15 +16,15 @@ from .types import ConfigProvider, ConfigStore
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "RuntimeProvider", "DictProvider", "DefaultsProvider",
+    "OverrideProvider", "DictProvider", "DefaultsProvider",
     "FileProvider", "ViewProvider"
 ]
 
 # ----------------------------------------------
-#              Runtime (in-memory)
+#          OverrideProvider (in-memory)
 # ----------------------------------------------
 
-class RuntimeProvider(ConfigProvider):
+class OverrideProvider(ConfigProvider):
     """
     Volatile, writable, topmost override layer (never saved to disk).
     """

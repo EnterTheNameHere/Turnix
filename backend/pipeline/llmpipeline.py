@@ -519,7 +519,7 @@ class LLMPipelineRun:
         """
         Hidden sessions are private to the creating mod by default.
         We construct an independent Session that mirrors ownerSession's bottom layers.
-        It is not registered into a RuntimeInstance by design.
+        It is not registered into a AppInstance by design.
         """
         parent = self.ownerSession
         bottom = parent.memoryLayers[1:] # Drop txn from the top

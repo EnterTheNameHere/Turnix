@@ -6,7 +6,7 @@ import urllib.parse
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from backend.app.globals import getActiveAppPack, getActiveRuntime, getTracer
+from backend.app.globals import getActiveAppPack, getActiveAppInstance, getTracer
 from backend.core.hashing import sha256sumWithPath
 from backend.core.paths import resolveSafe
 from backend.mods.constants import JS_RUNTIMES
@@ -105,13 +105,13 @@ def listFrontendModsForView(viewId: str) -> dict:
     except Exception:
         pass
     
-    runtimeInstance = getActiveRuntime()
+    appInstance = getActiveAppInstance()
     appPack = getActiveAppPack()
     found: ModMap = scanModsForMount(
         viewKind=viewId,
-        allowedIds=runtimeInstance.getAllowedPacks(),
+        allowedIds=appInstance.getAllowedPacks(),
         appPack=appPack,
-        saveRoot=runtimeInstance.saveRoot,
+        saveRoot=appInstance.saveRoot,
     )
     
     return makeFrontendIndex(found, viewId=viewId)
@@ -134,15 +134,15 @@ def serveModAssetForView(viewId: str, modId: str, path: str) -> FileResponse:
     except Exception:
         pass
     
-    activeRuntime = getActiveRuntime()
-    if activeRuntime is None:
+    appInstance = getActiveAppInstance()
+    if appInstance is None:
         raise HTTPException(status_code=404, detail="Unknown View.")
     appPack = getActiveAppPack()
     found: ModMap = scanModsForMount(
         viewKind=viewId,
-        allowedIds=activeRuntime.getAllowedPacks(),
+        allowedIds=appInstance.getAllowedPacks(),
         appPack=appPack,
-        saveRoot=activeRuntime.saveRoot,
+        saveRoot=appInstance.saveRoot,
     )
     if modId not in found:
         raise HTTPException(404, "Unknown mod.")

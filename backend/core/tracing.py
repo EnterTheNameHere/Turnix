@@ -185,7 +185,7 @@ class Tracer:
         
         # Copy known context keys to top-level for easy filtering in the viewer.
         for key in (
-            "runtimeInstanceId",
+            "appInstanceId",
             "appPackId",
             "sessionId",
             "pipelineId",

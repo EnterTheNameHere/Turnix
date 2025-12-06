@@ -187,7 +187,7 @@ def mountWebSocket(app: FastAPI):
                             raise ReactorScramError(
                                 f"Token validated but View {viewId!r} not found. "
                                 f"This is an invariant violation. View is dead! "
-                                f"Runtime declared a state of emergency. "
+                                f"Turnix declared a state of emergency. "
                                 f"Reality's integrity irrecoverably fragmented. "
                                 f"May the garbage collector have mercy."
                             )

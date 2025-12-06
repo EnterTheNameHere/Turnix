@@ -9,7 +9,7 @@ from backend.core.tracing import getTracer as _getCoreTracer, getTraceHub as _ge
 
 if TYPE_CHECKING:
     from backend.kernel import Kernel
-    from backend.runtimes.instance import RuntimeInstance
+    from backend.runtimes.instance import AppInstance
     from backend.config.service import ConfigService
     from backend.content.packs import ResolvedPack
     from backend.core.permissions import PermissionManager
@@ -33,16 +33,16 @@ def getKernel() -> Kernel:
 
 
 
-def getActiveRuntime() -> RuntimeInstance:
-    runtime = PROCESS_REGISTRY.get("runtime.active")
-    if runtime is None:
+def getActiveAppInstance() -> AppInstance:
+    appInstance = PROCESS_REGISTRY.get("appInstance.active")
+    if appInstance is None:
         raise ReactorScramError(
-            "Active runtime is None.\n"
-            "⚠️ RUNTIME MISSING ⚠️\n"
-            "Turnix looked for the current runtime and found philosophical emptiness.\n"
-            "This slot should contain: main menu, game, or literally any runtime.\n"
+            "Active appInstance is None.\n"
+            "⚠️ APP INSTANCE MISSING ⚠️\n"
+            "Turnix looked for the current appInstance and found philosophical emptiness.\n"
+            "This slot should contain: main menu, game, or literally any appInstance.\n"
         )
-    return cast("RuntimeInstance", runtime)
+    return cast("AppInstance", appInstance)
 
 
 
@@ -89,20 +89,20 @@ def getRootsService() -> RootsService:
 
 def getMainSessionOrScram() -> Session:
     """
-    returns active Runtime's main Session. It raises if no main session exists.
+    returns active AppInstance's main Session. It raises if no main session exists.
     """
-    runtime = getActiveRuntime()
-    if runtime is not None and runtime.mainSession is not None:
-        return runtime.mainSession
+    appInstance = getActiveAppInstance()
+    if appInstance is not None and appInstance.mainSession is not None:
+        return appInstance.mainSession
     
     # If we got here, the app state is corrupted and the UI cannot function.
     raise ReactorScramError(
         "Main session is None\n"
         "⚠️ MAIN SESSION MISSING ⚠️\n"
-        "Runtime doesn't have a main session. View's purpose is to show UI. But it doesn't have a main session. "
-        "We need UI to show the session. But we don't have None to UI. But Session is to show Runtime. "
-        "UI needs Runtime to show Session. Runtime show UI. Session Runtime None. Main UI. Run."
-        "(Some runtimes might not use main session. If you use such runtime, don't ask for main session.)"
+        "AppInstance doesn't have a main session. View's purpose is to show UI. But it doesn't have a main session. "
+        "We need UI to show the session. But we don't have None to UI. But Session is to show AppInstance. "
+        "UI needs AppInstance to show Session. AppInstance show UI. Session AppInstance None. Main UI. Run."
+        "(Some appInstances might not use main session. If you use such appInstance, don't ask for main session.)"
     )
 
 
@@ -129,7 +129,7 @@ def getTraceHub() -> TraceHub:
 
 
 def getActiveAppPack() -> ResolvedPack | None:
-    appPack = PROCESS_REGISTRY.get("runtime.active.appPack")
+    appPack = PROCESS_REGISTRY.get("appInstance.active.appPack")
     if appPack is None:
         return None
     return cast("ResolvedPack", appPack)

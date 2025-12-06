@@ -10,8 +10,8 @@ from typing import Any, cast
 from backend.app.globals import getRootsService
 from backend.content.packs import PackResolver, ResolvedPack
 from backend.content.saves import SaveManager
-from backend.runtimes.instance import RuntimeInstance
-from backend.runtimes.persistence import loadRuntime
+from backend.runtimes.instance import AppInstance
+from backend.runtimes.persistence import loadAppInstance
 
 logger = logging.getLogger(__name__)
 
@@ -25,13 +25,13 @@ GeneratorFn = Callable[[dict[str, Any]], dict[str, Any] | None]
 class ViewContext:
     """
     Bundles everything needed to bootstrap a view:
-        - runtime instance (already ensured / generated)
+        - appInstance (already ensured / generated)
         - appPack + viewPack (if any)
         - normalized viewKind
         - allowedMods as derived from the appPack manifest
         - extraModRoots: roots that should be passed into mod discovery for this view
     """
-    runtimeInstance: RuntimeInstance
+    appInstance: AppInstance
     appPack: ResolvedPack | None
     viewPack: ResolvedPack | None
     viewKind: str
@@ -70,14 +70,14 @@ def _extractMods(appPack: ResolvedPack) -> set[str]:
 
 
 
-def _defaultInstanceId(appPack: ResolvedPack) -> str:
+def _defaultAppInstanceId(appPack: ResolvedPack) -> str:
     rawMeta = appPack.rawJson.get("meta") if isinstance(appPack.rawJson, dict) else None
     runtimeCfg = rawMeta.get("runtimes") if isinstance(rawMeta, dict) else {}
     if isinstance(runtimeCfg, dict) and "defaultInstanceId" in runtimeCfg:
         value = runtimeCfg.get("defaultInstanceId")
         if isinstance(value, str) and value.strip():
             return value.strip()
-    return f"{appPack.id}-runtime"
+    return f"{appPack.id}-appInstance"
 
 
 
@@ -111,10 +111,10 @@ def _runGenerator(generatorPath: Path, context: dict[str, Any]) -> dict[str, Any
 
 
 
-def _discoverSaveDir(baseCandidates: list[Path], appPackId: str, runtimeInstanceId: str | None) -> Path | None:
+def _discoverSaveDir(baseCandidates: list[Path], appPackId: str, appInstanceId: str | None) -> Path | None:
     for base in baseCandidates:
         appPackSaveRoot = Path(base) / appPackId
-        specific = appPackSaveRoot / (runtimeInstanceId or "") if runtimeInstanceId else None
+        specific = appPackSaveRoot / (appInstanceId or "") if appInstanceId else None
         if specific and (specific / "save.json5").exists():
             return specific
         if not appPackSaveRoot.exists() or not appPackSaveRoot.is_dir():
@@ -128,11 +128,11 @@ def _discoverSaveDir(baseCandidates: list[Path], appPackId: str, runtimeInstance
 
 
 
-def _generateRuntime(
+def _generateAppInstance(
     *,
     appPack: ResolvedPack,
     appKey: str,
-    runtimeInstanceId: str,
+    appInstanceId: str,
     baseDir: Path,
 ) -> Path:
     rawMeta = appPack.rawJson.get("meta") if isinstance(appPack.rawJson, dict) else {}
@@ -146,11 +146,11 @@ def _generateRuntime(
     if not generatorPath.exists() or not generatorPath.is_file():
         raise RuntimeError(f"Generator file '{generatorPath}' for appPack '{appPack.id}' does not exist")
     
-    targetDir = (baseDir / appKey / runtimeInstanceId).resolve()
+    targetDir = (baseDir / appKey / appInstanceId).resolve()
     targetDir.mkdir(parents=True, exist_ok=True)
     ctx = {
         "appPackId": appKey,
-        "runtimeInstanceId": runtimeInstanceId,
+        "appInstanceId": appInstanceId,
         "saveDir": str(targetDir),
         "label": appPack.name or appPack.id,
     }
@@ -172,18 +172,18 @@ def _generateRuntime(
 
 
 
-def ensureRuntimeForAppPack(
+def ensureAppInstanceForAppPack(
     appPackIdOrQId: str,
     *,
     preferEmbeddedSaves: bool = False,
-) -> tuple[RuntimeInstance, ResolvedPack]:
+) -> tuple[AppInstance, ResolvedPack]:
     resolver = PackResolver()
     appPack = resolver.resolveAppPack(appPackIdOrQId)
     if not appPack:
-        raise RuntimeError(f"AppPack '{appPackIdOrQId}' not found. Cannot create RuntimeInstance.")
+        raise RuntimeError(f"AppPack '{appPackIdOrQId}' not found. Cannot create AppInstance.")
     
     canonicalId = _canonicalAppPackId(appPack)
-    runtimeInstanceId = _defaultInstanceId(appPack)
+    appInstanceId = _defaultAppInstanceId(appPack)
     
     baseCandidates: list[Path] = []
     if preferEmbeddedSaves:
@@ -191,31 +191,31 @@ def ensureRuntimeForAppPack(
     baseCandidates.append(getRootsService().getWriteDir("saves"))
     
     appKey = SaveManager().appIdToKey(canonicalId)
-    saveDir = _discoverSaveDir(baseCandidates, appKey, runtimeInstanceId)
+    saveDir = _discoverSaveDir(baseCandidates, appKey, appInstanceId)
     
     if saveDir is None:
         primaryBase = baseCandidates[0]
-        saveDir = _generateRuntime(
+        saveDir = _generateAppInstance(
             appPack=appPack,
             appKey=appKey,
-            runtimeInstanceId=runtimeInstanceId,
+            appInstanceId=appInstanceId,
             baseDir=primaryBase,
         )
     
-    runtimeInstance = loadRuntime(saveDir)
-    runtimeInstance.setAllowedPacks(_extractMods(appPack))
+    appInstance = loadAppInstance(saveDir)
+    appInstance.setAllowedPacks(_extractMods(appPack))
     
-    return runtimeInstance, appPack
+    return appInstance, appPack
 
 
 
-def buildViewContextForRuntime(
-    runtimeInstance: RuntimeInstance,
+def buildViewContextForAppInstance(
+    appInstance: AppInstance,
     appPack: ResolvedPack,
     viewKind: str | None = None,
 ) -> ViewContext:
     """
-    Build a ViewContext for an already-existing runtime + appPack.
+    Build a ViewContext for an already-existing appInstance + appPack.
     
       - Normalizes viewKind (defaults to "main").
       - Resolves the viewPack for the given appPack + viewKind
@@ -224,7 +224,7 @@ def buildViewContextForRuntime(
         when a viewPack is resolved, otherwise empty).
     
     This is the non-ensuring variant used when the process has an active
-    runtime/appPack (for example, in the HTTP bootstrap path).
+    appInstance/appPack (for example, in the HTTP bootstrap path).
     """
     # Normalize viewKind
     normalizedViewKind = (viewKind or "main").strip() or "main"
@@ -239,11 +239,11 @@ def buildViewContextForRuntime(
         extraRoots.append(viewPack.rootDir)
     
     return ViewContext(
-        runtimeInstance=runtimeInstance,
+        appInstance=appInstance,
         appPack=appPack,
         viewPack=viewPack,
         viewKind=normalizedViewKind,
-        allowedMods=set(runtimeInstance.getAllowedPacks()),
+        allowedMods=set(appInstance.getAllowedPacks()),
         extraModRoots=tuple(extraRoots),
     )
 
@@ -257,13 +257,13 @@ def ensureViewContext(
 ) -> ViewContext:
     """
     High-level helper that:
-      - Ensures a RuntimeInstance + appPack exist.
-      - see buildViewContextForRuntime for details on the rest
+      - Ensures a AppInstance + appPack exist.
+      - see buildViewContextForAppInstance for details on the rest
     """
-    # ensure runtime + appPack exist
-    runtimeInstance, appPack = ensureRuntimeForAppPack(
+    # ensure appInstance + appPack exist
+    appInstance, appPack = ensureAppInstanceForAppPack(
         appPackIdOrQId,
         preferEmbeddedSaves=preferEmbeddedSaves,
     )
     
-    return buildViewContextForRuntime(runtimeInstance, appPack, viewKind=viewKind)
+    return buildViewContextForAppInstance(appInstance, appPack, viewKind=viewKind)

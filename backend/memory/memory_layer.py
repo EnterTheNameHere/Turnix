@@ -213,7 +213,7 @@ class TransactionalMemoryLayer(MemoryLayer):
 # Aliases for Turnix contexts
 SessionMemoryLayer = DictMemoryLayer
 ScopedMemoryLayer = DictMemoryLayer
-RuntimeMemoryLayer = DictMemoryLayer
+AppInstanceMemoryLayer = DictMemoryLayer
 ViewMemoryLayer = DictMemoryLayer
 PipelineRunMemoryLayer = TransactionalMemoryLayer
 

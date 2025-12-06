@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from backend.app.context import PROCESS_REGISTRY
 from backend.app.globals import (
     getActiveAppPack,
-    getActiveRuntime,
+    getActiveAppInstance,
     getPermissions,
     getConfigService,
     getTracer
@@ -30,9 +30,9 @@ async def life(app: FastAPI) -> AsyncIterator[None]:
     try:
         configService = getConfigService()
         
-        runtimeInstance = getActiveRuntime()
+        appInstance = getActiveAppInstance()
         appPack = getActiveAppPack()
-        allowedMods = runtimeInstance.getAllowedPacks()
+        allowedMods = appInstance.getAllowedPacks()
         
         # Give mods a plain snapshot of merged global config
         configSnapshot: dict[str, Any] = configService.globalStore.snapshot()
@@ -40,13 +40,13 @@ async def life(app: FastAPI) -> AsyncIterator[None]:
             settings=configSnapshot,
             allowedModIds=allowedMods,
             appPack=appPack,
-            saveRoot=getattr(runtimeInstance, "saveRoot", None),
+            saveRoot=getattr(appInstance, "saveRoot", None),
         )
         
         
-        runtimeInstance.setAllowedPacks(set(allowedMods))
-        runtimeInstance.backendPacksLoaded = list([{"id": mod.modId, "name": mod.name, "version": mod.version} for mod in loaded])
-        runtimeInstance.backendPacksFailed = list(failed)
+        appInstance.setAllowedPacks(set(allowedMods))
+        appInstance.backendPacksLoaded = list([{"id": mod.modId, "name": mod.name, "version": mod.version} for mod in loaded])
+        appInstance.backendPacksFailed = list(failed)
         PROCESS_REGISTRY.register("mods.services", modsServices, overwrite=True)
         
         perms = getPermissions()

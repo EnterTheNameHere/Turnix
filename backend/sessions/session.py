@@ -41,7 +41,7 @@ class SessionVisibility(StrEnum):
 class Session:
     """
     Execution / world context with its own state, memory, and LLM pipeline.
-    Each Session can see multiple memory layers, injected by its parent Runtime or Kernel.
+    Each Session can see multiple memory layers, injected by its parent AppInstance or Kernel.
 
     Kinds:
       - "main": authoritative
@@ -286,7 +286,7 @@ class Session:
     ) -> Session:
         """
         Rehydrate a Session with the expected memory stack and resolver.
-        Callers (e.g., RuntimeInstance.fromSnapshot) should pass the bottom layers and savePath.
+        Callers (e.g., AppInstance.fromSnapshot) should pass the bottom layers and savePath.
         """
         try:
             kind = SessionKind(snapshot.get("kind", SessionKind.TEMPORARY))

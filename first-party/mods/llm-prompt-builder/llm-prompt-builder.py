@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Any
 
-from backend.app.globals import getActiveRuntime
+from backend.app.globals import getActiveAppInstance
 from backend.pipeline.llmpipeline import LLMPipelineStages
 from backend.core.logger import getModLogger
 
@@ -90,12 +90,12 @@ def onLoad(ctx) -> None:
       - run earlier (negative priority) to modify memItems
       - run later (positive priority) to tweak engineRequest messages
     """
-    runtime = getActiveRuntime()
-    if runtime is None or runtime.mainSession is None:
-        logger.error("llm-prompt-builder: no active runtime or main session to attach to. Skipping...")
+    appInstance = getActiveAppInstance()
+    if appInstance is None or appInstance.mainSession is None:
+        logger.error("llm-prompt-builder: no active appInstance or main session to attach to. Skipping...")
         return
     
-    pipeline = runtime.mainSession.pipeline
+    pipeline = appInstance.mainSession.pipeline
     builder = LLMPromptBuilder()
     
     async def buildPromptHandler(run, _payload):

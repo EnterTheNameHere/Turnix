@@ -288,8 +288,8 @@ async def onLoad(ctx):
     ctx.registerService("llm", client)
     
     # Wire the engine adapter into the main session pipeline
-    from backend.app.globals import getActiveRuntime
-    rt = getActiveRuntime()
+    from backend.app.globals import getActiveAppInstance
+    rt = getActiveAppInstance()
     if rt and rt.mainSession:
         pipe = rt.mainSession.pipeline
         async def engineAdapter(run):

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 
-from backend.app.globals import getActiveRuntime
+from backend.app.globals import getActiveAppInstance
 from backend.core.logger import getModLogger
 from backend.pipeline.llmpipeline import LLMPipelineStages
 from backend.memory.memory_layer import QueryItem as MemItem
@@ -119,13 +119,13 @@ def onLoad(ctx) -> None:
     
     # Required pieces
     llm = services.get("llm")
-    runtime = getActiveRuntime()
-    mainSession = runtime.mainSession
+    appInstance = getActiveAppInstance()
+    mainSession = appInstance.mainSession
     
     if llm is None or mainSession is None:
         missing = []
         if llm is None: missing.append("SERVICES['llm']")
-        if mainSession is None: missing.append("SERVICES['mainSession'] or SERVICES['runtime'].mainSession")
+        if mainSession is None: missing.append("SERVICES['mainSession'] or SERVICES['appInstance'].mainSession")
         logger.error("missing %s; skipping init", " & ".join(missing))
         return
     

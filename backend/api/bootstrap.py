@@ -5,8 +5,8 @@ import logging
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from backend.app.globals import getActiveRuntime, getActiveAppPack, config, configBool, getTracer
-from backend.content.runtime_bootstrap import buildViewContextForRuntime
+from backend.app.globals import getActiveAppInstance, getActiveAppPack, config, configBool, getTracer
+from backend.content.runtime_bootstrap import buildViewContextForAppInstance
 from backend.mods.roots_registry import registerRoots
 from backend.views.registry import viewRegistry
 
@@ -33,16 +33,16 @@ async def apiBootstrap(request: Request):
     view, token = viewRegistry.getOrCreateViewForClient(clientId, viewKind=viewKind)
     
     # Ensure the view has access to at least the shell session while in menu.
-    runtime = getActiveRuntime()
-    if runtime and runtime.mainSession and not view.isAttached(runtime.mainSession.id):
-        view.attachSession(runtime.mainSession.id)
+    appInstance = getActiveAppInstance()
+    if appInstance and appInstance.mainSession and not view.isAttached(appInstance.mainSession.id):
+        view.attachSession(appInstance.mainSession.id)
     
     # Build ViewContext for this view (if we have an active appPack)
     appPack = getActiveAppPack()
-    if runtime and appPack:
+    if appInstance and appPack:
         try:
-            viewContext = buildViewContextForRuntime(
-                runtimeInstance=runtime,
+            viewContext = buildViewContextForAppInstance(
+                appInstance=appInstance,
                 appPack=appPack,
                 viewKind=viewKind,
             )

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from backend.app.globals import getRootsService
-from backend.config.providers import DefaultsProvider, FileProvider, RuntimeProvider, ViewProvider
+from backend.config.providers import DefaultsProvider, FileProvider, OverrideProvider, ViewProvider
 from backend.config.schema_loader import loadConfigSchemas
 from backend.config.store import ConfigStore
 from backend.content.packs import ResolvedPack
@@ -52,43 +52,43 @@ class ConfigService:
             providers=[
                 DefaultsProvider(path=str(ASSETS_DEFAULTS_DIR / "global.json5")),
                 FileProvider(path=str(userdataCfgDir / "global.json5"), readOnly=False),
-                RuntimeProvider(),
+                OverrideProvider(),
             ],
         )
         return cls(registry=registry, globalStore=globalStore)
 
-    def makeRuntimeInstanceStore(self, *, appPack: ResolvedPack, runtimeInstanceId: str) -> ConfigStore:
-        validator = self.registry.getValidator("config", "runtimeInstance")
+    def makeAppInstanceStore(self, *, appPack: ResolvedPack, appInstanceId: str) -> ConfigStore:
+        validator = self.registry.getValidator("config", "appInstance")
         roots = getRootsService()
         
         # TODO(runtime-config):
         #    This is a temporary, minimal implementation.
-        #    In the future, runtimeInstance defaults should be built from a
+        #    In the future, appInstance defaults should be built from a
         #    fully resolved pack graph (appPack + viewPacks + contentPacks + mods),
         #    collecting and merging all pack-level default config trees into a
-        #    single flattened snapshot that is stored with the runtimeInstance.
+        #    single flattened snapshot that is stored with the appInstance.
         
         savesBase = roots.getWriteDir("saves")
         appKey = SaveManager().appIdToKey(appPack.id)
-        saveDir = savesBase / appKey / runtimeInstanceId
+        saveDir = savesBase / appKey / appInstanceId
         try:
             saveDir.mkdir(parents=True, exist_ok=True)
         except Exception:
             logger.exception(
-                "Failed to create directory for appPack/runtimeInstance '%s/%s' at '%s' to store config",
+                "Failed to create directory for appPack/appInstance '%s/%s' at '%s' to store config",
                 appPack.id,
-                runtimeInstanceId,
+                appInstanceId,
                 saveDir,
             )
         
         return ConfigStore(
-            namespace=f"config:runtimeInstance:{appPack.id}:{runtimeInstanceId}",
+            namespace=f"config:appInstance:{appPack.id}:{appInstanceId}",
             validator=validator,
             providers=[
                 DefaultsProvider(path=str(appPack.rootDir / "config.json5")),
                 ViewProvider(self.globalStore),
                 FileProvider(path=str(saveDir / "config.json5")),
-                RuntimeProvider(),
+                OverrideProvider(),
             ],
         )
 
@@ -124,7 +124,7 @@ class ConfigService:
             providers.append(DefaultsProvider(path=str(defaultsFilePath)))
         providers.append(ViewProvider(self.globalStore))
         providers.append(FileProvider(path=str(packConfigDir / f"{pack.id}.json5"), readOnly=False))
-        providers.append(RuntimeProvider())
+        providers.append(OverrideProvider())
         
         return ConfigStore(
             namespace=f"config:pack:{pack.kind}:{pack.id}",

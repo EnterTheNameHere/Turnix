@@ -10,14 +10,14 @@ from backend.app.context import PROCESS_REGISTRY
 from backend.app.globals import getTracer
 from backend.app.lifecycle import life
 from backend.app.static_mount import mountStatic
-from backend.content.runtime_bootstrap import ensureRuntimeForAppPack
+from backend.content.runtime_bootstrap import ensureAppInstanceForAppPack
 from backend.kernel import Kernel
 from backend.rpc.transport import mountWebSocket
-from backend.runtimes.instance import RuntimeInstance
+from backend.runtimes.instance import AppInstance
 
 
 
-def createApp(*, extraRouters: Sequence[APIRouter] = (), initialRuntime: RuntimeInstance | None = None) -> FastAPI:
+def createApp(*, extraRouters: Sequence[APIRouter] = (), initialAppInstance: AppInstance | None = None) -> FastAPI:
     # Early, process-wide bootstrap (idempotent)
     tracer = getTracer()
     tracer.startProcessSpan({"phase": "factory.createApp"})
@@ -41,20 +41,20 @@ def createApp(*, extraRouters: Sequence[APIRouter] = (), initialRuntime: Runtime
     # Turnix Boss. It registers itself to globals.
     kernel = Kernel()
     
-    # Create or load main menu runtime
+    # Create or load main menu appInstance
     activeAppPack = None
-    if initialRuntime is None:
-        runtimeInstance, appPack = ensureRuntimeForAppPack(
+    if initialAppInstance is None:
+        appInstance, appPack = ensureAppInstanceForAppPack(
             "main-menu",
             preferEmbeddedSaves=True
         )
         activeAppPack = appPack
     else:
-        runtimeInstance = initialRuntime
+        appInstance = initialAppInstance
     
-    kernel.switchRuntime(runtimeInstance)
+    kernel.switchAppInstance(appInstance)
     if activeAppPack is not None:
-        PROCESS_REGISTRY.register("runtime.active.appPack", activeAppPack, overwrite=True)
+        PROCESS_REGISTRY.register("appInstance.active.appPack", activeAppPack, overwrite=True)
     
     app = FastAPI(lifespan=life)
     

@@ -8,7 +8,7 @@ from backend.memory.memory_layer import (
     ReadOnlyMemoryLayer,
     MemoryLayer,
 )
-from backend.runtimes.instance import RuntimeInstance
+from backend.runtimes.instance import AppInstance
 
 __all__ = ["Kernel"]
 
@@ -17,9 +17,9 @@ __all__ = ["Kernel"]
 class Kernel:
     """
     Top-level backend owner.
-    - Exists even if no runtime is active.
+    - Exists even if no appInstance is active.
     - Owns process-wide memory (mods, assets, pack-level config).
-    - Can switch active runtimes (game, main menu, headless).
+    - Can switch active appInstance (game, main menu, headless).
     """
     def __init__(self) -> None:
         # Make globally discoverable
@@ -28,42 +28,42 @@ class Kernel:
         # Process-wide memory
         self.kernelRuntimeMemory: MemoryLayer = DictMemoryLayer("kernelRuntime")
         self.kernelStaticMemory:  MemoryLayer = ReadOnlyMemoryLayer("kernelStatic", {})
-        self.activeRuntime: RuntimeInstance | None = None
+        self.activeAppInstance: AppInstance | None = None
 
-    def createRuntime(
+    def createAppInstance(
         self,
         *,
         appPackId: str,
-        runtimeInstanceId: str | None = None,
+        appInstanceId: str | None = None,
         saveBaseDirectory: Path | str | None = None,
         createMainSession: bool = True,
-    ) -> RuntimeInstance:
+    ) -> AppInstance:
         """
-        Factory for a plain BaseRuntime that is already wired to kernel layers.
+        Factory for a plain AppInstance that is already wired to kernel layers.
         """
-        br = RuntimeInstance(
+        appInstance = AppInstance(
             appPackId=appPackId,
-            runtimeInstanceId=runtimeInstanceId,
+            appInstanceId=appInstanceId,
             kernelMemoryLayers=self.getKernelBottomLayers(),
             saveBaseDirectory=saveBaseDirectory,
             createMainSession=createMainSession,
         )
-        self.switchRuntime(br)
-        return br
+        self.switchAppInstance(appInstance)
+        return appInstance
 
-    def switchRuntime(self, runtime: RuntimeInstance) -> None:
+    def switchAppInstance(self, appInstance: AppInstance) -> None:
         """
-        Activate given runtime (game, menu, headless...).
+        Activate given appInstance (game, menu, headless...).
         """
-        self.activeRuntime = runtime
-        PROCESS_REGISTRY.register("runtime.active", runtime, overwrite=True)
+        self.activeAppInstance = appInstance
+        PROCESS_REGISTRY.register("appInstance.active", appInstance, overwrite=True)
     
-    def getActiveRuntime(self) -> RuntimeInstance | None:
-        return self.activeRuntime
+    def getActiveAppInstance(self) -> AppInstance | None:
+        return self.activeAppInstance
     
     def getKernelBottomLayers(self) -> list[MemoryLayer]:
         """
-        Layers that every runtime may want to inherit.
+        Layers that every appInstance may want to inherit.
         """
         return [self.kernelRuntimeMemory, self.kernelStaticMemory]
 

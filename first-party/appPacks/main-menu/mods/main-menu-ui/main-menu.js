@@ -234,9 +234,9 @@ async function fetchSaves(ctx) {
     return Array.isArray(res?.saves) ? res.saves : [];
 }
 
-async function generateRuntime(ctx, payload) {
+async function generateAppInstance(ctx, payload) {
     return ctx.rpc.request(
-        { route: { capability: 'main.menu@1' }, path: 'generateRuntime', op: 'call', args: [payload] },
+        { route: { capability: 'main.menu@1' }, path: 'generateAppInstance', op: 'call', args: [payload] },
         {},
         { class: 'request.medium' },
     );
@@ -250,7 +250,7 @@ async function loadSave(ctx, payload) {
     );
 }
 
-function randomRuntimeInstanceId(appPackId) {
+function randomAppInstanceId(appPackId) {
     const suffix = Math.random().toString(36).slice(2, 6);
     return `${appPackId.replace(/[^A-Za-z0-9_-]/gu, '-')}-${suffix}`;
 }
@@ -329,20 +329,20 @@ async function showNewDialog(ctx) {
         [...list.children].forEach((child) => child.dataset.selected = 'false');
         row.dataset.selected = 'true';
         selected = packs.find((pack) => pack.id === row.dataset.value) || null;
-        if(selected && !runtimeInstanceIdInput.value) runtimeInstanceIdInput.value = randomRuntimeInstanceId(selected.id);
+        if(selected && !appInstanceIdInput.value) appInstanceIdInput.value = randomAppInstanceId(selected.id);
     });
 
     const form = document.createElement('div');
     form.className = 'turnix-mm-form';
-    const runtimeLabel = document.createElement('label');
-    runtimeLabel.innerHTML = 'Save Name<input type="text" placeholder="auto" />';
-    const runtimeInstanceIdInput = runtimeLabel.querySelector('input');
+    const appInstanceLabel = document.createElement('label');
+    appInstanceLabel.innerHTML = 'Save Name<input type="text" placeholder="auto" />';
+    const appInstanceIdInput = appInstanceLabel.querySelector('input');
     const labelField = document.createElement('label');
     labelField.innerHTML = 'Label<input type="text" placeholder="My Adventure" />';
-    form.append(list, runtimeLabel, labelField);
+    form.append(list, appInstanceLabel, labelField);
 
     createDialog({
-        title: 'Create new runtime',
+        title: 'Create new AppInstance',
         body: form,
         actions: [
             {label: 'Cancel', variant: 'secondary', onClick: (overlay) => overlay.remove()},
@@ -353,10 +353,10 @@ async function showNewDialog(ctx) {
                 }
                 const payload = {
                     appPackId: selected.id,
-                    runtimeInstanceId: runtimeInstanceIdInput.value?.trim() || undefined,
+                    appInstanceId: appInstanceIdInput.value?.trim() || undefined,
                     label: labelField.querySelector('input').value?.trim() || undefined,
                 };
-                await generateRuntime(ctx, payload);
+                await generateAppInstance(ctx, payload);
                 overlay.remove();
             }},
         ],
@@ -373,18 +373,18 @@ async function showLoadDialog(ctx) {
     const list = buildList(saves, (save) => {
         const label = save.label ? ` · ${save.label}` : '';
         const ts = save.savedTs ? new Date(save.savedTs * 1000).toLocaleString() : 'unknown';
-        return `<strong>${save.appPackId}</strong> / ${save.runtimeInstanceId}${label}<br /><small>${ts}</small>`;
+        return `<strong>${save.appPackId}</strong> / ${save.appInstanceId}${label}<br /><small>${ts}</small>`;
     });
     list.addEventListener('click', (ev) => {
         const row = ev.target.closest('.turnix-mm-dialog__item');
         if(!row) return;
         [...list.children].forEach((child) => child.dataset.selected = 'false');
         row.dataset.selected = 'true';
-        selected = saves.find((save) => `${save.appPackId}/${save.runtimeInstanceId}` === row.dataset.value) || null;
+        selected = saves.find((save) => `${save.appPackId}/${save.appInstanceId}` === row.dataset.value) || null;
     });
     [...list.children].forEach((row, idx) => {
         const save = saves[idx];
-        row.dataset.value = `${save.appPackId}/${save.runtimeInstanceId}`;
+        row.dataset.value = `${save.appPackId}/${save.appInstanceId}`;
     });
 
     createDialog({
@@ -399,7 +399,7 @@ async function showLoadDialog(ctx) {
                 }
                 await loadSave(ctx, {
                     appPackId: selected.appPackId,
-                    runtimeInstanceId: selected.runtimeInstanceId,
+                    appInstanceId: selected.appInstanceId,
                 });
                 showToast(`Loaded ${selected.appPackId}`);
 

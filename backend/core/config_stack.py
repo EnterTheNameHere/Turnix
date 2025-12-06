@@ -227,7 +227,7 @@ class ConfigStack:
         self._version += 1
     
     def setOverlay(self, *, modId: str | None, assetId: str | None, path: str, value: Any) -> None:
-        """Set a temporary runtime override at path for this (modId, assetId) context."""
+        """Set a temporary override at path for this (modId, assetId) context."""
         from backend.core.dictpath import setByPath
         self._ensureOverlay(modId=modId, assetId=assetId)
         name = self._overlayName(modId, assetId)

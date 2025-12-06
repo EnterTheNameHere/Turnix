@@ -16,16 +16,16 @@ from backend.app.globals import (
 from backend.content.packs import PackResolver, ResolvedPack
 from backend.content.runtime_bootstrap import (
     _canonicalAppPackId,
-    _defaultInstanceId,
+    _defaultAppInstanceId,
     _extractMods,
-    _generateRuntime,
+    _generateAppInstance,
 )
 from backend.content.saves import SaveManager
 from backend.core.logger import getModLogger
 from backend.mods.loader import loadPythonMods
 from backend.rpc.api import registerCapabilityInstance, unregisterCapability
 from backend.rpc.broadcast import pushEvent
-from backend.runtimes.persistence import loadRuntime
+from backend.runtimes.persistence import loadAppInstance
 from backend.views.registry import viewRegistry
 
 logger = getModLogger("main-menu-service")
@@ -54,10 +54,10 @@ class _MainMenuCapability:
             return {"appPacks": self._listAppPacks()}
         if path == "listSaves":
             return {"saves": self._listSaves()}
-        if path == "generateRuntime":
+        if path == "generateAppInstance":
             payload = dict(args[0]) if args else {}
             async with self._lock:
-                return await self._generateRuntime(payload)
+                return await self._generateAppInstance(payload)
         if path == "loadSave":
             payload = dict(args[0]) if args else {}
             async with self._lock:
@@ -113,7 +113,7 @@ class _MainMenuCapability:
                     manifest = _readManifest(saveDir) or {}
                     entries.append({
                         "appPackId": appDir.name,
-                        "runtimeInstanceId": saveDir.name,
+                        "appInstanceId": saveDir.name,
                         "label": manifest.get("label"),
                         "savedTs": manifest.get("savedTs"),
                     })
@@ -123,31 +123,31 @@ class _MainMenuCapability:
             logger.exception("Listing saves failed")
         return entries
     
-    async def _generateRuntime(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _generateAppInstance(self, payload: dict[str, Any]) -> dict[str, Any]:
         resolver = PackResolver()
         # Prime resolver
         resolver.listPacks()
         appPack = self._requireAppPack(resolver, payload.get("appPackId"))
         
         canonicalId = _canonicalAppPackId(appPack)
-        runtimeInstanceId = str(payload.get("runtimeInstanceId") or _defaultInstanceId(appPack))
+        appInstanceId = str(payload.get("appInstanceId") or _defaultAppInstanceId(appPack))
         
         baseDir = getRootsService().getWriteDir("saves")
         appKey = SaveManager().appIdToKey(canonicalId)
-        saveDir = _generateRuntime(
+        saveDir = _generateAppInstance(
             appPack=appPack,
             appKey=appKey,
-            runtimeInstanceId=runtimeInstanceId,
+            appInstanceId=appInstanceId,
             baseDir=baseDir,
         )
         
-        runtimeInstance = loadRuntime(saveDir)
-        await self._activateRuntime(runtimeInstance, appPack)
+        appInstance = loadAppInstance(saveDir)
+        await self._activateAppInstance(appInstance, appPack)
         
         return {
             "ok": True,
             "appPackId": canonicalId,
-            "runtimeInstanceId": runtimeInstance.id,
+            "appInstanceId": appInstance.id,
             "saveDir": str(saveDir),
         }
     
@@ -157,22 +157,22 @@ class _MainMenuCapability:
         resolver.listPacks()
         
         appPack = self._requireAppPack(resolver, payload.get("appPackId"))
-        runtimeInstanceId = str(payload.get("runtimeInstanceId") or "").strip()
-        if not runtimeInstanceId:
-            raise ValueError("runtimeInstanceId must be provided")
+        appInstanceId = str(payload.get("appInstanceId") or "").strip()
+        if not appInstanceId:
+            raise ValueError("appInstanceId must be provided")
         
-        binding = SaveManager().bind(appPackId=_canonicalAppPackId(appPack), instanceId=runtimeInstanceId, create=False)
+        binding = SaveManager().bind(appPackId=_canonicalAppPackId(appPack), instanceId=appInstanceId, create=False)
         manifestPath = binding.saveDir / "save.json5"
         if not manifestPath.exists():
             raise FileNotFoundError(f"Save manifest not found at {manifestPath}")
         
-        runtimeInstance = loadRuntime(binding.saveDir)
-        await self._activateRuntime(runtimeInstance, appPack)
+        appInstance = loadAppInstance(binding.saveDir)
+        await self._activateAppInstance(appInstance, appPack)
         
         return {
             "ok": True,
             "appPackId": _canonicalAppPackId(appPack),
-            "runtimeInstanceId": runtimeInstance.id,
+            "appInstanceId": appInstance.id,
         }
     
     def _requireAppPack(self, resolver: PackResolver, appPackId: Any) -> ResolvedPack:
@@ -184,20 +184,20 @@ class _MainMenuCapability:
             raise ValueError(f"AppPack '{appPackId}' not found")
         return appPack
     
-    async def _activateRuntime(self, runtimeInstance: Any, appPack: ResolvedPack) -> None:
+    async def _activateAppInstance(self, appInstance: Any, appPack: ResolvedPack) -> None:
         allowedMods = _extractMods(appPack)
-        runtimeInstance.setAllowedPacks(allowedMods)
+        appInstance.setAllowedPacks(allowedMods)
         
         kernel = getKernel()
-        kernel.switchRuntime(runtimeInstance)
-        PROCESS_REGISTRY.register("runtime.active.appPack", appPack, overwrite=True)
+        kernel.switchAppInstance(appInstance)
+        PROCESS_REGISTRY.register("appInstance.active.appPack", appPack, overwrite=True)
         
-        frontendIndex, backendLoaded, backendFailed = await self._reloadMods(runtimeInstance, appPack, allowedMods)
+        frontendIndex, backendLoaded, backendFailed = await self._reloadMods(appInstance, appPack, allowedMods)
         await self._refreshViews(appPack, frontendIndex, backendLoaded, backendFailed)
     
     async def _reloadMods(
         self,
-        runtimeInstance: Any,
+        appInstance: Any,
         appPack: ResolvedPack,
         allowedMods: set[str]
     ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -208,17 +208,17 @@ class _MainMenuCapability:
             settings=cfgSnapshot,
             allowedModIds=allowedMods,
             appPack=appPack,
-            saveRoot=getattr(runtimeInstance, "saveRoot", None),
+            saveRoot=getattr(appInstance, "saveRoot", None),
         )
         
         print("\033[92m    >>>> _reloadMods >>>>\033[0m", "loaded", loaded, "failed", failed)
         
-        runtimeInstance.setAllowedPacks(set(allowedMods))
-        runtimeInstance.backendPacksLoaded = list([{"id": mod.modId, "name": mod.name, "version": mod.version} for mod in loaded])
-        runtimeInstance.backendPacksFailed = list(failed)
+        appInstance.setAllowedPacks(set(allowedMods))
+        appInstance.backendPacksLoaded = list([{"id": mod.modId, "name": mod.name, "version": mod.version} for mod in loaded])
+        appInstance.backendPacksFailed = list(failed)
         PROCESS_REGISTRY.register("mods.services", services, overwrite=True)
         
-        return {}, runtimeInstance.backendPacksLoaded, runtimeInstance.backendPacksFailed
+        return {}, appInstance.backendPacksLoaded, appInstance.backendPacksFailed
     
     async def _refreshViews(
         self,
@@ -245,12 +245,12 @@ class _MainMenuCapability:
             except Exception:
                 logger.debug("Failed to refresh view '%s'", getattr(view, "id", "?"), exc_info=True)
         
-        # Ask clients to reload themselves so they reconnect with fresh runtime state
+        # Ask clients to reload themselves so they reconnect with fresh appInstance state
         await pushEvent(
             "turnix.client",
             {
                 "op": "reload",
-                "reason": "runtime_instance_switched",
+                "reason": "appInstance_switched",
             },
         )
     

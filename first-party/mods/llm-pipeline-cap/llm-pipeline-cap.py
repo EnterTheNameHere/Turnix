@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from backend.app.globals import getActiveRuntime
+from backend.app.globals import getActiveAppInstance
 from backend.core.logger import getModLogger
 from backend.pipeline.llmpipeline import LLMPipelineStages
 from backend.rpc.api import (
@@ -27,12 +27,12 @@ def onLoad(ctx) -> None:
     - subscribe("run", {runId}) → generic run events (messageDelta, runCompleted, etc.)
     - subscribe("stage", {runId, stage}) → lightweight stage stream (e.g. ParseStreamedResponse)
     """
-    runtime = getActiveRuntime()
-    if not runtime or not runtime.mainSession:
-        logger.error("llm-pipeline-cap: missing runtime.mainSession. Skipping init.")
+    appInstance = getActiveAppInstance()
+    if not appInstance or not appInstance.mainSession:
+        logger.error("llm-pipeline-cap: missing appInstance.mainSession. Skipping init.")
         return
     
-    pipeline = runtime.mainSession.pipeline
+    pipeline = appInstance.mainSession.pipeline
     
     # Make sure we do not leave an old copy around (reloads).
     try:
