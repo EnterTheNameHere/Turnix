@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 import json5
 
-from backend.app.globals import configBool, getTracer, getRootsService
+from backend.app.globals import configBool, getTracer, getContentRootsService
 from backend.semver.semver import (
     SemVerPackVersion,
     SemVerPackRequirement,
@@ -490,7 +490,7 @@ def buildPackDescriptorRegistry() -> PackDescriptorRegistry:
     """
     tracer = getTracer()
     allowSymlinks = configBool("roots.followSymlinks", False)
-    contentRootsService = getRootsService()
+    contentRootsService = getContentRootsService()
     
     contentRoots = list(contentRootsService.contentRoots())
     saveRoots = list(contentRootsService.rootsFor("saves"))

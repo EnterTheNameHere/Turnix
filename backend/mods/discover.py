@@ -8,7 +8,7 @@ from typing import TypeAlias
 
 import json5
 
-from backend.app.globals import getTracer, getRootsService
+from backend.app.globals import getTracer, getContentRootsService
 from backend.content.packs import ResolvedPack, PackResolver
 from backend.mods.manifest import ModManifest
 from backend.mods.roots_registry import getRoots as getRegisteredRoots
@@ -82,7 +82,7 @@ def _modSearchRoots(
         roots.extend(extraRoots)
     
     # Global configured content roots (first-party, third-party, custom, ...)
-    roots.extend(getRootsService().contentRoots())
+    roots.extend(getContentRootsService().contentRoots())
     
     dedupedRoots = _dedupe(roots)
     

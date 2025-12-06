@@ -72,7 +72,7 @@ def getPermissions() -> PermissionManager:
 
 
 
-def getRootsService() -> ContentRootsService:
+def getContentRootsService() -> ContentRootsService:
     roots = PROCESS_REGISTRY.get("roots.service")
     if roots is None:
         raise ReactorScramError(

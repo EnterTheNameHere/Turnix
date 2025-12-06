@@ -11,7 +11,7 @@ from backend.app.globals import (
     getConfigService,
     getKernel,
     getModServices,
-    getRootsService,
+    getContentRootsService,
 )
 from backend.content.packs import PackResolver, ResolvedPack
 from backend.app.bootstrap import (
@@ -67,7 +67,7 @@ class _MainMenuCapability:
     def _listAppPacks(self) -> list[dict[str, Any]]:
         resolver = PackResolver()
         packs = resolver.listPacks(kinds={"appPack"})
-        roots = getRootsService().contentRoots()
+        roots = getContentRootsService().contentRoots()
         
         def _rootKind(path: Path | None) -> str | None:
             if not path:
@@ -93,7 +93,7 @@ class _MainMenuCapability:
         return out
     
     def _listSaves(self) -> list[dict[str, Any]]:
-        savesRoot = getRootsService().getWriteDir("saves")
+        savesRoot = getContentRootsService().getWriteDir("saves")
         entries: list[dict[str, Any]] = []
     
         def _readManifest(saveDir: Path) -> dict[str, Any] | None:
@@ -132,7 +132,7 @@ class _MainMenuCapability:
         canonicalId = _canonicalAppPackId(appPack)
         appInstanceId = str(payload.get("appInstanceId") or _defaultAppInstanceId(appPack))
         
-        baseDir = getRootsService().getWriteDir("saves")
+        baseDir = getContentRootsService().getWriteDir("saves")
         appKey = SaveManager().appIdToKey(canonicalId)
         saveDir = _generateAppInstance(
             appPack=appPack,

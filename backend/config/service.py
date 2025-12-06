@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Final
 
-from backend.app.globals import getRootsService
+from backend.app.globals import getContentRootsService
 from backend.config.providers import DefaultsProvider, FileProvider, OverrideProvider, ViewProvider
 from backend.config.schema_loader import loadConfigSchemas
 from backend.config.store import ConfigStore
@@ -37,7 +37,7 @@ class ConfigService:
         
         # User config lives under the selected userdata root:
         #     <userdata-root>/config/global.json5
-        roots = getRootsService()
+        roots = getContentRootsService()
         userdataBase = roots.getWriteDir("userdata") # Creates <base>/userdata if missing
         userdataCfgDir = userdataBase / "config"
         try:
@@ -59,7 +59,7 @@ class ConfigService:
 
     def makeAppInstanceStore(self, *, appPack: ResolvedPack, appInstanceId: str) -> ConfigStore:
         validator = self.registry.getValidator("config", "appInstance")
-        roots = getRootsService()
+        roots = getContentRootsService()
         
         # TODO(runtime-config):
         #    This is a temporary, minimal implementation.
@@ -94,7 +94,7 @@ class ConfigService:
 
     def makePackStore(self, *, pack: ResolvedPack) -> ConfigStore:
         validator = self.registry.getValidator("config", f"pack:{pack.kind}")
-        roots = getRootsService()
+        roots = getContentRootsService()
         
         userdataBase = roots.getWriteDir("userdata")
         packConfigDir: Final = userdataBase / "config" / pack.kind

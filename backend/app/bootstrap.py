@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from backend.app.globals import getRootsService
+from backend.app.globals import getContentRootsService
 from backend.content.packs import PackResolver, ResolvedPack
 from backend.content.saves import SaveManager
 from backend.app.instance import AppInstance
@@ -188,7 +188,7 @@ def ensureAppInstanceForAppPack(
     baseCandidates: list[Path] = []
     if preferEmbeddedSaves:
         baseCandidates.append(appPack.rootDir / "saves")
-    baseCandidates.append(getRootsService().getWriteDir("saves"))
+    baseCandidates.append(getContentRootsService().getWriteDir("saves"))
     
     appKey = SaveManager().appIdToKey(canonicalId)
     saveDir = _discoverSaveDir(baseCandidates, appKey, appInstanceId)

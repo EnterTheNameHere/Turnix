@@ -7,7 +7,7 @@ from typing import Any, cast, Literal
 
 import json5
 
-from backend.app.globals import getRootsService
+from backend.app.globals import getContentRootsService
 
 __all__ = [
     "SaveDescriptor",
@@ -34,7 +34,7 @@ class SaveManager:
     Uses ContentRootsService precedence to choose the first writable saves/ root that exists (or can be created).
     """
     def _firstWritable(self, kind: Literal["userdata", "saves"]) -> Path:
-        roots = getRootsService()
+        roots = getContentRootsService()
         try:
             base = roots.getWriteDir(kind)
         except Exception as err:

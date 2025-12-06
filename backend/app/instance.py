@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from backend.app.globals import getRootsService, getTracer
+from backend.app.globals import getContentRootsService, getTracer
 from backend.core.ids import uuid_12
 from backend.memory.memory_layer import (
     DictMemoryLayer,
@@ -53,7 +53,7 @@ class AppInstance:
         self.id = appInstanceId or uuid_12("appInstanceId_")
         
         if saveBaseDirectory is None:
-            baseSaves = getRootsService().getWriteDir("saves")
+            baseSaves = getContentRootsService().getWriteDir("saves")
             self.saveRoot: Path = (Path(baseSaves) / self.appPackId / self.id).resolve()
         else:
             baseSaves = Path(saveBaseDirectory)
