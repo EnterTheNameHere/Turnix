@@ -1,4 +1,4 @@
-# backend/app/runtime_bootstrap.py
+# backend/app/bootstrap.py
 from __future__ import annotations
 import importlib.util
 import logging

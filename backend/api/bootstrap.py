@@ -6,7 +6,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from backend.app.globals import getActiveAppInstance, getActiveAppPack, config, configBool, getTracer
-from backend.app.runtime_bootstrap import buildViewContextForAppInstance
+from backend.app.bootstrap import buildViewContextForAppInstance
 from backend.mods.roots_registry import registerRoots
 from backend.views.registry import viewRegistry
 
