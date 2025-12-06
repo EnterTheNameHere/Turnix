@@ -38,7 +38,7 @@ class View:
     ):
         self.id: str = viewId or uuid_12("view_")
         self.viewKind: str = viewKind or "main"
-        self.appPackId: str = appPackId or "turnix@main_menu"
+        self.appPackId: str = appPackId or "main-menu"
         self.frontendModsIndex: dict[str, Any] = {}
         
         self._traceSpan: TraceSpan | None = None

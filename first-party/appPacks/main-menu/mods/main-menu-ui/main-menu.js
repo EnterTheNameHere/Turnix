@@ -138,7 +138,7 @@ const STYLE = `
 }
 `;
 
-const _APP_PACK_ID = 'Turnix@main-menu';
+const _APP_PACK_ID = 'main-menu';
 
 function ensureStyles() {
     if(document.getElementById('turnix-main-menu-style')) return;

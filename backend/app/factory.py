@@ -45,7 +45,7 @@ def createApp(*, extraRouters: Sequence[APIRouter] = (), initialRuntime: Runtime
     activeAppPack = None
     if initialRuntime is None:
         runtimeInstance, appPack = ensureRuntimeForAppPack(
-            "Turnix@main-menu",
+            "main-menu",
             preferEmbeddedSaves=True
         )
         activeAppPack = appPack

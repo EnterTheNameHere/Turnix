@@ -9,7 +9,7 @@ from backend.memory.memory_layer import MemoryObject
 from backend.runtimes.instance import RuntimeInstance
 from backend.runtimes.persistence import save
 
-APP_PACK_ID = "Turnix@ai-chat"
+APP_PACK_ID = "ai-chat"
 APP_PACK_DISPLAY_NAME = "AI Chat"
 DEFAULT_RUNTIME_INSTANCE_ID = "ai-chat-runtime"
 

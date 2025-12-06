@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 
-APP_PACK_ID = "Turnix@main-menu"
+APP_PACK_ID = "main-menu"
 DEFAULT_RUNTIME_INSTANCE_ID = "turnix-main-menu"
 
 
