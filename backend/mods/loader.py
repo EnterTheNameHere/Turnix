@@ -12,14 +12,15 @@ from backend.app.globals import getPermissions, getTracer
 from backend.core.permissions import PermissionManager, GrantPermission, parseCapabilityRange
 from backend.content.packs import ResolvedPack
 from backend.mods.constants import PY_RUNTIMES
-from backend.mods.discover import scanMods
+from backend.mods.discover import scanMods, ModMap
+from backend.mods.roots_registry import getRoots as getRegisteredRoots
 from backend.mods.manifest import RuntimeSpec, ModManifest
 
 logger = logging.getLogger(__name__)
 
 
 
-@dataclass
+@dataclass(frozen=True)
 class LoadedPyMod:
     modId: str
     name: str
@@ -81,7 +82,7 @@ async def loadPythonMods(
         span = None
     
     try:
-        discovered = scanMods(
+        discovered: ModMap = scanMods(
             allowedIds=allowedModIds,
             appPack=appPack,
             saveRoot=saveRoot,
@@ -267,7 +268,35 @@ async def loadPythonMods(
 
 
 
-def autoGrantPermissionsForMods(perms: PermissionManager, discovered: dict[str, tuple[Path, Path, ModManifest, str]]) -> None:
+async def loadPythonModsForMount(
+    viewKind: str,
+    *,
+    settings: dict[str, Any],
+    allowedModIds: Iterable[str] | None = None,
+    appPack: ResolvedPack | None = None,
+    saveRoot: Path | None = None,
+) -> tuple[list[LoadedPyMod], list[dict[str, Any]], dict[str, Any]]:
+    """
+    Convenience wrapper to load Python mods for a specific view/mount.
+    
+    Resolution rules mirror scanModsForMount():
+      - Mount-specific roots (registered for this viewKind)
+      - Optional appPack.rootDir
+      - Optional saveRoot
+      - Global content roots
+    """
+    extraRoots = getRegisteredRoots(viewKind) or ()
+    return await loadPythonMods(
+        settings=settings,
+        allowedModIds=allowedModIds,
+        appPack=appPack,
+        saveRoot=saveRoot,
+        extraRoots=extraRoots,
+    )
+
+
+
+def autoGrantPermissionsForMods(perms: PermissionManager, discovered: ModMap) -> None:
     """
     Iterate manifests/runtimes and grant requested permissions programmatically for each modId.
     """
@@ -299,7 +328,7 @@ def autoGrantPermissionsForMods(perms: PermissionManager, discovered: dict[str, 
 
 
 
-def _quickImport(path: Path):
+def _quickImport(path: Path) -> Any:
     spec = importlib.util.spec_from_file_location(path.stem, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Could not load module from {path}")
