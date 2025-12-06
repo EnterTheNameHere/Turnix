@@ -1,277 +1,214 @@
-# Turnix Root System & Discovery Specification
+TURNIX ROOT SYSTEM & DISCOVERY SPECIFICATION (PLAIN TEXT VERSION)
+Status: Finalized model (2025-11)
 
-**Status:** Finalized model (2025-11)
+Authority note: docs/pack-and-asset-resolution.txt holds the authoritative rules for pack discovery, PackMeta construction, and resolution invariants. This document describes the root layout and complements those rules without redefining them.
 
-**Authority note:** `docs/pack-and-asset-resolution.txt` holds the authoritative rules for pack discovery, PackMeta construction, and resolution invariants. This document describes the root layout and complements those rules without redefining them.
+Scope: Root selection, directory semantics, discovery rules, write-permissions, and pack constraints.
 
-**Scope:** Root selection, directory semantics, discovery rules, write-permissions, and pack constraints.
+OVERVIEW
 
-## 1. Overview
+Turnix resolves all filesystem-related paths through a layered root selection system.
 
-Turnix resolves all filesystem-related paths through a layered *root selection system*.
+Each root contains exactly five top-level directories:
+first-party/
+third-party/
+custom/
+userdata/
+saves/
 
-Each root contains exactly **five** top-level directories:
+Only userdata/ and saves/ are writable during execution.
 
-- `first-party/`
-- `third-party/`
-- `custom/`
-- `userdata/`
-- `saves/`
+Pack discovery (mods, viewPacks, contentPacks, appPacks, savePacks) must cover these roots as defined by PackMeta registry rules:
+first-party/
+third-party/
+custom/
+saves/
 
-Only `userdata/` and `saves/` are writable at runtime.
+userdata/ never contains pack manifests.
 
-Pack discovery (mods, viewPacks, contentPacks, appPacks, savePacks) must cover these roots as defined by the PackMeta registry rules:
-- `first-party/`
-- `third-party/`
-- `custom/`
-- `saves/`
+PRIORITY RULES FOR ROOT SELECTION
 
-`userdata/` never contains pack manifests.
+Roots are resolved in descending priority.
 
-## 2. Priority Rules for Root Selection
+Priority 1 — Command-line flags
+--root=<dir> defines root for all five directories
+--userdata=<dir> overrides userdata path only
+--saves=<dir> overrides saves path only
 
-Roots are resolved in descending priority:
-
-### Priority 1 — Command-line flags
-
-```ini
---root=<dir>       # defines root for all 5 directories  
---userdata=<dir>   # overrides userdata path only
---saves=<dir>      # overrides saves path only
-```
 Rules:
-- `--root=` is authoritative; if provided, it becomes primary root.
-- `--userdata=` and `--saves=` override only their respective directories, even if `--root` is set.
-- When a directory is chosen, create it if it does not exist.
-- Create all required subdirectories inside `--root`.
+--root is authoritative; if provided, it becomes the primary root.
+--userdata and --saves override only their respective directories.
+Selected directories are created if missing.
+All required subdirectories inside the chosen --root must be created.
 
-### Priority 2 — Environment variable
-
-```ini
+Priority 2 — Environment variable
 TURNIX_ROOT=/absolute/path
-```
-Rules:
-- Must be **absolute path**.
-- If directory doesn't exist → create it.
-- If subdirectories(`first-party`, `third-party`, `custom`, `userdata`, `saves`) don't exist → create them.
-- Does **not override** any directory controlled by command-line flags.
-- Contributes an additional root for discovery (lower priority than CLI).
-
-### Priority 3 — Platform standard directories
-
-Example locations:
-- Windows: `%APPDATA%/Turnix/`
-- Linux: `~/.local/share/turnix/`
-- macOS: `~/Library/Application Support/turnix/`
 
 Rules:
-- Only used if a directory named `turnix/` already exists.
-- Never created by Turnix automatically.
-- Contribute lower-priority discovery roots.
-- Do not override userdata/saves if higher-priority values exist.
+Must be absolute.
+Created if missing.
+Subdirectories created if missing.
+Does not override command-line flags.
+Adds a lower-priority root for pack discovery.
 
-> **Note:** Multiple platform-standard directories may exist (for example, both `%APPDATA%/Turnix/` and
-> `%LOCALAPPDATA%/Turnix/`). Each of them becomes its own discovery root, ordered after environment
-> variables and before the repo root. Turnix never creates these directories automatically.
+Priority 3 — Platform-standard directories
+Examples:
+Windows: %APPDATA%/Turnix/
+Linux: ~/.local/share/turnix/
+macOS: ~/Library/Application Support/turnix/
 
-### Priority 4 — Repo root (fallback)
+Rules:
+Used only if the directory already exists.
+Never created automatically.
+Added as low-priority pack discovery roots.
+Do not override userdata or saves if higher priority roots exist.
 
-- Must exist.
-- Must contain all five directories.
-  If not → **ReactorScramError**.
-- Always included as the lowest-priority root.
+Priority 4 — Repo root (fallback)
+Must exist.
+Must contain all five directories.
+Failure to meet these conditions results in a ReactorScramError.
+Always included as the lowest-priority root.
 
-## 3. Directory Semantics
+DIRECTORY SEMANTICS
 
-### 3.1 Writable vs. Read-only:
-| Directory | Writable at runtime | Purpose |
-| :--- | :---: | :--- |
-| `first-party/` | No | Turnix-shipped packs |
-| `third-party/` | No | Downloaded packs (mods/content/view/app) |
-| `custom/` | No | User project workspace; editable by user, but runtime does not write |
-| `userdata/` | Yes | Global non-app-specific config/state |
-| `saves/` | Yes | Per-app save game data |
+Writable vs read-only:
+first-party/ read-only shipped packs
+third-party/ read-only downloaded packs
+custom/ read-only during execution (user workspace)
+userdata/ writable global config/state across AppInstances
+saves/ writable per-AppInstance save data
 
-### 3.2 *Why not write to -party or custom?*
-- Prevents overwriting shipped or downloaded content.
-- Prevents authoring mistakes during runtime.
-- Keeps mod reproducibility.
-- Makes "developer workspace" manual rather than implicit.
-- Saves and global config have well-defined locations.
+Reasons for prohibiting writes to -party and custom:
+Prevents modification of shipped or downloaded packs.
+Prevents corruption of reproducible packs.
+Separates save data from authored content.
+Keeps the authoring workflow explicit.
 
-## 4. Pack Discovery
+PACK DISCOVERY
 
 Path traversal must never escape root boundaries.
 
-### 4.1 Where packs may appear
+Where packs may appear:
+first-party/
+third-party/
+custom/
+saves/
 
-Packs (mods, viewPacks, contentPacks, appPacks, savePacks) are discoverable only in subdirectories of:
-- `first-party/`
-- `third-party/`
-- `custom/`
-- `saves/`
+userdata/ never contains pack manifests.
 
-`userdata/` never contains pack manifests.
+saves/ primarily contains SavePacks. SavePacks may optionally contain copies of packs, which must override external versions when constructing the PackMeta registry.
 
-`saves/` primarily contains SavePacks. A SavePack may contain **copies** of mods/content/view/app packs. If present, these overrides must be used to resolve pack versions for that save when constructing the PackMeta registry.
-
-### 4.2 Directory scanning rules
-
+Directory scanning rules:
 For each root:
+Scan only immediate child directories of first-party, third-party, custom.
+If a directory contains a manifest.json5, treat it as a pack root.
+Do not recurse under discovered pack roots.
+Top-level root directory may not contain manifests.
 
-#### 1. **Scan only the immediate subdirectories of the pack directories**, e.g.:
+Symlinks:
+Controlled by roots.followSymlinks.
+If enabled, the resolved path must stay inside an allowed pack directory.
+Symlink loops must be rejected.
 
-```bash
-first-party/*
-third-party/*
-custom/*
-```
+Pack manifest requirements:
+Each manifest must declare kind, one of:
+appPack
+viewPack
+mod
+contentPack
+savePack
 
-#### 2. If a subdirectory contains a recognized manifest (e.g. `manifest.json5`), treat it as a **pack root**.
+The loader rejects missing or ambiguous kinds.
+The kind defines loading rules and nesting allowed.
+Pack id must follow naming rules in pack-manifest-structure.txt.
 
-#### 3. **Stop recursion** below a discovered pack root – internal sub-folders are left to the loader of that pack.
+PACK TYPES AND NESTING
 
-#### 4. No manifests are allowed in top-level directory.
+AppPack:
+Defines an application or game.
+Provides initialization logic to create an AppInstance.
+May contain viewPacks and contentPacks.
 
-### 4.3 Symlinks
+ViewPack:
+Defines UI and view-specific content.
+Instantiable as a Turnix View (such as main or tracing-monitor).
+May contain contentPacks.
 
-Symlinks may be **allowed or forbidden** depending on Turnix configuration (`roots.followSymlinks`).
+Mod:
+Provides backend or frontend logic.
+Loaded by the mod loader.
+May depend on other mods.
 
-When allowed:
-- **"resolved path MUST remain inside one of the allowed pack"**
-- **"symlink loops must be detected and rejected"**
+ContentPack:
+Arbitrary assets or data.
+May be nested inside AppPacks or ViewPacks.
 
-### 4.4 Pack Manifest Requirements
+SavePack:
+Represents the saved state of an AppInstance.
+Located under saves/<appPackId>/<appInstanceId>/.
+May contain copied pack versions that override external ones.
 
-Every pack manifest must explicitly declare its **kind** (see `docs/pack-manifest-structure.txt` for the full schema). Valid values are:
+Nesting model:
+ContentPack may contain other ContentPacks or Mods.
+ViewPack may contain ContentPacks.
+AppPack may contain ViewPacks or ContentPacks.
+SavePack may contain AppPacks, ViewPacks, or ContentPacks.
 
-- `appPack`
-- `viewPack`
-- `mod`
-- `contentPack`
-- `savePack`
+ASSET RESOLUTION AND ROUTING
 
-Rules:
-- `kind` must appear at the top level of the manifest.
-- The value must be exactly one of the permitted pack kinds.
-- The loader must reject missing or ambiguous values.
-- The declared `kind` determines how the pack is loaded and which nesting rules apply.
-- Pack identifiers (`id`) must follow the character rules from `pack-manifest-structure.txt` (no `@`, `.`, spaces, or semver strings).
+Packs may contain code files, structured text, media files, binary files.
 
-## 5. Pack Types and Nesting
+Assets are served through routes such as:
+/packs/<packId>/assets/<assetPath>
 
-Turnix defines the following types of packs:
+Execution may load assets only from:
+first-party/
+third-party/
+custom/
+saves/<appPackId>/<appInstanceId>/
+explicit allowlisted backend/frontend directories
 
-#### 5.1 **AppPack**
-- Defines a full application or game.
-- Provides initialization logic for creating a runtime.
-- May contain viewPacks and contentPacks.
+Execution must never load arbitrary filesystem paths.
 
-#### 5.2 **ViewPack**
-- Defines UI and view-specific content.
-- Instantiable as a Turnix `View` (`main`, `tracing-monitor`, `vtuber-rig`, etc.)
-- May contain contentPacks.
+SAVING RULES
 
-#### 5.3 **Mod**
-- Functional code providing backend or frontend logic.
-- Can depend on other mods.
-- Loaded through the mod manager/loader.
+Global configuration:
+Stored in <root>/userdata/
+--userdata overrides the path.
 
-#### 5.4 **ContentPack**
-- Arbitrary assets or data
-- May be nested inside AppPack or ViewPack.
+AppInstance saves:
+Stored in <root>/saves/<appPackId>/<appInstanceId>/
+Packs copied inside SavePacks override external versions.
 
-#### 5.5 **SavePack**
-- Defines saved state of active `RuntimeInstance`.
-- Expected to be found at `saves/` directory, under `<appPackId>` and `<runtimeInstanceId>` sub-directories.
-- Can contain copies of packs copied during appPack initialization, in which case it should load those packs with higher priority for compatibility.
+Never save into:
+first-party/
+third-party/
+custom/
 
-**Nesting model**:
-```
-ContentPack := ContentPack | Mod (multiple allowed)
+EFFECTIVE ROOT RESOLUTION SUMMARY
 
-ViewPack := ContentPack (multiple)
+Pack discovery search order:
 
-AppPack := ViewPack | ContentPack (multiple)
+--root
 
-SavePack := AppPack | ViewPack | ContentPack (multiple)
-```
+TURNIX_ROOT
 
-## 6. Asset Resolution and Routing
+Platform-standard locations (only if turnix/ exists)
 
-Files inside any pack can include:
-- Code (`.py`, `.js`, etc.)
-- UTF-8 text (`json`, `json5`, `jsonl`, `txt`, etc.)
-- Media files (images, audio, video, etc.)
-- Specialized formats (sqlite, embeddings, etc.)
+Repo root
 
-Turnix exposes then via FastAPI routes such as:
-`/packs/<packId>/assets/<assetPath>`
+Writable locations:
+userdata/
+saves/
 
-Runtime code may load only from:
-- `first-party/`
-- `third-party/`
-- `custom/`
-- `saves/<appPackId>/<runtimeInstanceId>/` - if packs are copied inside it
-- explicit "allowlisted" code directories like `/backend/` or `/frontend/`
+No other directory is writable during execution.
 
-Runtime code must **never load arbitrary paths**.
+INVARIANTS
 
-## 7. Saving Rules
-
-### 7.1 Global configuration
-
-Always saved to:
-```bash
-<root>/userdata/
-```
-If `--userdata=` is used, that wins over all others. This folder never contains packs.
-
-### 7.2 Game/App saves
-
-Saved to:
-```bash
-<root>/saves/<appPackId>/<runtimeInstanceId>/
-```
-
-If `--saves=` is used, that wins over all others. If pack copies exist inside the SavePack, they take **priority** over any external version for this runtime instance.
-
-### 7.3 Never save anything into
-- `first-party/`
-- `third-party/`
-- `custom/`
-
-Creator workflows can use the filesystem manually or through authoring tools, but runtime **never** writes there.
-
-## 8. Effective Root Resolution Summary
-
-Runtime loads from directories in the following order:
-```markdown
-1. --root
-2. TURNIX_ROOT
-3. platform standard directories (if `turnix/` exists there)
-4. repo-root
-```
-
-Runtime priority for **writing** (only one):
-```markdown
-Writes allowed only in:
-<effective-userdata>/
-<effective-saves>/
-```
-
-## 9. Invariants (Hard Rules)
-
-- No manifest may exist in the root directory itself.
-
-  Only **inside** subdirectories of `first-party/`, `third-party`, `custom/`.
-
-- Runtime **must not** write into shipped pack directories.
-
-  Use `userdata/` or `saves/<appPackId>/<runtimeInstanceId>/` instead.
-
-- Pack scanning or loading must never traverse outside the permitted directories, including symlinks.
-- Discovery must build a complete PackMeta registry across `first-party/`, `third-party/`, `custom/`, and `saves/` before any resolution occurs; resolution itself never touches the filesystem.
-- Repo-root must contain all 5 directories (`first-party/`, `third-party`, `custom/`, `userdata/`, `saves/`) or launch fails.
-- Effective search path order is always deterministic.
-- If a SavePack contains a pack copy whose version conflicts with first/third/custom packs, the SavePack version must win.
+No manifest may exist directly in a root directory.
+The Turnix process must not write into shipped pack directories.
+Pack discovery must never escape allowed directories.
+PackMeta registry must always be fully built before resolution.
+Repo root must contain all required directories.
+Search paths are deterministic.
+If a SavePack contains pack copies that conflict in version, the SavePack version wins.
