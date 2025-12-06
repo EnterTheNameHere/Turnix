@@ -13,7 +13,7 @@ class ResolvedPack:
     """
     Resolved pack metadata the engine can pass around without re-discovery.
     """
-    id: str                     # Canonical identifier, e.g. "Turnix@main_menu" or "aiChat"
+    id: str                     # Identifier, e.g. "main_menu" or "aiChat"
     name: str                   # Human-friendly name
     version: str                # SemVer
     root: Path                  # root category folder (e.g. assets/appPacks)
