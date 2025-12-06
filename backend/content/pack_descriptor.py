@@ -1,12 +1,15 @@
-# backend/content/pack_meta.py
+# backend/content/pack_descriptor.py
+from __future__ import annotations
 
 import json
 import logging
 import re
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from collections import defaultdict
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import json5
 
@@ -21,6 +24,11 @@ from backend.semver.semver import (
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "AssetMeta",
+    "PackKind",
+    "LayerKind",
+    "VisibilityKind",
+    "PackRequest",
     "PackDescriptor",
     "PackDescriptorRegistry",
     "buildPackDescriptorRegistry",
@@ -33,38 +41,104 @@ _ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 
-RootLayer = Literal["content", "saves"]
+class PackKind(Enum):
+    APP = "appPack"
+    VIEW = "viewPack"
+    MOD = "mod"
+    CONTENT = "contentPack"
+    SAVE = "savePack"
 
 
 
-@dataclass(frozen=True)
+class LayerKind(Enum):
+    FIRST_PARTY = "first-party"
+    THIRD_PARTY = "third-party"
+    CUSTOM = "custom"
+    SAVES = "saves"
+
+
+
+class VisibilityKind(Enum):
+    PUBLIC = "public"
+    PRIVATE = "private"
+
+
+
+@dataclass(slots=True)
+class AssetMeta:
+    # Logical name used in lookups (e.g. "Sandy.png" or "config.json")
+    logicalName: str
+    # Path relative to the pack root (e.g. Path("assets/Sandy.png"))
+    relPath: Path
+    # High-level asset kind: "image", "config", "text", "binary", ...
+    kind: str
+
+
+
+@dataclass(slots=True)
+class PackRequest:
+    # From "<author>@" prefix in PackRefString, or None if omitted
+    author: str | None
+    # Hierarchical id ("ui.trace.trace-view")
+    packTreeId: str
+    # Semantic version requirement (parsed), or None if no constraint
+    semverRequirement: SemVerPackRequirement | None
+    # Optional filter by pack kind (mod, appPack, ...)
+    kind: PackKind | None = None
+
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class PackDescriptor:
     """
-    Canonical, generalized representation of a single pack.
+    Canonical, immutable description of a single discovered pack.
+
+    Built during discovery and stored in PackDescriptorRegistry.
+    Resolution uses only these descriptors, never the filesystem.
     """
-    id: str
+    # Identity / hierarchy
+    localId: str
+    packTreeId: str
+    kind: PackKind
+    
+    # Author + version (declared vs effective)
+    declaredAuthor: str | None
+    declaredSemVerPackVersion: SemVerPackVersion | None
+    effectiveAuthor: str
+    effectiveSemVerPackVersion: SemVerPackVersion | None
+    isVersionAgnostic: bool = False
+    
+    # Location and layer
+    layer: LayerKind            # first-party / third-party / custom / saves
+    baseRoot: Path              # Root under ContentRootsService
+    packRoot: Path              # Directory containing this pack's manifest
+    manifestPath: Path          # Full path to manifest file
+    parent: "PackDescriptor | None" = None
+    
+    # Visibility / inheritance
+    visibility: VisibilityKind
+    importFromParent: bool
+    exports: Mapping[str, object] | None
+    
+    # Compatibility hints (purely informational)
+    recommendedPacks: Sequence[PackRequest] = field(default_factory=tuple)
+    supportedPacks: Sequence[PackRequest] = field(default_factory=tuple)
+    unsupportedPacks: Sequence[PackRequest] = field(default_factory=tuple)
+
+    # Assets and runtime entries
+    assets: Mapping[str, AssetMeta] = field(default_factory=dict)
+    # e.g. { "python": [Path("service.py")], "javascript": [Path("ui.js")] }
+    runtimeEntries: Mapping[str, Sequence[Path]] = field(default_factory=dict)
+    
+    # UI / descriptive metadata (from manifest or derived)
+    # User-facing pack name. Defaults to manifest id when omitted.
     name: str
-    kind: str
-    # Plain version string from manifest, or None if missing/empty.
-    version: str | None
-    # Parsed semantic version if version is SemVer, else None.
-    semver: SemVerPackVersion | None
+    description: str | None
     # Canonical author name (string) or None
     authorName: str | None
-    description: str | None
-    # Where this pack came from: content roots (first-party/third-party/custom) or saves.
-    rootLayer: RootLayer
-    # Base root under which the pack was discovered (e.g. a single content root or a saves root)
-    baseRoot: Path
-    # Directory that contains the manifest - the "pack root".
-    packRoot: Path
-    # Full manifest file path.
-    manifestPath: Path
+    
     # Full raw JSON/JSON5 manifest object.
     rawJson: Mapping[str, Any]
-    
-    def hasSemVer(self) -> bool:
-        return self.semver is not None
 
 
 
@@ -74,111 +148,145 @@ class PackDescriptorRegistry:
     
     Responsibilities:
       - Hold PackDescriptor instances discovered from roots.
-      - Provide efficient lookup by (kind, id[, authorName]).
-      - Provide SemVer-based resolution for a given (kind, id[, author], requirement)
+      - Provide efficient lookup by packTreeId.
+      - Provide SemVer-based resolution for a given
+        (packTreeId[, kind][, author], requirement).
     
     SavePack preference:
-      - Packs discovered under "saves" roots (rootLayer == "saves") are preferred
+      - Packs discovered under LayerKind.SAVES are preferred
         over content-layer packs when versions tie.
     """
     
     def __init__(self, metas: Iterable[PackDescriptor]):
-        metasTuple = tuple(metas)
-        self._metas: tuple[PackDescriptor, ...] = metasTuple
+        self._byTreeId: dict[str, list[PackDescriptor]] = defaultdict(list)
+        self._all: list[PackDescriptor] = []
         
-        # (kind, id) -> [PackDescriptor, ...]
-        self._byKindId: dict[tuple[str, str], list[PackDescriptor]] = {}
-        # (kind, authorName, id) -> [PackDescriptor, ...]
-        self._byKindAuthorId: dict[tuple[str, str, str], list[PackDescriptor]] = {}
+        for desc in metas:
+            self.register(desc)
+    
+    # ----- Registration -----
+    
+    def register(self, desc: PackDescriptor) -> None:
+        # Reject exact duplicates in the same layer
+        for existing in self._byTreeId[desc.packTreeId]:
+            if (
+                existing.kind == desc.kind
+                and existing.effectiveAuthor == desc.effectiveAuthor
+                and existing.effectiveSemVerPackVersion == desc.effectiveSemVerPackVersion
+                and existing.layer == desc.layer
+            ):
+                msg = (
+                    "Duplicate pack descriptor: "
+                    f"{desc.effectiveAuthor}@{desc.packTreeId}:"
+                    f"{desc.effectiveSemVerPackVersion} in layer {desc.layer}"
+                )
+                raise ValueError(msg)
         
-        for meta in metasTuple:
-            key = (meta.kind, meta.id)
-            self._byKindId.setdefault(key, []).append(meta)
-            
-            if meta.authorName:
-                akey = (meta.kind, meta.authorName, meta.id)
-                self._byKindAuthorId.setdefault(akey, []).append(meta)
+        self._byTreeId[desc.packTreeId].append(desc)
+        self._all.append(desc)
     
     # ----- Basic iteration -----
     
     def all(self) -> tuple[PackDescriptor, ...]:
-        return self._metas
+        return tuple(self._all)
     
-    def iterByKind(self, kind: str) -> Iterable[PackDescriptor]:
-        return (meta for meta in self._metas if meta.kind == kind)
+    def findByTreeId(self, packTreeId: str) -> list[PackDescriptor]:
+        return list(self._byTreeId.get(packTreeId, ()))
     
     # ----- Candidate lookup -----
     
-    def _candidates(
+    def findCandidates(
         self,
-        kind: str,
-        packId: str,
         *,
+        packTreeId: str,
+        kind: PackKind | None = None,
         author: str | None = None,
-        preferSaves: bool = True,
     ) -> list[PackDescriptor]:
-        if author:
-            key = (kind, author, packId)
-            candidates = list(self._byKindAuthorId.get(key, ()))
-        else:
-            key = (kind, packId)
-            candidates = list(self._byKindId.get(key, ()))
+        """
+        Return all descriptors that match the given packTreeId, optionally
+        filtered by kind and effectiveAuthor.
+        """
+        candidates = self._byTreeId.get(packTreeId, ())
+        result: list[PackDescriptor] = []
         
-        if not candidates:
-            return []
+        for desc in candidates:
+            if kind is not None and desc.kind != kind:
+                continue
+            if author is not None and desc.effectiveAuthor != author:
+                continue
+            result.append(desc)
         
-        if preferSaves:
-            # Save-layer packs first, then content-layer.
-            candidates.sort(key=lambda meta: (meta.rootLayer != "saves", str(meta.baseRoot), str(meta.packRoot)))
-        else:
-            candidates.sort(key=lambda meta: (str(meta.baseRoot), str(meta.packRoot)))
-        
-        return candidates
+        return result
     
     # ----- SemVer resolution -----
     
     def resolveBest(
         self,
-        kind: str,
-        packId: str,
         *,
+        packTreeId: str,
+        kind: PackKind | None = None,
         author: str | None = None,
         requirement: SemVerPackRequirement | None = None,
         preferSaves: bool = True,
     ) -> PackDescriptor | None:
         """
-        Resolve the "best" pack for (kind, packId[, author]) given an optional SemVer requirement.
+        Resolve the "best" pack for (packTreeId[, kind][, author]) given
+        an optional SemVer requirement.
         
         Rules:
           - If no candidates exist: returns None.
-          - SemVer candidates = those with meta.semver != None.
+          - SemVer candidates = those with a usable effectiveSemVerPackVersion.
           - If requirement is not None and no SemVer candidates exist:
                 returns None (cannot satisfy requirement).
           - If requirement is None and no SemVer candidates exist:
                 returns the first candidate after layering/order sorting.
           - If SemVer candidates exist:
                 uses SemVerResolver.matchCandidates, preserving candidate ordering
-                so SavePack-layer candidates win ties.
+                so LayerKind.SAVES candidates win ties.
         """
-        candidates = self._candidates(kind, packId, author=author, preferSaves=preferSaves)
+        candidates = self.findCandidates(
+            packTreeId=packTreeId,
+            kind=kind,
+            author=author,
+        )
         if not candidates:
             return None
         
+        # Layer preference: saves first if requested
+        if preferSaves:
+            candidates.sort(
+                key=lambda desc: (
+                    desc.layer != LayerKind.SAVES,
+                    str(desc.baseRoot),
+                    str(desc.packRoot),
+                )
+            )
+        else:
+            candidates.sort(
+                key=lambda desc: (
+                    str(desc.baseRoot),
+                    str(desc.packRoot),
+                )
+            )
+        
         semverCandidates: list[tuple[SemVerPackVersion, PackDescriptor]] = [
-            (meta.semver, meta) for meta in candidates if meta.semver is not None
+            (desc.effectiveSemVerPackVersion, desc)
+            for desc in candidates
+            if desc.effectiveSemVerPackVersion is not None
         ]
         
         if requirement is not None and not semverCandidates:
+            # Caller asked for a version constraint and nothing is versioned
             return None
         
         if requirement is None and not semverCandidates:
-            # No SemVer. Fall back to first candidate (after layering / baseRoot ordering)
+            # No version info at all. Just use the first after layering ordering.
             return candidates[0]
         
-        # SemVer-based resolution
         matchResult = SemVerResolver.matchCandidates(semverCandidates, requirement)
         if matchResult.best is None:
             return None
+        
         _bestVersion, bestMeta = matchResult.best
         return bestMeta
 
@@ -210,11 +318,11 @@ def _loadManifestFile(path: Path) -> Mapping[str, Any]:
 
 
 
-def _canonicalAuthorName(author: str | dict[str, Any] | None) -> str | None:
+def _canonicalAuthorName(author: str | Mapping[str, Any] | None) -> str | None:
     if isinstance(author, str):
         name = author.strip()
         return name or None
-    if isinstance(author, dict):
+    if isinstance(author, Mapping):
         nameVal = author.get("name")
         if isinstance(nameVal, str):
             name = nameVal.strip()
@@ -228,7 +336,7 @@ def _normalizePackDescriptor(
     rawJson: Mapping[str, Any],
     manifestPath: Path,
     baseRoot: Path,
-    rootLayer: RootLayer,
+    layer: LayerKind,
 ) -> PackDescriptor:
     packId = str(rawJson.get("id") or "").strip()
     if not packId or not _ID_RE.fullmatch(packId):
@@ -236,47 +344,107 @@ def _normalizePackDescriptor(
     
     name = str(rawJson.get("name") or "").strip() or packId
     
-    kind = str(rawJson.get("kind") or "").strip()
-    if not kind:
+    kindRaw = str(rawJson.get("kind") or "").strip()
+    if not kindRaw:
         raise ValueError(f"Missing kind in manifest {str(manifestPath)}")
-    
+    try:
+        kind = PackKind(kindRaw)
+    except ValueError as err:
+        raise ValueError(f"Unknown pack kind {kindRaw!r} in manifest {str(manifestPath)}") from err
+        
     versionVal = rawJson.get("version")
+    versionStr: str | None
     if isinstance(versionVal, str):
-        version = versionVal.strip() or None
+        versionStr = versionVal.strip() or None
     else:
-        version = None
+        versionStr = None
     
-    author: str | dict[str, Any] | None = rawJson.get("author")
-    if author is not None and not isinstance(author, (str, dict)):
-        author = None
-    
-    authorName = _canonicalAuthorName(author)
+    semver: SemVerPackVersion | None = None
+    if versionStr:
+        try:
+            semver = parseSemVerPackVersion(versionStr)
+        except Exception:
+            semver = None
+
+    authorRaw: str | Mapping[str, Any] | None = rawJson.get("author")
+    if authorRaw is not None and not isinstance(authorRaw, (str, Mapping)):
+        authorRaw = None
+    authorName = _canonicalAuthorName(authorRaw)
     
     description = rawJson.get("description")
     if not isinstance(description, str):
         description = None
     
-    semver: SemVerPackVersion | None = None
-    if version:
-        try:
-            semver = parseSemVerPackVersion(version)
-        except Exception:
-            semver = None
+    # Declared vs effective author/version (no parent support yet)
+    declaredAuthor = authorName
+    declaredSemVerPackVersion = semver
+    effectiveAuthor = declaredAuthor or "unknown"
+    effectiveSemVerPackVersion = declaredSemVerPackVersion
+    
+    # Hierarchy: for now, discovery does not build nested trees, so packTreeId == localId
+    packTreeId = packId
     
     packRoot = manifestPath.parent
     
+    # Visibility defaults:
+    visRaw = rawJson.get("visibility")
+    if isinstance(visRaw, str):
+        visRawNorm = visRaw.strip().lower()
+        if visRawNorm == "public":
+            visibility = VisibilityKind.PUBLIC
+        elif visRawNorm == "private":
+            visibility = VisibilityKind.PRIVATE
+        else:
+            visibility = VisibilityKind.PUBLIC if kind is PackKind.CONTENT else VisibilityKind.PRIVATE
+    else:
+        visibility = VisibilityKind.PUBLIC if kind is PackKind.CONTENT else VisibilityKind.PRIVATE
+    
+    # importFromParent defaults: false for viewPack, true otherwise
+    importFromParentRaw = rawJson.get("importFromParent")
+    if isinstance(importFromParentRaw, bool):
+        importFromParent = importFromParentRaw
+    else:
+        importFromParent = False if kind is PackKind.VIEW else True
+    
+    exportsRaw = rawJson.get("exports")
+    exports: Mapping[str, object] | None
+    if isinstance(exportsRaw, Mapping):
+        exports = exportsRaw
+    else:
+        exports = None
+
+    # Compatibility hints and assets/runtimeEntries
+    recommendedPacks: Sequence[PackRequest] = ()
+    supportedPacks: Sequence[PackRequest] = ()
+    unsupportedPacks: Sequence[PackRequest] = ()
+    assets: Mapping[str, AssetMeta] = {}
+    runtimeEntries: Mapping[str, Sequence[Path]] = {}
+    
     return PackDescriptor(
-        id=packId,
-        name=name,
+        localId=packId,
+        packTreeId=packTreeId,
         kind=kind,
-        version=version,
-        semver=semver,
-        authorName=authorName,
-        description=description,
-        rootLayer=rootLayer,
+        declaredAuthor=declaredAuthor,
+        declaredSemVerPackVersion=declaredSemVerPackVersion,
+        effectiveAuthor=effectiveAuthor,
+        effectiveSemVerPackVersion=effectiveSemVerPackVersion,
+        isVersionAgnostic=False,
+        layer=layer,
         baseRoot=baseRoot,
         packRoot=packRoot,
         manifestPath=manifestPath,
+        parent=None,
+        visibility=visibility,
+        importFromParent=importFromParent,
+        exports=exports,
+        recommendedPacks=recommendedPacks,
+        supportedPacks=supportedPacks,
+        unsupportedPacks=unsupportedPacks,
+        assets=assets,
+        runtimeEntries=runtimeEntries,
+        name=name,
+        description=description,
+        authorName=authorName,
         rawJson=rawJson,
     )
 
@@ -287,15 +455,7 @@ def _normalizePackDescriptor(
 # ------------------------------------------------------------------ #
 
 def _isRelativeTo(path: Path, base: Path) -> bool:
-    try:
-        return path.is_relative_to(base)
-    except AttributeError:
-        # Python < 3.9 fallback
-        try:
-            path.relative_to(base)
-            return True
-        except Exception:
-            return False
+    return path.is_relative_to(base)
 
 
 
@@ -304,10 +464,10 @@ def _walkForPackDescriptors(
     *,
     baseResolved: Path,
     baseRoot: Path,
-    rootLayer: RootLayer,
+    layer: LayerKind,
     allowSymlinks: bool,
     pathStack: tuple[Path, ...],
-    seen: set[tuple[str, str | None, str | None, Path]],
+    seen: set[Path],
     out: list[PackDescriptor],
 ) -> None:
     tracer = getTracer()
@@ -402,31 +562,36 @@ def _walkForPackDescriptors(
     
     manifestPath = _findManifestPath(dirPath)
     if manifestPath:
+        manifestResolved = manifestPath.resolve()
+        if manifestResolved in seen:
+            return
+        seen.add(manifestResolved)
+        
         try:
             rawJson = _loadManifestFile(manifestPath)
-            meta = _normalizePackDescriptor(
+            desc = _normalizePackDescriptor(
                 rawJson=rawJson,
-                manifestPath=manifestPath.resolve(),
+                manifestPath=manifestResolved,
                 baseRoot=baseRoot,
-                rootLayer=rootLayer,
+                layer=layer,
             )
-            key = (meta.id, meta.authorName, meta.version, meta.packRoot)
-            if key in seen:
-                return
-            seen.add(key)
             
             try:
                 tracer.traceEvent(
                     "packs.manifestFound",
                     attrs={
-                        "packId": meta.id,
-                        "packName": meta.name,
-                        "kind": meta.kind,
-                        "authorName": meta.authorName,
-                        "version": meta.version,
-                        "dir": str(meta.packRoot),
-                        "manifestPath": str(meta.manifestPath),
-                        "rootLayer": rootLayer,
+                        "packId": desc.localId,
+                        "packName": desc.name,
+                        "kind": desc.kind.value,
+                        "authorName": desc.authorName,
+                        "version": (
+                            str(desc.declaredSemVerPackVersion)
+                            if desc.declaredSemVerPackVersion is not None
+                            else None
+                        ),
+                        "dir": str(desc.packRoot),
+                        "manifestPath": str(desc.manifestPath),
+                        "layer": desc.layer.value,
                         "baseRoot": str(baseResolved),
                     },
                     level="info",
@@ -435,7 +600,7 @@ def _walkForPackDescriptors(
             except Exception:
                 pass
             
-            out.append(meta)
+            out.append(desc)
         except Exception as exc:
             logger.exception("Failed to read manifest file '%s'", str(manifestPath))
             try:
@@ -461,7 +626,7 @@ def _walkForPackDescriptors(
                 child,
                 baseResolved=baseResolved,
                 baseRoot=baseRoot,
-                rootLayer=rootLayer,
+                layer=layer,
                 allowSymlinks=allowSymlinks,
                 pathStack=nextStack,
                 seen=seen,
@@ -516,9 +681,9 @@ def buildPackDescriptorRegistry() -> PackDescriptorRegistry:
         span = None
     
     metas: list[PackDescriptor] = []
-    seen: set[tuple[str, str | None, str | None, Path]] = set()
+    seen: set[Path] = set()
     
-    def _scanRoots(roots: Iterable[Path], rootLayer: RootLayer) -> None:
+    def _scanRoots(roots: Iterable[Path], layer: LayerKind) -> None:
         for base in roots:
             try:
                 baseResolved = base.resolve(strict=False)
@@ -531,7 +696,7 @@ def buildPackDescriptorRegistry() -> PackDescriptorRegistry:
                     level="debug",
                     tags=["packs"],
                     attrs={
-                        "rootLayer": rootLayer,
+                        "layer": layer.value,
                         "baseRoot": str(baseResolved),
                     },
                     span=span,
@@ -551,7 +716,7 @@ def buildPackDescriptorRegistry() -> PackDescriptorRegistry:
                         child,
                         baseResolved=baseResolved,
                         baseRoot=baseResolved,
-                        rootLayer=rootLayer,
+                        layer=layer,
                         allowSymlinks=allowSymlinks,
                         pathStack=(),
                         seen=seen,
@@ -562,8 +727,8 @@ def buildPackDescriptorRegistry() -> PackDescriptorRegistry:
     
     # Important: scan saves first, then content - so saves-layer candidates
     # appear earlier and win version ties in resolution.
-    _scanRoots(saveRoots, "saves")
-    _scanRoots(contentRoots, "content")
+    _scanRoots(saveRoots, LayerKind.SAVES)
+    _scanRoots(contentRoots, LayerKind.FIRST_PARTY)
     
     if span is not None:
         try:
