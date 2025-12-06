@@ -1,131 +1,159 @@
 WebSocket RPC Flow
+==================
 
-This guide explains how the Turnix backend stack wires the browser to the backend over
-/ws, and how RPCMessage envelopes travel across that socket. It combines behavior
-from the FastAPI endpoint, the session manager, and the browser RpcClient implementation.
+This guide explains how the Turnix backend stack wires the browser to the backend
+over /ws, and how RPCMessage envelopes travel across that socket. It combines
+behavior from the FastAPI endpoint, the Session manager, the ViewRegistry, and
+the browser-side RpcClient implementation.
+
 
 ------------------------------------------------------------
 HTTP bootstrap before the socket opens
 ------------------------------------------------------------
 
 Before the browser touches the WebSocket it performs two HTTP fetches that
-hydrate configuration and establish identity:
+bootstrap configuration and establish identity:
 
 1. Settings fetch – /settings returns the merged server configuration.
    The bootstrap script freezes it onto globalThis.Turnix so early modules can
-   read feature flags and other environment switches before RPC is ready.
+   read feature flags and environment switches before RPC is ready.
 
-2. View bootstrap – /api/bootstrap issues or refreshes a clientId cookie, binds
-   it to a view, and returns the viewId, viewToken, and the server's current
-   generation number. The frontend includes these fields in the subsequent
-   hello payload along with a per-tab clientInstanceId and the last persisted
-   generation so reconnects can resume cleanly.
+2. View bootstrap – /api/bootstrap issues or refreshes a clientId cookie,
+   binds it to a view, and returns:
+       - viewId
+       - viewToken
+       - the server’s current generation number  
+   The frontend places these fields into the subsequent "hello" payload, along
+   with a per-tab clientInstanceId and the last persisted generation so
+   reconnects can resume cleanly.
 
-The generated viewToken is cached server-side by ViewRegistry, ensuring only
-the authenticated client can bind to that view during the WebSocket handshake.
-If a browser opens multiple tabs the server will reuse the same view binding for
-their shared clientId while minting distinct tokens for each tab.
+ViewRegistry stores the server-side viewToken so only the authenticated client
+can bind to a view during the WebSocket handshake. Multiple tabs share the same
+clientId but receive distinct viewTokens.
+
 
 ------------------------------------------------------------
 Connection lifecycle
 ------------------------------------------------------------
 
-1. WebSocket upgrade – After bootstrap the browser connects to ws(s)://…/ws.
+1. WebSocket upgrade – After bootstrap, the browser connects to ws(s)://…/ws.
    The backend registers this endpoint via mountWebSocket. After accepting the
-   socket it enters a receive loop that filters out non-text frames and guards
-   against oversized payloads before attempting to validate them as RPCMessage
-   instances.
+   socket, it enters a receive loop that:
+       - discards non-text frames,
+       - enforces payload size limits,
+       - validates incoming data as RPCMessage objects.
 
 2. Client hello – Immediately after WebSocket.OPEN, the frontend sends a hello
-   frame containing optional view metadata. The helper enforces the standard
-   schema version, sys lane, and placeholder generation.
+   frame containing view metadata. The helper enforces the standard schema
+   version, the sys lane, and placeholder generation fields.
 
-3. Welcome – On the first valid hello, the server resolves or creates a view,
+3. Welcome – On the first valid hello, the server resolves or creates the view,
    binds the WebSocket to that view, allocates a new generation via
-   RPCConnection.newGeneration, patches view state, and returns a welcome
-   message that carries the generation and a snapshot of the current state.
+   RPCConnection.newGeneration, updates view state, and returns a "welcome"
+   message carrying:
+       - the new generation,
+       - a snapshot of the current view/session state.
 
-4. Client ready – After the welcome arrives the browser marks the connection
-   as ready, flushes queued messages, and resumes subscriptions. It can then
-   report module load status via clientReady, which the backend acknowledges
-   while recording module metadata and preventing duplicate processing per
-   generation.
+4. Client ready – After the welcome arrives, the browser marks the connection as
+   ready, flushes queued messages, and resumes subscriptions. It then reports the
+   module load status via clientReady. The backend ACKs this and records module
+   metadata, ensuring each module is processed only once per generation.
 
 5. Heartbeat – Both sides maintain liveness. The client periodically sends
-   heartbeat frames; the server updates its timestamp and ACKs them. Missed
-   heartbeats trigger reconnection logic in the browser.
+   heartbeat frames; the server updates its timestamp and replies with an ACK.
+   Missed heartbeats cause the frontend to initiate reconnection logic.
 
-6. Disconnect – When the socket closes, outstanding request and subscription
-   tasks are cancelled on the server, the view binding is removed, and the socket
-   is closed. The client tears down timers, rejects pending promises, and
-   schedules exponential backoff reconnect attempts.
+6. Disconnect – When the socket closes:
+       - All pending requests and subscription tasks are cancelled on the server.
+       - The view binding is removed.
+       - The socket is closed gracefully.
+     On the client side, timers are cleared, pending promises are rejected, and
+     exponential-backoff reconnect attempts are scheduled.
+
 
 ------------------------------------------------------------
 Session and generation tracking
 ------------------------------------------------------------
 
-RPCConnection tracks per-view/client state: idempotency cache, pending tasks,
-subscription coroutines, and generation metadata. Each successful hello bumps
-the generation counter and salt, ensuring replayed messages from older sessions
-can be ignored. The frontend stores the most recent generation and discards any
-message that does not match it.
+RPCConnection maintains per-view/client state:  
+- idempotency cache  
+- pending request tasks  
+- active subscription coroutines  
+- generation metadata  
+
+Each successful "hello" increments the generation counter and salt.  
+Messages with mismatched generation values must be ignored.
+
+The frontend stores the latest generation and rejects or discards any incoming
+message whose generation does not match.
+
 
 ------------------------------------------------------------
 Message dispatch
 ------------------------------------------------------------
 
-Once the handshake completes, the backend immediately ACKs every non-control
-message and dispatches based on the type and route:
+Once the handshake completes, the backend ACKs every non-control message and
+dispatches them based on type and route:
 
 - Requests – Routed either to object handlers or capability-based request
-  handlers. The transport checks permissions through _ensureCapabilityOrError
-  before invoking the registered handler. Errors are wrapped in error
-  envelopes tied to the triggering message.
+  handlers. Permissions are enforced through _ensureCapabilityOrError. Errors
+  become structured "error" envelopes tied to the original message.
 
-- Emits and subscribes – Resolved against capability-specific handlers.
-  Subscribes are tracked so later cancel / unsubscribe messages can stop the
-  running task and drop chat subscriptions.
+- Emits / Subscribes – Dispatched to capability handlers. Subscriptions are
+  tracked so later cancel/unsubscribe messages can halt the associated coroutine
+  and remove the subscription from the Session state.
 
-- Cancels – Remove pending work and cancel live subscriptions, cleaning up
-  session-side tracking structures.
+- Cancels – Remove pending work and stop active subscriptions.
 
-On the browser, incoming workload messages targeting exposed capabilities are
-ACKed automatically, then routed to the registered call, emit, or subscribe
-handler. Replies and errors resolve or reject pending promises, while
-subscription updates trigger local event emitters.
+Frontend behavior:
+
+- Workload messages targeting capabilities are auto-ACKed.
+- They are dispatched to the appropriate call, emit, or subscribe handler.
+- Replies and errors resolve or reject pending Promises.
+- Subscription updates trigger local event emitters.
+
 
 ------------------------------------------------------------
 Acknowledgements and flow control
 ------------------------------------------------------------
 
-- Automatic ACKs – The backend ACKs every message other than ack and
-  heartbeat, and the frontend mirrors this rule for all messages except the
-  handshake/control set. Both sides use helper constructors to tie the ACK to
-  the original message ID and to place it on the sys lane.
+- Automatic ACKs –  
+  The backend ACKs every message except ack and heartbeat.  
+  The frontend does the same for all non-handshake messages.  
+  Both sides generate ACKs with:
+      - original message id,
+      - sys lane routing.
 
-- Budget and retry windows – Request and emit helpers populate budgetMs
-  from timeout classes. The browser keeps per-lane in-flight counters and
-  queues additional work until ACKs or replies arrive, preventing overload while
-  providing best-effort cancellation on timeout.
+- Budget and retry windows –  
+  Request and emit helpers attach budgetMs based on timeout policies.  
+  The browser tracks lane-level in-flight counters and queues additional messages
+  until ACKs or replies arrive. This prevents overload and supports best-effort
+  cancellation on timeout.
 
-- Idempotency – Client helpers copy an idempotencyKey for request/emit
-  messages. The server connection caches IDs and previous replies so repeated
-  invocations can be deduplicated.
+- Idempotency –  
+  Request/emit helpers generate an idempotencyKey.  
+  The server caches this key and a copy of the previous reply, ensuring duplicate
+  invocations return consistent results without re-running handlers.
+
 
 ------------------------------------------------------------
 Permissions and principals
 ------------------------------------------------------------
 
-Before invoking capability handlers the backend derives the principal from the
-message and validates that it has the required capability. Permission failures
-are converted into structured error messages containing retry metadata, so the
-client can surface clean feedback.
+Before invoking capability handlers, the backend derives the principal from the
+message and checks whether the principal holds the required capability.
+
+Failures become structured error envelopes that include retry metadata so the
+frontend can present clear feedback.
+
 
 ------------------------------------------------------------
 Logging and observability
 ------------------------------------------------------------
 
-Each outbound frame is serialized via safeJsonDumps and passed through the RPC
-logging decision engine, enabling centrally controlled logging on both sides of
-the connection. The browser offers matching logging hooks that honor the same
-filters to keep debugging consistent.
+Each outbound frame is serialized with safeJsonDumps and passed through the RPC
+logging decision engine, ensuring consistent, centrally controlled logging.
+
+The frontend exposes equivalent hooks that respect the same filtering rules,
+making cross-side debugging coherent.
+
