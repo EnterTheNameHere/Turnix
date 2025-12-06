@@ -95,7 +95,7 @@ All records may include context fields where applicable.
 
 Optional standardized names:
 
-- `runtimeInstanceId`
+- `appInstanceId`
 - `sessionId`
 - `pipelineId`
 - `pipelineRunId`
@@ -124,7 +124,7 @@ A `spanStart` record includes:
   "spanId": "...",
   "parentSpanId": null,
   "spanName": "pipeline.run",
-  "runtimeInstanceId": "...",
+  "appInstanceId": "...",
   "sessionId": "...",
   "pipelineRunId": "...",
   "level": "info",
@@ -153,7 +153,7 @@ Rules:
   "traceId": "...",
   "spanId": "...",
   "spanName": "pipeline.run",
-  "runtimeInstanceId": "...",
+  "appInstanceId": "...",
   "sessionId": "...",
   "pipelineRunId": "...",
   "level": "info",
@@ -186,7 +186,7 @@ Rules:
   "traceId": "...",
   "spanId": "spn-123",
   "eventName": "rpc.recv",
-  "runtimeInstanceId": "...",
+  "appInstanceId": "...",
   "sessionId": "...",
   "level": "debug",
   "tags": ["rpc", "inbound"],
@@ -215,8 +215,8 @@ These are canonical:
 - `"process.turnix"`
   - lifecycle of the backend process
   - emits `process.start` and `process.stop` events
-- `"runtime.lifecycle"`
-  - one per runtime instance
+- `"appInstance.lifecycle"`
+  - one per AppInstance instance
 - `"session.lifecycle"`
   - represents a single session
 - `"pipeline.run"`
