@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from backend.content.packs import ResolvedPack
     from backend.core.permissions import PermissionManager
     from backend.sessions.session import Session
-    from backend.content.roots import RootsService
+    from backend.content.roots import ContentRootsService
     from backend.core.tracing import Tracer, TraceHub
 
 
@@ -72,18 +72,18 @@ def getPermissions() -> PermissionManager:
 
 
 
-def getRootsService() -> RootsService:
+def getRootsService() -> ContentRootsService:
     roots = PROCESS_REGISTRY.get("roots.service")
     if roots is None:
         raise ReactorScramError(
-            "RootsService is None.\n"
+            "ContentRootsService is None.\n"
             "⚠️ ROOTS SERVICE MISSING ⚠️\n"
             "Oh dear.\n"
-            "It appears the RootsService has not been set up.\n"
+            "It appears the ContentRootsService has not been set up.\n"
             "One could carry on, but that would be... ill-advised.\n"
             "Kettle’s going on. Tea?"
         )
-    return cast("RootsService", roots)
+    return cast("ContentRootsService", roots)
 
 
 

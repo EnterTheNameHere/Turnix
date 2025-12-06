@@ -41,7 +41,7 @@ class AppInstance:
         *,
         appPackId: str,
         appInstanceId: str | None = None,
-        saveBaseDirectory: Path | str | None = None, # overrides save directory; uses RootsService otherwise
+        saveBaseDirectory: Path | str | None = None, # overrides save directory; uses ContentRootsService otherwise
         kernelMemoryLayers: list[MemoryLayer] | None = None,
         createMainSession: bool = True,
     ) -> None:

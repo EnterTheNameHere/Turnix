@@ -478,9 +478,9 @@ def buildPackDescriptorRegistry() -> PackDescriptorRegistry:
     
     Discovery rules:
       - Content packs:
-          rootsService.contentRoots() are treated as base roots.
+          contentRootsService.contentRoots() are treated as base roots.
       - Save packs:
-          rootsService.rootsFor("saves") are treated as save-layer base roots.
+          contentRootsService.rootsFor("saves") are treated as save-layer base roots.
       - Each base root is scanned recursively:
           • Any directory containing a manifest.json5/json is a pack root.
           • Descent stops at a pack root (no nested packs within a pack).
@@ -490,10 +490,10 @@ def buildPackDescriptorRegistry() -> PackDescriptorRegistry:
     """
     tracer = getTracer()
     allowSymlinks = configBool("roots.followSymlinks", False)
-    rootsService = getRootsService()
+    contentRootsService = getRootsService()
     
-    contentRoots = list(rootsService.contentRoots())
-    saveRoots = list(rootsService.rootsFor("saves"))
+    contentRoots = list(contentRootsService.contentRoots())
+    saveRoots = list(contentRootsService.rootsFor("saves"))
     
     span = None
     try:

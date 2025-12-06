@@ -31,7 +31,7 @@ class SaveDescriptor:
 class SaveManager:
     """
     Knows where to put userdata/saves, creates directories, and lists existing saves.
-    Uses RootsService precedence to choose the first writable saves/ root that exists (or can be created).
+    Uses ContentRootsService precedence to choose the first writable saves/ root that exists (or can be created).
     """
     def _firstWritable(self, kind: Literal["userdata", "saves"]) -> Path:
         roots = getRootsService()

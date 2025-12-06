@@ -13,7 +13,7 @@ from backend.core.errors import ReactorScramError
 __all__ = [
     "RootKind",
     "RootSet",
-    "RootsService",
+    "ContentRootsService",
     "defaultUserRoot",
     "ROOT_DIR",
     "WEB_ROOT",
@@ -145,7 +145,7 @@ def _declareRoot(base: Path | str, *, priority: int, label: str, createDirectori
 # ------------------------------------------------------------------ #
 
 @dataclass
-class RootsService:
+class ContentRootsService:
     """
     Centralized roots + read/write resolution with strict rules:
     
@@ -180,7 +180,7 @@ class RootsService:
         cliRoot: str | None = None,
         cliUserdata: str | None = None,
         cliSaves: str | None = None,
-    ) -> "RootsService":
+    ) -> "ContentRootsService":
         """
         Constructs the service per specified ordering and policies.
         """
@@ -514,7 +514,7 @@ def defaultUserRoot() -> Path:
 # ------------------------------------------------------------------ #
 
 def initRoots(*, cliRoot: str | None = None, cliUserdata: str | None = None, cliSaves: str | None = None):
-    PROCESS_REGISTRY.register("roots.service", RootsService.build(
+    PROCESS_REGISTRY.register("roots.service", ContentRootsService.build(
         cliRoot=cliRoot,
         cliUserdata=cliUserdata,
         cliSaves=cliSaves,
