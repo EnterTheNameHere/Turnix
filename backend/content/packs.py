@@ -1,632 +1,399 @@
 # backend/content/packs.py
 from __future__ import annotations
-import json
+
 import logging
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import json5
-
-from backend.app.globals import configBool, getRootsService, getTracer
+from backend.app.globals import getTracer
+from backend.content.pack_meta import (
+    PackMeta,
+    PackMetaRegistry,
+    buildPackMetaRegistry,
+)
 from backend.semver.semver import (
     SemVerPackVersion,
     SemVerPackRequirement,
     SemVerResolver,
-    parseSemVerPackVersion,
     parseSemVerPackRequirement,
 )
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "PackManifest", "ResolvedPack", "PackResolver",
-    "PACK_KIND_DIRS",
+    "ResolvedPack",
+    "PackResolver",
 ]
-
-_MANIFEST_NAMES = ("manifest.json5", "manifest.json")
-PACK_KIND_DIRS: Mapping[str, str] = {
-    "appPack": "appPacks",
-    "viewPack": "viewPacks",
-    "contentPack": "contentPacks",
-    "mod": "mods",
-}
-_KNOWN_PACK_KINDS = frozenset((*PACK_KIND_DIRS.keys(), "savePack"))
-
-_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-
-
-
-@dataclass(frozen=True)
-class PackManifest:
-    id: str
-    name: str
-    # Declared version string from manifest, or None if missing/empty
-    version: str | None = None
-    # Manifest-declared kind ("appPack", "viewPack", "contentPack", "mod", "savePack")
-    kind: str = "appPack"
-    # "author" can be string or AuthorInfo-like object per spec (raw form)
-    author: str | dict[str, Any] | None = None
-    # Canonical author name (string), derived from author when possible
-    authorName: str | None = None
-    description: str | None = None
-    license: str | None = None
-    keywords: list[str] | None = None
-    homepage: str | None = None
-    # Repository can be a string or object per spec
-    repository: str | dict[str, Any] | None = None
-    # "public" or "private" or None
-    visibility: str | None = None
-    # Array of strings or AuthorInfo-like objects
-    contributors: list[str | dict[str, Any]] | None = None
-    # Optional metadata bag (languages, etc.)
-    meta: dict[str, Any] | None = None
-    # Full raw manifest JSON/JSON5 object, for anything not surfaced above
-    rawJson: dict[str, Any] | None = None
 
 
 
 @dataclass(frozen=True)
 class ResolvedPack:
     """
-    A fully resolved pack location.
+    Adapter over PackMeta.
     """
     id: str
     name: str
-    # Declared version string, or None if not specified in manifest
+    # Declared version string, or None if not specified in manifest.
     version: str | None
+    # Manifest-declared kind ("appPack", "viewPack", "contentPack", "mod", "savePack")
     kind: str
-    rootDir: Path       # Content directory root (the "pack directory")
+    # The pack root directory.
+    rootDir: Path
+    # The manifest file path.
     manifestPath: Path
-    sourceRoot: Path    # The root under which the pack was discovered
-    rawJson: dict[str, Any] | None
-    # Canonical author name (string) or None
+    # The base root under which this pack was discovered
+    # (one of the content roots or a saves root)
+    sourceRoot: Path
+    # Full raw manifest JSON/JSON5 data
+    rawJson: Mapping[str, Any]
+    # Canonical author name (string), derived from author when possible
     authorName: str | None = None
 
 
 
-def _readManifest(dirpath: Path) -> PackManifest | None:
-    for filename in _MANIFEST_NAMES:
-        path = dirpath / filename
-        if not path.exists() or not path.is_file():
-            continue
-        try:
-            if path.suffix == ".json5":
-                raw = json5.loads(path.read_text(encoding="utf-8"))
-            elif path.suffix == ".json":
-                raw = json.loads(path.read_text(encoding="utf-8"))
-            else:
-                raise ValueError(f"Unknown manifest file extension '{path.suffix}'")
-            if raw is None or not isinstance(raw, dict):
-                raise ValueError(f"Manifest file '{path}' is not a JSON object")
-
-            packId = str(raw.get("id") or "").strip()
-            name = str(raw.get("name") or "").strip()
-            
-            versionVal = raw.get("version")
-            if isinstance(versionVal, str):
-                version = versionVal.strip() or None
-            else:
-                version = None
-            
-            author = raw.get("author")
-            kind = str(raw.get("kind") or "").strip()
-            metaRaw = raw.get("meta")
-            meta = metaRaw if isinstance(metaRaw, dict) else {}
-                        
-            if not packId or not _ID_RE.fullmatch(packId):
-                raise ValueError(f"Invalid packId: '{packId}'. Manifest path: {str(path)}")
-            
-            if author is not None and not isinstance(author, (str, dict)):
-                author = None
-            
-            # Canonical authorName derived from author (string or object)
-            authorName: str | None = None
-            if isinstance(author, str):
-                authorName = author.strip() or None
-            elif isinstance(author, dict):
-                nameVal = author.get("name")
-                if isinstance(nameVal, str):
-                    authorName = nameVal.strip() or None
-                else:
-                    authorName = None
-            else:
-                authorName = None
-            
-            description = raw.get("description")
-            if not isinstance(description, str):
-                description = None
-            
-            licenseStr = raw.get("license")
-            if not isinstance(licenseStr, str):
-                licenseStr = None
-            
-            keywordsRaw = raw.get("keywords")
-            if isinstance(keywordsRaw, list):
-                keywords = [str(item) for item in keywordsRaw if isinstance(item, (str, bytes))]
-            else:
-                keywords = None
-            
-            homepage = raw.get("homepage")
-            if not isinstance(homepage, str):
-                homepage = None
-            
-            repository = raw.get("repository")
-            if not isinstance(repository, (str, dict)):
-                repository = None
-            
-            visibility = raw.get("visibility")
-            if visibility not in ("public", "private"):
-                visibility = None
-            
-            contributorsRaw = raw.get("contributors")
-            if isinstance(contributorsRaw, list):
-                contributors: list[str | dict[str, Any]] | None = []
-                for item in contributorsRaw:
-                    if isinstance(item, (str, dict)):
-                        contributors.append(item)
-                if not contributors:
-                    contributors = None
-            else:
-                contributors = None
-            
-            if not kind or kind not in _KNOWN_PACK_KINDS:
-                raise ValueError(f"kind must be one of [{', '.join(repr(key) for key in _KNOWN_PACK_KINDS)}]. Got {kind!r} instead.")
-            manifest = PackManifest(
-                id=packId,
-                name=name or packId,
-                version=version,
-                kind=kind,
-                author=author,
-                authorName=authorName,
-                description=description,
-                license=licenseStr,
-                keywords=keywords,
-                homepage=homepage,
-                repository=repository,
-                visibility=visibility,
-                contributors=contributors,
-                meta=meta,
-                rawJson=raw,
-            )
-            return manifest
-        except Exception as exc:
-            logger.exception("Failed to read manifest file %s", path)
-            try:
-                tracer = getTracer()
-                tracer.traceEvent(
-                    "packs.manifestInvalid",
-                    attrs={
-                        "manifestPath": str(path),
-                        "errorType": type(exc).__name__,
-                        "errorMessage": str(exc),
-                    },
-                    level="warn",
-                    tags=["packs", "manifest", "error"],
-                )
-            except Exception:
-                # Tracing must not break manifest reading
-                pass
-            return None
-    return None
-
-
-
-class PackScanner:
+def _isUnder(path: Path, root: Path) -> bool:
     """
-    Low-level pack scanner. Walks roots and discovers ResolvedPacks.
+    Returns True if `path` is the same as `root` or nested under it.
     """
-    def __init__(self, *, allowSymlinks: bool):
-        self.allowSymlinks = allowSymlinks
-        self.tracer = getTracer()
-    
-    def findManifestPath(self, dirPath: Path) -> Path:
-        for path in ((dirPath / name) for name in _MANIFEST_NAMES):
-            if path.is_file():
-                return path
-        raise FileNotFoundError(f"No manifest found in '{dirPath}'")
-    
-    def walkForManifests(
-        self,
-        dirPath: Path,
-        baseResolved: Path,
-        *,
-        rootIndex: int,
-        packKind: str,
-        kinds: set[str] | None,
-        seen: set[tuple[str, str | None, str | None, Path]],
-        tempOut: list[tuple[int, str, ResolvedPack]],
-        pathStack: tuple[Path, ...],
-    ) -> None:
-        """
-        Recursively walk directories until a manifest is found.
-        If a directory has a manifest, treat it as a pack root and stop descending.
-        """
-        try:
-            if not dirPath.is_dir():
-                try:
-                    self.tracer.traceEvent(
-                        "packs.dirSkipped",
-                        attrs={
-                            "path": str(dirPath),
-                            "reason": "notDir",
-                        },
-                        level="debug",
-                        tags=["packs", "fs", "skip"],
-                    )
-                except Exception:
-                    pass
-                return
-            if dirPath.is_symlink() and not self.allowSymlinks:
-                try:
-                    self.tracer.traceEvent(
-                        "packs.dirSkipped",
-                        attrs={
-                            "path": str(dirPath),
-                            "reason": "symlinkNotAllowed",
-                        },
-                        level="debug",
-                        tags=["packs", "fs", "skip"],
-                    )
-                except Exception:
-                    pass
-                return
-            resolved = dirPath.resolve(strict=False)
-            # Guard against escaping the discovery root
-            if not resolved.is_relative_to(baseResolved):
-                try:
-                    self.tracer.traceEvent(
-                        "packs.dirSkipped",
-                        attrs={
-                            "path": str(resolved),
-                            "reason": "outsideBaseRoot",
-                            "baseRoot": str(baseResolved),
-                        },
-                        level="debug",
-                        tags=["packs", "fs", "skip"],
-                    )
-                except Exception:
-                    pass
-                return
-        except Exception as exc:
-            try:
-                self.tracer.traceEvent(
-                    "packs.dirSkipped",
-                    attrs={
-                        "path": str(dirPath),
-                        "reason": "statError",
-                        "errorType": type(exc).__name__,
-                        "errorMessage": str(exc),
-                    },
-                    level="debug",
-                    tags=["packs", "fs", "skip"],
-                )
-            except Exception:
-                pass
-            return
-        
-        # Symlink / directory loop detection: if this resolved path is already in the
-        # current stack, bail out to avoid infinite recursion.
-        if resolved in pathStack:
-            if dirPath.is_symlink():
-                logger.warning("Detected symlink loop while scanning packs: '%s' (base '%s')", resolved, baseResolved)
-                try:
-                    self.tracer.traceEvent(
-                        "packs.symlinkLoop",
-                        attrs={
-                            "resolvedPath": str(resolved),
-                            "baseRoot": str(baseResolved),
-                        },
-                        level="warn",
-                        tags=["packs", "fs", "symlink"],
-                    )
-                except Exception:
-                    # Tracing must not break scanning
-                    pass
-            return
-        
-        nextStack = pathStack + (resolved,)
-        
-        manifest = _readManifest(dirPath)
-        if manifest:
-            if manifest.kind == packKind and (not kinds or manifest.kind in kinds):
-                key = (manifest.id, manifest.authorName, manifest.version, resolved)
-                if key not in seen:
-                    seen.add(key)
-                    try:
-                        manifestPath = self.findManifestPath(dirPath).resolve()
-                    except Exception:
-                        return
-                    
-                    # --- Tracing: manifest found ---
-                    try:
-                        self.tracer.traceEvent(
-                            "packs.manifestFound",
-                            attrs={
-                                "packId": manifest.id,
-                                "packName": manifest.name,
-                                "kind": manifest.kind,
-                                "author": manifest.author,
-                                "authorName": manifest.authorName,
-                                "version": manifest.version,
-                                "dir": str(resolved),
-                                "manifestPath": str(manifestPath),
-                                "rootIndex": rootIndex,
-                                "sourceRoot": str(baseResolved),
-                            },
-                            level="info",
-                            tags=["packs", "manifest"],
-                        )
-                    except Exception:
-                        # Do not break scanning if tracing fails
-                        pass
-                    
-                    tempOut.append((
-                        rootIndex,
-                        dirPath.name.lower(),
-                        ResolvedPack(
-                            id=manifest.id,
-                            name=manifest.name,
-                            authorName=manifest.authorName,
-                            version=manifest.version,
-                            kind=manifest.kind,
-                            rootDir=resolved,
-                            manifestPath=manifestPath,
-                            sourceRoot=baseResolved,
-                            rawJson=manifest.rawJson,
-                        ),
-                    ))
-            else:
-                # Manifest present but not used due to kind or filter mismatch
-                reason = "kindMismatch"
-                if kinds is not None and manifest.kind not in kinds:
-                    reason = "filteredByKinds"
-                try:
-                    self.tracer.traceEvent(
-                        "packs.packRootIgnored",
-                        attrs={
-                            "packId": manifest.id,
-                            "packName": manifest.name,
-                            "kind": manifest.kind,
-                            "author": manifest.author,
-                            "authorName": manifest.authorName,
-                            "version": manifest.version,
-                            "dir": str(resolved),
-                            "rootIndex": rootIndex,
-                            "sourceRoot": str(baseResolved),
-                            "expectedPackKind": packKind,
-                            "kindsFilter": sorted(kinds) if kinds else None,
-                            "reason": reason,
-                        },
-                        level="debug",
-                        tags=["packs", "manifest", "ignored"],
-                    )
-                except Exception:
-                    pass
-            # Stop descent - this directory is a pack root
-            return
-        
-        # No manifest → descent deeper
-        try:
-            for subDir in dirPath.iterdir():
-                self.walkForManifests(
-                    subDir,
-                    baseResolved,
-                    rootIndex=rootIndex,
-                    packKind=packKind,
-                    kinds=kinds,
-                    seen=seen,
-                    tempOut=tempOut,
-                    pathStack=nextStack,
-                )
-        except Exception:
-            return
+    return path == root or path.is_relative_to(root)
 
-    def scanPacks(
-        self,
-        *,
-        roots: list[Path],
-        kinds: set[str] | None = None
-    ) -> list[ResolvedPack]:
-        tempOut: list[tuple[int, str, ResolvedPack]] = []
-        seen: set[tuple[str, str | None, str | None, Path]] = set()
 
-        for rootIndex, base in enumerate(roots):
-            try:
-                baseResolved = base.resolve(strict=False)
-            except Exception:
-                continue
-            
-            for packKind, packDirName in PACK_KIND_DIRS.items():
-                packRoot = base / packDirName
-                if not packRoot.exists() or not packRoot.is_dir():
-                    continue
-            
-                # Recursive pack discovery
-                try:
-                    for child in packRoot.iterdir():
-                        self.walkForManifests(
-                            child,
-                            baseResolved,
-                            rootIndex=rootIndex,
-                            packKind=packKind,
-                            kinds=kinds,
-                            seen=seen,
-                            tempOut=tempOut,
-                            pathStack=(),
-                        )
-                except Exception:
-                    continue
-        
-        # Sort by (root precedence, folder name) to be deterministically but keep precedence.
-        tempOut.sort(key=lambda item: (item[0], item[1]))
-        return [item[2] for item in tempOut]
+
+def _metaToResolved(meta: PackMeta) -> ResolvedPack:
+    return ResolvedPack(
+        id=meta.id,
+        name=meta.name,
+        kind=meta.kind,
+        version=meta.version,
+        rootDir=meta.packRoot,
+        manifestPath=meta.manifestPath,
+        sourceRoot=meta.baseRoot,
+        rawJson=meta.rawJson,
+        authorName=meta.authorName,
+    )
 
 
 
 class PackResolver:
     """
-    Scans content roots (first-party/, third-party/, custom/) for content directories,
-    reads manifest, and resolves by (kind, id, author?, versionReq?) with precedence
-    determined by roots order.
+    High-level resolver built on top of PackMetaRegistry.
+    
+    Responsibilities:
+      - Expose a ResolvedPack view for existing callers.
+      - Provide SemVer-aware resolution for (kind, id[, authorName], versionReq?)
+      - Support scoping resolution to one or more directory trees.
     """
-    def listPacks(self, *, kinds: set[str] | None = None, roots: list[Path] | None = None) -> list[ResolvedPack]:
-        """
-        List packs of given kinds across one or more base roots.
+    
+    def __init__(self, registry: PackMetaRegistry | None = None) -> None:
+        self._registry = registry
         
-        - If roots is None, scan the configured pack roots (first-party, third-party, custom).
-        - If roots is provided, scan only those base directories.
-        - Discovery always:
-            • descends through directories without a manifest
-            • stops descending at a directory that has a manifest (treat it as a pack root)
+    def _getRegistry(self) -> PackMetaRegistry:
+        if self._registry is None:
+            self._registry = buildPackMetaRegistry()
+        return self._registry
+    
+    # ----- Listing -----
+    
+    def listPacks(
+        self,
+        *,
+        kinds: set[str] | None = None,
+        roots: list[Path] | None = None,
+    ) -> list[ResolvedPack]:
         """
-        rootsService = getRootsService()
-        allowSymlinks = configBool("roots.followSymlinks", False)
-        if roots is None:
-            # Default: all pack-hosting content roots (first-party, third-party, custom)
-            roots = list(rootsService.contentRoots())
-        else:
-            # Normalize and dedupe given roots
-            normRoots: list[Path] = []
+        List packs of given kinds, optionally restricted to one or more directory trees.
+        
+        - If kinds is None, all pack kinds are returned.
+        - If roots is None, results are taken from the full registry.
+        - If roots is provided, only packs whose packRoot lies at or under
+          any of the given roots are returned
+        """
+        registry = self._getRegistry()
+        metas = registry.all()
+        
+        scopeRoots: list[Path] | None = None
+        if roots is not None:
+            norm: list[Path] = []
             seen: set[str] = set()
             for base in roots:
                 resolved = str(Path(base).expanduser().resolve(strict=False))
                 if resolved in seen:
                     continue
                 seen.add(resolved)
-                normRoots.append(Path(resolved))
-            roots = normRoots
+                norm.append(Path(resolved))
+            scopeRoots = norm
         
+        out: list[ResolvedPack] = []
+        for meta in metas:
+            if kinds is not None and meta.kind not in kinds:
+                continue
+            if scopeRoots is not None and not any(_isUnder(meta.packRoot, root) for root in scopeRoots):
+                continue
+            out.append(_metaToResolved(meta))
         
-        tracer = getTracer()
-        span = tracer.startSpan(
-            "packs.scan",
-            attrs={
-                "kinds": sorted(kinds) if kinds else None,
-                "rootCount": len(roots),
-            },
-            level="info",
-            tags=["packs"],
+        # Deterministic but simple ordering.
+        out.sort(
+            key=lambda pack: (
+                pack.kind,
+                str(pack.sourceRoot),
+                str(pack.rootDir),
+                pack.id,
+                pack.version or "",
+            )
         )
-        
-        try:
-            scanner = PackScanner(allowSymlinks=allowSymlinks)
-            packs = scanner.scanPacks(roots=roots, kinds=kinds)
-            tracer.endSpan(
-                span,
-                status="ok",
-                attrs={
-                    "packCount": len(packs),
-                },
-            )
-            return packs
-        except Exception as exc:
-            tracer.endSpan(
-                span,
-                status="error",
-                errorType=type(exc).__name__,
-                errorMessage=str(exc),
-            )
-            raise
+        return out
 
+    
+    # ----- Resolution -----
+
+    def _candidateMetas(
+        self,
+        kind: str,
+        packId: str,
+        *,
+        authorName: str | None,
+        roots: list[Path] | None,
+        preferSaves: bool,
+    ) -> list[PackMeta]:
+        registry = self._getRegistry()
+        metas = registry.all()
+        
+        scopeRoots: list[Path] | None = None
+        if roots is not None:
+            norm: list[Path] = []
+            seen: set[str] = set()
+            for base in roots:
+                resolved = str(Path(base).expanduser().resolve(strict=False))
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                norm.append(Path(resolved))
+            scopeRoots = norm
+        
+        candidates: list[PackMeta] = []
+        for meta in metas:
+            if meta.kind != kind:
+                continue
+            if meta.id != packId:
+                continue
+            if authorName is not None and meta.authorName != authorName:
+                continue
+            if scopeRoots is not None and not any(_isUnder(meta.packRoot, root) for root in scopeRoots):
+                continue
+            candidates.append(meta)
+        
+        # Save-layer packs should win ties over content-layer packs.
+        # Within a layer, sort by baseRoot and packRoot for determinism.
+        if preferSaves:
+            candidates.sort(
+                key=lambda mm: (
+                    mm.rootLayer != "saves",
+                    str(mm.baseRoot),
+                    str(mm.packRoot),
+                )
+            )
+        else:
+            candidates.sort(
+                key=lambda mm: (
+                    str(mm.baseRoot),
+                    str(mm.packRoot),
+                )
+            )
+        return candidates
+    
     def resolvePack(
         self,
         kind: str,
         packId: str,
         *,
-        author: str | None = None,
+        authorName: str | None = None,
         versionReq: str | SemVerPackRequirement | None = None,
         roots: list[Path] | None = None,
+        preferSaves: bool = True,
     ) -> ResolvedPack | None:
         """
         Resolve a pack of a given kind using SemVer requirements.
         
         Arguments:
-          - kind:       pack kind ("appPack", "viewPack", "contentPack", "mod", "savePack", ...)
-          - packId:     logical pack id (e.g. "ai-chat")
-          - author:     optional author filter; if set, only packs with matching author are considered
-          - versionReq: semantic version requirement (string or SemVerPackRequirement), e.g.:
-                            "1.2.3"
-                            ">=1.0.0 <2.0.0"
-                            "^2.1.0"
-                            "~1.4.0"
-                          None means "any version".
-          - roots:      optional list of base roots to restrict discovery
+          - kind:       Pack kind ("appPack", "viewPack", "contentPack", "mod", "savePack", ...)
+          - packId:     Logical pack id (e.g. "ai-chat")
+          - authorName: Optional author filter; if set, only packs with matching canonical authorName are considered
+          - versionReq: Semantic version requirement (string or SemVerPackRequirement),
+                        For example:
+                           "1.2.3"
+                           ">=1.0.0 <2.0.0"
+                           "^2.1.0"
+                           "~1.4.0"
+                        None means "any version".
+          - roots:      Optional list of directory trees to restrict discovery.
+                        Only packs whose packRoot lies at or under one of these
+                        roots are considered.
+          - preferSaves: when True (default), packs discovered from the saves
+                        layer win ties over content-layer packs for the same
+                        semantic version.
         
         SemVer behavior:
-          - Only packs whose `version` can be parsed by parseSemVerPackVersion()
-            participate in SemVer selection.
-          - If versionReq is not None and no SemVer-parsable versions exist,
+          - Only metas with a parsed semantic version participate in SemVer selection
+          - If versionReq is not None and no SemVer-capable candidates exist,
             resolution fails (returns None)
-          - If versionReq is None and no SemVer-parsable versions exist,
-            resolution falls back to the last candidate in discovery order
-            (respecting root precedence).
+          - If versionReq is None and no SemVer-capable candidates exist,
+            resolution falls back to the first candidate after layering / ordering.
         """
-        # Discover packs of requested kind in the requested roots (or global).
-        allPacks = [pack for pack in self.listPacks(kinds={kind}, roots=roots)]
+        print("    >>>> resolvePack ", "kind", kind, "packId", packId, "authorName", authorName, "roots", roots)
+        tracer = getTracer()
+        span = None
+        try:
+            span = tracer.startSpan(
+                "packs.resolve",
+                attrs={
+                    "kind": kind,
+                    "packId": packId,
+                    "authorName": authorName or "",
+                    "hasVersionReq": bool(versionReq),
+                },
+                tags=["packs"],
+            )
+        except Exception:
+            span = None
         
-        # Filter by packId and optional author
-        candidates: list[ResolvedPack] = [
-            pack
-            for pack in allPacks
-            if pack.id == packId and (author is None or pack.authorName == author)
-        ]
-        if not candidates:
-            return None
+        try:
+            candidates: list[PackMeta] = self._candidateMetas(
+                kind,
+                packId,
+                authorName=authorName,
+                roots=roots,
+                preferSaves=preferSaves,
+            )
+            if not candidates:
+                if span is not None:
+                    tracer.endSpan(
+                        span,
+                        status="ok",
+                        tags=["packs"],
+                        attrs={"result": "none", "candidateCount": 0}
+                    )
+                return None
+            
+            # Normalize requirement.
+            if isinstance(versionReq, str):
+                requirement: SemVerPackRequirement | None = parseSemVerPackRequirement(versionReq)
+            else:
+                requirement = versionReq
+            
+            semverCandidates: list[tuple[SemVerPackVersion, PackMeta]] = [
+                (meta.semver, meta)
+                for meta in candidates
+                if meta.semver is not None
+            ]
+            
+            if requirement is not None and not semverCandidates:
+                if span is not None:
+                    tracer.endSpan(
+                        span,
+                        status="ok",
+                        tags=["packs"],
+                        attrs={
+                            "result": "none-no-semver",
+                            "candidateCount": len(candidates),
+                        },
+                    )
+                return None
+            
+            # No SemVer data available at all → fall back to first candidate.
+            if requirement is None and not semverCandidates:
+                bestMeta = candidates[0]
+                if span is not None:
+                    tracer.endSpan(
+                        span,
+                        status="ok",
+                        tags=["packs"],
+                        attrs={
+                            "result": "fallback",
+                            "candidateCount": len(candidates),
+                            "chosenId": bestMeta.id,
+                            "chosenVersion": bestMeta.version or "",
+                            "chosenLayer": bestMeta.rootLayer,
+                        },
+                    )
+                return _metaToResolved(bestMeta)
+            
+            # Prefer saves-layer candidates in SemVer tie-breaks by ordering
+            # the input to SemVerResolver accordingly. SemVerResolver chooses
+            # the highest version, and for equal versions it keeps the first
+            # encountered candidate.
+            if preferSaves:
+                semverCandidates.sort(
+                    key=lambda item: (
+                        item[1].rootLayer != "saves",
+                        str(item[1].baseRoot),
+                        str(item[1].packRoot),
+                    )
+                )
+            
+            matchResult = SemVerResolver.matchCandidates(semverCandidates, requirement)
+            if matchResult.best is None:
+                if span is not None:
+                    tracer.endSpan(
+                        span,
+                        status="ok",
+                        tags=["packs"],
+                        attrs={
+                            "result": "none-no-match",
+                            "candidateCount": len(candidates),
+                        },
+                    )
+                return None
+            
+            _bestVersion, bestMeta = matchResult.best
+            if span is not None:
+                tracer.endSpan(
+                    span,
+                    status="ok",
+                    tags=["packs"],
+                    attrs={
+                        "result": "ok",
+                        "candidateCount": len(candidates),
+                        "chosenId": bestMeta.id,
+                        "chosenVersion": bestMeta.version or "",
+                        "chosenLayer": bestMeta.rootLayer,
+                    },
+                )
+            return _metaToResolved(bestMeta)
         
-        # Normalize requirement
-        requirement: SemVerPackRequirement | None
-        if isinstance(versionReq, str):
-            requirement = parseSemVerPackRequirement(versionReq)
-        else:
-            requirement = versionReq
-        
-        # Build SemVer-capable candidate list
-        semverCandidates: list[tuple[SemVerPackVersion, ResolvedPack]] = []
-        for pack in candidates:
-            # Packs without a declared version or with an invalid SemVer string
-            # are ignored for SemVer-based resolution.
-            if not pack.version:
-                continue
-            try:
-                packSemVer = parseSemVerPackVersion(pack.version)
-            except:
-                # Non-SemVer versions are ignored for SemVer-based resolution
-                continue
-            semverCandidates.append((packSemVer, pack))
-        
-        # Requirement present but no SemVer versions → cannot satisfy
-        if requirement is not None and not semverCandidates:
-            return None
-        
-        # No requirement and no SemVer → fall back to discovery precedence
-        if requirement is None and not semverCandidates:
-            return candidates[-1]
-        
-        # Use SemVerResolver to pick best candidate
-        mtch = SemVerResolver.matchCandidates(semverCandidates, requirement)
-        if mtch.best is None:
-            return None
-        _bestVersion, bestPack = mtch.best
-        return bestPack
-
+        except Exception as exc:
+            if span is not None:
+                try:
+                    tracer.endSpan(
+                        span,
+                        status="error",
+                        tags=["packs", "error"],
+                        errorType=type(exc).__name__,
+                        errorMessage=str(exc),
+                    )
+                except Exception:
+                    pass
+            raise
+    
+    # ----- Convenience helpers -----
+    
     def resolveAppPack(
         self,
         packId: str,
         *,
-        author: str | None = None,
+        authorName: str | None = None,
         versionReq: str | SemVerPackRequirement | None = None,
         roots: list[Path] | None = None,
     ) -> ResolvedPack | None:
         """
-        Resolve an appPack by (id, author?, versionReq?, roots?).
+        Resolve an appPack by (id, authorName?, versionReq?, roots?).
         """
         return self.resolvePack(
             "appPack",
             packId,
-            author=author,
+            authorName=authorName,
             versionReq=versionReq,
             roots=roots,
         )
@@ -635,12 +402,12 @@ class PackResolver:
         self,
         packId: str,
         *,
-        author: str | None = None,
+        authorName: str | None = None,
         versionReq: str | SemVerPackRequirement | None = None,
         roots: list[Path] | None = None,
     ) -> ResolvedPack | None:
         """
-        Resolve a viewPack by (id, author?, versionReq?, roots?).
+        Resolve a viewPack by (id, authorName?, versionReq?, roots?).
         
         Typical usage:
           - Global: resolveViewPack("testView")
@@ -649,7 +416,7 @@ class PackResolver:
         return self.resolvePack(
             "viewPack",
             packId,
-            author=author,
+            authorName=authorName,
             versionReq=versionReq,
             roots=roots,
         )
@@ -659,30 +426,29 @@ class PackResolver:
         appPack: ResolvedPack,
         viewKind: str | None,
         *,
-        author: str | None = None,
+        authorName: str | None = None,
         versionReq: str | SemVerPackRequirement | None = None,
     ) -> ResolvedPack | None:
         """
         Resolve a viewPack for a given appPack + viewKind with these rules:
         
             - viewKind is normalized to a non-empty string, defaulting to "main".
-            - AppPack can declare which viewPacks it owns via meta.viewPacks
-              in its manifest (list | dict | string).
+            - AppPack can declare which viewPack it owns via viewPacks in its
+              manifest (list | dict | string).
             - If viewKind == "main":
-                • Only ever resolved from inside the appPack (roots=[appPack.rootDir]).
-                • Never resolved from global roots, so nothing external can override it.
-                • If not found locally, returns None (no viewPack → plain appPack mods).
+              • Only ever resolve from inside the appPack (roots=[appPack.rootDir]).
+              • Never resolved from global roots, so nothing external can override it.
+              • If not found locally, returns None (no viewPack → plain appPack mods).
             - If viewKind != "main":
-                • If declared in appPack.meta.viewPacks → resolve locally only
-                  (roots=[appPack.rootDir]). No global fallback.
-                • If NOT declared in appPack.meta.viewPacks → try global viewPacks
-                  (roots=None), which means any external viewPack with that id
-                  can be used.
+              • If declared in viewPacks in appPack's manifest → resolve locally only
+                (roots=[appPack.rootDir]). No global fallback.
+              • If NOT declared in viewPacks in appPack's manifest → try global viewPacks
+                (roots=None), which means any external viewPack with that id can be used.
         """
         viewKind = (viewKind or "main").strip() or "main"
         
-        raw = appPack.rawJson or {}
-        meta = raw.get("meta") if isinstance(raw, dict) else None
+        rawJson = appPack.rawJson or {}
+        meta = rawJson.get("meta") if isinstance(rawJson, dict) else None
         
         declared: set[str] = set()
         if isinstance(meta, dict):
@@ -708,7 +474,7 @@ class PackResolver:
         if viewKind == "main":
             local = self.resolveViewPack(
                 viewKind,
-                author=author,
+                authorName=authorName,
                 versionReq=versionReq,
                 roots=[appPack.rootDir],
             )
@@ -720,15 +486,16 @@ class PackResolver:
         if viewKind in declared:
             return self.resolveViewPack(
                 viewKind,
-                author=author,
+                authorName=authorName,
                 versionReq=versionReq,
                 roots=[appPack.rootDir],
             )
-
+        
         # AppPack does not declare this viewKind → allow external/global viewPack.
         # This is the "check viewPacks out of the appPack" case.
         return self.resolveViewPack(
             viewKind,
-            author=author,
+            authorName=authorName,
             versionReq=versionReq,
+            roots=None,
         )
