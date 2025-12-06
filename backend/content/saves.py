@@ -10,7 +10,7 @@ import json5
 from backend.app.globals import getRootsService
 
 __all__ = [
-    "SaveBinding",
+    "SaveDescriptor",
     "SaveManager",
 ]
 
@@ -21,7 +21,7 @@ _ID_SAFE = re.compile(r"^[A-Za-z0-9_.@-]+$")
 
 
 @dataclass(frozen=True)
-class SaveBinding:
+class SaveDescriptor:
     appPackId: str
     instanceId: str
     saveDir: Path
@@ -63,30 +63,30 @@ class SaveManager:
         path = (base / appKey / instanceId).resolve()
         return path
     
-    def bind(self, appPackId: str, instanceId: str, *, create: bool = False) -> SaveBinding:
+    def bind(self, appPackId: str, instanceId: str, *, create: bool = False) -> SaveDescriptor:
         saveDir = self.getSaveDir(appPackId, instanceId)
         if create:
             try:
                 saveDir.mkdir(parents=True, exist_ok=True)
             except Exception as err:
                 raise IOError(f"Failed to create save directory '{saveDir}': {err}") from err
-        return SaveBinding(
+        return SaveDescriptor(
             appPackId=appPackId,
             instanceId=instanceId,
             saveDir=saveDir,
         )
     
-    def listSaves(self, appPackId: str) -> list[SaveBinding]:
+    def listSaves(self, appPackId: str) -> list[SaveDescriptor]:
         base = self._firstWritable("saves")
         appKey = self.appIdToKey(appPackId)
         root = (base / appKey).resolve()
         if not root.exists() or not root.is_dir():
             return []
-        out: list[SaveBinding] = []
+        out: list[SaveDescriptor] = []
         try:
             for child in root.iterdir():
                 if child.is_dir():
-                    out.append(SaveBinding(
+                    out.append(SaveDescriptor(
                         appPackId=appPackId,
                         instanceId=child.name,
                         saveDir=child.resolve(),
