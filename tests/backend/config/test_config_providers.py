@@ -38,7 +38,7 @@ class DummyStore:
 
 
 # ----------------------------
-# RuntimeProvider tests
+# OverrideProvider tests
 # ----------------------------
 
 def test_runtimeProvider_setAndGet_pathCreatesNested() -> None:
