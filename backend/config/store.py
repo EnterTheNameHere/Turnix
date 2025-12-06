@@ -80,7 +80,11 @@ class ConfigStore(ConfigStoreProtocol):
             self._validator(effective)
         except Exception as err:
             # rollback
-            self._providers[idx].set(key, value)
+            if oldValue is None:
+                # Delete key from target layer
+                self._providers[idx].set(key, None)
+            else:
+                self._providers[idx].set(key, oldValue)
             raise
 
         # Notify listeners after successful validation
