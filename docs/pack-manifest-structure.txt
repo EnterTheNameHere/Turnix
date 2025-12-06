@@ -47,7 +47,8 @@ author (optional)
     Semantics:
         - If string: treated as AuthorInfo(name=<string>).
         - If object: fields populate AuthorInfo.
-        - May be omitted; effectiveAuthor is resolved in PackMeta (inherit or "unknown").
+        - May be omitted; effectiveAuthor is resolved in PackMeta (inherit or
+          "unknown").
 
 contributors (optional)
     Type: array of string OR AuthorInfo objects
@@ -69,9 +70,9 @@ id (required)
         ".", "@", whitespace, other punctuation.
 
     This is the PackLocalId (local identifier).
-    Hierarchical ids (packTreeId) are built by the loader using parent relationships;
-    the manifest "id" is always a single segment and never includes dots or "@", and
-    never contains version information.
+    Hierarchical ids (packTreeId) are built by the loader using parent
+    relationships; the manifest "id" is always a single segment and never
+    includes dots or "@", and never contains version information.
 
 name (optional)
     Type: string
@@ -131,23 +132,69 @@ visibility (optional)
         "private"
 
     Semantics:
-        - Controls whether this pack is considered "exported" outside its parent
-          when the parent is a contentPack (or any exporting parent).
+        - Controls whether this pack is considered externally visible or
+          internal-only inside its parent pack tree.
 
-    Defaults:
-        - If parent.kind == "contentPack":
-              child.visibility default is "public"
-        - Else (appPack, viewPack, mod, savePack):
-              child.visibility default is "private"
+    Defaults (effectiveVisibility):
+        - For a root pack (no parent):
+              default is "public" if visibility is omitted.
+        - For a child pack (nested inside another pack):
+              if visibility is omitted, inherit parent's effectiveVisibility.
+        - A manifest that explicitly sets "visibility" always overrides the
+          inherited value.
 
     Effect:
-        - When building PackMetaRegistry and determining which packTreeIds are
-          visible to other, unrelated packs:
-            - Children with visibility: "public" are treated as exported / visible.
-            - Children with visibility: "private" are considered internal to their
-              parent pack tree; they may still be used internally (parent and siblings),
-              but external PackRequests cannot resolve to them directly (or will
-              trigger a "not visible" error/warning).
+        - The PackMetaRegistry treats a pack as a candidate for global
+          resolution only if:
+              effectiveVisibility == "public"
+              AND all ancestors allow exporting it (see exportNestedPacks).
+        - Packs with effectiveVisibility == "private" can still be used
+          internally by their parent tree but are not targetable by external
+          PackRequests.
+
+exportNestedPacks (optional)
+    Type:
+        - boolean, OR
+        - array of PackLocalId strings
+
+    Examples:
+        "exportNestedPacks": true
+        "exportNestedPacks": false
+        "exportNestedPacks": ["assets", "assets.ui"]
+
+    Semantics:
+        - Controls which child packs become globally exported when building
+          PackMetaRegistry.
+
+        - If boolean:
+            true  -> all child packs whose effectiveVisibility == "public"
+                     are exported / registered globally.
+            false -> children are not exported globally, even if visible;
+                     they remain internal to this pack tree.
+
+        - If array of PackLocalId:
+            Only the listed child ids are exported globally (provided their
+            effectiveVisibility == "public"). Other children are internal.
+
+    Defaults:
+        - If exportNestedPacks is omitted:
+            Suggested policy:
+              kind == "contentPack":
+                  exportNestedPacks defaults to true
+              kind in {"appPack", "viewPack", "mod", "savePack"}:
+                  exportNestedPacks defaults to false
+            Exact defaults are defined by the loader, but should be consistent
+            with this policy.
+
+    Combined effect with visibility:
+        - A nested child pack appears in the global PackMetaRegistry only if:
+            (a) its effectiveVisibility == "public", AND
+            (b) at least one ancestor has exportNestedPacks == true, or
+                a list that explicitly includes this child id.
+
+        - The parent pack is responsible for deciding whether its children are
+          exposed as part of a public surface or treated as internal modules.
+
 
 --------------------------------------
 2. DEPENDENCIES FIELD
@@ -181,7 +228,8 @@ packs (optional)
             - viewPack: packs required by this view.
             - contentPack: packs required to interpret its content.
             - mod: packs it depends on (shared services, UI controls, etc.).
-            - savePack: packs referenced for reconstruction (typically with overrides).
+            - savePack: packs referenced for reconstruction (typically with
+              overrides).
 
 
 --------------------------------------
@@ -193,8 +241,8 @@ Manifest key: "assets"
     Optional; default: no public assets.
 
     Purpose:
-        - Declare asset directories and explicit asset files that are exposed for
-          use by mods and views.
+        - Declare asset directories and explicit asset files that are exposed
+          for use by mods and views.
 
 3.1 String entries
     "assets": [
@@ -234,7 +282,8 @@ Manifest key: "assets"
             Default: true
 
             If true:
-                - Auto-include safe files under dir recursively, plus listed files.
+                - Auto-include safe files under dir recursively, plus listed
+                  files.
             If false:
                 - Include ONLY the listed files.
 
@@ -247,89 +296,108 @@ Manifest key: "assets"
 
 
 --------------------------------------
-4. EXPORTS AND IMPORT FROM PARENT
+4. NESTED VISIBILITY, EXPORTS AND IMPORT
 --------------------------------------
 
-These are optional fields controlling visibility/inheritance of packs and capabilities.
+This section ties together:
+    - visibility
+    - exportNestedPacks
+    - capability exports
+    - importFromParent
+
+4.1 Capability exports
 
 exports (optional)
     Type: object
-    Example (minimal initial design):
+
+    Example:
 
         "exports": {
-            "packs": ["trace", "trace-view"],
             "capabilities": ["Button", "TraceListView"]
         }
 
     Fields:
-        packs (optional)
-            Type: array of PackLocalId (local child ids)
-
-            Semantics:
-                - Marks which child packs are public / exported.
-                - Resolver may allow other packs to depend on these exported children.
-                - Local ids are converted to full packTreeId using the parent’s packTreeId.
-
         capabilities (optional)
             Type: array of strings
 
             Semantics:
-                - Named capabilities this pack provides (e.g., UI components,
-                  services). Exact semantics will be defined by the capability
-                  system; here it’s just a declaration.
+                - Named capabilities this pack provides (for example, UI
+                  components, services).
+                - Exact semantics are defined by the capability system.
+                - This is purely a declaration; the capability framework
+                  interprets it.
 
-    Defaults:
-        - If exports is omitted:
-            - Engine may treat all children as either internal or public, depending
-              on the policy you decide. A reasonable initial policy:
-                - contentPack: children (e.g. mods in a UI pack) are public by default.
-                - appPack: children are internal by default unless listed in exports.packs.
+    Note:
+        - Previous ideas around exports.packs have been superseded by the
+          combination of per-pack "visibility" and the parent's
+          "exportNestedPacks" setting.
+        - If a legacy manifest defines exports.packs, the loader may translate
+          those entries into exportNestedPacks = [ ... ] at load time.
+
+4.2 Import from parent (dependency inheritance)
 
 importFromParent (optional)
     Type: boolean OR object
-    Default: True
 
     Simple form:
         "importFromParent": true
 
         Semantics:
-            - If true, this pack implicitly inherits its parent pack's "packs" as
-              dependencies, in addition to its own "packs" list.
+            - If true, this pack implicitly inherits its parent pack's "packs"
+              as dependencies, in addition to its own "packs" list.
+            - If false, only this manifest's "packs" list is considered.
 
-    Extended form (future, if needed):
+    Extended form (reserved for future use):
         "importFromParent": {
             "packs": true
         }
 
-    For kind == "viewPack":
-        - "importFromParent" default is FALSE.
-        - That is, a viewPack does NOT automatically inherit its appPack's dependencies
-          unless explicitly requested.
+    Defaults:
+        - If kind == "viewPack":
+              importFromParent defaults to false.
+        - For other kinds (appPack, contentPack, mod, savePack):
+              importFromParent defaults to true, unless overridden by manifest
+              or global configuration.
 
-    Example:
+    Example (viewPack without inheritance):
         {
           "kind": "viewPack",
           "id": "trace-monitor",
           "packs": [
             "Turnix@trace-service@^1"
           ]
-          // no importFromParent => does NOT automatically load appPack.packs javascript mods
+          // importFromParent omitted -> defaults to false for viewPack
+          // does NOT automatically inherit appPack.packs
         }
 
-    If you want inheritance:
+    Example (viewPack with inheritance):
         {
           "kind": "viewPack",
           "id": "trace-monitor",
-          // now DOES automatically load appPack.packs javascript mods
           "importFromParent": true,
           "packs": [
             "Turnix@trace-service@^1"
           ]
+          // Inherits appPack.packs plus its own "packs" list
         }
+
 
 --------------------------------------
 5. KIND-SPECIFIC FIELDS
 --------------------------------------
+
+In addition to the common fields above, each kind may declare a dedicated
+top-level block for kind-specific configuration. These blocks are mutually
+exclusive by kind:
+
+    kind == "appPack"    -> "app": { ... }
+    kind == "viewPack"   -> "view": { ... }
+    kind == "contentPack"-> "content": { ... }
+    kind == "mod"        -> "mod": { ... }
+    kind == "savePack"   -> "save": { ... }
+
+Exact schemas for these blocks are defined in more detailed documents. This
+section only sketches the expected shape and intention.
 
 5.1 appPack
 
@@ -337,16 +405,38 @@ importFromParent (optional)
         kind: "appPack"
         id: <PackLocalId>
 
-    Core fields:
-        packs: [...]  (dependencies)
-        assets: [...] (optional)
-        exports: {...} (optional)
-        importFromParent: (not typically used; appPacks are roots)
+    Kind-specific block:
+        app (required for appPack)
+            Type: object
+
+            Expected fields (examples, not exhaustive):
+                "runtimes": {
+                    "python"?: {
+                        "generator": "generator.py",
+                        "entry": "src/main.py"
+                    },
+                    "javascript"?: {
+                        "generator": "generator.js",
+                        "entry": "src/main.js"
+                    }
+                },
+                "defaultInstanceId": "turnix-main-menu",
+                "initialState": { ... }
+
+            Exact semantics are defined in the app runtime specification.
+
+    Other applicable fields:
+        packs: [...]           (dependencies)
+        assets: [...]          (optional)
+        visibility: ...        (optional)
+        exportNestedPacks: ... (optional)
+        importFromParent:      (rarely used; appPack is typically a root)
 
     Semantics:
         - Top-level application definition.
-        - Owns child packs in its directory (viewPacks, mods, contentPacks).
-
+        - Owns child packs in its directory tree (viewPacks, mods,
+          contentPacks).
+        - Responsible for defining how an AppInstance is created and saved.
 
 5.2 viewPack
 
@@ -354,17 +444,26 @@ importFromParent (optional)
         kind: "viewPack"
         id: <PackLocalId>
 
-    Core fields:
+    Kind-specific block:
+        view (required for viewPack)
+            Type: object
+
+            Expected fields (examples):
+                "viewKind": "main" | "trace-monitor" | ...,
+                "layout": { ... },          // layout / UI config
+                "runtimes": { ... }         // if view has its own JS entrypoint
+
+    Other applicable fields:
         packs: [...]           (dependencies)
         assets: [...]          (optional)
-        exports: {...}         (optional)
-        importFromParent: bool (optional, typically used here)
+        visibility: ...        (optional)
+        exportNestedPacks: ... (optional)
+        importFromParent:      (defaults to false unless explicitly set)
 
     Semantics:
         - Defines a specific View (browser tab/window, 3D client, etc.).
         - May inherit parent appPack’s packs via importFromParent.
-        - Contains mods and contentPacks which are only relevant to this view.
-
+        - Contains mods and contentPacks that are only relevant to this view.
 
 5.3 contentPack
 
@@ -372,15 +471,27 @@ importFromParent (optional)
         kind: "contentPack"
         id: <PackLocalId>
 
-    Core fields:
-        packs: [...]   (dependencies)
-        assets: [...]  (likely common here)
-        exports: {...} (optional; may default to export all children)
+    Kind-specific block:
+        content (optional)
+            Type: object
+
+            Example fields:
+                "category": "ui-controls" | "avatars" | "levels" | ...,
+                "schema": "..."      // content schema hint
+                "loader": "..."      // optional content loader hint
+
+    Other applicable fields:
+        packs: [...]           (dependencies)
+        assets: [...]          (common here)
+        visibility: ...        (optional)
+        exportNestedPacks: ... (optional; typically default true for this kind)
+        importFromParent:      (defaults to true unless overridden)
 
     Semantics:
-        - Holds assets and possibly child mods/other packs.
-        - Typical use: UI control library, avatar pack, level pack, etc.
-
+        - Holds assets and possibly child mods and other packs.
+        - Typical use: UI control library, avatar pack, level pack.
+        - Often acts as a container that exports nested packs via
+          exportNestedPacks and per-child visibility settings.
 
 5.4 mod
 
@@ -388,21 +499,39 @@ importFromParent (optional)
         kind: "mod"
         id: <PackLocalId>
 
-    Additional fields (not detailed here but expected):
-        runtimes: {
-            "python"?:     [ "file.py", ... ],
-            "javascript"?: [ "file.js", ... ]
-        }
+    Kind-specific block:
+        mod (required for mod)
+            Type: object
 
-    Core fields:
-        packs: [...]   (dependencies on other packs)
-        assets: [...]  (optional)
-        exports: {...} (optional, especially for services/capabilities)
+            Expected fields:
+                "runtimes": {
+                    "python"?: {
+                        "entry": "backend_mod.py"
+                    },
+                    "javascript"?: {
+                        "entry": "frontend_mod.js"
+                    }
+                },
+                "permissions": [
+                    "rpc:trace.read@^1",
+                    "rpc:trace.write@^1"
+                ],
+                "hooks": {
+                    // hook-specific configuration if needed
+                }
+
+    Other applicable fields:
+        packs: [...]           (dependencies on other packs)
+        assets: [...]          (optional)
+        visibility: ...        (optional)
+        exportNestedPacks: ... (optional)
+        importFromParent:      (defaults to true unless overridden)
 
     Semantics:
         - Executable code unit.
         - Provides Python and/or JavaScript entries for runtime.
-
+        - Can register capabilities and services; may export them via
+          exports.capabilities.
 
 5.5 savePack
 
@@ -410,13 +539,33 @@ importFromParent (optional)
         kind: "savePack"
         id: <PackLocalId>
 
-    Core fields:
-        packs: [...]  (snapshot of packs used for appInstance reconstruction)
-        assets: [...] (e.g. per-save assets, data files)
+    Kind-specific block:
+        save (optional)
+            Type: object
+
+            Example fields:
+                "appInstanceId": "turnix-main-menu",
+                "createdTs": 1700000000,
+                "appPack": "appPack://Turnix@main-menu:1.0.0",
+                "requestedPacks": { ... },
+                "resolvedPacks": { ... }
+
+            Exact schema is defined in the save-pack specification.
+
+    Other applicable fields:
+        packs: [...]           (snapshot of packs used for AppInstance
+                               reconstruction)
+        assets: [...]          (per-save assets, data files)
+        visibility: ...        (optional; usually "private" since savePacks
+                               are tied to a specific workspace)
+        exportNestedPacks: ... (optional)
+        importFromParent:      (defaults to true unless overridden)
 
     Semantics:
-        - Holds save-specific state and possibly per-save overrides of other packs.
-        - Resolution rules prioritize savePack layer when conflicts exist.
+        - Holds save-specific state and possibly per-save overrides of other
+          packs.
+        - Resolution rules prioritize the savePack layer when conflicts exist
+          with external packs.
 
 
 --------------------------------------
@@ -427,9 +576,10 @@ importFromParent (optional)
     - If missing: effectiveAuthor inherited from parent or set to "unknown".
 
 - version:
-    - If missing: no declared version; effectiveSemVerPackVersion inherited from parent
-      or engine default.
-    - Version semantics (SemVerPackVersion, SemVerPackRequirement) handled by SemVerResolver.
+    - If missing: no declared version; effectiveSemVerPackVersion inherited
+      from parent or engine default.
+    - Version semantics (SemVerPackVersion, SemVerPackRequirement) handled by
+      the SemVer resolver.
 
 - name:
     - If missing: use `id` (PackLocalId) as user-facing name.
@@ -440,17 +590,37 @@ importFromParent (optional)
 - assets:
     - If missing: pack exposes no public assets.
 
-- exports:
-    - If missing: behavior depends on global policy:
-        - A simple rule is:
-            - contentPack: children considered public by default.
-            - appPack, mod, viewPack: children considered internal by default.
+- visibility:
+    - If missing:
+        - Root pack (no parent): default to "public".
+        - Nested pack: inherit parent's effectiveVisibility.
+    - A manifest that sets visibility explicitly overrides the inherited value.
+
+- exportNestedPacks:
+    - If missing:
+        Suggested policy:
+            kind == "contentPack":
+                default to true
+            kind in {"appPack", "viewPack", "mod", "savePack"}:
+                default to false
+    - Exact defaults are defined by the loader but should remain stable across
+      versions to keep resolution predictable.
 
 - importFromParent:
-    - If missing: no implicit dependency inheritance.
+    - If missing:
+        - For kind == "viewPack": default to false.
+        - For other kinds: default to true.
+    - This influences dependency inheritance, not visibility.
+
+- exports:
+    - If missing:
+        - No capabilities are declared as exported.
+        - Nested pack visibility is controlled solely by visibility and
+          exportNestedPacks.
 
 
 End of manifest structure spec (draft).
+
 
 --------------------------------------
 7. COMPATIBILITY / RELATIONSHIP HINTS
@@ -483,7 +653,8 @@ recommendedPacks (optional)
         ]
 
     Semantics:
-        - "These packs are not required, but are known to enhance or complement this pack."
+        - "These packs are not required, but are known to enhance or complement
+           this pack."
         - Mod/Packs Manager may:
             - highlight them when this pack is selected,
             - offer quick "install/enable recommended packs" actions.
@@ -495,7 +666,10 @@ supportedPacks (optional)
     Example:
         "supportedPacks": [
           "OtherDev@combat-system@^2",
-          { "id": "trevor@story-mode@^1", "reason": "Explicitly tested with story mode v1.x" }
+          {
+            "id": "trevor@story-mode@^1",
+            "reason": "Explicitly tested with story mode v1.x"
+          }
         ]
 
     Semantics:
@@ -509,12 +683,16 @@ unsupportedPacks (optional)
 
     Example:
         "unsupportedPacks": [
-          { "id": "OtherDev@old-combat@<2", "reason": "Conflicts with new damage model" }
+          {
+            "id": "OtherDev@old-combat@<2",
+            "reason": "Conflicts with new damage model"
+          }
         ]
 
     Semantics:
-        - "These packs are known incompatible / broken with this pack."
+        - "These packs are known incompatible or broken with this pack."
         - Mod/Packs Manager may:
-            - warn when user tries to enable them together,
+            - warn when a user tries to enable them together,
             - or optionally block the combination depending on policy.
-        - Resolver by default does NOT hard-block; conflict handling is a higher-level policy.
+        - Resolver by default does NOT hard-block; conflict handling is a
+          higher-level policy.
