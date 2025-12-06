@@ -11,7 +11,7 @@ from backend.app.globals import getRootsService
 from backend.content.packs import PackResolver, ResolvedPack
 from backend.content.saves import SaveManager
 from backend.app.instance import AppInstance
-from backend.runtimes.persistence import loadAppInstance
+from backend.app.persistence import loadAppInstance
 
 logger = logging.getLogger(__name__)
 

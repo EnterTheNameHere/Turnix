@@ -7,7 +7,7 @@ from typing import Any
 
 from backend.memory.memory_layer import MemoryObject
 from backend.app.instance import AppInstance
-from backend.runtimes.persistence import save
+from backend.app.persistence import save
 
 APP_PACK_ID = "ai-chat"
 APP_PACK_DISPLAY_NAME = "AI Chat"

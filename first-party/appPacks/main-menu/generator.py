@@ -12,7 +12,7 @@ from typing import Any, Mapping
 
 from backend.memory.memory_layer import MemoryObject
 from backend.app.instance import AppInstance
-from backend.runtimes.persistence import save
+from backend.app.persistence import save
 
 logger = logging.getLogger(__name__)
 

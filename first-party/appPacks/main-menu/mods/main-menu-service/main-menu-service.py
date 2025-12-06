@@ -25,7 +25,7 @@ from backend.core.logger import getModLogger
 from backend.mods.loader import loadPythonMods
 from backend.rpc.api import registerCapabilityInstance, unregisterCapability
 from backend.rpc.broadcast import pushEvent
-from backend.runtimes.persistence import loadAppInstance
+from backend.app.persistence import loadAppInstance
 from backend.views.registry import viewRegistry
 
 logger = getModLogger("main-menu-service")
