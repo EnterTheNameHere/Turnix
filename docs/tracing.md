@@ -1,121 +1,123 @@
-# Turnix Tracing Standard v0.1
+TURNIX TRACING STANDARD v0.1 (UPDATED TO MATCH CURRENT SPECS)
 
-This document defines the **wire format**, **conceptual model**, **lifecycle rules**, and **required fields** for the Turnix tracing system.  
-It is the canonical reference for all tracing in pre-alpha.
+This document defines the wire format, conceptual model, lifecycle rules, and
+required fields for the Turnix tracing system.
+
+It is the canonical reference for tracing in pre-alpha.
+
+
+======================================================================
+1. CORE CONCEPTS
+======================================================================
+
+Tracing uses **spans** and **events**.
+
+- A **span** represents an operation with start and end.
+- An **event** is a point-in-time message inside a span.
+- Missing spanEnd means the operation is still running or ended abnormally.
+
+All trace records are **independent JSON objects** delivered through a single
+stream (`/ws/trace`), one per message.
 
 Tracing is used to understand:
 
-- what happened inside a pipeline run  
-- how RPC, mods, memory, and LLM calls interact  
-- performance, ordering, and concurrency  
-- debugging unexpected updates in memory  
-- identifying stuck or unfinished operations  
+- pipeline execution state
+- RPC circulation
+- AppInstance / session behavior
+- mod hook behavior
+- contentPack and asset loading performance
+- memory updates inside MemoryLayers
+- LLM request/response phases
+- concurrency and cross-subsystem interactions
 
-No backward compatibility is guaranteed in `0.x` versions.
 
----
+======================================================================
+2. SPAN MODEL
+======================================================================
 
-# 1. Core Concepts
+Each span has:
 
-Turnix tracing uses **spans** and **events**.
+- spanId
+- traceId (groups related spans: RPC → pipeline → LLM → mod hook)
+- parentSpanId (null or absent for roots)
+- spanName (stable, identifier-free)
+- status: "ok", "error", "cancelled"
+- errorType (optional)
+- errorMessage (optional)
+- errorStack (optional)
 
-- A **span** represents an operation with a start and (usually) an end.
-- An **event** is a point-in-time record that belongs to a span.
-- Missing `spanEnd` means the span is still running or ended unexpectedly.
+A span produces:
 
-All trace data is sent as **individual JSON objects** through a single stream (e.g. `/ws/trace`), one per message.
+- spanStart
+- spanEnd
 
----
+If spanEnd never arrives, the span is considered “open”.
 
-# 2. Span Model
 
-A span has:
-
-- `spanId` — unique identifier  
-- `traceId` — correlates a full flow (RPC → pipeline → LLM)  
-- `parentSpanId` — null for roots  
-- `spanName` — stable descriptive name  
-- `status` on completion:
-  - `"ok"`  
-  - `"error"`  
-  - `"cancelled"`  
-- optional error fields:
-  - `errorType`
-  - `errorMessage`
-  - `errorStack`
-
-Spans emit:
-
-- a `spanStart` record at the moment they begin  
-- a `spanEnd` record when they finish  
-
-If a span never ends, it remains open in the viewer.
-
----
-
-# 3. Event Model
+======================================================================
+3. EVENT MODEL
+======================================================================
 
 Events:
 
-- belong to a span (`spanId`)
-- have `eventName`
-- have structured `attrs`
-- are point-in-time, not durations
+- attach to a span via spanId
+- have eventName
+- carry arbitrary structured attrs
+- represent moments, not durations
 
-All errors that end a span produce **both**:
+When a span errors, the system produces:
 
-1. a `spanEnd` with `"status": "error"`
-2. optionally one or more `"event"` records with additional diagnostic data
+1. spanEnd with status="error"
+2. zero or more event records containing diagnosing details
 
----
 
-# 4. Record Types
+======================================================================
+4. RECORD TYPES & REQUIRED FIELDS
+======================================================================
 
-Each JSON record sent through the trace stream has:
+Each record has:
 
-```python
-recordType: "spanStart" | "spanEnd" | "event"
-```
+    recordType: "spanStart" | "spanEnd" | "event"
 
-Additional global fields:
+Global fields:
 
-- `time`: ISO 8601 timestamp `("2025-11-15T12:34:56.789Z")`
-- `seq`: monotonic incrementing integer for ordering
-- `traceId`
-- `spanId`
-- `level`: `"debug" | "info" | "warn" | "error"`
-- `tags`: list of short strings
-- `attrs`: structured metadata for this record
+    time: ISO 8601 timestamp with milliseconds
+    seq: monotonic integer per trace stream
+    traceId: correlation id
+    spanId: for all record types
+    level: "debug" | "info" | "warn" | "error"
+    tags: list of short strings
+    attrs: object with structured metadata
 
-All records may include context fields where applicable.
 
----
+======================================================================
+5. CONTEXT FIELDS (ALIGNED WITH CURRENT TURNIX TERMINOLOGY)
+======================================================================
 
-# 5. Context Fields
+Optional standardized fields:
 
-Optional standardized names:
+    appInstanceId      — id of the AppInstance owning the operation
+    sessionId          — id of the session tied to this view or RPC origin
+    viewId             — id of the view where RPC originated, if applicable
+    clientId           — stable long-term client identity (browser cookie)
+    pipelineId         — pipeline name or kind
+    pipelineRunId      — unique id for each run
+    modId              — packTreeId or resolved mod id
+    hookId             — identifier of specific hook handler
+    rpcKind            — "inbound" | "outbound"
+    llmProvider        — e.g. "llama.cpp"
+    llmPreset          — preset/profile defined in PackMeta or runtime
 
-- `appInstanceId`
-- `sessionId`
-- `pipelineId`
-- `pipelineRunId`
-- `viewId`
-- `clientId`
-- `modId`
-- `hookId`
-- `rpcKind` — `"inbound"` / `"outbound"`
-- `llmProvider` — e.g. `"llama.cpp"`
-- `llmPreset` — profile/preset name used by the LLM adapter
+These fields correspond to identifiers defined elsewhere in the framework
+(AppInstance, Session, View, PackMeta).
 
-These fields allow filtering and correlation across subsystems.
 
----
+======================================================================
+6. spanStart RECORD
+======================================================================
 
-# 6. spanStart Record
+Example:
 
-A `spanStart` record includes:
-
-```json
 {
   "recordType": "spanStart",
   "time": "...",
@@ -134,18 +136,20 @@ A `spanStart` record includes:
     "entryPoint": "user.chat"
   }
 }
-```
 
 Rules:
-- `spanStart` is emitted **immediately** when the operation begins.
-- `status` is always `null` on start.
-- `spanName` is stable and does not encode identifiers.
 
----
+- Emitted immediately when operation begins.
+- status is always null for spanStart.
+- spanName must be stable and must not encode identifiers.
 
-# 7. spanEnd Record
 
-```json
+======================================================================
+7. spanEnd RECORD
+======================================================================
+
+Example:
+
 {
   "recordType": "spanEnd",
   "time": "...",
@@ -166,19 +170,20 @@ Rules:
     "durationMs": 333.2
   }
 }
-```
 
 Rules:
-- emitted when span completes normally or abnormally
-- `status` must be `"ok"`, `"error"`, or `"cancelled"`
-- error fields must be provided for `"error"`
-- viewers treat missing `spanEnd` as "open/unfinished"
 
----
+- Must contain a concrete status: ok, error, or cancelled.
+- For status="error", all error fields must be populated.
+- Missing spanEnd is treated as "unfinished".
 
-# 8. event Record
 
-```json
+======================================================================
+8. event RECORD
+======================================================================
+
+Example:
+
 {
   "recordType": "event",
   "time": "...",
@@ -195,104 +200,128 @@ Rules:
     "payloadSize": 852
   }
 }
-```
 
 Rules:
-- `event` records always attach to a span
-- no `status` field
-- used for fine-grained logging:
-  - RPC framed in/out
-  - hook.enter / hook.exit
-  - llm.request / llm.chunk / llm.response
-  - memory.before / memory.after / memory.diff
-  - pipeline.start / pipeline.end
 
----
+- Must attach to a span via spanId.
+- No status field.
+- The primary tool for detailed diagnostic information.
+- Should be used for all subsystem-specific events:
+  - RPC (frame start, frame end, parse errors)
+  - mod hook invocation steps
+  - pipeline step transitions
+  - LLM request/stream/response phases
+  - memory operations inside MemoryLayers
 
-# 9. Standard Span Names
 
-These are canonical:
-- `"process.turnix"`
-  - lifecycle of the backend process
-  - emits `process.start` and `process.stop` events
-- `"appInstance.lifecycle"`
-  - one per AppInstance instance
-- `"session.lifecycle"`
-  - represents a single session
-- `"pipeline.run"`
-  - one per pipeline execution
-- `"rpc.frame"`
-  - one per inbound or outbound frame
-- `"mod.hook"`
-  - each mod hook invocation
-- `"llm.call"`
-  - one model request-response cycle
-- `"memory.op"`
-  - any create/update/delete/load operation
+======================================================================
+9. STANDARD SPAN NAMES (UPDATED)
+======================================================================
 
-Span names do **not** include identifiers.
-Identifiers go into `attrs` and context fields.
+Canonical identifiers:
 
----
+    "process.turnix"
+        Lifecycle of backend process.
 
-# 10. Memory Operations
+    "appInstance.lifecycle"
+        A full lifecycle of one AppInstance.
 
-Memory operations use the same tracing system:
+    "session.lifecycle"
+        Lifecycle of a session (defined in Session model).
 
-### Span
-```python
-spanName: "memory.op"
-```
+    "pipeline.run"
+        One execution of a pipeline run.
 
-### Required attrs
-- `opKind`: `"create" | "update" | "delete" | "load"`
-- `layerId`: memory layer name (`"party"`, `"world"`, `"session"`)
-- `itemRef`: logical identifier of the QueryItem (e.g.`"npc.bartender"`)
+    "rpc.frame"
+        Handling of a single inbound or outbound RPC frame.
 
-### Optional diff attrs
+    "mod.hook"
+        Any mod hook invocation (view hooks, AppInstance hooks, pipeline hooks).
 
-- `fieldsChanged`
-- `hash.before` / `hash.after`
-- `textPreview.before` / `textPreview.after`
+    "llm.call"
+        One full model request/response.
 
-Memory viewer apps use these to reconstruct history, while backend RPC gives the current state.
+    "memory.op"
+        A single MemoryLayer operation (create/update/delete/load).
 
----
+Rules:
+- Never include identifiers inside the spanName.
+- Context fields and attrs hold identifiers.
 
-# 11. Lifecycle Rules
 
-### Spans
-- must emit `spanStart` immediately.
-- must emit `spanEnd` when finishing.
-- missing `spanEnd` means still running or abnormal termination.
-### End status
-- `"ok"` — normal completion
-- `"error"` — raised exception, with error fields
-- `"cancelled"` — terminated intentionally
-### Events
-- do not affect span lifecycle.
-- used for details inside spans (RPC chunks, hook calls, memory diffs).
+======================================================================
+10. MEMORY OPERATION TRACING (ALIGNED WITH NEW MEMORYLAYERS)
+======================================================================
 
----
+Span name:
 
-# 12. Transport and Storage
+    memory.op
 
-This spec only defines the **format** of records.
+Required attrs:
 
-Delivery is handled by:
+    opKind: "create" | "update" | "delete" | "load"
+    layerId: MemoryLayer name (for example: "party", "world", "session")
+    itemRef: logical QueryItem reference ("npc.bartender", "quest.42", etc.)
 
-- a TraceHub inside backend
-- in-memory ring buffer
-- live streamed trace messages via WebSocket `/ws/trace`
-- optional viewer-side file save/load
+Optional diff attrs:
 
-Backend tracing must never block or throw.
+    fieldsChanged
+    hash.before / hash.after
+    textPreview.before / textPreview.after
 
----
+These allow trace viewers to show computed diffs, while the actual memory state
+is retrieved via RPC.
 
-# 13. Versioning
+
+======================================================================
+11. LIFECYCLE RULES
+======================================================================
+
+Spans:
+
+- spanStart must be emitted immediately.
+- spanEnd must be emitted at completion.
+- Missing spanEnd → considered running or abnormally terminated.
+
+End status:
+
+- "ok"         normal completion
+- "error"      must include errorType, errorMessage, errorStack
+- "cancelled"  intentional termination
+
+Events:
+
+- do not affect lifecycle.
+- carry fine-grained details of what happened inside a span.
+
+
+======================================================================
+12. TRANSPORT AND STORAGE
+======================================================================
+
+This spec defines *only the data format*, not the transport mechanism.
+
+Backend behavior:
+
+- TraceHub aggregates spans/events.
+- Messages placed into an in-memory ring buffer.
+- Live messages pushed through `/ws/trace`.
+- Must never block main operations.
+- Must never throw into calling subsystems.
+
+Optional:
+
+- Viewer may save or load trace streams from disk.
+- File I/O must not affect live tracing.
+
+
+======================================================================
+13. VERSIONING
+======================================================================
 
 This is **Turnix Tracing Standard v0.1**.
 
-- Pre-alpha: breaking changes allowed, no legacy support.
-- After 1.0: schema becomes stable.
+Rules:
+
+- Pre-1.0: breaking changes allowed.
+- 1.0+: schema becomes stable.
