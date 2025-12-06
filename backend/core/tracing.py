@@ -168,6 +168,10 @@ class Tracer:
             # Span context overrides ambient context where they overlap.
             ctx = {**ctx, **span.context}
         
+        # Remove _ctxToken if present (we don't want it in the trace record)
+        if "_ctxToken" in ctx:
+            del ctx["_ctxToken"]
+        
         record: JsonDict = {
             "recordType": recordType,
             "time": _utcNowIso(),
