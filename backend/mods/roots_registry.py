@@ -11,7 +11,7 @@ _REGISTRY: dict[str, tuple[Path, ...]] = {}
 
 
 def registerRoots(mountId: str, roots: Iterable[Path]) -> None:
-    _REGISTRY[mountId] = tuple(Path(root).resolve() for root in roots)
+    _REGISTRY[mountId] = tuple(Path(root).resolve(strict=False) for root in roots)
 
 def getRoots(mountId: str) -> tuple[Path, ...] | None:
     return _REGISTRY.get(mountId)
