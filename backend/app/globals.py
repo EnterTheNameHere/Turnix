@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from backend.content.packs import ResolvedPack
     from backend.core.permissions import PermissionManager
     from backend.sessions.session import Session
-    from backend.content.roots import ContentRootsService
+    from backend.content.content_roots import ContentRootsService
     from backend.core.tracing import Tracer, TraceHub
 
 

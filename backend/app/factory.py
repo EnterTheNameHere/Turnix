@@ -21,7 +21,7 @@ def createApp(*, extraRouters: Sequence[APIRouter] = (), initialAppInstance: App
     # Early, process-wide bootstrap (idempotent)
     tracer = getTracer()
     tracer.startProcessSpan({"phase": "factory.createApp"})
-    from backend.content.roots import initRoots
+    from backend.content.content_roots import initRoots
     initRoots() # TODO: Add cli options
     from backend.app.config import initConfig
     initConfig()

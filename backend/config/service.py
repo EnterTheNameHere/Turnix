@@ -11,7 +11,7 @@ from backend.config.store import ConfigStore
 from backend.content.packs import ResolvedPack
 from backend.content.saves import SaveManager
 from backend.core.schema_registry import SchemaRegistry
-from backend.content.roots import ROOT_DIR
+from backend.content.content_roots import ROOT_DIR
 
 logger = logging.getLogger(__name__)
 

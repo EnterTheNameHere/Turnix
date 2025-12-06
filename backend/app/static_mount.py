@@ -5,7 +5,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from backend.content.roots import WEB_ROOT
+from backend.content.content_roots import WEB_ROOT
 
 logger = logging.getLogger(__name__)
 
