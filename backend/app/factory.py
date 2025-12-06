@@ -10,7 +10,7 @@ from backend.app.context import PROCESS_REGISTRY
 from backend.app.globals import getTracer
 from backend.app.lifecycle import life
 from backend.app.static_mount import mountStatic
-from backend.content.runtime_bootstrap import ensureAppInstanceForAppPack
+from backend.app.runtime_bootstrap import ensureAppInstanceForAppPack
 from backend.kernel import Kernel
 from backend.rpc.transport import mountWebSocket
 from backend.app.instance import AppInstance

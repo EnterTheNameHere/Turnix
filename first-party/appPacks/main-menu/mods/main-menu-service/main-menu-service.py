@@ -14,7 +14,7 @@ from backend.app.globals import (
     getRootsService,
 )
 from backend.content.packs import PackResolver, ResolvedPack
-from backend.content.runtime_bootstrap import (
+from backend.app.runtime_bootstrap import (
     _canonicalAppPackId,
     _defaultAppInstanceId,
     _extractMods,
