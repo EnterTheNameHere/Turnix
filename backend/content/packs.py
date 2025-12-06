@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.app.globals import getTracer
-from backend.content.pack_meta import (
+from backend.content.pack_descriptor import (
     PackDescriptor,
     PackDescriptorRegistry,
     buildPackDescriptorRegistry,
