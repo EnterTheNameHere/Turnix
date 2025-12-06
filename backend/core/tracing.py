@@ -155,7 +155,14 @@ class Tracer:
         current.update(values)
         _traceContextVar.set(current)
     
-    def _buildBaseRecord(self, recordType: str, span: TraceSpan | None, level: str, tags: list[str] | None) -> JsonDict:
+    def _buildBaseRecord(
+        self,
+        recordType: str,
+        span: TraceSpan | None,
+        level: str,
+        tags: list[str] | None,
+        attrs: JsonDict | None = None,
+    ) -> JsonDict:
         ctx = self._currentContext()
         if span is not None:
             # Span context overrides ambient context where they overlap.
@@ -169,7 +176,7 @@ class Tracer:
             "spanId": span.spanId if span is not None else ctx.get("spanId", ""),
             "level": level,
             "tags": tags or [],
-            "attrs": {},
+            "attrs": {**ctx, **(attrs or {})},
         }
         
         # Copy known context keys to top-level for easy filtering in the viewer.
@@ -226,11 +233,10 @@ class Tracer:
         # Remember token so we can restore previous span when ending.
         span.context["_ctxToken"] = token
         
-        record = self._buildBaseRecord("spanStart", span, level, tags or [])
+        record = self._buildBaseRecord("spanStart", span, level, tags or [], attrs)
         record["spanName"] = spanName
         record["parentSpanId"] = span.parentSpanId
         record["status"] = None
-        record["attrs"] = attrs or {}
         
         self._emit(record)
         return span
@@ -263,7 +269,7 @@ class Tracer:
                 # If reset fails, don't break tracing...
                 pass
         
-        record = self._buildBaseRecord("spanEnd", span, level, tags or [])
+        record = self._buildBaseRecord("spanEnd", span, level, tags or [], attrs)
         record["spanName"] = span.spanName
         record["status"] = status
         record["errorType"] = errorType
@@ -296,9 +302,8 @@ class Tracer:
         if span is None:
             span = self._currentSpan()
         
-        record = self._buildBaseRecord("event", span, level, tags or [])
+        record = self._buildBaseRecord("event", span, level, tags or [], attrs)
         record["eventName"] = eventName
-        record["attrs"] = attrs or {}
         
         self._emit(record)
     
