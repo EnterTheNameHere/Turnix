@@ -1,5 +1,6 @@
 # backend/mods/frontend_index.py
 from __future__ import annotations
+from typing import Any
 
 import urllib.parse
 from fastapi import APIRouter, HTTPException
@@ -9,18 +10,18 @@ from backend.app.globals import getActiveAppPack, getActiveRuntime, getTracer
 from backend.core.hashing import sha256sumWithPath
 from backend.core.paths import resolveSafe
 from backend.mods.constants import JS_RUNTIMES
-from backend.mods.discover import scanMods
+from backend.mods.discover import scanModsForMount, ModMap
 
 router = APIRouter()
 
 
 
 def makeFrontendIndex(
-    found: dict,
+    found: ModMap,
     *,
     viewId: str,
 ) -> dict:
-    manifests: list[dict] = []
+    manifests: list[dict[str, Any]] = []
 
     for _modId, (_root, moddir, manifest, _manFileName) in found.items():
         rt = next((manifest.runtimes[key] for key in JS_RUNTIMES if key in manifest.runtimes), None)
@@ -105,15 +106,15 @@ def listFrontendModsForView(viewId: str) -> dict:
         pass
     
     runtimeInstance = getActiveRuntime()
-    result = makeFrontendIndex(
-        scanMods(
-            allowedIds=runtimeInstance.getAllowedPacks(),
-            appPack=getActiveAppPack(),
-            saveRoot=runtimeInstance.saveRoot
-        ),
-        viewId=viewId,
+    appPack = getActiveAppPack()
+    found: ModMap = scanModsForMount(
+        viewKind=viewId,
+        allowedIds=runtimeInstance.getAllowedPacks(),
+        appPack=appPack,
+        saveRoot=runtimeInstance.saveRoot,
     )
-    return result
+    
+    return makeFrontendIndex(found, viewId=viewId)
 
 
 
@@ -125,7 +126,10 @@ def serveModAssetForView(viewId: str, modId: str, path: str) -> FileResponse:
             "mods.frontend.serveModAssetForView",
             level="info",
             tags=["mods", "frontend"],
-            attrs={"viewId": viewId},
+            attrs={
+                "viewId": viewId,
+                "modId": modId
+            },
         )
     except Exception:
         pass
@@ -133,10 +137,12 @@ def serveModAssetForView(viewId: str, modId: str, path: str) -> FileResponse:
     activeRuntime = getActiveRuntime()
     if activeRuntime is None:
         raise HTTPException(status_code=404, detail="Unknown View.")
-    found = scanMods(
-        allowedIds=activeRuntime.allowedPacks,
-        appPack=getActiveAppPack(),
-        saveRoot=getActiveRuntime().saveRoot or None,
+    appPack = getActiveAppPack()
+    found: ModMap = scanModsForMount(
+        viewKind=viewId,
+        allowedIds=activeRuntime.getAllowedPacks(),
+        appPack=appPack,
+        saveRoot=activeRuntime.saveRoot,
     )
     if modId not in found:
         raise HTTPException(404, "Unknown mod.")
@@ -163,5 +169,5 @@ def rescanModsForView(viewId: str) -> dict:
         )
     except Exception:
         pass
-    
+
     return listFrontendModsForView(viewId)
