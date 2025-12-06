@@ -30,12 +30,14 @@ class ConfigStore(ConfigStoreProtocol):
         self._roleIdx: dict[str, int] = {}
         for idx, provider in enumerate(self._providers):
             name = provider.__class__.__name__.lower()
-            if "runtime" in name and "runtime" not in self._roleIdx:
+            # Top override layer (what callers see as "runtime" target)
+            if any(token in name for token in ("override", "runtime")) and "runtime" not in self._roleIdx:
                 self._roleIdx["runtime"] = idx
-            if "file" in name and "save" not in self._roleIdx:
+            # Save-backed layer (file on disk)
+            if any(token in name for token in ("file", "save")) and "save" not in self._roleIdx:
                 self._roleIdx["save"] = idx
-            if "view" in name or "dict" in name:
-                # "global" writes usually not allowed
+            # Global-ish base layer (defaults, view, dict-backed, etc.)
+            if any(token in name for token in ("view", "global", "defaults", "dict")):
                 self._roleIdx.setdefault("global", idx)
     
     # ----- Helpers -----
