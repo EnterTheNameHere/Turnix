@@ -8,8 +8,8 @@ from typing import TypeAlias
 
 import json5
 
-from backend.app.globals import configBool, getTracer, getRootsService
-from backend.content.packs import ResolvedPack, PackScanner
+from backend.app.globals import getTracer, getRootsService
+from backend.content.packs import ResolvedPack, PackResolver
 from backend.mods.manifest import ModManifest
 from backend.mods.roots_registry import getRoots as getRegisteredRoots
 
@@ -20,7 +20,6 @@ __all__ = [
     "rescanModsForMount"
 ]
 
-_IGNORE_DIRS = {".git", "node_modules", "__pycache__", "pytest_cache", ".vscode"}
 _SCAN_LOCK = RLock()
 
 ModInfo: TypeAlias = tuple[Path, Path, ModManifest, str]
@@ -59,8 +58,8 @@ def _modSearchRoots(
     """
     Build a list of base roots for mod packs.
     
-    These are *content roots* from which PackScanner will look into the
-    "mods" subdirectory just like for other pack kinds.
+    These roots are passed to PackResolver/PackMetaRegistry to scope which
+    pack directories are considered.
     
     Precedence (earlier wins on collisions):
       1) saveRoot         - per-save overrides (if present)
@@ -123,6 +122,31 @@ def _modSearchRoots(
 
 
 
+def _rootPriority(roots: list[Path], packRoot: Path) -> int:
+    """
+    Compute precedence index for a packRoot based on the first matching base root.
+    
+    Earlier roots win on collision. If no root matches, returns len(roots).
+    """
+    for idx, base in enumerate(roots):
+        if packRoot == base or packRoot.is_relative_to(base):
+            return idx
+    return len(roots)
+
+
+
+def _sortKeyForPack(roots: list[Path], packRoot: Path, modId: str, version: str | None) -> tuple[int, str, str]:
+    """
+    Sorting key with precedence:
+      1) Earlier roots first
+      2) Then by folder name (case-insensitive)
+      3) Then by id/version for determinism
+    """
+    priority = _rootPriority(roots, packRoot)
+    return (priority, packRoot.name.lower(), f"{modId}:{version or ''}")
+
+
+
 def scanMods(
     *,
     allowedIds: Iterable[str] | None = None,
@@ -137,10 +161,10 @@ def scanMods(
     Only mods whose ids are in allowedIds are returned when the iterable is not None.
     
     Search order (earlier roots win on collisions):
-      1) saveRoot/mods (if present)
-      2) appPack.rootDir/mods (if present)
-      3) extraRoots/<mods> (mount-specific or viewPack-local)
-      4) each configured pack root's `mods` directory (first-party, third-party, custom)
+      1) saveRoot subtree (if present)
+      2) appPack.rootDir subtree (if present)
+      3) extraRoots subtrees (mount-specific or viewPack-local)
+      4) each configured content root subtree (first-party, third-party, custom)
     """
     tracer = getTracer()
     span = None
@@ -151,14 +175,12 @@ def scanMods(
         saveRoot=saveRoot,
         extraRoots=extraRoots,
     )
-    allowSymlinks = configBool("mods.allowSymlinks", False)
     
     try:
         span = tracer.startSpan(
             "mods.scan",
             attrs={
                 "rootCount": len(roots),
-                "allowSymlinks": allowSymlinks,
                 "allowed": sorted(allowedSet) if allowedSet is not None else [],
             },
             tags=["mods", "scan"],
@@ -176,8 +198,11 @@ def scanMods(
 
     with _SCAN_LOCK:
         try:
-            scanner = PackScanner(allowSymlinks=allowSymlinks)
-            discoveredPacks = scanner.scanPacks(roots=roots, kinds={"mod"})
+            resolver = PackResolver()
+            discoveredPacks = resolver.listPacks(kinds={"mod"}, roots=roots)
+            
+            # Compute priorities
+            discoveredPacks.sort(key=lambda pack: _sortKeyForPack(roots, pack.rootDir, pack.id, pack.version))
             
             for pack in discoveredPacks:
                 # pack.manifestPath is the pack-level manifest, but we still validate
@@ -291,10 +316,10 @@ def scanMods(
             raise
     
     logger.info(
-        "Mods discovered: %d (allowSymlinks=%s, allowedIds=%s)",
+        "Mods discovered: %d (allowedIds=%s, rootCount=%s)",
         len(found),
-        allowSymlinks,
         sorted(allowedSet) if allowedSet is not None else "*",
+        len(roots),
     )
     return found
 
