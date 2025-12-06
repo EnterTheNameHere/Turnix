@@ -5,7 +5,9 @@ import logging
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from backend.app.globals import getActiveRuntime, config, configBool, getTracer
+from backend.app.globals import getActiveRuntime, getActiveAppPack, config, configBool, getTracer
+from backend.content.runtime_bootstrap import buildViewContextForRuntime
+from backend.mods.roots_registry import registerRoots
 from backend.views.registry import viewRegistry
 
 logger = logging.getLogger(__name__)
@@ -35,6 +37,22 @@ async def apiBootstrap(request: Request):
     if runtime and runtime.mainSession and not view.isAttached(runtime.mainSession.id):
         view.attachSession(runtime.mainSession.id)
     
+    # Build ViewContext for this view (if we have an active appPack)
+    appPack = getActiveAppPack()
+    if runtime and appPack:
+        try:
+            viewContext = buildViewContextForRuntime(
+                runtimeInstance=runtime,
+                appPack=appPack,
+                viewKind=viewKind,
+            )
+            # Register extra mod roots for this viewId so scanModsForMount(viewId, …)
+            # can pick them up when scanning mods for frontend/backend.
+            if viewContext.extraModRoots:
+                registerRoots(view.id, viewContext.extraModRoots)
+        except Exception:
+            # Failure to resolve viewPack or register roots must not break bootstrap...
+            logger.exception("Failed to build/register ViewContext for view '%s'", view.id)
     payload = {
         "viewId": view.id,
         "viewToken": token,
