@@ -6,7 +6,7 @@ TURNIX PACK & ASSET RESOLUTION SPEC (DRAFT)
 
 This spec defines:
 
-- How packs are discovered and represented (PackMeta).
+- How packs are discovered and represented (PackDescriptor).
 - How references to packs are written by creators (PackRefString / PackRequest).
 - How semantic versioning (SemVer*) is used for packs.
 - How assets are declared and resolved via the "assets" field.
@@ -55,13 +55,13 @@ SemVerMatchResult:
     - Result of matching multiple SemVerPackVersion values against one SemVerPackRequirement.
     - Contains:
         kind: "none", "single", or "multiple"
-        matches: list of PackMeta (or (version, PackMeta) pairs)
+        matches: list of PackDescriptor (or (version, PackDescriptor) pairs)
 
 SemVerResolver:
     - Component responsible only for matching versions.
     - Signature (conceptual):
         match(
-            candidates: list[(SemVerPackVersion, PackMeta)],
+            candidates: list[(SemVerPackVersion, PackDescriptor)],
             requirement: SemVerPackRequirement | None
         ) -> SemVerMatchResult
 
@@ -86,7 +86,7 @@ There are three levels related to "id":
 
 3.2 packTreeId (hierarchical id)
     - Hierarchical dotted name built from PackLocalIds along the parent chain.
-    - Constructed during discovery / PackMeta building.
+    - Constructed during discovery / PackDescriptor building.
     - Rules:
         - Root pack: packTreeId = PackLocalId
         - Child:     packTreeId = parent.packTreeId + "." + localId
@@ -106,15 +106,15 @@ There are three levels related to "id":
 
 
 ============================================================
-4. PACK REPRESENTATION (PACKMETA)
+4. PACK REPRESENTATION (PackDescriptor)
 ============================================================
 
-PackMeta is the immutable catalog entry for a single pack, created during discovery
+PackDescriptor is the immutable catalog entry for a single pack, created during discovery
 (scan / rescan). It is not modified during resolution.
 
 Fields (conceptual):
 
-    PackMeta:
+    PackDescriptor:
         localId: PackLocalId
         packTreeId: str               # hierarchical id ("ui.trace.trace-view")
         declaredAuthor: str | None    # as written in manifest
@@ -126,7 +126,7 @@ Fields (conceptual):
         rootPath: Path                # directory of this pack
         manifestPath: Path            # path to manifest.json5
         layer: "first-party" | "third-party" | "custom" | "saves"
-        parent: PackMeta | None       # parent in pack tree
+        parent: PackDescriptor | None     # parent in pack tree
         visibility: "public" | "private"  # governs export from parent trees
         importFromParent: bool        # whether dependencies are inherited from parent
         exports: dict | None          # export lists such as {"packs": [...], "capabilities": [...]} or None
@@ -192,7 +192,7 @@ Examples:
 
 
 ============================================================
-6. DISCOVERY PHASE (SCAN → PACKMETA REGISTRY)
+6. DISCOVERY PHASE (SCAN → PackDescriptor REGISTRY)
 ============================================================
 
 There are two phases:
@@ -201,21 +201,21 @@ Phase 1: Discovery (scan / rescan).
 Phase 2: Resolution (respond to PackRequests).
 
 Invariants:
-    - Discovery builds / updates the complete PackMeta registry.
+    - Discovery builds / updates the complete PackDescriptor registry.
     - Resolution MUST NOT trigger new filesystem scanning or manifest discovery.
-    - Resolution uses only the current PackMeta registry snapshot.
+    - Resolution uses only the current PackDescriptor registry snapshot.
 
 Discovery steps (high level):
 
 1. For each root (first-party, third-party, custom, saves):
     - Walk directories.
     - When a manifest file is found in a directory, treat that directory as a pack root.
-    - Create PackMeta for that root pack.
+    - Create PackDescriptor for that root pack.
     - Recursively search inside that directory for child pack directories with their own manifest files.
 
 2. For each pack discovered:
     - Read manifest (at least: id, author, version, kind).
-    - Determine parent PackMeta (if any).
+    - Determine parent PackDescriptor (if any).
     - Compute:
         localId = manifest.id
         packTreeId:
@@ -231,8 +231,8 @@ Discovery steps (high level):
         exports = manifest.exports or None
         recommendedPacks/supportedPacks/unsupportedPacks = manifest values or []
     - Build runtimeEntries (optional lazily).
-    - Process "assets" (see section 7) and fill PackMeta.assets.
-3. Register all PackMeta objects into a PackMetaRegistry.
+    - Process "assets" (see section 7) and fill PackDescriptor.assets.
+3. Register all PackDescriptor objects into a PackDescriptorRegistry.
    The registry must support queries by:
     - packTreeId
     - (effectiveAuthor, packTreeId, kind)
@@ -240,7 +240,7 @@ Discovery steps (high level):
 
 No lazy discovery rule:
     - Once discovery finishes (or a rescan completes), every pack that exists under roots
-      must appear in the PackMetaRegistry.
+      must appear in the PackDescriptorRegistry.
     - Resolution must not trigger filesystem traversal or manifest probing.
 
 
@@ -271,7 +271,7 @@ String form:
     For each string entry:
         - Interpret as a directory path relative to pack root.
         - At discovery, walk the directory recursively.
-        - Auto-include all files with "safe" extensions (see below) into PackMeta.assets.
+        - Auto-include all files with "safe" extensions (see below) into PackDescriptor.assets.
 
 Object form:
     "assets": [
@@ -300,7 +300,7 @@ Unknown/unsafe extensions:
     - NOT auto-included.
     - Only included if explicitly listed in an object entry's "files" array.
 
-PackMeta.assets construction (simplified):
+PackDescriptor.assets construction (simplified):
 
     For each "assets" entry:
         - If entry is a string (dirPath):
@@ -328,14 +328,14 @@ Assets namespace resolution:
 ============================================================
 
 PackResolver:
-    - Resolves PackRequest -> ResolvedPack using PackMetaRegistry.
+    - Resolves PackRequest -> ResolvedPack using PackDescriptorRegistry.
 
 ResolvedPack (conceptual):
 
     ResolvedPack:
-        meta: PackMeta          # the PackMeta that won
-        sourceLayer: str        # where the pack came from: "savePack", "first-party", etc.
-        replaced: list[PackMeta]# packs shadowed or replaced (optional)
+        meta: PackDescriptor          # the PackDescriptor that won
+        sourceLayer: str              # where the pack came from: "savePack", "first-party", etc.
+        replaced: list[PackDescriptor]# packs shadowed or replaced (optional)
         # convenience mirrors:
         author: str
         packTreeId: str
@@ -348,7 +348,7 @@ ResolvedPack (conceptual):
 
 Resolution steps (for pack):
 
-    def resolvePack(request: PackRequest, registry: PackMetaRegistry) -> ResolvedPack:
+    def resolvePack(request: PackRequest, registry: PackDescriptorRegistry) -> ResolvedPack:
         # 1. Filter by packTreeId, author, kind
         candidates = [
             m for m in registry.all()
@@ -364,7 +364,7 @@ Resolution steps (for pack):
         # 3. Interpret SemVerMatchResult:
         #    - none -> ResolutionError("No matching version")
         #    - multiple -> ResolutionError("Ambiguous version")
-        #    - single -> build ResolvedPack from that PackMeta
+        #    - single -> build ResolvedPack from that PackDescriptor
 
         return resolvedPack
 
@@ -400,7 +400,7 @@ AssetResolver:
 ============================================================
 
 - Discovery/rescan:
-    - Must build a complete PackMeta registry for all packs under roots.
+    - Must build a complete PackDescriptor registry for all packs under roots.
     - Must detect collisions where:
         - two packs share same (effectiveAuthor, packTreeId, kind, version) and both appear in same precedence layer without an explicit override mechanism.
     - May reject manifests with invalid or conflicting id/author/version fields.
@@ -408,12 +408,12 @@ AssetResolver:
 - Resolution:
     - Must not touch filesystem or read manifests.
     - Must fail clearly if:
-        - No PackMeta matches PackRequest.id / author / kind.
+        - No PackDescriptor matches PackRequest.id / author / kind.
         - SemVerResolver returns "none" or "multiple" for a given request.
     - Must treat PackRequests with missing author or missing semverRequirement as wildcards, not as errors.
 
 - Assets:
-    - Only files that appear in PackMeta.assets may be served via asset APIs.
+    - Only files that appear in PackDescriptor.assets may be served via asset APIs.
     - Unknown extensions are not served unless specifically configured in "files" list.
 
 End of spec (draft).

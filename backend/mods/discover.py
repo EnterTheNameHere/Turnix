@@ -58,7 +58,7 @@ def _modSearchRoots(
     """
     Build a list of base roots for mod packs.
     
-    These roots are passed to PackResolver/PackMetaRegistry to scope which
+    These roots are passed to PackResolver/PackDescriptorRegistry to scope which
     pack directories are considered.
     
     Precedence (earlier wins on collisions):

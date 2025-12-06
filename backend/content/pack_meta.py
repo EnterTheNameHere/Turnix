@@ -21,9 +21,9 @@ from backend.semver.semver import (
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "PackMeta",
-    "PackMetaRegistry",
-    "buildPackMetaRegistry",
+    "PackDescriptor",
+    "PackDescriptorRegistry",
+    "buildPackDescriptorRegistry",
 ]
 
 
@@ -38,7 +38,7 @@ RootLayer = Literal["content", "saves"]
 
 
 @dataclass(frozen=True)
-class PackMeta:
+class PackDescriptor:
     """
     Canonical, generalized representation of a single pack.
     """
@@ -68,12 +68,12 @@ class PackMeta:
 
 
 
-class PackMetaRegistry:
+class PackDescriptorRegistry:
     """
     In-memory index of all discovered packs.
     
     Responsibilities:
-      - Hold PackMeta instances discovered from roots.
+      - Hold PackDescriptor instances discovered from roots.
       - Provide efficient lookup by (kind, id[, authorName]).
       - Provide SemVer-based resolution for a given (kind, id[, author], requirement)
     
@@ -82,14 +82,14 @@ class PackMetaRegistry:
         over content-layer packs when versions tie.
     """
     
-    def __init__(self, metas: Iterable[PackMeta]):
+    def __init__(self, metas: Iterable[PackDescriptor]):
         metasTuple = tuple(metas)
-        self._metas: tuple[PackMeta, ...] = metasTuple
+        self._metas: tuple[PackDescriptor, ...] = metasTuple
         
-        # (kind, id) -> [PackMeta, ...]
-        self._byKindId: dict[tuple[str, str], list[PackMeta]] = {}
-        # (kind, authorName, id) -> [PackMeta, ...]
-        self._byKindAuthorId: dict[tuple[str, str, str], list[PackMeta]] = {}
+        # (kind, id) -> [PackDescriptor, ...]
+        self._byKindId: dict[tuple[str, str], list[PackDescriptor]] = {}
+        # (kind, authorName, id) -> [PackDescriptor, ...]
+        self._byKindAuthorId: dict[tuple[str, str, str], list[PackDescriptor]] = {}
         
         for meta in metasTuple:
             key = (meta.kind, meta.id)
@@ -101,10 +101,10 @@ class PackMetaRegistry:
     
     # ----- Basic iteration -----
     
-    def all(self) -> tuple[PackMeta, ...]:
+    def all(self) -> tuple[PackDescriptor, ...]:
         return self._metas
     
-    def iterByKind(self, kind: str) -> Iterable[PackMeta]:
+    def iterByKind(self, kind: str) -> Iterable[PackDescriptor]:
         return (meta for meta in self._metas if meta.kind == kind)
     
     # ----- Candidate lookup -----
@@ -116,7 +116,7 @@ class PackMetaRegistry:
         *,
         author: str | None = None,
         preferSaves: bool = True,
-    ) -> list[PackMeta]:
+    ) -> list[PackDescriptor]:
         if author:
             key = (kind, author, packId)
             candidates = list(self._byKindAuthorId.get(key, ()))
@@ -145,7 +145,7 @@ class PackMetaRegistry:
         author: str | None = None,
         requirement: SemVerPackRequirement | None = None,
         preferSaves: bool = True,
-    ) -> PackMeta | None:
+    ) -> PackDescriptor | None:
         """
         Resolve the "best" pack for (kind, packId[, author]) given an optional SemVer requirement.
         
@@ -164,7 +164,7 @@ class PackMetaRegistry:
         if not candidates:
             return None
         
-        semverCandidates: list[tuple[SemVerPackVersion, PackMeta]] = [
+        semverCandidates: list[tuple[SemVerPackVersion, PackDescriptor]] = [
             (meta.semver, meta) for meta in candidates if meta.semver is not None
         ]
         
@@ -223,13 +223,13 @@ def _canonicalAuthorName(author: str | dict[str, Any] | None) -> str | None:
 
 
 
-def _normalizePackMeta(
+def _normalizePackDescriptor(
     *,
     rawJson: Mapping[str, Any],
     manifestPath: Path,
     baseRoot: Path,
     rootLayer: RootLayer,
-) -> PackMeta:
+) -> PackDescriptor:
     packId = str(rawJson.get("id") or "").strip()
     if not packId or not _ID_RE.fullmatch(packId):
         raise ValueError(f"Invalid pack id {packId!r} in manifest {str(manifestPath)}")
@@ -265,7 +265,7 @@ def _normalizePackMeta(
     
     packRoot = manifestPath.parent
     
-    return PackMeta(
+    return PackDescriptor(
         id=packId,
         name=name,
         kind=kind,
@@ -299,7 +299,7 @@ def _isRelativeTo(path: Path, base: Path) -> bool:
 
 
 
-def _walkForPackMetas(
+def _walkForPackDescriptors(
     dirPath: Path,
     *,
     baseResolved: Path,
@@ -308,7 +308,7 @@ def _walkForPackMetas(
     allowSymlinks: bool,
     pathStack: tuple[Path, ...],
     seen: set[tuple[str, str | None, str | None, Path]],
-    out: list[PackMeta],
+    out: list[PackDescriptor],
 ) -> None:
     tracer = getTracer()
     
@@ -404,7 +404,7 @@ def _walkForPackMetas(
     if manifestPath:
         try:
             rawJson = _loadManifestFile(manifestPath)
-            meta = _normalizePackMeta(
+            meta = _normalizePackDescriptor(
                 rawJson=rawJson,
                 manifestPath=manifestPath.resolve(),
                 baseRoot=baseRoot,
@@ -457,7 +457,7 @@ def _walkForPackMetas(
     # No manifest - descend deeper.
     try:
         for child in dirPath.iterdir():
-            _walkForPackMetas(
+            _walkForPackDescriptors(
                 child,
                 baseResolved=baseResolved,
                 baseRoot=baseRoot,
@@ -472,9 +472,9 @@ def _walkForPackMetas(
 
 
 
-def buildPackMetaRegistry() -> PackMetaRegistry:
+def buildPackDescriptorRegistry() -> PackDescriptorRegistry:
     """
-    Discover packs across all configured roots and build a PackMetaRegistry.
+    Discover packs across all configured roots and build a PackDescriptorRegistry.
     
     Discovery rules:
       - Content packs:
@@ -515,7 +515,7 @@ def buildPackMetaRegistry() -> PackMetaRegistry:
     except Exception:
         span = None
     
-    metas: list[PackMeta] = []
+    metas: list[PackDescriptor] = []
     seen: set[tuple[str, str | None, str | None, Path]] = set()
     
     def _scanRoots(roots: Iterable[Path], rootLayer: RootLayer) -> None:
@@ -547,7 +547,7 @@ def buildPackMetaRegistry() -> PackMetaRegistry:
             
             try:
                 for child in baseResolved.iterdir():
-                    _walkForPackMetas(
+                    _walkForPackDescriptors(
                         child,
                         baseResolved=baseResolved,
                         baseRoot=baseResolved,
@@ -584,4 +584,4 @@ def buildPackMetaRegistry() -> PackMetaRegistry:
         except Exception:
             pass
     
-    return PackMetaRegistry(metas)
+    return PackDescriptorRegistry(metas)

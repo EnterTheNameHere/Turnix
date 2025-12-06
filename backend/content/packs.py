@@ -9,9 +9,9 @@ from typing import Any
 
 from backend.app.globals import getTracer
 from backend.content.pack_meta import (
-    PackMeta,
-    PackMetaRegistry,
-    buildPackMetaRegistry,
+    PackDescriptor,
+    PackDescriptorRegistry,
+    buildPackDescriptorRegistry,
 )
 from backend.semver.semver import (
     SemVerPackVersion,
@@ -32,7 +32,7 @@ __all__ = [
 @dataclass(frozen=True)
 class ResolvedPack:
     """
-    Adapter over PackMeta.
+    Adapter over PackDescriptor.
     """
     id: str
     name: str
@@ -62,7 +62,7 @@ def _isUnder(path: Path, root: Path) -> bool:
 
 
 
-def _metaToResolved(meta: PackMeta) -> ResolvedPack:
+def _metaToResolved(meta: PackDescriptor) -> ResolvedPack:
     return ResolvedPack(
         id=meta.id,
         name=meta.name,
@@ -79,7 +79,7 @@ def _metaToResolved(meta: PackMeta) -> ResolvedPack:
 
 class PackResolver:
     """
-    High-level resolver built on top of PackMetaRegistry.
+    High-level resolver built on top of PackDescriptorRegistry.
     
     Responsibilities:
       - Expose a ResolvedPack view for existing callers.
@@ -87,12 +87,12 @@ class PackResolver:
       - Support scoping resolution to one or more directory trees.
     """
     
-    def __init__(self, registry: PackMetaRegistry | None = None) -> None:
+    def __init__(self, registry: PackDescriptorRegistry | None = None) -> None:
         self._registry = registry
         
-    def _getRegistry(self) -> PackMetaRegistry:
+    def _getRegistry(self) -> PackDescriptorRegistry:
         if self._registry is None:
-            self._registry = buildPackMetaRegistry()
+            self._registry = buildPackDescriptorRegistry()
         return self._registry
     
     # ----- Listing -----
@@ -157,7 +157,7 @@ class PackResolver:
         authorName: str | None,
         roots: list[Path] | None,
         preferSaves: bool,
-    ) -> list[PackMeta]:
+    ) -> list[PackDescriptor]:
         registry = self._getRegistry()
         metas = registry.all()
         
@@ -173,7 +173,7 @@ class PackResolver:
                 norm.append(Path(resolved))
             scopeRoots = norm
         
-        candidates: list[PackMeta] = []
+        candidates: list[PackDescriptor] = []
         for meta in metas:
             if meta.kind != kind:
                 continue
@@ -260,7 +260,7 @@ class PackResolver:
             span = None
         
         try:
-            candidates: list[PackMeta] = self._candidateMetas(
+            candidates: list[PackDescriptor] = self._candidateMetas(
                 kind,
                 packId,
                 authorName=authorName,
@@ -283,7 +283,7 @@ class PackResolver:
             else:
                 requirement = versionReq
             
-            semverCandidates: list[tuple[SemVerPackVersion, PackMeta]] = [
+            semverCandidates: list[tuple[SemVerPackVersion, PackDescriptor]] = [
                 (meta.semver, meta)
                 for meta in candidates
                 if meta.semver is not None
