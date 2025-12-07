@@ -184,6 +184,32 @@ class PackDescriptorRegistry:
         
         self._byTreeId[desc.packTreeId].append(desc)
         self._all.append(desc)
+        
+        # Lifecycle: pack is now indexed in the registry.
+        try:
+            trace = getTracer()
+            trace.traceEvent(
+                "packs.lifecycle",
+                attrs={
+                    "phase": "indexed",
+                    "packId": desc.localId,
+                    "packTreeId": desc.packTreeId,
+                    "kind": desc.kind.value,
+                    "authorName": desc.authorName,
+                    "effectiveAuthor": desc.effectiveAuthor,
+                    "version": (
+                        str(desc.declaredSemVerPackVersion)
+                        if desc.declaredSemVerPackVersion is not None
+                        else None
+                    ),
+                    "layer": desc.layer.value,
+                    "baseRoot": str(desc.baseRoot),
+                    "pickRoot": str(desc.packRoot),
+                }
+            )
+        except Exception:
+            # Tracing never break discovery.
+            pass
     
     # ----- Basic iteration -----
     
@@ -577,25 +603,35 @@ def _walkForPackDescriptors(
             )
             
             try:
+                attrs={
+                    "packId": desc.localId,
+                    "packName": desc.name,
+                    "kind": desc.kind.value,
+                    "authorName": desc.authorName,
+                    "version": (
+                        str(desc.declaredSemVerPackVersion)
+                        if desc.declaredSemVerPackVersion is not None
+                        else None
+                    ),
+                    "dir": str(desc.packRoot),
+                    "manifestPath": str(desc.manifestPath),
+                    "layer": desc.layer.value,
+                    "baseRoot": str(baseResolved),
+                }
                 tracer.traceEvent(
                     "packs.manifestFound",
-                    attrs={
-                        "packId": desc.localId,
-                        "packName": desc.name,
-                        "kind": desc.kind.value,
-                        "authorName": desc.authorName,
-                        "version": (
-                            str(desc.declaredSemVerPackVersion)
-                            if desc.declaredSemVerPackVersion is not None
-                            else None
-                        ),
-                        "dir": str(desc.packRoot),
-                        "manifestPath": str(desc.manifestPath),
-                        "layer": desc.layer.value,
-                        "baseRoot": str(baseResolved),
-                    },
+                    attrs=attrs,
                     level="info",
                     tags=["packs", "manifest"],
+                )
+                tracer.traceEvent(
+                    "packs.lifecycle",
+                    attrs={
+                        **attrs,
+                        "phase": "discoverd",
+                    },
+                    level="debug",
+                    tags=["packs", "lifecycle"],
                 )
             except Exception:
                 pass
