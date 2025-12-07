@@ -8,6 +8,7 @@ from backend.app.globals import getContentRootsService
 from backend.config.providers import DefaultsProvider, FileProvider, OverrideProvider, ViewProvider
 from backend.config.schema_loader import loadConfigSchemas
 from backend.config.store import ConfigStore
+from backend.content.pack_descriptor import PackDescriptor
 from backend.content.packs import ResolvedPack
 from backend.content.saves import SaveManager
 from backend.core.schema_registry import SchemaRegistry
@@ -131,3 +132,42 @@ class ConfigService:
             validator=validator,
             providers=providers,
         )
+
+    # ------------------------------------------------------------------ #
+    # Pack-aware schema + config loading
+    # ------------------------------------------------------------------ #
+    
+    def registerSchemasFor(self, packs: list[PackDescriptor]) -> None:
+        """
+        Register config schemas shipped by the given packs.
+        
+        Intended usage:
+            - After PackManager has selected the active set of packs for
+              this run (app, view, mods, system packs).
+            - Before any defaults/user config are loaded.
+        
+        Implementation sketch (to be filled in later):
+            - For each pack, look for schema files under known relative
+              paths (for example "config/schema/**/*.schema.json")
+            - Load and register them into self.registry.
+        """
+        # TODO: Implement schema discovery inside packs
+        return
+    
+    def loadConfigFor(self, packs: list[PackDescriptor]) -> None:
+        """
+        Load default and user configuration for the given packs.
+        
+        Intended usage:
+            - After registerSchemasFor(packs) has been called.
+            - Before packs are considered "prepared" and before mod
+              onLoad() is invoked.
+        
+        Implementation sketch (to be filled in later):
+            - For each pack, merge:
+                1. defaults from pack (config/defaults/*.json5)
+                2. user config from <userdata>/ (per-pack/app files)
+            - Validate with self.registry and apply into self.store.
+        """
+        # TODO: Implement pack-scoped config loading.
+        return
