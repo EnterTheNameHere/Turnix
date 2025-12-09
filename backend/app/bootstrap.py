@@ -60,7 +60,7 @@ def _extractMods(appPack: ResolvedPack) -> set[str]:
     
     # Reject strings early - they are iterable!
     if isinstance(mods, str):
-        raise TypeError(f"Invalid 'mods' value type - use dict or list!")
+        raise TypeError("Invalid 'mods' value type - use dict or list!")
     
     # list of mod names
     if isinstance(mods, list):
