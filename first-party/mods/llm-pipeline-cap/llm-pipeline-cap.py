@@ -1,5 +1,6 @@
 # first-party/mods/llm-pipeline-cap/llm-pipeline-cap.py
 from __future__ import annotations
+
 import asyncio
 from typing import Any
 
@@ -14,6 +15,9 @@ from backend.rpc.api import (
 )
 
 logger = getModLogger("llm-pipeline-cap")
+
+
+
 _CAP_NAME = "llm.pipeline@1"
 
 

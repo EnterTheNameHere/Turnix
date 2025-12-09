@@ -1,8 +1,9 @@
 # backend/core/logging/handlers.py
 from __future__ import annotations
+
 import asyncio
-from collections import deque
 import logging
+from collections import deque
 
 from .formatters import JsonFormatter
 

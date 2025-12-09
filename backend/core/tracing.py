@@ -1,10 +1,11 @@
 # backend/core/tracing.py
 from __future__ import annotations
+
 import asyncio
-from asyncio import AbstractEventLoop
 import contextvars
 import datetime as dt
 import threading
+from asyncio import AbstractEventLoop
 from dataclasses import dataclass, field
 from typing import Any
 

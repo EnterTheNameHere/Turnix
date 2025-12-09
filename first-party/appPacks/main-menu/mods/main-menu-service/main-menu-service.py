@@ -1,11 +1,18 @@
 # first-party/appPack/main-menu/mods/main-menu-service/main-menu-service.py
 from __future__ import annotations
+
 import asyncio
 from pathlib import Path
 from typing import Any
 
 import json5
 
+from backend.app.bootstrap import (
+    _canonicalAppPackId,
+    _defaultAppInstanceId,
+    _extractMods,
+    _generateAppInstance,
+)
 from backend.app.context import PROCESS_REGISTRY
 from backend.app.globals import (
     getConfigService,
@@ -13,19 +20,13 @@ from backend.app.globals import (
     getModServices,
     getContentRootsService,
 )
+from backend.app.persistence import loadAppInstance
 from backend.content.packs import PackResolver, ResolvedPack
-from backend.app.bootstrap import (
-    _canonicalAppPackId,
-    _defaultAppInstanceId,
-    _extractMods,
-    _generateAppInstance,
-)
 from backend.content.saves import SaveManager
 from backend.core.logger import getModLogger
 from backend.mods.loader import loadPythonMods
 from backend.rpc.api import registerCapabilityInstance, unregisterCapability
 from backend.rpc.broadcast import pushEvent
-from backend.app.persistence import loadAppInstance
 from backend.views.registry import viewRegistry
 
 logger = getModLogger("main-menu-service")

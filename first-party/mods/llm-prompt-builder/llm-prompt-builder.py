@@ -1,10 +1,11 @@
 # first-party/mods/llm-prompt-builder/llm-prompt-builder.py
 from __future__ import annotations
+
 from typing import Any
 
 from backend.app.globals import getActiveAppInstance
-from backend.pipeline.llmpipeline import LLMPipelineStages
 from backend.core.logger import getModLogger
+from backend.pipeline.llmpipeline import LLMPipelineStages
 
 logger = getModLogger("llm-prompt-builder")
 

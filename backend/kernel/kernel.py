@@ -1,8 +1,10 @@
 # backend/kernel/kernel.py
 from __future__ import annotations
+
 from pathlib import Path
 
 from backend.app.context import PROCESS_REGISTRY
+from backend.app.instance import AppInstance
 from backend.content.internal_pack_manager import InternalPackManager
 from backend.content.pack_descriptor import PackDescriptorRegistry
 from backend.memory.memory_layer import (
@@ -10,7 +12,6 @@ from backend.memory.memory_layer import (
     ReadOnlyMemoryLayer,
     MemoryLayer,
 )
-from backend.app.instance import AppInstance
 
 __all__ = ["Kernel"]
 

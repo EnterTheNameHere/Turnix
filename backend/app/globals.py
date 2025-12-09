@@ -1,5 +1,6 @@
 # backend/app/globals.py
 from __future__ import annotations
+
 from typing import Any, cast, TYPE_CHECKING
 
 from backend.app.context import PROCESS_REGISTRY

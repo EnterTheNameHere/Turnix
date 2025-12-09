@@ -1,5 +1,6 @@
 # backend/views/manager.py
 from __future__ import annotations
+
 from fastapi import WebSocket
 
 from backend.app.globals import getTracer

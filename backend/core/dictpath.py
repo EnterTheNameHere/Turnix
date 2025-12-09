@@ -1,7 +1,8 @@
 # backend/core/dictpath.py
 from __future__ import annotations
-from typing import Any
+
 from collections.abc import Mapping, MutableMapping
+from typing import Any
 
 __all__ = ["getByPath", "setByPath", "hasPath", "deleteByPath"]
 

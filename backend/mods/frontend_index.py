@@ -1,8 +1,9 @@
 # backend/mods/frontend_index.py
 from __future__ import annotations
-from typing import Any
 
+from typing import Any
 import urllib.parse
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 

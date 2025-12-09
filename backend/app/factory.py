@@ -1,5 +1,6 @@
 # backend/app/factory.py
 from __future__ import annotations
+
 import logging
 from collections.abc import Sequence
 
@@ -7,13 +8,13 @@ from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.context import PROCESS_REGISTRY
+from backend.app.bootstrap import ensureAppInstanceForAppPack
 from backend.app.globals import getTracer
+from backend.app.instance import AppInstance
 from backend.app.lifecycle import life
 from backend.app.static_mount import mountStatic
-from backend.app.bootstrap import ensureAppInstanceForAppPack
 from backend.kernel import Kernel
 from backend.rpc.transport import mountWebSocket
-from backend.app.instance import AppInstance
 
 
 

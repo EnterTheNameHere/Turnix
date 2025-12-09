@@ -1,5 +1,6 @@
 # backend/config/store.py
 from __future__ import annotations
+
 from typing import Any, Callable, Literal
 
 from .types import ConfigProvider, ChangeListener, ConfigStore as ConfigStoreProtocol, ConfigMeta

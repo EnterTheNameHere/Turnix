@@ -1,14 +1,15 @@
 from __future__ import annotations
+
 import asyncio
 import logging
 from typing import Any
 
 from fastapi import WebSocket
 
-from backend.views.manager import viewManager
 from backend.core.ids import uuidv7
 from backend.rpc.connection import getRPCConnection
 from backend.rpc.transport import sendRPCMessage
+from backend.views.manager import viewManager
 
 logger = logging.getLogger(__name__)
 

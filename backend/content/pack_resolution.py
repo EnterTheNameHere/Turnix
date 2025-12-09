@@ -3,15 +3,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
 
-from backend.semver.semver import SemVerPackRequirement, parseSemVerPackRequirement
 from backend.content.pack_descriptor import (
     PackKind,
     PackRequest,
     PackDescriptor,
     PackDescriptorRegistry,
 )
+from backend.semver.semver import SemVerPackRequirement, parseSemVerPackRequirement
 
 logger = logging.getLogger(__name__)
 

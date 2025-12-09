@@ -1,5 +1,6 @@
 # backend/core/auth.py
 from __future__ import annotations
+
 from backend.rpc.models import RPCMessage
 
 

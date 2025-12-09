@@ -1,5 +1,6 @@
 # backend/config/service.py
 from __future__ import annotations
+
 import logging
 from dataclasses import dataclass
 from typing import Final
@@ -11,8 +12,8 @@ from backend.config.store import ConfigStore
 from backend.content.pack_descriptor import PackDescriptor
 from backend.content.packs import ResolvedPack
 from backend.content.saves import SaveManager
-from backend.core.schema_registry import SchemaRegistry
 from backend.content.content_roots import ROOT_DIR
+from backend.core.schema_registry import SchemaRegistry
 
 logger = logging.getLogger(__name__)
 

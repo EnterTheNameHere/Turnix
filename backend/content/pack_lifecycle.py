@@ -1,8 +1,8 @@
 # backend/content/pack_lifecycle.py
 from __future__ import annotations
 
-from enum import Enum
 from collections.abc import Iterable
+from enum import Enum
 
 from backend.content.pack_descriptor import PackDescriptor
 

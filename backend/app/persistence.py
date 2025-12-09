@@ -1,5 +1,6 @@
 # backend/runtimes/persistence.py
 from __future__ import annotations
+
 import logging
 import os
 import time
@@ -9,8 +10,8 @@ from typing import Any
 import json5
 
 from backend.app.globals import getTracer
-from backend.memory.memory_persistence import saveLayersToDir, loadLayersFromDir
 from backend.app.instance import AppInstance
+from backend.memory.memory_persistence import saveLayersToDir, loadLayersFromDir
 from backend.sessions.session import Session
 
 logger = logging.getLogger(__name__)

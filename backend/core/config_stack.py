@@ -1,9 +1,10 @@
 # backend/core/config_stack.py
 from __future__ import annotations
-from typing import Any, Literal, cast
+
+import copy
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-import copy
+from typing import Any, Literal, cast
 
 from backend.core.tracing import getTracer
 

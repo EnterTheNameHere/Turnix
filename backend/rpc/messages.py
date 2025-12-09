@@ -1,13 +1,16 @@
 # backend/rpc/messages.py
 from __future__ import annotations
-from typing import Any
+
 from collections.abc import Mapping
+from typing import Any
+
 from pydantic import ValidationError
-from backend.rpc.models import RPCMessage, Gen
-from backend.core.ids import uuidv7
-from backend.core.jsonutils import serializeError
+
 from backend.app.config import pickBudgetMs
 from backend.app.globals import config
+from backend.core.ids import uuidv7
+from backend.core.jsonutils import serializeError
+from backend.rpc.models import RPCMessage, Gen
 
 __all__ = [
     "createWelcomeMessage", "createAckMessage", "createErrorMessage",

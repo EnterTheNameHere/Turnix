@@ -1,12 +1,19 @@
 # first-party/mods/drivers/llamacpp/llamacpp_client.py
-
 from __future__ import annotations
+
 import asyncio
-import httpx, json, math, secrets
+import json
+import math
+import secrets
 from typing import AsyncGenerator, Any
 
+import httpx
+
 from backend.core.logger import getModLogger
+
 logger = getModLogger("llamacpp_client")
+
+
 
 DEFAULT_BASE_URL = "http://localhost:1234"
 # TODO: check for valid paths / returned formats - do it on init? Check streamChat TODOs too...

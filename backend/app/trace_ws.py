@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from backend.core.jsonutils import safeJsonDumps
 from backend.app.globals import getTraceHub
+from backend.core.jsonutils import safeJsonDumps
 
 router = APIRouter()
 

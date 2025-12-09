@@ -1,13 +1,15 @@
 # first-party/mods/chat-history/chat-history.py
 from __future__ import annotations
+
 import asyncio
 import time
 
 from backend.app.globals import getActiveAppInstance
-from backend.core.logger import getModLogger
-from backend.pipeline.llmpipeline import LLMPipelineStages
-from backend.memory.memory_layer import QueryItem as MemItem
 from backend.core.ids import uuid_12
+from backend.core.logger import getModLogger
+from backend.memory.memory_layer import QueryItem as MemItem
+from backend.pipeline.llmpipeline import LLMPipelineStages
+from backend.sessions.session import Session
 
 logger = getModLogger("chat-history")
 
@@ -62,7 +64,6 @@ def _takeTail(history: list[MemItem], *, maxUser: int = 6, maxAssistant: int = 6
 
 
 
-from backend.sessions.session import Session
 def _loadThreadFromMemory(session: Session, threadId: str) -> list[MemItem]:
     """
     Linear read from layered memory under 'session.chat.<threadId>.*'.

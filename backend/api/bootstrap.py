@@ -1,5 +1,6 @@
 # backend/api/bootstrap.py
 from __future__ import annotations
+
 import logging
 
 from fastapi import APIRouter, Request

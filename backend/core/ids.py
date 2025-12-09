@@ -1,6 +1,9 @@
 # backend/core/ids.py
 from __future__ import annotations
-import uuid6, uuid, secrets
+
+import uuid
+import uuid6
+import secrets
 
 __all__ = ["uuidv7", "uuidv4", "uuid_10", "uuid_12", "shortToken"]
 

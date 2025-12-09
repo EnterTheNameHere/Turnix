@@ -1,19 +1,22 @@
 # first-party/appPacks/ai-chat/generator.py
 from __future__ import annotations
+
 import logging
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from backend.memory.memory_layer import MemoryObject
 from backend.app.instance import AppInstance
 from backend.app.persistence import save
+from backend.memory.memory_layer import MemoryObject
+
+logger = logging.getLogger(__name__)
+
+
 
 APP_PACK_ID = "ai-chat"
 APP_PACK_DISPLAY_NAME = "AI Chat"
 DEFAULT_APP_INSTANCE_ID = "ai-chat-appInstance"
-
-logger = logging.getLogger(__name__)
 
 
 

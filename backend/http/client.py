@@ -1,11 +1,12 @@
 # backend/http/client.py
 from __future__ import annotations
+
 import asyncio
 import random
-from typing import Any
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
+from typing import Any
 
 import httpx
 

@@ -1,5 +1,6 @@
 # backend/app/context.py
 from __future__ import annotations
+
 from typing import Any, TypeVar, cast
 
 T = TypeVar("T")

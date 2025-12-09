@@ -1,15 +1,16 @@
 # backend/rpc/logging.py
 from __future__ import annotations
-from typing import Any, Literal, Mapping
-
-from backend.rpc.models import RPCMessage
-from backend.core.redaction import redactText
-from backend.core.jsonutils import safeJsonDumps
-from backend.app.globals import config
-from backend.core.dictpath import getByPath
-from backend.core.ops import evaluateOp
 
 import logging
+from typing import Any, Literal, Mapping
+
+from backend.app.globals import config
+from backend.core.dictpath import getByPath
+from backend.core.jsonutils import safeJsonDumps
+from backend.core.ops import evaluateOp
+from backend.core.redaction import redactText
+from backend.rpc.models import RPCMessage
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["shouldLogRpcMessage", "decideAndLog"]

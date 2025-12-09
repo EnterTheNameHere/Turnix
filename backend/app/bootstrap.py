@@ -1,5 +1,6 @@
 # backend/app/bootstrap.py
 from __future__ import annotations
+
 import importlib.util
 import logging
 from collections.abc import Callable
@@ -8,10 +9,10 @@ from pathlib import Path
 from typing import Any, cast
 
 from backend.app.globals import getContentRootsService
-from backend.content.packs import PackResolver, ResolvedPack
-from backend.content.saves import SaveManager
 from backend.app.instance import AppInstance
 from backend.app.persistence import loadAppInstance
+from backend.content.packs import PackResolver, ResolvedPack
+from backend.content.saves import SaveManager
 
 logger = logging.getLogger(__name__)
 

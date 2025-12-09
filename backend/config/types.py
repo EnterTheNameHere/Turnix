@@ -1,5 +1,6 @@
 # backend/config/types.py
 from __future__ import annotations
+
 from typing import Literal, Protocol, Any, Callable, TypedDict
 
 Visibility = Literal["public", "advanced", "hidden"]

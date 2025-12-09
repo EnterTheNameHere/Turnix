@@ -1,9 +1,10 @@
 # backend/rpc/context.py
 from __future__ import annotations
+
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
-from collections.abc import Callable
 
 __all__ = ["CallContext"]
 

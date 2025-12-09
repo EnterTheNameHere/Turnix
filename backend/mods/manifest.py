@@ -1,5 +1,6 @@
 # backend/mods/manifest.py
 from __future__ import annotations
+
 from pydantic import BaseModel, Field, ConfigDict
 
 __all__ = ["RuntimeSpec", "ModManifest"]

@@ -1,11 +1,12 @@
 # backend/core/logging/setup.py
 from __future__ import annotations
+
 import logging
 import logging.handlers
 
 from backend.app.globals import config, configBool
-from .formatters import DevFormatter, JsonFormatter, RedactingFormatter
 from .filters import RecurringSuppressFilter
+from .formatters import DevFormatter, JsonFormatter, RedactingFormatter
 from .handlers import getJSLogHandler
 
 __all__ = [

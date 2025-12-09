@@ -1,5 +1,6 @@
 # backend/app/static_mount.py
 from __future__ import annotations
+
 import logging
 
 from fastapi import FastAPI

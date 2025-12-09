@@ -64,7 +64,7 @@ def _isUnder(path: Path, root: Path) -> bool:
 
 def _metaToResolved(meta: PackDescriptor) -> ResolvedPack:
     return ResolvedPack(
-        id=meta.id,
+        id=meta.localId,
         name=meta.name,
         kind=meta.kind,
         version=meta.version,
@@ -177,7 +177,7 @@ class PackResolver:
         for meta in metas:
             if meta.kind != kind:
                 continue
-            if meta.id != packId:
+            if meta.localId != packId:
                 continue
             if authorName is not None and meta.authorName != authorName:
                 continue
@@ -313,7 +313,7 @@ class PackResolver:
                         attrs={
                             "result": "fallback",
                             "candidateCount": len(candidates),
-                            "chosenId": bestMeta.id,
+                            "chosenId": bestMeta.localId,
                             "chosenVersion": bestMeta.version or "",
                             "chosenLayer": bestMeta.rootLayer,
                         },
@@ -356,7 +356,7 @@ class PackResolver:
                     attrs={
                         "result": "ok",
                         "candidateCount": len(candidates),
-                        "chosenId": bestMeta.id,
+                        "chosenId": bestMeta.localId,
                         "chosenVersion": bestMeta.version or "",
                         "chosenLayer": bestMeta.rootLayer,
                     },

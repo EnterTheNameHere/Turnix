@@ -1,10 +1,11 @@
 # backend/core/logging/formatters.py
 from __future__ import annotations
+
 import logging
-from .context import getLogContext
 
 from backend.core.jsonutils import safeJsonDumps
 from backend.core.redaction import redactText
+from .context import getLogContext
 
 
 

@@ -1,11 +1,11 @@
 # backend/core/schema_registry.py
 from __future__ import annotations
-import re
+
 import copy
 import threading
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, TypeAlias, Callable, cast
-from collections.abc import Mapping, Sequence
 
 import fastjsonschema
 

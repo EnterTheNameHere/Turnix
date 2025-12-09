@@ -1,8 +1,11 @@
 # backend/rpc/connection.py
 from __future__ import annotations
-import secrets, time, asyncio
-from typing import Any
+
+import asyncio
+import secrets
+import time
 from collections.abc import Callable
+from typing import Any
 
 from backend.rpc.models import RPCMessage, Gen
 from backend.rpc.types import SubscriptionEntry, PendingRequestEntry

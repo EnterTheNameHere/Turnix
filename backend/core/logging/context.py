@@ -1,5 +1,6 @@
 # backend/core/logging/context.py
 from __future__ import annotations
+
 import contextvars
 
 # All log context lives here. Enrich this from RPC receive path.

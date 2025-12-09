@@ -6,13 +6,14 @@ This module is executed by the controller to ensure that the
 main menu appInstance has an on-disk save to restore from.
 """
 from __future__ import annotations
+
 import logging
 from pathlib import Path
 from typing import Any, Mapping
 
-from backend.memory.memory_layer import MemoryObject
 from backend.app.instance import AppInstance
 from backend.app.persistence import save
+from backend.memory.memory_layer import MemoryObject
 
 logger = logging.getLogger(__name__)
 

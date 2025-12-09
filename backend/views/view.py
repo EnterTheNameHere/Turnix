@@ -1,5 +1,6 @@
 # backend/views/view.py
 from __future__ import annotations
+
 from typing import Any, TypedDict
 
 from backend.app.globals import getActiveAppInstance, getTracer, getActiveAppPack

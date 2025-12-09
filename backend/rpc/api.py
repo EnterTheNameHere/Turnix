@@ -1,11 +1,12 @@
 # backend/rpc/api.py
 from __future__ import annotations
+
 import asyncio
 import inspect
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
-from collections.abc import Callable
 
 __all__ = [
     "exposeCapability", "listCapabilities", "getCapability",

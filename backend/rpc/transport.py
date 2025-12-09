@@ -1,5 +1,6 @@
 # backend/rpc/transport.py
 from __future__ import annotations
+
 import asyncio
 import logging
 from collections.abc import Callable
@@ -13,9 +14,9 @@ from backend.app.globals import getPermissions, getTracer
 from backend.core.auth import resolvePrincipal
 from backend.core.errors import ReactorScramError
 from backend.core.jsonutils import safeJsonDumps
+from backend.core.logging.handlers import getJSLogHandler
 from backend.core.permissions import GrantPermissionError
 from backend.core.time import nowMonotonicMs
-from backend.core.logging.handlers import getJSLogHandler
 from backend.rpc.api import (
     getCapability, routeRequest, routeEmit,
     routeSubscribe, ActiveSubscription,

@@ -1,8 +1,11 @@
 # backend/rpc/models.py
 from __future__ import annotations
+
 from typing import Literal, Any
+
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 from pydantic.alias_generators import to_camel
+
 from backend.core.time import nowMonotonicMs
 
 __all__ = ["Gen", "Route", "RPCMessage"]

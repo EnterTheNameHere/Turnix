@@ -1,11 +1,12 @@
 # backend/views/registry.py
 from __future__ import annotations
+
 import secrets
 from collections.abc import Mapping # pyright: ignore[reportShadowedImports] - one of our requirement ships typings extra, but Python 3.12 already includes them
 
 from backend.app.globals import getTracer
-from backend.views.view import View
 from backend.core.ids import uuid_12
+from backend.views.view import View
 
 
 
