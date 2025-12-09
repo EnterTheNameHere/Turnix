@@ -140,7 +140,7 @@ def _jsonLikeEquals(first: Any, second: Any) -> bool:
     if isinstance(first, (list, tuple)) and isinstance(second, (list, tuple)):
         if len(first) != len(second):
             return False
-        return all(_jsonLikeEquals(zippedA, zippedB) for zippedA, zippedB in zip(first, second))
+        return all(_jsonLikeEquals(zippedA, zippedB) for zippedA, zippedB in zip(first, second))  # noqa: B905
 
     # Fallback: strict equality if possible (should rarely trigger for tryJSONify outputs)
     try:
