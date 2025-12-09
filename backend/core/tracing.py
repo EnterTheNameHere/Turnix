@@ -27,9 +27,9 @@ _spanContextVar: contextvars.ContextVar["TraceSpan | None"] = contextvars.Contex
 
 
 
-_traceContextVar: contextvars.ContextVar[JsonDict] = contextvars.ContextVar(
+_traceContextVar: contextvars.ContextVar[JsonDict | None] = contextvars.ContextVar(
     "turnix_trace_context",
-    default={},
+    default=None,
 )
 
 
@@ -143,8 +143,11 @@ class Tracer:
         return _spanContextVar.get(None)
 
     def _currentContext(self) -> JsonDict:
-        # Always clone so callers cannot mutate shared dict.
-        return dict(_traceContextVar.get({}))
+        # Get current context, clone so callers cannot mutate shared dict.
+        ctx = _traceContextVar.get()
+        if ctx is None:
+            return {}
+        return dict(ctx)
     
     def updateTraceContext(self, values: JsonDict) -> None:
         """
