@@ -85,7 +85,7 @@ class DevFormatter(logging.Formatter):
 class ContextFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         ctx = getLogContext() or {}
-        setattr(record, "viewId", ctx.get("viewId", ""))
-        setattr(record, "modId", ctx.get("modId", ""))
-        setattr(record, "requestId", ctx.get("requestId"))
+        record.viewId = ctx.get("viewId", "")
+        record.modId = ctx.get("modId", "")
+        record.requestId = ctx.get("requestId")
         return super().format(record)
