@@ -3,14 +3,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from backend.content.pack_descriptor import (
     PackDescriptor,
     PackDescriptorRegistry,
     PackKind,
     PackRequest,
+    buildPackDescriptorRegistry,
 )
 from backend.content.pack_resolution import (
     parsePackRefString,
@@ -91,9 +91,18 @@ class InternalPackManager:
     This manager is intentionally not exposed to mods. It is part of the
     engine core and is responsible for deterministic, safe resolution.
     """
+    _registry: PackDescriptorRegistry
     
     def __init__(self, registry: PackDescriptorRegistry) -> None:
         self._registry = registry
+    
+    @classmethod
+    def fromDiscovery(cls) -> InternalPackManager:
+        """
+        Build a new manager using full discovery across content + saves roots.
+        """
+        reg = buildPackDescriptorRegistry()
+        return cls(registry=reg)
     
     # ------------------------------------------------------------------ #
     # Public API
@@ -359,3 +368,7 @@ class InternalPackManager:
         if not desc.recommendedPacks:
             return []
         return list(desc.recommendedPacks)
+
+    def getRegistry(self) -> PackDescriptorRegistry:
+        return self._registry
+    
