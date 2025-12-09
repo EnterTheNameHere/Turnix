@@ -123,7 +123,7 @@ def parsePackRefString(
             # author@packTreeId OR packTreeId@semverRange
             firstPart, secondPart = parts
             try:
-                requirement = parseSemVerPackRequirement(secondPart)
+                requirement = parseSemVerPackRequirement(secondPart.strip())
             except Exception as err:
                 logger.debug(
                     "parsePackRefString: Invalid SemVer version format in '%s': %s",
@@ -132,15 +132,15 @@ def parsePackRefString(
                 )
                 requirement = None
             
-            if requirement is None:
-                # We probably have author and id
-                authorPart = firstPart
-                idPart = secondPart
+            if requirement is not None:
+                # packTreeId@semverRange
+                authorPart = None
+                packTreeId = _stripOrNone(firstPart) or ""
             else:
-                idPart = firstPart
+                # author@packTreeId
+                author = _stripOrNone(firstPart)
+                packTreeId = _stripOrNone(secondPart) or ""
             
-            author = _stripOrNone(authorPart)
-            packTreeId = _stripOrNone(idPart) or ""
             if not packTreeId:
                 raise ValueError(f"PackRefString {text!r} has empty packTreeId part")
         elif len(parts) == 3:
