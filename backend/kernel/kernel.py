@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.app.context import PROCESS_REGISTRY
+from backend.content.internal_pack_manager import InternalPackManager
+from backend.content.pack_descriptor import PackDescriptorRegistry
 from backend.memory.memory_layer import (
     DictMemoryLayer,
     ReadOnlyMemoryLayer,
@@ -29,6 +31,13 @@ class Kernel:
         self.kernelRuntimeMemory: MemoryLayer = DictMemoryLayer("kernelRuntime")
         self.kernelStaticMemory:  MemoryLayer = ReadOnlyMemoryLayer("kernelStatic", {})
         self.activeAppInstance: AppInstance | None = None
+        
+        # Pack discovery / registry
+        self.packManager: InternalPackManager = InternalPackManager.fromDiscovery()
+        self.packRegistry: PackDescriptorRegistry = self.packManager.getRegistry()
+        
+        PROCESS_REGISTRY.register("packs.internalManager", self.packManager, overwrite=True)
+        PROCESS_REGISTRY.register("packs.registry", self.packRegistry, overwrite=True)
 
     def createAppInstance(
         self,
