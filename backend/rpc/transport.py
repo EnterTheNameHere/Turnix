@@ -2,6 +2,7 @@
 from __future__ import annotations
 import asyncio
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import FastAPI, WebSocket
@@ -37,6 +38,40 @@ logger = logging.getLogger(__name__)
 
 
 _DEFAULT_REQUEST_TIMEOUT_MS = 30_000 # If msg.budgetMs is None; TODO: Make this default on RPCMessage in future?
+
+
+
+def _makePushToWs(
+    ws: WebSocket,
+    rpc: RPCConnection,
+    gen: Gen,
+    msg: RPCMessage,
+) -> Callable[[dict[str, Any]], None]:
+    def _pushToWs(ev: dict[str, Any]) -> None:
+        # Fire-and-forget. Never block capability.    
+        async def _send() -> None:
+            # Drop if generation changed (client re-hello'd) or socket is gone
+            if rpc.genNum != gen.num or ws.application_state != WebSocketState.CONNECTED:
+                return
+            try:
+                await sendRPCMessage(ws, createStateUpdateMessage(msg, {
+                    "gen": gen,
+                    "payload": ev or {},
+                }))
+            except Exception:
+                logger.debug("subscribe push send failed", exc_info=True)
+
+        asyncio.create_task(_send())
+    
+    return _pushToWs
+
+
+
+async def _hold(signal: asyncio.Event) -> None:
+    try:
+        await signal.wait()
+    except asyncio.CancelledError:
+        pass
 
 
 
@@ -389,28 +424,11 @@ def mountWebSocket(app: FastAPI):
                     
                     # Build SubscribeContext over HandlerContext with a push → WS bridge
                     signal = asyncio.Event()
+                    gen = rpcConnection.gen()
                     
                     # Snapshot values for this request to avoid late-binding bugs in the async task...
-                    localGen = rpcConnection.gen()
-                    localWs = ws
-                    localRPC = rpcConnection
-                    localMsg = msg
-                    def _pushToWs(ev: dict) -> None:
-                        # Fire-and-forget. Never block capability.    
-                        async def _send(ev: dict = ev, ws: WebSocket = localWs, rpc: RPCConnection = localRPC, gen: Gen = localGen, msg=localMsg):
-                            # Drop if generation changed (client re-hello'd) or socket is gone
-                            if rpc.genNum != gen.num or ws.application_state != WebSocketState.CONNECTED:
-                                return
-                            try:
-                                await sendRPCMessage(ws, createStateUpdateMessage(msg, {
-                                    "gen": localGen,
-                                    "payload": ev or {},
-                                }))
-                            except Exception:
-                                logger.debug("subscribe push send failed", exc_info=True)
-                        asyncio.create_task(_send())
-                    
-                    ctx = SubscribeContext(id=msg.id, origin=msg.origin, signal=signal, _push=_pushToWs)
+                    pushToWs = _makePushToWs(ws, rpcConnection, gen, msg)
+                    ctx = SubscribeContext(id=msg.id, origin=msg.origin, signal=signal, _push=pushToWs)
                     
                     try:
                         desc: ActiveSubscription = await routeSubscribe(
@@ -431,13 +449,7 @@ def mountWebSocket(app: FastAPI):
                         }))
                     
                     # Keep a trivial "liveness" task that just waits on the signal
-                    async def _hold():
-                        try:
-                            await signal.wait()
-                        except asyncio.CancelledError:
-                            pass
-                    
-                    entry = asyncio.create_task(_hold(), name=f"sub:{capability}:{msg.id}")
+                    entry = asyncio.create_task(_hold(signal), name=f"sub:{capability}:{msg.id}")
                     rpcConnection.subscriptions[msg.id] = SubscriptionEntry(entry, desc.onCancel, signal)
                     continue
 
