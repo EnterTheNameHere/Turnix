@@ -78,7 +78,7 @@ class ConfigStore(ConfigStoreProtocol):
         effective = self._merged()
         try:
             self._validator(effective)
-        except Exception as err:
+        except Exception:
             # rollback
             if oldValue is None:
                 # Delete key from target layer
