@@ -302,11 +302,11 @@ class LayeredMemory:
         """
         for layer in self.layers:
             if isinstance(layer, DictMemoryLayer):
-                for key, versions in layer.data.items():
+                for _key, versions in layer.data.items():
                     if versions and versions[-1].uuidStr == uuidStr:
                         return (layer.name, versions[-1])
         if includeTxn and isinstance(self.txn, TransactionalMemoryLayer):
-            for key, obj in self.txn.staged.items():
+            for _key, obj in self.txn.staged.items():
                 if obj.uuidStr == uuidStr:
                     return (self.txn.name, obj)
         return None

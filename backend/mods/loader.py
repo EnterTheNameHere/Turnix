@@ -122,7 +122,7 @@ async def loadPythonMods(
             manifest, _moddir, _entryPath, runtime = entry
             return (runtime.order, manifest.id, manifest.version)
 
-        for manifest, moddir, entryPath, rt in sorted(enabled, key=_sortKey):
+        for manifest, _moddir, entryPath, rt in sorted(enabled, key=_sortKey):
             
             # Enrich ambient trace context so all records get modId/modRuntime
             try:
