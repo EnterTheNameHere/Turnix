@@ -16,6 +16,8 @@ if TYPE_CHECKING:
     from backend.sessions.session import Session
     from backend.content.content_roots import ContentRootsService
     from backend.core.tracing import Tracer, TraceHub
+    from backend.content.internal_pack_manager import InternalPackManager
+    from backend.content.pack_descriptor import PackDescriptorRegistry
 
 
 
@@ -133,6 +135,35 @@ def getActiveAppPack() -> ResolvedPack | None:
     if appPack is None:
         return None
     return cast("ResolvedPack", appPack)
+
+
+
+def getPackDescriptorRegistry() -> PackDescriptorRegistry:
+    reg = PROCESS_REGISTRY.get("packs.registry")
+    if reg is None:
+        raise ReactorScramError(
+            "PackDescriptorRegistry is None.\n"
+            "🕵️ PACK DESCRIPTOR REGISTRY: CASE FILE #404 🕵️\n"
+            "Scene: a cold process, one empty slot in PROCESS_REGISTRY.\n"
+            "The suspect: a missing PackDescriptorRegistry.\n"
+            "Motive: unclear. Result: no descriptors, no packs, no story.\n"
+            "Closing the case with a reactor scram before more evidence disappears."
+        )
+    return cast("PackDescriptorRegistry", reg)
+
+
+
+def getInternalPackManager() -> InternalPackManager:
+    mgr = PROCESS_REGISTRY.get("packs.internalManager")
+    if mgr is None:
+        raise ReactorScramError(
+            "InternalPackManager is None.\n"
+            "⚠️ INTERNAL PACK MANAGER MISSING ⚠️\n"
+            "System status: packs detected, registry online, orchestrator = NULL.\n"
+            "This configuration matches the pattern: FRAMEWORK_ONLY_MODE=1, USEFULNESS=0.\n"
+            "Automatic safety protocol: scram and request an InternalPackManager instance."
+        )
+    return cast("InternalPackManager", mgr)
 
 
 
