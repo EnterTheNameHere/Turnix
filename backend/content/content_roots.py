@@ -244,7 +244,11 @@ class ContentRootsService:
             else:
                 # a) XDG data (~/.local/share/turnix or $XDG_DATA_HOME/turnix)
                 xdgDataHome = os.getenv("XDG_DATA_HOME")
-                xdgDataBase = Path(xdgDataHome).expanduser() if xdgDataHome else Path.home() / ".local" / "share" / "turnix"
+                xdgDataBase = (
+                    Path(xdgDataHome).expanduser()
+                    if xdgDataHome
+                    else Path.home() / ".local" / "share" / "turnix"
+                )
                 if xdgDataBase.exists():
                     roots.append(_declareRoot(xdgDataBase, priority=800, label="xdg-data", createDirectories=False))
                 
