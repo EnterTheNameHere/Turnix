@@ -125,7 +125,11 @@ def parsePackRefString(
             try:
                 requirement = parseSemVerPackRequirement(secondPart)
             except Exception as err:
-                logger.debug(f"parsePackRefString: Invalid SemVer version format in '{secondPart}': {err}")
+                logger.debug(
+                    "parsePackRefString: Invalid SemVer version format in '%s': %s",
+                    secondPart,
+                    err,
+                )
                 requirement = None
             
             if requirement is None:
