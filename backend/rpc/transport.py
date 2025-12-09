@@ -158,7 +158,7 @@ def mountWebSocket(app: FastAPI):
                 try:
                     msg = RPCMessage.model_validate_json(raw)
                     decideAndLog("incoming", rpcMessage=msg, text=raw)
-                except ValidationError as verr:
+                except ValidationError:
                     logger.debug("Invalid JSON", exc_info=True)
                     # Best-effort log for broken input (no rules)
                     decideAndLog("incoming", rpcMessage=None, text=raw)
