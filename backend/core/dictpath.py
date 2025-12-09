@@ -175,7 +175,9 @@ def setByPath(obj: Any, path: str, value: Any, *, createIfMissing: bool = False)
                     current = getattr(current, part)
                     continue
                 except Exception as err:
-                    raise AttributeError(f"Failed to access attribute '{part}' on {type(current).__name__}: {err}")
+                    raise AttributeError(
+                        f"Failed to access attribute '{part}' on {type(current).__name__}: {err}"
+                    ) from err
             # Key is missing and createIfMissing == False forbids us from creating it → fail
             raise KeyError(f"path segment '{part}' not found in mapping")
         # attribute walk
@@ -184,7 +186,9 @@ def setByPath(obj: Any, path: str, value: Any, *, createIfMissing: bool = False)
                 current = getattr(current, part)
                 continue
             except Exception as err:
-                raise AttributeError(f"Failed to access attribute '{part}' on {type(current).__name__}: {err}")
+                raise AttributeError(
+                    f"Failed to access attribute '{part}' on {type(current).__name__}: {err}"
+                ) from err
         # We didn't find it
         raise AttributeError(f"path segment '{part}' not found on object of type {type(current).__name__}")
     
@@ -204,7 +208,7 @@ def setByPath(obj: Any, path: str, value: Any, *, createIfMissing: bool = False)
             setattr(current, last, value)
             return
         except Exception as err:
-            raise AttributeError(f"Failed to set attribute '{last}' on {type(current).__name__}: {err}")
+            raise AttributeError(f"Failed to set attribute '{last}' on {type(current).__name__}: {err}") from err
     
     raise AttributeError(f"Attribute '{last}' not found on object of type {type(current).__name__}")
 
@@ -280,7 +284,7 @@ def deleteByPath(obj: Any, path: str, *, pruneEmptyParents: bool = True) -> bool
             try:
                 delattr(current, last)
             except Exception as err:
-                raise AttributeError(f"Failed to delete attribute '{last}' on {type(current).__name__}: {err}")
+                raise AttributeError(f"Failed to delete attribute '{last}' on {type(current).__name__}: {err}") from err
             removed = True
         else:
             return False

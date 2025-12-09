@@ -20,9 +20,9 @@ def _requireGen(props: Mapping[str, Any]) -> Gen:
     try:
         return Gen.model_validate(props["gen"])
     except KeyError:
-        raise ValueError("props.gen is required")
+        raise ValueError("props.gen is required") from None
     except ValidationError as err:
-        raise TypeError(f"props.gen must be a valid Gen: {err}")
+        raise TypeError("props.gen must be a valid Gen") from err
 
 
 

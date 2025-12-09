@@ -74,7 +74,7 @@ class ViewRegistry:
                 try:
                     view = self.viewsById[boundId]
                 except KeyError:
-                    raise LookupError(f"View {boundId!r} not found!")
+                    raise LookupError(f"View {boundId!r} not found!") from None
         
         tokenKey = (view.id, clientId)
         token = self._mintViewToken()
