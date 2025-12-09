@@ -628,7 +628,7 @@ def _walkForPackDescriptors(
                     "packs.lifecycle",
                     attrs={
                         **attrs,
-                        "phase": "discoverd",
+                        "phase": "discovered",
                     },
                     level="debug",
                     tags=["packs", "lifecycle"],
