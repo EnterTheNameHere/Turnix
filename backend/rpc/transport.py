@@ -9,7 +9,7 @@ from fastapi import FastAPI, WebSocket
 from starlette.websockets import WebSocketState
 from pydantic import ValidationError
 
-from backend.app.globals import getPermissions, getMainSessionOrScram, getTracer
+from backend.app.globals import getPermissions, getTracer
 from backend.core.auth import resolvePrincipal
 from backend.core.errors import ReactorScramError
 from backend.core.jsonutils import safeJsonDumps
