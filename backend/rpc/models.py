@@ -38,7 +38,12 @@ class RPCMessage(BaseModel):
 
     v: str                          # RPCMessage schema version
     id: str                         # UUIDv7
-    type: Literal["ack","heartbeat","hello","welcome","clientReady","request","emit","reply","subscribe","stateUpdate","unsubscribe","cancel","error"]
+    type: Literal[
+        "ack", "heartbeat", "hello", "welcome",
+        "clientReady", "request", "emit", "reply",
+        "subscribe", "stateUpdate", "unsubscribe",
+        "cancel", "error"
+    ]
     correlatesTo: str | None = None # UUIDv7 of previous message, if in sequence.
     gen: Gen                        # generation of connection as set by server
     ts: int = Field(default_factory=nowMonotonicMs) # Monotonic time of sending
@@ -49,7 +54,8 @@ class RPCMessage(BaseModel):
     route: Route | None = None      # "Address" of handler which should be handling the message
     op: str | None = None           # "operation" handler should perform, if further specification is needed
     path: str | None = None         # Additional info for handler to decide which "operation" to execute
-    args: list[Any] | None = None   # "arguments" for "operation" handler might find useful to decide what "operation" to execute
+    args: list[Any] | None = None   # "arguments" for "operation" handler might find useful to decide
+                                    # what "operation" to execute
     seq: int | None = None          # Per-lane delivery sequence number
     origin: dict[str, Any] | None = None # For metadata only, not for auth
     chunkNo: int | None = None      # For streamed payload

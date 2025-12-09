@@ -126,7 +126,11 @@ def createReplyMessage(toMsg: RPCMessage, props: dict[str, Any], opts: dict[str,
 
 
 
-def createStateUpdateMessage(toMsg: RPCMessage, props: dict[str, Any], opts: dict[str, Any] | None = None) -> RPCMessage:
+def createStateUpdateMessage(
+    toMsg: RPCMessage,
+    props: dict[str, Any],
+    opts: dict[str, Any] | None = None
+) -> RPCMessage:
     if not isinstance(toMsg, RPCMessage): raise TypeError("toMsg must be a valid RPCMessage")
     if not isinstance(props, dict): raise TypeError("props must be a dict")
 

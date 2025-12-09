@@ -214,7 +214,11 @@ class _MainMenuCapability:
         print("\033[92m    >>>> _reloadMods >>>>\033[0m", "loaded", loaded, "failed", failed)
         
         appInstance.setAllowedPacks(set(allowedMods))
-        appInstance.backendPacksLoaded = list([{"id": mod.modId, "name": mod.name, "version": mod.version} for mod in loaded])
+        appInstance.backendPacksLoaded = list(
+            [
+                {"id": mod.modId, "name": mod.name, "version": mod.version} for mod in loaded
+            ]
+        )
         appInstance.backendPacksFailed = list(failed)
         PROCESS_REGISTRY.register("mods.services", services, overwrite=True)
         

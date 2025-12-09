@@ -326,7 +326,12 @@ def loadAppInstance(sourceDir: Path | str) -> AppInstance:
         if isinstance(expectedHash, str):
             actualHash = sha256Bytes(appInstanceSnapshotPath.read_bytes())
             if expectedHash != actualHash:
-                logger.warning("Checksum failed for '%s' (expected %s, got %s)", appInstanceSnapshotPath, expectedHash, actualHash)
+                logger.warning(
+                    "Checksum failed for '%s' (expected %s, got %s)",
+                    appInstanceSnapshotPath,
+                    expectedHash,
+                    actualHash
+                )
 
         appInstanceSnapshot = readJson5(appInstanceSnapshotPath)
         snapshotAppPackId = appInstanceSnapshot.get("appPackId")
@@ -383,7 +388,11 @@ def loadAppInstance(sourceDir: Path | str) -> AppInstance:
             
             # Hydrate session memory layers from its per-layer directory if present
             layersDirStr = meta.get("layersDir")
-            layersDir = (rootDir / layersDirStr) if isinstance(layersDirStr, str) else (sessionPath.parent / f"{session.id}_layers")
+            layersDir = (
+                (rootDir / layersDirStr)
+                if isinstance(layersDirStr, str)
+                else (sessionPath.parent / f"{session.id}_layers")
+            )
             try:
                 loadLayersFromDir(session.memoryLayers, layersDir, missingOk=True)
             except Exception:

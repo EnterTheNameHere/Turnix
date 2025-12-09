@@ -178,7 +178,9 @@ class SchemaRegistry:
                 ex = self._anchors.get(baseIdWithHash)
                 # Allow overwrite if this anchor came from the doc we're superseding
                 if ex is not None and not self._deepEqual(ex, node) and baseIdWithHash not in allowedAnchors:
-                    raise ValueError(f"Schema $anchor collision for '{baseIdWithHash}': different content already registered")
+                    raise ValueError(
+                        f"Schema $anchor collision for '{baseIdWithHash}': different content already registered"
+                    )
                 ex2 = stagedAnchors.get(baseIdWithHash)
                 if ex2 is not None:
                     raise ValueError(f"Schema $anchor collision (staged) for '{baseIdWithHash}'")

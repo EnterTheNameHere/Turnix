@@ -124,7 +124,10 @@ def _jsonLikeEquals(first: Any, second: Any) -> bool:
         return True
     
     # Scalars
-    if isinstance(first, (type(None), bool, int, float, str)) and isinstance(second, (type(None), bool, int, float, str)):
+    if isinstance(
+        first,
+        (type(None), bool, int, float, str)) and isinstance(second, (type(None), bool, int, float, str)
+    ):
         return first == second
     
     # Dicts

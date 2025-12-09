@@ -305,7 +305,12 @@ class PermissionManager:
                     "PERMISSION_DENIED",
                     f"Requested '{family}@{reqVer}' outside granted rangeExpr '{grant.rangeSpec}'",
                     retryable=False,
-                    extra={"family": family, "requested": str(reqVer), "grant_range": str(grant.rangeSpec), "decision": grant.decision},
+                    extra={
+                        "family": family,
+                        "requested": str(reqVer),
+                        "grant_range": str(grant.rangeSpec),
+                        "decision": grant.decision
+                    },
                 )
         
         if reqVer is None:

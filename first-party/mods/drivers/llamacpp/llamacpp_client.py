@@ -72,7 +72,8 @@ class LlamaCppClient:
         await self.client.aclose()
 
     # TODO: Validate samplers values and protect against NaN/Inf
-    # TODO: Maybe try which samplers are supported by checking if their usage makes server respond with error - do it at initiation?
+    # TODO: Maybe try which samplers are supported by checking if their usage makes server 
+    # TODO:   respond with error - do it at initiation?
     # TODO: Use grammar so prompt use is correct like if system role is ignored...
     async def streamChat(
         self,
@@ -187,7 +188,9 @@ class LlamaCppClient:
                             }
                             continue
                         if "choices" not in obj and "content" in obj:
-                            obj: dict = {"choices": [{"delta": {"content": obj["content"]}, "index": 0, "finish_reason": None}]}
+                            obj: dict = {
+                                "choices": [{"delta": {"content": obj["content"]}, "index": 0, "finish_reason": None}]
+                            }
                         obj["raw"] = data
                         obj["requestId"] = requestId
                         yield obj
@@ -229,7 +232,11 @@ class LlamaCppClient:
                             }
                         else:
                             if "choices" not in obj and "content" in obj:
-                                obj = {"choices": [{"delta": {"content": obj["content"]}, "index": 0, "finish_reason": None}]}
+                                obj = {
+                                    "choices": [
+                                        {"delta": {"content": obj["content"]}, "index": 0, "finish_reason": None}
+                                    ]
+                                }
                             obj["raw"] = data
                             obj["requestId"] = requestId
                             yield obj

@@ -54,7 +54,14 @@ async def pushEventToView(viewId: str, capability: str, payload: dict[str, Any])
 
 
 
-async def _sendOne(ws: WebSocket, viewId: str, capability: str, payload: dict[str, Any], *, override_shouldLog: bool | None = None):
+async def _sendOne(
+    ws: WebSocket,
+    viewId: str,
+    capability: str,
+    payload: dict[str, Any],
+    *,
+    override_shouldLog: bool | None = None
+) -> None:
     """
     Build and send a single RPCMessage(emit) to a WebSocket, using the socket's cookie clientId if present.
       

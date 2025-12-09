@@ -239,8 +239,9 @@ def mountWebSocket(app: FastAPI):
                 if view is None:
                     raise ReactorScramError(
                         f"View for client {clientId} not found! This shouldn't happen! "
-                        f"The stability of the application is not guaranteed! Jokes are no longer funny! "
-                        f"Dogs and cats are living together! We should've given penguins the voting rights when we had chance!")
+                        "The stability of the application is not guaranteed! Jokes are no longer funny! "
+                        "Dogs and cats are living together! We should've given penguins the voting rights "
+                        "when we had chance!")
 
                 if msgType == "clientReady":
                     # Frontend declares it has finished loading/initializing
@@ -312,8 +313,13 @@ def mountWebSocket(app: FastAPI):
                     )
                     
                     logger.info(
-                        "[clientReady] accepted for gen='%s' (viewId='%s', clientId='%s') mods: loaded='%d' failed='%d'",
-                        currGenNum, getattr(view, "id", "?"), clientId, len(loaded), len(failed),
+                        "[clientReady] accepted for gen='%s' "
+                        "(viewId='%s', clientId='%s') mods: loaded='%d' failed='%d'",
+                        currGenNum,
+                        getattr(view, "id", "?"),
+                        clientId,
+                        len(loaded),
+                        len(failed),
                     )
 
                     await sendRPCMessage(ws, createAckMessage(msg, {"gen": rpcConnection.gen()}))
@@ -370,7 +376,10 @@ def mountWebSocket(app: FastAPI):
                         logger.warning("Unknown capability for subscribe: '%s'", capability)
                         await sendRPCMessage(ws, createErrorMessage(msg, {
                             "gen": rpcConnection.gen(),
-                            "payload": {"code":"CAPABILITY_NOT_FOUND","message":f"Unknown capability '{capability}' for subscribe."}
+                            "payload": {
+                                "code": "CAPABILITY_NOT_FOUND",
+                                "message": f"Unknown capability '{capability}' for subscribe."
+                            }
                         }))
                         continue
 
@@ -447,7 +456,11 @@ def mountWebSocket(app: FastAPI):
                         continue
                     
                     ctx = CallContext(id=msg.id, origin=msg.origin)
-                    timeoutMs = msg.budgetMs if isinstance(msg.budgetMs, int) and msg.budgetMs > 0 else _DEFAULT_REQUEST_TIMEOUT_MS
+                    timeoutMs = (
+                        msg.budgetMs
+                        if isinstance(msg.budgetMs, int) and msg.budgetMs > 0
+                        else _DEFAULT_REQUEST_TIMEOUT_MS
+                    )
                     
                     # Snapshot values for this request to avoid late-binding bugs in the async task...
                     localGen = rpcConnection.gen()
@@ -509,7 +522,10 @@ def mountWebSocket(app: FastAPI):
                                     "payload": payload,
                                 }))
                             except Exception:
-                                logger.debug("_runRequest sending reply failed (likely disconnect happened)", exc_info=True)
+                                logger.debug(
+                                    "_runRequest sending reply failed (likely disconnect happened)",
+                                    exc_info=True
+                                )
                                 return
                         except asyncio.TimeoutError as err:
                             tracer.endSpan(
@@ -538,7 +554,10 @@ def mountWebSocket(app: FastAPI):
                                     },
                                 }))
                             except Exception:
-                                logger.debug("_runRequest sending TimeoutError notification failed (likely disconnect happened)", exc_info=True)
+                                logger.debug(
+                                    "_runRequest sending TimeoutError notification failed (likely disconnect happened)",
+                                    exc_info=True
+                                )
                                 return
                         except asyncio.CancelledError:
                             tracer.endSpan(
@@ -574,7 +593,10 @@ def mountWebSocket(app: FastAPI):
                                     "payload": {"code":"REQUEST_ERROR","message":str(err),"err":err,"retryable":False}
                                 }))
                             except Exception:
-                                logger.debug("_runRequest sending Error notification failed (likely disconnect happened)", exc_info=True)
+                                logger.debug(
+                                    "_runRequest sending Error notification failed (likely disconnect happened)",
+                                    exc_info=True
+                                )
                                 return
                         finally:
                             rpc.pending.pop(msg.id, None)
