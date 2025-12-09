@@ -619,7 +619,6 @@ def mountWebSocket(app: FastAPI):
                     if not await _ensureCapabilityOrError(ws, rpcConnection, msg, capability):
                         continue
                     
-                    session = getMainSessionOrScram()
                     ctx = EmitContext(id=msg.id, origin=msg.origin)
                     # Fire-and-forget. Errors are swallowed inside routeEmit
                     routeEmit(capability, (msg.path or ""), msg.payload or {}, ctx) 
