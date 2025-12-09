@@ -42,9 +42,12 @@ def evaluateOp(left: Any, op: str, right: Any) -> bool:
         if mm:
             pattern, flags = mm.group(1), mm.group(2)
         reFlags = 0
-        if "i" in flags: reFlags |= re.IGNORECASE
-        if "m" in flags: reFlags |= re.MULTILINE
-        if "s" in flags: reFlags |= re.DOTALL
+        if "i" in flags:
+            reFlags |= re.IGNORECASE
+        if "m" in flags:
+            reFlags |= re.MULTILINE
+        if "s" in flags:
+            reFlags |= re.DOTALL
         try:
             return re.search(pattern, left, reFlags) is not None
         except re.error:

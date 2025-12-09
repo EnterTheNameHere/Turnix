@@ -74,7 +74,8 @@ class RPCConnection:
             try:
                 task: asyncio.Task | None = getattr(entry, "task", None)
                 if task is not None and hasattr(task, "done") and hasattr(task, "cancel") and not task.done():
-                    try: task.cancel()
+                    try:
+                        task.cancel()
                     except Exception:
                         pass
             except Exception:
@@ -90,14 +91,20 @@ class RPCConnection:
             onCancel: Callable[[], None] | None = getattr(entry, "onCancel", None)
             task: asyncio.Task[Any] | None = getattr(entry, "task", None)
             if signal is not None:
-                try: signal.set()
-                except Exception: pass
+                try:
+                    signal.set()
+                except Exception:
+                    pass
             if callable(onCancel):
-                try: onCancel()
-                except Exception: pass
+                try:
+                    onCancel()
+                except Exception:
+                    pass
             if task is not None and hasattr(task, "cancel") and hasattr(task, "done") and not task.done():
-                try: task.cancel()
-                except Exception: pass
+                try:
+                    task.cancel()
+                except Exception:
+                    pass
         
         self.subscriptions.clear()
 

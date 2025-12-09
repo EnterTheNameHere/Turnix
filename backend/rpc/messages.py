@@ -35,7 +35,8 @@ def _requireDict(dct: Mapping[str, Any], key: str, *, default: dict[str, Any] | 
 
 
 def createWelcomeMessage(props: dict[str, Any], opts: dict[str, Any] | None = None) -> RPCMessage:
-    if not isinstance(props, dict): raise TypeError("props must be a dict")
+    if not isinstance(props, dict):
+        raise TypeError("props must be a dict")
     
     gen = _requireGen(props)
     payload = _requireDict(props, "payload", default={})
@@ -53,8 +54,10 @@ def createWelcomeMessage(props: dict[str, Any], opts: dict[str, Any] | None = No
 
 
 def createAckMessage(toMsg: RPCMessage, props: dict[str, Any]) -> RPCMessage:
-    if not isinstance(toMsg, RPCMessage): raise TypeError("toMsg must be a valid RPCMessage")
-    if not isinstance(props, dict): raise TypeError("props must be a dict")
+    if not isinstance(toMsg, RPCMessage):
+        raise TypeError("toMsg must be a valid RPCMessage")
+    if not isinstance(props, dict):
+        raise TypeError("props must be a dict")
     
     gen = _requireGen(props)
 
@@ -73,8 +76,10 @@ def createAckMessage(toMsg: RPCMessage, props: dict[str, Any]) -> RPCMessage:
 
 
 def createErrorMessage(toMsg: RPCMessage, props: dict[str, Any], opts: dict[str, Any] | None = None) -> RPCMessage:
-    if not isinstance(toMsg, RPCMessage): raise TypeError("toMsg must be a valid RPCMessage")
-    if not isinstance(props, dict): raise TypeError("props must be a dict")
+    if not isinstance(toMsg, RPCMessage):
+        raise TypeError("toMsg must be a valid RPCMessage")
+    if not isinstance(props, dict):
+        raise TypeError("props must be a dict")
     
     gen = _requireGen(props)
     payload = _requireDict(props, "payload", default={})
@@ -105,8 +110,10 @@ def createErrorMessage(toMsg: RPCMessage, props: dict[str, Any], opts: dict[str,
 
 
 def createReplyMessage(toMsg: RPCMessage, props: dict[str, Any], opts: dict[str, Any] | None = None) -> RPCMessage:
-    if not isinstance(toMsg, RPCMessage): raise TypeError("toMsg must be a valid RPCMessage")
-    if not isinstance(props, dict): raise TypeError("props must be a dict")
+    if not isinstance(toMsg, RPCMessage):
+        raise TypeError("toMsg must be a valid RPCMessage")
+    if not isinstance(props, dict):
+        raise TypeError("props must be a dict")
     
     gen = _requireGen(props)
     payload = _requireDict(props, "payload") # No default - reply should include payload
@@ -131,8 +138,10 @@ def createStateUpdateMessage(
     props: dict[str, Any],
     opts: dict[str, Any] | None = None
 ) -> RPCMessage:
-    if not isinstance(toMsg, RPCMessage): raise TypeError("toMsg must be a valid RPCMessage")
-    if not isinstance(props, dict): raise TypeError("props must be a dict")
+    if not isinstance(toMsg, RPCMessage):
+        raise TypeError("toMsg must be a valid RPCMessage")
+    if not isinstance(props, dict):
+        raise TypeError("props must be a dict")
 
     gen = _requireGen(props)
     payload = _requireDict(props, "payload", default={})

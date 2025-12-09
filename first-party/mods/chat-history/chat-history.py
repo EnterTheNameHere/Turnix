@@ -124,8 +124,10 @@ def onLoad(ctx) -> None:
     
     if llm is None or mainSession is None:
         missing = []
-        if llm is None: missing.append("SERVICES['llm']")
-        if mainSession is None: missing.append("SERVICES['mainSession'] or SERVICES['appInstance'].mainSession")
+        if llm is None:
+            missing.append("SERVICES['llm']")
+        if mainSession is None:
+            missing.append("SERVICES['mainSession'] or SERVICES['appInstance'].mainSession")
         logger.error("missing %s; skipping init", " & ".join(missing))
         return
     
@@ -281,9 +283,11 @@ def onLoad(ctx) -> None:
         }
         # Bubble through error/cancel reason if present
         err = run.get("error")
-        if err: payload["error"] = err
+        if err:
+            payload["error"] = err
         cancel = run.get("cancelReason")
-        if cancel: payload["cancelReason"] = cancel
+        if cancel:
+            payload["cancelReason"] = cancel
         asyncio.create_task(pipeline.events.publish(f"run:{run.runId}", payload))
     
     pipeline.subscribeToStage(LLMPipelineStages.Finalize, stageFinalize)

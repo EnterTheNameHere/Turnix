@@ -65,9 +65,12 @@ class DevFormatter(logging.Formatter):
             viewId = ctx.get("viewId")
             clientInstanceId = ctx.get("clientInstanceId")
             md = []
-            if reqId: md.append(str(reqId))
-            if viewId: md.append(str(viewId))
-            if clientInstanceId: md.append(str(clientInstanceId))
+            if reqId:
+                md.append(str(reqId))
+            if viewId:
+                md.append(str(viewId))
+            if clientInstanceId:
+                md.append(str(clientInstanceId))
             if md:
                 ctxStr = " [" + "/".join(md) + "]"
         msg = record.getMessage()
