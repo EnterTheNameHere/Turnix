@@ -170,7 +170,7 @@ class InternalPackManager:
                 logger.error(msg)
                 raise RuntimeError(msg)
             
-            if key is visited:
+            if key in visited:
                 # Already planned, nothing more to do. We do not update depth/reason.
                 return
             
