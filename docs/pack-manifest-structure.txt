@@ -132,25 +132,46 @@ visibility (optional)
         "private"
 
     Semantics:
-        - Controls whether this pack is considered externally visible or
-          internal-only inside its parent pack tree.
+        - Declares the pack's local visibility inside its pack tree.
 
-    Defaults (effectiveVisibility):
-        - For a root pack (no parent):
-              default is "public" if visibility is omitted.
-        - For a child pack (nested inside another pack):
-              if visibility is omitted, inherit parent's effectiveVisibility.
-        - A manifest that explicitly sets "visibility" always overrides the
-          inherited value.
+    Local defaults:
+        If "visibility" is omitted or invalid:
 
-    Effect:
-        - The PackDescriptorRegistry treats a pack as a candidate for global
-          resolution only if:
-              effectiveVisibility == "public"
-              AND all ancestors allow exporting it (see exportNestedPacks).
-        - Packs with effectiveVisibility == "private" can still be used
-          internally by their parent tree but are not targetable by external
-          PackRequests.
+            kind == "contentPack":
+                visibility defaults to "public".
+
+            kind in {"appPack", "viewPack", "mod", "savePack"}:
+                visibility defaults to "private".
+
+        There is no automatic inheritance of visibility from the parent.
+        A child that does not declare "visibility" gets the default for
+        its own kind.
+
+    Relationship to globalVisibility:
+        - The loader derives a separate globalVisibility flag that combines:
+            • this pack's local visibility, and
+            • the parent pack's exportNestedPacks rule.
+        - Root packs always have globalVisibility == visibility.
+        - Nested packs:
+            • If visibility == "private" → globalVisibility is "private"
+              regardless of the parent's exportNestedPacks value.
+            • Otherwise, globalVisibility is "public" or "private" depending
+              on parent.exportNestedPacks:
+
+                  parent.exportNestedPacks == false:
+                      child.globalVisibility = "private"
+
+                  parent.exportNestedPacks == true:
+                      child.globalVisibility = "public"
+
+                  parent.exportNestedPacks is a list:
+                      child.globalVisibility = "public"
+                          if child.localId is in that list
+                      else "private".
+
+        - Higher-level systems (PackResolver, mod loader, etc.) are responsible
+          for honouring visibility/globalVisibility. The PackDescriptorRegistry
+          indexes all discovered packs regardless of these flags.
 
 exportNestedPacks (optional)
     Type:
@@ -187,13 +208,16 @@ exportNestedPacks (optional)
             with this policy.
 
     Combined effect with visibility:
-        - A nested child pack appears in the global PackDescriptorRegistry only if:
-            (a) its effectiveVisibility == "public", AND
-            (b) at least one ancestor has exportNestedPacks == true, or
-                a list that explicitly includes this child id.
+        - A nested child pack is considered globally visible only if:
+            (a) it does not declare "visibility": "private", and
+            (b) the parent's exportNestedPacks setting exports it
+                (boolean true for all children, or an explicit list
+                 containing the child's local id).
 
-        - The parent pack is responsible for deciding whether its children are
-          exposed as part of a public surface or treated as internal modules.
+        - The loader precomputes a globalVisibility flag for each pack
+          from these rules. The registry still indexes all descriptors;
+          higher layers decide whether to honour globalVisibility when
+          resolving packs.
 
 
 --------------------------------------
@@ -201,28 +225,46 @@ exportNestedPacks (optional)
 --------------------------------------
 
 packs (optional)
-    Type: array of PackRefString
+    Type: PackRequestRef | array of PackRequestRef
 
-    Example:
-        "packs": [
-            "Turnix@ui@^2",
-            "Anthony@avatars",
-            "main-menu.service@^1.3.0"
-        ]
+    PackRequestRef supported forms:
 
-    PackRefString grammar (recap):
-        [<author>"@"]<packTreeId>["@"<SemVerPackRequirement>]
+        1) String (PackRefString):
+            "[author@]id"
+            "[author@]id@<SemVerPackRequirement>"
 
-        Examples:
-            "avatars"
-            "Anthony@avatars"
-            "Turnix@ui.trace.trace-list@2.5.3"
-            "Turnix@main-menu.ui@^3"
+            Examples:
+                "avatars"
+                "Anthony@avatars"
+                "Turnix@ui.trace.trace-list@2.5.3"
+                "Turnix@main-menu.ui@^3"
+
+        2) Key/value map:
+            {
+              "[author@]id": "versionRequirement",
+              "Anthony@avatars": "^1.0.0",
+              "ui.trace.view":   "*"
+            }
+
+            Here "*" or an empty string means "no explicit version constraint".
+
+        3) Object form:
+            {
+              "author":  "Turnix",          // optional
+              "id":      "ui.trace.view",   // required
+              "version": "^2.3.0"           // optional, "*" or null for "any"
+            }
+
+        4) Arrays:
+            - "packs" may be a single PackRequestRef or an array of them.
+            - Arrays can freely mix the forms above.
 
     Semantics:
-        - Declares other packs this pack depends on.
-        - Parsed into PackRequest at load time.
-        - Resolution is done via PackResolver using PackDescriptorRegistry.
+        - All of the above are normalized into PackRequest instances at load
+          time using the same rules as normalizePackRequestRefs in the
+          backend.
+        - Resolution is done via the PackDescriptorRegistry and SemVer
+          resolver.
         - Applies to all kinds:
             - appPack: packs required by this application.
             - viewPack: packs required by this view.
@@ -591,10 +633,19 @@ section only sketches the expected shape and intention.
     - If missing: pack exposes no public assets.
 
 - visibility:
-    - If missing:
-        - Root pack (no parent): default to "public".
-        - Nested pack: inherit parent's effectiveVisibility.
-    - A manifest that sets visibility explicitly overrides the inherited value.
+    - If missing or invalid:
+        - If kind == "contentPack": visibility defaults to "public".
+        - If kind in {"appPack", "viewPack", "mod", "savePack"}:
+              visibility defaults to "private".
+
+    - There is no automatic inheritance of visibility from the parent.
+      Each pack that omits "visibility" gets the default for its own kind.
+
+    - The loader derives a separate globalVisibility flag from:
+          • this local visibility, and
+          • the parent pack's exportNestedPacks value,
+      using the rules described in the "visibility" section above.
+      Root packs always have globalVisibility == visibility.
 
 - exportNestedPacks:
     - If missing:
@@ -626,10 +677,20 @@ End of manifest structure spec (draft).
 7. COMPATIBILITY / RELATIONSHIP HINTS
 --------------------------------------
 
-These fields are OPTIONAL and are NOT enforced by PackResolver.
+These fields are OPTIONAL and are NOT enforced by pack resolution.
 They are for Mod/Packs Manager UI and tooling (suggestions, badges, warnings).
 
-All three share the same value shape:
+All three accept the same kinds of values as "packs" (PackRequestRef):
+
+    - Any PackRefString:
+        "Turnix@turnix.ui@^3"
+
+    - Any object with "id" / "author" / "version" fields as described for
+      PackRequestRef.
+
+    - Key/value maps are also accepted but are less useful here.
+
+Recommended pattern for human-facing manifests:
 
     - Either a simple PackRefString:
         "Turnix@turnix.ui@^3"
@@ -640,11 +701,14 @@ All three share the same value shape:
           "reason": "Includes standard UI controls used by this pack"
         }
 
-    Where "id" is a PackRefString (author@packTreeId@SemVerPackRequirement).
+    The "id" field is a PackRefString (author@packTreeId@SemVerPackRequirement).
+    Additional keys such as "reason" are ignored by the resolver but may be
+    used by UI/tooling.
 
 
 recommendedPacks (optional)
-    Type: array of (PackRefString OR object with "id" and "reason")
+    Type: array of PackRequestRef (see packs), typically PackRefString or an object
+          with "id" and "reason".
 
     Example:
         "recommendedPacks": [
@@ -661,7 +725,8 @@ recommendedPacks (optional)
 
 
 supportedPacks (optional)
-    Type: array of (PackRefString OR object with "id" and "reason")
+    Type: array of PackRequestRef (see packs), typically PackRefString
+          or an object with "id" and "reason".
 
     Example:
         "supportedPacks": [
@@ -679,7 +744,8 @@ supportedPacks (optional)
 
 
 unsupportedPacks (optional)
-    Type: array of (PackRefString OR object with "id" and "reason")
+    Type: array of PackRequestRef (see packs), typically PackRefString
+          or an object with "id" and "reason".
 
     Example:
         "unsupportedPacks": [
