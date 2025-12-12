@@ -12,8 +12,9 @@ This spec defines:
 - How assets are declared and resolved via the "assets" field.
 - Constraints and invariants (no lazy discovery during resolution).
 
-**Authority note:** Manifest shape, defaults, and field semantics are defined in `docs/pack-manifest-structure.txt`. This document
- focuses on resolution and runtime handling and should not contradict the manifest authority file.
+**Authority note:** Manifest shape, defaults, and field semantics are defined in
+`docs/pack-manifest-structure.txt`. This document focuses on resolution and
+runtime handling and must remain consistent with the manifest authority file.
 
 
 ============================================================
@@ -117,25 +118,32 @@ Fields (conceptual):
     PackDescriptor:
         localId: PackLocalId
         packTreeId: str               # hierarchical id ("ui.trace.trace-view")
+        kind: str                     # "appPack", "mod", etc.
         declaredAuthor: str | None    # as written in manifest
         declaredSemVerPackVersion: SemVerPackVersion | None  # as in manifest
         effectiveAuthor: str          # after inheritance from parent
         effectiveSemVerPackVersion: SemVerPackVersion  # after inheritance
+            # (manifest or inherited/engine default)
         isVersionAgnostic: bool       # optional; true if Pack declares itself "serves all"
-        kind: str                     # "appPack", "mod", etc.
-        rootPath: Path                # directory of this pack
-        manifestPath: Path            # path to manifest.json5
         layer: "first-party" | "third-party" | "custom" | "saves"
+        baseRoot: Path                # content root this pack lives under
+        packRoot: Path                # directory of this specific pack
+        manifestPath: Path            # path to manifest.json5
         parent: PackDescriptor | None     # parent in pack tree
-        visibility: "public" | "private"  # governs export from parent trees
+        visibility: "public" | "private"        # local visibility (as declared / defaulted)
+        globalVisibility: "public" | "private"  # derived from visibility + parent.exportNestedPacks
         importFromParent: bool        # whether dependencies are inherited from parent
-        exports: dict | None          # export lists such as {"packs": [...], "capabilities": [...]} or None
+        exports: dict | None          # export metadata (e.g. "capabilities"); shape defined in manifest spec
+        exportNestedPacks: bool | list[str]     # controls which children become globally exported
         recommendedPacks: list[PackRequest]   # optional compatibility hints
         supportedPacks: list[PackRequest]     # optional compatibility hints
         unsupportedPacks: list[PackRequest]   # optional compatibility hints
         assets: dict[str, AssetMeta]  # logicalName -> AssetMeta
-        runtimeEntries: dict[str, list[Path]]
-            # e.g. { "python": ["service.py"], "javascript": ["ui.js"] }
+        runtimeEntries: dict[str, list[Path]] # e.g. { "python": ["service.py"], "javascript": ["ui.js"] }
+        name: str                     # user-facing name (defaults to localId if omitted)
+        description: str | None       # user-facing description
+        authorName: str | None        # canonical author display name
+        rawJson: Mapping[str, Any]    # full manifest object, for future extensions
 
     AssetMeta:
         logicalName: str   # e.g. "Sandy.png", "config.json", "mesh:hero"
@@ -150,7 +158,9 @@ Effective author + version:
     - effectiveSemVerPackVersion:
         - If manifest declares "version": use it.
         - Else, if parent exists: inherit parent's effectiveSemVerPackVersion.
-        - Else: default to something defined by the engine (e.g. "0.0.0", or force author to specify).
+        - Else: use an engine-defined default version.
+          The exact default and its meaning are defined in the manifest
+          authority spec (`pack-manifest-structure`) and should remain stable.
 
 isVersionAgnostic:
     - Optional semantic flag meaning "I conceptually serve all versions".
@@ -223,20 +233,51 @@ Discovery steps (high level):
             else: packTreeId = parent.packTreeId + "." + localId
         effectiveAuthor = declaredAuthor or parent.effectiveAuthor or "unknown"
         effectiveSemVerPackVersion =
-            declaredSemVerPackVersion or parent.effectiveSemVerPackVersion or engineDefault
-        visibility = manifest.visibility if present else default
-            # default: if parent.kind == "contentPack" -> "public" else "private"
+            declaredSemVerPackVersion
+            or parent.effectiveSemVerPackVersion
+            or engineDefault  # exact default defined by manifest authority spec
+        visibility:
+            - If manifest.visibility is "public" or "private": use that value.
+            - Else:
+                  default is determined by this pack's own kind (not by parent):
+                      kind == "contentPack" -> "public"
+                      kind in {"appPack", "viewPack", "mod", "savePack"} -> "private"
+        exportNestedPacks:
+            - If manifest.exportNestedPacks is:
+                  * boolean -> use as-is.
+                  * array   -> treat as list of child PackLocalId values.
+            - If manifest.exportNestedPacks is missing or invalid:
+                  suggested defaults:
+                      kind == "contentPack" -> true
+                      kind in {"appPack", "viewPack", "mod", "savePack"} -> false
+                  (exact defaults are defined by the manifest spec / loader and must remain stable).
+        globalVisibility:
+            - Derived from this pack's own visibility and the parent's exportNestedPacks value:
+                * If parent is None:
+                      globalVisibility = visibility
+                * Else if visibility == "private":
+                      globalVisibility = "private"
+                * Else if parent.exportNestedPacks == false:
+                      globalVisibility = "private"
+                * Else if parent.exportNestedPacks == true:
+                      globalVisibility = "public"
+                * Else if parent.exportNestedPacks is a list:
+                      globalVisibility = "public" if localId is in that list,
+                      otherwise "private".
         importFromParent = manifest.importFromParent if present else default
-            # default: false for viewPack, true otherwise
+            # default: false for viewPack, true otherwise (see manifest spec)
         exports = manifest.exports or None
-        recommendedPacks/supportedPacks/unsupportedPacks = manifest values or []
+        recommendedPacks/supportedPacks/unsupportedPacks:
+            - normalize from manifest "recommendedPacks" / "supportedPacks" /
+              "unsupportedPacks" using the same rules as for "packs"
+              (PackRequestRef → PackRequest), or [] if missing.
     - Build runtimeEntries (optional lazily).
     - Process "assets" (see section 7) and fill PackDescriptor.assets.
 3. Register all PackDescriptor objects into a PackDescriptorRegistry.
    The registry must support queries by:
     - packTreeId
     - (effectiveAuthor, packTreeId, kind)
-    - (effectiveAuthor, packTreeId, kind, version)
+    - (effectiveAuthor, packTreeId, kind, effectiveSemVerPackVersion)
 
 No lazy discovery rule:
     - Once discovery finishes (or a rescan completes), every pack that exists under roots
@@ -341,7 +382,8 @@ ResolvedPack (conceptual):
         packTreeId: str
         semverPackVersion: SemVerPackVersion
         kind: str
-        rootPath: Path
+        baseRoot: Path
+        packRoot: Path
         manifestPath: Path
         runtimeEntries: dict[str, list[Path]]
         assets: dict[str, AssetMeta]
@@ -402,7 +444,8 @@ AssetResolver:
 - Discovery/rescan:
     - Must build a complete PackDescriptor registry for all packs under roots.
     - Must detect collisions where:
-        - two packs share same (effectiveAuthor, packTreeId, kind, version) and both appear in same precedence layer without an explicit override mechanism.
+        - two packs share same (effectiveAuthor, packTreeId, kind, effectiveSemVerPackVersion)
+          and both appear in same precedence layer without an explicit override mechanism.
     - May reject manifests with invalid or conflicting id/author/version fields.
 
 - Resolution:
