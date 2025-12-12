@@ -5,7 +5,9 @@ Authority note: pack-manifest-structure.txt is the canonical reference for
 manifest fields and their semantics. Identity, semantic versioning, and
 PackDescriptor/PackResolver behaviour continue to be covered in
 pack-and-asset-resolution.txt. This document only describes the URI surface and
-save-metadata examples. When in doubt, defer to the authoritative specs.
+save-metadata examples. When in doubt, defer to the authoritative specs, with
+pack-manifest-structure.txt and pack-and-asset-resolution.txt taking
+precedence over this document where any ambiguity arises.
 
 This document defines the addressing scheme for packs and resources in Turnix.
 It is written as if for an automatic code generator: every term is precise and
@@ -60,8 +62,9 @@ A pack is a directory with a manifest and additional files. Pack kinds include:
 - viewPack – a bundle that provides one or more debugging or auxiliary views.
 - mod – a reusable functionality unit attached to an application or view.
 - contentPack – optional: data-only or mostly-data packs.
-- savePack – optional conceptual kind for per-save resources (often represented
-  by a directory under saves/).
+- savePack – pack kind used for per-save resources, typically stored under
+    the saves/ root as described in the root system spec. A savePack has its
+    own manifest and participates in discovery and resolution like other packs.
 
 
 2.2 Manifest fields (common)
@@ -122,9 +125,7 @@ may be partial and requires resolution:
 
   <author?>@<packTreeId>[@<SemVerPackRequirement>]
 
-where author and version requirement are optional wildcards. Variant IDs are not
-part of the authoritative spec and should be handled separately if retained for
-tooling compatibility.
+where author and version requirement are optional wildcards.
 
 Resolved pack id (ResolvedPackId): a canonical, fully-resolved reference that
 includes an exact version and scheme:
@@ -138,10 +139,22 @@ Examples:
 - mod://Enter@ui.trace.listbox:1.0.0
 - mod://Jan@ui.trace.listbox:1.1.0
 
+Request vs canonical forms:
+
+- **Request selectors** may use a semantic version **requirement**:
+    <author?>@<packTreeId>[@<SemVerPackRequirement>]
+  for example:
+    "Turnix@ui.trace.listbox@^1.0.0"
+
+- **Canonical resolved ids** always use an **exact version** with a colon:
+    <scheme>://<authorId>@<packTreeId>:<SemVerPackVersion>
+  for example:
+    "mod://Turnix@ui.trace.listbox:1.1.0"
+
 Compatibility note: Older references to packId in this document should be
 interpreted as the packTreeId root segment. Where dotted packTreeId values
-appear, map each segment to a directory level when constructing filesystem paths.
-
+appear, map each segment to a directory level when constructing filesystem
+paths.
 
 2.5 Resource URIs
 -----------------
@@ -227,31 +240,15 @@ first-party configuration files and similar resources.
 
 All pack-based schemes follow the same mapping pattern.
 
-First-party packs:
+Pack-based schemes do not map to fixed directory structures.
+They resolve through the PackDescriptorRegistry:
 
-  appPack://Turnix@main-menu
-  -> <root>/first-party/appPacks/main-menu/
+1. Resolve <author>@<packTreeId>@<versionRequirement> into a PackDescriptor.
+2. Use PackDescriptor.packRoot for filesystem access.
+3. Append inner/path if present.
 
-  viewPack://Turnix@trace-monitor
-  -> <root>/first-party/viewPacks/trace-monitor/
-
-  mod://Turnix@toast
-  -> <root>/first-party/mods/toast/
-
-Third-party packs (versioned by author):
-
-  mod://Enter@listbox:1.0.0
-  -> <root>/third-party/mods/Enter/listbox/1.0.0/
-
-  mod://Jan@listbox:1.1.0
-  -> <root>/third-party/mods/Jan/listbox/1.1.0/
-
-The resolver combines:
-
-- scheme → pack kind and base directory name (appPacks, viewPacks, mods, etc.).
-- authorId and packId → path segments (for third-party).
-- versionSpec → resolved to an exact version; used as an extra directory level
-  where appropriate.
+All directory structure rules come from roots-and-discovery.txt,
+not from URI scheme names.
 
 
 3.2.3 Source kind and mutability
@@ -285,10 +282,15 @@ The following layout is the reference target state.
 4.1 First-party layout
 ----------------------
 
-  <root>/first-party/appPacks/<packId>/...
-  <root>/first-party/viewPacks/<packId>/...
-  <root>/first-party/mods/<packId>/...
-  <root>/first-party/contentPacks/<packId>/... (optional)
+This section is non-authoritative.
+Turnix no longer organizes packs by kind-specific directories.
+Discovery follows roots-and-discovery.txt:
+
+  <root>/first-party/<anyPackRoot>/manifest.json5
+  <root>/third-party/<anyPackRoot>/manifest.json5
+  <root>/custom/<anyPackRoot>/manifest.json5
+
+Nested packs are discovered by scanning within packRoot recursively.
 
 Concrete example from the main-menu and 100floors scenario:
 
@@ -322,9 +324,12 @@ Concrete example from the main-menu and 100floors scenario:
 
 Third-party packs are organized by author and version:
 
-  <root>/third-party/appPacks/<authorId>/<packId>/<version>/...
-  <root>/third-party/viewPacks/<authorId>/<packId>/<version>/...
-  <root>/third-party/mods/<authorId>/<packId>/<version>/...
+Third-party packs follow the same discovery rules as first-party:
+
+  <root>/third-party/<anyPackRoot>/manifest.json5
+
+Author/version directories may exist but are not part of the authoritative
+resolution strategy. Discovery uses manifest metadata, not path structure.
 
 Example:
 
@@ -344,8 +349,7 @@ While not fully specified here, the expected pattern for saves is:
 
   <root>/saves/<appPackId>/<appInstanceId>/...
 
-Each save directory may itself be treated as a savePack with a manifest that
-records:
+Each save directory is expected to contain a savePack manifest that records:
 
 - original pack selectors,
 - resolved pack ids,
@@ -388,24 +392,17 @@ Responsibilities:
 - Reject invalid or ambiguous strings with clear error messages.
 
 
-5.2 PackDiscoveryIndex
+5.2 PackDescriptorRegistry (conceptual view)
 ----------------------
 
 Input: list of root directories (first-party, third-party, custom, saves)  
 Output: in-memory index of available packs.
 
-The index stores entries like:
-
-  type PackIndexEntry = {
-    sourceKind: "first-party" | "third-party" | "custom" | "saves";
-    kind: "appPack" | "viewPack" | "mod" | "contentPack" | "savePack";
-    author: string;
-    packTreeId: string;
-    exactVersion: string;
-    variantId?: string;
-    rootPath: string;   // filesystem path to pack root
-    manifestPath: string;
-  }
+The index stores entries as PackDescriptor objects.
+PackDescriptorRegistry provides indexed lookup by:
+  - packTreeId
+  - (author, packTreeId)
+  - (author, packTreeId, version)
 
 Responsibilities:
 
@@ -417,7 +414,8 @@ Responsibilities:
   (kind, author, packTreeId, exactVersion).
 
 (Discovery must obey the constraints and invariants described in
-pack-and-asset-resolution.txt and the root-system spec.)
+pack-and-asset-resolution.txt and the root-system spec, including visibility
+and globalVisibility rules.)
 
 
 5.3 VersionChooser
@@ -446,27 +444,42 @@ Responsibilities:
 -----------------------------------
 
 Packs can be embedded inside other packs (for example, UI mods in an application
-pack). The ScopeResolver determines where to look first.
+pack). The ScopeResolver describes a recommended local-then-global lookup strategy
+that builds on top of the PackDescriptorRegistry rules from
+pack-and-asset-resolution.txt.
 
 For a requesting pack P wanting a dependency with selector S:
 
 Search order:
 
-1. Local scope of P  
-   For example, for appPack://Turnix@main-menu, check:
+1. Local scope of P
+   For example, for appPack://Turnix@main-menu, search for nested packs
+   under P's packRoot (as discovered according to roots-and-discovery and
+   pack-and-asset-resolution), such as:
 
-     <root>/first-party/appPacks/main-menu/mods/<packId>/manifest.json5
+     <packRoot>/mods/<localId>/manifest.json5
 
-   If found, treat this as a pack with:
-   - author inherited from P unless overridden in the embedded manifest.
-   - packId from the embedded manifest or directory name.
+   The exact directory names (e.g. "mods") are not prescribed by this
+   specification; they are part of the pack's own layout. If a nested pack is
+   found, treat it as a normal PackDescriptor with its own manifest-defined
+   id, author, and kind.
+
+   Local scope may see **private** children (visibility=="private") inside the
+   same pack tree. Visibility and exportNestedPacks do not restrict a parent
+   from resolving its own nested private packs.
 
 2. Global scope  
-   If not found locally, use the PackDiscoveryIndex to find global candidates
-   among first-party, third-party, and custom packs.
+   If not found locally, use the PackDescriptorRegistry to find global
+   candidates among first-party, third-party, and custom packs.
 
-The ScopeResolver returns a set of candidate PackIndexEntry objects to pass into
-VersionChooser.
+   Only descriptors whose **globalVisibility == "public"** (as defined by
+   pack-and-asset-resolution.txt and pack-manifest-structure.txt) may be
+   considered for global resolution. Private packs (visibility=="private") or
+   children that are not exported by their parent via exportNestedPacks remain
+   internal and must not appear as global candidates.
+
+The ScopeResolver returns a set of candidate PackDescriptor objects to pass
+into VersionChooser.
 
 
 5.5 PackResolver
@@ -478,7 +491,8 @@ Input:
 - PackRequest (author may be missing)
 - requesting context (for example, requesting pack identity for local scope)
 
-Output: ResolvedPackId and PackIndexEntry
+Output: ResolvedPackId and the chosen PackDescriptor (or a ResolvedPack
+        wrapper that contains PackDescriptor plus layer/source metadata).
 
 Responsibilities:
 
@@ -493,10 +507,10 @@ Responsibilities:
 
 4. Return a canonical ResolvedPackId:
 
-     <scheme>://<author>@<packTreeId>:<exactVersion>[:<variantId>]
+      <scheme>://<author>@<packTreeId>:<exactVersion>
 
-   along with the corresponding PackIndexEntry (which contains the filesystem
-   paths).
+    along with the corresponding PackDescriptor (or ResolvedPack), which
+    contains filesystem paths and layer/source information.
 
 
 5.6 ResourceUriResolver
@@ -512,7 +526,6 @@ Responsibilities:
    - authorId
    - packIdOrDir
    - versionSpec
-   - variantId
    - innerPath
 
 2. If scheme == "file":
@@ -523,7 +536,9 @@ Responsibilities:
 3. If scheme is a pack scheme (appPack, viewPack, mod, contentPack, savePack):
    - Derive pack kind from scheme.
    - Treat packIdOrDir as packId (or packTreeId, depending on convention).
-   - Construct a PackRequest from authorId, packId, versionSpec, variantId.
+   - Construct a PackRequest from authorId, packId, versionSpec
+     (SemVerPackRequirement). Canonical resolved forms use an exact version in
+      the ResolvedPackId (<scheme>://author@packTreeId:version).
    - Use PackResolver to get PackIndexEntry.
    - Return PackIndexEntry.rootPath combined with innerPath (if any).
 
@@ -543,11 +558,11 @@ Example metadata snippet inside a save manifest:
 
 {
   "appPack": "appPack://Turnix@100floors:1.0.0",
-  "requestedMods": {
+  "requestedPacks": {
     "ui": "ui:^1.0.0",
     "listbox": "listbox:^1.0.0"
   },
-  "resolvedMods": {
+  "resolvedPacks": {
     "ui": "mod://Turnix@ui:1.0.0",
     "listbox": "mod://Enter@listbox:1.0.0"
   }
@@ -555,9 +570,9 @@ Example metadata snippet inside a save manifest:
 
 Notes:
 
-- requestedMods stores PackRefStrings / PackRequests as originally requested by
+- requestedPacks stores PackRefStrings / PackRequests as originally requested by
   manifests (or generator.js logic).
-- resolvedMods stores the exact ResolvedPackId chosen at the time of save
+- resolvedPacks stores the exact ResolvedPackId chosen at the time of save
   creation or last upgrade.
 
 
@@ -566,28 +581,28 @@ Notes:
 
 When loading a save:
 
-1. For each entry in requestedMods:
+1. For each entry in requestedPacks:
    - Use the corresponding selector (for example listbox:^1.0.0).
 
 2. Use PackResolver to determine the current best candidate based on the
    available packs.
 
-3. Compare with the stored resolvedMods entry:
+3. Compare with the stored resolvedPacks entry:
    - If they are identical, load that pack directly.
    - If they differ (for example, a newer version is now available that still
      satisfies ^1.0.0):
      - Prompt the user whether to upgrade to the new version.
      - If the user chooses to upgrade:
        - Attempt to load the new pack and run any validation.
-       - If it is successful, update resolvedMods in the save metadata and
+       - If it is successful, update resolvedPacks in the save metadata and
          create a backup of the old state.
        - If it fails in a detectable way, revert to the previous version and
          inform the user.
 
-4. If the pack referenced in resolvedMods no longer exists:
+4. If the pack referenced in resolvedPacks no longer exists:
    - This is an error; the save is no longer directly reproducible with the
      current installation.
-   - The system may offer to re-resolve from requestedMods, but must clearly
+   - The system may offer to re-resolve from requestedPacks, but must clearly
      indicate that behaviour is no longer guaranteed identical.
 
 
@@ -621,16 +636,16 @@ provided:
        "id": "main-menu",
        "name": "Main Menu",
        "version": "1.0.0",
-       "defaultAppInstanceId": "turnix-main-menu",
+       "defaultInstanceId": "turnix-main-menu",
        "overrideSaveUri": "appPack://Turnix@main-menu/save/",
-       "mods": {
+       "packs": {
          "main-menu-ui": "^1.0.0",
          "toast": "^1.0.0"
        }
      }
 
    - Run generator.js to create a save (or a savePack) and initialize
-     resolvedMods based on the manifest and discovered packs.
+     resolvedPacks based on the manifest and discovered packs.
    - Respect read-only rules on <root>/first-party paths and redirect actual
      writable output to saves/ or userdata/ as needed, while still maintaining
      logical overrideSaveUri semantics.
@@ -651,13 +666,15 @@ provided:
   "name": "100floors",
   "description": "A 100 floors dungeon example.",
   "version": "1.0.0",
-  "runtime": {
-    "javascript": {
-      "generator": "generator.js",
-      "entry": "src/100floors.js"
-    }
-  },
-  "mods": {
+  "app": {
+    "runtimes": {
+      "javascript": {
+        "generator": "generator.js",
+        "entry": "src/100floors.js"
+      }
+    },
+  }
+  "packs": {
     "ui": "^1.0.0"
   }
 }
@@ -671,15 +688,17 @@ ui mod manifest:
   "name": "Basic UI",
   "description": "Provides basic UI for application packs.",
   "version": "1.0.0",
-  "runtimes": {
-    "javascript": {
-      "entries": [
-        "button.js",
-        "textarea.js",
-        "menu.js",
-        "dialog.js",
-        "messageslist.js"
-      ]
+  "mod": {
+    "runtimes": {
+      "javascript": {
+        "entries": [
+          "button.js",
+          "textarea.js",
+          "menu.js",
+          "dialog.js",
+          "messageslist.js"
+        ]
+      }
     }
   }
 }
@@ -689,15 +708,15 @@ Resolution flow for "ui": "^1.0.0":
 1. Parse selector: packId = "ui", versionSpec = "^1.0.0", no explicit author.
 2. ScopeResolver:
    - Local scope in 100floors: no embedded ui mod.
-   - Global scope: candidates from PackDiscoveryIndex:
+   - Global scope: candidates from PackDescriptorRegistry:
      - mod://Turnix@ui:1.0.0
 3. VersionChooser:
    - Only one candidate, version 1.0.0, which matches ^1.0.0.
 4. PackResolver returns:
    - ResolvedPackId = "mod://Turnix@ui:1.0.0".
 5. Save metadata records:
-   - requestedMods["ui"] = "ui:^1.0.0"
-   - resolvedMods["ui"] = "mod://Turnix@ui:1.0.0"
+   - requestedPacks["ui"] = "ui:^1.0.0"
+   - resolvedPacks["ui"] = "mod://Turnix@ui:1.0.0"
 
 
 7.3 trace-monitor and listbox versions
@@ -711,7 +730,7 @@ trace-monitor view pack manifest:
   "id": "trace-monitor",
   "name": "Trace Monitor",
   "version": "1.0.0",
-  "mods": {
+  "packs": {
     "ui": "^1.0.0",
     "listbox": "^1.0.0"
   }
@@ -740,6 +759,9 @@ Listbox mod manifests:
   "extends": "Enter@listbox" // optional inheritance metadata
 }
 
+(Example above uses an extra "extends" field as custom metadata; it has no
+behaviour in the core specs and is interpreted only by higher-level tools.)
+
 When first loading trace-monitor in a world where only Enter's listbox exists:
 
 1. Selector: "listbox": "^1.0.0".
@@ -747,23 +769,23 @@ When first loading trace-monitor in a world where only Enter's listbox exists:
    - mod://Enter@listbox:1.0.0.
 3. VersionChooser → choose 1.0.0.
 4. Save metadata:
-   - requestedMods["listbox"] = "listbox:^1.0.0"
-   - resolvedMods["listbox"] = "mod://Enter@listbox:1.0.0"
+   - requestedPacks["listbox"] = "listbox:^1.0.0"
+   - resolvedPacks["listbox"] = "mod://Enter@listbox:1.0.0"
 
 Later, Jan's listbox:1.1.0 is installed:
 
-1. On save load, the engine again evaluates requestedMods["listbox"]:
+1. On save load, the engine again evaluates requestedPacks["listbox"]:
    - Candidates now:
      - mod://Enter@listbox:1.0.0
      - mod://Jan@listbox:1.1.0
 2. VersionChooser:
    - Both satisfy ^1.0.0.
    - Policy chooses the highest version: 1.1.0 (Jan's).
-3. Because this differs from stored resolvedMods["listbox"]
+3. Because this differs from stored resolvedPacks["listbox"]
    (Enter@listbox:1.0.0):
    - Prompt the user to upgrade.
    - On acceptance, attempt to load Jan's listbox.
-   - If successful, update resolvedMods["listbox"] to
+   - If successful, update resolvedPacks["listbox"] to
      "mod://Jan@listbox:1.1.0" and create a backup of the previous save state.
 
 This behaviour ensures that saves can evolve to newer compatible versions while
@@ -781,7 +803,7 @@ required:
    - Parses <author?>@<packTreeId>[@<SemVerPackRequirement>] into structured
      data compatible with PackRequest.
 
-2. PackDiscoveryIndex
+2. PackDescriptorRegistry
    - Discovers packs on disk.
    - Indexes them by kind, author, packTreeId, and exactVersion.
 
@@ -801,11 +823,11 @@ required:
      and returns filesystem paths.
 
 7. SaveManifestManager
-   - Writes and reads requestedMods and resolvedMods sections in save manifests.
+   - Writes and reads requestedPacks and resolvedPacks sections in save manifests.
    - Provides helpers to iterate over requested dependencies.
 
 8. UpgradeManager
-   - Compares stored resolvedMods with current resolution results.
+   - Compares stored resolvedPacks with current resolution results.
    - Decides when to prompt for upgrade.
    - Applies upgrades and manages backups.
 
