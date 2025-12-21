@@ -1,0 +1,252 @@
+======================================================================
+DESIGN AREA 9 — SERVICES, CAPABILITIES & PERMISSIONS
+======================================================================
+
+Status:
+-------
+CORE — this area defines *how packs interact at runtime* without
+importing code, and how Turnix mediates power, access, and safety.
+
+This is the primary cross-pack interaction mechanism.
+
+
+----------------------------------------------------------------------
+1. CORE CONCEPT
+----------------------------------------------------------------------
+
+Turnix distinguishes between:
+
+- Services  → concrete runtime objects / instances
+- Capabilities → named, permissioned actions
+
+They are related but NOT the same.
+
+
+----------------------------------------------------------------------
+2. SERVICES (LOCKED DEFINITION)
+----------------------------------------------------------------------
+
+A Service is:
+- a runtime object
+- registered by a pack during activation
+- stored in a scoped service registry
+- retrieved by other packs at runtime
+
+Example:
+    ctx.registerService("llm", client)
+    client = ctx.services.get("llm")
+
+Properties:
+- services are opaque objects
+- lifetime = activation scope
+- no automatic permission checks
+- name collisions are forbidden
+
+
+----------------------------------------------------------------------
+3. SERVICE ACCESS RULES (LOCKED)
+----------------------------------------------------------------------
+
+- Service access is explicit
+- No inheritance
+- No visibility-based granting
+- No implicit availability
+
+If service does not exist:
+- ctx.services.get(name) → error (or None if explicitly allowed)
+
+Services are for trusted runtime wiring.
+
+
+----------------------------------------------------------------------
+4. CAPABILITIES (LOCKED DEFINITION)
+----------------------------------------------------------------------
+
+A Capability is:
+- a named operation
+- exposed by a pack
+- callable by other packs
+- mediated by Turnix
+- permission-checked
+
+Example:
+    ctx.registerCapability("llm.pipeline@1", handler)
+
+Call site:
+    ctx.callCapability("llm.pipeline@1", args)
+
+
+----------------------------------------------------------------------
+5. CAPABILITY NAMES & VERSIONING (LOCKED)
+----------------------------------------------------------------------
+
+Capability identifiers:
+    <name>@<major>
+
+Examples:
+    "llm.pipeline@1"
+    "http.request@1"
+    "compile.typescript@1"
+
+Rules:
+- major version only
+- incompatible change → new major
+- no minor/patch in identifier
+
+
+----------------------------------------------------------------------
+6. CAPABILITY EXPORT & IMPORT (LOCKED DISTINCTION)
+----------------------------------------------------------------------
+
+Export:
+- happens in code via ctx.registerCapability
+- manifest declaration is OPTIONAL (bookkeeping only)
+
+Import / usage:
+- happens in code via ctx.callCapability
+- manifest declaration OPTIONAL but RECOMMENDED
+
+Manifest data is advisory, not authoritative.
+
+
+----------------------------------------------------------------------
+7. PERMISSIONS MODEL (LOCKED CORE)
+----------------------------------------------------------------------
+
+Capabilities may require permission.
+
+Permission classes:
+- none        → always allowed
+- soft        → user may be asked, allow/deny/always
+- hard        → user MUST explicitly allow
+
+Exact classification is capability-defined.
+
+
+----------------------------------------------------------------------
+8. PERMISSION FLOW (LOCKED BEHAVIOR)
+----------------------------------------------------------------------
+
+When a capability is invoked:
+
+1) Permission is checked
+2) If allowed → handler executes
+3) If not decided:
+    - execution PAUSES
+    - UI prompt is shown
+    - user decision resumes execution
+
+Turnix must remain responsive while waiting.
+
+
+----------------------------------------------------------------------
+9. USER DECISIONS & POLICY (LOCKED)
+----------------------------------------------------------------------
+
+User choices:
+- may be persisted
+- may be scoped (session/app/global)
+- must be explainable
+
+Policies may allow:
+- auto-allow soft permissions
+- never auto-allow hard permissions
+
+
+----------------------------------------------------------------------
+10. CAPABILITIES VS SERVICES (LOCKED SEPARATION)
+----------------------------------------------------------------------
+
+Services:
+- direct object access
+- no permission layer
+- internal wiring
+
+Capabilities:
+- controlled boundary
+- user-facing power
+- audited, traced, permissioned
+
+Both may coexist in same pack.
+
+
+----------------------------------------------------------------------
+11. OVERRIDING & CONFLICTS (LOCKED PRINCIPLE)
+----------------------------------------------------------------------
+
+Multiple packs exporting same capability:
+- not allowed unless explicitly designed
+- conflict must be detected
+- user must choose or error raised
+
+Silent override is forbidden.
+
+
+----------------------------------------------------------------------
+12. TRACE & AUDIT (LOCKED)
+----------------------------------------------------------------------
+
+All capability calls:
+- are traceable
+- include caller identity
+- include permission context
+- may be logged
+
+This is critical for debugging and trust.
+
+
+----------------------------------------------------------------------
+13. DEVELOPMENT-TIME REPORTING (LOCKED)
+----------------------------------------------------------------------
+
+At end of run (dev mode):
+
+- report declared-but-unused capabilities
+- report used-but-undeclared capabilities
+- report exported-but-never-called capabilities
+
+Informational only, non-fatal.
+
+
+----------------------------------------------------------------------
+14. JAVASCRIPT & PYTHON SYMMETRY
+----------------------------------------------------------------------
+
+Same concepts apply to both runtimes:
+- services registered in Python usable by JS via capability
+- JS UI triggers Python services via capability
+- no direct cross-language object access
+
+
+----------------------------------------------------------------------
+15. OPEN QUESTIONS
+----------------------------------------------------------------------
+
+OPEN:
+- fine-grained permission scopes
+- capability discovery UI
+- dynamic capability revocation
+- subscription-based capabilities
+
+
+----------------------------------------------------------------------
+16. LOCKED SUMMARY
+----------------------------------------------------------------------
+
+LOCKED:
+- services = runtime objects
+- capabilities = permissioned actions
+- explicit registration
+- user-mediated permissions
+- no silent overrides
+- dev-mode reporting
+
+OPEN:
+- UX polish
+- advanced permission models
+
+
+----------------------------------------------------------------------
+END OF DESIGN AREA 9
+----------------------------------------------------------------------
+

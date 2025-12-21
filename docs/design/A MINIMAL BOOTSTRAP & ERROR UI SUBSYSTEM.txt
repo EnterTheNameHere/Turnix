@@ -1,0 +1,256 @@
+======================================================================
+OPTIONAL DESIGN AREA A — MINIMAL BOOTSTRAP & ERROR UI SUBSYSTEM
+======================================================================
+
+Status:
+-------
+OPTIONAL BUT STRATEGIC — not required for core Turnix correctness,
+but strongly improves robustness, debuggability, and user trust.
+
+
+----------------------------------------------------------------------
+1. CORE PROBLEM THIS AREA SOLVES
+----------------------------------------------------------------------
+
+Turnix must handle failures that occur:
+- before any appPack is active
+- before user UI exists
+- before mods are loaded
+- before services or capabilities are available
+
+Examples:
+- corrupted global config
+- unreadable manifest
+- schema mismatch
+- missing runtime files
+- discovery failure
+
+Without a minimal UI layer, such failures become:
+- silent
+- terminal-only
+- confusing
+- non-recoverable for non-technical users
+
+
+----------------------------------------------------------------------
+2. BOOTSTRAP PHASES (LOCKED CONCEPT)
+----------------------------------------------------------------------
+
+Turnix startup is conceptually split into rings:
+
+Ring 0 — Kernel bootstrap
+-------------------------
+- process startup
+- logging
+- IoManager
+- error envelope
+- config schema loader
+- default config loader
+- user config loader
+
+Failures here are FATAL.
+No UI is guaranteed.
+
+
+Ring 1 — Minimal UI bootstrap (this area)
+-----------------------------------------
+- serve index.html
+- serve bootstrap.js
+- establish RPC
+- register error-reporting capability
+- render minimal error UI
+
+Failures here are SEVERE but recoverable
+with retry or user action.
+
+
+Ring 2 — Pack discovery & activation
+------------------------------------
+- content scanning
+- indexing
+- activation
+- appInstance creation
+
+Failures here are expected and user-resolvable.
+
+
+----------------------------------------------------------------------
+3. MINIMAL ERROR UI PURPOSE
+----------------------------------------------------------------------
+
+The minimal error UI exists ONLY to:
+- display fatal / blocking errors
+- present recovery choices
+- return a decision to kernel
+
+It is NOT:
+- a full application UI
+- a PackManager
+- themeable
+- customizable by mods
+
+
+----------------------------------------------------------------------
+4. ERROR UI CHARACTERISTICS (LOCKED)
+----------------------------------------------------------------------
+
+The minimal error UI must:
+- be small
+- load fast
+- have zero dependencies on packs
+- not require LLM
+- not require user config
+- not require saves
+- not require asset compilation
+
+Acceptable forms:
+- Electron window
+- browser page
+- native dialog
+- text overlay (fallback)
+
+
+----------------------------------------------------------------------
+5. ERROR COMMUNICATION MODEL (LOCKED)
+----------------------------------------------------------------------
+
+Errors are sent to the UI as:
+- standard error envelope
+- with human-readable message
+- with structured payload
+- with allowed actions list
+
+UI responds with:
+- selected action
+- optional parameters
+- acknowledgement
+
+
+----------------------------------------------------------------------
+6. SUPPORTED USER ACTIONS (LOCKED)
+----------------------------------------------------------------------
+
+Typical actions:
+- Retry
+- Reset config to defaults
+- Ignore and continue (if allowed)
+- Abort startup
+- Open logs directory
+
+Actions are provided by kernel,
+not invented by UI.
+
+
+----------------------------------------------------------------------
+7. UI AVAILABILITY GUARANTEE
+----------------------------------------------------------------------
+
+Once Ring 1 is complete:
+- kernel may assume UI exists
+- user decisions may be requested
+- execution may pause safely
+
+Before Ring 1:
+- no user interaction allowed
+- fatal errors abort immediately
+
+
+----------------------------------------------------------------------
+8. OPTIONAL PACK-BASED ERROR UI (OPEN / FUTURE)
+----------------------------------------------------------------------
+
+Concept:
+- special pack category: errorUiPack
+- loaded before normal discovery
+- explicitly whitelisted
+- replaces built-in error UI
+
+Pros:
+- themed
+- extensible
+- reusable
+
+Cons:
+- increases bootstrap complexity
+- dependency risk
+
+Status: NOT LOCKED
+
+
+----------------------------------------------------------------------
+9. MULTI-FRONTEND HANDLING (LOCKED)
+----------------------------------------------------------------------
+
+If multiple frontends connect:
+- error is broadcast
+- first response wins
+- others are dismissed
+
+Kernel remains authority.
+
+
+----------------------------------------------------------------------
+10. LLM-ASSISTED RECOVERY (OPEN)
+----------------------------------------------------------------------
+
+Idea:
+- if LLM service is available
+- provide explanation / guidance
+
+Constraints:
+- must never block recovery
+- must never replace user choice
+- must never be required
+
+Status: OPEN / OPTIONAL
+
+
+----------------------------------------------------------------------
+11. FAILURE MODES
+----------------------------------------------------------------------
+
+If minimal UI fails to load:
+- fallback to launcher
+- fallback to console
+- abort with clear error
+
+If UI disconnects:
+- pause execution
+- allow reconnect
+- enforce timeout if configured
+
+
+----------------------------------------------------------------------
+12. WHAT THIS AREA DOES NOT DO
+----------------------------------------------------------------------
+
+Explicitly excluded:
+- save inspection
+- pack browsing
+- mod installation
+- capability invocation
+- scripting
+- theming
+
+
+----------------------------------------------------------------------
+13. LOCKED SUMMARY
+----------------------------------------------------------------------
+
+LOCKED:
+- concept of bootstrap rings
+- minimal error UI role
+- kernel-driven actions
+- structured error envelopes
+- pause-and-resume behavior
+
+OPEN:
+- pack-based error UI
+- LLM-assisted guidance
+- UX refinements
+
+
+----------------------------------------------------------------------
+END OF OPTIONAL DESIGN AREA A
+----------------------------------------------------------------------
+

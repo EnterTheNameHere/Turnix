@@ -1,0 +1,261 @@
+======================================================================
+DESIGN AREA 7 — DEPENDENCIES, REQUIREMENTS & PACK REQUESTS
+======================================================================
+
+Status:
+-------
+CORE — this area defines *how packs express what they need*, how those
+needs are interpreted, and how ambiguity is handled without guesswork.
+
+This area is intentionally explicit.
+Dependencies are contracts, not hints.
+
+
+----------------------------------------------------------------------
+1. CORE CONCEPT
+----------------------------------------------------------------------
+
+A dependency answers:
+
+    “This pack cannot function correctly unless another pack exists
+     that satisfies these constraints.”
+
+Dependencies do NOT:
+- load code
+- activate packs
+- guarantee order
+- imply visibility
+- imply capability access
+
+They only define *requirements*.
+
+
+----------------------------------------------------------------------
+2. DECLARING DEPENDENCIES (LOCKED)
+----------------------------------------------------------------------
+
+Manifest field:
+    packs: PackRequestRef | [PackRequestRef, ...]
+
+Examples:
+    "packs": ["Turnix@ui.controls@^1.2"]
+    "packs": ["avatars", "llm.pipeline"]
+
+Rules:
+- Absence of "packs" means no declared dependencies
+- Empty array means explicitly no dependencies
+
+
+----------------------------------------------------------------------
+3. PACK REQUEST REFERENCE (LOCKED GRAMMAR)
+----------------------------------------------------------------------
+
+PackRequestRef grammar:
+
+    [<author>@]<packTreeId>[@<semverRequirement>]
+
+Examples:
+    "ui.controls"
+    "Turnix@ui.controls"
+    "ui.controls@^1.2"
+    "Turnix@ui.controls@~1.4"
+
+Parsing rule (LOCKED):
+- If two “@” parts exist → author + id + semver
+- If one “@” part exists:
+    - attempt semver parse
+    - if parse succeeds → id + semver
+    - else → author + id
+- Semver parse failure in this ambiguity case is NOT an error
+
+
+----------------------------------------------------------------------
+4. PACK REQUEST OBJECT (INTERNAL FORM)
+----------------------------------------------------------------------
+
+Parsed into:
+
+    PackRequest:
+        author: str | None
+        packTreeId: str
+        semverRequirement: SemVerPackRequirement | None
+        kind: str | None
+
+Notes:
+- kind may be injected by context (e.g. “mod only”)
+- PackRequest is immutable after parsing
+
+
+----------------------------------------------------------------------
+5. DEPENDENCY RESOLUTION PHASES
+----------------------------------------------------------------------
+
+Dependencies are resolved in two distinct phases:
+
+Phase A — Registry matching
+Phase B — Policy & selection
+
+This separation is NON-NEGOTIABLE.
+
+
+----------------------------------------------------------------------
+6. PHASE A — REGISTRY MATCHING (LOCKED)
+----------------------------------------------------------------------
+
+Input:
+- PackRequest
+- PackDescriptorRegistry
+
+Steps:
+1. Match packTreeId
+2. Filter by author (if specified)
+3. Filter by kind (if specified)
+4. Collect candidates
+
+No ordering.
+No scoring.
+No policy.
+
+
+----------------------------------------------------------------------
+7. PHASE B — VERSION & POLICY FILTERING (LOCKED)
+----------------------------------------------------------------------
+
+Inputs:
+- candidates
+- semverRequirement
+- global/user policy
+
+Outcomes:
+- eligible
+- softRejected
+- hardRejected
+
+Soft rejection examples:
+- semver mismatch
+- prerelease blocked
+
+Hard rejection examples:
+- permission denied
+- forbidden root
+- copied-pack constraint violation
+
+
+----------------------------------------------------------------------
+8. SCORING & SELECTION (LOCKED MODEL)
+----------------------------------------------------------------------
+
+Scoring inputs:
+
+1) Author affinity
+2) SemVer quality
+3) Root precedence
+4) Stability (release > prerelease)
+
+Deterministic tie-breakers:
+1) Root precedence
+2) Newer version
+3) Stable over prerelease
+4) Lexical fully-resolved ref
+
+
+----------------------------------------------------------------------
+9. AMBIGUITY HANDLING (LOCKED)
+----------------------------------------------------------------------
+
+If:
+- multiple eligible candidates remain
+AND
+- policy == askUser
+
+Then:
+- resolution MUST pause
+- UI MUST explain choices
+- user decision MUST be persisted
+
+Silent selection is forbidden.
+
+
+----------------------------------------------------------------------
+10. LAST KNOWN GOOD (LOCKED CONCEPT)
+----------------------------------------------------------------------
+
+Resolver tracks:
+- which pack actually worked last time
+
+Rules:
+- preferred if still eligible
+- replacement requires policy approval
+- disappearance requires user action
+
+
+----------------------------------------------------------------------
+11. PINNED & COPIED PACKS (LOCKED BEHAVIOR)
+----------------------------------------------------------------------
+
+Pinned packs:
+- override normal scoring
+- missing pin → error
+
+Copied packs (inside save):
+- hard constraint
+- cannot be substituted
+- update governed by copy policy
+
+
+----------------------------------------------------------------------
+12. DEPENDENCY ≠ ACTIVATION (LOCKED)
+----------------------------------------------------------------------
+
+Declaring a dependency:
+- does NOT activate the pack
+- does NOT load its code
+- does NOT grant access
+
+Activation is a separate stage.
+
+
+----------------------------------------------------------------------
+13. ERROR HANDLING (LOCKED)
+----------------------------------------------------------------------
+
+Resolution errors:
+- NotFoundError
+- AmbiguousResolutionError
+- PermissionDeniedError
+- VersionMismatchError
+
+All must:
+- use standard error envelope
+- include explanation context
+
+
+----------------------------------------------------------------------
+14. OPEN QUESTIONS
+----------------------------------------------------------------------
+
+OPEN:
+- per-pack vs global prerelease policy
+- dependency groups (optional / feature-based)
+- tooling to visualize dependency chains
+
+
+----------------------------------------------------------------------
+15. LOCKED SUMMARY
+----------------------------------------------------------------------
+
+LOCKED:
+- explicit dependency grammar
+- two-phase resolution
+- deterministic scoring
+- no silent ambiguity resolution
+- dependency ≠ activation
+
+OPEN:
+- UX & visualization only
+
+
+----------------------------------------------------------------------
+END OF DESIGN AREA 7
+----------------------------------------------------------------------
+

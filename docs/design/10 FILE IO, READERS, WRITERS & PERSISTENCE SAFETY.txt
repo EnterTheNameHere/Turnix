@@ -1,0 +1,289 @@
+======================================================================
+DESIGN AREA 10 — FILE I/O, READERS/WRITERS & PERSISTENCE SAFETY
+======================================================================
+
+Status:
+-------
+CORE — this area defines *how data is read and written*, *who is allowed
+to do it*, and *how failures are handled* without corrupting identity or
+state.
+
+This area is NON-NEGOTIABLE.
+All persistence goes through Turnix.
+
+
+----------------------------------------------------------------------
+1. CORE PRINCIPLE (LOCKED)
+----------------------------------------------------------------------
+
+ALL file reading and writing in Turnix MUST go through
+a centralized I/O system.
+
+No direct filesystem access is allowed outside it.
+
+This applies to:
+- config
+- manifests
+- saves
+- logs
+- caches
+- compiled assets
+- future databases or stores
+
+
+----------------------------------------------------------------------
+2. CENTRAL COMPONENT (LOCKED)
+----------------------------------------------------------------------
+
+Component name:
+    IoManager
+
+Responsibilities:
+- mediate all reads and writes
+- enforce root boundaries
+- enforce read/write permissions
+- normalize paths
+- classify errors
+- produce standard error envelopes
+- emit trace reasons
+
+
+----------------------------------------------------------------------
+3. READERS & WRITERS (LOCKED CONCEPT)
+----------------------------------------------------------------------
+
+IoManager does not hardcode all formats.
+
+Instead it uses:
+- Readers  → load data
+- Writers  → persist data
+
+Each reader/writer:
+- handles a specific kind
+- declares capabilities
+- is registered with IoManager
+
+
+----------------------------------------------------------------------
+4. BUILT-IN READERS / WRITERS (LOCKED)
+----------------------------------------------------------------------
+
+Provided by Turnix core:
+- utf8Text
+- binary
+- json
+- json5
+- jsonl
+
+These are ALWAYS available before discovery.
+
+
+----------------------------------------------------------------------
+5. EXTENDED READERS / WRITERS (LOCKED POLICY)
+----------------------------------------------------------------------
+
+Anything beyond built-ins (e.g. YAML, SQLite, embeddings):
+
+- must be provided by a pack
+- must register as an I/O provider
+- must be activated BEFORE use
+- must declare supported formats
+
+Turnix will NOT attempt to auto-discover readers mid-read.
+
+
+----------------------------------------------------------------------
+6. DISCOVERY-TIME I/O LIMITS (LOCKED)
+----------------------------------------------------------------------
+
+During discovery:
+
+Allowed:
+- built-in readers only
+
+Disallowed:
+- pack-provided readers
+- compilers
+- transformers
+
+Rationale:
+Discovery must be deterministic and independent of packs.
+
+
+----------------------------------------------------------------------
+7. WRITE PERMISSIONS (LOCKED)
+----------------------------------------------------------------------
+
+Writable locations:
+- userdata/
+- saves/
+
+Read-only locations during runtime:
+- first-party/
+- third-party/
+- custom/
+
+Authoring tools may override this OUTSIDE runtime.
+
+
+----------------------------------------------------------------------
+8. ERROR CLASSES (LOCKED)
+----------------------------------------------------------------------
+
+I/O errors are classified as:
+
+A) Unrecoverable (fatal)
+    - cannot load config schema
+    - cannot load default config
+    - corrupted required state
+
+→ ReactorScramError
+
+B) User-decidable
+    - corrupted userdata config
+    - missing optional file
+    - version mismatch
+
+→ Pausable error with UI decision
+
+C) Optional / best-effort
+    - logs
+    - traces
+    - caches
+
+→ Warning only
+
+
+----------------------------------------------------------------------
+9. ERROR PRESENTATION (LOCKED)
+----------------------------------------------------------------------
+
+Console / terminal interaction is NOT relied upon.
+
+User decisions MUST be shown via UI:
+- Electron frontend
+- minimal error UI
+- dialog / overlay
+
+Execution may pause waiting for user input.
+
+
+----------------------------------------------------------------------
+10. BOOTSTRAP GUARANTEE (LOCKED)
+----------------------------------------------------------------------
+
+Minimum runtime required before ANY user decision UI:
+
+- FastAPI running
+- index.html served
+- bootstrap.js loaded
+- rpc.js available
+- error overlay capable of rendering
+
+Before this point:
+- any error is fatal
+- no user recovery possible
+
+
+----------------------------------------------------------------------
+11. TRACE REASONS (LOCKED NAMING)
+----------------------------------------------------------------------
+
+Refused or skipped I/O MUST emit trace reasons, e.g.:
+
+- ManifestInRootLayerDir
+- SymlinkForbidden
+- FileAccessDenied
+- ScanDepthLimitReached
+
+Reasons use PascalCase.
+
+
+----------------------------------------------------------------------
+12. SAVE FILE HANDLING (LOCKED)
+----------------------------------------------------------------------
+
+SavePacks:
+- discovered by saves/*/*/manifest.json5
+- NOT deep-scanned by default
+- internal packs scanned only when:
+    - save is loaded
+    - PackManager inspects save
+    - config explicitly enables deep scan
+
+
+----------------------------------------------------------------------
+13. CONFIG LOADING ORDER (LOCKED)
+----------------------------------------------------------------------
+
+Order:
+1) config schemas
+2) default config
+3) userdata config
+4) validation
+5) indexing decisions
+
+If step 1 or 2 fails → fatal.
+Step 3 may be user-recoverable.
+
+
+----------------------------------------------------------------------
+14. MIGRATORS (LOCKED CONCEPT)
+----------------------------------------------------------------------
+
+Supported:
+- ConfigMigrator
+- ManifestMigrator
+- Future *Migrator
+
+Rules:
+- migrators are versioned
+- applied sequentially
+- no rollback
+- migrations are deterministic
+
+
+----------------------------------------------------------------------
+15. NO BACKDOORS (LOCKED)
+----------------------------------------------------------------------
+
+Packs:
+- cannot bypass IoManager
+- cannot write arbitrary paths
+- cannot intercept core I/O
+
+All persistence is centralized.
+
+
+----------------------------------------------------------------------
+16. OPEN QUESTIONS
+----------------------------------------------------------------------
+
+OPEN:
+- streaming readers
+- transactional multi-file writes
+- snapshot vs incremental save strategy
+- encrypted stores
+
+
+----------------------------------------------------------------------
+17. LOCKED SUMMARY
+----------------------------------------------------------------------
+
+LOCKED:
+- centralized IoManager
+- reader/writer abstraction
+- strict permission model
+- fatal vs recoverable error split
+- UI-mediated recovery
+- no discovery-time extensions
+
+OPEN:
+- performance optimizations
+- future storage backends
+
+
+----------------------------------------------------------------------
+END OF DESIGN AREA 10
+----------------------------------------------------------------------
+

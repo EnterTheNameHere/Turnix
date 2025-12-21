@@ -1,0 +1,295 @@
+======================================================================
+DESIGN AREA 2 — ROOT SYSTEM & PACK DISCOVERY BOUNDARIES
+======================================================================
+
+Status:
+-------
+CORE INFRASTRUCTURE — affects discovery, visibility, persistence,
+and user expectations. Decisions here strongly constrain later phases.
+
+Purpose:
+--------
+This area defines *where* Turnix looks for content, *what* it considers
+eligible for discovery, and *what is explicitly ignored*.
+
+The root system is not just a filesystem detail; it encodes:
+- trust boundaries
+- override semantics
+- authoring vs runtime separation
+- determinism guarantees
+
+
+----------------------------------------------------------------------
+1. ROOT TYPES (LOCKED)
+----------------------------------------------------------------------
+
+Turnix recognizes the following root categories:
+
+- custom/
+- first-party/
+- third-party/
+- userdata/
+- saves/
+
+Each root has a semantic meaning and constraints attached to it.
+
+----------------------------------------------------------------------
+1.1 Content roots
+----------------------------------------------------------------------
+
+Content roots are:
+
+- custom/
+- first-party/
+- third-party/
+
+These are scanned for packs (manifests).
+
+Precedence (highest wins):
+    custom
+    first-party
+    third-party
+
+Rationale:
+- custom      → local overrides, authoring, experiments
+- first-party→ shipped baseline
+- third-party→ external content that must not silently override baseline
+
+This precedence is LOCKED and reused everywhere (resolution, scoring,
+tie-breaking).
+
+
+----------------------------------------------------------------------
+1.2 Userdata root
+----------------------------------------------------------------------
+
+userdata/ is NOT a content root.
+
+It is used for:
+- persisted config
+- state
+- user decisions
+- caches
+
+It is never scanned for packs.
+
+
+----------------------------------------------------------------------
+1.3 Saves root
+----------------------------------------------------------------------
+
+saves/ contains savePacks.
+
+LOCKED:
+- savePacks are discoverable as *save entities*
+- savePacks are NOT eligible for import as normal packs
+- copied packs inside saves are context-bound to that save
+
+Default behavior:
+- shallow scan only (see Section 5)
+
+
+----------------------------------------------------------------------
+2. DISCOVERY ENTRY POINT RULES (LOCKED)
+----------------------------------------------------------------------
+
+----------------------------------------------------------------------
+2.1 Root directory itself is not a pack
+----------------------------------------------------------------------
+
+A manifest located directly in a root directory is ignored.
+
+Examples:
+- first-party/manifest.json5      → ignored
+- saves/manifest.json5            → ignored
+- custom/manifest.json5           → ignored
+
+Reason:
+- roots define namespaces, not packs
+- avoids ambiguity and accidental global packs
+
+This is NOT an error.
+
+
+----------------------------------------------------------------------
+2.2 Trace reasons for ignored manifests
+----------------------------------------------------------------------
+
+Ignored manifests MUST produce trace records (not user-facing errors).
+
+Locked trace reason names (PascalCase):
+
+- ManifestInRootLayerDir
+- SymlinkForbidden
+- ScanDepthLimitReached
+- FileAccessDenied
+- ManifestParsingError
+- ManifestInvalidField
+- ManifestRequiredFieldMissing
+- SemVerParseError   (with documented exception, see below)
+
+These are *reasons*, not fatal errors.
+
+
+----------------------------------------------------------------------
+3. DIRECTORY SCANNING RULES
+----------------------------------------------------------------------
+
+----------------------------------------------------------------------
+3.1 Manifest-based depth, not directory depth
+----------------------------------------------------------------------
+
+Depth is defined in terms of *manifest nesting*, not filesystem nesting.
+
+Example:
+    first-party/a/manifest.json5        → depth 0
+    first-party/a/b/c/d/manifest.json5  → still depth 0
+
+Depth increases only when scanning *below a discovered manifest*.
+
+This is LOCKED.
+
+
+----------------------------------------------------------------------
+3.2 Maximum scan depth
+----------------------------------------------------------------------
+
+Config:
+    packs.discovery.totalDepth
+
+Rules (LOCKED):
+- totalDepth <= 0   → infinite
+- totalDepth == 1   → scan only first subdirectory level
+- totalDepth >= 2   → exact limit
+
+Default:
+    totalDepth = 60
+
+Behavior:
+- exceeding depth stops recursion
+- produces ScanDepthLimitReached trace
+- does NOT error
+
+Rationale:
+- protects against runaway trees
+- allows user override for exotic layouts
+
+
+----------------------------------------------------------------------
+3.3 Symlink handling
+----------------------------------------------------------------------
+
+LOCKED:
+- Symlinks are forbidden by default
+- Both directory and file symlinks are disallowed
+
+Violation produces:
+- SymlinkForbidden trace
+
+Rationale:
+- determinism
+- security
+- avoidance of implicit graph expansion
+
+Policy-based relaxation MAY exist later.
+
+
+----------------------------------------------------------------------
+4. DISCOVERY OUTPUT (LOCKED)
+----------------------------------------------------------------------
+
+Discovery produces PackDescriptor objects in **Discovered** state.
+
+At discovery time:
+- manifest is read
+- declared* fields are parsed and type-checked
+- parent relationship is established
+- packTreeId is computed
+- manifestRaw is stored
+
+Discovery MUST NOT:
+- resolve visibility
+- apply user enable/disable config
+- parse selectors
+- activate packs
+- load runtimes
+- require compilers or providers
+
+If a pack cannot be discovered correctly:
+- it is rejected
+- reason is recorded
+- system continues
+
+
+----------------------------------------------------------------------
+5. SAVE DISCOVERY POLICY
+----------------------------------------------------------------------
+
+----------------------------------------------------------------------
+5.1 Default save scanning (LOCKED)
+----------------------------------------------------------------------
+
+Default behavior:
+- scan saves/*/*/manifest.json5 only
+- do NOT recurse into save pack directories
+- do NOT index copied packs
+
+Rationale:
+- typical saves do not copy packs
+- exported saves might copy many packs
+- scanning them eagerly would be expensive and unnecessary
+
+
+----------------------------------------------------------------------
+5.2 When deep save scanning occurs
+----------------------------------------------------------------------
+
+Deep scanning of save contents occurs ONLY when:
+- a save is explicitly loaded
+- PackManager inspects a save
+- config explicitly enables deep save scan
+
+At that point:
+- copied packs are discovered
+- visibility is limited to save context
+- copied-pack rules apply
+
+This separation is LOCKED.
+
+
+----------------------------------------------------------------------
+6. AGREED (BUT ADJUSTABLE)
+----------------------------------------------------------------------
+
+- Discovery should be fast and side-effect free
+- All heavy logic belongs to indexing or activation
+- Discovery errors are classified, not fatal (unless config/core missing)
+
+
+----------------------------------------------------------------------
+7. OPEN QUESTIONS
+----------------------------------------------------------------------
+
+- Should different root types have different default depth limits?
+- Should symlink allowance be per-root configurable?
+- Should discovery be incremental or always full-scan?
+- Should discovery cache results between runs?
+
+
+----------------------------------------------------------------------
+8. WHY THIS AREA EXISTS
+----------------------------------------------------------------------
+
+Without strict discovery boundaries:
+- visibility rules become impossible to reason about
+- performance degrades unpredictably
+- user trust erodes due to “ghost packs”
+- save isolation breaks
+
+Discovery must be boring, strict, and predictable.
+
+
+----------------------------------------------------------------------
+END OF DESIGN AREA 2
+----------------------------------------------------------------------
+

@@ -1,0 +1,244 @@
+======================================================================
+DESIGN AREA 11 — CONFIGURATION, SCHEMAS & MIGRATION
+======================================================================
+
+Status:
+-------
+CORE — this area defines *how configuration exists*, *how it is validated*,
+*how it evolves over time*, and *how user state is protected*.
+
+Configuration is data with identity.
+Breaking it silently is forbidden.
+
+
+----------------------------------------------------------------------
+1. CORE CONCEPT
+----------------------------------------------------------------------
+
+Configuration answers:
+
+    “What parameters influence Turnix and packs at runtime,
+     and how are they made safe, stable, and evolvable?”
+
+Configuration is NOT:
+- arbitrary JSON blobs
+- free-form user data
+- implicit defaults hidden in code
+
+
+----------------------------------------------------------------------
+2. CONFIGURATION TYPES (LOCKED)
+----------------------------------------------------------------------
+
+Turnix distinguishes:
+
+A) Global engine config
+B) Pack config
+C) Save-bound config
+
+Each has:
+- schema
+- defaults
+- user overrides
+- migration path
+
+
+----------------------------------------------------------------------
+3. CONFIG SCHEMAS (LOCKED)
+----------------------------------------------------------------------
+
+Schemas define:
+- structure
+- types
+- constraints
+- defaults (logical, not materialized)
+
+Format:
+- JSON Schema–like (exact dialect already implemented)
+
+Location:
+- config/**/*.schema.json (inside pack)
+
+Rules:
+- schemas are immutable once released
+- new versions extend, not rewrite
+- breaking change requires new major semver
+
+
+----------------------------------------------------------------------
+4. DEFAULT CONFIGS (LOCKED)
+----------------------------------------------------------------------
+
+Defaults:
+- provided by pack
+- versioned alongside schema
+- applied only if user value missing
+
+Formats:
+- *.defaults.json
+- *.defaults.json5
+
+Defaults are NOT user config.
+They are inputs to materialization.
+
+
+----------------------------------------------------------------------
+5. USERDATA CONFIG (LOCKED)
+----------------------------------------------------------------------
+
+User overrides live in:
+    userdata/config/<canonicalPackId>.json
+
+CanonicalPackId:
+- derived during indexing
+- uses resolved author + packTreeId
+- semver NOT included
+
+Rules:
+- loaded after defaults
+- overrides defaults only
+- never modified silently
+
+
+----------------------------------------------------------------------
+6. CONFIG MATERIALIZATION (LOCKED)
+----------------------------------------------------------------------
+
+Effective config is built by:
+
+1) load schema
+2) load defaults
+3) load userdata override
+4) validate
+5) produce effective config object
+
+If validation fails:
+- user-decidable error
+- UI must offer repair/reset options
+
+
+----------------------------------------------------------------------
+7. CONFIG ACCESS (LOCKED)
+----------------------------------------------------------------------
+
+Packs access config via:
+    ctx.config.get(...)
+    ctx.config.watch(...)
+
+Direct file access is forbidden.
+
+Config is read-only unless explicitly updated via IoManager.
+
+
+----------------------------------------------------------------------
+8. CONFIG MIGRATION (LOCKED)
+----------------------------------------------------------------------
+
+Migrators:
+- ConfigMigrator
+- versioned
+- ordered
+
+Rules:
+- migration runs BEFORE validation
+- migrators are pure functions
+- multiple migrators may run sequentially
+- old configs are never discarded without consent
+
+
+----------------------------------------------------------------------
+9. MANIFEST VS CONFIG MIGRATION (LOCKED DISTINCTION)
+----------------------------------------------------------------------
+
+ManifestMigrator:
+- evolves pack metadata
+
+ConfigMigrator:
+- evolves user state
+
+They are separate and must remain so.
+
+
+----------------------------------------------------------------------
+10. SAVE-BOUND CONFIG (LOCKED)
+----------------------------------------------------------------------
+
+Save-specific config:
+- stored under saves/<appPackId>/<appInstanceId>/
+- overrides global config
+- migrates independently
+
+Deletion or corruption of save config:
+- does not affect global config
+
+
+----------------------------------------------------------------------
+11. ERROR HANDLING (LOCKED)
+----------------------------------------------------------------------
+
+Config errors are classified as:
+
+Fatal:
+- schema missing
+- defaults missing
+
+Recoverable:
+- invalid user value
+- outdated version
+
+Recovery must be UI-driven.
+
+
+----------------------------------------------------------------------
+12. DEV-MODE DIAGNOSTICS (LOCKED)
+----------------------------------------------------------------------
+
+In development:
+- report unused config keys
+- report deprecated keys
+- report schema drift
+
+Non-fatal, informational only.
+
+
+----------------------------------------------------------------------
+13. NO IMPLICIT FALLBACKS (LOCKED)
+----------------------------------------------------------------------
+
+Turnix MUST NOT:
+- invent defaults silently
+- ignore invalid config
+- auto-reset without user consent
+
+Explicitness over convenience.
+
+
+----------------------------------------------------------------------
+14. OPEN QUESTIONS
+----------------------------------------------------------------------
+
+OPEN:
+- config hot-reload semantics
+- config diff UI
+- partial save-bound inheritance
+
+
+----------------------------------------------------------------------
+15. LOCKED SUMMARY
+----------------------------------------------------------------------
+
+LOCKED:
+- schema-driven config
+- defaults + overrides
+- canonical config identity
+- explicit migration
+- UI-mediated recovery
+
+OPEN:
+- tooling & UX enhancements only
+
+
+----------------------------------------------------------------------
+END OF DESIGN AREA 11
+----------------------------------------------------------------------
+

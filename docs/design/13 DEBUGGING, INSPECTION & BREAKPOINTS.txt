@@ -1,0 +1,259 @@
+======================================================================
+DESIGN AREA 13 — DEBUGGING, INSPECTION & BREAKPOINTS
+======================================================================
+
+Status:
+-------
+CORE (developer-facing) — this area defines *how Turnix can be inspected
+while running*, *where execution can be paused*, and *how state can be
+safely observed and modified* without breaking determinism.
+
+
+----------------------------------------------------------------------
+1. CORE INTENT
+----------------------------------------------------------------------
+
+Debugging in Turnix is not:
+- print statements
+- ad-hoc logging
+- attaching debuggers to random threads
+
+Debugging in Turnix is:
+- intentional
+- observable
+- reversible
+- scoped
+
+
+----------------------------------------------------------------------
+2. DEBUGGING PHILOSOPHY (LOCKED)
+----------------------------------------------------------------------
+
+Turnix debugging must:
+- not change semantic behavior by default
+- be opt-in
+- preserve causality
+- operate on *Turnix concepts*, not language internals
+
+You debug:
+- packs
+- activation
+- pipelines
+- memory layers
+- capabilities
+NOT:
+- Python frames
+- JavaScript call stacks (except as context)
+
+
+----------------------------------------------------------------------
+3. BREAKPOINT TYPES (LOCKED)
+----------------------------------------------------------------------
+
+Turnix supports *semantic breakpoints*, not code-line breakpoints.
+
+3.1 Pipeline Stage Breakpoints
+------------------------------
+Pause execution when a pipeline reaches a specific stage.
+
+Use cases:
+- inspect prompt before sending to LLM
+- verify memory composition
+- observe transformations
+
+Breakpoint triggers:
+- stage id
+- pipeline id
+- optional condition
+
+
+3.2 Memory Breakpoints
+----------------------
+Pause execution when memory changes.
+
+Triggers:
+- memory key
+- memory layer
+- change type (set, delete, overwrite)
+- optional value predicate
+
+
+3.3 Capability Breakpoints
+--------------------------
+Pause before or after a capability call.
+
+Triggers:
+- capability name
+- caller pack
+- permission decision point
+
+
+----------------------------------------------------------------------
+4. BREAKPOINT BEHAVIOR (LOCKED)
+----------------------------------------------------------------------
+
+When breakpoint triggers:
+- execution of the triggering unit pauses
+- the rest of Turnix continues (unless configured otherwise)
+- debugger UI is notified
+- state becomes inspectable
+
+Breakpoints NEVER:
+- auto-resume silently
+- alter execution order
+- mutate state by default
+
+
+----------------------------------------------------------------------
+5. INSPECTION SURFACES (LOCKED)
+----------------------------------------------------------------------
+
+Inspectable objects include:
+- PackDescriptors
+- Activation state
+- Memory layers
+- Pipeline objects
+- Capability registry
+- Services registry
+
+Inspection is read-only by default.
+
+
+----------------------------------------------------------------------
+6. CONTROLLED MUTATION (LOCKED)
+----------------------------------------------------------------------
+
+Explicit mutation is allowed ONLY via:
+- debugger actions
+- user confirmation
+- trace logging
+
+Examples:
+- editing memory value
+- disabling a breakpoint
+- forcing resume
+
+Every mutation emits a trace event.
+
+
+----------------------------------------------------------------------
+7. DEBUGGER UI INTEGRATION (LOCKED)
+----------------------------------------------------------------------
+
+Debugger UI:
+- subscribes via RPC
+- receives breakpoint hit events
+- shows causal context
+- allows resume / step / abort
+
+Debugger UI is optional but supported.
+
+
+----------------------------------------------------------------------
+8. STEP MODES (LOCKED)
+----------------------------------------------------------------------
+
+Supported:
+- Resume
+- Step over (next stage / memory change)
+- Abort (fail current execution unit)
+
+Unsupported:
+- instruction-level stepping
+- time travel (future area)
+
+
+----------------------------------------------------------------------
+9. SCOPING RULES (LOCKED)
+----------------------------------------------------------------------
+
+Breakpoints can be scoped to:
+- global
+- appInstance
+- view
+- pack
+- pipeline
+
+Unscoped breakpoints are discouraged.
+
+
+----------------------------------------------------------------------
+10. DEV VS PROD (LOCKED)
+----------------------------------------------------------------------
+
+In production:
+- breakpoints disabled by default
+- inspection limited
+- mutation disallowed unless explicitly enabled
+
+In development:
+- all features available
+
+
+----------------------------------------------------------------------
+11. FAILURE MODES (LOCKED)
+----------------------------------------------------------------------
+
+If debugger disconnects:
+- execution resumes or aborts based on policy
+- no deadlock allowed
+
+If breakpoint logic errors:
+- breakpoint disabled
+- error traced
+
+
+----------------------------------------------------------------------
+12. RELATION TO TRACING (LOCKED)
+----------------------------------------------------------------------
+
+Every breakpoint hit:
+- emits trace event
+- links to causal chain
+- records inspection actions
+
+Tracing and debugging are complementary.
+
+
+----------------------------------------------------------------------
+13. WHAT IS EXPLICITLY NOT SUPPORTED
+----------------------------------------------------------------------
+
+NOT SUPPORTED:
+- arbitrary Python debugger injection
+- JavaScript eval debugging
+- modifying pack code at runtime
+- hot-patching logic without reload
+
+
+----------------------------------------------------------------------
+14. OPEN QUESTIONS
+----------------------------------------------------------------------
+
+OPEN:
+- conditional breakpoint language
+- snapshot / restore state
+- time-travel debugging
+- replay-from-trace tooling
+
+
+----------------------------------------------------------------------
+15. LOCKED SUMMARY
+----------------------------------------------------------------------
+
+LOCKED:
+- semantic breakpoints
+- pipeline, memory, capability breakpoints
+- read-only inspection by default
+- controlled mutation with tracing
+- non-blocking debugger behavior
+
+OPEN:
+- advanced conditional logic
+- replay & time travel
+
+
+----------------------------------------------------------------------
+END OF DESIGN AREA 13
+----------------------------------------------------------------------
+

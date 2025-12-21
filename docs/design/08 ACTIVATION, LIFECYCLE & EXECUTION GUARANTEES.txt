@@ -1,0 +1,277 @@
+======================================================================
+DESIGN AREA 8 — ACTIVATION, LIFECYCLE & EXECUTION GUARANTEES
+======================================================================
+
+Status:
+-------
+CORE — this area defines *when code is allowed to run*, *in what order*,
+and *what Turnix guarantees (and does not)* about execution.
+
+This area is deliberately strict.
+Activation is the only moment code becomes “alive”.
+
+
+----------------------------------------------------------------------
+1. CORE CONCEPT
+----------------------------------------------------------------------
+
+Activation answers:
+
+    “Is this pack now allowed to execute code and provide runtime behavior?”
+
+Activation is NOT:
+- discovery
+- dependency resolution
+- importing
+- visibility granting
+
+Activation is a controlled, explicit transition.
+
+
+----------------------------------------------------------------------
+2. LIFECYCLE PHASES (LOCKED OVERVIEW)
+----------------------------------------------------------------------
+
+Turnix operates in ordered phases:
+
+1) Discovery
+2) Indexing
+3) Resolution
+4) Activation
+5) Finalized / Running
+
+Only during **Activation** may pack code execute.
+
+
+----------------------------------------------------------------------
+3. WHAT “ACTIVATED” MEANS (LOCKED)
+----------------------------------------------------------------------
+
+When a pack is activated:
+
+- its runtime entries may be loaded
+- its canonical entrypoints are invoked
+- it may register:
+    - services
+    - capabilities
+    - subscriptions
+    - hooks
+- it may begin participating in Turnix orchestration
+
+Before activation:
+- pack metadata exists
+- pack may be resolved
+- pack code must NOT execute
+
+
+----------------------------------------------------------------------
+4. ACTIVATION IS PACK-LEVEL (LOCKED)
+----------------------------------------------------------------------
+
+Activation applies to:
+- the pack as a unit
+
+Not to:
+- individual files
+- individual imports
+- individual capabilities
+
+Files may be imported only after activation guarantees
+are satisfied by PackManager.
+
+
+----------------------------------------------------------------------
+5. ACTIVATION ENTRYPOINTS (LOCKED)
+----------------------------------------------------------------------
+
+Canonical entrypoints (current):
+
+    onLoad(ctx)
+
+Rules:
+- called exactly once per pack instance
+- ctx is always provided
+- execution order is managed by PackManager
+- failure aborts activation of that pack
+
+Future entrypoints may be added, but:
+- all must be Turnix-invoked
+- none may be implicit
+
+
+----------------------------------------------------------------------
+6. RUNTIME ENTRIES SEMANTICS (LOCKED)
+----------------------------------------------------------------------
+
+Manifest:
+    runtimes.<language>.entry
+    runtimes.<language>.entries
+
+Behavior:
+- entry:
+    - treated as primary activation unit
+    - loaded and onLoad(ctx) invoked
+- entries:
+    - loadable modules
+    - NOT auto-executed
+    - author-controlled usage only
+
+Turnix never calls onLoad(ctx) on entries.
+
+
+----------------------------------------------------------------------
+7. ACTIVATION ORDER (LOCKED RESPONSIBILITY)
+----------------------------------------------------------------------
+
+Activation order is determined by:
+- PackManager
+- dependency constraints
+- visibility constraints
+- user policy
+- category ordering (future)
+
+Mods MUST NOT assume:
+- another pack is activated unless required
+- a service exists unless requested
+- a capability exists unless granted
+
+
+----------------------------------------------------------------------
+8. ensureActivated vs resolvePack (LOCKED DISTINCTION)
+----------------------------------------------------------------------
+
+resolvePack(selector):
+- resolves metadata
+- performs visibility checks
+- returns PackDescriptor / ResolvedPack
+- does NOT activate
+
+ensureActivated(selector):
+- ensures pack is activated
+- returns activation result metadata (optional)
+- does NOT return code or symbols
+- may throw NotActivatedError
+
+
+----------------------------------------------------------------------
+9. NOT ACTIVATED ERROR (LOCKED BEHAVIOR)
+----------------------------------------------------------------------
+
+NotActivatedError indicates:
+- activation ordering failure
+- missing or delayed dependency
+- policy block
+
+Guidance (LOCKED):
+- mods SHOULD NOT catch this error
+- swallowing it hides system-level failure
+- user should be notified via UI
+
+Handling is allowed only with explicit intent.
+
+
+----------------------------------------------------------------------
+10. BACKGROUND EXECUTION GUARANTEE (LOCKED)
+----------------------------------------------------------------------
+
+Turnix guarantees behavior ONLY for work that is:
+
+- triggered via:
+    - activation entrypoints
+    - capability calls
+    - Turnix-managed schedulers (future)
+
+Work started outside Turnix orchestration:
+- timers
+- threads
+- raw async loops
+
+is UNSUPPORTED and UNSAFE.
+
+
+----------------------------------------------------------------------
+11. JAVASCRIPT EXECUTION MODEL (LOCKED)
+----------------------------------------------------------------------
+
+JavaScript specifics:
+
+- ESM evaluation occurs on import
+- side effects are allowed but discouraged
+- all Turnix interaction must happen in onLoad(ctx)
+- premature imports are author responsibility
+
+Turnix does not sandbox JS execution.
+
+
+----------------------------------------------------------------------
+12. PYTHON EXECUTION MODEL (LOCKED)
+----------------------------------------------------------------------
+
+Python specifics:
+
+- module top-level executes on importlib load
+- only local imports allowed
+- cross-pack behavior must go through ctx
+
+onLoad(ctx) is the sole supported lifecycle hook.
+
+
+----------------------------------------------------------------------
+13. ACTIVATION FAILURE HANDLING (LOCKED)
+----------------------------------------------------------------------
+
+If activation fails:
+
+- pack is marked failed
+- dependent activations must not proceed
+- UI must surface failure
+- failure context must be preserved
+
+Silent fallback is forbidden.
+
+
+----------------------------------------------------------------------
+14. ACTIVATION RESULT (LOCKED)
+----------------------------------------------------------------------
+
+ensureActivated may return:
+- activation status
+- warnings
+- diagnostics
+
+It must NOT return:
+- code objects
+- namespaces
+- runtime symbols
+
+
+----------------------------------------------------------------------
+15. OPEN QUESTIONS
+----------------------------------------------------------------------
+
+OPEN:
+- category-based activation ordering (ioProviders, compilers, etc.)
+- partial activation / staged activation
+- activation retry semantics
+
+
+----------------------------------------------------------------------
+16. LOCKED SUMMARY
+----------------------------------------------------------------------
+
+LOCKED:
+- activation is explicit
+- code runs only after activation
+- entry vs entries semantics
+- ensureActivated ≠ import
+- background work unsupported
+- failures are visible and fatal to pack
+
+OPEN:
+- ordering refinements only
+
+
+----------------------------------------------------------------------
+END OF DESIGN AREA 8
+----------------------------------------------------------------------
+

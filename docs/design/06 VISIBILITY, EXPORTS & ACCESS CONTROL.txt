@@ -1,0 +1,295 @@
+======================================================================
+DESIGN AREA 6 — VISIBILITY, EXPORTS & ACCESS CONTROL
+======================================================================
+
+Status:
+-------
+CORE — this area defines *who can see what*, *who may reference what*,
+and *what is considered reachable* across the pack graph.
+
+This area is intentionally conservative.
+Visibility is resolved by Turnix, not by authors at runtime.
+
+
+----------------------------------------------------------------------
+1. CORE CONCEPT
+----------------------------------------------------------------------
+
+Visibility answers a single question:
+
+    “Is pack A allowed to reference pack B?”
+
+This is NOT about:
+- activation
+- loading order
+- dependency preference
+- version matching
+
+It is purely about *reachability*.
+
+
+----------------------------------------------------------------------
+2. VISIBILITY VS DEPENDENCY (LOCKED DISTINCTION)
+----------------------------------------------------------------------
+
+- Dependency declaration ("packs") expresses *need*
+- Visibility expresses *permission*
+
+A pack may depend on another pack and still not be allowed
+to see it if visibility rules block it.
+
+Visibility is evaluated:
+- during resolution
+- at runtime resolve attempts
+- never lazily bypassed
+
+
+----------------------------------------------------------------------
+3. PACK VISIBILITY TYPES
+----------------------------------------------------------------------
+
+Each pack has two visibility notions:
+
+A) Local visibility
+B) Global visibility
+
+Local visibility:
+- scope-limited
+- applies inside a parent pack tree
+
+Global visibility:
+- whether the pack is reachable from outside its parent chain
+
+
+----------------------------------------------------------------------
+4. DECLARED VISIBILITY (MANIFEST-LEVEL)
+----------------------------------------------------------------------
+
+Manifest field:
+    visibility: "public" | "private"
+
+Rules:
+- If declared:
+    - use as-is
+- If omitted:
+    default depends on pack kind:
+        contentPack → public
+        appPack, viewPack, mod, savePack → private
+
+This value is *local visibility intent* only.
+
+
+----------------------------------------------------------------------
+5. exportNestedPacks (LOCKED SEMANTICS)
+----------------------------------------------------------------------
+
+Manifest field:
+    exportNestedPacks:
+        - true
+        - false
+        - [<localId>, <localId>, ...]
+
+Purpose:
+- controls which child packs become globally visible
+
+Rules:
+- true:
+    all direct children may be exported
+- false:
+    no children are exported
+- list:
+    only listed direct children are exported
+
+Constraints (LOCKED):
+- Only direct children allowed
+- "parent.child" is INVALID
+- Non-existent localId → error
+
+
+----------------------------------------------------------------------
+6. GLOBAL VISIBILITY DERIVATION (LOCKED)
+----------------------------------------------------------------------
+
+Computed field:
+    globalVisibility: "public" | "private"
+
+Rules:
+
+If pack has no parent:
+    globalVisibility = declared visibility
+
+If pack has parent:
+    if declared visibility == private:
+        globalVisibility = private
+    else if parent.exportNestedPacks == false:
+        globalVisibility = private
+    else if parent.exportNestedPacks == true:
+        globalVisibility = public
+    else if parent.exportNestedPacks is list:
+        globalVisibility = public only if localId in list
+        otherwise private
+
+
+----------------------------------------------------------------------
+7. importFromParent (LOCKED, RENAMED)
+----------------------------------------------------------------------
+
+Final name (LOCKED):
+    importFromParent
+
+Purpose:
+- controls which parent-side packs are visible to this pack
+
+Allowed values:
+- false
+- true
+- [<selector>, <selector>, ...]
+
+Semantics:
+- false:
+    sees nothing from parent automatically
+- true:
+    sees all parent-visible children
+- list:
+    sees only explicitly listed selectors
+
+
+----------------------------------------------------------------------
+8. importFromParent LIST SEMANTICS (LOCKED)
+----------------------------------------------------------------------
+
+Selectors in list:
+- relative to parent
+- resolved as:
+    parent.packTreeId + "." + selector
+
+Example:
+    parent = main-menu
+    selector = ui.Button
+    resolves to:
+        main-menu.ui.Button
+
+Constraints:
+- selectors must refer to descendants of parent
+- cannot escape parent tree
+- invalid selector → error
+
+
+----------------------------------------------------------------------
+9. VIEWPACK DEFAULTS (LOCKED)
+----------------------------------------------------------------------
+
+Default importFromParent:
+- viewPack → false
+- all other kinds → true
+
+Rationale:
+- views must not accidentally inherit UI-affecting mods
+- app-level mods should not leak into independent views
+
+
+----------------------------------------------------------------------
+10. CAPABILITIES & VISIBILITY (LOCKED SEPARATION)
+----------------------------------------------------------------------
+
+Capabilities:
+- are NOT inherited
+- are NOT exported via pack visibility
+- must be explicitly requested and granted
+
+Even if pack is visible:
+- its capabilities are NOT implicitly usable
+
+
+----------------------------------------------------------------------
+11. SERVICES & VISIBILITY (LOCKED SEPARATION)
+----------------------------------------------------------------------
+
+Services:
+- are runtime objects
+- registered during activation
+- accessed via ctx.services
+
+Visibility rules DO NOT grant access to services.
+Only service registration + request does.
+
+
+----------------------------------------------------------------------
+12. SAVE PACK VISIBILITY (LOCKED BASE RULE)
+----------------------------------------------------------------------
+
+savePack:
+- never globally visible
+- visible only within its AppInstance
+- copied packs inside save:
+    - visible only within that save context
+
+Exact rules deferred to savePack activation spec.
+
+
+----------------------------------------------------------------------
+13. VISIBILITY EVALUATION TIME
+----------------------------------------------------------------------
+
+Visibility is checked:
+- during resolvePack
+- during runtime resolve attempts
+- during turnixImport resolution
+
+Visibility is NOT pre-expanded into full adjacency matrix.
+It is evaluated dynamically between requester and target.
+
+
+----------------------------------------------------------------------
+14. FAILURE MODE (LOCKED)
+----------------------------------------------------------------------
+
+If visibility check fails:
+- raise PermissionDeniedError
+- include:
+    - requester pack
+    - target pack
+    - rule violated
+
+No silent fallback.
+No probing allowed.
+
+
+----------------------------------------------------------------------
+15. CASE SENSITIVITY (LOCKED)
+----------------------------------------------------------------------
+
+All pack ids, selectors, and visibility checks are:
+- case-sensitive
+- byte-exact
+
+
+----------------------------------------------------------------------
+16. OPEN QUESTIONS
+----------------------------------------------------------------------
+
+OPEN:
+- visualization tooling for visibility graphs
+- UI explanation phrasing for visibility denial
+- future “friend packs” concept (explicit bilateral visibility)
+
+
+----------------------------------------------------------------------
+17. LOCKED SUMMARY
+----------------------------------------------------------------------
+
+LOCKED:
+- declared visibility + exportNestedPacks define global visibility
+- importFromParent controls downward visibility
+- no implicit capability/service inheritance
+- dynamic evaluation, not precomputed
+- strict failure on violation
+
+OPEN:
+- UX tooling only, not semantics
+
+
+----------------------------------------------------------------------
+END OF DESIGN AREA 6
+----------------------------------------------------------------------
+

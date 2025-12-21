@@ -1,0 +1,314 @@
+======================================================================
+DESIGN AREA 3 — PACK IDENTITY, HIERARCHY & VISIBILITY
+======================================================================
+
+Status:
+-------
+FOUNDATIONAL — directly affects resolution, imports, activation order,
+security boundaries, and mental model for creators.
+
+This area answers:
+- What *is* a pack?
+- How packs relate to each other
+- Who can see whom, and why
+
+
+----------------------------------------------------------------------
+1. PACK IDENTITY MODEL (LOCKED)
+----------------------------------------------------------------------
+
+There are three distinct identity layers. They must never be conflated.
+
+----------------------------------------------------------------------
+1.1 declaredId (manifest-level)
+----------------------------------------------------------------------
+
+Source:
+- manifest.json5 → "id"
+
+Rules (LOCKED):
+- string
+- no dots (.)
+- no "@"
+- no version
+- local to its parent
+
+This is a *local identifier*, not globally unique.
+
+Example:
+    id: "ui"
+    id: "button"
+    id: "llamacpp"
+
+
+----------------------------------------------------------------------
+1.2 packTreeId (computed)
+----------------------------------------------------------------------
+
+Computed during discovery.
+
+Rule:
+    packTreeId =
+        declaredId                         (if root pack)
+        parent.packTreeId + "." + declaredId
+
+Examples:
+    ui
+    ui.controls
+    ui.controls.button
+    main-menu.ui
+    main-menu.ui.button
+
+Properties (LOCKED):
+- case-sensitive
+- globally unique *within author scope*
+- hierarchical, but not filesystem-based
+
+
+----------------------------------------------------------------------
+1.3 author (effective identity)
+----------------------------------------------------------------------
+
+Terminology (LOCKED):
+
+- declaredAuthor
+    → value from manifest ("author"), str or None
+
+- author
+    → effective author identity:
+        declaredAuthor
+        OR inherited from parent
+        OR "unknown" (engine default)
+
+Notes:
+- author is computed during indexing, not discovery
+- author is part of identity, not decoration
+
+
+----------------------------------------------------------------------
+2. VERSION IDENTITY (LOCKED)
+----------------------------------------------------------------------
+
+- declaredVersion
+    → raw string or None from manifest
+
+- version
+    → parsed SemVerPackVersion
+
+Rules:
+- parsing happens after discovery
+- invalid semver → pack rejected
+- no “effectiveVersion” prefix used
+
+Version inheritance:
+- if version missing, inherit from parent
+- root without version uses engine default
+
+Rationale:
+- version is identity-affecting
+- inheritance keeps trees coherent
+
+
+----------------------------------------------------------------------
+3. VISIBILITY MODEL
+----------------------------------------------------------------------
+
+Visibility answers: *Can pack A see pack B?*
+
+This is NOT the same as:
+- dependency declaration
+- import usage
+- activation order
+
+----------------------------------------------------------------------
+3.1 Local visibility
+----------------------------------------------------------------------
+
+Each pack has:
+
+- visibility:
+    "public" | "private"
+
+Declared or defaulted based on pack kind.
+
+Defaults (LOCKED):
+- contentPack → public
+- appPack / viewPack / mod / savePack → private
+
+
+----------------------------------------------------------------------
+3.2 exportNestedPacks (LOCKED)
+----------------------------------------------------------------------
+
+Controls whether a pack’s *children* are visible externally.
+
+Type:
+- false
+- true
+- list[PackLocalId]
+
+Semantics:
+- false → no children exported
+- true  → all children exported
+- list  → only listed children exported
+
+Rules:
+- list entries are localIds ONLY
+- specifying dotted ids is an error
+- applies only to direct children
+
+
+----------------------------------------------------------------------
+3.3 globalVisibility (computed)
+----------------------------------------------------------------------
+
+Computed during indexing.
+
+Rules (LOCKED):
+
+If pack has no parent:
+    globalVisibility = visibility
+
+Else:
+    if visibility == private:
+        globalVisibility = private
+    else if parent.exportNestedPacks == false:
+        globalVisibility = private
+    else if parent.exportNestedPacks == true:
+        globalVisibility = public
+    else if parent.exportNestedPacks is list:
+        globalVisibility = public if localId in list
+                           else private
+
+
+----------------------------------------------------------------------
+4. importFromParent / importPacksFromParent
+----------------------------------------------------------------------
+
+Purpose:
+- controls which parent packs are *import-visible*
+- does NOT imply export
+- does NOT imply capability inheritance
+
+Recommended final name:
+    importPacksFromParent
+
+----------------------------------------------------------------------
+4.1 Allowed forms
+----------------------------------------------------------------------
+
+Type:
+- false
+- true
+- list[PackLocalId or relative packTreeId]
+
+Semantics:
+- false → no parent packs visible
+- true  → all visible parent packs imported
+- list  → explicit whitelist
+
+Example:
+    importPacksFromParent = ["ui.Button", "service"]
+
+Resolution:
+- relative to immediate parent
+- resolved at runtime with visibility checks
+
+
+----------------------------------------------------------------------
+4.2 Default behavior (LOCKED)
+----------------------------------------------------------------------
+
+Defaults:
+- viewPack → false
+- all other kinds → true
+
+Rationale:
+- views must not inherit parent UI mods
+- prevents UI contamination
+- keeps views isolated
+
+
+----------------------------------------------------------------------
+5. VISIBILITY VS RESOLUTION (IMPORTANT DISTINCTION)
+----------------------------------------------------------------------
+
+Facts (LOCKED):
+
+- Visibility is static (computed)
+- Resolution is contextual (runtime)
+- A pack can exist but be invisible
+- A visible pack may still fail resolution
+- Visibility ≠ dependency
+
+
+----------------------------------------------------------------------
+6. CAPABILITIES ARE NOT VISIBILITY
+----------------------------------------------------------------------
+
+LOCKED:
+- capability exports are NOT inherited
+- capability imports must be explicit
+- parent visibility does NOT grant capabilities
+
+Rationale:
+- capabilities are behavioral power
+- must be explicitly acknowledged
+- prevents accidental privilege escalation
+
+
+----------------------------------------------------------------------
+7. SAVE PACK VISIBILITY (OPEN)
+----------------------------------------------------------------------
+
+Known constraints:
+- savePack copied packs are visible only to that save
+- they must override external versions
+- they must not leak globally
+
+Open:
+- exact rules for visibility graph inside save
+- interaction with exportNestedPacks
+- PackManager UI representation
+
+
+----------------------------------------------------------------------
+8. WHY THIS AREA IS HARD
+----------------------------------------------------------------------
+
+This area balances:
+- expressiveness
+- safety
+- predictability
+- creator intuition
+
+Too permissive → chaos  
+Too strict → unusable ecosystem  
+
+Current design intentionally:
+- favors explicitness
+- defers runtime checks
+- avoids static “can-see” matrices
+
+
+----------------------------------------------------------------------
+9. LOCKED SUMMARY
+----------------------------------------------------------------------
+
+LOCKED:
+- declaredId vs packTreeId vs author separation
+- case-sensitive identifiers
+- no effective* naming
+- visibility + exportNestedPacks model
+- importPacksFromParent semantics
+- no capability inheritance
+
+OPEN:
+- savePack visibility internals
+- tooling/UI exposure of visibility graph
+
+
+----------------------------------------------------------------------
+END OF DESIGN AREA 3
+----------------------------------------------------------------------
+
