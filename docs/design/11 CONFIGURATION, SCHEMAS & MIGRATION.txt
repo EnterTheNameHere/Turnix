@@ -109,12 +109,13 @@ Effective config is built by:
 1) load schema
 2) load defaults
 3) load userdata override
-4) validate
-5) produce effective config object
+4) migrate (if needed)
+5) validate
+6) produce effective config object
 
-If validation fails:
+If migration or validation fails:
 - user-decidable error
-- UI must offer repair/reset options
+- UI must offer repair/reset/restore options
 
 
 ----------------------------------------------------------------------
@@ -131,7 +132,21 @@ Config is read-only unless explicitly updated via IoManager.
 
 
 ----------------------------------------------------------------------
-8. CONFIG MIGRATION (LOCKED)
+8. I/O AUTHORITY BRIDGE (LOCKED)
+----------------------------------------------------------------------
+
+ConfigService and all config providers are NOT allowed to do filesystem I/O.
+
+They MUST request reads/writes from IoManager, which enforces:
+- permissions and root boundaries
+- atomic write behavior
+- backup/snapshot policy
+- error classification
+- UI-mediated recovery flows
+
+
+----------------------------------------------------------------------
+9. CONFIG MIGRATION (LOCKED)
 ----------------------------------------------------------------------
 
 Migrators:
@@ -141,13 +156,30 @@ Migrators:
 
 Rules:
 - migration runs BEFORE validation
-- migrators are pure functions
+- migrators are pure functions (input document -> output document)
 - multiple migrators may run sequentially
 - old configs are never discarded without consent
 
 
 ----------------------------------------------------------------------
-9. MANIFEST VS CONFIG MIGRATION (LOCKED DISTINCTION)
+10. MIGRATION + BACKUP SAFETY (LOCKED POLICY)
+----------------------------------------------------------------------
+
+Before writing a migrated config, IoManager SHOULD:
+- create a backup of the last known good file (policy-driven)
+- write the migrated file atomically
+- preserve the previous file for restore if the user chooses
+
+No silent fallback is allowed.
+If the config is corrupt or incompatible, the user must be offered:
+- restore last known good
+- reset to defaults
+- quarantine/rename broken config
+- abort startup of the affected pack/appInstance (where appropriate)
+
+
+----------------------------------------------------------------------
+11. MANIFEST VS CONFIG MIGRATION (LOCKED DISTINCTION)
 ----------------------------------------------------------------------
 
 ManifestMigrator:
@@ -160,7 +192,7 @@ They are separate and must remain so.
 
 
 ----------------------------------------------------------------------
-10. SAVE-BOUND CONFIG (LOCKED)
+12. SAVE-BOUND CONFIG (LOCKED)
 ----------------------------------------------------------------------
 
 Save-specific config:
@@ -173,7 +205,7 @@ Deletion or corruption of save config:
 
 
 ----------------------------------------------------------------------
-11. ERROR HANDLING (LOCKED)
+13. ERROR HANDLING (LOCKED)
 ----------------------------------------------------------------------
 
 Config errors are classified as:
@@ -181,16 +213,19 @@ Config errors are classified as:
 Fatal:
 - schema missing
 - defaults missing
+- failures before minimal UI is ready
 
-Recoverable:
+Recoverable (user-decidable):
 - invalid user value
-- outdated version
+- parse errors in userdata config
+- outdated version requiring migration
+- restore-from-backup decisions
 
 Recovery must be UI-driven.
 
 
 ----------------------------------------------------------------------
-12. DEV-MODE DIAGNOSTICS (LOCKED)
+14. DEV-MODE DIAGNOSTICS (LOCKED)
 ----------------------------------------------------------------------
 
 In development:
@@ -202,19 +237,20 @@ Non-fatal, informational only.
 
 
 ----------------------------------------------------------------------
-13. NO IMPLICIT FALLBACKS (LOCKED)
+15. NO IMPLICIT FALLBACKS (LOCKED)
 ----------------------------------------------------------------------
 
 Turnix MUST NOT:
 - invent defaults silently
 - ignore invalid config
 - auto-reset without user consent
+- silently treat parse errors as "empty config"
 
 Explicitness over convenience.
 
 
 ----------------------------------------------------------------------
-14. OPEN QUESTIONS
+16. OPEN QUESTIONS
 ----------------------------------------------------------------------
 
 OPEN:
@@ -224,15 +260,17 @@ OPEN:
 
 
 ----------------------------------------------------------------------
-15. LOCKED SUMMARY
+17. LOCKED SUMMARY
 ----------------------------------------------------------------------
 
 LOCKED:
 - schema-driven config
 - defaults + overrides
-- canonical config identity
-- explicit migration
+- canonical config identity (author + packTreeId; no semver)
+- explicit migration (pure functions)
+- IoManager-mediated I/O only (no filesystem I/O in ConfigService/providers)
 - UI-mediated recovery
+- backup/restore options for user-decidable config failures
 
 OPEN:
 - tooling & UX enhancements only

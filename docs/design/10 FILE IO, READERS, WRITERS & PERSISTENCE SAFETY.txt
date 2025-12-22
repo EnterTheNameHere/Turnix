@@ -46,6 +46,8 @@ Responsibilities:
 - classify errors
 - produce standard error envelopes
 - emit trace reasons
+- provide atomic write guarantees
+- manage backups/snapshots per policy
 
 
 ----------------------------------------------------------------------
@@ -135,14 +137,14 @@ I/O errors are classified as:
 A) Unrecoverable (fatal)
     - cannot load config schema
     - cannot load default config
-    - corrupted required state
+    - corrupted required state before minimal UI is ready
 
 → ReactorScramError
 
 B) User-decidable
     - corrupted userdata config
-    - missing optional file
-    - version mismatch
+    - missing optional file that the user may choose to recreate
+    - version mismatch requiring migration/reset/choice
 
 → Pausable error with UI decision
 
@@ -244,7 +246,50 @@ Rules:
 
 
 ----------------------------------------------------------------------
-15. NO BACKDOORS (LOCKED)
+15. BACKUPS & SNAPSHOTS (LOCKED CONCEPT)
+----------------------------------------------------------------------
+
+Turnix supports generic backup/snapshot creation via IoManager.
+
+Purpose:
+- provide a "last known good" rollback point when corruption is detected
+- support multi-file consistency (savePack style backups)
+- support safe upgrades and migrations
+
+Definitions:
+
+A) File backup (single-file)
+    - IoManager may keep a previous version of a file (or multiple versions)
+    - used for configs, manifests, small critical documents
+
+B) Snapshot (multi-file / atomic unit)
+    - a snapshot groups multiple files that belong together logically
+      (example: savePack state, memory layers, save-bound config, indices)
+    - snapshot creation is an explicit IoManager operation
+
+Policy-driven behavior:
+- whether backups are kept, how many, and where they live is configurable
+- rollback is never automatic without a clear policy or user decision
+- restoring from backup/snapshot is a user-visible action when it changes state
+
+
+----------------------------------------------------------------------
+16. RECOVERY USING BACKUPS (LOCKED POLICY)
+----------------------------------------------------------------------
+
+If reading/parsing fails for user-decidable data, IoManager may:
+- detect the presence of a backup/snapshot
+- offer UI options, e.g.:
+    - restore last known good
+    - reset to defaults
+    - open/quarantine the broken file
+    - proceed without (only if explicitly allowed by policy)
+
+No silent fallback is allowed for configuration or other identity-bearing state.
+
+
+----------------------------------------------------------------------
+17. NO BACKDOORS (LOCKED)
 ----------------------------------------------------------------------
 
 Packs:
@@ -256,18 +301,18 @@ All persistence is centralized.
 
 
 ----------------------------------------------------------------------
-16. OPEN QUESTIONS
+18. OPEN QUESTIONS
 ----------------------------------------------------------------------
 
 OPEN:
 - streaming readers
-- transactional multi-file writes
+- transactional multi-file writes (implementation details)
 - snapshot vs incremental save strategy
 - encrypted stores
 
 
 ----------------------------------------------------------------------
-17. LOCKED SUMMARY
+19. LOCKED SUMMARY
 ----------------------------------------------------------------------
 
 LOCKED:
@@ -277,6 +322,8 @@ LOCKED:
 - fatal vs recoverable error split
 - UI-mediated recovery
 - no discovery-time extensions
+- generic backups and multi-file snapshots via IoManager
+- no silent fallback for identity-bearing data
 
 OPEN:
 - performance optimizations
