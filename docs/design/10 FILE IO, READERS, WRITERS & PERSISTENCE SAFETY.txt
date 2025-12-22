@@ -274,7 +274,165 @@ Policy-driven behavior:
 
 
 ----------------------------------------------------------------------
-16. RECOVERY USING BACKUPS (LOCKED POLICY)
+16. STREAMING READERS / WRITERS (PLANNED SUPPORT)
+----------------------------------------------------------------------
+
+Status:
+    PLANNED — supported when Turnix needs it for large data and long-lived
+    I/O (traces, large assets, save snapshots, bulk exports).
+    This is NOT required for initial Turnix functionality.
+
+Rationale:
+    Streaming reduces memory pressure and latency for large payloads, and it
+    enables "progressive" production/consumption without forcing a full
+    materialization of data in memory.
+
+Core rule:
+    Streaming is an explicit I/O mode.
+    It is NEVER implicit.
+
+    A caller MUST request streaming explicitly (by kind / API),
+    and IoManager MUST enforce streaming-specific guarantees.
+
+----------------------------------------------------------------------
+16.1 WHAT "STREAMING" MEANS IN TURNIX (LOCKED)
+----------------------------------------------------------------------
+
+Streaming read:
+    IoManager returns an async iterator / stream of chunks or records.
+
+Streaming write:
+    IoManager accepts an async iterator / stream of chunks or records,
+    and persists them incrementally into a staged destination.
+
+Important:
+    Streaming changes *how* data is transferred, not *what* data means.
+    A streamed file still has a final logical representation.
+
+----------------------------------------------------------------------
+16.2 STREAMING KINDS (LOCKED)
+----------------------------------------------------------------------
+
+Streaming is only allowed for dedicated streaming kinds, e.g.:
+
+    - utf8TextStream     (chunked text)
+    - binaryStream       (chunked bytes)
+    - jsonlStream        (record stream)
+    - tarStream          (archived file stream)          [future]
+    - saveSnapshotStream (multi-file streamed commit)    [future]
+
+Non-streaming kinds remain non-streaming, e.g.:
+    - json
+    - json5
+    - manifest.json5
+    - config.json5
+
+No implicit streaming fallback is allowed.
+
+----------------------------------------------------------------------
+16.3 CANCELLATION & CLEANUP GUARANTEES (LOCKED)
+----------------------------------------------------------------------
+
+Streaming read cancellation:
+    - Cancellation MUST be safe.
+    - IoManager MUST close underlying handles promptly.
+    - No partial state is committed to persistence by reads.
+
+Streaming write cancellation:
+    - Cancellation MUST NOT produce a partially "valid" final file.
+    - IoManager MUST ensure one of:
+        A) no final destination exists (staging only), OR
+        B) destination remains at last known good version (transactional).
+
+Cleanup rules:
+    - All streaming writes are staged into temp locations.
+    - Staging artifacts MUST be garbage-collectable by IoManager.
+    - IoManager SHOULD track staged artifacts for cleanup on restart.
+
+----------------------------------------------------------------------
+16.4 WHERE STREAMING IS FORBIDDEN (LOCKED)
+----------------------------------------------------------------------
+
+Streaming MUST NOT be used for:
+
+    - discovery-time reading
+    - indexing-time canonicalization and identity-critical parsing
+    - activation-critical reads required to build a deterministic pack graph
+    - configuration schema loading
+    - default configuration loading
+    - manifest loading used for pack identity or dependency resolution
+
+Rationale:
+    These phases must be deterministic, fully validated, and must not
+    introduce partial/interleaved states or time-dependent outcomes.
+
+----------------------------------------------------------------------
+16.5 WHERE STREAMING IS EXPECTED TO BE USED (PLANNED)
+----------------------------------------------------------------------
+
+Streaming is intended for post-indexing runtime workflows, such as:
+
+    - trace/log streaming to UI
+    - large asset delivery to browser
+    - bulk export/import (packs, saves, caches)
+    - save snapshot creation (multi-file streamed commit)
+    - large dataset reads for tooling (e.g., embeddings, indexes)
+
+Rule of thumb:
+    Streaming is appropriate when the caller naturally awaits data and no
+    other part of the system is blocked waiting for this read/write to
+    complete in order to preserve identity or determinism.
+
+----------------------------------------------------------------------
+16.6 SAVE SNAPSHOT AS A MULTI-FILE "STREAMED COMMIT" (PLANNED)
+----------------------------------------------------------------------
+
+Goal:
+    Provide an optional durability mechanism for SavePack snapshots where
+    multiple files must be updated together as one logical transaction.
+
+High-level contract:
+    - A snapshot write is staged into a new snapshot directory (or archive).
+    - The snapshot is considered valid only once a commit marker exists.
+    - Activation/restore uses only committed snapshots.
+    - If staging fails or is cancelled:
+        - the previous committed snapshot remains valid
+        - staged artifacts are cleaned up (immediately or on restart)
+
+Commit semantics:
+    - IoManager defines a "commit point" as an atomic rename / replace of the
+      snapshot root, OR a commit marker file written last after all parts are
+      flushed and verified.
+
+Backup integration:
+    - IoManager MAY keep a bounded number of previous committed snapshots
+      (or move the old snapshot into a backup namespace) based on policy.
+
+----------------------------------------------------------------------
+16.7 ERROR CLASSIFICATION FOR STREAMING (LOCKED)
+----------------------------------------------------------------------
+
+Streaming errors MUST be classified using the same rules as all I/O:
+
+    - Unrecoverable (fatal) for identity-bearing streaming commits
+    - User-decidable for optional repairs (e.g., discard staged snapshot)
+    - Optional/best-effort for traces/logs/caches
+
+User decisions (if required) remain UI-mediated.
+
+----------------------------------------------------------------------
+END 16. STREAMING READERS / WRITERS
+----------------------------------------------------------------------
+
+OPEN QUESTIONS (kept open, but streaming itself is planned):
+    - streaming backpressure API shape (chunk size, pacing)
+    - resumable streaming (continuation tokens)
+    - verification hooks (hashing, size limits)
+    - policy for staged artifact cleanup on crash
+
+
+----------------------------------------------------------------------
+17. RECOVERY USING BACKUPS (LOCKED POLICY)
 ----------------------------------------------------------------------
 
 If reading/parsing fails for user-decidable data, IoManager may:
@@ -289,7 +447,7 @@ No silent fallback is allowed for configuration or other identity-bearing state.
 
 
 ----------------------------------------------------------------------
-17. NO BACKDOORS (LOCKED)
+18. NO BACKDOORS (LOCKED)
 ----------------------------------------------------------------------
 
 Packs:
@@ -301,18 +459,17 @@ All persistence is centralized.
 
 
 ----------------------------------------------------------------------
-18. OPEN QUESTIONS
+19. OPEN QUESTIONS
 ----------------------------------------------------------------------
 
 OPEN:
-- streaming readers
 - transactional multi-file writes (implementation details)
 - snapshot vs incremental save strategy
 - encrypted stores
 
 
 ----------------------------------------------------------------------
-19. LOCKED SUMMARY
+20. LOCKED SUMMARY
 ----------------------------------------------------------------------
 
 LOCKED:
