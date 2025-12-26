@@ -1,0 +1,207 @@
+=====================================================================
+MINIMAL PACK / MOD CONTRACT
+Pragmatic, Reproducible, Low Author Burden
+=====================================================================
+
+Core assumption:
+----------------
+You cannot guarantee correctness.
+You can only guarantee:
+- reproducibility
+- reversibility
+- explicit uncertainty
+
+Anything else is illusion.
+
+---------------------------------------------------------------------
+1. OWNERSHIP MODEL
+---------------------------------------------------------------------
+
+System:
+- owns stability
+- owns versioning
+- owns rollback
+- owns enforcement of hard rules
+
+Author:
+- owns intent
+- declares minimum requirements
+- does NOT guarantee compatibility
+
+User:
+- owns decisions
+- but only after consequences are made explicit
+
+No party is asked to do what it cannot realistically do.
+
+---------------------------------------------------------------------
+2. THREE KINDS OF COMPATIBILITY (STRICTLY SEPARATED)
+---------------------------------------------------------------------
+
+2.1 HARD COMPATIBILITY (NON-NEGOTIABLE)
+--------------------------------------
+
+If this fails, the pack MUST NOT load.
+No overrides.
+No "try anyway".
+
+Declared by author, enforced by engine.
+
+Example:
+
+engineApi: ">=1.6 <2.0"
+
+Typical contents:
+- required engine API range
+- required runtime (JS, Python, VM)
+- required execution model (ESM vs CJS, sync vs async)
+
+If mismatched:
+- loading is blocked
+- error is explicit and final
+
+Purpose:
+- protect the engine
+- prevent undefined behavior
+
+---------------------------------------------------------------------
+
+2.2 SOFT COMPATIBILITY (INFORMATIONAL)
+-------------------------------------
+
+This may work, but is not guaranteed.
+
+Optional declaration by author.
+
+Example:
+
+testedWith:
+- engine@1.6.0
+- engine@1.6.1
+
+If current engine is outside testedWith:
+- pack MAY load
+- pack is marked as UNVERIFIED
+- system emits an informational warning
+
+The warning MUST be consequence-based, not moral.
+
+Good warning:
+"This pack has never been tested with engine 1.6.2.
+Last known working version: 1.6.0."
+
+Bad warning:
+"This pack may break. Continue?"
+
+No yes/no question.
+Only facts.
+
+---------------------------------------------------------------------
+
+2.3 CAPABILITY COMPATIBILITY (FINE-GRAINED)
+-------------------------------------------
+
+Packs declare what engine capabilities they rely on.
+
+Example:
+
+capabilities:
+- worldState.write
+- ui.inject
+- asset.pipeline.v1
+
+Engine tracks capability changes between versions.
+
+If a capability changes:
+- pack is flagged as "potentially affected"
+- warning references the specific capability
+
+Example:
+"Capability 'ui.inject' changed behavior in engine 1.6.2."
+
+Purpose:
+- better diagnostics
+- no requirement for authors to re-release just to tag versions
+
+---------------------------------------------------------------------
+3. SAVE PACK AS THE SOURCE OF TRUTH
+---------------------------------------------------------------------
+
+A SavePack MUST pin exact pack versions.
+
+Example:
+
+savePack:
+  packId: example.mod
+  version: 2.3.1
+  hash: abcdef123456
+
+Rules:
+- updates NEVER overwrite a SavePack
+- SavePack always loads with pinned versions
+- updates create new versions side-by-side
+
+Result:
+- deterministic saves
+- no silent breakage
+- rollback is trivial
+
+---------------------------------------------------------------------
+4. UPDATE POLICY (DEFAULT SAFE)
+---------------------------------------------------------------------
+
+Default behavior:
+- SavePacks do NOT auto-update packs
+
+Optional per-save setting:
+- followUpdates = false (default)
+- followUpdates = true (explicit opt-in)
+
+Global rolling profiles are allowed,
+but SavePacks remain deterministic.
+
+---------------------------------------------------------------------
+5. STORAGE AND GARBAGE COLLECTION
+---------------------------------------------------------------------
+
+The system may keep multiple versions of the same pack.
+
+Deletion rules:
+- versions referenced by any SavePack are NEVER deleted
+- unreferenced versions may be deleted by policy
+
+Example policies:
+- older than 30 days
+- disk quota exceeded
+- explicit user cleanup
+
+User may pin versions manually to prevent deletion.
+
+---------------------------------------------------------------------
+6. WHAT THIS CONTRACT DOES NOT REQUIRE
+---------------------------------------------------------------------
+
+It does NOT require authors to:
+- maintain parallel branches
+- publish "works with X.Y.Z"
+- update just to silence warnings
+
+It does NOT require users to:
+- understand dependency graphs
+- manage version pinning manually
+
+It does NOT pretend compatibility can be guaranteed.
+
+---------------------------------------------------------------------
+7. WHAT THIS CONTRACT GUARANTEES
+---------------------------------------------------------------------
+
+- Builds that worked once can work again
+- Updates are reversible
+- Responsibility is explicit
+- Uncertainty is visible, not hidden
+- Stability is owned by the system, not outsourced
+
+---------------------------------------------------------------------
+END OF CONTRACT
+=====================================================================
