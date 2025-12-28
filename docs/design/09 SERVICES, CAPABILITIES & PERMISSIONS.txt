@@ -16,10 +16,13 @@ This is the primary cross-pack interaction mechanism.
 
 Turnix distinguishes between:
 
-- Services  → concrete runtime objects / instances
+- Services     → concrete runtime objects / instances
 - Capabilities → named, permissioned actions
 
 They are related but NOT the same.
+
+Neither Services nor Capabilities imply persistence.
+Persistence is governed exclusively by IoManager and Config (DA-10, DA-11).
 
 
 ----------------------------------------------------------------------
@@ -41,6 +44,7 @@ Properties:
 - lifetime = activation scope
 - no automatic permission checks
 - name collisions are forbidden
+- services MUST NOT perform filesystem I/O directly
 
 
 ----------------------------------------------------------------------
@@ -55,7 +59,8 @@ Properties:
 If service does not exist:
 - ctx.services.get(name) → error (or None if explicitly allowed)
 
-Services are for trusted runtime wiring.
+Services are for trusted runtime wiring only.
+They MUST NOT be used as a substitute for configuration or persistence.
 
 
 ----------------------------------------------------------------------
@@ -74,6 +79,8 @@ Example:
 
 Call site:
     ctx.callCapability("llm.pipeline@1", args)
+
+Capabilities are the ONLY allowed cross-pack execution boundary.
 
 
 ----------------------------------------------------------------------
@@ -100,7 +107,7 @@ Rules:
 
 Export:
 - happens in code via ctx.registerCapability
-- manifest declaration is OPTIONAL (bookkeeping only)
+- manifest declaration OPTIONAL (bookkeeping only)
 
 Import / usage:
 - happens in code via ctx.callCapability
@@ -116,11 +123,11 @@ Manifest data is advisory, not authoritative.
 Capabilities may require permission.
 
 Permission classes:
-- none        → always allowed
-- soft        → user may be asked, allow/deny/always
-- hard        → user MUST explicitly allow
+- none  → always allowed
+- soft  → user may be asked, allow/deny/always
+- hard  → user MUST explicitly allow
 
-Exact classification is capability-defined.
+Classification is capability-defined and immutable per major version.
 
 
 ----------------------------------------------------------------------
@@ -131,26 +138,30 @@ When a capability is invoked:
 
 1) Permission is checked
 2) If allowed → handler executes
-3) If not decided:
+3) If undecided:
     - execution PAUSES
     - UI prompt is shown
     - user decision resumes execution
 
-Turnix must remain responsive while waiting.
+Turnix MUST remain responsive while waiting.
+No background mutation may occur during pause.
 
 
 ----------------------------------------------------------------------
 9. USER DECISIONS & POLICY (LOCKED)
 ----------------------------------------------------------------------
 
-User choices:
+User decisions:
 - may be persisted
-- may be scoped (session/app/global)
+- may be scoped (session / app / global)
 - must be explainable
+- must be reversible
 
 Policies may allow:
 - auto-allow soft permissions
 - never auto-allow hard permissions
+
+Decisions MUST be traceable.
 
 
 ----------------------------------------------------------------------
@@ -160,30 +171,59 @@ Policies may allow:
 Services:
 - direct object access
 - no permission layer
-- internal wiring
+- internal wiring only
 
 Capabilities:
 - controlled boundary
 - user-facing power
 - audited, traced, permissioned
 
-Both may coexist in same pack.
+Both may coexist in the same pack.
+Capabilities MUST NOT expose service internals directly.
 
 
 ----------------------------------------------------------------------
-11. OVERRIDING & CONFLICTS (LOCKED PRINCIPLE)
+11. COMPUTED TRANSFORMS & REACTIVE BEHAVIOR (LOCKED CLARIFICATION)
 ----------------------------------------------------------------------
 
-Multiple packs exporting same capability:
-- not allowed unless explicitly designed
-- conflict must be detected
-- user must choose or error raised
+Some packs may react to changes in configuration or state by:
+
+- observing values
+- computing derived behavior
+- adjusting runtime output
+
+Rules:
+- such behavior MUST be runtime-only
+- MUST NOT mutate stored config or memory
+- MUST NOT intercept persistence
+- MUST NOT replace the config source of truth
+
+Reactive behavior may be implemented via:
+- capability invocation
+- service cooperation
+- config.watch-style notifications (defined in DA-11), without 
+  acquiring mutation authority
+
+This preserves:
+- determinism
+- reversibility
+- non-invasive overrides (e.g. accessibility scaling)
+
+
+----------------------------------------------------------------------
+12. OVERRIDING & CONFLICTS (LOCKED PRINCIPLE)
+----------------------------------------------------------------------
+
+Multiple packs exporting the same capability:
+- NOT allowed by default
+- conflict MUST be detected
+- user choice or hard error required
 
 Silent override is forbidden.
 
 
 ----------------------------------------------------------------------
-12. TRACE & AUDIT (LOCKED)
+13. TRACE & AUDIT (LOCKED)
 ----------------------------------------------------------------------
 
 All capability calls:
@@ -192,11 +232,16 @@ All capability calls:
 - include permission context
 - may be logged
 
+Trace MUST distinguish:
+- stored mutation
+- computed effect
+- denied access
+
 This is critical for debugging and trust.
 
 
 ----------------------------------------------------------------------
-13. DEVELOPMENT-TIME REPORTING (LOCKED)
+14. DEVELOPMENT-TIME REPORTING (LOCKED)
 ----------------------------------------------------------------------
 
 At end of run (dev mode):
@@ -209,7 +254,7 @@ Informational only, non-fatal.
 
 
 ----------------------------------------------------------------------
-14. JAVASCRIPT & PYTHON SYMMETRY
+15. JAVASCRIPT & PYTHON SYMMETRY (LOCKED)
 ----------------------------------------------------------------------
 
 Same concepts apply to both runtimes:
@@ -219,7 +264,7 @@ Same concepts apply to both runtimes:
 
 
 ----------------------------------------------------------------------
-15. OPEN QUESTIONS
+16. OPEN QUESTIONS
 ----------------------------------------------------------------------
 
 OPEN:
@@ -230,23 +275,22 @@ OPEN:
 
 
 ----------------------------------------------------------------------
-16. LOCKED SUMMARY
+17. LOCKED SUMMARY
 ----------------------------------------------------------------------
 
 LOCKED:
-- services = runtime objects
-- capabilities = permissioned actions
-- explicit registration
-- user-mediated permissions
+- services = runtime wiring only
+- capabilities = permissioned execution boundary
+- no implicit persistence
 - no silent overrides
-- dev-mode reporting
+- computed behavior is non-mutating
+- full tracing & audit
 
 OPEN:
-- UX polish
-- advanced permission models
+- UX extensions
+- advanced permission policies
 
 
 ----------------------------------------------------------------------
 END OF DESIGN AREA 9
 ----------------------------------------------------------------------
-

@@ -27,20 +27,31 @@ Configuration is NOT:
 
 
 ----------------------------------------------------------------------
-2. CONFIGURATION TYPES (LOCKED)
+2. CONFIGURATION TYPES & SCOPES (LOCKED)
 ----------------------------------------------------------------------
 
-Turnix distinguishes:
+Turnix distinguishes configuration by SCOPE:
 
-A) Global engine config
-B) Pack config
-C) Save-bound config
+A) Engine (kernel-global)
+B) Pack-global
+C) Save-bound (pack-local)
 
-Each has:
+Each scope has:
 - schema
 - defaults
 - user overrides
 - migration path
+
+Scopes are strictly ordered by precedence:
+Save-bound > Pack-global > Engine > Defaults
+
+Ownership:
+- Engine scope is owned by the kernel
+- Pack-global and Save-bound scopes are owned by a specific canonicalPackId
+- Ownership is immutable without migration
+
+This ownership model is normative and constrained further by:
+- OE — CROSS-PACK PERMISSIONS — STATE ACCESS, MUTATION & AUTHORITY
 
 
 ----------------------------------------------------------------------
@@ -51,102 +62,191 @@ Schemas define:
 - structure
 - types
 - constraints
-- defaults (logical, not materialized)
+- allowed value shapes
+- access-level metadata (see OE)
+
+Schemas MUST NOT be relied upon as a source of defaults.
 
 Format:
 - JSON Schema–like (exact dialect already implemented)
 
-Location:
-- config/**/*.schema.json (inside pack)
+Locations (first-found-wins within root priority):
+- <root>/config/schema/**/*.schema.json
+- <root>/<pack>/config/schema/**/*.schema.json
 
 Rules:
 - schemas are immutable once released
 - new versions extend, not rewrite
 - breaking change requires new major semver
+- access level metadata is immutable without migration
 
 
 ----------------------------------------------------------------------
 4. DEFAULT CONFIGS (LOCKED)
 ----------------------------------------------------------------------
 
+Defaults define *initial values* only.
+
 Defaults:
-- provided by pack
-- versioned alongside schema
-- applied only if user value missing
+- are provided by kernel or packs
+- are versioned alongside schema
+- are applied only if user override is missing
+- MUST NEVER be overwritten
 
 Formats:
 - *.defaults.json
 - *.defaults.json5
 
+Locations:
+- <root>/config/defaults/
+- <root>/<pack>/config/defaults/
+
 Defaults are NOT user config.
-They are inputs to materialization.
+Defaults are NOT mutable state.
+Defaults may change between pack versions at author responsibility.
 
 
 ----------------------------------------------------------------------
-5. USERDATA CONFIG (LOCKED)
+5. USER OVERRIDES (LOCKED)
 ----------------------------------------------------------------------
 
-User overrides live in:
-    userdata/config/<canonicalPackId>.json
+User overrides store only deviations from defaults.
+
+Locations:
+
+Engine (kernel-global):
+    userdata/config/engine/*.json5
+
+Pack-global:
+    userdata/config/packs/<canonicalPackId>/*.json5
+
+Save-bound (pack-local):
+    saves/<appPackId>/<appInstanceId>/config/packs/<canonicalPackId>/*.json5
 
 CanonicalPackId:
-- derived during indexing
-- uses resolved author + packTreeId
+- resolved author + packTreeId
 - semver NOT included
 
 Rules:
-- loaded after defaults
-- overrides defaults only
-- never modified silently
+- overrides never modify defaults
+- overrides are loaded after defaults
+- overrides are migrated explicitly
+- overrides are never modified silently
+- overrides are the ONLY writable layer
 
 
 ----------------------------------------------------------------------
-6. CONFIG MATERIALIZATION (LOCKED)
+6. CONFIG MATERIALIZATION PIPELINE (LOCKED)
 ----------------------------------------------------------------------
 
-Effective config is built by:
+Configuration is resolved in ordered layers:
 
-1) load schema
-2) load defaults
-3) load userdata override
-4) migrate (if needed)
-5) validate
-6) produce effective config object
+1) schema
+2) defaults
+3) user overrides (engine / pack-global / save-bound)
+4) migration (if required)
+5) validation of stored values
+6) computed transforms (if any)
+7) effectiveConfig materialization
 
-If migration or validation fails:
-- user-decidable error
-- UI must offer repair/reset/restore options
+Only steps 1–5 are gating.
+Steps 6–7 MUST NOT block persistence.
 
-
-----------------------------------------------------------------------
-7. CONFIG ACCESS (LOCKED)
-----------------------------------------------------------------------
-
-Packs access config via:
-    ctx.config.get(...)
-    ctx.config.watch(...)
-
-Direct file access is forbidden.
-
-Config is read-only unless explicitly updated via IoManager.
+Computed layers are constrained by OE and MUST NOT alter stored state.
 
 
 ----------------------------------------------------------------------
-8. I/O AUTHORITY BRIDGE (LOCKED)
+7. EFFECTIVE CONFIG & COMPUTED TRANSFORMS (LOCKED)
 ----------------------------------------------------------------------
 
-ConfigService and all config providers are NOT allowed to do filesystem I/O.
+Some configuration values may be:
+- computed
+- derived
+- transformed
+- adjusted based on other values
 
-They MUST request reads/writes from IoManager, which enforces:
-- permissions and root boundaries
-- atomic write behavior
+Rules:
+- computed transforms MUST NOT mutate stored values
+- computed transforms MUST NOT write to config
+- computed transforms operate only on effectiveConfig
+- removal of a transform MUST restore prior behavior
+- computed layers must be traceable
+
+EffectiveConfig represents the final, runtime-visible values only.
+
+
+----------------------------------------------------------------------
+8. DIAGNOSTIC VALIDATION OF EFFECTIVE CONFIG (LOCKED, NON-BLOCKING)
+----------------------------------------------------------------------
+
+Turnix MAY validate effectiveConfig against schema
+for diagnostic purposes only.
+
+Diagnostic validation:
+- MUST NOT block set(), save(), or load
+- MUST NOT rewrite stored config
+- MUST emit trace reasons when violated
+- MUST be surfaced to the user as informational warnings
+
+Example trace reason:
+- EffectiveConfigValidationFailed
+
+Stored config validation remains authoritative.
+
+
+----------------------------------------------------------------------
+9. CONFIG ACCESS API (LOCKED)
+----------------------------------------------------------------------
+
+Configuration access is scope-explicit and ownership-aware.
+
+Engine scope:
+    config.engine.get(key)
+    config.engine.set(key, value)
+    config.engine.delete(key)
+
+Pack-global scope:
+    config.user.get(packSelector, key)
+    config.user.set(packSelector, key, value)
+    config.user.delete(packSelector, key)
+
+Save-bound scope:
+    config.save.get(key)
+    config.save.set(key, value)
+    config.save.delete(key)
+
+Read semantics:
+- get() returns value or raises NotFoundOrPermissionDenied
+- tryGet() MAY return None instead of throwing
+- no API distinguishes “not found” from “permission denied”
+
+Write semantics:
+- writes always target an explicit owner scope
+- writes may trigger permission decisions (see OE, DA-14)
+- delete() removes overrides only (never defaults)
+- deletion of subtrees MUST be supported
+
+
+----------------------------------------------------------------------
+10. I/O AUTHORITY BRIDGE (LOCKED)
+----------------------------------------------------------------------
+
+ConfigService and all config providers:
+
+- MUST NOT perform filesystem I/O
+- MUST route all persistence through IoManager
+
+IoManager enforces:
+- root boundaries
+- permissions
+- atomic writes
 - backup/snapshot policy
 - error classification
-- UI-mediated recovery flows
+- UI-mediated recovery
 
 
 ----------------------------------------------------------------------
-9. CONFIG MIGRATION (LOCKED)
+11. CONFIG MIGRATION (LOCKED)
 ----------------------------------------------------------------------
 
 Migrators:
@@ -156,30 +256,33 @@ Migrators:
 
 Rules:
 - migration runs BEFORE validation
-- migrators are pure functions (input document -> output document)
+- migrators are pure functions (input → output)
 - multiple migrators may run sequentially
-- old configs are never discarded without consent
+- migration may inspect previous values
+- migration MUST NOT discard user intent silently
+- migration MUST preserve ownership and access metadata
 
 
 ----------------------------------------------------------------------
-10. MIGRATION + BACKUP SAFETY (LOCKED POLICY)
+12. MIGRATION + BACKUP SAFETY (LOCKED)
 ----------------------------------------------------------------------
 
-Before writing a migrated config, IoManager SHOULD:
-- create a backup of the last known good file (policy-driven)
-- write the migrated file atomically
-- preserve the previous file for restore if the user chooses
+Before writing migrated config, IoManager SHOULD:
+- snapshot the last known good version
+- write atomically
+- retain rollback capability
 
-No silent fallback is allowed.
-If the config is corrupt or incompatible, the user must be offered:
+User MUST be offered:
 - restore last known good
 - reset to defaults
-- quarantine/rename broken config
-- abort startup of the affected pack/appInstance (where appropriate)
+- quarantine broken config
+- abort affected startup
+
+No silent fallback is allowed.
 
 
 ----------------------------------------------------------------------
-11. MANIFEST VS CONFIG MIGRATION (LOCKED DISTINCTION)
+13. MANIFEST VS CONFIG MIGRATION (LOCKED DISTINCTION)
 ----------------------------------------------------------------------
 
 ManifestMigrator:
@@ -192,91 +295,96 @@ They are separate and must remain so.
 
 
 ----------------------------------------------------------------------
-12. SAVE-BOUND CONFIG (LOCKED)
+14. SAVE-BOUND CONFIG (LOCKED)
 ----------------------------------------------------------------------
 
-Save-specific config:
-- stored under saves/<appPackId>/<appInstanceId>/
-- overrides global config
+Save-bound config:
+- is isolated per save
+- overrides pack-global and engine values
 - migrates independently
+- is included in SavePack snapshots
 
-Deletion or corruption of save config:
-- does not affect global config
+Corruption or deletion:
+- does NOT affect global config
 
 
 ----------------------------------------------------------------------
-13. ERROR HANDLING (LOCKED)
+15. ERROR HANDLING (LOCKED)
 ----------------------------------------------------------------------
 
 Config errors are classified as:
 
 Fatal:
-- schema missing
-- defaults missing
-- failures before minimal UI is ready
+- missing schema
+- missing defaults
+- failure before minimal UI is ready
 
 Recoverable (user-decidable):
 - invalid user value
-- parse errors in userdata config
-- outdated version requiring migration
+- parse errors
+- migration-required state
 - restore-from-backup decisions
 
-Recovery must be UI-driven.
+Recovery MUST be UI-driven.
 
 
 ----------------------------------------------------------------------
-14. DEV-MODE DIAGNOSTICS (LOCKED)
+16. DEV-MODE DIAGNOSTICS (LOCKED)
 ----------------------------------------------------------------------
 
 In development:
-- report unused config keys
+- report unused keys
 - report deprecated keys
 - report schema drift
+- report effective-config diagnostics
+- report access denials (informational)
 
-Non-fatal, informational only.
+All diagnostics are non-fatal.
 
 
 ----------------------------------------------------------------------
-15. NO IMPLICIT FALLBACKS (LOCKED)
+17. NO IMPLICIT FALLBACKS (LOCKED)
 ----------------------------------------------------------------------
 
 Turnix MUST NOT:
-- invent defaults silently
-- ignore invalid config
-- auto-reset without user consent
-- silently treat parse errors as "empty config"
+- invent defaults
+- ignore invalid stored values
+- auto-reset without consent
+- treat parse errors as empty config
 
 Explicitness over convenience.
 
 
 ----------------------------------------------------------------------
-16. OPEN QUESTIONS
+18. OPEN QUESTIONS
 ----------------------------------------------------------------------
 
 OPEN:
-- config hot-reload semantics
+- hot-reload semantics
 - config diff UI
-- partial save-bound inheritance
+- cross-scope promotion UX
 
 
 ----------------------------------------------------------------------
-17. LOCKED SUMMARY
+19. LOCKED SUMMARY
 ----------------------------------------------------------------------
 
 LOCKED:
-- schema-driven config
-- defaults + overrides
-- canonical config identity (author + packTreeId; no semver)
-- explicit migration (pure functions)
-- IoManager-mediated I/O only (no filesystem I/O in ConfigService/providers)
+- per-scope configuration stores
+- explicit ownership per scope
+- schema-declared access metadata
+- defaults are immutable
+- overrides only record deviations
+- explicit migration
+- diagnostic-only effective validation
+- IoManager-mediated persistence
 - UI-mediated recovery
-- backup/restore options for user-decidable config failures
+- NotFoundOrPermissionDenied read semantics
 
 OPEN:
-- tooling & UX enhancements only
+- UX and tooling only
 
 
 ----------------------------------------------------------------------
 END OF DESIGN AREA 11
 ----------------------------------------------------------------------
-

@@ -1,0 +1,379 @@
+======================================================================
+OE — CROSS-PACK PERMISSIONS — STATE ACCESS, MUTATION & AUTHORITY
+======================================================================
+
+Status:
+-------
+CORE (CROSS-CUTTING)
+
+This document defines how packs may read, modify, observe, and derive
+state owned by other packs or by the Turnix kernel.
+
+It applies uniformly to:
+- configuration
+- state-like data exposed through config APIs
+- future memory / state systems
+- inspection, tracing, and diagnostic surfaces
+
+This document does NOT define:
+- filesystem access (see Design Area 10)
+- service or capability invocation mechanics (see Design Area 9)
+- dependency resolution or visibility (see Design Areas 3 and 6)
+
+
+----------------------------------------------------------------------
+1. CORE INTENT
+----------------------------------------------------------------------
+
+Turnix must:
+- prevent accidental cross-pack corruption
+- preserve determinism and reproducibility
+- make authority explicit and traceable
+- avoid pretending that hostile behavior can be fully prevented
+
+This system exists to:
+- prevent mistakes
+- surface intent
+- make responsibility explicit
+
+It does NOT attempt:
+- sandboxing adversarial code
+- secrecy against a local user
+- moral or trust enforcement
+
+
+----------------------------------------------------------------------
+2. WHAT THIS DOCUMENT GOVERNS
+----------------------------------------------------------------------
+
+This document governs cross-pack access to:
+
+A) Kernel-owned state
+B) Pack-global state
+C) Pack-local (save-bound) state
+D) Computed / derived effective values
+
+Across operations:
+- read
+- write (mutation)
+- delete
+- observation (watching / reacting)
+
+
+----------------------------------------------------------------------
+3. STATE OWNERSHIP MODEL (LOCKED)
+----------------------------------------------------------------------
+
+Every state key has exactly ONE authority owner.
+
+Owner is either:
+- the kernel (engine domain)
+- a specific pack (canonicalPackId)
+
+Ownership is:
+- defined by domain and key path
+- never inferred dynamically
+- immutable without migration
+
+There is no shared “global bag of keys”.
+
+
+----------------------------------------------------------------------
+4. STATE SCOPES (LOCKED)
+----------------------------------------------------------------------
+
+Turnix recognizes the following scopes:
+
+4.1 Kernel Scope
+----------------
+- owned by the kernel
+- stored in userdata
+- exists independently of packs and saves
+- accessible without ctx
+
+Examples:
+- UI language
+- global UI scale
+- developer-mode toggles
+
+
+4.2 Pack-Global Scope
+---------------------
+- owned by a specific pack
+- stored in userdata
+- shared across all savePacks
+- available after pack indexing
+
+Examples:
+- UI theme defaults
+- code formatting preferences
+- accessibility base parameters
+
+
+4.3 Pack-Local (Save-Bound) Scope
+---------------------------------
+- owned by a specific pack
+- stored in savePack
+- exists only when a save is loaded
+- accessible via ctx only
+
+Examples:
+- game difficulty
+- per-save gameplay modifiers
+- save-specific UI overrides
+
+
+4.4 Computed / Effective Layer
+------------------------------
+- NOT an ownership scope
+- derived at read time
+- never persisted directly
+
+Examples:
+- accessibility scaling applied to UI font size
+- late runtime transforms
+- temporary overrides
+
+
+----------------------------------------------------------------------
+5. ACCESS LEVELS (LOCKED)
+----------------------------------------------------------------------
+
+Each state key declares an access level.
+
+Access level is metadata:
+- declared in schema
+- immutable without migration
+- enforced uniformly across all APIs
+
+Levels:
+
+PUBLIC
+- readable by any pack that can address the scope
+- writable only by owner (unless permission granted)
+
+PROTECTED
+- readable by any pack
+- writable requires explicit permission or ownership
+
+PRIVATE
+- readable and writable only by owner
+- hidden or redacted in UI and trace by default
+
+INTERNAL
+- readable and writable only by owner and kernel
+- not discoverable via enumeration
+- always redacted in exports by default
+
+Access levels prevent mistakes; they do not claim secrecy.
+
+
+----------------------------------------------------------------------
+6. READ VS WRITE AUTHORITY (LOCKED)
+----------------------------------------------------------------------
+
+6.1 Reading
+-----------
+- reading is permissive by default
+- restrictions exist only to prevent misuse or probing
+
+If access is denied for any reason:
+- API returns NotFoundOrPermissionDenied
+- no distinction is exposed programmatically
+- trace records the real reason
+
+No silent fallback is allowed.
+
+
+6.2 Writing / Deleting
+----------------------
+- all mutation requires authority
+- delete is explicit and treated as write
+- subtree deletion is supported
+
+Authority may come from:
+- ownership
+- explicit permission
+- user-mediated decision
+
+Unauthorized mutation:
+- MUST NOT occur
+- MUST emit trace event
+- MAY trigger user decision if recoverable
+
+
+----------------------------------------------------------------------
+7. MUTATION RULES (LOCKED)
+----------------------------------------------------------------------
+
+- defaults are NEVER mutated
+- schemas are NEVER mutated
+- only override layers are written
+
+All writes:
+- go through IoManager
+- are atomic
+- produce trace events
+- may produce backups
+- may trigger recovery UI
+
+
+----------------------------------------------------------------------
+8. COMPUTED / DERIVED VALUES (LOCKED)
+----------------------------------------------------------------------
+
+Computed layers:
+- react to base value changes
+- do not overwrite persisted values
+- are applied late
+- are not stored
+
+Removal of a computed layer:
+- must revert behavior automatically
+- must not require migration
+
+Computed layers must:
+- declare dependencies
+- be traceable
+- avoid cycles
+
+
+----------------------------------------------------------------------
+9. REACTION & OBSERVATION (LOCKED)
+----------------------------------------------------------------------
+
+Packs may:
+- watch values
+- react to changes
+- recompute derived values
+
+They may NOT:
+- intercept reads
+- replace owners
+- suppress other observers
+
+Observation is additive, never exclusive.
+
+
+----------------------------------------------------------------------
+10. CROSS-PACK INTENTIONAL MODIFICATION (LOCKED)
+----------------------------------------------------------------------
+
+If Pack B modifies Pack A’s state:
+
+Requirements:
+- Pack B depends on Pack A
+- target owner domain is explicit
+- permission model applies
+- trace records intent
+
+This is explicit cooperation, not an implicit override.
+
+
+----------------------------------------------------------------------
+11. ENUMERATION & DISCOVERABILITY (LOCKED)
+----------------------------------------------------------------------
+
+- enumeration of keys is explicit, never implicit
+- INTERNAL keys never appear by default
+- PRIVATE keys appear only to owner (and kernel tools in dev mode)
+
+Enumeration exists for tooling, not probing.
+
+
+----------------------------------------------------------------------
+12. USER VISIBILITY & LEAK PREVENTION (LOCKED)
+----------------------------------------------------------------------
+
+Users may inspect all state via kernel tools.
+
+However:
+- PRIVATE and INTERNAL values are redacted by default
+- traces never include raw values for PRIVATE / INTERNAL
+- exports redact sensitive values unless explicitly included
+
+No state is secret from the user, but leaks are prevented by default.
+
+
+----------------------------------------------------------------------
+13. TRACE & AUDIT REQUIREMENTS (LOCKED)
+----------------------------------------------------------------------
+
+All cross-pack access emits trace events including:
+- caller identity
+- owner domain
+- key path
+- access level
+- operation
+- outcome
+- reason
+
+Raw values are excluded based on access level.
+
+
+----------------------------------------------------------------------
+14. FAILURE SEMANTICS (LOCKED)
+----------------------------------------------------------------------
+
+Denied access results in:
+- deterministic behavior
+- no partial mutation
+- no silent override
+
+Errors are:
+- traceable
+- explainable
+- reproducible
+
+
+----------------------------------------------------------------------
+15. RELATION TO OTHER DOCUMENTS
+----------------------------------------------------------------------
+
+Constrains:
+- Design Area 9  (Services, Capabilities & Permissions)
+- Design Area 11 (Configuration, Schemas & Migration)
+- Design Area 12 (Tracing & Observability)
+- Design Area 14 (User Decisions & Policy)
+
+Must remain compatible with:
+- CT-D (Core Truth Doctrine)
+- Optional Design Area D (Minimal Pack / Mod Contract)
+
+
+----------------------------------------------------------------------
+16. OPEN QUESTIONS (REQUIRE LOCK-IN BEFORE IMPLEMENTATION)
+----------------------------------------------------------------------
+
+OPEN-1:
+How access-level metadata is represented in the schema dialect.
+
+OPEN-2:
+Policy granularity for write permissions (per key vs subtree vs capability).
+
+OPEN-3:
+Enumeration capability shape and scope.
+
+No other design questions remain open.
+
+
+----------------------------------------------------------------------
+17. LOCKED SUMMARY
+----------------------------------------------------------------------
+
+LOCKED:
+- explicit ownership
+- scoped state model
+- schema-declared access levels
+- permissive reads, guarded writes
+- non-persistent computed layers
+- IoManager-mediated mutation
+- trace-first enforcement
+- leak-safe diagnostics
+
+Implementation details are downstream only.
+
+
+----------------------------------------------------------------------
+END OF OE — CROSS-PACK PERMISSIONS
+----------------------------------------------------------------------

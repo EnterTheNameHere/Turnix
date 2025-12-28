@@ -25,6 +25,9 @@ It must support:
 - post-mortem analysis
 - reproducibility
 
+Tracing is authoritative.
+If it is not traced, it did not happen.
+
 
 ----------------------------------------------------------------------
 2. TRACE FIRST, LOG SECOND (LOCKED)
@@ -36,6 +39,7 @@ Turnix prioritizes:
 - causal relationships
 
 Plain logs are secondary and optional.
+Logs MUST NOT be relied upon for correctness or explanation.
 
 
 ----------------------------------------------------------------------
@@ -47,13 +51,15 @@ Each trace event has:
 - eventId
 - timestamp
 - level (info | warn | error | fatal)
-- domain (discovery, resolution, activation, io, capability, etc.)
+- domain (discovery, resolution, activation, io, config, capability, etc.)
 - message (human-readable)
 - reason (PascalCase enum)
 - attributes (structured key-value data)
 - optional parentEventId
 
 Events form a DAG, not a flat stream.
+
+Causality MUST be preserved across subsystems.
 
 
 ----------------------------------------------------------------------
@@ -64,6 +70,7 @@ Reasons are:
 - stable identifiers
 - PascalCase
 - machine-parseable
+- semantically precise
 
 Examples:
 - ManifestInRootLayerDir
@@ -72,8 +79,16 @@ Examples:
 - PermissionDenied
 - NotActivated
 - SemVerParseError
+- ConfigValueOverridden
+- ConfigValueComputed
+- ConfigWriteBlocked
+- RestoreFromBackupChosen
 
-Reasons MUST be emitted whenever a decision is made.
+Reasons MUST be emitted whenever:
+- a decision is made
+- a value source changes
+- a write is accepted or refused
+- behavior differs from defaults
 
 
 ----------------------------------------------------------------------
@@ -88,6 +103,7 @@ Discovery emits trace events for:
 - symlink refusal
 
 No silent skipping allowed.
+Each ignored artifact MUST have a reason.
 
 
 ----------------------------------------------------------------------
@@ -102,7 +118,10 @@ Resolution emits:
 - ambiguity detection
 - user decision points
 
-Resolution traces must be sufficient to replay logic offline.
+Resolution traces must be sufficient to:
+- replay logic offline
+- explain “why this pack/version was chosen”
+- explain “why another was not”
 
 
 ----------------------------------------------------------------------
@@ -113,10 +132,11 @@ Activation emits:
 - activation start
 - dependency activation ordering
 - entrypoint invocation
-- service/capability registration
-- activation failure/success
+- service registration
+- capability registration
+- activation failure or success
 
-Activation traces define runtime causality.
+Activation traces define runtime causality and scope boundaries.
 
 
 ----------------------------------------------------------------------
@@ -124,110 +144,167 @@ Activation traces define runtime causality.
 ----------------------------------------------------------------------
 
 Every capability call emits:
-- caller pack
-- target capability
+- caller pack identity
+- target capability identifier
+- permission classification
 - permission decision
 - execution outcome
 - duration
+
+Capability traces MUST distinguish:
+- denied execution
+- deferred execution (waiting on UI)
+- successful execution
 
 This is mandatory for trust and audit.
 
 
 ----------------------------------------------------------------------
-9. TRACE STORAGE (LOCKED POLICY)
+9. CONFIG & STATE TRACE INTEGRATION (LOCKED)
 ----------------------------------------------------------------------
 
-Trace data:
+Configuration and state interactions MUST be traced distinctly.
+
+Trace MUST differentiate between:
+
+A) Stored mutation
+   - change written via IoManager
+   - persisted to userdata or savePack
+   - attributed to scope (engine / pack-global / save)
+
+B) Computed effect
+   - derived value
+   - reactive transform
+   - accessibility scaling
+   - runtime-only override
+
+C) Read resolution
+   - which layer provided the value
+   - defaults vs user override vs save override
+
+Computed effects MUST NOT appear as stored mutations.
+
+Trace attributes MUST include:
+- config key
+- scope (engine | pack-global | save)
+- source layer
+- pack identity (if applicable)
+
+
+----------------------------------------------------------------------
+10. TRACE STORAGE (LOCKED POLICY)
+----------------------------------------------------------------------
+
+Trace data is:
 - best-effort persistence
-- never blocks execution
-- rotating / bounded storage
+- non-blocking
+- bounded / rotating
 - safe to drop under pressure
 
-Failure to write traces is OPTIONAL severity.
+Failure to write traces:
+- MUST be traced
+- MUST NOT block execution
+
+Trace loss is acceptable; silent behavior is not.
 
 
 ----------------------------------------------------------------------
-10. TRACE ACCESS (LOCKED)
+11. TRACE ACCESS (LOCKED)
 ----------------------------------------------------------------------
 
 Trace access via:
 - TraceMonitor UI
 - backend APIs
-- exportable formats (future)
+- future export formats
 
 No direct file scraping.
+Trace consumers MUST rely on structured access.
 
 
 ----------------------------------------------------------------------
-11. USER-FACING DIAGNOSTICS (LOCKED)
+12. USER-FACING DIAGNOSTICS (LOCKED)
 ----------------------------------------------------------------------
 
 Trace events may be surfaced to users as:
 - warnings
 - explanations
-- prompts
+- decision prompts
 - error dialogs
 
-But raw trace data remains developer-facing.
+User-facing views MUST:
+- simplify presentation
+- preserve causality
+- never fabricate reasons
+
+Raw trace remains developer-facing.
 
 
 ----------------------------------------------------------------------
-12. ERROR ENVELOPE INTEGRATION (LOCKED)
+13. ERROR ENVELOPE INTEGRATION (LOCKED)
 ----------------------------------------------------------------------
 
 All errors include:
 - error code
-- message
+- human message
 - reason
-- trace correlation ids
+- trace correlation identifiers
 
 Errors and traces are inseparable.
+Every surfaced error MUST map to trace events.
 
 
 ----------------------------------------------------------------------
-13. DEV-MODE ENHANCEMENTS (LOCKED)
+14. DEV-MODE ENHANCEMENTS (LOCKED)
 ----------------------------------------------------------------------
 
-Development mode may add:
+Development mode MAY add:
 - verbose traces
 - speculative branches
 - “why not chosen” explanations
+- layer-resolution breakdowns
 
-Never enabled silently in production.
+Dev-mode enhancements:
+- are explicit
+- are never enabled silently
+- MUST NOT change behavior
 
 
 ----------------------------------------------------------------------
-14. NO HEURISTIC SUPPRESSION (LOCKED)
+15. NO HEURISTIC SUPPRESSION (LOCKED)
 ----------------------------------------------------------------------
 
 Turnix MUST NOT:
 - suppress “obvious” traces
 - collapse distinct decisions
 - infer reasons without recording them
+- merge computed effects with stored changes
 
 Explicit beats clever.
 
 
 ----------------------------------------------------------------------
-15. OPEN QUESTIONS
+16. OPEN QUESTIONS
 ----------------------------------------------------------------------
 
 OPEN:
 - trace visualization schemas
 - time-travel replay tooling
 - cross-session trace stitching
+- diff-oriented trace views
 
 
 ----------------------------------------------------------------------
-16. LOCKED SUMMARY
+17. LOCKED SUMMARY
 ----------------------------------------------------------------------
 
 LOCKED:
 - structured tracing everywhere
 - stable PascalCase reasons
 - causal DAG model
-- full resolution/activation coverage
+- full discovery/resolution/activation coverage
 - capability auditing
+- config vs computed distinction
+- scope-aware tracing
 
 OPEN:
 - visualization & tooling only
@@ -236,4 +313,3 @@ OPEN:
 ----------------------------------------------------------------------
 END OF DESIGN AREA 12
 ----------------------------------------------------------------------
-
