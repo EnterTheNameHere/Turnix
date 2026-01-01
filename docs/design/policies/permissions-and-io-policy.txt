@@ -1,0 +1,207 @@
+===============================================================================
+TURNIX PERMISSIONS AND I/O POLICY
+===============================================================================
+
+Status: AUTHORITATIVE
+
+Scope:
+Runtime filesystem access, local artifact I/O, permission semantics, error
+handling, and recovery behavior.
+
+This document defines the authoritative rules governing all filesystem and
+local-artifact access performed by Turnix and Turnix-managed code paths.
+
+
+===============================================================================
+1. AUTHORITY AND RESPONSIBILITY
+===============================================================================
+
+IoManager authority
+-------------------------------------------------------------------------------
+
+- IoManager is the ONLY supported interface for filesystem and local-artifact
+  access in Turnix-managed code paths.
+
+- All Turnix subsystems, packs, and mods MUST perform any such access
+  exclusively through IoManager readers and writers.
+
+- Direct access via language or library primitives (for example open(),
+  Path.open(), sqlite opening files directly, etc.) is UNSUPPORTED.
+
+
+Consequences of bypassing IoManager
+-------------------------------------------------------------------------------
+
+- Any direct I/O outside IoManager is considered an IMPLEMENTATION MISTAKE.
+
+- Turnix provides NO guarantees for such access, including:
+    - determinism
+    - rollback or recovery
+    - permission correctness
+    - diagnostics and tracing
+    - cross-platform behavior
+    - long-term compatibility
+
+- Problems arising from such access are outside the Turnix support contract.
+
+
+Detection of policy violations
+-------------------------------------------------------------------------------
+
+- Turnix MAY attempt to detect direct I/O bypassing IoManager.
+- Detection is OPTIONAL, implementation-defined, and NOT guaranteed.
+- Absence of detection does NOT legitimize direct I/O usage.
+- If detected, Turnix MAY emit diagnostics or warnings.
+- Detection itself MUST NOT cause Turnix termination.
+
+
+===============================================================================
+2. PERMITTED SCOPES AND ROOT ENFORCEMENT
+===============================================================================
+
+Root-based enforcement
+-------------------------------------------------------------------------------
+
+- All filesystem access via IoManager is restricted to the effective roots
+  defined by the root resolution system.
+
+- Operating system permission success is NECESSARY but NOT SUFFICIENT.
+
+- IoManager enforces Turnix policy independently of the operating system.
+
+
+Symlink handling
+-------------------------------------------------------------------------------
+
+- All paths are validated using canonical real paths.
+- If a resolved real path escapes the permitted scope, access is DENIED.
+- This applies EVEN IF the operating system would allow the access.
+- If Turnix configuration forbids symlinks, that decision is AUTHORITATIVE.
+
+
+===============================================================================
+3. READ, WRITE, AND PROMPTING RULES
+===============================================================================
+
+Read operations
+-------------------------------------------------------------------------------
+
+- Read operations MUST NEVER trigger user prompts.
+- If a read is not permitted by policy, it is denied deterministically.
+
+
+Write and destructive operations
+-------------------------------------------------------------------------------
+
+- Write, delete, rename, or other destructive operations MAY require
+  explicit user decision, depending on policy.
+
+- Such cases result in a HARD denial until the decision is made.
+
+
+Meaning of hard and soft denial
+-------------------------------------------------------------------------------
+
+- SOFT denial:
+    - Operation is denied.
+    - Turnix MAY apply fallback, skip, or degraded behavior automatically.
+
+- HARD denial:
+    - Operation is denied.
+    - Progress cannot continue without explicit user decision or override.
+    - This DOES NOT crash Turnix.
+
+
+===============================================================================
+4. ERROR TAXONOMY
+===============================================================================
+
+IoManager operations return or raise errors in the following categories:
+
+- PermissionDenied
+    - Denied by Turnix policy (scope, roots, rules).
+    - NO content is returned.
+
+- OsPermissionDenied
+    - Denied by the operating system.
+
+- IoError
+    - Read or write failed despite being permitted
+      (missing file, lock, transient failure, etc.).
+
+- ParseError
+    - Content was read successfully but could not be parsed or decoded.
+
+- InvariantViolation
+    - Internal Turnix contract violated; indicates a bug.
+
+
+===============================================================================
+5. RECOVERABILITY AND ReactorScramError
+===============================================================================
+
+General recoverability rule
+-------------------------------------------------------------------------------
+
+- Turnix MUST remain operational and deterministic after any error that
+  originates from packs, permissions, I/O, pipelines, or AppInstances.
+
+- Such errors are recoverable by:
+    - cancelling actions
+    - aborting pipelines
+    - reverting state
+    - closing AppInstances
+
+
+ReactorScramError
+-------------------------------------------------------------------------------
+
+- ReactorScramError represents a Turnix integrity failure.
+
+- It is raised ONLY when Turnix cannot guarantee a deterministic internal
+  state even after all recovery mechanisms.
+
+Examples MAY include:
+    - irrecoverable invariant violations
+    - corrupted global state across subsystems
+
+Examples MUST NOT include:
+    - permission denial
+    - I/O failure
+    - malformed data
+    - AppInstance-level failure
+
+
+Recovery domains
+-------------------------------------------------------------------------------
+
+- ReactorScramError MAY be caught ONLY inside explicitly defined recovery
+  domains where determinism can be fully restored.
+
+- If determinism cannot be restored, the error MUST be re-raised.
+
+
+Top-level handling
+-------------------------------------------------------------------------------
+
+- Outside recovery domains, ReactorScramError MUST propagate to the top-most
+  Turnix executor (for example launcher).
+
+- The executor MUST terminate Turnix to avoid persisting undefined state.
+
+- A diagnostic message MAY include developer-oriented or humorous text.
+
+
+===============================================================================
+6. REFERENCES
+===============================================================================
+
+- roots-and-discovery.txt
+- frontend-file-exposure-policy.txt
+- diagnostics-and-consistency.txt
+- pack-and-asset-resolution.txt
+
+
+===============================================================================
+END OF FILE
+===============================================================================
