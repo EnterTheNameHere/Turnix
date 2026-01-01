@@ -1,349 +1,408 @@
-TURNIX PACK DISCOVERY, RESOLUTION & ACTIVATION PHASES
-=====================================================
+===============================================================================
+TURNIX PACK DISCOVERY, RESOLUTION, AND ACTIVATION PHASES
+===============================================================================
+
 Version: Current (2025-12)
-Status: Drafted for internal documentation
-Authority: 
-  - pack-manifest-structure.txt
-  - pack-and-asset-resolution.txt
-  - roots-and-discovery.txt
-  - pack-uri-spec.txt
+Status: DRAFT (internal documentation, NOT AUTHORITATIVE)
 
-This document consolidates the operational phases of Turnix according to the
-latest canonical specifications. It defines the lifecycle from filesystem
-scanning to activation of appPacks, viewPacks, and mods. It is intended as a
-reference for developers and tooling.
+Authority note:
+This document is a consolidation reference only. In case of conflict, the
+following documents are authoritative:
 
+- pack-manifest-structure.txt
+- pack-and-asset-resolution.txt
+- roots-and-discovery.txt
+- pack-uri-spec.txt
 
-=====================================================
-0. OVERVIEW
-=====================================================
-
-Turnix has three major operational stages:
-
-  1. DISCOVERY — scan roots → build PackDescriptors → finalize registry
-  2. RESOLUTION — convert PackRequests into ResolvedPacks
-  3. ACTIVATION — load appPack, views, and mods; run generators; initialize runtime
-
-Discovery happens at backend startup or when rescanning.  
-Resolution and Activation occur per appInstance, per view, or per mod.
-
-Resolution MUST NOT access the filesystem.  
-Discovery MUST complete before any resolution is performed.
+This document MUST NOT override authoritative specifications.
 
 
-=====================================================
-1. DISCOVERY PHASE
-=====================================================
+===============================================================================
+1. SCOPE
+===============================================================================
 
-Discovery is responsible for building the complete PackDescriptorRegistry.  
-It consists of four sub-phases that run in strict order.
+This document defines the operational lifecycle from filesystem scanning to
+activation of appPacks, viewPacks, and mods.
 
-----------------------------
-1.1 Discovery.ScanRoots
-----------------------------
+It is intended for:
+- developers implementing Turnix subsystems
+- tooling authors (validators, inspectors, debug UIs)
+- internal consistency checks and staging boundaries
+
+
+===============================================================================
+2. OVERVIEW
+===============================================================================
+
+Turnix has three operational stages:
+
+1. DISCOVERY
+   - Scan roots
+   - Build PackDescriptors
+   - Finalize PackDescriptorRegistry snapshot
+
+2. RESOLUTION
+   - Convert PackRequests and Pack URIs into ResolvedPacks
+
+3. ACTIVATION
+   - Load and initialize appPack, viewPacks, and mods
+   - Run generators when required
+   - Initialize runtime behavior
+
+Discovery occurs at backend startup and during rescans.
+
+Resolution and Activation occur per AppInstance, per view, or per mod.
+
+Invariants:
+- Discovery MUST complete before any resolution is performed.
+- Resolution MUST NOT access the filesystem.
+
+
+===============================================================================
+3. DISCOVERY PHASE
+===============================================================================
+
+Discovery builds the complete PackDescriptorRegistry snapshot.
+
+Discovery consists of four sub-phases that execute in strict order.
+
+
+Discovery.ScanRoots
+-------------------------------------------------------------------------------
 
 - Traverse the effective set of content roots:
-      first-party/
-      third-party/
-      custom/
-      saves/
+    first-party/
+    third-party/
+    custom/
+    saves/
 
-- Follow the rules in roots-and-discovery.txt:
-    • identify directories containing manifest.json5  
-    • treat each such directory as a packRoot  
-    • recursively search inside each packRoot for nested packs  
-    • do not scan userdata/  
-    • path traversal must not escape roots  
-    • symlink rules apply if enabled  
+- Follow rules in roots-and-discovery.txt:
+    - identify directories containing manifest.json5
+    - treat each such directory as a packRoot
+    - recursively search inside each packRoot for nested packs
+    - do not scan userdata/
+    - path traversal MUST NOT escape roots
+    - symlink rules apply if enabled
 
 - For each discovered manifest, schedule descriptor construction.
 
-----------------------------
-1.2 Discovery.BuildDescriptors
-----------------------------
+
+Discovery.BuildDescriptors
+-------------------------------------------------------------------------------
 
 For each detected packRoot:
 
 - Load and parse manifest.json5.
-- Construct a PackDescriptor according to pack-and-asset-resolution.txt:
-      localId
-      packTreeId (computed hierarchy)
-      declaredAuthor, declaredVersion
-      effectiveAuthor, effectiveVersion
-      kind
-      visibility, globalVisibility
-      exportNestedPacks
-      importPacksFromParent
-      assets
-      runtimeEntries
-      recommended/supported/unsupported pack requests
+- Construct a PackDescriptor according to pack-and-asset-resolution.txt,
+  including at least:
+    - localId
+    - packTreeId (computed hierarchy)
+    - declaredAuthor, declaredVersion
+    - effectiveAuthor, effectiveVersion
+    - kind
+    - visibility, globalVisibility
+    - exportNestedPacks
+    - importPacksFromParent
+    - assets
+    - runtimeEntries
+    - recommendedPacks, supportedPacks, unsupportedPacks
 
-- Enforce manifest structure rules:
-      id constraints
-      kind validity
-      inheritance rules
-      visibility defaults
-      author/version inheritance
+- Enforce manifest structure rules from pack-manifest-structure.txt:
+    - id constraints
+    - kind validity
+    - inheritance rules
+    - visibility defaults
+    - author and version inheritance
 
-- Build parent–child relationships for nested packs.
+- Build parent-child relationships for nested packs.
 
-----------------------------
-1.3 Registry.FinalizeSnapshot
-----------------------------
+
+Registry.FinalizeSnapshot
+-------------------------------------------------------------------------------
 
 - Construct a PackDescriptorRegistry from all PackDescriptors.
-- Create indexes:
-      by packTreeId
-      by (effectiveAuthor, packTreeId)
-      by (effectiveAuthor, packTreeId, exactVersion)
-- Validate collisions and invariants.
-- Freeze registry: no further descriptors may be added until next rescan.
+- Create indexes (conceptual minimum set):
+    - by packTreeId
+    - by (effectiveAuthor, packTreeId)
+    - by (effectiveAuthor, packTreeId, kind)
+    - by (effectiveAuthor, packTreeId, kind, exactVersion)
 
-----------------------------
-1.4 Registry.Ready
-----------------------------
+- Validate collisions and invariants.
+- Freeze the registry snapshot:
+    - no further descriptors may be added until the next rescan
+
+
+Registry.Ready
+-------------------------------------------------------------------------------
 
 - The system now has a complete, immutable snapshot of all available packs.
 - Resolution may begin.
 - No filesystem scanning is permitted during resolution or activation.
 
 
-=====================================================
-2. RESOLUTION PHASE
-=====================================================
+===============================================================================
+4. RESOLUTION PHASE
+===============================================================================
 
-Resolution interprets PackRequests and Pack URIs.  
-It cannot touch the filesystem and must use only the PackDescriptorRegistry.
+Resolution interprets PackRequests and Pack URIs.
 
-Resolution involves three conceptual components:
+Constraints:
+- Resolution MUST NOT access the filesystem.
+- Resolution MUST use only the PackDescriptorRegistry snapshot.
 
-- ScopeResolver (local-before-global lookup)
-- VersionChooser (semver matching)
-- PackResolver (full selection and ResolvedPack construction)
+Resolution is composed of three conceptual components:
 
-This phase is implicitly triggered by ACTIVATE operations.
+- ScopeResolver
+  - performs local-before-global lookup rules
+  - enforces SavePack override behavior for an AppInstance
 
-No explicit lifecycle stages exist here; resolution is on-demand.
+- VersionChooser
+  - performs semantic version matching and tie-breaking rules
 
+- PackResolver
+  - performs full selection and constructs ResolvedPack objects
 
-=====================================================
-3. ACTIVATION PHASE
-=====================================================
-
-Activation loads and initializes runnable components: appPacks, viewPacks, mods.
-
-Activation is structured into multiple stages executed in order.
+Resolution is triggered by activation operations. Resolution is on-demand and
+does not have a standalone lifecycle beyond the constraints above.
 
 
------------------------------------------------------
-3.1 Activation.LoadAppPack
------------------------------------------------------
+===============================================================================
+5. ACTIVATION PHASE
+===============================================================================
+
+Activation loads and initializes runnable components:
+- appPacks
+- viewPacks
+- mods
+
+Activation is structured into ordered stages.
+
+
+Activation.LoadAppPack
+-------------------------------------------------------------------------------
 
 Triggered when Turnix is asked to boot into an application.
 
-- Interpret resource URI: appPack://author@packTreeId[:version]
+- Interpret resource URI:
+    appPack://author@packTreeId[:version]
+
 - Use PackResolver to select a PackDescriptor.
 - Validate kind == "appPack".
 - Load PackDescriptor.runtimeEntries for Python (backend) immediately.
-- Prepare viewPack/contentPack/mod dependencies for resolution.
+- Prepare viewPack, contentPack, and mod dependencies for resolution.
 
-This stage selects the definitive appPack for this process.
+Outcome:
+- A definitive appPack is selected for this AppInstance activation flow.
 
 
------------------------------------------------------
-3.2 Activation.BuildAppInstance
------------------------------------------------------
+Activation.BuildAppInstance
+-------------------------------------------------------------------------------
 
 Construct a new AppInstance using:
 
-- appPack metadata  
-- declared dependencies ("packs" section)
-- automatic dependency inheritance (importPacksFromParent)
-- scope rules (local embedded packs override global ones)
+- appPack metadata
+- declared dependencies ("packs" field)
+- dependency inheritance rules (importPacksFromParent)
+- scope rules (SavePack and embedded packs override external packs)
 - PackResolver over the complete dependency graph
 
-All packs required by the appPack are now mapped to exact versions and
-associated PackDescriptors.
+At completion:
+- all required packs are mapped to exact versions and selected PackDescriptors
 
 Initialize:
-
 - memory layers
 - initial configuration
 - mod loading plan
 - view definitions
 
-At the end, dependency resolution is complete.
+Invariant:
+- dependency resolution is complete at the end of this stage.
 
 
------------------------------------------------------
-3.3 Activation.RunGenerator (optional)
------------------------------------------------------
+Activation.RunGenerator (optional)
+-------------------------------------------------------------------------------
 
-Executed when:
-
-- no savePack exists for the chosen appPack, OR
-- appPack explicitly declares generator behavior.
+Executed when at least one of the following is true:
+- no SavePack exists for the chosen appPack and AppInstanceId
+- appPack declares generator behavior that requires execution
 
 Steps:
-
-1. Load appPack JS/Python generator runtime entries.
-2. Execute generator to create a savePack structure.
+1. Load appPack generator runtime entries (JavaScript and or Python).
+2. Execute generator to create SavePack structure.
 3. Save created pack under:
        saves/<appPackId>/<appInstanceId>/
-4. Record:
+4. Record at minimum:
        requestedPacks
        resolvedPacks
        modOrder
 
-SavePack participates in discovery for subsequent launches and overrides
-external packs of the same identity.
+SavePack behavior:
+- The created SavePack participates in discovery for subsequent launches.
+- The SavePack overrides external packs of the same identity for the target
+  AppInstance.
 
 
------------------------------------------------------
-3.4 Activation.AppReady
------------------------------------------------------
+Activation.AppReady
+-------------------------------------------------------------------------------
 
-Completed when:
+Completed when all of the following are true:
 
 - AppInstance exists
 - SavePack is loaded (existing or newly generated)
-- All dependencies resolved to exact versions
-- Python backend mods for the appPack are ready
-- runtime entries for appPack have been executed
+- all dependencies are resolved to exact versions
+- Python backend mods required by the AppInstance are ready
+- runtime entries for the appPack have executed as required
 
-The application is now considered "running".
+Outcome:
+- The application is considered running for this AppInstance.
 
 
-=====================================================
-4. VIEW ACTIVATION PHASE
-=====================================================
+===============================================================================
+6. VIEW ACTIVATION PHASE
+===============================================================================
 
 Each viewId triggers an isolated activation flow.
 
------------------------------------------------------
-4.1 Activation.LoadViewPack
------------------------------------------------------
 
-- Resolve the viewPack declared for a viewKind.
+Activation.LoadViewPack
+-------------------------------------------------------------------------------
+
+- Resolve the viewPack declared for the target viewKind.
 - Resolve its dependency graph (mods, contentPacks).
 - Load Python backend runtimeEntries.
 - Prepare frontend runtimeEntries (JavaScript) for delivery.
 
-Views may have nested private packs ignored by global registry.
+Visibility note:
+- Views MAY have nested private packs.
+- Global resolution MUST enforce globalVisibility rules defined by authoritative
+  specifications.
 
 
------------------------------------------------------
-4.2 Activation.ProvideViewResources
------------------------------------------------------
+Activation.ProvideViewResources
+-------------------------------------------------------------------------------
 
 Triggered when the frontend connects.
 
-- Use ResourceUriResolver to serve JS modules, assets, schemas.
-- Ensure globalVisibility rules are enforced:  
-  only exported packs may be resolved globally.
+- Use ResourceUriResolver to serve:
+    - JavaScript modules
+    - assets
+    - schemas or other frontend-needed resources
 
-When frontend receives its scripts, it can begin loading JS mods.
+- Enforce globalVisibility:
+    - only exported packs may be resolved globally
+
+Outcome:
+- The frontend receives scripts and resources and can begin loading JavaScript
+  mods for the view.
 
 
-=====================================================
-5. MOD ACTIVATION PHASE
-=====================================================
+===============================================================================
+7. MOD ACTIVATION PHASE
+===============================================================================
 
-Mods contain Python runtimeEntries and/or JavaScript runtimeEntries.
+Mods contain Python runtimeEntries and or JavaScript runtimeEntries.
 
-These are activated separately.
+Mods are activated in separate stages.
 
------------------------------------------------------
-5.1 Activation.Mod.ResolveRuntimeEntries
------------------------------------------------------
+
+Activation.Mod.ResolveRuntimeEntries
+-------------------------------------------------------------------------------
 
 Determine:
-
 - python entries
 - javascript entries
 
-Validate mod kind and metadata.
+Validate:
+- kind == "mod"
+- required metadata for declared runtimes
 
-Build ModEntry object for backend and prepare frontend manifest.
-
-
------------------------------------------------------
-5.2 Activation.Mod.LoadPython
------------------------------------------------------
-
-- Import module(s)
-- Execute mod.onLoad(context)
-- Register hooks into pipeline, AppInstance, views, etc.
-
-Python mods always load first (backend never waits for frontend).
-
------------------------------------------------------
-5.3 Activation.Mod.LoadJavascript
------------------------------------------------------
-
-Executed when frontend is connected:
-
-- Serve JS runtime entries via URI
-- Initialize mod module on frontend
-- Execute onLoad() on frontend side
-
------------------------------------------------------
-5.4 Activation.Mod.Ready
------------------------------------------------------
-
-A mod is considered fully activated when:
-
-- Backend Python runtimeEntries loaded successfully
-- Frontend JS entries loaded (if any)
-- Hooks registered
-- Initialization code complete
-
-At this stage, the mod may participate in execution flow (pipelines, events,
-RPC, views).
+Build:
+- backend ModEntry object
+- frontend mod manifest data (for delivery)
 
 
-=====================================================
-6. INVARIANTS
-=====================================================
+Activation.Mod.LoadPython
+-------------------------------------------------------------------------------
 
-- Discovery MUST complete before resolution.  
-- Resolution MUST NOT perform filesystem operations.  
-- No pack loading may happen outside the Activation phase.  
-- SavePack overrides external PackDescriptors for its AppInstance.  
-- Frontend execution of mods must not precede backend initialization.  
+- Import module or modules.
+- Execute mod.onLoad(context).
+- Register hooks into pipelines, AppInstance, views, and other subsystems.
+
+Invariant:
+- Python mods load before frontend mod initialization.
+
+
+Activation.Mod.LoadJavascript
+-------------------------------------------------------------------------------
+
+Executed when the frontend is connected:
+
+- Serve JavaScript runtime entries via URI resolution.
+- Initialize mod module on frontend.
+- Execute frontend onLoad(context) or equivalent lifecycle hook.
+
+
+Activation.Mod.Ready
+-------------------------------------------------------------------------------
+
+A mod is considered fully activated when all applicable items are true:
+
+- backend Python runtimeEntries loaded successfully (if any)
+- frontend JavaScript runtimeEntries loaded successfully (if any)
+- hooks registered
+- initialization complete
+
+Outcome:
+- The mod may participate in execution flow (pipelines, events, RPC, views).
+
+
+===============================================================================
+8. INVARIANTS
+===============================================================================
+
+- Discovery MUST complete before resolution.
+- Resolution MUST NOT perform filesystem operations.
+- No pack loading may happen outside the Activation phase.
+- SavePack overrides external PackDescriptors for its AppInstance.
+- Frontend execution of mods MUST NOT precede backend initialization.
 - PackDescriptorRegistry MUST remain immutable until rescanning.
 
 
-=====================================================
-7. SUMMARY
-=====================================================
+===============================================================================
+9. SUMMARY
+===============================================================================
 
 Lifecycle overview:
 
-  DISCOVERY
-    → ScanRoots
-    → BuildDescriptors
-    → FinalizeSnapshot
-    → Registry.Ready
+DISCOVERY
+- ScanRoots
+- BuildDescriptors
+- FinalizeSnapshot
+- Registry.Ready
 
-  ACTIVATION (APP)
-    → LoadAppPack
-    → BuildAppInstance
-    → RunGenerator (optional)
-    → AppReady
+ACTIVATION (APP)
+- LoadAppPack
+- BuildAppInstance
+- RunGenerator (optional)
+- AppReady
 
-  ACTIVATION (VIEW)
-    → LoadViewPack
-    → ProvideViewResources
+ACTIVATION (VIEW)
+- LoadViewPack
+- ProvideViewResources
 
-  ACTIVATION (MOD)
-    → ResolveRuntimeEntries
-    → LoadPython
-    → LoadJavascript
-    → ModReady
+ACTIVATION (MOD)
+- ResolveRuntimeEntries
+- LoadPython
+- LoadJavascript
+- Mod.Ready
 
-This model fully matches:
-  pack-manifest-structure.txt,
-  pack-and-asset-resolution.txt,
-  roots-and-discovery.txt,
-  and the Pack URI specification.
+This consolidation model is derived from:
+- pack-manifest-structure.txt
+- pack-and-asset-resolution.txt
+- roots-and-discovery.txt
+- pack-uri-spec.txt
+
+
+===============================================================================
+END OF FILE
+===============================================================================

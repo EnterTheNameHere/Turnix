@@ -1,22 +1,45 @@
-TURNIX ROOT SYSTEM & DISCOVERY SPECIFICATION (PLAIN TEXT VERSION)
+===============================================================================
+TURNIX ROOT SYSTEM AND DISCOVERY SPECIFICATION
+===============================================================================
 
-Status: Finalized model (2025-11)
+Status: AUTHORITATIVE (updated, style-aligned)
 
 Authority note:
-docs/pack-and-asset-resolution.txt holds the authoritative rules for pack discovery,
-PackDescriptor construction, and resolution invariants. This document describes the root
-layout and complements those rules without redefining them.
+docs/pack-and-asset-resolution.txt holds the authoritative rules for pack
+discovery, PackDescriptor construction, and resolution invariants.
 
-Scope:
-Root selection, directory semantics, discovery rules, write-permissions, and pack
-constraints.
+permissions-and-io-policy.txt holds the authoritative rules for filesystem
+access, scope enforcement, and permission handling.
+
+frontend-file-exposure-policy.txt holds the authoritative rules for
+frontend-visible file serving.
+
+This document defines root layout, discovery order, directory semantics, and
+invariants. It COMPLEMENTS the above documents and does NOT override them.
 
 
-OVERVIEW
+===============================================================================
+1. SCOPE
+===============================================================================
 
-Turnix resolves all filesystem-related paths through a layered root selection system.
+This specification covers:
 
-Each root contains exactly five top-level directories:
+- Root selection and prioritization
+- Directory semantics (read-only vs writable)
+- Pack discovery locations and scanning rules
+- SavePack layout and override behavior
+- Structural invariants required for deterministic operation
+
+
+===============================================================================
+2. OVERVIEW
+===============================================================================
+
+Turnix resolves all filesystem-related paths through a layered root selection
+system.
+
+Each effective root contains exactly five top-level directories:
+
     first-party/
     third-party/
     custom/
@@ -25,178 +48,211 @@ Each root contains exactly five top-level directories:
 
 Only userdata/ and saves/ are writable during execution.
 
-Pack discovery (mods, viewPacks, contentPacks, appPacks, savePacks) must cover these
-roots as defined by PackDescriptor registry rules:
+Pack discovery MUST consider the following roots:
+
     first-party/
     third-party/
     custom/
     saves/
 
-userdata/ never contains pack manifests.
+userdata/ NEVER contains pack manifests.
 
 
-PRIORITY RULES FOR ROOT SELECTION
+===============================================================================
+3. PRIORITY RULES FOR ROOT SELECTION
+===============================================================================
 
-Roots are resolved in descending priority.
+Roots are resolved in descending priority order.
 
 
-Priority 1 — Command-line flags
+Priority 1 - Command-line flags
+-------------------------------------------------------------------------------
 
-    --root=<dir>     defines root for all five directories
+    --root=<dir>     defines the base root for all five directories
     --userdata=<dir> overrides userdata path only
     --saves=<dir>    overrides saves path only
 
 Rules:
-    --root is authoritative; if provided, it becomes the primary root.
-    --userdata and --saves override only their respective directories.
-    Selected directories are created if missing.
-    All required subdirectories inside the chosen --root must be created.
+
+- --root is authoritative when provided.
+- --userdata and --saves override only their respective directories.
+- Selected directories are created if missing.
+- All required subdirectories inside --root MUST be created.
 
 
-Priority 2 — Environment variable
+Priority 2 - Environment variable
+-------------------------------------------------------------------------------
 
     TURNIX_ROOT=/absolute/path
 
 Rules:
-    Must be absolute.
-    Created if missing.
-    Subdirectories created if missing.
-    Does not override command-line flags.
-    Adds a lower-priority root for pack discovery.
+
+- Path MUST be absolute.
+- Directory is created if missing.
+- Required subdirectories are created if missing.
+- Does NOT override command-line flags.
+- Adds a lower-priority root for pack discovery.
 
 
-Priority 3 — Platform-standard directories
+Priority 3 - Platform-standard directories
+-------------------------------------------------------------------------------
 
 Examples:
+
     Windows: %APPDATA%/Turnix/
     Linux:   ~/.local/share/turnix/
     macOS:   ~/Library/Application Support/turnix/
 
 Rules:
-    Used only if the directory already exists.
-    Never created automatically.
-    Added as low-priority pack discovery roots.
-    Do not override userdata or saves if higher priority roots exist.
+
+- Used ONLY if the directory already exists.
+- NEVER created automatically.
+- Added as low-priority pack discovery roots.
+- Do NOT override userdata or saves paths.
 
 
-Priority 4 — Repo root (fallback)
+Priority 4 - Repository root (fallback)
+-------------------------------------------------------------------------------
 
-    Must exist.
-    Must contain all five directories.
-    Failure to meet these conditions results in a ReactorScramError.
-    Always included as the lowest-priority root.
+Rules:
+
+- Repository root MUST exist.
+- MUST contain all five required directories.
+- Failure results in ReactorScramError.
+- Always included as the lowest-priority root.
 
 
-DIRECTORY SEMANTICS
+===============================================================================
+4. DIRECTORY SEMANTICS
+===============================================================================
 
 Writable vs read-only:
 
     first-party/
-        read-only shipped packs
+        Read-only shipped packs
 
     third-party/
-        read-only downloaded packs
+        Read-only downloaded packs
 
     custom/
-        read-only during execution (user workspace; edited outside the running
-        process or by dedicated authoring tools)
+        Read-only during execution
+        (edited offline or by authoring tools)
 
     userdata/
-        writable global configuration and state shared across AppInstances
+        Writable global configuration and state
+        shared across AppInstances
 
     saves/
-        writable per-AppInstance save data and associated per-save packs
+        Writable per-AppInstance save data
+        and associated SavePacks
 
 Reasons for prohibiting writes to first-party, third-party, and custom:
 
-    - Prevents modification of shipped or downloaded packs.
-    - Prevents corruption of reproducible packs.
-    - Separates save data from authored content.
-    - Keeps the authoring workflow explicit.
+- Prevents modification of shipped or downloaded packs
+- Prevents corruption of reproducible packs
+- Separates authored content from runtime state
+- Keeps authoring workflows explicit
 
 
-PACK DISCOVERY
+===============================================================================
+5. PACK DISCOVERY
+===============================================================================
 
-Path traversal must never escape root boundaries.
+General rule:
 
-Where packs may appear:
+- Path traversal MUST NEVER escape root boundaries.
+
+Pack locations:
 
     first-party/
     third-party/
     custom/
     saves/
 
-userdata/ never contains pack manifests.
+userdata/ NEVER contains pack manifests.
 
-saves/ primarily contains SavePacks and their nested packs. SavePacks may optionally
-contain copies of other packs; these must override external versions when constructing
-the PackDescriptor registry for a given AppInstance.
-
-
-DIRECTORY SCANNING RULES
-
-For each root directory in the effective search path:
-
-1. For first-party/, third-party/, and custom/:
-
-   - Scan only the immediate subdirectories of:
-        first-party/
-        third-party/
-        custom/
-
-   - If a subdirectory contains a manifest.json5 (or other supported manifest name),
-     treat that subdirectory as the root of a pack tree.
-
-   - Do not treat descendants of that pack tree as separate root-level packs.
-     Nested packs inside a pack tree (for example, appPack containing viewPacks
-     and mods) are discovered by the PackDescriptor builder according to the pack
-     and asset resolution spec, not as independent top-level roots.
-
-   - The top-level root directory itself may not contain manifests.
-
-2. For saves/:
-
-   - The saves/ directory is organized primarily as:
-        saves/<appPackId>/<appInstanceId>/
-
-   - Each <appPackId>/<appInstanceId>/ directory is treated as the base directory
-     for one SavePack tree. Under that directory, discovery:
-        - Locates the savePack manifest that describes the AppInstance.
-        - Locates any copied or embedded packs (appPacks, viewPacks, contentPacks,
-          mods) used by this save.
-
-   - As with other roots, nested packs discovered under a savePack are handled
-     by the PackDescriptor builder and are not treated as separate root-level packs.
-
-3. General:
-
-   - Path traversal during scanning must never escape the respective root
-     directory (including when following symlinks; see below).
-   - No manifest may exist directly in the root directory itself (only inside
-     subdirectories of first-party/, third-party/, custom/, or under saves/
-     as described above).
+SavePacks MAY contain copied packs that override external versions for a given
+AppInstance.
 
 
-SYMLINKS
+===============================================================================
+6. DIRECTORY SCANNING RULES
+===============================================================================
 
-Symlink behavior is controlled by configuration, for example:
+For each root in the effective search path:
 
-    roots.followSymlinks = true/false
+
+first-party/, third-party/, custom/
+-------------------------------------------------------------------------------
+
+- Scan ONLY immediate subdirectories of:
+      first-party/
+      third-party/
+      custom/
+
+- If a subdirectory contains a supported manifest file, it is treated as a
+  pack root.
+
+- Descendants of that pack root are NOT treated as separate root-level packs.
+
+- Nested packs are discovered by the PackDescriptor builder according to
+  pack-and-asset-resolution.txt.
+
+- The root directory itself MUST NOT contain manifests.
+
+
+saves/
+-------------------------------------------------------------------------------
+
+- Organized primarily as:
+
+      saves/<appPackId>/<appInstanceId>/
+
+- Each such directory represents one SavePack tree.
+
+- Discovery within this tree:
+    - Locates the SavePack manifest
+    - Locates copied or embedded packs
+
+- Nested packs under SavePacks are NOT treated as independent root-level packs.
+
+
+General rules
+-------------------------------------------------------------------------------
+
+- Discovery MUST NOT escape the root directory.
+- This applies even when following symlinks.
+- No manifest may exist directly in a root directory.
+
+
+===============================================================================
+7. SYMLINKS
+===============================================================================
+
+Symlink behavior is controlled by configuration:
+
+    roots.followSymlinks = true | false
 
 Rules when symlinks are allowed:
 
-    - The resolved path of any symlink must remain inside one of the allowed
-      pack directories within the root.
-    - Symlink loops must be detected and rejected.
-    - A symlink that would resolve outside the root (escape) must be rejected.
+- Canonical resolved paths MUST remain inside the permitted root scope.
+- Symlink loops MUST be detected and rejected.
+- Symlinks that escape the root are DENIED.
 
-If symlinks are forbidden, discovery must treat them as opaque entries or skip
-them entirely, depending on engine policy.
+If symlinks are forbidden:
+
+- Discovery treats them as opaque entries or skips them, according to engine
+  policy.
+
+Authoritative enforcement rules are defined in:
+permissions-and-io-policy.txt
 
 
-PACK MANIFEST REQUIREMENTS
+===============================================================================
+8. PACK MANIFEST REQUIREMENTS
+===============================================================================
 
-Each manifest must declare kind, one of:
+Each manifest MUST declare exactly one kind:
 
     appPack
     viewPack
@@ -204,105 +260,92 @@ Each manifest must declare kind, one of:
     contentPack
     savePack
 
-The loader rejects missing or ambiguous kinds.
+Missing or ambiguous kinds are rejected.
 
 The kind defines:
 
-    - How the pack is loaded (for example, AppInstance bootstrap vs view-only).
-    - What kind of runtime entries are expected (for example, mod runtimes).
-    - Which nesting patterns are permitted (see below).
+- Loading behavior
+- Expected runtime entries
+- Permitted nesting patterns
 
-Pack id (the manifest "id") must follow naming rules in
-docs/pack-manifest-structure.txt and is combined with its parent chain to form
-packTreeId. It must not contain "@", ".", or a version string.
+Pack id rules:
+
+- Defined in docs/pack-manifest-structure.txt
+- Combined with parent chain to form packTreeId
+- MUST NOT contain "@", ".", or version strings
 
 
-PACK TYPES AND NESTING
+===============================================================================
+9. PACK TYPES AND NESTING
+===============================================================================
 
 AppPack:
-    - Defines an application or game.
-    - Provides initialization logic to create an AppInstance and its saves.
-    - May contain viewPacks, contentPacks, and mods.
+- Defines an application or game
+- Bootstraps AppInstances and saves
+- May contain ViewPacks, ContentPacks, Mods
 
 ViewPack:
-    - Defines user interface and view-specific content.
-    - Instantiable as a Turnix View (for example: main, tracing-monitor).
-    - May contain contentPacks and mods that are local to this view.
+- Defines UI and view-specific content
+- Instantiable as a Turnix View
+- May contain ContentPacks and Mods
 
 Mod:
-    - Provides backend or frontend logic.
-    - Loaded by the mod loader.
-    - May depend on other packs via the "packs" dependency field.
+- Provides backend or frontend logic
+- Loaded by mod loader
+- May depend on other packs
 
 ContentPack:
-    - Arbitrary assets or data, optionally with code helpers.
-    - May be nested inside AppPacks, ViewPacks, other ContentPacks, and SavePacks.
-    - May itself contain child ContentPacks and Mods.
+- Provides assets or data
+- May contain other ContentPacks and Mods
+- May be nested in AppPacks, ViewPacks, SavePacks
 
 SavePack:
-    - Represents the saved state of an AppInstance.
-    - Located under:
-          saves/<appPackId>/<appInstanceId>/
-    - May contain copied pack versions (appPacks, viewPacks, contentPacks, mods)
-      that override external ones for this AppInstance.
-
-Nesting model (conceptual):
-
-    - ContentPack:
-        may contain other ContentPacks and Mods.
-
-    - ViewPack:
-        may contain ContentPacks and Mods.
-
-    - AppPack:
-        may contain ViewPacks, ContentPacks, and Mods.
-
-    - SavePack:
-        may contain AppPacks, ViewPacks, ContentPacks, and Mods, typically as
-        copies pinned to the save.
+- Represents saved state of an AppInstance
+- Located under:
+      saves/<appPackId>/<appInstanceId>/
+- May contain copied packs overriding external ones
 
 
-ASSET RESOLUTION AND ROUTING
+===============================================================================
+10. ASSET RESOLUTION AND ROUTING
+===============================================================================
 
-Packs may contain code files, structured text, media files, and binary files.
+Assets include:
 
-Assets are exposed via the asset resolution system described in
-docs/pack-and-asset-resolution.txt and may be served through HTTP routes such as:
+- Code files
+- Structured text
+- Media files
+- Binary files
 
-    /packs/<packIdentifier>/assets/<assetPath>
+Asset resolution is defined in:
+docs/pack-and-asset-resolution.txt
 
-where <packIdentifier> is resolved via PackDescriptor and pack resolution rules.
+Frontend exposure rules are defined in:
+frontend-file-exposure-policy.txt
 
-Execution may load assets only from:
+Execution MAY load assets ONLY from permitted roots and allowlisted directories.
 
-    first-party/
-    third-party/
-    custom/
-    saves/<appPackId>/<appInstanceId>/
-    explicit allowlisted backend/frontend directories
-
-Execution must never load arbitrary filesystem paths and must never serve files
-that are not registered in PackDescriptor.assets for the resolved pack.
+Execution MUST NOT load arbitrary filesystem paths.
 
 
-SAVING RULES
+===============================================================================
+11. SAVING RULES
+===============================================================================
 
 Global configuration:
 
     Stored in:
         <root>/userdata/
 
-    --userdata overrides the path.
-
 AppInstance saves:
 
     Stored in:
         <root>/saves/<appPackId>/<appInstanceId>/
 
-    For a given AppInstance, the corresponding SavePack and any copied packs
-    under this directory form the highest-priority source for pack resolution.
-    When constructing the PackDescriptor registry for that AppInstance, these copies
-    override external versions found in first-party, third-party, or custom.
+For a given AppInstance:
+
+- SavePack and copied packs override external versions.
+- These overrides apply ONLY to that AppInstance.
 
 Never save into:
 
@@ -310,51 +353,42 @@ Never save into:
     third-party/
     custom/
 
-These locations are treated as read-only during execution. Authoring workflows,
-installers, or tools may modify them offline or under controlled conditions,
-but the running process must not.
+These locations are read-only during execution.
 
 
-EFFECTIVE ROOT RESOLUTION SUMMARY
+===============================================================================
+12. EFFECTIVE ROOT RESOLUTION SUMMARY
+===============================================================================
 
-Pack discovery search order:
+Pack discovery order:
 
     1. --root
     2. TURNIX_ROOT
-    3. Platform-standard locations (only if a turnix/ directory exists there)
-    4. Repo root
+    3. Platform-standard locations (if present)
+    4. Repository root
 
 Writable locations:
 
     - <effective-userdata>/
     - <effective-saves>/
 
-No other directory is writable during execution.
+No other directory is writable.
 
 
-INVARIANTS
+===============================================================================
+13. INVARIANTS
+===============================================================================
 
-- No manifest may exist directly in a root directory (only in subdirectories
-  under first-party/, third-party/, custom/, or within the saves/ hierarchy).
+- No manifest may exist directly in a root directory.
+- Writes to shipped or downloaded packs are forbidden.
+- Discovery MUST NOT escape allowed directories.
+- Discovery completes fully before any resolution.
+- Resolution MUST NOT trigger new filesystem scanning.
+- Repository root MUST contain all required directories.
+- Search order is deterministic.
+- SavePack copies override external versions for their AppInstance.
 
-- The Turnix process must not write into shipped or downloaded pack directories:
-    first-party/, third-party/, custom/.
 
-- Pack discovery must never escape allowed directories, including when
-  following symlinks.
-
-- Discovery and PackDescriptor registry construction must always complete (or a
-  consistent snapshot must exist) before any resolution is performed. Resolution
-  must not trigger new filesystem scanning.
-
-- Repo root must contain all required directories:
-    first-party/, third-party/, custom/, userdata/, saves/
-  or launch fails with a ReactorScramError.
-
-- Search paths are deterministic; the same configuration yields the same
-  discovery order and resulting PackDescriptor registry.
-
-- If a SavePack contains pack copies whose versions conflict with versions
-  in first-party, third-party, or custom, the SavePack copies win for that
-  AppInstance and must be used by the resolver when building the effective
-  pack set for that save.
+===============================================================================
+END OF FILE
+===============================================================================
