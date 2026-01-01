@@ -1,0 +1,171 @@
+===============================================================================
+TURNIX FRONTEND FILE EXPOSURE POLICY
+===============================================================================
+
+Status: AUTHORITATIVE
+
+Scope:
+Files served from backend to frontend, code module exposure, pack root
+visibility, and SavePack handling.
+
+This document defines which files may be exposed to frontend environments
+through Turnix backend services (for example FastAPI), and under what rules.
+
+
+===============================================================================
+1. GENERAL PRINCIPLES
+===============================================================================
+
+- Frontend environments NEVER access the filesystem directly.
+- All frontend file access is mediated by Turnix backend services.
+- Exposure rules are based on pack structure and declared intent.
+- Directory listing is denied by default unless explicitly provided via RPC.
+
+
+===============================================================================
+2. PACK ROOT VISIBILITY
+===============================================================================
+
+For a pack located at <relative-root>/:
+
+- <relative-root>/ is NOT directly accessible.
+- <relative-root>/manifest.json5 is NEVER accessible.
+- All access is resolved relative to the pack root and MUST NOT escape it.
+
+
+===============================================================================
+3. JAVASCRIPT RUNTIME MODULES
+===============================================================================
+
+Module root
+-------------------------------------------------------------------------------
+
+- JavaScript modules MAY be served ONLY from:
+
+      <relative-root>/runtimes/javascript/
+
+- Files outside this directory are NEVER served as JavaScript modules.
+
+
+Entry module
+-------------------------------------------------------------------------------
+
+- runtimes.javascript.entry specifies EXACTLY ONE relative file path under
+  runtimes/javascript/.
+
+- That module is auto-imported and activated by Turnix.
+
+- Activation means Turnix calls the lifecycle hook with context.
+
+
+Library modules (Policy 1)
+-------------------------------------------------------------------------------
+
+- runtimes.javascript.entries defines allowed import roots.
+
+- Each entry is either:
+    - a relative file path, or
+    - a relative directory glob ending in "/**".
+
+- A module import request is allowed ONLY if the resolved path:
+    - matches the entry exactly, OR
+    - matches one of the entries exactly, OR
+    - is located under an entries directory glob.
+
+- Modules not covered by these rules are DENIED.
+
+
+Activation rules
+-------------------------------------------------------------------------------
+
+- Only the entry module is auto-activated by Turnix.
+- Library modules are NEVER auto-activated by Turnix.
+- Library modules MUST be safe to evaluate without Turnix context.
+
+
+===============================================================================
+4. PYTHON RUNTIME FILES
+===============================================================================
+
+- Python runtime files are NEVER served to the frontend.
+- Python code is loaded and executed exclusively on the backend.
+- runtimes.python.entry and runtimes.python.entries control backend loading
+  and activation only.
+
+
+===============================================================================
+5. STATIC FILES
+===============================================================================
+
+assets/
+-------------------------------------------------------------------------------
+
+- Files under <relative-root>/assets/ MAY be served to the frontend.
+- Directory listing is denied by default.
+- Only files with extensions supported by Turnix are served.
+
+
+template/
+-------------------------------------------------------------------------------
+
+- Files under <relative-root>/template/ MAY be served to the frontend.
+- Directory listing is denied by default.
+- Supported file types include html, css, and other formats explicitly
+  handled by Turnix.
+
+
+===============================================================================
+6. CONFIGURATION FILES
+===============================================================================
+
+- <relative-root>/config/ is NOT served to the frontend by default.
+- Schema and default configuration files are engine-facing.
+- Configuration data MAY be exposed only via explicit Turnix services or
+  explicit opt-in policy.
+
+
+===============================================================================
+7. USERDATA AND SAVEPACKS
+===============================================================================
+
+userdata/
+-------------------------------------------------------------------------------
+
+- userdata/ is NEVER served to the frontend.
+
+
+SavePack handling
+-------------------------------------------------------------------------------
+
+- SavePack directories MAY contain copied packs under:
+
+      saves/<appPackId>/<appInstanceId>/packs/
+
+- Files inside those copied pack directories follow the SAME exposure rules
+  as normal packs.
+
+- Files outside copied packs (for example save.json5, state directories)
+  are NEVER served directly.
+
+
+===============================================================================
+8. SECURITY AND SAFETY NOTES
+===============================================================================
+
+- Exposure rules prevent accidental execution of undeclared code.
+- Arbitrary file serving is forbidden even if filesystem access would allow it.
+- All paths are validated to prevent traversal and scope escape.
+
+
+===============================================================================
+9. REFERENCES
+===============================================================================
+
+- permissions-and-io-policy.txt
+- roots-and-discovery.txt
+- pack-and-asset-resolution.txt
+
+
+===============================================================================
+END OF FILE
+===============================================================================
