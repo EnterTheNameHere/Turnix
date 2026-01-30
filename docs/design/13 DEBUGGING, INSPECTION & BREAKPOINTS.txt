@@ -41,9 +41,10 @@ You debug:
 - pipelines
 - memory layers
 - capabilities
+
 NOT:
 - Python frames
-- JavaScript call stacks (except as context)
+- JavaScript call stacks (except as contextual information)
 
 
 ===============================================================================
@@ -51,6 +52,7 @@ NOT:
 ===============================================================================
 
 Turnix supports *semantic breakpoints*, not code-line breakpoints.
+
 
 3.1 Pipeline Stage Breakpoints
 ------------------------------
@@ -92,7 +94,7 @@ Triggers:
 4. BREAKPOINT BEHAVIOR (LOCKED)
 ===============================================================================
 
-When breakpoint triggers:
+When a breakpoint triggers:
 - execution of the triggering unit pauses
 - the rest of Turnix continues (unless configured otherwise)
 - debugger UI is notified
@@ -102,6 +104,37 @@ Breakpoints NEVER:
 - auto-resume silently
 - alter execution order
 - mutate state by default
+
+
+===============================================================================
+4.1 LIVE DEBUGGING WITHOUT PAUSE (LOCKED)
+===============================================================================
+
+The debugger MAY be used while Turnix is running normally.
+
+LOCKED:
+- Debugger inspection does NOT require a breakpoint to be hit.
+- Debugger inspection does NOT require Turnix to be in a paused state.
+
+Consequences:
+- A user may open inspectors, browse state, and request read-only views
+  at any time.
+- Such inspection MUST be traceable and marked as debugger / tooling activity.
+
+
+===============================================================================
+4.2 DEBUGGER ACTIONS VS ORCHESTRATION (LOCKED)
+===============================================================================
+
+Debugger UI actions are executed via Turnix-controlled Remote Procedure Call
+and capabilities.
+
+LOCKED:
+- Debugger tooling MUST NOT bypass Turnix orchestration.
+- Debugger tooling MUST NOT access raw filesystem input/output.
+- Any persistence-affecting action initiated by the debugger MUST execute
+  through the same authority path as normal runtime actions
+  (for example IoManager or services that use it).
 
 
 ===============================================================================
@@ -125,15 +158,70 @@ Inspection is read-only by default.
 
 Explicit mutation is allowed ONLY via:
 - debugger actions
-- user confirmation
+- explicit user confirmation
 - trace logging
 
 Examples:
-- editing memory value
-- disabling a breakpoint
-- forcing resume
+- editing a memory value
+- disabling or modifying a breakpoint
+- forcing resume or abort
 
 Every mutation emits a trace event.
+
+
+===============================================================================
+6.1 MUTATION WHILE RUNNING (LOCKED)
+===============================================================================
+
+Controlled mutation MAY be performed while Turnix is active (not paused).
+
+Rules:
+- Mutation MUST be explicit (user action in debugger UI).
+- Mutation MUST be traceable and labeled as debugger-initiated.
+- Mutation MUST obey the same permission, ownership, and scope rules as
+  normal runtime actions.
+
+If a mutation affects data that active execution units may read
+concurrently, the debugger MUST either:
+- require a manual pause (see Section 6.2), OR
+- enforce deterministic apply-at-safe-point semantics (see Section 6.3).
+
+
+===============================================================================
+6.2 MANUAL PAUSE (LOCKED)
+===============================================================================
+
+Turnix MAY support manual pausing even when no breakpoint is hit.
+
+Purpose:
+- allow deterministic inspection and mutation
+- prevent important work from being voided by cancellation
+
+LOCKED:
+- Manual pause MUST be deterministic.
+- Manual pause MUST NOT silently cancel in-flight work.
+- If pausing cannot be achieved safely, Turnix MUST refuse the pause
+  request with an explicit, traceable reason.
+
+Manual pause MAY operate by enforcing quiescence at defined safe points:
+- between pipeline stages
+- between capability calls
+- before commit points for persistence
+
+
+===============================================================================
+6.3 APPLY-AT-SAFE-POINT (LOCKED)
+===============================================================================
+
+When Turnix is not paused, debugger-initiated mutations MAY be staged and
+applied only at a deterministic safe point.
+
+Rules:
+- Staging MUST be traceable.
+- The exact safe point where the mutation becomes visible MUST be traceable.
+- Staged mutations MUST NOT partially apply.
+- If the safe point is never reached (for example execution aborts),
+  the staged mutation MUST be discarded deterministically and traced.
 
 
 ===============================================================================
@@ -161,6 +249,33 @@ Supported:
 Unsupported:
 - instruction-level stepping
 - time travel (future area)
+
+
+===============================================================================
+8.1 JOBS, LONG-RUNNING WORK & BREAKPOINTING (LOCKED)
+===============================================================================
+
+Turnix MAY represent long-running work as explicit Jobs.
+
+If Jobs exist:
+- Jobs MUST be observable (status, owner, causal trace links).
+- Jobs MUST be abortable only through Turnix orchestration.
+
+Debugger interaction with Jobs:
+- A manual pause MUST NOT implicitly abort Jobs.
+- A debugger MAY request:
+    - pause-at-safe-point for a Job
+    - breakpoint-at-safe-point for a Job
+    - explicit Job abort
+
+Safe-point pausing or breakpointing of Jobs occurs:
+- between pipeline stages
+- before or after capability boundaries
+- before commit points for persistence
+
+If a Job cannot reach a safe point:
+- this MUST be surfaced explicitly
+- no silent cancellation is permitted
 
 
 ===============================================================================
@@ -208,9 +323,9 @@ If breakpoint logic errors:
 ===============================================================================
 
 Every breakpoint hit:
-- emits trace event
-- links to causal chain
-- records inspection actions
+- emits a trace event
+- links to the causal chain
+- records inspection and mutation actions
 
 Tracing and debugging are complementary.
 
@@ -243,9 +358,13 @@ OPEN:
 
 LOCKED:
 - semantic breakpoints
-- pipeline, memory, capability breakpoints
+- pipeline, memory, and capability breakpoints
 - read-only inspection by default
 - controlled mutation with tracing
+- debugger usable while Turnix is running
+- deterministic manual pause
+- apply-at-safe-point mutation semantics
+- job-safe breakpointing and pausing
 - non-blocking debugger behavior
 
 OPEN:
@@ -259,6 +378,6 @@ END OF DESIGN AREA 13
 
 --- doc-meta ---
 docId: docs/design/13 DEBUGGING, INSPECTION & BREAKPOINTS.txt
-rev: 2
-git: 8225391
+rev: 3
+git: d1b3b4b
 ---------------
