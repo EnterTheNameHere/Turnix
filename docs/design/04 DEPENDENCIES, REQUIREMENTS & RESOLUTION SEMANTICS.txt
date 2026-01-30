@@ -1,287 +1,352 @@
 ===============================================================================
-DESIGN AREA 4 — DEPENDENCIES, REQUIREMENTS & RESOLUTION SEMANTICS
+DESIGN AREA 4 — GENERIC RESOLUTION SEMANTICS
 ===============================================================================
 
 Status:
 -------
-CORE — this area defines *how packs ask for other packs* and *how the
-engine decides what actually gets used*.
+CORE — this area defines the generic, dependency-agnostic resolution
+machinery used by Turnix to interpret PackRequests, enumerate candidates,
+apply constraints, and produce deterministic outcomes.
 
-This area deliberately separates:
-- declaring intent
-- resolving candidates
-- selecting a winner
-- activating code
+This document defines resolution *mechanics only*.
 
-Nothing here implies load order or execution.
+It does NOT define:
+- dependency meaning or strength
+- savePack behavior
+- pinning or copying rules
+- activation, execution, or lifecycle semantics
 
+Those are defined by higher-level consumers
+(e.g. dependency resolution, save handling, activation).
 
-===============================================================================
-1. DEPENDENCY DECLARATION (MANIFEST)
-===============================================================================
+This area strictly separates:
+- request parsing
+- candidate enumeration
+- constraint application
+- deterministic selection
+- ambiguity and failure signaling
 
-Manifest field:
-    packs
-
-Type:
-    PackRequestRef | list[PackRequestRef]
-
-Examples:
-    "packs": ["ui"]
-    "packs": ["Turnix@ui.controls@^1.2"]
-    "packs": ["Anthony@avatars", "Turnix@ui"]
+Nothing in this area implies loading, activation, execution order,
+or runtime access.
 
 
 ===============================================================================
-2. PACK REQUEST REF (LOCKED GRAMMAR)
+1. PURPOSE AND SCOPE
+===============================================================================
+
+This design area defines:
+
+- the PackRequest reference grammar
+- how PackRequests are parsed and represented
+- how candidate packs are enumerated
+- how constraints are applied
+- how deterministic selection is enforced
+- how ambiguity and failure are reported
+
+This area deliberately avoids:
+- interpreting *why* a request exists
+- deciding whether a request is optional or mandatory
+- defining fallback, retry, or recovery behavior
+
+It provides the *mechanical resolution engine*, not the *policy*.
+
+
+===============================================================================
+2. PACK REQUEST REFERENCE GRAMMAR (LOCKED)
 ===============================================================================
 
 Canonical grammar:
 
     [<author>@]<packTreeId>[@<semverRequirement>]
 
-Rules (LOCKED):
+Rules:
 - case-sensitive
-- exactly zero, one, or two '@'
+- exactly zero, one, or two '@' characters
 - no filesystem paths
 - no slashes
-- dots only for hierarchy
+- dots are allowed only for hierarchy
+- no implicit defaults
 
-Examples:
+Valid examples:
     "ui"
     "ui.controls"
     "Turnix@ui.controls"
-    "Turnix@ui.controls@^2.0"
+    "ui.controls@^2.0"
+    "Turnix@ui.controls@~1.4"
 
-Invalid:
-    "ui@controls@1.0"
+Invalid examples:
+    "@ui"
     "ui/controls"
     "ui.controls:1.0"
-    "@ui"
 
 
 ===============================================================================
-3. SEMVER PARSING RULE (IMPORTANT)
+3. SINGLE '@' DISAMBIGUATION RULE (LOCKED)
 ===============================================================================
 
-Ambiguity rule (LOCKED):
+If a PackRequest contains exactly one '@':
 
-If request has exactly one '@':
-- Try parsing the suffix as semver
-- If parsing succeeds → treat as semver
-- If parsing fails → treat as author
+- Attempt to parse the suffix as a semantic version requirement
+- If parsing succeeds:
+    → suffix is treated as semver
+- If parsing fails:
+    → suffix is treated as author
 
-Therefore:
-    "foo@1.2"      → id=foo, semver=1.2
-    "foo@bar"      → author=foo, id=bar
+Examples:
+    "foo@1.2"  → packTreeId="foo", semver="1.2"
+    "foo@bar"  → author="foo", packTreeId="bar"
 
-SemVer parse failure here is NOT an error.
-It is an expected ambiguity resolution path.
+Failure to parse semver in this context is NOT an error.
+This is an intentional disambiguation rule.
 
 
 ===============================================================================
-4. PACKREQUEST (PARSED FORM)
+4. PACKREQUEST INTERNAL REPRESENTATION (LOCKED)
 ===============================================================================
 
-Internal structure:
+PackRequest is the parsed, immutable internal representation
+used by the resolver.
+
+Structure:
 
     PackRequest:
         author: str | None
         packTreeId: str
         semverRequirement: SemVerPackRequirement | None
-        kind: PackKind | None   # optional future filter
-
-PackRequest creation is part of indexing, not discovery.
-
-
-===============================================================================
-5. WHAT DEPENDENCIES MEAN (CRITICAL)
-===============================================================================
-
-LOCKED:
-- Declaring a dependency DOES NOT load code
-- Declaring a dependency DOES NOT activate a pack
-- Declaring a dependency DOES NOT imply visibility
-- Declaring a dependency DOES NOT imply order
-
-Dependencies only express:
-    “This pack cannot function without a pack matching this request.”
-    (and errors during resolution should be explicitly reported)
-
-For invalid or malformed dependencies:
-    - SoftRejected dependencies are discouraged but can be overridden.
-    - HardRejected dependencies will be completely disregarded during resolution.
-
-===============================================================================
-6. RESOLUTION PHASE (CONCEPTUAL)
-===============================================================================
-
-Resolution is pure selection logic.
-
-Input:
-- PackRequest
-- PackDescriptorRegistry snapshot
-- Policy (user + system)
-
-Output:
-- Eligible
-- SoftRejected
-- HardRejected
-- Selected (or unresolved)
-
-For dependencies that cannot be resolved (e.g., missing or malformed packs), 
-they will either be SoftRejected or HardRejected based on the error severity.
-HardRejected packs are excluded from further resolution steps and reported as errors.
-
-===============================================================================
-7. HARD FILTERS (LOCKED)
-===============================================================================
-
-Hard filters REMOVE candidates permanently.
-
-Examples:
-- wrong packTreeId
-- wrong author (when author required)
-- wrong kind (if specified)
-- forbidden root
-- visibility violation
-- savePack scoping violation
-
-HardRejected packs:
-- are never selectable
-- are not shown to the user
-- may be traced
-
-===============================================================================
-8. SOFT FILTERS (LOCKED)
-===============================================================================
-
-Soft filters DISCOURAGE but do not forbid.
-
-Examples:
-- semver mismatch
-- prerelease blocked by policy
-- deprecated pack
-
-SoftRejected packs:
-- remain known
-- may be overridden by user
-- are shown with explanation
-
-===============================================================================
-9. SCORING MODEL (LOCKED)
-===============================================================================
-
-Each remaining candidate receives a score.
-
-Scoring dimensions:
-
-9.1 Author match
-    - exact requested author → highest
-    - same author as requester → high
-    - different known author → mid
-    - unknown author → lowest
-
-9.2 Semver match
-    - exact version → highest
-    - range match → newest > oldest
-    - wildcard/missing → lowest
-
-9.3 Root precedence bonus
-    custom > first-party > third-party
-
-9.4 Tie-breakers (deterministic)
-    1) root precedence
-    2) newer version
-    3) stable over prerelease
-    4) lexical fully-resolved ref
-
-Note: SoftRejected packs should affect the score but will not be selected unless explicitly overridden by the user.
-
-===============================================================================
-10. USER INVOLVEMENT (LOCKED)
-===============================================================================
-
-User interaction is REQUIRED when:
-- multiple eligible packs tie
-- only softRejected packs exist
-- pinned pack is missing
-- update would replace last-known-good
-
-Once user decides:
-- decision is persisted
-- future runs are deterministic
-
-
-===============================================================================
-11. PINS, COPIES & LAST-KNOWN-GOOD
-===============================================================================
-
-Resolution must respect:
-
-- pinnedNoUpdate
-- pinnedUpdateable
-- copied packs inside save
-- last-known-good fallback
+        kind: PackKind | None
 
 Rules:
-- copied pack ALWAYS wins
-- pinned missing → hard error
-- silent substitution is forbidden
+- created during indexing
+- immutable after creation
+- carries no policy or resolution state
+- kind MAY be injected by the resolution context
 
 
 ===============================================================================
-12. RESOLUTION ≠ ACTIVATION (LOCKED)
+5. RESOLUTION OVERVIEW (LOCKED)
 ===============================================================================
 
-Resolution decides *what should be used*.
-Activation decides *when and how code runs*.
+Resolution is a pure, side-effect-free process.
 
-A resolved pack may never be activated
-if nothing requires its code.
+Inputs:
+- a PackRequest
+- a snapshot of the PackDescriptorRegistry
+- an externally supplied resolution policy context
 
+Outputs:
+- exactly one concrete pack identity, OR
+- a classified resolution failure
 
-===============================================================================
-13. ERROR PHILOSOPHY (LOCKED)
-===============================================================================
-
-Resolver must NEVER:
-- silently choose
-- pretend ambiguity is obvious
-- hide alternatives
-
-If ambiguity exists:
-- classify it
-- explain it
-- ask user or apply explicit policy
-- persist the outcome
+Resolution MUST be deterministic:
+Given the same inputs and policy context,
+the same outcome MUST always occur.
 
 
 ===============================================================================
-14. OPEN QUESTIONS
+6. CANDIDATE ENUMERATION — PHASE A (LOCKED)
 ===============================================================================
 
-OPEN:
-- per-pack prerelease policy
-- global vs per-request soft filter tuning
-- UI wording for resolution explanations
+Candidate enumeration identifies packs that are *structurally compatible*
+with a PackRequest.
+
+Steps:
+1) match packTreeId
+2) apply author constraint if present
+3) apply kind constraint if present
+4) collect remaining candidates
+
+Properties:
+- no ordering
+- no selection
+- no preference evaluation
+- no fallback
+- no policy interpretation
+
+This phase answers only:
+
+    “Which packs could possibly satisfy this request?”
 
 
 ===============================================================================
-15. LOCKED SUMMARY
+7. CONSTRAINT APPLICATION — PHASE B (LOCKED)
+===============================================================================
+
+Constraints remove or restrict candidates.
+
+Two constraint classes exist.
+
+
+-------------------------------------------------------------------------------
+7.1 HARD CONSTRAINTS
+-------------------------------------------------------------------------------
+
+Hard constraints permanently exclude candidates.
+
+Examples:
+- packTreeId mismatch
+- required author mismatch
+- kind mismatch
+- visibility violation
+- forbidden root
+- savePack scope violation
+- concrete version mismatch
+
+Rules:
+- candidates failing a hard constraint MUST NOT be selected
+- candidates failing a hard constraint MUST NOT be offered to the user
+- failure reasons MUST be observable (see DESIGN AREA 12)
+
+
+-------------------------------------------------------------------------------
+7.2 SOFT CONSTRAINTS
+-------------------------------------------------------------------------------
+
+Soft constraints discourage selection but do not invalidate structure.
+
+Examples:
+- prerelease blocked by policy
+- deprecated pack
+- policy-based discouragement
+
+Rules:
+- soft-constrained candidates remain known
+- they are NOT automatically selectable
+- selection requires explicit policy or user decision
+
+IMPORTANT:
+Soft constraints apply to *candidates*, not to the PackRequest itself.
+Whether a request is mandatory or optional is defined externally.
+The resolver MUST still order soft-constrained candidates deterministically 
+once explicitly allowed.
+
+
+===============================================================================
+8. RESOLUTION SOURCE DETERMINATION (LOCKED)
+===============================================================================
+
+Before ordering or selection, the resolver MUST be told
+which resolution source applies.
+
+Rules:
+- exactly one source applies
+- the source is determined externally
+- the resolver MUST NOT mix sources
+- the resolver MUST NOT fall back between sources
+
+The selected source constrains:
+- where candidates are collected from
+- which substitution rules are legal
+
+
+===============================================================================
+9. DETERMINISTIC SELECTION (LOCKED)
+===============================================================================
+
+After constraints are applied, the resolver MUST:
+
+- impose a total, deterministic ordering on remaining candidates
+- select the FIRST candidate in that ordering
+
+Rules:
+- ordering MUST be stable and reproducible
+- ordering MUST NOT depend on iteration order
+- ordering MUST NOT involve randomness
+
+The concrete ordering criteria are defined by
+the resolution consumer (e.g. dependency resolution).
+
+Silent substitution is FORBIDDEN.
+
+
+===============================================================================
+10. AMBIGUITY HANDLING (LOCKED)
+===============================================================================
+
+If deterministic ordering cannot reduce candidates to a single,
+unambiguous choice:
+
+- resolution MUST pause
+- ambiguity MUST be explicitly classified
+- external input (policy or user) MUST be requested
+
+Once a decision is made:
+- it MUST be persisted by the consumer
+- future runs MUST be deterministic
+
+The resolver itself MUST NOT guess.
+The resolver MUST NOT auto-persist decisions.
+
+
+===============================================================================
+11. FAILURE CONDITIONS (LOCKED)
+===============================================================================
+
+Resolution fails if:
+- no candidates exist after hard constraints
+- no candidates are selectable under policy
+- resolution source rules are violated
+
+Failure MUST:
+- be explicit
+- be classified
+- be observable (see DESIGN AREA 12)
+- never silently fall back
+
+
+===============================================================================
+12. RESOLUTION ≠ ACTIVATION
+===============================================================================
+
+Resolution determines:
+
+    “Which concrete pack identity satisfies this request?”
+
+Resolution does NOT:
+- load code
+- activate packs
+- guarantee execution order
+- grant runtime access
+
+Activation and lifecycle behavior are defined elsewhere.
+
+
+===============================================================================
+13. ERROR MODEL (LOCKED)
+===============================================================================
+
+Resolution errors include, but are not limited to:
+- NotFoundError
+- VersionMismatchError
+- AmbiguousResolutionError
+- PermissionDeniedError
+
+All resolution errors MUST:
+- use the standard error envelope
+- include PackRequest context
+- include resolution source
+- include reason classification
+
+
+===============================================================================
+14. LOCKED SUMMARY
 ===============================================================================
 
 LOCKED:
-- dependency grammar
-- ambiguity resolution rules
-- hard vs soft filters
-- scoring model
-- no auto-loading
-- determinism over convenience
+- PackRequest grammar and disambiguation rules
+- two-phase resolution model
+- hard vs soft constraint distinction
+- concrete version mismatch is a hard exclusion
+- deterministic ordering and selection
+- no silent substitution
+- explicit ambiguity signaling
 
-OPEN:
-- fine-grained policy knobs
-- PackManager UI behavior
+DEFERRED:
+- dependency semantics
+- savePack behavior
+- pinning and copying rules
+- activation and lifecycle behavior
+
+Those are defined by higher-level design areas.
 
 
 ===============================================================================
@@ -290,6 +355,6 @@ END OF DESIGN AREA 4
 
 --- doc-meta ---
 docId: docs/design/04 DEPENDENCIES, REQUIREMENTS & RESOLUTION SEMANTICS.txt
-rev: 3
-git: a55d2c2
+rev: 4
+git: d1b3b4b
 ---------------
