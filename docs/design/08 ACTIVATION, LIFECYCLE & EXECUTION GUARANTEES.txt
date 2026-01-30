@@ -4,43 +4,61 @@ DESIGN AREA 8 — ACTIVATION, LIFECYCLE & EXECUTION GUARANTEES
 
 Status:
 -------
-CORE — this area defines *when code is allowed to run*, *in what order*,
-and *what Turnix guarantees (and does not)* about execution.
+CORE — this area defines when pack code is permitted to execute, under whose
+authority execution occurs, and which execution behaviors Turnix explicitly
+guarantees or does not guarantee.
 
-This area is deliberately strict.
-Activation is the only moment code becomes “alive”.
+Activation is the sole mechanism that transitions a pack from inert metadata
+to an executable participant under Turnix control.
 
 
 ===============================================================================
 1. CORE CONCEPT
 ===============================================================================
 
-Activation answers:
+Activation answers exactly one question:
 
-    “Is this pack now allowed to execute code and provide runtime behavior?”
+    “Is this pack permitted to execute code under Turnix orchestration?”
+
+Activation is a controlled, explicit, one-time state transition.
+
+Before activation:
+- a pack exists only as metadata
+- its code has no execution authority under Turnix
+
+After activation:
+- the pack may participate in runtime behavior
+- execution is allowed only through Turnix-controlled orchestration pathways
 
 Activation is NOT:
 - discovery
+- indexing
 - dependency resolution
 - importing
 - visibility granting
 
-Activation is a controlled, explicit transition.
+Those phases may occur before activation, but NEVER imply it.
 
 
 ===============================================================================
-2. LIFECYCLE PHASES (LOCKED OVERVIEW)
+2. LIFECYCLE PHASES (LOCKED)
 ===============================================================================
 
-Turnix operates in ordered phases:
+Turnix operates in logically ordered, externally observable phases:
 
 1) Discovery
 2) Indexing
 3) Resolution
 4) Activation
-5) Finalized / Running
+5) Running / Finalized
 
-Only during **Activation** may pack code execute.
+Execution guarantee boundary:
+
+- Activation is the FIRST moment Turnix may intentionally execute pack code.
+- After activation, pack code MAY execute during Running, but ONLY through
+  Turnix-orchestrated execution pathways (see Section 14).
+
+Any code that executes outside Turnix orchestration is outside Turnix guarantees.
 
 
 ===============================================================================
@@ -49,199 +67,274 @@ Only during **Activation** may pack code execute.
 
 When a pack is activated:
 
-- its runtime entries may be loaded
-- its canonical entrypoints are invoked
-- it may register:
-    - services
-    - capabilities
-    - subscriptions
-    - hooks
-- it may begin participating in Turnix orchestration
+- Turnix creates a PackContext (ctx) for that pack instance
+- The pack’s activation entrypoint is invoked
+- The pack may:
+    - register services
+    - register capabilities
+    - subscribe to Turnix events
+    - allocate runtime resources
+    - participate in Turnix-managed orchestration
 
 Before activation:
-- pack metadata exists
-- pack may be resolved
-- pack code must NOT execute
+- pack metadata may be resolved
+- pack may appear in graphs
+- pack code MUST NOT execute under Turnix authority
 
 
 ===============================================================================
-4. ACTIVATION IS PACK-LEVEL (LOCKED)
+4. PACK-LEVEL ACTIVATION (LOCKED)
 ===============================================================================
 
-Activation applies to:
-- the pack as a unit
+Activation applies to the pack as a whole.
 
-Not to:
+Activation does NOT apply to:
 - individual files
+- individual modules
 - individual imports
 - individual capabilities
 
-Files may be imported only after activation guarantees
-are satisfied by PackManager.
+A pack is either activated or not activated.
+There is no partial, staged, deferred, or per-file activation.
 
 
 ===============================================================================
-5. ACTIVATION ENTRYPOINTS (LOCKED)
+5. PACKCONTEXT (ctx) — EXECUTION AUTHORITY (LOCKED)
 ===============================================================================
 
-Canonical entrypoints (current):
+Turnix provides exactly one execution authority object to pack code:
+the PackContext (“ctx”).
+
+LOCKED:
+- PackContext is created only by Turnix
+- PackContext is bound to exactly one pack instance
+- PackContext represents execution authority on behalf of that pack
+
+Any code executing with a PackContext:
+- executes under the authority of that pack
+- is subject to that pack’s visibility, permissions, and policy
+
+Passing ctx to other code is an explicit delegation of authority.
+The delegating pack is fully responsible for all actions performed using its ctx.
+
+
+===============================================================================
+6. ACTIVATION ENTRYPOINT (LOCKED)
+===============================================================================
+
+The sole activation entrypoint is:
 
     onLoad(ctx)
 
 Rules:
-- called exactly once per pack instance
-- ctx is always provided
-- execution order is managed by PackManager
+- onLoad(ctx) is called exactly once per pack instance
+- it is called only by Turnix
+- ctx is always provided by Turnix
 - failure aborts activation of that pack
 
-Future entrypoints may be added, but:
-- all must be Turnix-invoked
-- none may be implicit
+No other function, construct, or mechanism may activate a pack.
+
+Future activation entrypoints, if introduced, MUST follow the same rules and
+MUST be explicitly defined by Turnix.
 
 
 ===============================================================================
-6. RUNTIME ENTRIES SEMANTICS (LOCKED)
+7. ACTIVATION VS EXECUTION (CRITICAL DISTINCTION)
 ===============================================================================
 
-Manifest:
-    runtimes.<language>.entry
-    runtimes.<language>.entries
+Activation and execution are distinct concepts.
 
-Behavior:
-- entry:
-    - treated as primary activation unit
-    - loaded and onLoad(ctx) invoked
-- entries:
-    - loadable modules
-    - NOT auto-executed
-    - author-controlled usage only
+Activation:
+- is a one-time state transition
+- establishes PackContext authority
+- is performed exclusively via onLoad(ctx)
 
-Turnix never calls onLoad(ctx) on entries.
+Execution:
+- occurs only AFTER activation
+- may happen multiple times
+- occurs only when invoked by Turnix orchestration
+
+No execution mechanism activates a pack.
+No execution mechanism substitutes for onLoad(ctx).
 
 
 ===============================================================================
-7. ACTIVATION ORDER (LOCKED RESPONSIBILITY)
+8. IMMEDIATE EXECUTION & LANGUAGE CONSTRUCTS (LOCKED)
 ===============================================================================
 
-Activation order is determined by:
+Turnix acknowledges that some languages permit immediate execution constructs,
+including but not limited to:
+
+- Immediately Invoked Function Expressions (IIFE)
+- module-level executable statements
+- top-level side effects
+
+RULES (LOCKED):
+
+- Turnix does NOT rely on, endorse, or coordinate immediate execution.
+- Immediate execution is DISCOURAGED in all pack code.
+- Immediate execution does NOT activate a pack.
+- Immediate execution runs outside Turnix orchestration.
+
+Code that executes immediately on import:
+- runs without PackContext authority
+- is not tracked by Turnix
+- is outside lifecycle guarantees
+- is not recoverable or abortable by Turnix
+
+Such execution may technically occur, but its behavior is unsupported.
+All consequences are the responsibility of the pack author.
+
+These rules apply uniformly to:
+- Python
+- JavaScript
+- and any future supported language
+
+
+===============================================================================
+9. RUNTIME ENTRIES — JAVASCRIPT SEMANTICS (LOCKED)
+===============================================================================
+
+Manifest fields:
+
+    runtimes.javascript.entry
+    runtimes.javascript.entries
+
+Semantics:
+
+runtimes.javascript.entry:
+- imported by Turnix during activation
+- onLoad(ctx) is invoked from this module
+- successful completion marks JavaScript activation success
+
+runtimes.javascript.entries:
+- are never imported automatically by Turnix
+- never receive ctx automatically
+- never have onLoad(ctx) invoked
+- are treated strictly as library modules
+
+
+===============================================================================
+10. ENTRY VS ENTRIES — EXECUTION RULES (LOCKED)
+===============================================================================
+
+If runtimes.javascript.entry exists:
+- it MUST be executed before any pack code relies on activation state
+- entries MUST NOT assume activation unless enforced by caller logic
+
+If runtimes.javascript.entry does NOT exist:
+- no JavaScript code is executed during activation
+- the pack may still activate based on non-JS activation requirements
+
+If only runtimes.javascript.entries exist:
+- the pack is treated as a library-only pack
+- all modules MUST be activation-independent
+
+
+===============================================================================
+11. ACTIVATION-INDEPENDENT CODE (LOCKED)
+===============================================================================
+
+Activation-independent code:
+
+- MUST NOT assume its own pack is activated
+- MUST NOT implicitly depend on ctx
+- MUST NOT perform Turnix side effects at module top level
+
+Such code MAY:
+- accept a PackContext explicitly as a parameter
+- execute under the authority of the caller pack providing that ctx
+
+In this case:
+- the caller pack owns responsibility
+- authority is that of the caller, not the provider
+
+If code requires activation-specific state of its own pack,
+it MUST be initialized from that pack’s activation entry.
+
+
+===============================================================================
+12. ACTIVATION ORDER (LOCKED RESPONSIBILITY)
+===============================================================================
+
+Activation order is determined exclusively by:
 - PackManager
-- dependency constraints
+- resolved dependencies
 - visibility constraints
 - user policy
-- category ordering (future)
+- future category-based ordering
 
-Mods MUST NOT assume:
-- another pack is activated unless required
-- a service exists unless requested
-- a capability exists unless granted
+Packs MUST NOT assume:
+- another pack is activated unless explicitly required
+- services exist unless explicitly requested
+- capabilities are available unless explicitly granted
 
 
 ===============================================================================
-8. ensureActivated vs resolvePack (LOCKED DISTINCTION)
+13. resolvePack vs ensureActivated (LOCKED)
 ===============================================================================
 
 resolvePack(selector):
 - resolves metadata
 - performs visibility checks
-- returns PackDescriptor / ResolvedPack
-- does NOT activate
+- does NOT execute code
+- does NOT activate packs
 
 ensureActivated(selector):
-- ensures pack is activated
-- returns activation result metadata (optional)
+- ensures the target pack is activated
+- may trigger activation
+- returns activation metadata only
+- activation metadata is immutable and diagnostic
 - does NOT return code or symbols
-- may throw NotActivatedError
-
-If activation fails due to unresolved dependencies or other errors, it
-results in a `HardError`. Any missing or delayed dependency or policy block
-must trigger an activation failure, surfaced to the user via the UI.
+- may raise NotActivatedError
 
 
 ===============================================================================
-9. NOT ACTIVATED ERROR (LOCKED BEHAVIOR)
+14. ORCHESTRATED EXECUTION GUARANTEE (LOCKED)
 ===============================================================================
 
-NotActivatedError indicates:
-- activation ordering failure
-- missing or delayed dependency
-- policy block
+Turnix guarantees behavior ONLY for execution invoked and tracked through
+Turnix orchestration.
 
-Guidance (LOCKED):
-- mods SHOULD NOT catch this error
-- swallowing it hides system-level failure
-- user should be notified via UI
+Guaranteed execution pathways include:
 
-Handling is allowed only with explicit intent.
+- activation entrypoints (onLoad(ctx))
+- capability calls dispatched by Turnix
+- Turnix event dispatch (handlers registered through Turnix)
+- Turnix-managed schedulers (future)
+- IoManager-mediated operations (including streaming reads/writes)
 
-Activation failure leaves the pack in an **errored-out** state, where it will
-not be activated until the issue is resolved.
+Execution started outside Turnix orchestration is UNSUPPORTED.
 
-
-===============================================================================
-10. BACKGROUND EXECUTION GUARANTEE (LOCKED)
-===============================================================================
-
-Turnix guarantees behavior ONLY for work that is:
-
-- triggered via:
-    - activation entrypoints
-    - capability calls
-    - Turnix-managed schedulers (future)
-
-Work started outside Turnix orchestration:
-- timers
-- threads
-- raw async loops
-
-is UNSUPPORTED and UNSAFE.
+Unsupported execution may still run, but Turnix provides:
+- no guarantees
+- no tracing
+- no lifecycle control
+- no cleanup
 
 
 ===============================================================================
-11. JAVASCRIPT EXECUTION MODEL (LOCKED)
+15. ACTIVATION FAILURE & NotActivatedError (LOCKED)
 ===============================================================================
 
-JavaScript specifics:
+Activation failure indicates a system-level error, including:
+- unresolved dependency
+- policy violation
+- visibility violation
+- activation entry failure
 
-- ESM evaluation occurs on import
-- side effects are allowed but discouraged
-- all Turnix interaction must happen in onLoad(ctx)
-- premature imports are author responsibility
+LOCKED:
+- activation failure leaves the pack inactive
+- dependent activations MUST NOT proceed
+- failure MUST be surfaced to the user
+- silent fallback is forbidden
 
-Turnix does not sandbox JS execution.
-
-
-===============================================================================
-12. PYTHON EXECUTION MODEL (LOCKED)
-===============================================================================
-
-Python specifics:
-
-- module top-level executes on importlib load
-- only local imports allowed
-- cross-pack behavior must go through ctx
-
-onLoad(ctx) is the sole supported lifecycle hook.
+NotActivatedError SHOULD NOT be swallowed by pack code.
+Doing so hides orchestration failure.
 
 
 ===============================================================================
-13. ACTIVATION FAILURE HANDLING (LOCKED)
-===============================================================================
-
-If activation fails:
-
-- pack is marked failed
-- dependent activations must not proceed
-- UI must surface failure
-- failure context must be preserved
-
-Silent fallback is forbidden.
-
-If a dependency fails, it should prevent all subsequent dependent activations
-and trigger `NotActivatedError`. This failure must be clearly reported to the user.
-
-
-===============================================================================
-14. ACTIVATION RESULT (LOCKED)
+16. ACTIVATION RESULT (LOCKED)
 ===============================================================================
 
 ensureActivated may return:
@@ -249,33 +342,36 @@ ensureActivated may return:
 - warnings
 - diagnostics
 
-It must NOT return:
-- code objects
-- namespaces
+It MUST NOT return:
+- executable code
+- module namespaces
 - runtime symbols
 
 
 ===============================================================================
-15. OPEN QUESTIONS
+17. OPEN QUESTIONS
 ===============================================================================
 
 OPEN:
-- category-based activation ordering (ioProviders, compilers, etc.)
-- partial activation / staged activation
+- category-based activation ordering
+- staged or phased activation
 - activation retry semantics
 
 
 ===============================================================================
-16. LOCKED SUMMARY
+18. LOCKED SUMMARY
 ===============================================================================
 
 LOCKED:
-- activation is explicit
-- code runs only after activation
-- entry vs entries semantics
-- ensureActivated ≠ import
-- background work unsupported
-- failures are visible and fatal to pack
+- activation is explicit and pack-level
+- onLoad(ctx) is the ONLY activation entrypoint
+- activation establishes execution authority
+- execution is allowed only after activation
+- immediate execution (IIFE, top-level code) is unsupported
+- execution requires Turnix orchestration
+- PackContext defines authority
+- activation ≠ import ≠ resolution
+- failures are visible and abort activation
 
 OPEN:
 - ordering refinements only
@@ -287,6 +383,6 @@ END OF DESIGN AREA 8
 
 --- doc-meta ---
 docId: docs/design/08 ACTIVATION, LIFECYCLE & EXECUTION GUARANTEES.txt
-rev: 3
-git: a55d2c2
+rev: 4
+git: d1b3b4b
 ---------------
