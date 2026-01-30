@@ -26,6 +26,73 @@ Set-Location $root
 function Section($t){ Write-Host "`n=== $t ===" -ForegroundColor Cyan }
 function Get-Sha256([string]$path){ (Get-FileHash -Algorithm SHA256 -Path $path).Hash.ToUpper() }
 
+function Ensure-GitHooks() {
+  Section "Git hooks setup"
+
+  $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+  if (-not $gitCmd) { throw "git not found in PATH. Install Git for Windows or fix PATH." }
+
+  $inRepo = $false
+  try {
+    & git rev-parse --show-toplevel | Out-Null
+    $inRepo = $true
+  } catch {
+    $inRepo = $false
+  }
+  if (-not $inRepo) { throw "Not inside a git repository (or .git missing). Run setup from repo root." }
+
+  $hooksDir = Join-Path $root ".githooks"
+  $hookFile = Join-Path $hooksDir "pre-commit"
+
+  if (-not (Test-Path $hooksDir)) { throw "Missing $hooksDir. Create it and commit it." }
+  if (-not (Test-Path $hookFile)) { throw "Missing hook: $hookFile (expected pre-commit hook script)." }
+
+  # Ensure Git uses the repo-tracked hooks directory.
+  & git config core.hooksPath ".githooks"
+
+  $configured = (& git config --get core.hooksPath).Trim()
+  if ($configured -ne ".githooks") {
+    throw "Failed to set core.hooksPath. Expected '.githooks', got '$configured'."
+  }
+
+  Write-Host "Configured core.hooksPath = .githooks"
+
+  # Sanity check: confirm git sees the hook file via the configured path.
+  $expected = (Resolve-Path $hookFile).Path
+  $hookSeen = (Join-Path (Join-Path $root $configured) "pre-commit")
+  $hookSeen = (Resolve-Path $hookSeen).Path
+
+  if ($hookSeen -ne $expected) {
+    throw "Hook path mismatch. Expected '$expected' but Git hooksPath resolves to '$hookSeen'."
+  }
+
+  Write-Host "Hook present: $hookSeen"
+
+  # Line ending check: pre-commit should be LF, not CRLF.
+  # Git Bash can handle CRLF sometimes, but it is a common source of subtle failures.
+  # We fail loudly to avoid a future "why is hook not running" situation.
+  $raw = [IO.File]::ReadAllBytes($hookFile)
+  $hasCrLf = $false
+  for ($i = 0; $i -lt ($raw.Length - 1); $i++) {
+    if ($raw[$i] -eq 13 -and $raw[$i + 1] -eq 10) { $hasCrLf = $true; break }
+  }
+  if ($hasCrLf) {
+    throw "Hook file has CRLF line endings: $hookFile`n" +
+          "Convert it to LF (Unix) line endings. Example:`n" +
+          "  - In VS Code: set 'End of Line Sequence' to LF, save`n" +
+          "  - Or run in Git Bash: sed -i 's/\r$//' .githooks/pre-commit"
+  }
+
+  # Basic shebang check
+  $firstLine = (Get-Content $hookFile -TotalCount 1 -ErrorAction Stop).TrimEnd()
+  if ($firstLine -notmatch '^#!/usr/bin/env bash$') {
+    throw "Hook file first line must be '#!/usr/bin/env bash' but got: '$firstLine'`n" +
+          "Fix the shebang to ensure Git Bash runs it reliably."
+  }
+
+  Write-Host "Hook line endings OK (LF) and shebang OK."
+}
+
 function Normalize-EmbeddablePth([string]$embedDir) {
   $pth = Join-Path $embedDir "python312._pth"
   if (!(Test-Path $pth)) {
@@ -130,8 +197,7 @@ function Ensure-Pip([string]$pyExe, [string]$getPipRelPath){
 
   $env:PATH = "$scripts;$env:PATH"
 
-  $ensureOk = $true
-  try { & $pyExe -m ensurepip -q 2>$null | Out-Null } catch { $ensureOk = $false }
+  try { & $pyExe -m ensurepip -q 2>$null | Out-Null } catch { }
 
   if (!(Test-Path $pipExe)) {
     if (Test-Path $getPipRelPath) {
@@ -223,6 +289,7 @@ function Link-NodeModules(){
 }
 
 # --- Run ---
+Ensure-GitHooks
 $py = Ensure-LocalPython
 Ensure-Pip -pyExe $py -getPipRelPath (Join-Path $root $GetPipRel)
 Pip-Step   -pyExe $py -req $Requirements

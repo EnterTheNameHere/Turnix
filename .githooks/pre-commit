@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+# Turnix docs metadata pre-commit hook (hardened, docs/ only, auto docId)
+#
+# Scope:
+# - Only staged files under docs/** with .md/.txt/.json5
+#
+# Guarantees for each targeted staged file:
+# - Exactly one doc-meta block: lines exactly
+#     --- doc-meta ---
+#     ...
+#     ---------------
+# - rev and git keys exist exactly once inside the doc-meta block
+# - docId key is auto-inserted if missing, or auto-corrected if present (must not appear more than once)
+# - docId is always set to the repo-relative file path (forward slashes)
+# - rev is computed as (commit-count touching file) + 1 when the file is staged with changes
+# - git is the last commit hash that touched the file before this commit (0000000 for new files)
+#
+# Safety / anti-footgun:
+# - Refuses to run if a file has partially staged changes (staged + unstaged), because the hook edits and re-stages
+#   the whole file and would destroy partial staging.
+# - Refuses ambiguous/malformed doc-meta blocks
+# - Refuses if required tools are missing
+
+set -euo pipefail
+IFS=$'\n\t'
+
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+needCmd() {
+  command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
+}
+
+needCmd git
+needCmd python3
+
+repoRoot="$(git rev-parse --show-toplevel 2>/dev/null)" || die "Not a git repository"
+cd "$repoRoot"
+
+isDocsFileWanted() {
+  local f="$1"
+  case "$f" in
+    docs/*.md|docs/*.txt|docs/*.json5|docs/*/*.md|docs/*/*.txt|docs/*/*.json5|docs/*/*/*.md|docs/*/*/*.txt|docs/*/*/*.json5|docs/*/*/*/*.md|docs/*/*/*/*.txt|docs/*/*/*/*.json5|docs/*/*/*/*/*.md|docs/*/*/*/*/*.txt|docs/*/*/*/*/*.json5)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# Read staged files under docs/ (NUL-delimited to handle spaces)
+mapfile -d '' stagedFiles < <(git diff --cached --name-only -z --diff-filter=ACMR -- docs/)
+
+if [ "${#stagedFiles[@]}" -eq 0 ]; then
+  exit 0
+fi
+
+targets=()
+for f in "${stagedFiles[@]}"; do
+  if isDocsFileWanted "$f"; then
+    targets+=("$f")
+  fi
+done
+
+if [ "${#targets[@]}" -eq 0 ]; then
+  exit 0
+fi
+
+# Guard: refuse partial staging for any target file (staged + unstaged)
+for f in "${targets[@]}"; do
+  [ -f "$f" ] || die "Staged path not found in working tree: $f"
+
+  # If no staged changes, skip checks.
+  if git diff --cached --quiet -- "$f"; then
+    continue
+  fi
+
+  # If unstaged changes also exist, refuse.
+  if ! git diff --quiet -- "$f"; then
+    die "Partial staging detected for '$f'.
+This hook edits and re-stages the whole file (would destroy partial staging).
+Fix: stage the whole file (git add '$f') or stash/restore unstaged parts, then commit."
+  fi
+done
+
+for f in "${targets[@]}"; do
+  # Only update if the file has staged changes.
+  if git diff --cached --quiet -- "$f"; then
+    continue
+  fi
+
+  # Last hash touching the file BEFORE this commit (short). If none (new file), use 0000000.
+  lastHash="$(git log -n 1 --follow --pretty=format:%h -- "$f" 2>/dev/null || true)"
+  if [ -z "$lastHash" ]; then
+    lastHash="0000000"
+  fi
+
+  # rev base = number of commits touching the file so far (before this commit). New file => 0.
+  revBase="$(git log --follow --pretty=format:%H -- "$f" 2>/dev/null | wc -l | tr -d ' ')"
+  newRev=$((revBase + 1))
+
+  # docId is always the repo-relative path (forward slashes)
+  expectedDocId="$f"
+
+  python3 - "$f" "$expectedDocId" "$newRev" "$lastHash" <<'PY'
+import sys
+
+path = sys.argv[1]
+expected_doc_id = sys.argv[2]
+new_rev = int(sys.argv[3])
+new_hash = sys.argv[4]
+
+start_marker = "--- doc-meta ---"
+end_marker = "---------------"
+
+with open(path, "r", encoding="utf-8", newline="") as f:
+  text = f.read()
+
+# Preserve newline style where possible
+newline = "\n"
+if "\r\n" in text and "\n" in text:
+  newline = "\r\n"
+
+lines = text.replace("\r\n", "\n").split("\n")
+
+# Find exactly one start marker
+starts = [i for i, line in enumerate(lines) if line == start_marker]
+if len(starts) != 1:
+  raise SystemExit(
+    f"ERROR: {path}: expected exactly one '{start_marker}' line, found {len(starts)}"
+  )
+s = starts[0]
+
+# Find end marker after start
+try:
+  e = next(i for i in range(s + 1, len(lines)) if lines[i] == end_marker)
+except StopIteration:
+  raise SystemExit(f"ERROR: {path}: missing end marker '{end_marker}' after doc-meta start")
+
+block = lines[s + 1 : e]
+
+def find_key_lines(key: str):
+  prefix = f"{key}:"
+  return [idx for idx, line in enumerate(block) if line.startswith(prefix)]
+
+# rev + git must exist exactly once
+for key in ("rev", "git"):
+  hits = find_key_lines(key)
+  if len(hits) != 1:
+    raise SystemExit(
+      f"ERROR: {path}: expected exactly one '{key}:' line in doc-meta block, found {len(hits)}"
+    )
+
+rev_idx = find_key_lines("rev")[0]
+git_idx = find_key_lines("git")[0]
+
+# docId: allow 0 or 1, but not >1; auto-insert or auto-correct.
+doc_hits = find_key_lines("docId")
+if len(doc_hits) > 1:
+  raise SystemExit(
+    f"ERROR: {path}: expected at most one 'docId:' line in doc-meta block, found {len(doc_hits)}"
+  )
+
+if len(doc_hits) == 0:
+  # Insert docId at the top of the block (right after the start marker)
+  block.insert(0, f"docId: {expected_doc_id}")
+else:
+  doc_idx = doc_hits[0]
+  block[doc_idx] = f"docId: {expected_doc_id}"
+
+# Update rev / git
+block[rev_idx] = f"rev: {new_rev}"
+block[git_idx] = f"git: {new_hash}"
+
+new_lines = lines[: s + 1] + block + lines[e:]
+new_text = newline.join(new_lines)
+
+with open(path, "w", encoding="utf-8", newline="") as f:
+  f.write(new_text)
+PY
+
+  git add -- "$f"
+done
+
+exit 0
