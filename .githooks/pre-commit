@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# Turnix docs metadata pre-commit hook (hardened, docs/ only, auto docId)
+# Turnix docs metadata pre-commit hook (hardened, docs/ only, auto docId, repo-local Python)
 #
 # Scope:
 # - Only staged files under docs/** with .md/.txt/.json5
+#
+# Requires:
+# - Git
+# - Repo-local embeddable Python at ./python-embedded/python.exe
 #
 # Guarantees for each targeted staged file:
 # - Exactly one doc-meta block: lines exactly
@@ -34,10 +38,20 @@ needCmd() {
 }
 
 needCmd git
-needCmd python3
 
 repoRoot="$(git rev-parse --show-toplevel 2>/dev/null)" || die "Not a git repository"
 cd "$repoRoot"
+
+PY_EXE="$repoRoot/python-embedded/python.exe"
+if [ ! -f "$PY_EXE" ]; then
+  die "Missing repo-local Python: $PY_EXE
+Run setup.ps1 (from repo root) to install the embeddable runtime, then retry the commit."
+fi
+
+# Basic sanity check that it runs
+if ! "$PY_EXE" -c "import sys; assert sys.version_info >= (3, 12)" >/dev/null 2>&1; then
+  die "Repo-local Python exists but failed to run or is not Python 3.12+: $PY_EXE"
+fi
 
 isDocsFileWanted() {
   local f="$1"
@@ -105,7 +119,7 @@ for f in "${targets[@]}"; do
   # docId is always the repo-relative path (forward slashes)
   expectedDocId="$f"
 
-  python3 - "$f" "$expectedDocId" "$newRev" "$lastHash" <<'PY'
+  "$PY_EXE" - "$f" "$expectedDocId" "$newRev" "$lastHash" <<'PY'
 import sys
 
 path = sys.argv[1]
