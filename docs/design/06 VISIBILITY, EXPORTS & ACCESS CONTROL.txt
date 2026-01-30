@@ -4,61 +4,74 @@ DESIGN AREA 6 — VISIBILITY, EXPORTS & ACCESS CONTROL
 
 Status:
 -------
-CORE — this area defines *who can see what*, *who may reference what*,
-and *what is considered reachable* across the pack graph.
+CORE — this area defines who is allowed to reference whom across the pack
+graph, and where strict reachability boundaries exist.
 
-This area is intentionally conservative.
-Visibility is resolved by Turnix, not by authors at runtime.
+Visibility is enforced by Turnix.
+Visibility is NOT negotiated at runtime by packs.
+Visibility violations are hard failures.
 
 
 ===============================================================================
 1. CORE CONCEPT
 ===============================================================================
 
-Visibility answers a single question:
+Visibility answers exactly one question:
 
-    “Is pack A allowed to reference pack B?”
+    “Is pack A permitted to reference pack B?”
 
-This is NOT about:
-- activation
-- loading order
-- dependency preference
-- version matching
+Visibility is about reachability and permission only.
 
-It is purely about *reachability*.
+Visibility does NOT:
+- activate packs
+- load code
+- imply execution order
+- imply dependency satisfaction
+- imply version compatibility
+- grant runtime capabilities or services
 
 
 ===============================================================================
 2. VISIBILITY VS DEPENDENCY (LOCKED DISTINCTION)
 ===============================================================================
 
-- Dependency declaration ("packs") expresses *need*
-- Visibility expresses *permission*
+Dependency declaration expresses REQUIREMENT.
+Visibility expresses PERMISSION.
 
-A pack may depend on another pack and still not be allowed
-to see it if visibility rules block it.
+A pack may:
+- depend on another pack
+- but still be forbidden from referencing it
+
+Consequences:
+- a dependency can fail due to visibility
+- visibility failure is a hard dependency failure
+- no silent bypass is allowed
 
 Visibility is evaluated:
-- during resolution
-- at runtime resolve attempts
-- never lazily bypassed
+- during dependency resolution
+- during resolvePack calls
+- during turnixImport resolution
+
+Visibility is NEVER bypassed or deferred.
 
 
 ===============================================================================
-3. PACK VISIBILITY TYPES
+3. VISIBILITY DOMAINS
 ===============================================================================
 
-Each pack has two visibility notions:
+Each pack participates in two visibility domains:
 
 A) Local visibility
 B) Global visibility
 
 Local visibility:
-- scope-limited
-- applies inside a parent pack tree
+- applies within a parent pack tree
+- controls parent–child relationships
 
 Global visibility:
-- whether the pack is reachable from outside its parent chain
+- determines whether a pack is reachable from outside its parent chain
+
+These domains are computed statically and enforced dynamically.
 
 
 ===============================================================================
@@ -70,29 +83,35 @@ Manifest field:
 
 Rules:
 - If declared:
-    - use as-is
+    - value is used as-is
 - If omitted:
-    default depends on pack kind:
+    default is derived from pack kind:
         contentPack → public
-        appPack, viewPack, mod, savePack → private
+        appPack → private
+        viewPack → private
+        mod → private
+        savePack → private
 
-This value is *local visibility intent* only.
+Declared visibility expresses LOCAL visibility intent only.
+It does not directly grant global reachability.
 
 
 ===============================================================================
-5. exportNestedPacks (LOCKED SEMANTICS)
+5. exportNestedPacks (LOCKED)
 ===============================================================================
 
 Manifest field:
-    exportNestedPacks:
-        - true
-        - false
-        - [<localId>, <localId>, ...]
+    exportNestedPacks
+
+Allowed values:
+- true
+- false
+- list of localId strings
 
 Purpose:
-- controls which child packs become globally visible
+- controls which direct child packs may become globally visible
 
-Rules:
+Semantics:
 - true:
     all direct children may be exported
 - false:
@@ -101,9 +120,10 @@ Rules:
     only listed direct children are exported
 
 Constraints (LOCKED):
-- Only direct children allowed
-- "parent.child" is INVALID
-- Non-existent localId → error
+- only direct children may be listed
+- dotted identifiers are forbidden
+- non-existent localId is an error
+- exportNestedPacks never applies transitively
 
 
 ===============================================================================
@@ -118,7 +138,7 @@ Rules:
 If pack has no parent:
     globalVisibility = declared visibility
 
-If pack has parent:
+If pack has a parent:
     if declared visibility == private:
         globalVisibility = private
     else if parent.exportNestedPacks == false:
@@ -126,15 +146,17 @@ If pack has parent:
     else if parent.exportNestedPacks == true:
         globalVisibility = public
     else if parent.exportNestedPacks is list:
-        globalVisibility = public only if localId in list
+        globalVisibility = public only if localId is listed
         otherwise private
+
+Global visibility is immutable after computation.
 
 
 ===============================================================================
 7. importPacksFromParent (LOCKED)
 ===============================================================================
 
-Final name (LOCKED):
+Manifest field:
     importPacksFromParent
 
 Purpose:
@@ -143,150 +165,189 @@ Purpose:
 Allowed values:
 - false
 - true
-- [<selector>, <selector>, ...]
+- list of selectors
 
 Semantics:
 - false:
-    sees nothing from parent automatically
+    no parent packs are visible
 - true:
-    sees all parent-visible children
+    all globally-visible parent packs are visible
 - list:
-    sees only explicitly listed selectors
+    only explicitly listed packs are visible
 
 
 ===============================================================================
-8. importPacksFromParent LIST SEMANTICS (LOCKED)
+8. importPacksFromParent LIST RESOLUTION
 ===============================================================================
 
-Selectors in list:
-- relative to parent
-- resolved as:
-    parent.packTreeId + "." + selector
+Selectors in the list are resolved relative to the parent pack.
 
-Example:
-    parent = main-menu
-    selector = ui.Button
-    resolves to:
-        main-menu.ui.Button
+Resolution rule:
+    resolvedId = parent.packTreeId + "." + selector
 
 Constraints:
-- selectors must refer to descendants of parent
-- cannot escape parent tree
-- invalid selector → error
+- selectors must refer to descendants of the parent
+- escaping the parent tree is forbidden
+- invalid resolution is a hard error
+
+Visibility checks still apply after resolution.
 
 
 ===============================================================================
-9. VIEWPACK DEFAULTS (LOCKED)
+9. DEFAULT IMPORT BEHAVIOR (LOCKED)
 ===============================================================================
 
-Default importPacksFromParent:
+Default importPacksFromParent value:
 - viewPack → false
-- all other kinds → true
+- all other pack kinds → true
 
 Rationale:
-- views must not accidentally inherit UI-affecting mods
-- app-level mods should not leak into independent views
+- views must remain isolated
+- UI contamination must be explicit
+- app-level behavior must not leak silently
 
 
 ===============================================================================
-10. CAPABILITIES & VISIBILITY (LOCKED SEPARATION)
+10. VISIBILITY AND RESOLUTION SOURCES (LOCKED INVARIANT)
 ===============================================================================
 
-Capabilities:
-- are NOT inherited
-- are NOT exported via pack visibility
-- must be explicitly requested and granted
+Visibility evaluation ALWAYS occurs AFTER resolution source determination.
 
-Even if pack is visible:
-- its capabilities are NOT implicitly usable
+Rules:
+- resolution source is determined first
+- only packs within that source are considered visible
+- packs outside the active source are NOT visible, regardless of
+  declared or global visibility
 
-
-===============================================================================
-11. SERVICES & VISIBILITY (LOCKED SEPARATION)
-===============================================================================
-
-Services:
-- are runtime objects
-- registered during activation
-- accessed via ctx.services
-
-Visibility rules DO NOT grant access to services.
-Only service registration + request does.
+Consequences:
+- savePack-scoped resolution ignores global packs
+- global resolution ignores savePack copies
+- visibility never bridges resolution sources
 
 
 ===============================================================================
-12. SAVE PACK VISIBILITY (LOCKED BASE RULE)
+11. SAVE PACK VISIBILITY (LOCKED)
 ===============================================================================
 
-savePack:
-- never globally visible
-- visible only within its AppInstance
-- copied packs inside save:
-    - visible only within that save context
+savePack has a dedicated visibility domain.
 
-Exact rules deferred to savePack activation spec.
+Rules:
+- savePack is never globally visible
+- savePack is visible only within its AppInstance
+- copied packs inside a savePack:
+    - are visible only within that save
+    - are not visible globally
+    - shadow global packs of the same identity
+
+If a pack is resolved from a savePack:
+- global packs with the same identity are NOT visible
+- global registry MUST NOT be consulted
 
 
 ===============================================================================
-13. VISIBILITY EVALUATION TIME
+12. CAPABILITIES & VISIBILITY (LOCKED SEPARATION)
 ===============================================================================
 
-Visibility is checked:
-- during resolvePack
-- during runtime resolve attempts
+Capabilities are NOT governed by visibility.
+
+Rules:
+- visibility does not grant capabilities
+- capabilities are not inherited
+- capability access requires explicit request and grant
+
+A visible pack may still be unable to use another pack’s capabilities.
+
+
+===============================================================================
+13. SERVICES & VISIBILITY (LOCKED SEPARATION)
+===============================================================================
+
+Services are runtime objects.
+
+Rules:
+- services are registered during activation
+- services are accessed via ctx.services
+- visibility does not grant service access
+
+Service access requires:
+- service registration
+- explicit lookup
+
+
+===============================================================================
+14. VISIBILITY EVALUATION TIMING
+===============================================================================
+
+Visibility checks occur:
+- during dependency resolution
+- during resolvePack calls
 - during turnixImport resolution
 
-Visibility is NOT pre-expanded into full adjacency matrix.
-It is evaluated dynamically between requester and target.
+Visibility is evaluated dynamically between:
+- requesting pack
+- target pack
+
+Visibility is NOT pre-expanded into a static graph.
 
 
 ===============================================================================
-14. FAILURE MODE (LOCKED)
+15. FAILURE MODE (LOCKED)
 ===============================================================================
 
-If visibility check fails:
-- raise PermissionDeniedError
-- include:
-    - requester pack
-    - target pack
-    - rule violated
+If a visibility check fails:
+- PermissionDeniedError is raised
+- error MUST include:
+    - requesting pack identity
+    - target pack identity
+    - violated rule
 
-No silent fallback.
-No probing allowed.
+Visibility failure during dependency resolution:
+- constitutes a hard dependency failure
+- aborts resolution for that request
+
+No fallback is permitted.
+No probing is permitted.
 
 
 ===============================================================================
-15. CASE SENSITIVITY (LOCKED)
+16. CASE SENSITIVITY (LOCKED)
 ===============================================================================
 
-All pack ids, selectors, and visibility checks are:
+All identifiers used in visibility checks are:
 - case-sensitive
 - byte-exact
 
-
-===============================================================================
-16. OPEN QUESTIONS
-===============================================================================
-
-OPEN:
-- visualization tooling for visibility graphs
-- UI explanation phrasing for visibility denial
-- future “friend packs” concept (explicit bilateral visibility)
+No normalization is performed.
 
 
 ===============================================================================
-17. LOCKED SUMMARY
+17. OPEN QUESTIONS
+===============================================================================
+
+OPEN (NON-SEMANTIC):
+- tooling for visualizing visibility graphs
+- UI phrasing for visibility denial explanations
+
+OUT OF SCOPE (FUTURE):
+- explicit bilateral visibility agreements ("friend packs")
+
+
+===============================================================================
+18. LOCKED SUMMARY
 ===============================================================================
 
 LOCKED:
-- declared visibility + exportNestedPacks define global visibility
+- visibility is permission, not preference
+- dependency does not override visibility
+- declared visibility + exportNestedPacks define reachability
 - importPacksFromParent controls downward visibility
-- no implicit capability/service inheritance
-- dynamic evaluation, not precomputed
-- strict failure on violation
+- resolution source restricts visibility domain
+- savePack visibility is strictly isolated
+- no implicit capability or service inheritance
+- dynamic evaluation with hard failure on violation
 
 OPEN:
-- UX tooling only, not semantics
+- tooling and UX only, not semantics
 
 
 ===============================================================================
@@ -295,6 +356,6 @@ END OF DESIGN AREA 6
 
 --- doc-meta ---
 docId: docs/design/06 VISIBILITY, EXPORTS & ACCESS CONTROL.txt
-rev: 3
-git: 8225391
+rev: 4
+git: d1b3b4b
 ---------------
