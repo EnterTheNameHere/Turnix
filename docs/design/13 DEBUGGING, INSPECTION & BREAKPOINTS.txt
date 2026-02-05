@@ -80,6 +80,70 @@ Triggers:
 - optional value predicate
 
 
+-------------------------------------------------------------------------------
+3.2.1 MEMORY BREAKPOINTS & TRANSACTIONAL STAGING (LOCKED)
+-------------------------------------------------------------------------------
+
+Memory breakpoints observe *state transitions*, not storage mechanics.
+
+Definitions:
+
+- A "staged mutation" is a write into a transactional layer.
+- A "committed mutation" is a write that becomes visible in a committed
+  (authoritative) memory layer after a successful commit.
+- An "aborted mutation" is a staged mutation discarded during abort.
+
+Rules (LOCKED):
+
+1) By default, memory breakpoints MUST trigger on committed mutations only.
+
+   - Writing into a transactional layer MUST NOT trigger a memory breakpoint.
+   - Aborting a transaction MUST NOT trigger a memory breakpoint.
+   - Only the moment a value becomes authoritative is breakpoint-visible.
+
+2) Memory breakpoints MAY be configured to observe staged mutations explicitly.
+
+   If enabled, a breakpoint MAY specify:
+   - observeStaged = true
+   - observeCommitted = true | false
+
+   When observeStaged is enabled:
+   - breakpoint triggers when a staged value is written
+   - breakpoint context MUST include:
+       - transaction id
+       - staging layer identity
+       - parent layer identity
+       - commit eligibility status
+
+3) Memory breakpoints MUST distinguish mutation phase.
+
+   Every breakpoint hit MUST be classified as exactly one of:
+   - StagedMutation
+   - CommittedMutation
+
+4) Breakpoints MUST NOT fire twice for the same mutation.
+
+   If a breakpoint observes staged mutations and committed mutations:
+   - the staged hit and committed hit are distinct events
+   - both MUST be trace-linked to the same mutation lineage
+
+5) Nested transactions inherit breakpoint semantics.
+
+   - A breakpoint defined on a parent session applies to all child
+     transactions unless explicitly scoped otherwise.
+   - A child transaction commit into a parent transaction MUST NOT be
+     treated as a committed mutation.
+
+   Only the outermost transaction commit produces authoritative mutation
+   events.
+
+Rationale:
+
+This model preserves determinism, prevents breakpoint storms during
+speculative execution, and aligns debugging semantics with Turnix’s
+transactional authority model (see DESIGN AREA 15).
+
+
 3.3 Capability Breakpoints
 --------------------------
 Pause before or after a capability call.
@@ -359,6 +423,7 @@ OPEN:
 LOCKED:
 - semantic breakpoints
 - pipeline, memory, and capability breakpoints
+- transaction-aware breakpoint semantics
 - read-only inspection by default
 - controlled mutation with tracing
 - debugger usable while Turnix is running
@@ -378,6 +443,6 @@ END OF DESIGN AREA 13
 
 --- doc-meta ---
 docId: docs/design/13 DEBUGGING, INSPECTION & BREAKPOINTS.txt
-rev: 3
-git: d1b3b4b
+rev: 4
+git: 4b75e10
 ---------------

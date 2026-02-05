@@ -1,0 +1,461 @@
+===============================================================================
+DESIGN AREA 15 — MEMORY, STATE, LAYERS & JOURNALING
+===============================================================================
+
+Status:
+-------
+CORE — this area defines how runtime state exists, how it is layered,
+how mutations are staged and committed, how persistence is handled,
+and how historical evidence is recorded without compromising determinism
+or safety.
+
+
+===============================================================================
+1. CORE INTENT
+===============================================================================
+
+This design area defines:
+
+- what "memory" means in Turnix
+- how state is layered, staged, and committed
+- how persistence relates to runtime memory
+- how historical evidence is recorded
+- what is authoritative state vs observational data
+- how inspection, rollback, and audit are supported
+
+Turnix MUST:
+- preserve deterministic state evolution
+- support rollback and reproducibility
+- allow inspection and auditing
+- avoid unbounded growth or silent data loss
+
+Turnix MUST NOT:
+- conflate state with logs or traces
+- require infinite retention
+- make silent pruning decisions
+
+
+===============================================================================
+2. MEMORY VS STATE (LOCKED)
+===============================================================================
+
+Memory is the runtime representation of values.
+State is the authoritative, persisted outcome of committed memory.
+
+Memory MAY exist without persistence.
+Persistence MAY exist without memory being resident.
+
+Only committed state is authoritative.
+
+
+===============================================================================
+3. MEMORY LAYERS (LOCKED)
+===============================================================================
+
+Turnix manages memory as a set of layered stores.
+
+Layers represent:
+- authority
+- scope
+- lifetime
+- rollback boundaries
+
+Examples of layers include (non-exhaustive):
+- kernel-global
+- appInstance
+- session
+- view
+- transactional
+
+There is NO single "global memory object".
+Each layer contains real values.
+
+
+===============================================================================
+4. TRANSACTIONAL STAGING MODEL (LOCKED)
+===============================================================================
+
+A transactional layer is a temporary memory layer created to stage mutations.
+
+Properties:
+- overlays one or more parent layers
+- captures all writes during its lifetime
+- allows reads from parent layers
+- is resolved only by commit or abort
+
+Primary usage:
+- pipeline execution
+- capability calls with mutation
+- debugger-initiated staging
+
+On commit:
+- values propagate to their target authoritative layers
+
+On abort:
+- all staged mutations are discarded deterministically
+
+
+===============================================================================
+5. NESTED PIPELINE RUNS & TRANSACTION STACKING (LOCKED)
+===============================================================================
+
+If a pipeline run creates or enters another session (a child session) while
+an enclosing pipeline run is active, the child session MUST inherit the
+enclosing transactional view.
+
+Effective read/write stack:
+
+    kernel layer
+    appInstance layer
+    parent session layer
+    parent transaction layer (txnParent)
+    child transaction layer  (txnChild)
+
+Rules (LOCKED):
+- Reads resolve first-match from txnChild downward.
+- Writes always target txnChild.
+- Committing txnChild propagates its writes into txnParent.
+- No child transaction may commit directly into committed layers while an
+  enclosing transaction exists.
+- Only the outermost transaction commit may mutate committed layers.
+
+This prevents lost updates and desynchronization between pipeline runs.
+
+
+===============================================================================
+6. COMMIT, ABORT & DETERMINISM (LOCKED)
+===============================================================================
+
+A transaction MUST end in exactly one outcome:
+- commit
+- abort
+
+Partial propagation is forbidden.
+
+Commit and abort:
+- are atomic
+- are trace-backed
+- preserve rollback guarantees
+
+
+===============================================================================
+7. COMMIT CONFLICT DETECTION (LOCKED)
+===============================================================================
+
+Each transaction records, per key, the base revision id visible at the time
+the key was first read or first written within that transaction.
+
+When committing into committed layers:
+- if the committed layer's latest revision id differs from the recorded base
+  revision id, the commit is in conflict and MUST fail deterministically.
+
+No silent merge, no last-write-wins, and no heuristic reconciliation is allowed.
+Any override requires explicit user or policy decision (DA-14).
+
+
+===============================================================================
+8. ORCHESTRATION CONCURRENCY MODEL (LOCKED)
+===============================================================================
+
+Turnix orchestrates execution in a deterministic single-lane model.
+
+Within a given AppInstance, Turnix MUST NOT execute multiple orchestration
+units concurrently.
+
+Orchestration units include (non-exhaustive):
+- pipeline stage callbacks
+- capability handlers
+- memory/config mutation requests
+- debugger-initiated mutations
+
+Awaited I/O or model calls may suspend the current unit, but MUST NOT allow
+another unit that can mutate the same AppInstance state to run concurrently
+unless an explicit concurrency mode is enabled by the kernel.
+
+Work started outside Turnix orchestration is outside Turnix guarantees.
+Any mutation MUST re-enter through orchestration boundaries.
+
+
+===============================================================================
+9. PERSISTENCE MODEL (LOCKED)
+===============================================================================
+
+Persistence is protection against loss, not the definition of state.
+
+Rules:
+- any committed value MAY be persisted
+- persistence is handled exclusively by Turnix
+- persistence is asynchronous but ordered
+- failure to persist MUST be trace-visible
+
+Persistence does not imply:
+- immediate disk residency
+- exclusive in-memory presence
+- unlimited retention
+
+
+===============================================================================
+10. STATIC DATA & MUTATION INTENT (LOCKED)
+===============================================================================
+
+Static data is data provided by:
+- packs
+- configuration
+- bundled resources
+
+Static data is read-only by default.
+
+When a mutation is attempted on static data, intent MUST be explicit:
+
+A) Patch
+   - original key remains authoritative
+   - patch is applied on each read
+   - patch is persisted as overlay data
+
+B) Copy
+   - a new key is created
+   - data is copied and modified
+   - original remains unchanged
+
+This decision MAY require user interaction (DA-14).
+
+
+===============================================================================
+11. REVISIONS & STATE GARBAGE COLLECTION (LOCKED)
+===============================================================================
+
+Committed state values MAY have revisions.
+
+Revisions exist to support:
+- rollback
+- auditing
+- debugging
+
+Revision retention is policy-driven.
+
+Garbage collection MAY remove:
+- old revisions
+- unreachable historical states
+
+Garbage collection MUST NOT:
+- remove data required to reconstruct current committed state
+- occur silently
+- violate rollback guarantees
+
+
+===============================================================================
+12. JOURNAL — OBSERVATIONAL EVIDENCE (LOCKED)
+===============================================================================
+
+The journal records observational evidence of system activity.
+
+Journal is:
+- append-only
+- non-authoritative
+- non-blocking
+- trace-adjacent
+
+Examples:
+- raw user input attempts
+- raw assistant output (including aborted streams)
+- intermediate pipeline artifacts
+- debugging captures
+
+Journal data is NOT state.
+Journal data is NOT required for correctness.
+
+
+===============================================================================
+13. JOURNAL RETENTION MODEL (LOCKED)
+===============================================================================
+
+Journal retention follows a best-effort model.
+
+LOCKED MEANING:
+- If retention limits are exceeded (size, age, quota), older journal entries
+  MAY be pruned.
+- If storage is unavailable or under severe pressure, journal writes MAY be
+  dropped rather than blocking execution.
+- Any pruning or dropped writes MUST be trace-visible and classified.
+
+Journal loss MUST NOT affect correctness.
+
+
+===============================================================================
+14. JOURNAL RETENTION POLICIES (LOCKED)
+===============================================================================
+
+Retention policies MAY include:
+- maximum total size
+- maximum age
+- per-appInstance quota
+- per-save quota
+- per-category quota
+
+Policies are:
+- explicit
+- inspectable
+- configurable
+
+Journal garbage collection:
+- occurs incrementally
+- emits trace events (what, why, policy)
+- MUST NOT block execution
+
+
+===============================================================================
+15. JOURNAL RETENTION CLASSES (LOCKED)
+===============================================================================
+
+Journal entries MAY declare a retention class:
+
+A) ephemeral
+   - safe to prune aggressively
+   - streaming chunks, transient outputs
+
+B) bounded
+   - retained per policy
+   - suitable for post-mortem analysis
+
+C) pinned
+   - pruned only by explicit user action
+   - SHOULD be used sparingly
+
+Retention class affects garbage collection only.
+
+
+===============================================================================
+16. MEMORY INSPECTOR & TOOLING SEMANTICS (LOCKED STATE CONTRACT)
+===============================================================================
+
+The Memory Inspector is a tooling surface for observing and manipulating
+Turnix-managed memory.
+
+This section defines memory and state semantics only.
+Breakpoint triggering, pause behavior, and execution control are governed
+by DA-13.
+
+Capabilities:
+- enumerate memory layers and their composition
+- inspect values with:
+    - origin layer
+    - revision identifiers
+    - transactional visibility
+- view active transactional stacks
+- inspect staged vs committed values
+
+Transactional interaction:
+- Inspector-initiated edits MUST occur inside a transaction.
+- The inspector MAY create its own temporary transactional overlay.
+- Inspector transactions follow the same commit / abort rules as runtime
+  transactions.
+- Inspector commits propagate only one layer downward.
+- Inspector actions MUST NOT finalize committed state mid-pipeline.
+
+Undo / redo semantics:
+- Undo operates on committed revisions.
+- Redo is inspector-local, ephemeral, and non-authoritative.
+- Redo history MUST be discarded deterministically when a new revision
+  is committed.
+
+Breakpoints and change observation:
+- Memory breakpoints MAY observe:
+    - committed layer mutations
+    - transactional layer mutations
+- Whether transactional changes trigger breakpoints is defined by DA-13
+  breakpoint configuration and safe-point rules.
+
+Debugger-initiated mutation:
+- Obeys all ownership, permission, and scope rules.
+- Is trace-labeled as tooling activity.
+- May be staged and applied at safe points (DA-13).
+
+
+===============================================================================
+17. SNAPSHOT & EXPORT SEMANTICS (OPEN)
+===============================================================================
+
+Snapshots capture committed state at a point in time.
+
+Properties:
+- snapshots include committed layers only
+- revisions and journal inclusion are policy-driven
+- snapshots are immutable once created
+
+Export formats MAY include:
+- full SavePack snapshot
+- minimal audit bundle
+- state-only export (no journal)
+- journal-only export (no state)
+
+Snapshots are used for:
+- rollback
+- audit
+- reproduction
+- offline inspection
+
+
+===============================================================================
+18. CROSS-SESSION AUDIT WORKFLOWS (OPEN)
+===============================================================================
+
+Audit workflows operate across:
+- traces
+- committed state
+- revisions
+- journal entries
+
+Audit MAY support:
+- reconstructing decision chains
+- inspecting state evolution over time
+- correlating journal evidence with trace events
+
+Audit workflows MUST NOT:
+- mutate state
+- require journal completeness
+- assume replayability
+
+
+===============================================================================
+19. WHAT IS EXPLICITLY NOT REQUIRED
+===============================================================================
+
+Turnix does NOT require:
+- infinite history
+- journal-backed replay
+- journal-backed determinism
+- journal-backed recovery
+- concurrency-first execution
+
+
+===============================================================================
+20. LOCKED SUMMARY
+===============================================================================
+
+LOCKED:
+- layered memory model
+- transactional staging
+- deterministic commit / abort
+- nested transaction stacking
+- commit conflict detection
+- single-lane AppInstance orchestration
+- persistence as protection, not truth
+- journal as best-effort evidence
+- explicit, trace-visible retention and pruning
+- inspector-bound, transactional tooling mutation
+
+OPEN:
+- tooling UX refinements
+- snapshot and export formats
+- cross-session audit workflows
+
+
+===============================================================================
+END OF DESIGN AREA 15
+===============================================================================
+
+--- doc-meta ---
+docId: docs/design/15 MEMORY, STATE, LAYERS & JOURNALING.txt
+rev: 1
+git: 0000000
+---------------
