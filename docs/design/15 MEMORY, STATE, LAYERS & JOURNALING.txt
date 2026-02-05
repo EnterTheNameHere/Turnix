@@ -372,52 +372,193 @@ Debugger-initiated mutation:
 
 
 ===============================================================================
-17. SNAPSHOT & EXPORT SEMANTICS (OPEN)
+17. TRACE DIRECTED ACYCLIC GRAPH (TRACE DAG) (LOCKED)
 ===============================================================================
 
-Snapshots capture committed state at a point in time.
+Turnix tracing is modeled as a Trace Directed Acyclic Graph (trace DAG).
 
-Properties:
-- snapshots include committed layers only
-- revisions and journal inclusion are policy-driven
-- snapshots are immutable once created
+Definition:
+- A trace DAG is a directed acyclic graph of trace events.
+- Each trace event MAY reference zero or more parent trace events.
+- Cycles are forbidden.
 
-Export formats MAY include:
-- full SavePack snapshot
-- minimal audit bundle
-- state-only export (no journal)
-- journal-only export (no state)
+Trace DAG properties:
+- Causality is explicit.
+- Temporal order is NOT authoritative.
+- Multiple parent links are permitted.
+- Absence of a parent link implies independent origin, not simultaneity.
 
-Snapshots are used for:
-- rollback
-- audit
-- reproduction
-- offline inspection
+Trace DAG guarantees:
+- Every decision-producing action MUST emit at least one trace event.
+- Every trace event MUST belong to exactly one trace DAG.
+- Trace DAG identity MUST be stable across export and inspection.
 
+Naming:
+- "Trace Directed Acyclic Graph" is the canonical name.
+- "trace DAG" is the permitted abbreviation.
 
-===============================================================================
-18. CROSS-SESSION AUDIT WORKFLOWS (OPEN)
-===============================================================================
+Trace DAG is authoritative for:
+- causal explanation
+- audit reconstruction
+- debugger correlation
+- policy enforcement provenance
 
-Audit workflows operate across:
-- traces
-- committed state
-- revisions
-- journal entries
-
-Audit MAY support:
-- reconstructing decision chains
-- inspecting state evolution over time
-- correlating journal evidence with trace events
-
-Audit workflows MUST NOT:
-- mutate state
-- require journal completeness
-- assume replayability
+Trace DAG is NOT authoritative for:
+- state reconstruction
+- replay semantics
+- rollback eligibility
 
 
 ===============================================================================
-19. WHAT IS EXPLICITLY NOT REQUIRED
+18. MINIMAL AUDIT BUNDLE (MAB) — CORE DEFINITION (LOCKED)
+===============================================================================
+
+A Minimal Audit Bundle (MAB) is a non-authoritative export artifact intended
+to support audit, explanation, and offline inspection.
+
+Purpose:
+- capture sufficient evidence to explain what happened and why
+- allow external or offline audit
+- preserve causal structure without requiring full state
+
+A MAB is NOT:
+- authoritative state
+- a snapshot
+- replayable
+- sufficient for restoration
+
+
+===============================================================================
+19. MAB CONTENTS (LOCKED)
+===============================================================================
+
+A Minimal Audit Bundle MUST include:
+- one or more trace DAGs
+- all trace events referenced by those DAGs
+- trace metadata required to interpret reason codes
+- stable identifiers for:
+    - appInstance
+    - session(s)
+    - pipeline run(s)
+    - packs involved
+
+A Minimal Audit Bundle MAY include:
+- selected journal entries referenced by trace events
+- selected committed state excerpts (read-only)
+- revision metadata without value payloads
+
+A Minimal Audit Bundle MUST NOT include:
+- authoritative committed state in full
+- transactional layers
+- uncommitted mutations
+- executable code
+- capability implementations
+- secrets or credentials
+
+
+===============================================================================
+20. MAB INTEGRITY & LOSS MODEL (LOCKED)
+===============================================================================
+
+Integrity guarantees:
+- A MAB MUST preserve trace DAG structure exactly.
+- Trace parent-child relationships MUST NOT be altered.
+- Missing data MUST be explicitly marked.
+
+Loss tolerance:
+- A MAB MAY be incomplete.
+- Incompleteness MUST be explicit and trace-visible.
+- Absence of data MUST NOT imply absence of behavior.
+
+A MAB MUST be safe to share for audit purposes under applicable policy.
+
+
+===============================================================================
+21. MAB AND JOURNAL INTERACTION (LOCKED)
+===============================================================================
+
+Journal entries included in a MAB are evidence only.
+
+Rules:
+- Journal inclusion is OPTIONAL.
+- Journal absence MUST NOT invalidate the MAB.
+- Journal entries included MUST retain original retention class metadata.
+
+Journal entries in a MAB:
+- MUST NOT be treated as authoritative state
+- MUST NOT be used for replay or mutation
+- MAY be truncated or redacted per policy
+
+
+===============================================================================
+22. MAB AND MEMORY STATE (LOCKED)
+===============================================================================
+
+State excerpts in a MAB:
+- MUST be explicitly labeled as non-authoritative
+- MUST be read-only
+- MUST include revision identifiers
+
+State excerpts:
+- MAY omit historical revisions
+- MAY omit unrelated keys
+- MUST NOT imply completeness
+
+A MAB MUST NOT be used to mutate or restore state.
+
+
+===============================================================================
+23. MAB CREATION SEMANTICS (LOCKED)
+===============================================================================
+
+MAB creation:
+- MAY occur while Turnix is running
+- MUST NOT pause execution by default
+- MUST NOT block orchestration
+
+MAB creation MUST:
+- operate on committed data only
+- tolerate concurrent activity
+- record any omission caused by pressure or policy
+
+MAB creation failure:
+- MUST emit trace events
+- MUST NOT affect runtime state
+
+
+===============================================================================
+24. MAB NON-GOALS (LOCKED)
+===============================================================================
+
+A Minimal Audit Bundle explicitly does NOT provide:
+
+- determinism guarantees
+- replay capability
+- state restoration
+- debugging time travel
+- completeness guarantees
+
+Any tooling requiring those properties MUST use snapshots or other
+authoritative mechanisms defined elsewhere.
+
+
+===============================================================================
+25. RELATION TO SNAPSHOTS (LOCKED)
+===============================================================================
+
+A MAB and a snapshot serve distinct purposes.
+
+Rules:
+- A snapshot captures authoritative committed state.
+- A MAB captures explanatory evidence.
+- A snapshot MAY include traces.
+- A snapshot MUST NOT depend on MAB semantics.
+
+A MAB MUST NOT be treated as a lightweight snapshot.
+
+
+===============================================================================
+26. WHAT IS EXPLICITLY NOT REQUIRED
 ===============================================================================
 
 Turnix does NOT require:
@@ -426,10 +567,11 @@ Turnix does NOT require:
 - journal-backed determinism
 - journal-backed recovery
 - concurrency-first execution
+- audit completeness guarantees
 
 
 ===============================================================================
-20. LOCKED SUMMARY
+27. LOCKED SUMMARY
 ===============================================================================
 
 LOCKED:
@@ -441,13 +583,14 @@ LOCKED:
 - single-lane AppInstance orchestration
 - persistence as protection, not truth
 - journal as best-effort evidence
-- explicit, trace-visible retention and pruning
-- inspector-bound, transactional tooling mutation
+- inspector-bound transactional mutation
+- trace DAG as causal authority
+- minimal audit bundle semantics
 
 OPEN:
-- tooling UX refinements
-- snapshot and export formats
-- cross-session audit workflows
+- snapshot formats
+- export serialization formats
+- audit tooling UX
 
 
 ===============================================================================
@@ -457,5 +600,5 @@ END OF DESIGN AREA 15
 --- doc-meta ---
 docId: docs/design/15 MEMORY, STATE, LAYERS & JOURNALING.txt
 rev: 1
-git: 0000000
+git: d42d7c8
 ---------------
