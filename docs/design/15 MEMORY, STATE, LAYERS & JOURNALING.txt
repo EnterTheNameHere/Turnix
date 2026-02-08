@@ -372,7 +372,108 @@ Debugger-initiated mutation:
 
 
 ===============================================================================
-17. TRACE DIRECTED ACYCLIC GRAPH (TRACE DAG) (LOCKED)
+17. SNAPSHOTS AND EXPORTS
+===============================================================================
+
+A snapshot captures a point-in-time view of committed state.
+
+LOCKED-IN-INTENT FOR OPEN SECTION:
+- snapshots MUST be derived from committed layers only
+- snapshots MUST NOT include transactional layers
+- snapshot creation MUST be trace-visible
+
+Export is a serialization of snapshot contents for external storage or
+transfer.
+
+Export formats MAY include:
+- full SavePack snapshot
+- state-only export (no journal)
+- journal-only export (no state)
+- minimal audit bundle (defined below)
+
+Snapshots and exports MUST be immutable once created.
+
+
+===============================================================================
+18. ORCHESTRATION UNIT
+===============================================================================
+
+An Orchestration Unit is a kernel-tracked execution unit that is permitted
+to mutate Turnix-managed state within an AppInstance.
+
+Examples (non-exhaustive):
+- a pipeline run, including its stage callbacks
+- a capability handler invocation
+- a debugger-initiated mutation transaction
+- config mutation request processing
+
+Work started outside Turnix orchestration is not an Orchestration Unit until
+it re-enters through Turnix orchestration boundaries.
+
+
+===============================================================================
+19. SNAPSHOT REQUEST MODES
+===============================================================================
+
+Turnix MAY support multiple snapshot request modes.
+
+Mode A: ImmediateCommitted
+
+Meaning:
+- snapshot captures committed layers only
+- snapshot creation MUST NOT wait for quiescence
+- snapshot creation MUST NOT fail due to active Orchestration Units
+- snapshot metadata MUST include whether any Orchestration Unit was active
+
+Mode B: AtQuiescence
+
+Meaning:
+- snapshot is created only when no Orchestration Unit is active for the
+  target AppInstance
+- the request MAY be queued until quiescence is reached
+
+If Mode B is supported, it MUST be policy-bounded as defined below.
+
+
+===============================================================================
+20. ATQUIESCENCE QUEUEING AND POLICY BOUNDS
+===============================================================================
+
+If AtQuiescence is requested while an Orchestration Unit is active:
+
+- Turnix MAY queue the request until quiescence is reached.
+- Turnix MUST emit a trace event at request time indicating the request is
+  pending and not yet satisfied.
+- Turnix MUST emit a trace event when the snapshot is created, or when the
+  request fails.
+
+If queued requests are not persisted, this MUST be explicit:
+- a queued AtQuiescence request MAY be lost on crash or restart
+- loss MUST NOT be silent and MUST be trace-visible before the crash point
+  when possible
+
+AtQuiescence requests MUST be bounded by explicit policy. Policy options:
+
+A) Timeout
+
+- the request MUST fail deterministically after the configured time limit
+  if quiescence is not reached
+
+B) PauseAtSafePoint
+
+- Turnix MAY attempt a deterministic pause at a defined safe point as
+  described in DA-13
+- if safe-point pause cannot be achieved safely, Turnix MUST fail the
+  request with an explicit reason
+
+AtQuiescence MUST NOT:
+- silently wait forever
+- silently cancel in-flight work
+- silently downgrade into ImmediateCommitted without explicit user or policy
+
+
+===============================================================================
+21. TRACE DIRECTED ACYCLIC GRAPH (TRACE DAG) (LOCKED)
 ===============================================================================
 
 Turnix tracing is modeled as a Trace Directed Acyclic Graph (trace DAG).
@@ -410,7 +511,7 @@ Trace DAG is NOT authoritative for:
 
 
 ===============================================================================
-18. MINIMAL AUDIT BUNDLE (MAB) — CORE DEFINITION (LOCKED)
+22. MINIMAL AUDIT BUNDLE (MAB) — CORE DEFINITION (LOCKED)
 ===============================================================================
 
 A Minimal Audit Bundle (MAB) is a non-authoritative export artifact intended
@@ -429,23 +530,30 @@ A MAB is NOT:
 
 
 ===============================================================================
-19. MAB CONTENTS (LOCKED)
+23. MAB CONTENTS (LOCKED)
 ===============================================================================
 
 A Minimal Audit Bundle MUST include:
 - one or more trace DAGs
 - all trace events referenced by those DAGs
 - trace metadata required to interpret reason codes
-- stable identifiers for:
-    - appInstance
-    - session(s)
-    - pipeline run(s)
-    - packs involved
+- enough metadata to correlate trace events to:
+    - AppInstance identity
+    - session identity
+    - Orchestration Unit
+    - snapshot identity (if any)
 
 A Minimal Audit Bundle MAY include:
 - selected journal entries referenced by trace events
 - selected committed state excerpts (read-only)
 - revision metadata without value payloads
+
+A Minimal Audit Bundle MUST NOT require:
+- infinite history
+- journal completeness
+- state replayability
+- mutation capability
+- concurrency-first execution
 
 A Minimal Audit Bundle MUST NOT include:
 - authoritative committed state in full
@@ -455,9 +563,12 @@ A Minimal Audit Bundle MUST NOT include:
 - capability implementations
 - secrets or credentials
 
+If included, journal data in a Minimal Audit Bundle MUST follow journal
+retention rules and MAY be incomplete.
+
 
 ===============================================================================
-20. MAB INTEGRITY & LOSS MODEL (LOCKED)
+24. MAB INTEGRITY & LOSS MODEL (LOCKED)
 ===============================================================================
 
 Integrity guarantees:
@@ -474,7 +585,7 @@ A MAB MUST be safe to share for audit purposes under applicable policy.
 
 
 ===============================================================================
-21. MAB AND JOURNAL INTERACTION (LOCKED)
+25. MAB AND JOURNAL INTERACTION (LOCKED)
 ===============================================================================
 
 Journal entries included in a MAB are evidence only.
@@ -491,7 +602,7 @@ Journal entries in a MAB:
 
 
 ===============================================================================
-22. MAB AND MEMORY STATE (LOCKED)
+26. MAB AND MEMORY STATE (LOCKED)
 ===============================================================================
 
 State excerpts in a MAB:
@@ -508,7 +619,7 @@ A MAB MUST NOT be used to mutate or restore state.
 
 
 ===============================================================================
-23. MAB CREATION SEMANTICS (LOCKED)
+27. MAB CREATION SEMANTICS (LOCKED)
 ===============================================================================
 
 MAB creation:
@@ -527,7 +638,7 @@ MAB creation failure:
 
 
 ===============================================================================
-24. MAB NON-GOALS (LOCKED)
+28. MAB NON-GOALS (LOCKED)
 ===============================================================================
 
 A Minimal Audit Bundle explicitly does NOT provide:
@@ -543,7 +654,7 @@ authoritative mechanisms defined elsewhere.
 
 
 ===============================================================================
-25. RELATION TO SNAPSHOTS (LOCKED)
+29. RELATION TO SNAPSHOTS (LOCKED)
 ===============================================================================
 
 A MAB and a snapshot serve distinct purposes.
@@ -558,7 +669,7 @@ A MAB MUST NOT be treated as a lightweight snapshot.
 
 
 ===============================================================================
-26. WHAT IS EXPLICITLY NOT REQUIRED
+30. WHAT IS EXPLICITLY NOT REQUIRED
 ===============================================================================
 
 Turnix does NOT require:
@@ -571,7 +682,28 @@ Turnix does NOT require:
 
 
 ===============================================================================
-27. LOCKED SUMMARY
+31. CROSS-SESSION AUDIT WORKFLOWS (OPEN)
+===============================================================================
+
+Audit workflows operate across:
+- traces
+- committed state
+- revisions
+- journal entries
+
+Audit MAY support:
+- reconstructing decision chains
+- inspecting state evolution over time
+- correlating journal evidence with trace events
+
+Audit workflows MUST NOT:
+- mutate state
+- require journal completeness
+- assume replayability
+
+
+===============================================================================
+32. LOCKED SUMMARY
 ===============================================================================
 
 LOCKED:
@@ -599,6 +731,6 @@ END OF DESIGN AREA 15
 
 --- doc-meta ---
 docId: docs/design/15 MEMORY, STATE, LAYERS & JOURNALING.txt
-rev: 1
-git: d42d7c8
+rev: 2
+git: 1476cb3
 ---------------
