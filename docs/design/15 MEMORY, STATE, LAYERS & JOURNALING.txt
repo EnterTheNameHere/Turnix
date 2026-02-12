@@ -21,7 +21,11 @@ This design area defines:
 - how persistence relates to runtime memory
 - how historical evidence is recorded
 - what is authoritative state vs observational data
-- how inspection, rollback, and audit are supported
+- what a Trace Directed Acyclic Graph (trace DAG) is
+- what Window, SafePointWindow, AbortedWindow and ActiveWindow are
+- how snapshots and exports relate to SafePointWindows
+- what Minimal Audit Bundle (MAB) is and what it is not
+- what Replay, Resume, and Retry mean in Turnix
 
 Turnix MUST:
 - preserve deterministic state evolution
@@ -36,16 +40,31 @@ Turnix MUST NOT:
 
 
 ===============================================================================
-2. MEMORY VS STATE (LOCKED)
+2. TERMS AND AUTHORITY BOUNDARIES (LOCKED)
 ===============================================================================
 
 Memory is the runtime representation of values.
 State is the authoritative, persisted outcome of committed memory.
 
-Memory MAY exist without persistence.
-Persistence MAY exist without memory being resident.
+Rules (LOCKED):
+- Memory MAY exist without persistence.
+- Persistence MAY exist without memory being resident.
+- Only committed state is authoritative.
 
-Only committed state is authoritative.
+Authority classes (LOCKED):
+
+A) Authoritative
+- committed layers and committed config as captured by a SafePointWindow
+
+B) Non-authoritative
+- transactional staging layers
+- journal contents
+- trace contents
+- Minimal Audit Bundles (MAB)
+- ActiveWindow contents and metadata
+
+Non-authoritative material MAY be used for explanation and audit.
+Non-authoritative material MUST NOT be required for state correctness.
 
 
 ===============================================================================
@@ -67,15 +86,18 @@ Examples of layers include (non-exhaustive):
 - view
 - transactional
 
-There is NO single "global memory object".
-Each layer contains real values.
+Rules (LOCKED):
+- There is NO single "global memory object".
+- Each layer contains real values.
+- Reads resolve according to the active layer stack for the requesting scope.
 
 
 ===============================================================================
-4. TRANSACTIONAL STAGING MODEL (LOCKED)
+4. TRANSACTIONS (LOCKED)
 ===============================================================================
 
-A transactional layer is a temporary memory layer created to stage mutations.
+A transaction is a temporary staging overlay used to record speculative
+mutations before they become authoritative.
 
 Properties:
 - overlays one or more parent layers
@@ -88,16 +110,29 @@ Primary usage:
 - capability calls with mutation
 - debugger-initiated staging
 
+4.1 Commit and abort
+--------------------
+
+Rules (LOCKED):
+- A transaction MUST end in exactly one outcome:
+  - commit
+  - abort
+- Partial propagation is forbidden.
+- Commit and abort:
+  - are atomic
+  - are trace-backed
+  - preserve rollback guarantees
+
 On commit:
-- values propagate to their target authoritative layers
+- values propagate to their target authoritative layers or to a parent
+  transaction, depending on nesting rules
 
 On abort:
 - all staged mutations are discarded deterministically
 
 
-===============================================================================
-5. NESTED PIPELINE RUNS & TRANSACTION STACKING (LOCKED)
-===============================================================================
+4.2 Nested pipeline runs and transaction stacking
+-------------------------------------------------
 
 If a pipeline run creates or enters another session (a child session) while
 an enclosing pipeline run is active, the child session MUST inherit the
@@ -122,25 +157,11 @@ Rules (LOCKED):
 This prevents lost updates and desynchronization between pipeline runs.
 
 
-===============================================================================
-6. COMMIT, ABORT & DETERMINISM (LOCKED)
-===============================================================================
+4.3 Commit into committed layers and conflict detection
+-------------------------------------------------------
 
-A transaction MUST end in exactly one outcome:
-- commit
-- abort
-
-Partial propagation is forbidden.
-
-Commit and abort:
-- are atomic
-- are trace-backed
-- preserve rollback guarantees
-
-
-===============================================================================
-7. COMMIT CONFLICT DETECTION (LOCKED)
-===============================================================================
+Commit conflict detection applies ONLY when a transaction attempts to commit
+into committed layers.
 
 Each transaction records, per key, the base revision id visible at the time
 the key was first read or first written within that transaction.
@@ -149,40 +170,54 @@ When committing into committed layers:
 - if the committed layer's latest revision id differs from the recorded base
   revision id, the commit is in conflict and MUST fail deterministically.
 
-No silent merge, no last-write-wins, and no heuristic reconciliation is allowed.
-Any override requires explicit user or policy decision (DA-14).
+Rules (LOCKED):
+- No silent merge is allowed.
+- No last-write-wins is allowed.
+- No heuristic reconciliation is allowed.
+- Any override requires explicit user or policy decision (DA-14).
+
+Conflict detection MUST NOT be applied to txnChild -> txnParent propagation.
+txnChild -> txnParent propagation is not authoritative mutation.
 
 
 ===============================================================================
-8. ORCHESTRATION CONCURRENCY MODEL (LOCKED)
+5. ORCHESTRATION (LOCKED)
 ===============================================================================
+
+An Orchestration Unit is a kernel-tracked execution unit that is permitted to
+mutate Turnix-managed state within an AppInstance.
+
+Examples (non-exhaustive):
+- a pipeline run, including its stage callbacks
+- a capability handler invocation
+- a debugger-initiated mutation transaction
+- config mutation request processing
+
+Work started outside Turnix orchestration is not an Orchestration Unit until
+it re-enters through Turnix orchestration boundaries.
+
+5.1 Single-lane AppInstance orchestration
+-----------------------------------------
 
 Turnix orchestrates execution in a deterministic single-lane model.
 
-Within a given AppInstance, Turnix MUST NOT execute multiple orchestration
-units concurrently.
-
-Orchestration units include (non-exhaustive):
-- pipeline stage callbacks
-- capability handlers
-- memory/config mutation requests
-- debugger-initiated mutations
-
-Awaited I/O or model calls may suspend the current unit, but MUST NOT allow
-another unit that can mutate the same AppInstance state to run concurrently
-unless an explicit concurrency mode is enabled by the kernel.
-
-Work started outside Turnix orchestration is outside Turnix guarantees.
-Any mutation MUST re-enter through orchestration boundaries.
+Rules (LOCKED):
+- Within a given AppInstance, Turnix MUST NOT execute multiple Orchestration
+  Units concurrently.
+- Awaited input/output or model calls MAY suspend the current unit, but MUST
+  NOT allow another unit that can mutate the same AppInstance state to run
+  concurrently unless an explicit concurrency mode is enabled by the kernel.
+- Work started outside Turnix orchestration is outside Turnix guarantees.
+  Any mutation MUST re-enter through orchestration boundaries.
 
 
 ===============================================================================
-9. PERSISTENCE MODEL (LOCKED)
+6. PERSISTENCE MODEL (LOCKED)
 ===============================================================================
 
 Persistence is protection against loss, not the definition of state.
 
-Rules:
+Rules (LOCKED):
 - any committed value MAY be persisted
 - persistence is handled exclusively by Turnix
 - persistence is asynchronous but ordered
@@ -195,7 +230,7 @@ Persistence does not imply:
 
 
 ===============================================================================
-10. STATIC DATA & MUTATION INTENT (LOCKED)
+7. STATIC DATA AND MUTATION INTENT (LOCKED)
 ===============================================================================
 
 Static data is data provided by:
@@ -221,7 +256,7 @@ This decision MAY require user interaction (DA-14).
 
 
 ===============================================================================
-11. REVISIONS & STATE GARBAGE COLLECTION (LOCKED)
+8. REVISIONS AND STATE GARBAGE COLLECTION (LOCKED)
 ===============================================================================
 
 Committed state values MAY have revisions.
@@ -244,7 +279,7 @@ Garbage collection MUST NOT:
 
 
 ===============================================================================
-12. JOURNAL — OBSERVATIONAL EVIDENCE (LOCKED)
+9. JOURNAL (LOCKED)
 ===============================================================================
 
 The journal records observational evidence of system activity.
@@ -261,13 +296,12 @@ Examples:
 - intermediate pipeline artifacts
 - debugging captures
 
-Journal data is NOT state.
-Journal data is NOT required for correctness.
+Rules (LOCKED):
+- Journal data is NOT state.
+- Journal data is NOT required for correctness.
 
-
-===============================================================================
-13. JOURNAL RETENTION MODEL (LOCKED)
-===============================================================================
+9.1 Journal retention model
+---------------------------
 
 Journal retention follows a best-effort model.
 
@@ -280,10 +314,8 @@ LOCKED MEANING:
 
 Journal loss MUST NOT affect correctness.
 
-
-===============================================================================
-14. JOURNAL RETENTION POLICIES (LOCKED)
-===============================================================================
+9.2 Journal retention policies
+------------------------------
 
 Retention policies MAY include:
 - maximum total size
@@ -302,10 +334,8 @@ Journal garbage collection:
 - emits trace events (what, why, policy)
 - MUST NOT block execution
 
-
-===============================================================================
-15. JOURNAL RETENTION CLASSES (LOCKED)
-===============================================================================
+9.3 Journal retention classes
+-----------------------------
 
 Journal entries MAY declare a retention class:
 
@@ -319,13 +349,410 @@ B) bounded
 
 C) pinned
    - pruned only by explicit user action
-   - SHOULD be used sparingly
+   - intended for rare use
 
 Retention class affects garbage collection only.
 
 
 ===============================================================================
-16. MEMORY INSPECTOR & TOOLING SEMANTICS (LOCKED STATE CONTRACT)
+10. TRACE DIRECTED ACYCLIC GRAPH (TRACE DAG) (LOCKED)
+===============================================================================
+
+Turnix tracing is modeled as a Trace Directed Acyclic Graph (trace DAG).
+
+Definition:
+- A trace DAG is a directed acyclic graph of trace events.
+- Each trace event MAY reference zero or more parent trace events.
+- Cycles are forbidden.
+
+Trace DAG properties:
+- Causality is explicit.
+- Temporal order is NOT authoritative.
+- Multiple parent links are permitted.
+- Absence of a parent link implies independent origin, not simultaneity.
+
+Trace DAG guarantees:
+- Every decision-producing action MUST emit at least one trace event.
+- Every trace event MUST belong to exactly one trace DAG.
+- Trace DAG identity MUST be stable across export and inspection.
+
+Naming:
+- "Trace Directed Acyclic Graph" is the canonical name.
+- "trace DAG" is the permitted abbreviation.
+
+Trace DAG is authoritative for:
+- causal explanation
+- audit reconstruction
+- debugger correlation
+- policy enforcement provenance
+
+Trace DAG is NOT authoritative for:
+- state reconstruction
+- replay semantics
+- rollback eligibility
+
+
+===============================================================================
+11. WINDOWS AND SAFEPOINTWINDOWS (LOCKED)
+===============================================================================
+
+An AppInstance maintains an ordered sequence of Windows.
+
+A Window is a bounded segment of runtime history and evidence.
+
+A Window is exactly one of:
+- SafePointWindow
+- AbortedWindow
+- ActiveWindow
+
+Exactly one ActiveWindow MAY exist per AppInstance.
+ActiveWindow, if it exists, MUST be the last Window in the sequence.
+
+11.1 SafePointWindow
+--------------------
+
+A SafePointWindow is an authoritative committed boundary.
+
+A SafePointWindow MUST satisfy:
+- all state mutations included are committed
+- no transactional layer state is included
+- the SafePointWindow is restorable deterministically
+- the SafePointWindow is trace-correlated and explainable via the trace DAG
+
+A SafePointWindow MUST contain:
+- committed layers and committed config (authoritative)
+- trace DAG material sufficient to identify the SafePointWindow and its scope
+
+A SafePointWindow MUST NOT contain:
+- transactional layer contents
+
+A SafePointWindow MAY contain:
+- revision history (policy-driven)
+- journal material (policy-driven)
+- additional trace/journal not required for correctness (policy-driven)
+
+A SafePointWindow MUST have:
+- safePointId (stable identity)
+
+Retention and garbage collection:
+- trace/journal/revisions within a SafePointWindow MAY be truncated or removed
+  per explicit policy
+- at least one authoritative value per committed key MUST remain sufficient to
+  restore the SafePointWindow deterministically
+
+11.2 ActiveWindow
+-----------------
+
+ActiveWindow is the current in-flight region after the last SafePointWindow.
+
+ActiveWindow MUST contain:
+- trace DAG events emitted after the last SafePointWindow
+- journal entries produced after the last SafePointWindow
+- metadata about active Orchestration Units sufficient for diagnosis
+- transactional staging layers and in-flight transactional state
+
+Rules (LOCKED):
+- ActiveWindow MUST be treated as non-authoritative.
+- ActiveWindow MAY be discarded during recovery.
+
+Immutability rule (pressure handling) (LOCKED):
+- ActiveWindow trace and journal MUST NOT be pruned or garbage collected.
+- If storage pressure occurs:
+  - journal writes MAY be dropped (as already defined) but the drop MUST be
+    trace-visible and classified
+  - trace events MUST still record the fact of omission
+
+11.3 AbortedWindow
+------------------
+
+An AbortedWindow is a finalized ActiveWindow that did NOT produce committed
+state changes.
+
+An AbortedWindow MUST contain:
+- trace DAG events describing what happened post-previous SafePointWindow
+- a finalization event identifying the abort outcome and reason category
+
+An AbortedWindow MAY contain:
+- journal evidence (policy-driven)
+
+An AbortedWindow MUST NOT contain:
+- committed layers/config changes
+- transactional layer contents
+- claims of authority
+
+An AbortedWindow MUST have:
+- abortedWindowId (stable identity)
+
+Retention and garbage collection (LOCKED):
+- AbortedWindow trace/journal MAY be truncated or removed per explicit policy
+- if an AbortedWindow is retained (not fully removed), it MUST retain enough
+  trace meaning to explain:
+  - that it was aborted (not committed)
+  - why it was aborted (reason category and causal links)
+- an AbortedWindow MAY be fully removed only if policy permits and at least
+  one later SafePointWindow exists OR the engine explicitly accepts loss of
+  that audit region
+
+11.4 Finalization rules
+-----------------------
+
+ActiveWindow MUST be finalized as exactly one of:
+- SafePointWindow (commit path)
+- AbortedWindow (abort/fail path)
+
+Finalizing ActiveWindow into SafePointWindow (LOCKED):
+- requires that all applicable transactions are resolved (committed or aborted)
+- produces a SafePointWindow with a new safePointId
+- produces a trace event SafePointCreationSucceeded
+
+Finalizing ActiveWindow into AbortedWindow (LOCKED):
+- occurs when in-flight work concludes without producing a new SafePointWindow
+  and committed state remains as the last SafePointWindow
+- produces a trace event ActiveWindowFinalizedAborted with reason category
+
+Finalization MUST NOT produce partial artifacts.
+
+11.5 Ordered list representation
+--------------------------------
+
+The Window sequence can be represented as an ordered list.
+
+Rules (LOCKED):
+- SafePointWindow has safePointId
+- AbortedWindow has abortedWindowId
+- ordering is explicit (sequence index)
+- ActiveWindow does not require an id because it is always last, unique, and
+  mutable-in-progress
+
+11.6 SafePointWindow creation request modes
+-------------------------------------------
+
+Turnix MAY support multiple SafePointWindow creation request modes.
+
+Mode A: ImmediateCommitted
+
+Meaning:
+- creation MUST NOT wait for quiescence
+- if an eligible SafePointWindow can be created immediately, it is created
+- if a SafePointWindow cannot be created immediately, the request fails
+  deterministically with explicit reason
+
+Mode B: AtQuiescence
+
+Meaning:
+- creation is attempted only when no Orchestration Unit is active for the
+  target AppInstance
+- the request MAY be queued until quiescence is reached
+
+If Mode B is supported, it MUST be policy-bounded as defined below.
+
+11.7 AtQuiescence queueing and policy bounds
+--------------------------------------------
+
+If AtQuiescence is requested while an Orchestration Unit is active:
+
+- Turnix MAY queue the request until quiescence is reached.
+- Turnix MUST emit a trace event at request time indicating the request is
+  queued and not yet satisfied.
+- Turnix MUST emit a trace event when creation succeeds, fails, times out,
+  or is cancelled.
+
+If queued requests are not persisted, this MUST be explicit:
+- a queued AtQuiescence request MAY be lost on crash or restart
+- loss MUST NOT be silent and MUST be trace-visible before the crash point
+  when possible
+
+AtQuiescence requests MUST be bounded by explicit policy. Policy options:
+
+A) Timeout
+- the request MUST fail deterministically after the configured time limit
+  if quiescence is not reached
+
+B) PauseAtSafePoint
+- Turnix MAY attempt a deterministic pause at a defined safe point as
+  described in DA-13
+- if safe-point pause cannot be achieved safely, Turnix MUST fail the request
+  with an explicit reason
+
+AtQuiescence MUST NOT:
+- silently wait forever
+- silently cancel in-flight work
+- silently downgrade into ImmediateCommitted without explicit user or policy
+
+11.8 Trace DAG correlation rules
+--------------------------------
+
+The trace DAG records decisions and causality.
+
+SafePointWindow correlation rules (LOCKED):
+- Each SafePointWindow MUST have a trace DAG event identifying it.
+- The trace DAG MUST identify:
+  - safePointId
+  - the committed scope(s) it covers
+  - the reason it was created
+  - whether it includes revision/journal material per policy
+
+The trace DAG MUST distinguish:
+- events that contributed to committed state at the SafePointWindow
+- events that occurred after the SafePointWindow (ActiveWindow events)
+
+This distinction MUST NOT rely on timestamps alone.
+
+11.9 SafePointWindow creation events
+------------------------------------
+
+Turnix MUST emit trace DAG events for:
+- SafePointWindow creation request
+- SafePointWindow creation start
+- SafePointWindow creation success
+- SafePointWindow creation failure
+- SafePointWindow creation cancellation (policy-driven)
+
+SafePointWindow creation failure MUST NOT create partial artifacts.
+SafePointWindow creation cancellation MUST be explicit and trace-visible.
+
+11.10 Authority and determinism boundary
+----------------------------------------
+
+SafePointWindow guarantees (LOCKED):
+- determinism of committed state restoration
+- ability to reconstruct which committed values exist and why
+- committed state does not depend on journal completeness
+- committed state does not depend on non-committed transactions
+
+ActiveWindow non-guarantees (LOCKED):
+- no deterministic replay of in-flight work
+- no deterministic reproduction of external side effects
+- no deterministic ordering after restart beyond SafePointWindow restoration
+
+If a crash occurs within the ActiveWindow (LOCKED):
+- the system MAY discard all ActiveWindow activity
+- the system MAY attempt to resume, but MUST treat resumption as new work
+- any such attempt MUST be explicit and trace-visible
+
+
+===============================================================================
+12. SNAPSHOTS AND EXPORTS (OPEN WITH LOCKED CONSTRAINTS)
+===============================================================================
+
+A snapshot is a serialized representation of exactly one SafePointWindow.
+
+Locked constraints within this open section:
+- A snapshot MUST represent committed state only.
+- A snapshot MUST exclude transactional layer contents.
+- A snapshot MUST be internally consistent and restorable.
+- Snapshots and exports MUST be immutable once created.
+
+A snapshot MUST serialize:
+- safePointId
+- committed layers and committed config belonging to that SafePointWindow
+
+A snapshot MAY include (policy-driven):
+- revisions
+- journal entries
+- trace material associated with the SafePointWindow
+- Minimal Audit Bundle material (defined below)
+
+Export is a serialization of snapshot contents for external storage or 
+transfer.
+
+Rules:
+- Export MUST NOT add authority.
+- Export MUST NOT include transactional layer contents.
+
+
+===============================================================================
+13. MINIMAL AUDIT BUNDLE (MAB) (LOCKED)
+===============================================================================
+
+A Minimal Audit Bundle (MAB) is a non-authoritative export artifact intended to
+support audit, explanation, and offline inspection.
+
+Purpose:
+- capture sufficient evidence to explain what happened and why
+- allow external or offline audit
+- preserve causal structure without requiring full state
+
+A MAB is NOT:
+- authoritative state
+- a snapshot
+- replayable
+- sufficient for restoration
+
+13.1 MAB required contents
+--------------------------
+
+A Minimal Audit Bundle MUST include:
+- one or more trace DAGs
+- all trace events referenced by those DAGs
+- trace metadata required to interpret reason codes
+- enough metadata to correlate trace events to:
+  - AppInstance identity
+  - session identity
+  - Orchestration Unit identity (if applicable)
+  - safePointId and snapshot identity (if any)
+
+A Minimal Audit Bundle MUST NOT include:
+- authoritative committed state in full
+- transactional layers
+- uncommitted mutations
+- executable code
+- capability implementations
+- secrets or credentials
+
+13.2 MAB optional contents
+--------------------------
+
+A Minimal Audit Bundle MAY include:
+- selected journal entries referenced by trace events
+- selected committed state excerpts (read-only)
+- revision metadata without value payloads
+
+If included, journal material:
+- MUST preserve journal metadata (including retention class)
+- MAY be incomplete, truncated, or redacted per explicit policy
+
+If included, state excerpts:
+- MUST be labeled non-authoritative
+- MUST be read-only
+- MUST include revision identifiers
+- MUST NOT imply completeness
+
+13.3 MAB integrity and loss model
+---------------------------------
+
+Integrity guarantees (LOCKED):
+- A MAB MUST preserve trace DAG structure exactly.
+- Trace parent-child relationships MUST NOT be altered.
+- Missing data MUST be explicitly marked.
+
+Loss tolerance (LOCKED):
+- A MAB MAY be incomplete.
+- Incompleteness MUST be explicit.
+- Absence of data MUST NOT imply absence of behavior.
+
+MAB creation failure (LOCKED):
+- MUST emit trace events
+- MUST NOT affect runtime state
+
+MAB creation (LOCKED):
+- MAY occur while Turnix is running
+- MUST NOT pause execution by default
+- MUST NOT block orchestration
+
+13.4 MAB non-goals
+------------------
+
+A Minimal Audit Bundle explicitly does NOT provide:
+- determinism guarantees
+- replay capability
+- state restoration
+- debugging time travel
+- completeness guarantees
+
+
+===============================================================================
+14. MEMORY INSPECTOR & TOOLING SEMANTICS (LOCKED STATE CONTRACT)
 ===============================================================================
 
 The Memory Inspector is a tooling surface for observing and manipulating
@@ -372,317 +799,47 @@ Debugger-initiated mutation:
 
 
 ===============================================================================
-17. SNAPSHOTS AND EXPORTS
+15. REPLAY, RESUME, AND RETRY (LOCKED)
 ===============================================================================
 
-A snapshot captures a point-in-time view of committed state.
+Replay is deterministic reconstruction of a SafePointWindow state and its
+causal story.
 
-LOCKED-IN-INTENT FOR OPEN SECTION:
-- snapshots MUST be derived from committed layers only
-- snapshots MUST NOT include transactional layers
-- snapshot creation MUST be trace-visible
+Replay in Turnix means:
+- restore committed state at a SafePointWindow
+- inspect or step through trace DAG events that produced it
 
-Export is a serialization of snapshot contents for external storage or
-transfer.
+Replay MUST NOT:
+- imply re-running external effects
+- imply deterministically reproducing the ActiveWindow
 
-Export formats MAY include:
-- full SavePack snapshot
-- state-only export (no journal)
-- journal-only export (no state)
-- minimal audit bundle (defined below)
+Resume is the attempt to continue execution after restoring a SafePointWindow.
 
-Snapshots and exports MUST be immutable once created.
+Resume MAY involve:
+- re-running orchestration units that were in-flight
+- retrying external calls
+- abandoning in-flight work and starting new work
 
+Rules (LOCKED):
+- Resume is not deterministic in outcome.
+- Resume MUST be explicit and trace-visible.
 
-===============================================================================
-18. ORCHESTRATION UNIT
-===============================================================================
+Retry is a new orchestration attempt for a previously failed or incomplete
+action.
 
-An Orchestration Unit is a kernel-tracked execution unit that is permitted
-to mutate Turnix-managed state within an AppInstance.
+Examples:
+- a model call
+- a network call
+- a file write
 
-Examples (non-exhaustive):
-- a pipeline run, including its stage callbacks
-- a capability handler invocation
-- a debugger-initiated mutation transaction
-- config mutation request processing
-
-Work started outside Turnix orchestration is not an Orchestration Unit until
-it re-enters through Turnix orchestration boundaries.
-
-
-===============================================================================
-19. SNAPSHOT REQUEST MODES
-===============================================================================
-
-Turnix MAY support multiple snapshot request modes.
-
-Mode A: ImmediateCommitted
-
-Meaning:
-- snapshot captures committed layers only
-- snapshot creation MUST NOT wait for quiescence
-- snapshot creation MUST NOT fail due to active Orchestration Units
-- snapshot metadata MUST include whether any Orchestration Unit was active
-
-Mode B: AtQuiescence
-
-Meaning:
-- snapshot is created only when no Orchestration Unit is active for the
-  target AppInstance
-- the request MAY be queued until quiescence is reached
-
-If Mode B is supported, it MUST be policy-bounded as defined below.
+Rules (LOCKED):
+- Retry MUST be modeled as new work.
+- Retry MUST be trace-visible.
+- Retry MUST NOT be implied by replay.
 
 
 ===============================================================================
-20. ATQUIESCENCE QUEUEING AND POLICY BOUNDS
-===============================================================================
-
-If AtQuiescence is requested while an Orchestration Unit is active:
-
-- Turnix MAY queue the request until quiescence is reached.
-- Turnix MUST emit a trace event at request time indicating the request is
-  pending and not yet satisfied.
-- Turnix MUST emit a trace event when the snapshot is created, or when the
-  request fails.
-
-If queued requests are not persisted, this MUST be explicit:
-- a queued AtQuiescence request MAY be lost on crash or restart
-- loss MUST NOT be silent and MUST be trace-visible before the crash point
-  when possible
-
-AtQuiescence requests MUST be bounded by explicit policy. Policy options:
-
-A) Timeout
-
-- the request MUST fail deterministically after the configured time limit
-  if quiescence is not reached
-
-B) PauseAtSafePoint
-
-- Turnix MAY attempt a deterministic pause at a defined safe point as
-  described in DA-13
-- if safe-point pause cannot be achieved safely, Turnix MUST fail the
-  request with an explicit reason
-
-AtQuiescence MUST NOT:
-- silently wait forever
-- silently cancel in-flight work
-- silently downgrade into ImmediateCommitted without explicit user or policy
-
-
-===============================================================================
-21. TRACE DIRECTED ACYCLIC GRAPH (TRACE DAG) (LOCKED)
-===============================================================================
-
-Turnix tracing is modeled as a Trace Directed Acyclic Graph (trace DAG).
-
-Definition:
-- A trace DAG is a directed acyclic graph of trace events.
-- Each trace event MAY reference zero or more parent trace events.
-- Cycles are forbidden.
-
-Trace DAG properties:
-- Causality is explicit.
-- Temporal order is NOT authoritative.
-- Multiple parent links are permitted.
-- Absence of a parent link implies independent origin, not simultaneity.
-
-Trace DAG guarantees:
-- Every decision-producing action MUST emit at least one trace event.
-- Every trace event MUST belong to exactly one trace DAG.
-- Trace DAG identity MUST be stable across export and inspection.
-
-Naming:
-- "Trace Directed Acyclic Graph" is the canonical name.
-- "trace DAG" is the permitted abbreviation.
-
-Trace DAG is authoritative for:
-- causal explanation
-- audit reconstruction
-- debugger correlation
-- policy enforcement provenance
-
-Trace DAG is NOT authoritative for:
-- state reconstruction
-- replay semantics
-- rollback eligibility
-
-
-===============================================================================
-22. MINIMAL AUDIT BUNDLE (MAB) — CORE DEFINITION (LOCKED)
-===============================================================================
-
-A Minimal Audit Bundle (MAB) is a non-authoritative export artifact intended
-to support audit, explanation, and offline inspection.
-
-Purpose:
-- capture sufficient evidence to explain what happened and why
-- allow external or offline audit
-- preserve causal structure without requiring full state
-
-A MAB is NOT:
-- authoritative state
-- a snapshot
-- replayable
-- sufficient for restoration
-
-
-===============================================================================
-23. MAB CONTENTS (LOCKED)
-===============================================================================
-
-A Minimal Audit Bundle MUST include:
-- one or more trace DAGs
-- all trace events referenced by those DAGs
-- trace metadata required to interpret reason codes
-- enough metadata to correlate trace events to:
-    - AppInstance identity
-    - session identity
-    - Orchestration Unit
-    - snapshot identity (if any)
-
-A Minimal Audit Bundle MAY include:
-- selected journal entries referenced by trace events
-- selected committed state excerpts (read-only)
-- revision metadata without value payloads
-
-A Minimal Audit Bundle MUST NOT require:
-- infinite history
-- journal completeness
-- state replayability
-- mutation capability
-- concurrency-first execution
-
-A Minimal Audit Bundle MUST NOT include:
-- authoritative committed state in full
-- transactional layers
-- uncommitted mutations
-- executable code
-- capability implementations
-- secrets or credentials
-
-If included, journal data in a Minimal Audit Bundle MUST follow journal
-retention rules and MAY be incomplete.
-
-
-===============================================================================
-24. MAB INTEGRITY & LOSS MODEL (LOCKED)
-===============================================================================
-
-Integrity guarantees:
-- A MAB MUST preserve trace DAG structure exactly.
-- Trace parent-child relationships MUST NOT be altered.
-- Missing data MUST be explicitly marked.
-
-Loss tolerance:
-- A MAB MAY be incomplete.
-- Incompleteness MUST be explicit and trace-visible.
-- Absence of data MUST NOT imply absence of behavior.
-
-A MAB MUST be safe to share for audit purposes under applicable policy.
-
-
-===============================================================================
-25. MAB AND JOURNAL INTERACTION (LOCKED)
-===============================================================================
-
-Journal entries included in a MAB are evidence only.
-
-Rules:
-- Journal inclusion is OPTIONAL.
-- Journal absence MUST NOT invalidate the MAB.
-- Journal entries included MUST retain original retention class metadata.
-
-Journal entries in a MAB:
-- MUST NOT be treated as authoritative state
-- MUST NOT be used for replay or mutation
-- MAY be truncated or redacted per policy
-
-
-===============================================================================
-26. MAB AND MEMORY STATE (LOCKED)
-===============================================================================
-
-State excerpts in a MAB:
-- MUST be explicitly labeled as non-authoritative
-- MUST be read-only
-- MUST include revision identifiers
-
-State excerpts:
-- MAY omit historical revisions
-- MAY omit unrelated keys
-- MUST NOT imply completeness
-
-A MAB MUST NOT be used to mutate or restore state.
-
-
-===============================================================================
-27. MAB CREATION SEMANTICS (LOCKED)
-===============================================================================
-
-MAB creation:
-- MAY occur while Turnix is running
-- MUST NOT pause execution by default
-- MUST NOT block orchestration
-
-MAB creation MUST:
-- operate on committed data only
-- tolerate concurrent activity
-- record any omission caused by pressure or policy
-
-MAB creation failure:
-- MUST emit trace events
-- MUST NOT affect runtime state
-
-
-===============================================================================
-28. MAB NON-GOALS (LOCKED)
-===============================================================================
-
-A Minimal Audit Bundle explicitly does NOT provide:
-
-- determinism guarantees
-- replay capability
-- state restoration
-- debugging time travel
-- completeness guarantees
-
-Any tooling requiring those properties MUST use snapshots or other
-authoritative mechanisms defined elsewhere.
-
-
-===============================================================================
-29. RELATION TO SNAPSHOTS (LOCKED)
-===============================================================================
-
-A MAB and a snapshot serve distinct purposes.
-
-Rules:
-- A snapshot captures authoritative committed state.
-- A MAB captures explanatory evidence.
-- A snapshot MAY include traces.
-- A snapshot MUST NOT depend on MAB semantics.
-
-A MAB MUST NOT be treated as a lightweight snapshot.
-
-
-===============================================================================
-30. WHAT IS EXPLICITLY NOT REQUIRED
-===============================================================================
-
-Turnix does NOT require:
-- infinite history
-- journal-backed replay
-- journal-backed determinism
-- journal-backed recovery
-- concurrency-first execution
-- audit completeness guarantees
-
-
-===============================================================================
-31. CROSS-SESSION AUDIT WORKFLOWS (OPEN)
+16. CROSS-SESSION AUDIT WORKFLOWS (OPEN)
 ===============================================================================
 
 Audit workflows operate across:
@@ -703,26 +860,41 @@ Audit workflows MUST NOT:
 
 
 ===============================================================================
-32. LOCKED SUMMARY
+17. WHAT IS EXPLICITLY NOT REQUIRED
+===============================================================================
+
+Turnix does NOT require:
+- infinite history
+- journal-backed replay
+- journal-backed determinism
+- journal-backed recovery
+- concurrency-first execution
+- audit completeness guarantees
+
+
+===============================================================================
+18. LOCKED SUMMARY
 ===============================================================================
 
 LOCKED:
+- Memory vs State authority boundary (only committed state is authoritative)
 - layered memory model
-- transactional staging
-- deterministic commit / abort
-- nested transaction stacking
-- commit conflict detection
-- single-lane AppInstance orchestration
+- transactional staging with atomic commit/abort
+- nested transaction stacking for child pipeline runs
+- commit conflict detection for commits into committed layers
+- single-lane AppInstance orchestration with orchestration re-entry boundaries
 - persistence as protection, not truth
-- journal as best-effort evidence
-- inspector-bound transactional mutation
-- trace DAG as causal authority
-- minimal audit bundle semantics
+- journal as best-effort non-authoritative evidence
+- trace DAG as causal authority (not state authority)
+- window model with SafePointWindow, ActiveWindow, AbortedWindow
+- SafePointWindow determinism boundary and ActiveWindow non-guarantees
+- Minimal Audit Bundle non-authoritative semantics and integrity rules
+- Memory Inspector edits via transactions and trace-labeled tooling mutation
+- Replay/Resume/Retry definitions and non-guarantees
 
 OPEN:
-- snapshot formats
-- export serialization formats
-- audit tooling UX
+- snapshot and export serialization formats beyond locked constraints
+- cross-session audit workflows and tooling UX
 
 
 ===============================================================================
@@ -731,6 +903,6 @@ END OF DESIGN AREA 15
 
 --- doc-meta ---
 docId: docs/design/15 MEMORY, STATE, LAYERS & JOURNALING.txt
-rev: 2
-git: 1476cb3
+rev: 3
+git: 95eb5de
 ---------------
