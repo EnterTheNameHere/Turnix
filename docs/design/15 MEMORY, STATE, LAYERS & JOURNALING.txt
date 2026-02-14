@@ -1092,6 +1092,40 @@ Rules (LOCKED):
 - Offline inspection MUST NOT require journal completeness.
 - Offline inspection MUST treat non-authoritative roots as evidence only.
 
+15.6 Snapshot and export digests (OPEN WITH LOCKED CONSTRAINTS)
+---------------------------------------------------------------
+
+Purpose:
+- provide OPTIONAL accelerators for equality checks
+- digests are not identities
+- digests exist only to avoid expensive deep comparisons
+
+Rules (LOCKED):
+- A digest field MAY be present in snapshot or export manifests.
+- If present, a digest MUST be computed from a canonical serialization of the
+  compared material for that digest type.
+- If canonical serialization rules are not defined for a digest type, that
+  digest type MUST NOT be emitted.
+- Tools MUST treat digests as hints:
+  - if digests match, tools MAY conclude Equal for the corresponding equality
+    mode
+  - if digests differ, tools MUST conclude NotEqual for the corresponding
+    equality mode
+  - if a digest is missing, tools MUST compute it on demand OR fall back to
+    structural comparison
+
+Digest fields (non-exhaustive):
+- stateDigest
+  Canonical serialization of committed layers and committed config only.
+- strictStateDigest
+  Canonical serialization of committed state plus revision material included
+  per declared strict mode.
+- evidenceDigest
+  Canonical serialization of included trace/journal material per declared
+  inclusion policy.
+- exportManifestDigest
+  Canonical serialization of the export manifest logical content.
+
 
 ===============================================================================
 16. MINIMAL AUDIT BUNDLE (MAB) (LOCKED)
@@ -1359,13 +1393,53 @@ LOCKED:
   - SnapshotManifest roots by ChunkId/ValueRef
   - committedStateRoot required
   - carry-forward consistency rule for included trace spans
+- digest support for snapshots and exports:
+  - digests are optional and computed on demand
+  - digests are derived from canonical serialization rules
+  - missing digests require computation or structural comparison
 
 OPEN:
 - ChunkId encoding choice beyond locked constraints
 - snapshot and export serialization formats beyond locked constraints
 - optional chunk features beyond locked constraints (compression, encryption,
   streaming, packing, paging, index chunks)
+- digest algorithms and canonical serialization choices for each digest type
 - cross-session audit workflows and tooling user experience
+
+
+===============================================================================
+23. COMPARISON RESULT TYPE (LOCKED)
+===============================================================================
+
+All equality checks MUST return a ComparisonResult.
+
+ComparisonResult is an enum with exactly three values:
+- Equal
+- NotEqual
+- NotComparable
+
+Rules (LOCKED):
+- ComparisonResult MUST NOT be represented as:
+  - boolean
+  - integer
+  - float
+  - string not in the enum set
+- APIs MUST NOT provide alternate return types or "truthy/falsy" equivalents.
+- If an API language lacks enums, the API MUST expose:
+  - a closed set of named constants, OR
+  - a tagged union / sealed type
+  with exactly the three values above.
+- Any comparison API that offers a convenience boolean (example: isEqual())
+  MUST be forbidden.
+
+Behavior rules (LOCKED):
+- NotComparable MUST be returned when required material is missing due to:
+  - policy pruning
+  - partial export
+  - corruption
+  - unsupported strict submode
+- NotComparable MUST NOT be treated as NotEqual by Turnix tooling.
+- Any UI presentation MUST distinguish NotComparable from NotEqual.
 
 
 ===============================================================================
@@ -1374,6 +1448,6 @@ END OF DESIGN AREA 15
 
 --- doc-meta ---
 docId: docs/design/15 MEMORY, STATE, LAYERS & JOURNALING.txt
-rev: 6
-git: 33f2e52
+rev: 7
+git: d5b8c5d
 ---------------
