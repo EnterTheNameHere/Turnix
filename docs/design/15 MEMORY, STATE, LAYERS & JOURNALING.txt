@@ -85,17 +85,19 @@ Core idea:
 
 Chunk:
 - immutable byte sequence addressed by ChunkId
-- defined in Section 4
 
 ValueRef:
 - immutable reference describing how to obtain and decode a value payload
-- defined in Section 5
 
 Codec:
 - deterministic decoding rule identified by codecId
 
 Schema:
 - optional typing and version metadata for decoding and migrations
+
+Root manifest:
+- an immutable manifest that enumerates references (ChunkId, ValueRef) that
+  define a reachability root for garbage collection
 
 3.2 Locked payload rules
 ------------------------
@@ -116,7 +118,7 @@ Rules (LOCKED):
 --------------------------------
 
 Static data is pack-provided or bundled resource data and is read-only by
-default (Section 7).
+default (Section 10).
 
 Rules (LOCKED):
 - A ValueRef MAY reference payload bytes originating from static data.
@@ -129,13 +131,26 @@ Rules (LOCKED):
 3.4 IoManager boundary
 ----------------------
 
-All persistence required to resolve ValueRefs and Chunks is mediated by IoManager
-(DA-10).
+All persistence required to resolve ValueRefs and Chunks is mediated by
+IoManager (DA-10).
 
 Rules (LOCKED):
 - Packs MUST NOT resolve chunk storage or write ValueRef payloads directly.
 - Readers/Writers that implement chunk stores or codecs operate under IoManager
   authority and are subject to DA-10 restrictions.
+
+3.5 Payload sharing across artifacts
+------------------------------------
+
+Artifacts MAY share payload chunks.
+
+Meaning:
+- the same ChunkId MAY be referenced by multiple snapshots, windows, traces,
+  journals, MABs, and savePacks.
+
+Rules (LOCKED):
+- Payload sharing MUST NOT change authority boundaries.
+- Sharing MUST be safe under reachability-based garbage collection.
 
 
 ===============================================================================
@@ -232,6 +247,7 @@ chunkType examples (non-exhaustive):
 - traceEvents
 - traceIndex
 - windowManifest
+- snapshotManifest
 - packManifest
 - blob
 
@@ -284,7 +300,7 @@ Rules (LOCKED):
 4.8 Reachability and garbage collection support
 -----------------------------------------------
 
-Reachability is defined by references from authoritative roots.
+Reachability is defined by references from explicit roots.
 
 Rules (LOCKED):
 - Any artifact that references chunks MUST do so by ChunkId.
@@ -300,8 +316,8 @@ Rules (LOCKED):
 Roots (examples, non-exhaustive):
 - a savePack manifest
 - a snapshot manifest
-- a pinned SafePointWindow manifest
 - a pinned MAB manifest
+- any other pinned root manifest explicitly designated by policy
 
 4.9 Optional chunk features (OPEN, WITH LOCKED CONSTRAINTS)
 -----------------------------------------------------------
@@ -312,6 +328,7 @@ Optional capabilities that MAY exist:
 - chunk streaming
 - partial retrieval via index chunks
 - logical chunk packing into physical containers
+- paging via index chunks and value tables
 
 Rules (LOCKED):
 - Optional capabilities MUST NOT change chunk identity semantics.
@@ -321,6 +338,8 @@ Rules (LOCKED):
 - A backend MAY store multiple logical chunks inside a single physical
   container, as long as retrieval by ChunkId and integrity verification
   behave exactly as if each chunk were stored independently.
+- Paging and partial retrieval MUST be expressed through chunks and index
+  chunks. It MUST NOT introduce hidden references outside reachability.
 
 
 ===============================================================================
@@ -536,7 +555,7 @@ Examples (non-exhaustive):
 - config mutation request processing
 
 Work started outside Turnix orchestration is not an Orchestration Unit until
-it re-enters through Turnix orchestration boundaries.
+it re-enters through orchestration boundaries.
 
 8.1 Single-lane AppInstance orchestration
 -----------------------------------------
@@ -983,13 +1002,23 @@ If a crash occurs within the ActiveWindow (LOCKED):
 15. SNAPSHOTS AND EXPORTS (OPEN WITH LOCKED CONSTRAINTS)
 ===============================================================================
 
-A snapshot is a serialized representation of exactly one SafePointWindow.
+A snapshot is an immutable artifact representing exactly one SafePointWindow.
 
-Locked constraints within this open section:
+This section remains OPEN regarding exact serialization formats, but has
+LOCKED constraints and LOCKED interoperability contracts with ChunkId and
+ValueRef.
+
+15.1 Locked snapshot constraints
+--------------------------------
+
+Rules (LOCKED):
 - A snapshot MUST represent committed state only.
 - A snapshot MUST exclude transactional layer contents.
 - A snapshot MUST be internally consistent and restorable.
 - Snapshots and exports MUST be immutable once created.
+
+15.2 Snapshot representation (OPEN WITH LOCKED CONSTRAINTS)
+-----------------------------------------------------------
 
 A snapshot MUST serialize:
 - safePointId
@@ -999,14 +1028,69 @@ A snapshot MAY include (policy-driven):
 - revisions
 - journal entries
 - trace material associated with the SafePointWindow
-- Minimal Audit Bundle material (defined below)
+- Minimal Audit Bundle material (Section 16)
+
+15.3 Snapshot manifests and chunk referencing (LOCKED WITH OPEN FORMATS)
+------------------------------------------------------------------------
+
+To prevent duplication across many snapshots, snapshots MAY reference chunks.
+
+Definition:
+- A SnapshotManifest is a root manifest that defines the snapshot contents
+  by reference (ChunkId, ValueRef) rather than by embedding payload bytes.
+
+Rules (LOCKED):
+- A snapshot MUST have a snapshotId (stable identity).
+- A snapshot MUST reference exactly one SafePointWindow by safePointWindowId.
+- A snapshot MUST define a committedStateRoot.
+- committedStateRoot MUST be a ChunkId of a manifest/index that enumerates
+  all committed layers and committed config for that SafePointWindow.
+
+Optional roots (policy-driven):
+- traceRoot
+- journalRoot
+- revisionRoot
+- mabRoot
+
+Rules (LOCKED):
+- Optional roots MUST NOT add authority.
+- Optional roots MUST be explicitly labeled non-authoritative.
+
+Carry-forward rule for optional evidence (LOCKED):
+- If a snapshot includes trace evidence, it MAY reference chunks whose creation
+  predates the SafePointWindow, but only to preserve internal consistency of
+  included evidence.
+- If a snapshot includes a trace span close event, the corresponding span open
+  event MUST also be included.
+
+NOTE:
+- The ordering rule for span open before span close is LOCKED in DA-12.
+
+15.4 Export
+-----------
 
 Export is a serialization of snapshot contents for external storage or
 transfer.
 
-Rules:
+Rules (LOCKED):
 - Export MUST NOT add authority.
 - Export MUST NOT include transactional layer contents.
+
+Export format and bundling are OPEN.
+
+15.5 Offline inspection (LOCKED)
+--------------------------------
+
+Snapshots and snapshot manifests MUST be inspectable offline.
+
+Meaning:
+- An offline tool MAY resolve referenced ChunkIds and decode ValueRefs without
+  running Turnix orchestration logic.
+
+Rules (LOCKED):
+- Offline inspection MUST NOT require capability calls.
+- Offline inspection MUST NOT require journal completeness.
+- Offline inspection MUST treat non-authoritative roots as evidence only.
 
 
 ===============================================================================
@@ -1254,6 +1338,7 @@ LOCKED:
   - Chunk identity and integrity rules
   - IoManager mediation for ValueRef/Chunk persistence
   - schemaless default with optional schema fields
+  - payload sharing across artifacts without changing authority
 - layered memory model
 - transactional staging with atomic commit/abort
 - nested transaction stacking for child pipeline runs
@@ -1270,12 +1355,16 @@ LOCKED:
 - Memory Inspector edits via transactions and trace-labeled tooling mutation
 - Replay/Resume/Retry definitions and non-guarantees
 - migration commit rule requiring atomic transaction and new SafePointWindow
+- snapshot chunk-referencing:
+  - SnapshotManifest roots by ChunkId/ValueRef
+  - committedStateRoot required
+  - carry-forward consistency rule for included trace spans
 
 OPEN:
 - ChunkId encoding choice beyond locked constraints
 - snapshot and export serialization formats beyond locked constraints
 - optional chunk features beyond locked constraints (compression, encryption,
-  streaming, packing, index chunks)
+  streaming, packing, paging, index chunks)
 - cross-session audit workflows and tooling user experience
 
 
@@ -1285,6 +1374,6 @@ END OF DESIGN AREA 15
 
 --- doc-meta ---
 docId: docs/design/15 MEMORY, STATE, LAYERS & JOURNALING.txt
-rev: 5
-git: 754a181
+rev: 6
+git: 33f2e52
 ---------------
