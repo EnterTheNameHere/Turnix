@@ -23,11 +23,12 @@ This design area defines:
 - what is authoritative state vs observational data
 - what a Trace Directed Acyclic Graph (trace DAG) is
 - what Window, SafePointWindow, AbortedWindow and ActiveWindow are
-- how snapshots and exports relate to SafePointWindows
+- how WindowManifests and exports relate to finalized Windows
 - what Minimal Audit Bundle (MAB) is and what it is not
 - what Replay, Resume, and Retry mean in Turnix
-- the storage-neutral payload model used by committed state, snapshots,
-  savePacks, traces, and journals
+- the storage-neutral payload model used by committed state, savePacks,
+  traces, journals, windows, manifests, and exports
+- comparison modes and comparison results for offline tooling
 
 Turnix MUST:
 - preserve deterministic state evolution
@@ -64,6 +65,7 @@ B) Non-authoritative
 - trace contents
 - Minimal Audit Bundles (MAB)
 - ActiveWindow contents and metadata
+- evidence roots attached to WindowManifests
 
 Non-authoritative material MAY be used for explanation and audit.
 Non-authoritative material MUST NOT be required for state correctness.
@@ -73,8 +75,9 @@ Non-authoritative material MUST NOT be required for state correctness.
 3. STORAGE-NEUTRAL PAYLOAD MODEL (LOCKED)
 ===============================================================================
 
-This section defines how committed state, snapshots, savePacks, trace, and
-journal refer to immutable payload bytes without assuming a storage backend.
+This section defines how committed state, savePacks, trace, journal, windows,
+manifests, and exports refer to immutable payload bytes without assuming a
+storage backend.
 
 Core idea:
 - authoritative committed state references immutable payloads
@@ -145,12 +148,15 @@ Rules (LOCKED):
 Artifacts MAY share payload chunks.
 
 Meaning:
-- the same ChunkId MAY be referenced by multiple snapshots, windows, traces,
-  journals, MABs, and savePacks.
+- the same ChunkId MAY be referenced by multiple windows, manifests, traces,
+  journals, MABs, and exports.
 
 Rules (LOCKED):
 - Payload sharing MUST NOT change authority boundaries.
 - Sharing MUST be safe under reachability-based garbage collection.
+- Sharing inside a savePack MUST NOT weaken immutability of any immutable
+  artifact; if a portable export claims immutability, it MUST be self-contained
+  with respect to retained payloads (Section 15.6).
 
 
 ===============================================================================
@@ -159,8 +165,8 @@ Rules (LOCKED):
 
 Purpose:
 - define the minimum, storage-agnostic contract for identifying immutable data
-  chunks referenced by savePacks, snapshots, windows, traces, journals, and
-  other artifacts
+  chunks referenced by savePacks, windows, traces, journals, manifests, and
+  exports
 - enable stable references, integrity checks, and reachability-based garbage
   collection without assuming a storage layout
 
@@ -247,7 +253,6 @@ chunkType examples (non-exhaustive):
 - traceEvents
 - traceIndex
 - windowManifest
-- snapshotManifest
 - packManifest
 - blob
 
@@ -314,8 +319,8 @@ Rules (LOCKED):
   at the action level.
 
 Roots (examples, non-exhaustive):
-- a savePack manifest
-- a snapshot manifest
+- a savePack manifest (primary root inside a running system)
+- a pinned WindowManifest
 - a pinned MAB manifest
 - any other pinned root manifest explicitly designated by policy
 
@@ -999,52 +1004,48 @@ If a crash occurs within the ActiveWindow (LOCKED):
 
 
 ===============================================================================
-15. SNAPSHOTS AND EXPORTS (OPEN WITH LOCKED CONSTRAINTS)
+15. WINDOWMANIFESTS AND EXPORTS (OPEN WITH LOCKED CONSTRAINTS)
 ===============================================================================
 
-A snapshot is an immutable artifact representing exactly one SafePointWindow.
+A WindowManifest is an immutable manifest representing exactly one finalized
+Window (SafePointWindow or AbortedWindow).
 
 This section remains OPEN regarding exact serialization formats, but has
 LOCKED constraints and LOCKED interoperability contracts with ChunkId and
 ValueRef.
 
-15.1 Locked snapshot constraints
---------------------------------
+15.1 Locked WindowManifest constraints
+--------------------------------------
 
 Rules (LOCKED):
-- A snapshot MUST represent committed state only.
-- A snapshot MUST exclude transactional layer contents.
-- A snapshot MUST be internally consistent and restorable.
-- Snapshots and exports MUST be immutable once created.
+- A WindowManifest MUST be immutable once created.
+- A WindowManifest MUST represent exactly one finalized Window.
+- A WindowManifest MUST NOT represent an ActiveWindow.
+- A WindowManifest MUST be inspectable offline (Section 15.7).
 
-15.2 Snapshot representation (OPEN WITH LOCKED CONSTRAINTS)
------------------------------------------------------------
+Authority rules (LOCKED):
+- A SafePointWindowManifest MAY contain authoritative committed state roots.
+- An AbortedWindowManifest MUST NOT contain authoritative committed state roots.
+- Trace, journal, and MAB roots are evidence-only and MUST be labeled as such.
 
-A snapshot MUST serialize:
-- safePointId
-- committed layers and committed config belonging to that SafePointWindow
+15.2 WindowManifest types (LOCKED)
+----------------------------------
 
-A snapshot MAY include (policy-driven):
-- revisions
-- journal entries
-- trace material associated with the SafePointWindow
-- Minimal Audit Bundle material (Section 16)
+A WindowManifest is exactly one of:
+- SafePointWindowManifest
+- AbortedWindowManifest
 
-15.3 Snapshot manifests and chunk referencing (LOCKED WITH OPEN FORMATS)
-------------------------------------------------------------------------
+15.3 SafePointWindowManifest (LOCKED WITH OPEN FORMATS)
+-------------------------------------------------------
 
-To prevent duplication across many snapshots, snapshots MAY reference chunks.
+A SafePointWindowManifest MUST include:
+- safePointWindowId
+- windowType = SafePointWindow
+- committedStateRoot
 
 Definition:
-- A SnapshotManifest is a root manifest that defines the snapshot contents
-  by reference (ChunkId, ValueRef) rather than by embedding payload bytes.
-
-Rules (LOCKED):
-- A snapshot MUST have a snapshotId (stable identity).
-- A snapshot MUST reference exactly one SafePointWindow by safePointWindowId.
-- A snapshot MUST define a committedStateRoot.
-- committedStateRoot MUST be a ChunkId of a manifest/index that enumerates
-  all committed layers and committed config for that SafePointWindow.
+- committedStateRoot is a ChunkId of a manifest/index that enumerates all
+  committed layers and committed config for that SafePointWindow by ValueRef.
 
 Optional roots (policy-driven):
 - traceRoot
@@ -1054,34 +1055,63 @@ Optional roots (policy-driven):
 
 Rules (LOCKED):
 - Optional roots MUST NOT add authority.
-- Optional roots MUST be explicitly labeled non-authoritative.
+- Optional roots MUST be explicitly labeled non-authoritative evidence.
+
+15.4 AbortedWindowManifest (LOCKED WITH OPEN FORMATS)
+-----------------------------------------------------
+
+An AbortedWindowManifest MUST include:
+- abortedWindowId
+- windowType = AbortedWindow
+- traceRoot
+
+Optional roots (policy-driven):
+- journalRoot
+- mabRoot
+
+Rules (LOCKED):
+- An AbortedWindowManifest MUST NOT define committedStateRoot.
+- If traceRoot is absent, the AbortedWindowManifest MUST explicitly declare
+  "traceAbsent" and the reason category for absence (policy/pruned/corrupt).
+  A default AbortedWindowManifest SHOULD include traceRoot.
+
+15.5 Evidence carry-forward consistency (LOCKED)
+------------------------------------------------
 
 Carry-forward rule for optional evidence (LOCKED):
-- If a snapshot includes trace evidence, it MAY reference chunks whose creation
-  predates the SafePointWindow, but only to preserve internal consistency of
+- If a WindowManifest includes trace evidence, it MAY reference chunks whose
+  creation predates the window, but only to preserve internal consistency of
   included evidence.
-- If a snapshot includes a trace span close event, the corresponding span open
-  event MUST also be included.
+- If a WindowManifest includes a trace span close event, the corresponding span
+  open event MUST also be included.
 
 NOTE:
 - The ordering rule for span open before span close is LOCKED in DA-12.
 
-15.4 Export
------------
+15.6 Window exports (LOCKED POLICY + OPEN FORMATS)
+--------------------------------------------------
 
-Export is a serialization of snapshot contents for external storage or
-transfer.
+Export is a portable, immutable serialization of one WindowManifest closure.
+
+Terminology:
+- WindowExport: an exported artifact derived from a WindowManifest
+- SafePointWindowExport: a WindowExport derived from SafePointWindowManifest
+- AbortedWindowExport: a WindowExport derived from AbortedWindowManifest
 
 Rules (LOCKED):
 - Export MUST NOT add authority.
 - Export MUST NOT include transactional layer contents.
+- Export MUST be self-contained with respect to retained payloads.
+  Meaning:
+  - A WindowExport MUST copy into itself every referenced chunk required to
+    decode the exported closure, subject to explicit "partial export" policy.
+  - If partial export is used, missing material MUST be explicit and impacts
+    comparison results (NotComparable).
 
-Export format and bundling are OPEN.
-
-15.5 Offline inspection (LOCKED)
+15.7 Offline inspection (LOCKED)
 --------------------------------
 
-Snapshots and snapshot manifests MUST be inspectable offline.
+WindowManifests and WindowExports MUST be inspectable offline.
 
 Meaning:
 - An offline tool MAY resolve referenced ChunkIds and decode ValueRefs without
@@ -1090,10 +1120,10 @@ Meaning:
 Rules (LOCKED):
 - Offline inspection MUST NOT require capability calls.
 - Offline inspection MUST NOT require journal completeness.
-- Offline inspection MUST treat non-authoritative roots as evidence only.
+- Offline inspection MUST treat evidence roots as evidence only.
 
-15.6 Snapshot and export digests (OPEN WITH LOCKED CONSTRAINTS)
----------------------------------------------------------------
+15.8 Window digest support (OPEN WITH LOCKED CONSTRAINTS)
+---------------------------------------------------------
 
 Purpose:
 - provide OPTIONAL accelerators for equality checks
@@ -1101,16 +1131,14 @@ Purpose:
 - digests exist only to avoid expensive deep comparisons
 
 Rules (LOCKED):
-- A digest field MAY be present in snapshot or export manifests.
+- A digest field MAY be present in WindowManifests or WindowExports.
 - If present, a digest MUST be computed from a canonical serialization of the
   compared material for that digest type.
 - If canonical serialization rules are not defined for a digest type, that
   digest type MUST NOT be emitted.
 - Tools MUST treat digests as hints:
-  - if digests match, tools MAY conclude Equal for the corresponding equality
-    mode
-  - if digests differ, tools MUST conclude NotEqual for the corresponding
-    equality mode
+  - if digests match, tools MAY conclude Equal for the corresponding mode
+  - if digests differ, tools MUST conclude NotEqual for the corresponding mode
   - if a digest is missing, tools MUST compute it on demand OR fall back to
     structural comparison
 
@@ -1125,6 +1153,34 @@ Digest fields (non-exhaustive):
   inclusion policy.
 - exportManifestDigest
   Canonical serialization of the export manifest logical content.
+
+15.9 Equality modes (LOCKED)
+----------------------------
+
+Equality checks MAY be performed in multiple modes.
+
+Definitions (LOCKED):
+
+A) StateEquality
+- compares committed key/value pairs only (latest values only)
+- ignores revision history entirely
+
+B) StrictStateEquality
+- compares committed key/value pairs AND revision history that is present
+- if required revision material is missing for one side, result is
+  NotComparable (not NotEqual)
+
+C) EvidenceEquality
+- compares included evidence closure (trace/journal/MAB as included)
+- does not imply equality of state unless used in addition to state modes
+
+D) ExportEquality
+- compares export closure as packaged, including declared partial/missing flags
+- intended for verifying that two exports are the same packaged artifact
+
+Rules (LOCKED):
+- Tools MUST state which mode is used.
+- Default mode MUST be StateEquality unless explicitly requested otherwise.
 
 
 ===============================================================================
@@ -1141,7 +1197,7 @@ Purpose:
 
 A MAB is NOT:
 - authoritative state
-- a snapshot
+- a WindowManifest
 - replayable
 - sufficient for restoration
 
@@ -1156,7 +1212,7 @@ A Minimal Audit Bundle MUST include:
   - AppInstance identity
   - session identity
   - Orchestration Unit identity (if applicable)
-  - safePointWindowId and snapshot identity (if any)
+  - safePointWindowId and WindowExport identity (if any)
 
 A Minimal Audit Bundle MUST NOT include:
 - authoritative committed state in full
@@ -1362,53 +1418,7 @@ Turnix does NOT require:
 
 
 ===============================================================================
-22. LOCKED SUMMARY
-===============================================================================
-
-LOCKED:
-- Memory vs State authority boundary (only committed state is authoritative)
-- storage-neutral payload model:
-  - committed keys representable as (key -> ValueRef)
-  - Chunk identity and integrity rules
-  - IoManager mediation for ValueRef/Chunk persistence
-  - schemaless default with optional schema fields
-  - payload sharing across artifacts without changing authority
-- layered memory model
-- transactional staging with atomic commit/abort
-- nested transaction stacking for child pipeline runs
-- commit conflict detection for commits into committed layers
-- single-lane AppInstance orchestration with orchestration re-entry boundaries
-- persistence as protection, not truth
-- static data Patch/Copy mutation intent
-- revisions retention and reachability-safe garbage collection
-- journal as best-effort non-authoritative evidence
-- trace DAG as causal authority (not state authority)
-- window model with SafePointWindow, ActiveWindow, AbortedWindow
-- SafePointWindow determinism boundary and ActiveWindow non-guarantees
-- Minimal Audit Bundle non-authoritative semantics and integrity rules
-- Memory Inspector edits via transactions and trace-labeled tooling mutation
-- Replay/Resume/Retry definitions and non-guarantees
-- migration commit rule requiring atomic transaction and new SafePointWindow
-- snapshot chunk-referencing:
-  - SnapshotManifest roots by ChunkId/ValueRef
-  - committedStateRoot required
-  - carry-forward consistency rule for included trace spans
-- digest support for snapshots and exports:
-  - digests are optional and computed on demand
-  - digests are derived from canonical serialization rules
-  - missing digests require computation or structural comparison
-
-OPEN:
-- ChunkId encoding choice beyond locked constraints
-- snapshot and export serialization formats beyond locked constraints
-- optional chunk features beyond locked constraints (compression, encryption,
-  streaming, packing, paging, index chunks)
-- digest algorithms and canonical serialization choices for each digest type
-- cross-session audit workflows and tooling user experience
-
-
-===============================================================================
-23. COMPARISON RESULT TYPE (LOCKED)
+22. COMPARISON RESULT TYPE (LOCKED)
 ===============================================================================
 
 All equality checks MUST return a ComparisonResult.
@@ -1443,11 +1453,61 @@ Behavior rules (LOCKED):
 
 
 ===============================================================================
+23. LOCKED SUMMARY
+===============================================================================
+
+LOCKED:
+- Memory vs State authority boundary (only committed state is authoritative)
+- storage-neutral payload model:
+  - committed keys representable as (key -> ValueRef)
+  - Chunk identity and integrity rules
+  - IoManager mediation for ValueRef/Chunk persistence
+  - schemaless default with optional schema fields
+  - payload sharing across artifacts without changing authority
+- layered memory model
+- transactional staging with atomic commit/abort
+- nested transaction stacking for child pipeline runs
+- commit conflict detection for commits into committed layers
+- single-lane AppInstance orchestration with orchestration re-entry boundaries
+- persistence as protection, not truth
+- static data Patch/Copy mutation intent
+- revisions retention and reachability-safe garbage collection
+- journal as best-effort non-authoritative evidence
+- trace DAG as causal authority (not state authority)
+- window model with SafePointWindow, ActiveWindow, AbortedWindow
+- SafePointWindow determinism boundary and ActiveWindow non-guarantees
+- WindowManifest model:
+  - SafePointWindowManifest has committedStateRoot
+  - AbortedWindowManifest has evidence roots only
+  - manifests are immutable and offline inspectable
+- WindowExport model:
+  - portable, immutable closure of a WindowManifest
+  - exports are self-contained unless explicitly partial
+- Minimal Audit Bundle non-authoritative semantics and integrity rules
+- Memory Inspector edits via transactions and trace-labeled tooling mutation
+- Replay/Resume/Retry definitions and non-guarantees
+- migration commit rule requiring atomic transaction and new SafePointWindow
+- digest support for manifests and exports:
+  - digests are optional and computed on demand
+  - digests are derived from canonical serialization rules
+  - missing digests require computation or structural comparison
+- equality modes and ComparisonResult enum requirements
+
+OPEN:
+- ChunkId encoding choice beyond locked constraints
+- WindowManifest and WindowExport serialization formats beyond locked constraints
+- optional chunk features beyond locked constraints (compression, encryption,
+  streaming, packing, paging, index chunks)
+- digest algorithms and canonical serialization choices for each digest type
+- cross-session audit workflows and tooling user experience
+
+
+===============================================================================
 END OF DESIGN AREA 15
 ===============================================================================
 
 --- doc-meta ---
 docId: docs/design/15 MEMORY, STATE, LAYERS & JOURNALING.txt
-rev: 7
-git: d5b8c5d
+rev: 8
+git: bfcb889
 ---------------
