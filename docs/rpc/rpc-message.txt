@@ -1,168 +1,287 @@
 ===============================================================================
-RPCMessage Schema
+RPC MESSAGE SCHEMA
 ===============================================================================
 
-This document summarizes the structure of the RPC messages exchanged between the
-frontend and backend. The canonical model lives on the backend in
-backend/rpc/models.py and is mirrored on the frontend in
-frontend/assets/types.d.ts and the RPC client helper.
+This document summarizes the structure of the RPC messages exchanged between
+the frontend and backend.
+
+The canonical model lives on the backend in:
+    backend/rpc/models.py
+
+It is mirrored on the frontend in:
+    frontend/assets/types.d.ts
+    RpcClient helper utilities
 
 
-Core models
------------
+===============================================================================
+CORE MODELS
+===============================================================================
 
 Model: Gen
-- Purpose: Wraps the connection generation (num, salt) assigned by the server.
-  It is embedded in every RPC envelope so both sides can detect stale traffic.
+-----------
+Purpose:
+Wraps the connection generation (num, salt) assigned by the server.
+
+The Gen object is embedded in every RPC envelope so that both sides can
+detect stale traffic and reject frames from previous sessions.
+
 
 Model: Route
-- Purpose: Points a message to either a capability (capability) or an object
-  (object). The backend infers the default lane from these values when the
-  explicit lane is missing.
+-------------
+Purpose:
+Points a message to either:
+- a capability (capability)
+- an object (object)
+
+If the explicit lane is missing, the backend infers the default delivery
+lane from the Route values.
+
 
 Model: RPCMessage
-- Purpose: The wire envelope for all RPC communication, enforcing camelCase
-  aliases, forbidding extra fields, and performing lane inference via a model
-  validator.
+-----------------
+Purpose:
+The wire envelope for all RPC communication.
+
+Responsibilities:
+- enforce camelCase aliases
+- forbid extra fields
+- validate message shape
+- infer delivery lane via a model validator
 
 
-Envelope fields
----------------
+===============================================================================
+ENVELOPE FIELDS
+===============================================================================
 
-The list below covers every field carried by an RPCMessage. Unless stated
-otherwise, the field is optional and defaults to null / None.
+Unless stated otherwise, all fields are optional and default to null / None.
 
-- v (str)
-  - Schema version, currently "0.1".
-
-- id (str)
-  - UUIDv7 that uniquely identifies the message.
-
-- type (enum)
-  - Message category. Valid values include:
-    - Control messages:
-      - "hello"
-      - "welcome"
-      - "clientReady"
-      - "heartbeat"
-      - "ack"
-    - Workload messages:
-      - "request"
-      - "emit"
-      - "reply"
-      - "subscribe"
-      - "stateUpdate"
-      - "unsubscribe"
-      - "cancel"
-      - "error"
-
-- correlatesTo (str)
-  - Links to the parent message (for example, replies, ACKs, cancels).
-
-- gen (Gen)
-  - Server-assigned generation, echoed by the client to validate session
-    continuity.
-
-- ts (int)
-  - Monotonic send timestamp populated on creation (for example, milliseconds
-    since process start).
-
-- lane (str)
-  - Delivery lane.
-  - Defaults:
-    - "sys" for control traffic.
-    - For non-control messages, if empty it is inferred from route:
-      - "cap:<capability>" when targeting a capability.
-      - "obj:<id>" when targeting a specific object.
-  - The lane is used to maintain separate sequencing and flow control per
-    logical stream.
-
-- budgetMs (int)
-  - Optional time budget for the operation in milliseconds.
-  - Builders derive defaults from protocol settings and priority classes, and
-    callers may override.
-
-- ackOf (int)
-  - Reserved for richer ACK semantics; currently unused but part of the schema
-    for future compatibility.
-
-- job (dict)
-  - Mirrors backend job progress snapshots when long-running work reports
-    state. The concrete shape is job-type specific.
-
-- idempotencyKey (str)
-  - Enables backend deduplication and cached replies.
-  - For request / emit messages, helpers default this to the message id so that
-    retries with the same id are naturally deduplicated.
-
-- route (Route)
-  - Target capability or object.
-  - Mandatory for request and emit messages, and generally present for any
-    workload message that needs routing.
-  - Also used to derive lanes and permissions.
-
-- op (str)
-  - Operation qualifier (for example, "call", "event").
-  - Helps the handler choose between multiple behaviours on the same route.
-
-- path (str)
-  - Additional routing hint used by handlers to select an operation variant
-    or sub-endpoint.
-
-- args (list)
-  - Positional arguments for capability calls initiated by the client.
-  - For most RPC calls, payload carries structured data and args is either an
-    empty list or contains a small number of positional parameters.
-
-- seq (int)
-  - Per-lane delivery sequence number maintained by the sender for ordering.
-  - Each lane has its own counter.
-
-- origin (dict)
-  - Metadata (for example, tracing information) passed through without
-    affecting permissions.
-  - Typically includes trace/span identifiers or calling context.
-
-- chunkNo (int)
-  - Index of the chunk when streaming payloads.
-  - Starts at 0 or 1 depending on the streaming helper’s convention and is
-    monotonically increasing within the stream.
-
-- final (int / bool)
-  - Marks the final chunk in a stream.
-  - Accepts either a boolean or an integer flag; non-zero is treated as true.
-
-- payload (dict)
-  - Application data.
-  - For replies, errors, and stateUpdate messages, helpers enforce the payload
-    shape (for example, reply messages require a payload with the result;
-    error messages require an error object).
+v (str)
+-------
+Schema version.
+Currently "0.1".
 
 
-Helper constructors
--------------------
+id (str)
+--------
+UUIDv7 that uniquely identifies the message.
 
-Backend helper functions construct validated envelopes while enforcing required
-fields, correlating ids, and copying idempotency keys from the triggering
-message. This avoids hand-building envelopes across the codebase.
 
-Typical responsibilities of these helpers:
+type (enum)
+-----------
+Message category.
 
-- Set v (schema version) to the current protocol version.
-- Generate id (UUIDv7) for new messages.
-- Copy correlatesTo for replies / acks / cancels.
-- Populate gen from the active RPCConnection.
-- Compute lane if not provided, based on route and message type.
-- Set default budgetMs for the operation kind.
-- Copy idempotencyKey from the triggering message where appropriate.
-- Ensure required fields for each type are present:
-  - "hello" must carry gen and client identity info in payload.
-  - "request" must carry route, op/path, and payload/args as needed.
-  - "reply" must carry correlatesTo and payload.
-  - "error" must carry correlatesTo and an error payload.
+Valid values:
 
-The frontend mirrors these helpers in RpcClient, guaranteeing symmetric message
-shapes during creation of:
+Control messages:
+- "hello"
+- "welcome"
+- "clientReady"
+- "heartbeat"
+- "ack"
+
+Workload messages:
+- "request"
+- "emit"
+- "reply"
+- "subscribe"
+- "stateUpdate"
+- "unsubscribe"
+- "cancel"
+- "error"
+
+
+correlatesTo (str)
+------------------
+Links this message to a parent message.
+
+Used for:
+- replies
+- ACKs
+- cancels
+- error propagation
+
+
+gen (Gen)
+---------
+Server-assigned generation.
+Echoed by the client to validate session continuity.
+
+
+ts (int)
+--------
+Monotonic send timestamp populated on creation.
+For example, milliseconds since process start.
+
+
+lane (str)
+----------
+Delivery lane.
+
+Defaults:
+- "sys" for control traffic
+- for non-control messages, if empty it is inferred from route:
+    - "cap:<capability>" when targeting a capability
+    - "obj:<id>" when targeting a specific object
+
+Lanes maintain independent sequencing and flow control per logical stream.
+
+
+budgetMs (int)
+--------------
+Optional time budget for the operation in milliseconds.
+
+Defaults are derived from protocol settings and priority classes.
+Callers may override explicitly.
+
+
+ackOf (int)
+-----------
+Reserved for richer ACK semantics.
+Currently unused but retained for forward compatibility.
+
+
+job (dict)
+----------
+Mirrors backend job progress snapshots when long-running work reports state.
+
+The concrete structure is job-type specific.
+
+
+idempotencyKey (str)
+--------------------
+Enables backend deduplication and cached replies.
+
+For request and emit messages:
+- helpers default this to the message id
+- retries with the same id are naturally deduplicated
+
+
+route (Route)
+-------------
+Target capability or object.
+
+Mandatory for:
+- request
+- emit
+
+Generally present for any workload message that requires routing.
+
+Also used to:
+- derive lanes
+- enforce permissions
+
+
+op (str)
+--------
+Operation qualifier.
+For example: "call", "event".
+
+Allows handlers to multiplex multiple behaviors on the same route.
+
+
+path (str)
+----------
+Additional routing hint used by handlers to select an operation variant
+or sub-endpoint.
+
+
+args (list)
+-----------
+Positional arguments for capability calls initiated by the client.
+
+For most RPC calls:
+- payload carries structured data
+- args is empty or contains a small number of positional parameters
+
+
+seq (int)
+---------
+Per-lane delivery sequence number maintained by the sender.
+
+Each lane has its own counter.
+
+
+origin (dict)
+-------------
+Opaque metadata passed through without affecting permissions.
+
+Typically includes:
+- trace identifiers
+- span identifiers
+- calling context
+
+
+chunkNo (int)
+-------------
+Index of the chunk when streaming payloads.
+
+Starts at 0 or 1 depending on helper convention and is monotonically
+increasing within the stream.
+
+
+final (int | bool)
+------------------
+Marks the final chunk in a stream.
+
+Accepts:
+- boolean
+- integer flag (non-zero treated as true)
+
+
+payload (dict)
+--------------
+Application data.
+
+Helpers enforce payload shape by message type:
+- reply requires a result payload
+- error requires an error object
+- stateUpdate carries state deltas
+
+
+===============================================================================
+HELPER CONSTRUCTORS
+===============================================================================
+
+Backend helper functions construct validated envelopes while enforcing
+required fields, correlating ids, and copying idempotency keys from the
+triggering message.
+
+This avoids hand-building envelopes across the codebase.
+
+
+Typical helper responsibilities:
+
+- set v to the current protocol version
+- generate id (UUIDv7) for new messages
+- copy correlatesTo for replies, ACKs, and cancels
+- populate gen from the active RPCConnection
+- compute lane if not provided, based on route and message type
+- set default budgetMs for the operation kind
+- copy idempotencyKey from the triggering message when applicable
+- enforce required fields per message type
+
+
+Per-type requirements:
+
+- "hello"
+    - MUST carry gen and client identity info in payload
+
+- "request"
+    - MUST carry route
+    - MUST carry op and/or path
+    - MUST carry payload or args as required
+
+- "reply"
+    - MUST carry correlatesTo
+    - MUST carry payload
+
+- "error"
+    - MUST carry correlatesTo
+    - MUST carry error payload
+
+
+The frontend mirrors these helpers in RpcClient, guaranteeing symmetric
+message shapes for:
 
 - hello
 - welcome
@@ -178,49 +297,56 @@ shapes during creation of:
 - error
 - ack
 
-Both sides rely on shared defaults for schema version, system lane, and
-acknowledgment budget so that messages created on one side are always valid on
-the other.
+Both sides rely on shared defaults for:
+- schema version
+- system lane
+- acknowledgment budget
 
+This guarantees cross-side validity without ad-hoc exceptions.
 
-Serialization and logging
--------------------------
-
-On the backend, sending an RPCMessage typically follows this sequence:
-
-1. Build or mutate an RPCMessage instance via helper constructors.
-2. Serialize it using a JSON helper (for example, safeJsonDumps) that:
-   - Dumps the Pydantic model to a standard Python structure.
-   - Applies deterministic JSON separators and ordering where useful for
-     logging or diffing.
-3. Feed the serialized frame into the RPC logging decision engine, which:
-   - Decides whether to log based on lane, type, level, or other filters.
-   - Emits structured log entries for trace viewers or log files if enabled.
-4. Transmit the resulting JSON string over the WebSocket.
-
-On the frontend, the flow is reversed for inbound frames:
-
-1. Incoming text frames are parsed as JSON into plain objects.
-2. The RpcClient validates the basic structure (presence of v, id, type, etc.).
-3. Optional logging hooks receive the parsed object and apply the same logging
-   filters as the backend for consistency.
-4. The RpcClient routes messages based on type, lane, and route:
-   - Control frames (hello/welcome/clientReady/heartbeat/ack) update
-     connection state and generation tracking.
-   - Workload frames (request/emit/subscribe/stateUpdate/reply/error) are
-     dispatched to registered handlers, promise resolvers, or subscription
-     emitters.
-
-This shared schema and behaviour ensures that any message emitted on one side
-can be accurately interpreted, routed, and logged on the other without ad-hoc
-special cases.
 
 ===============================================================================
-END OF FILE
+SERIALIZATION AND LOGGING
 ===============================================================================
+
+Backend send flow:
+
+1) Build or mutate an RPCMessage via helper constructors
+2) Serialize using a JSON helper (for example safeJsonDumps):
+   - dump model to a plain structure
+   - apply deterministic separators and ordering where appropriate
+3) Feed the frame into the RPC logging decision engine:
+   - decide whether to log based on lane, type, and level
+   - emit structured log entries if enabled
+4) Transmit the JSON string over the WebSocket
+
+
+Frontend receive flow:
+
+1) Incoming text frames are parsed as JSON
+2) RpcClient validates the basic structure (v, id, type, etc.)
+3) Optional logging hooks apply the same filters as the backend
+4) RpcClient routes messages by type, lane, and route:
+   - control frames update connection and generation state
+   - workload frames dispatch to handlers, promises, or subscriptions
+
+
+This shared schema ensures that any message emitted on one side can be:
+- interpreted correctly
+- routed deterministically
+- logged consistently
+- correlated for tracing
+
+No ad-hoc special cases are required.
+
+
+===============================================================================
+END OF RPC MESSAGE SCHEMA
+===============================================================================
+
 
 --- doc-meta ---
 docId: docs/rpc/rpc-message.txt
-rev: 6
-git: 8225391
----------------
+rev: 7
+git: d1b3b4b
+----------------
