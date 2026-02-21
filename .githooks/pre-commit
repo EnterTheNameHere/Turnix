@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Turnix docs metadata pre-commit hook (hardened, docs/ only, auto docId, repo-local Python)
+# Turnix docs metadata pre-commit hook (hardened, docs/ only, auto docId+file, repo-local Python)
 #
 # Scope:
 # - Only staged files under docs/** with .md/.txt/.json5
@@ -8,22 +8,26 @@
 # - Git
 # - Repo-local embeddable Python at ./python-embedded/python.exe
 #
-# Guarantees for each targeted staged file:
-# - Exactly one doc-meta block: lines exactly
+# Guarantees for each targeted staged file (newest spec: doc-meta footer):
+# - Document MUST end with exactly one doc-meta block:
 #     --- doc-meta ---
-#     ...
-#     ---------------
-# - rev and git keys exist exactly once inside the doc-meta block
-# - docId key is auto-inserted if missing, or auto-corrected if present (must not appear more than once)
-# - docId is always set to the repo-relative file path (forward slashes)
+#     docId: <canonical document identifier>
+#     file: <canonical repository path>
+#     rev: <revision count>
+#     git: <short commit id>
+#     ----------------
+# - docId is derived from filename: "<dirs>/<docId>_<normalized>.<EXT>"
+#   - docId pattern: one or more [A-Z], then "-", then one or more [A-Z0-9]
+# - file is the repo-relative path as staged (forward slashes)
 # - rev is computed as (commit-count touching file) + 1 when the file is staged with changes
 # - git is the last commit hash that touched the file before this commit (0000000 for new files)
 #
 # Safety / anti-footgun:
 # - Refuses to run if a file has partially staged changes (staged + unstaged), because the hook edits and re-stages
 #   the whole file and would destroy partial staging.
-# - Refuses ambiguous/malformed doc-meta blocks
+# - Refuses ambiguous/malformed doc-meta blocks (missing/duplicate markers, content after footer, etc.)
 # - Refuses if required tools are missing
+# - Enforces doc-meta structure and ordering; overwrites the doc-meta block content to match spec
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -63,6 +67,48 @@ isDocsFileWanted() {
       return 1
       ;;
   esac
+}
+
+# Extract docId from repo-relative path:
+# - path must start with "docs/"
+# - filename part is after last "/"
+# - filename format: "<docId>_<normalized text>.<EXT>"
+# - docId is before first "_"
+# - docId regex: ^[A-Z]+-[A-Z0-9]+$
+extractDocIdFromPathOrDie() {
+  local path="$1"
+
+  [[ -n "$path" ]] || die "Path cannot be empty"
+  [[ "$path" == docs/* ]] || die "Path must be under docs/: '$path'"
+
+  local base="${path##*/}"
+  [[ -n "$base" ]] || die "Filename cannot be empty: '$path'"
+
+  # Must not be ".onlyextension" (no leading dot, must have at least one non-dot char before first dot)
+  [[ "$base" != .* ]] || die "Filename must not start with '.': '$path'"
+
+  # Must contain underscore (docId separator)
+  [[ "$base" == *_* ]] || die "Filename must contain '_' after docId: '$path'"
+
+  # Must contain at least one dot for extension
+  [[ "$base" == *.* ]] || die "Filename must contain an extension (a '.'): '$path'"
+
+  # First character must be [A-Z]
+  [[ "${base:0:1}" =~ [A-Z] ]] || die "Filename must start with [A-Z]: '$path'"
+
+  # Must contain '-' (per docId pattern)
+  [[ "$base" == *-* ]] || die "Filename must contain '-' in docId: '$path'"
+
+  local docId="${base%%_*}"
+  [[ -n "$docId" ]] || die "docId extracted from filename is empty: '$path'"
+
+  # Validate docId pattern: one or more [A-Z], '-', then one or more [A-Z0-9]
+  if ! [[ "$docId" =~ ^[A-Z]+-[A-Z0-9]+$ ]]; then
+    die "Invalid docId '$docId' extracted from '$path'.
+Expected pattern: one or more [A-Z], then '-', then one or more [A-Z0-9]."
+  fi
+
+  printf '%s' "$docId"
 }
 
 # Read staged files under docs/ (NUL-delimited to handle spaces)
@@ -106,6 +152,12 @@ for f in "${targets[@]}"; do
     continue
   fi
 
+  # Validate path + derive docId from filename
+  expectedDocId="$(extractDocIdFromPathOrDie "$f")"
+
+  # file is the repo-relative path (forward slashes) exactly as staged
+  expectedFile="$f"
+
   # Last hash touching the file BEFORE this commit (short). If none (new file), use 0000000.
   lastHash="$(git log -n 1 --follow --pretty=format:%h -- "$f" 2>/dev/null || true)"
   if [ -z "$lastHash" ]; then
@@ -116,16 +168,14 @@ for f in "${targets[@]}"; do
   revBase="$(git log --follow --pretty=format:%H -- "$f" 2>/dev/null | wc -l | tr -d ' ')"
   newRev=$((revBase + 1))
 
-  # docId is always the repo-relative path (forward slashes)
-  expectedDocId="$f"
-
-  "$PY_EXE" - "$f" "$expectedDocId" "$newRev" "$lastHash" <<'PY'
+  "$PY_EXE" - "$f" "$expectedDocId" "$expectedFile" "$newRev" "$lastHash" <<'PY'
 import sys
 
 path = sys.argv[1]
 expected_doc_id = sys.argv[2]
-new_rev = int(sys.argv[3])
-new_hash = sys.argv[4]
+expected_file = sys.argv[3]
+new_rev = int(sys.argv[4])
+new_hash = sys.argv[5]
 
 start_marker = "--- doc-meta ---"
 end_marker = "----------------"
@@ -154,43 +204,47 @@ try:
 except StopIteration:
   raise SystemExit(f"ERROR: {path}: missing end marker '{end_marker}' after doc-meta start")
 
-block = lines[s + 1 : e]
-
-def find_key_lines(key: str):
-  prefix = f"{key}:"
-  return [idx for idx, line in enumerate(block) if line.startswith(prefix)]
-
-# rev + git must exist exactly once
-for key in ("rev", "git"):
-  hits = find_key_lines(key)
-  if len(hits) != 1:
-    raise SystemExit(
-      f"ERROR: {path}: expected exactly one '{key}:' line in doc-meta block, found {len(hits)}"
-    )
-
-rev_idx = find_key_lines("rev")[0]
-git_idx = find_key_lines("git")[0]
-
-# docId: allow 0 or 1, but not >1; auto-insert or auto-correct.
-doc_hits = find_key_lines("docId")
-if len(doc_hits) > 1:
+# Spec requires doc-meta at end of document (footer). Allow only trailing empty lines after end marker.
+tail = lines[e + 1 :]
+if any(line.strip() != "" for line in tail):
   raise SystemExit(
-    f"ERROR: {path}: expected at most one 'docId:' line in doc-meta block, found {len(doc_hits)}"
+    f"ERROR: {path}: doc-meta block must be at the end of the document; found content after '{end_marker}'"
   )
 
-if len(doc_hits) == 0:
-  # Insert docId at the top of the block (right after the start marker)
-  block.insert(0, f"docId: {expected_doc_id}")
-else:
-  doc_idx = doc_hits[0]
-  block[doc_idx] = f"docId: {expected_doc_id}"
+# Build a canonical spec-compliant block (overwrite whatever was there).
+# Exact required order:
+# docId, file, rev, git
+block = [
+  f"docId: {expected_doc_id}",
+  f"file: {expected_file}",
+  f"rev: {new_rev}",
+  f"git: {new_hash}",
+]
 
-# Update rev / git
-block[rev_idx] = f"rev: {new_rev}"
-block[git_idx] = f"git: {new_hash}"
+# Enforce line length rule:
+# - Only the value of the "file:" field MAY exceed 79 characters.
+# - No other doc-meta line may exceed 79 characters.
+def check_len(line: str, is_file: bool) -> None:
+  if is_file:
+    # file line can exceed 79, allowed by spec
+    return
+  if len(line) > 79:
+    raise SystemExit(f"ERROR: {path}: doc-meta line exceeds 79 chars: '{line}'")
 
-new_lines = lines[: s + 1] + block + lines[e:]
+check_len(block[0], is_file=False)  # docId
+check_len(block[1], is_file=True)   # file
+check_len(block[2], is_file=False)  # rev
+check_len(block[3], is_file=False)  # git
+
+# Replace the existing block content (whatever it was) with the canonical block.
+new_lines = lines[: s + 1] + block + [end_marker]
+
+# Preserve a single trailing newline if the original file had one.
+# (split("\n") drops the final empty item only if there was no trailing newline)
+had_trailing_newline = text.endswith("\n") or text.endswith("\r\n")
 new_text = newline.join(new_lines)
+if had_trailing_newline:
+  new_text += newline
 
 with open(path, "w", encoding="utf-8", newline="") as f:
   f.write(new_text)
