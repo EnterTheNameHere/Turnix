@@ -161,7 +161,9 @@ Triggers:
 
 When a breakpoint triggers:
 - execution of the triggering unit pauses
-- the rest of Turnix continues (unless configured otherwise)
+- mutation-capable execution for the owning appInstance pauses
+- other appInstances MAY continue (if supported)
+- non-mutating kernel activity MAY continue (unless configured otherwise)
 - debugger UI is notified
 - state becomes inspectable
 
@@ -291,6 +293,24 @@ Rules:
 
 
 ===============================================================================
+6.4 TRACE RETENTION AND DEBUGGER ACTIONS (LOCKED)
+===============================================================================
+
+Debugger tooling MUST NOT create untraced gaps.
+
+Rules (LOCKED):
+- Any debugger action that affects trace evidence (export, prune, clear,
+  retention policy changes) MUST emit the corresponding trace reasons defined
+  in DESIGN AREA 12, including retention, continuity, and loss evidence
+  reasons.
+- Such events MUST be marked as debugger-initiated via trace attributes.
+
+Meaning:
+- Trace retention and loss evidence rules apply equally to debugger-initiated
+  trace-affecting actions.
+
+
+===============================================================================
 7. DEBUGGER UI INTEGRATION (LOCKED)
 ===============================================================================
 
@@ -377,6 +397,8 @@ In development:
 
 If debugger disconnects:
 - execution resumes or aborts based on policy
+- the chosen outcome MUST be traced using the debugger disconnect outcome
+  reasons defined in DESIGN AREA 12
 - no deadlock allowed
 
 If breakpoint logic errors:
@@ -393,7 +415,22 @@ Every breakpoint hit:
 - links to the causal chain
 - records inspection and mutation actions
 
+Breakpoint hits and resume actions MUST be traced using the breakpoint reasons
+defined in DESIGN AREA 12.
+
+Breakpoint hit trace events MUST include sufficient identifiers for offline
+linking when applicable, including:
+- appInstanceId
+- pipelineRunId and stage id (pipeline breakpoints)
+- memoryLayerId and memory key identity (memory breakpoints)
+- transactionId and mutation phase (StagedMutation | CommittedMutation)
+- capability identifier and caller pack identity (capability breakpoints)
+- orchestrationUnitId or Job identity (if applicable)
+
 Tracing and debugging are complementary.
+
+Debugger actions that stage and apply mutations at safe points MUST be traced
+as distinct events that share a stable mutation lineage identifier.
 
 
 ===============================================================================
@@ -445,7 +482,8 @@ END OF DESIGN AREA 13 - DEBUGGING, INSPECTION & BREAKPOINTS
 
 
 --- doc-meta ---
-docId: docs/design/DA-13_DEBUGGING_INSPECTION_AND_BREAKPOINTS.txt
-rev: 1
-git: 0000000
+docId: DA-13
+file: docs/design/DA-13_DEBUGGING_INSPECTION_AND_BREAKPOINTS.txt
+rev: 7
+git: 9dd51ef
 ----------------
