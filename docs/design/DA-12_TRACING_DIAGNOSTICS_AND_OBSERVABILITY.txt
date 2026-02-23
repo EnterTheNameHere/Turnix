@@ -1,18 +1,55 @@
 ===============================================================================
-DESIGN AREA 12 - TRACING, DIAGNOSTICS & OBSERVABILITY
+DESIGN AREA DA-12 - TRACING, DIAGNOSTICS & OBSERVABILITY
 ===============================================================================
 
 Status:
 -------
-CORE - this area defines how Turnix observes itself, how decisions are
-explained, and how failures can be reconstructed after the fact.
+EVOLVING
 
-Tracing is not logging.
-Tracing is structural truth.
+Description:
+------------
+Defines the Turnix tracing model, including trace events, causal structure,
+reasons, span rules, and retention-loss evidence, enabling offline audit and
+explanation without making trace retention a hidden correctness dependency.
+
+Purpose and Scope:
+------------------
+This design area defines the Turnix tracing, diagnostics, and observability
+model.
+
+It defines:
+- what tracing means in Turnix and what it is authoritative for
+- trace event fields and causal DAG semantics
+- trace spans, ordering constraints, and trace roots
+- trace reasons and required reason sets
+- retention, pruning, and loss evidence requirements
+- required tracing coverage for discovery, resolution, activation, and
+  capabilities
+- configuration and state trace integration rules
+- trace access and user-facing diagnostics constraints
+- error envelope integration requirements
+
+It does NOT define:
+- authoritative committed state, transactions, or windows
+  (see DESIGN AREA 15)
+- debugger pause and mutation safety semantics
+  (see DESIGN AREA 13)
+- concrete storage formats, codecs, or digest algorithms
+  (see DESIGN AREA 10 and DESIGN AREA 15)
+- UI layout for trace viewers or debugger tooling
+  (see OPTIONAL DESIGN AREAS)
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
 
 
 ===============================================================================
-1. CORE CONCEPT
+01. CORE CONCEPT
 ===============================================================================
 
 Tracing answers:
@@ -48,7 +85,7 @@ Authority boundary:
 
 
 ===============================================================================
-2. TRACE FIRST, LOG SECOND (LOCKED)
+02. TRACE FIRST, LOG SECOND (LOCKED)
 ===============================================================================
 
 Turnix prioritizes:
@@ -61,7 +98,7 @@ Logs MUST NOT be relied upon for correctness or explanation.
 
 
 ===============================================================================
-3. TRACE EVENT MODEL (LOCKED)
+03. TRACE EVENT MODEL (LOCKED)
 ===============================================================================
 
 Each trace event has:
@@ -100,9 +137,8 @@ Correlation attributes:
   events MUST be linkable to their owning objects.
 
 
-===============================================================================
-3.1 TRACE SPANS AND ORDERING (LOCKED)
-===============================================================================
+03.1 TRACE SPANS AND ORDERING (LOCKED)
+--------------------------------------
 
 Trace spans represent bounded work with a start and an end.
 
@@ -132,9 +168,8 @@ Snapshot interaction (LOCKED cross-reference):
 - This rule is satisfied by the DA-15 snapshot trace carry-forward rule.
 
 
-===============================================================================
-3.2 TRACE ROOTS AND SPAN STRATIFICATION (LOCKED)
-===============================================================================
+03.2 TRACE ROOTS AND SPAN STRATIFICATION (LOCKED)
+-------------------------------------------------
 
 Trace storage MAY contain multiple unconnected trace DAG roots.
 
@@ -183,7 +218,7 @@ Interpretation:
 
 
 ===============================================================================
-4. TRACE REASONS (LOCKED)
+04. TRACE REASONS (LOCKED)
 ===============================================================================
 
 Reasons are:
@@ -226,9 +261,8 @@ Reasons MUST be emitted whenever:
 - execution is paused, staged, resumed, or aborted via debugging facilities
 
 
-===============================================================================
-4.1 TRACE REASONS FOR RETENTION, CONTINUITY, AND LOSS (LOCKED)
-===============================================================================
+04.1 TRACE REASONS FOR RETENTION, CONTINUITY, AND LOSS (LOCKED)
+---------------------------------------------------------------
 
 This subsection defines required trace reasons for trace retention behavior,
 continuity evidence, and explicit loss reporting.
@@ -256,9 +290,8 @@ available:
 - policyId (if applicable)
 
 
--------------------------------------------------------------------------------
-4.1.1 REQUIRED RETENTION AND LOSS REASONS (LOCKED)
--------------------------------------------------------------------------------
+04.1.1 REQUIRED RETENTION AND LOSS REASONS (LOCKED)
+---------------------------------------------------
 
 The following reasons MUST exist and MUST be emitted when applicable.
 
@@ -464,9 +497,8 @@ E) Window boundary trace reasons (cross-reference with DA-15)
     CrashRecovered, OtherExplicitReason)
 
 
--------------------------------------------------------------------------------
-4.1.2 REQUIRED ATTRIBUTES FOR KEY MUTATION TRACE (LOCKED)
--------------------------------------------------------------------------------
+04.1.2 REQUIRED ATTRIBUTES FOR KEY MUTATION TRACE (LOCKED)
+----------------------------------------------------------
 
 To support audit skeleton retention, mutation evidence MUST be representable
 even under aggressive pruning.
@@ -489,9 +521,8 @@ This event SHOULD be causally linked to:
 - the owning work span or orchestration unit span when such a span exists.
 
 
--------------------------------------------------------------------------------
-4.1.3 OPTIONAL REASONS (OPEN)
--------------------------------------------------------------------------------
+04.1.3 OPTIONAL REASONS (OPEN)
+-----------------------------
 
 The following reasons MAY be defined to improve observability without changing
 authority semantics:
@@ -507,9 +538,8 @@ authority semantics:
 - TraceRetentionClassOverridden
 
 
--------------------------------------------------------------------------------
-4.1.4 DEBUGGER TRACE REASONS (REQUIRED) (LOCKED)
--------------------------------------------------------------------------------
+04.1.4 DEBUGGER TRACE REASONS (REQUIRED) (LOCKED)
+-------------------------------------------------
 
 This subsection defines required trace reasons for debugger inspection,
 breakpoints, pausing, and debugger-initiated mutation.
@@ -696,7 +726,7 @@ E) Debugger inspection and mutation
 
 
 ===============================================================================
-5. TRACE DURING DISCOVERY (LOCKED)
+05. TRACE DURING DISCOVERY (LOCKED)
 ===============================================================================
 
 Discovery emits trace events for:
@@ -711,7 +741,7 @@ Each ignored artifact MUST have a reason.
 
 
 ===============================================================================
-6. TRACE DURING RESOLUTION (LOCKED)
+06. TRACE DURING RESOLUTION (LOCKED)
 ===============================================================================
 
 Resolution emits:
@@ -729,7 +759,7 @@ Resolution traces must be sufficient to:
 
 
 ===============================================================================
-7. TRACE DURING ACTIVATION (LOCKED)
+07. TRACE DURING ACTIVATION (LOCKED)
 ===============================================================================
 
 Activation emits:
@@ -744,7 +774,7 @@ Activation traces define runtime causality and scope boundaries.
 
 
 ===============================================================================
-8. CAPABILITY CALL TRACING (LOCKED)
+08. CAPABILITY CALL TRACING (LOCKED)
 ===============================================================================
 
 Every capability call emits:
@@ -764,7 +794,7 @@ This is mandatory for trust and audit.
 
 
 ===============================================================================
-9. CONFIG & STATE TRACE INTEGRATION (LOCKED)
+09. CONFIG & STATE TRACE INTEGRATION (LOCKED)
 ===============================================================================
 
 Configuration and state interactions MUST be traced distinctly.
@@ -816,9 +846,8 @@ Failure to write traces:
 Trace loss is acceptable; silent behavior is not.
 
 
-===============================================================================
 10.1 TRACE RETENTION, LOSS EVIDENCE, AND PRUNING LEDGER (LOCKED POLICY)
-===============================================================================
+----------------------------------------------------------------------
 
 Trace retention is policy-driven.
 
@@ -845,8 +874,8 @@ Pruning and drop events MUST include:
   or window identity if applicable)
 - target identity (what was removed or omitted, expressed as ranges or chunk
   identities)
-- reason category (PolicyPruned | StoragePressureDropped | CorruptedIsRejected |
-  ManualRemoval | OtherExplicitReason)
+- reason category (PolicyPruned | StoragePressureDropped |
+  CorruptedIsRejected | ManualRemoval | OtherExplicitReason)
 
 Continuity requirement:
 - Turnix MUST maintain a minimal continuity record sufficient to establish
@@ -970,13 +999,12 @@ OPEN:
 
 
 ===============================================================================
-END OF DESIGN AREA 12 - TRACING, DIAGNOSTICS & OBSERVABILITY
+END OF TRACING, DIAGNOSTICS & OBSERVABILITY
 ===============================================================================
-
 
 --- doc-meta ---
 docId: DA-12
 file: docs/design/DA-12_TRACING_DIAGNOSTICS_AND_OBSERVABILITY.txt
-rev: 10
-git: 46774cb
+rev: 11
+git: 5c202f5
 ----------------
