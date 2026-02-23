@@ -1,23 +1,18 @@
 ===============================================================================
-DESIGN AREA 4 - GENERIC RESOLUTION SEMANTICS
+DESIGN AREA DA-04 - GENERIC RESOLUTION SEMANTICS
 ===============================================================================
 
 Status:
 -------
-CORE - this area defines the generic, dependency-agnostic resolution
-machinery used by Turnix to interpret PackRequests, enumerate candidates,
-apply constraints, and produce deterministic outcomes.
+EVOLVING
+
+Description:
+------------
+Defines the generic, dependency-agnostic resolution machinery used by Turnix
+to interpret PackRequests, enumerate candidates, apply constraints, and
+produce deterministic outcomes.
 
 This document defines resolution mechanics only.
-
-It does NOT define:
-- dependency meaning or strength
-- savePack behavior
-- pinning or copying rules
-- activation, execution, or lifecycle semantics
-
-Those are defined by higher-level consumers
-(e.g. dependency resolution, save handling, activation).
 
 This area strictly separates:
 - request parsing
@@ -26,12 +21,56 @@ This area strictly separates:
 - deterministic selection
 - ambiguity and failure signaling
 
-Nothing in this area implies loading, activation, execution order,
-or runtime access.
+Nothing in this area implies loading, activation, execution order, or runtime
+access.
+
+
+Purpose:
+--------
+Provide a pure, deterministic resolution engine that higher-level consumers
+(dependency resolution, save handling, activation planning) can invoke with
+their own policy and ordering criteria, without embedding that policy into the
+core resolver.
+
+This area defines:
+- the PackRequest reference grammar
+- PackRequest parsing and representation
+- candidate enumeration phases
+- hard vs soft constraint handling
+- deterministic selection contract
+- ambiguity and failure signaling requirements
+
+This area does NOT define:
+- dependency meaning or strength
+- savePack behavior
+- pinning or copying rules
+- activation, execution, or lifecycle semantics
+- resolution ordering criteria (consumer-defined)
+
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-02
+- DA-03
+
+
+Downstream Documents:
+--------------------
+- pack-uri-spec
+- pack-and-asset-resolution
+- IS-01
+- IS-02
+- DA-12
 
 
 ===============================================================================
-1. PURPOSE AND SCOPE
+01. PURPOSE AND SCOPE
 ===============================================================================
 
 This design area defines:
@@ -51,13 +90,13 @@ It provides the mechanical resolution engine, not the policy.
 
 
 ===============================================================================
-2. PACK REQUEST REFERENCE GRAMMAR (LOCKED)
+02. PACK REQUEST REFERENCE GRAMMAR (LOCKED)
 ===============================================================================
 
 Canonical grammar:
     [<author>@]<packTreeId>[@<semverRequirement>]
 
-Rules:
+Rules (LOCKED):
 - case-sensitive
 - exactly zero, one, or two '@' characters
 - no filesystem paths
@@ -79,19 +118,19 @@ Invalid examples:
 
 
 ===============================================================================
-3. SINGLE '@' DISAMBIGUATION RULE (LOCKED)
+03. SINGLE '@' DISAMBIGUATION RULE (LOCKED)
 ===============================================================================
 
 If a PackRequest contains exactly one '@':
 
-- Attempt to parse the suffix as a semantic version requirement
+- Attempt to parse the suffix as a semantic version requirement.
 - If parsing succeeds:
-    -> suffix is treated as semver
+    -> suffix is treated as semverRequirement.
 - If parsing fails:
-    -> suffix is treated as author
+    -> suffix is treated as author.
 
 Examples:
-    "foo@1.2"  -> packTreeId="foo", semver="1.2"
+    "foo@1.2"  -> packTreeId="foo", semverRequirement="1.2"
     "foo@bar"  -> author="foo", packTreeId="bar"
 
 Failure to parse semver in this context is NOT an error.
@@ -99,11 +138,11 @@ This is an intentional disambiguation rule.
 
 
 ===============================================================================
-4. PACKREQUEST INTERNAL REPRESENTATION (LOCKED)
+04. PACKREQUEST INTERNAL REPRESENTATION (LOCKED)
 ===============================================================================
 
-PackRequest is the parsed, immutable internal representation
-used by the resolver.
+PackRequest is the parsed, immutable internal representation used by the
+resolver.
 
 Structure:
     PackRequest:
@@ -112,7 +151,7 @@ Structure:
         semverRequirement: SemVerPackRequirement | None
         kind: PackKind | None
 
-Rules:
+Rules (LOCKED):
 - created during indexing
 - immutable after creation
 - carries no policy or resolution state
@@ -120,7 +159,7 @@ Rules:
 
 
 ===============================================================================
-5. RESOLUTION OVERVIEW (LOCKED)
+05. RESOLUTION OVERVIEW (LOCKED)
 ===============================================================================
 
 Resolution is a pure, side-effect-free process.
@@ -135,16 +174,15 @@ Outputs:
 - a classified resolution failure
 
 Resolution MUST be deterministic:
-Given the same inputs and policy context,
-the same outcome MUST always occur.
+Given the same inputs and policy context, the same outcome MUST always occur.
 
 
 ===============================================================================
-6. CANDIDATE ENUMERATION - PHASE A (LOCKED)
+06. CANDIDATE ENUMERATION - PHASE A (LOCKED)
 ===============================================================================
 
-Candidate enumeration identifies packs that are structurally compatible
-with a PackRequest.
+Candidate enumeration identifies packs that are structurally compatible with a
+PackRequest.
 
 Steps:
 1) match packTreeId
@@ -152,7 +190,7 @@ Steps:
 3) apply kind constraint if present
 4) collect remaining candidates
 
-Properties:
+Properties (LOCKED):
 - no ordering
 - no selection
 - no preference evaluation
@@ -164,7 +202,7 @@ This phase answers only:
 
 
 ===============================================================================
-7. CONSTRAINT APPLICATION - PHASE B (LOCKED)
+07. CONSTRAINT APPLICATION - PHASE B (LOCKED)
 ===============================================================================
 
 Constraints remove or restrict candidates.
@@ -172,7 +210,7 @@ Constraints remove or restrict candidates.
 Two constraint classes exist.
 
 
-7.1 HARD CONSTRAINTS
+07.1 Hard constraints
 --------------------
 
 Hard constraints permanently exclude candidates.
@@ -186,13 +224,13 @@ Examples:
 - savePack scope violation
 - concrete version mismatch
 
-Rules:
+Rules (LOCKED):
 - candidates failing a hard constraint MUST NOT be selected
 - candidates failing a hard constraint MUST NOT be offered to the user
-- failure reasons MUST be observable (see DESIGN AREA 12)
+- failure reasons MUST be observable (see DA-12)
 
 
-7.2 SOFT CONSTRAINTS
+07.2 Soft constraints
 --------------------
 
 Soft constraints discourage selection but do not invalidate structure.
@@ -202,26 +240,27 @@ Examples:
 - deprecated pack
 - policy-based discouragement
 
-Rules:
+Rules (LOCKED):
 - soft-constrained candidates remain known
 - they are NOT automatically selectable
 - selection requires explicit policy or user decision
 
-IMPORTANT:
+IMPORTANT (LOCKED):
 Soft constraints apply to candidates, not to the PackRequest itself.
 Whether a request is mandatory or optional is defined externally.
-The resolver MUST still order soft-constrained candidates deterministically
-once explicitly allowed.
+
+If soft-constrained candidates are explicitly allowed, the resolver MUST still
+order them deterministically under the consumer-defined ordering.
 
 
 ===============================================================================
-8. RESOLUTION SOURCE DETERMINATION (LOCKED)
+08. RESOLUTION SOURCE DETERMINATION (LOCKED)
 ===============================================================================
 
-Before ordering or selection, the resolver MUST be told
-which resolution source applies.
+Before ordering or selection, the resolver MUST be told which resolution
+source applies.
 
-Rules:
+Rules (LOCKED):
 - exactly one source applies
 - the source is determined externally
 - the resolver MUST NOT mix sources
@@ -233,20 +272,20 @@ The selected source constrains:
 
 
 ===============================================================================
-9. DETERMINISTIC SELECTION (LOCKED)
+09. DETERMINISTIC SELECTION (LOCKED)
 ===============================================================================
 
 After constraints are applied, the resolver MUST:
 - impose a total, deterministic ordering on remaining candidates
 - select the FIRST candidate in that ordering
 
-Rules:
+Rules (LOCKED):
 - ordering MUST be stable and reproducible
 - ordering MUST NOT depend on iteration order
 - ordering MUST NOT involve randomness
 
-The concrete ordering criteria are defined by
-the resolution consumer (e.g. dependency resolution).
+The concrete ordering criteria are defined by the resolution consumer
+(e.g. dependency resolution).
 
 Silent substitution is FORBIDDEN.
 
@@ -255,8 +294,8 @@ Silent substitution is FORBIDDEN.
 10. AMBIGUITY HANDLING (LOCKED)
 ===============================================================================
 
-If deterministic ordering cannot reduce candidates to a single,
-unambiguous choice:
+If deterministic ordering cannot reduce candidates to a single, unambiguous
+choice:
 
 - resolution MUST pause
 - ambiguity MUST be explicitly classified
@@ -282,7 +321,7 @@ Resolution fails if:
 Failure MUST:
 - be explicit
 - be classified
-- be observable (see DESIGN AREA 12)
+- be observable (see DA-12)
 - never silently fall back
 
 
@@ -328,7 +367,7 @@ LOCKED:
 - two-phase resolution model
 - hard vs soft constraint distinction
 - concrete version mismatch is a hard exclusion
-- deterministic ordering and selection
+- deterministic ordering and selection contract
 - no silent substitution
 - explicit ambiguity signaling
 
@@ -342,12 +381,13 @@ Those are defined by higher-level design areas.
 
 
 ===============================================================================
-END OF DESIGN AREA 4 - GENERIC RESOLUTION SEMANTICS
+END OF GENERIC RESOLUTION SEMANTICS
 ===============================================================================
 
 
 --- doc-meta ---
-docId: docs/design/DA-04_GENERIC_RESOLUTION_SEMANTICS.txt
-rev: 1
-git: 0000000
+docId: DA-04
+file: docs/design/DA-04_GENERIC_RESOLUTION_SEMANTICS.txt
+rev: 7
+git: f230f5d
 ----------------
