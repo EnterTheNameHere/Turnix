@@ -1,26 +1,72 @@
 ===============================================================================
-DESIGN AREA 10 - FILE I/O, READERS / WRITERS & PERSISTENCE SAFETY
+DESIGN AREA DA-10 - FILE I/O, READERS / WRITERS & PERSISTENCE SAFETY
 ===============================================================================
 
 Status:
 -------
-CORE - this area defines how data is read and written, who is allowed
-to do so, and how failures are handled without corrupting identity,
-history, or user trust.
+EVOLVING
+
+Description:
+------------
+Defines how data is read and written, who is allowed to do so, and how
+failures are handled without corrupting identity, history, or user trust.
 
 This area is NON-NEGOTIABLE.
 All persistence in Turnix is centralized and mediated.
 
 
+Purpose:
+--------
+Centralize all persistent I/O behind a single authority (IoManager) to
+preserve determinism, reversibility, and explicit uncertainty. Prevent packs
+and runtime components from bypassing safety rules by direct filesystem
+access, and ensure identity-bearing state is never silently corrupted.
+
+This area defines:
+- centralized I/O authority and boundaries
+- Reader / Writer provider model
+- raw access containment rules
+- root read/write permissions
+- error classification and user-mediated recovery guarantees
+- rollback points, backups, and snapshots
+- streaming I/O rules and where streaming is forbidden
+
+This area does NOT define:
+- activation and lifecycle semantics (see DA-08)
+- dependency resolution semantics (see DA-07)
+- capability schemas and permission prompting (see DA-09)
+- tracing schema and storage (see DA-12)
+- pack discovery rules beyond save scanning references (see DA-02)
+
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-02
+- DA-08
+
+
+Downstream Documents:
+--------------------
+- DA-11
+- DA-12
+- tracing
+
+
 ===============================================================================
-1. CORE PRINCIPLE (LOCKED)
+01. CORE PRINCIPLE (LOCKED)
 ===============================================================================
 
-ALL file reading and writing in Turnix MUST go through a centralized
-I/O authority.
+ALL file reading and writing in Turnix MUST go through a centralized I/O
+authority.
 
-No pack, tool, or runtime component may read or write persistent data
-by accessing the filesystem directly.
+No pack, tool, or runtime component may read or write persistent data by
+accessing the filesystem directly.
 
 This applies to:
 - configuration
@@ -33,7 +79,7 @@ This applies to:
 
 
 ===============================================================================
-2. CENTRAL AUTHORITY: IoManager (LOCKED)
+02. CENTRAL AUTHORITY: IoManager (LOCKED)
 ===============================================================================
 
 Component:
@@ -56,7 +102,7 @@ No other component may bypass IoManager.
 
 
 ===============================================================================
-3. READERS & WRITERS (LOCKED CONCEPT)
+03. READERS & WRITERS (LOCKED CONCEPT)
 ===============================================================================
 
 IoManager does not hardcode all file formats.
@@ -70,12 +116,11 @@ Each Reader / Writer:
 - declares its supported formats
 - is registered with IoManager
 - operates strictly within IoManager control
-- executes in the Turnix-controlled backend environment
-  (never in frontend)
+- executes in the Turnix-controlled backend environment (never in frontend)
 
 
 ===============================================================================
-4. RAW ACCESS BOUNDARY (LOCKED)
+04. RAW ACCESS BOUNDARY (LOCKED)
 ===============================================================================
 
 Reader / Writer implementations MAY internally use:
@@ -83,9 +128,7 @@ Reader / Writer implementations MAY internally use:
 - platform-native APIs
 - low-level I/O operations
 
-However:
-
-LOCKED:
+However (LOCKED):
 - raw handles MUST NOT escape the Reader / Writer boundary
 - raw paths MUST NOT be exposed to calling code
 - packs NEVER receive filesystem handles or unrestricted path APIs
@@ -93,12 +136,12 @@ LOCKED:
 Readers return fully loaded data.
 Writers accept data to persist.
 
-The raw filesystem is an internal implementation detail of IoManager
-and its providers, never part of the public runtime surface.
+The raw filesystem is an internal implementation detail of IoManager and its
+providers, never part of the public runtime surface.
 
 
 ===============================================================================
-5. BUILT-IN READERS / WRITERS (LOCKED)
+05. BUILT-IN READERS / WRITERS (LOCKED)
 ===============================================================================
 
 Turnix core provides the following built-in kinds:
@@ -112,7 +155,7 @@ These are ALWAYS available before discovery begins.
 
 
 ===============================================================================
-6. EXTENDED READERS / WRITERS (LOCKED POLICY)
+06. EXTENDED READERS / WRITERS (LOCKED POLICY)
 ===============================================================================
 
 Additional formats (e.g. YAML, SQLite, embeddings):
@@ -121,14 +164,14 @@ Additional formats (e.g. YAML, SQLite, embeddings):
 - MUST be activated BEFORE use
 - MUST declare supported kinds explicitly
 
-Pack-provided Readers and Writers MUST NOT be usable unless the
-providing pack is activated.
+Pack-provided Readers and Writers MUST NOT be usable unless the providing
+pack is activated.
 
 Turnix MUST NOT attempt to auto-discover or load providers mid-read.
 
 
 ===============================================================================
-7. DISCOVERY- AND INDEXING-TIME I/O LIMITS (LOCKED)
+07. DISCOVERY- AND INDEXING-TIME I/O LIMITS (LOCKED)
 ===============================================================================
 
 During discovery and indexing:
@@ -148,7 +191,7 @@ Early phases must be deterministic, fast, and independent of packs.
 
 
 ===============================================================================
-8. WRITE PERMISSIONS (LOCKED)
+08. WRITE PERMISSIONS (LOCKED)
 ===============================================================================
 
 Writable roots at runtime:
@@ -167,7 +210,7 @@ IoManager enforces these rules strictly.
 
 
 ===============================================================================
-9. ERROR CLASSIFICATION (LOCKED)
+09. ERROR CLASSIFICATION (LOCKED)
 ===============================================================================
 
 All I/O errors are classified into exactly one category:
@@ -175,8 +218,8 @@ All I/O errors are classified into exactly one category:
 A) UNRECOVERABLE (Fatal)
    - failure to load required config schema
    - failure to load default configuration
-   - corruption of identity-bearing state required
-     before minimal UI is available
+   - corruption of identity-bearing state required before minimal UI is
+     available
    -> ReactorScramError
 
 B) USER-DECIDABLE
@@ -278,11 +321,10 @@ Rules:
 - applied sequentially toward target version
 - deterministic and side-effect controlled
 
-IMPORTANT:
+IMPORTANT (LOCKED):
 - Migrators do NOT implement inverse operations.
 - BEFORE any identity-bearing mutation is committed:
-  -> IoManager MUST create a rollback point
-     (backup or snapshot, per policy)
+  -> IoManager MUST create a rollback point (backup or snapshot, per policy)
 
 Identity-bearing mutations include, but are not limited to:
 - configuration migrations
@@ -335,8 +377,8 @@ Core rules (LOCKED):
 - cancellation MUST be safe
 
 
-16.1 STREAMING KINDS (LOCKED)
------------------------------
+16.1 Streaming kinds (LOCKED)
+----------------------------
 
 Examples:
 - utf8TextStream
@@ -348,8 +390,8 @@ Examples:
 Non-streaming kinds remain non-streaming.
 
 
-16.2 CANCELLATION & CLEANUP (LOCKED)
-------------------------------------
+16.2 Cancellation & cleanup (LOCKED)
+-----------------------------------
 
 Streaming read:
 - cancellation closes handles
@@ -364,7 +406,7 @@ Staging artifacts:
 - SHOULD be tracked for cleanup on restart
 
 
-16.3 WHERE STREAMING IS FORBIDDEN (LOCKED)
+16.3 Where streaming is forbidden (LOCKED)
 ------------------------------------------
 
 Streaming MUST NOT be used for:
@@ -406,7 +448,7 @@ All persistence authority is centralized.
 
 
 ===============================================================================
-19. OPEN QUESTIONS
+19. EXPLICITLY OPEN QUESTIONS
 ===============================================================================
 
 OPEN:
@@ -436,12 +478,12 @@ OPEN:
 
 
 ===============================================================================
-END OF DESIGN AREA 10 - FILE I/O, READERS / WRITERS & PERSISTENCE SAFETY
+END OF DA-10 - FILE I/O, READERS / WRITERS & PERSISTENCE SAFETY
 ===============================================================================
 
-
 --- doc-meta ---
-docId: docs/design/DA-10_FILE_IO_READERS_WRITERS_AND_PERSISTENCE_SAFETY.txt
-rev: 1
-git: 0000000
+docId: DA-10
+file: docs/design/DA-10_FILE_IO_READERS_WRITERS_AND_PERSISTENCE_SAFETY.txt
+rev: 9
+git: f4cf937
 ----------------
