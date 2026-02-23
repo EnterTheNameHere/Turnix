@@ -1,18 +1,65 @@
 ===============================================================================
-DESIGN AREA 11 - CONFIGURATION, SCHEMAS & MIGRATION
+DESIGN AREA DA-11 - CONFIGURATION, SCHEMAS & MIGRATION
 ===============================================================================
 
 Status:
 -------
-CORE - this area defines how configuration exists, how it is validated,
-how it evolves over time, and how user state is protected.
+EVOLVING
+
+Description:
+------------
+Defines how configuration exists, how it is validated, how it evolves over
+time, and how user state is protected.
 
 Configuration is data with identity.
 Breaking it silently is forbidden.
 
 
+Purpose:
+--------
+Provide a deterministic, schema-governed configuration system with explicit
+ownership, layered overrides, safe migration, and UI-mediated recovery. Ensure
+configuration remains explainable, reversible, and protected from silent
+breakage.
+
+This area defines:
+- configuration scopes and precedence rules
+- schema and defaults rules and locations
+- override storage rules and canonical ownership
+- the configuration materialization pipeline
+- effectiveConfig and computed transform constraints
+- config access API semantics
+- migration rules and backup / rollback safety
+- IoManager mediation requirements for persistence
+- error classification and recovery boundaries
+
+This area does NOT define:
+- direct filesystem I/O rules beyond the IoManager bridge (see DA-10)
+- cross-pack permission authority details (see OE as referenced)
+- tracing schema and storage (see DA-12)
+- activation semantics beyond config usage implications (see DA-08)
+
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-10
+
+
+Downstream Documents:
+--------------------
+- DA-12
+- tracing
+- ODA-E
+
+
 ===============================================================================
-1. CORE CONCEPT
+01. CORE CONCEPT
 ===============================================================================
 
 Configuration answers:
@@ -27,10 +74,10 @@ Configuration is NOT:
 
 
 ===============================================================================
-2. CONFIGURATION TYPES & SCOPES (LOCKED)
+02. CONFIGURATION TYPES & SCOPES (LOCKED)
 ===============================================================================
 
-Turnix distinguishes configuration by SCOPE:
+Turnix distinguishes configuration by scope:
 
 A) Engine (kernel-global)
 B) Pack-global
@@ -48,14 +95,14 @@ Save-bound > Pack-global > Engine > Defaults
 Ownership:
 - Engine scope is owned by the kernel
 - Pack-global and Save-bound scopes are owned by a specific canonicalPackId
-- Ownership is immutable without migration
+- ownership is immutable without migration
 
 This ownership model is normative and constrained further by:
 - OE - CROSS-PACK PERMISSIONS - STATE ACCESS, MUTATION & AUTHORITY
 
 
 ===============================================================================
-3. CONFIG SCHEMAS (LOCKED)
+03. CONFIG SCHEMAS (LOCKED)
 ===============================================================================
 
 Schemas define:
@@ -74,7 +121,7 @@ Locations (first-found-wins within root priority):
 - <root>/config/schema/**/*.schema.json
 - <root>/<pack>/config/schema/**/*.schema.json
 
-Rules:
+Rules (LOCKED):
 - schemas are immutable once released
 - new versions extend, not rewrite
 - breaking change requires new major semver
@@ -82,7 +129,7 @@ Rules:
 
 
 ===============================================================================
-4. DEFAULT CONFIGS (LOCKED)
+04. DEFAULT CONFIGS (LOCKED)
 ===============================================================================
 
 Defaults define initial values only.
@@ -107,7 +154,7 @@ Defaults may change between pack versions at author responsibility.
 
 
 ===============================================================================
-5. USER OVERRIDES (LOCKED)
+05. USER OVERRIDES (LOCKED)
 ===============================================================================
 
 User overrides store only deviations from defaults.
@@ -123,11 +170,11 @@ Pack-global:
 Save-bound (pack-local):
     saves/<appPackId>/<appInstanceId>/config/packs/<canonicalPackId>/*.json5
 
-CanonicalPackId:
+canonicalPackId:
 - resolved author + packTreeId
 - semver NOT included
 
-Rules:
+Rules (LOCKED):
 - overrides never modify defaults
 - overrides are loaded after defaults
 - overrides are migrated explicitly
@@ -136,7 +183,7 @@ Rules:
 
 
 ===============================================================================
-6. CONFIG MATERIALIZATION PIPELINE (LOCKED)
+06. CONFIG MATERIALIZATION PIPELINE (LOCKED)
 ===============================================================================
 
 Configuration is resolved in ordered layers:
@@ -156,7 +203,7 @@ Computed layers are constrained by OE and MUST NOT alter stored state.
 
 
 ===============================================================================
-7. EFFECTIVE CONFIG & COMPUTED TRANSFORMS (LOCKED)
+07. EFFECTIVE CONFIG & COMPUTED TRANSFORMS (LOCKED)
 ===============================================================================
 
 Some configuration values may be:
@@ -165,24 +212,24 @@ Some configuration values may be:
 - transformed
 - adjusted based on other values
 
-Rules:
+Rules (LOCKED):
 - computed transforms MUST NOT mutate stored values
 - computed transforms MUST NOT write to config
 - computed transforms operate only on effectiveConfig
 - removal of a transform MUST restore prior behavior
-- computed layers must be traceable
+- computed layers MUST be traceable
 
-EffectiveConfig represents the final, runtime-visible values only.
+effectiveConfig represents the final, runtime-visible values only.
 
 
 ===============================================================================
-8. DIAGNOSTIC VALIDATION OF EFFECTIVE CONFIG (LOCKED, NON-BLOCKING)
+08. DIAGNOSTIC VALIDATION OF EFFECTIVE CONFIG (LOCKED, NON-BLOCKING)
 ===============================================================================
 
-Turnix MAY validate effectiveConfig against schema
-for diagnostic purposes only.
+Turnix MAY validate effectiveConfig against schema for diagnostic purposes
+only.
 
-Diagnostic validation:
+Diagnostic validation (LOCKED):
 - MUST NOT block set(), save(), or load
 - MUST NOT rewrite stored config
 - MUST emit trace reasons when violated
@@ -195,7 +242,7 @@ Stored config validation remains authoritative.
 
 
 ===============================================================================
-9. CONFIG ACCESS API (LOCKED)
+09. CONFIG ACCESS API (LOCKED)
 ===============================================================================
 
 Configuration access is scope-explicit and ownership-aware.
@@ -215,12 +262,12 @@ Save-bound scope:
     config.save.set(key, value)
     config.save.delete(key)
 
-Read semantics:
+Read semantics (LOCKED):
 - get() returns value or raises NotFoundOrPermissionDenied
 - tryGet() MAY return None instead of throwing
 - no API distinguishes "not found" from "permission denied"
 
-Write semantics:
+Write semantics (LOCKED):
 - writes always target an explicit owner scope
 - writes may trigger permission decisions (see OE, DA-14)
 - delete() removes overrides only (never defaults)
@@ -253,7 +300,7 @@ Migrators:
 - versioned
 - ordered
 
-Rules:
+Rules (LOCKED):
 - migration runs BEFORE validation
 - migrators are pure functions (input -> output)
 - multiple migrators may run sequentially
@@ -290,7 +337,7 @@ ManifestMigrator:
 ConfigMigrator:
 - evolves user state
 
-They are separate and must remain so.
+They are separate and MUST remain so.
 
 
 ===============================================================================
@@ -355,7 +402,7 @@ Explicitness over convenience.
 
 
 ===============================================================================
-18. OPEN QUESTIONS
+18. EXPLICITLY OPEN QUESTIONS
 ===============================================================================
 
 OPEN:
@@ -385,12 +432,13 @@ OPEN:
 
 
 ===============================================================================
-END OF DESIGN AREA 11 - CONFIGURATION, SCHEMAS & MIGRATION
+END OF DA-11 - CONFIGURATION, SCHEMAS & MIGRATION
 ===============================================================================
 
 
 --- doc-meta ---
-docId: docs/design/DA-11_CONFIGURATION_SCHEMAS_AND_MIGRATION.txt
-rev: 1
-git: 0000000
+docId: DA-11
+file: docs/design/DA-11_CONFIGURATION_SCHEMAS_AND_MIGRATION.txt
+rev: 7
+git: 9411411
 ----------------
