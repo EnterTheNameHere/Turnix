@@ -507,6 +507,194 @@ authority semantics:
 - TraceRetentionClassOverridden
 
 
+-------------------------------------------------------------------------------
+4.1.4 DEBUGGER TRACE REASONS (REQUIRED) (LOCKED)
+-------------------------------------------------------------------------------
+
+This subsection defines required trace reasons for debugger inspection,
+breakpoints, pausing, and debugger-initiated mutation.
+
+These reasons MUST be emitted when applicable.
+
+All events in this subsection MUST be causally linked to the owning span or
+unit when such ownership exists (example: AppInstanceActiveSpan or WorkSpan).
+
+All events in this subsection SHOULD include correlation attributes when
+available:
+- appInstanceId
+- pipelineRunId
+- orchestrationUnitId
+- transactionId
+- Job identity (if applicable)
+
+
+A) Debugger connection lifecycle
+
+- DebuggerConnected
+  Emitted when a debugger client successfully connects.
+
+  Required attributes:
+  - debuggerClientId (stable per connection)
+  - connectionKind (UI, headless, other)
+
+- DebuggerDisconnected
+  Emitted when a debugger client disconnects unexpectedly or intentionally.
+
+  Required attributes:
+  - debuggerClientId
+  - disconnectKind (Normal, Unexpected, Timeout, TransportError)
+
+
+B) Debugger disconnect outcome (policy effect)
+
+Exactly one of the following MUST be emitted when a debugger disconnect causes
+or triggers a policy outcome for active debugging control.
+
+- DebuggerDisconnectedResume
+  Emitted when execution continues after debugger disconnect by policy.
+
+  Required attributes:
+  - debuggerClientId
+  - policyId
+
+- DebuggerDisconnectedAbort
+  Emitted when active work is aborted after debugger disconnect by policy.
+
+  Required attributes:
+  - debuggerClientId
+  - policyId
+  - abortTarget (Job, orchestrationUnit, appInstance)
+
+- DebuggerDisconnectedHoldRefused
+  Emitted if policy would require holding execution but holding is not allowed
+  or cannot be achieved safely.
+
+  Required attributes:
+  - debuggerClientId
+  - policyId
+  - refusalReasonCategory (NotSupported, NotSafe, NotQuiescent, Other)
+
+
+C) Breakpoint hit and handling
+
+- BreakpointHit
+  Emitted when any breakpoint triggers.
+
+  Required attributes:
+  - breakpointId
+  - breakpointType (PipelineStage, Memory, Capability)
+  - scope (global, appInstance, view, pack, pipeline)
+
+  Required attributes by type:
+  - PipelineStage:
+    - pipelineRunId
+    - stageId
+  - Memory:
+    - memoryLayerId
+    - memoryKey identity
+    - mutationPhase (StagedMutation, CommittedMutation)
+    - mutationKind (Set, Delete, Overwrite)
+    - transactionId (if applicable)
+  - Capability:
+    - capabilityId
+    - callerPackId
+    - decisionPoint (Before, After, PermissionDecision)
+
+- BreakpointResumed
+  Emitted when execution resumes after a breakpoint hit.
+
+  Required attributes:
+  - breakpointId
+  - resumeMode (Resume, StepOver, AbortRequested)
+
+
+D) Manual pause and safe-point pause
+
+- ManualPauseRequested
+  Emitted when a manual pause is requested.
+
+  Required attributes:
+  - requestId
+  - pauseScope (appInstance, Job, global)
+  - targetIdentity (appInstanceId or Job identity)
+
+- ManualPauseGranted
+  Emitted when manual pause is achieved.
+
+  Required attributes:
+  - requestId
+  - achievedAtSafePoint (true | false)
+  - safePointDescriptor (if achievedAtSafePoint is true)
+
+- ManualPauseRefused
+  Emitted when manual pause is refused.
+
+  Required attributes:
+  - requestId
+  - refusalReasonCategory (NotSafe, NotSupported, NotQuiescent, PolicyRefused,
+    Other)
+
+- PauseAtSafePointRequested
+  Emitted when pause-at-safe-point is requested.
+
+  Required attributes:
+  - requestId
+  - targetIdentity (Job identity or orchestrationUnitId)
+
+- PauseAtSafePointApplied
+  Emitted when pause-at-safe-point is reached and applied.
+
+  Required attributes:
+  - requestId
+  - safePointDescriptor
+
+
+E) Debugger inspection and mutation
+
+- DebuggerInspection
+  Emitted when the debugger performs an inspection action.
+
+  Required attributes:
+  - inspectionKind (ReadValue, Enumerate, Query, Other)
+  - targetKind (Memory, Layer, Pipeline, CapabilityRegistry, ServicesRegistry)
+  - targetIdentity (as applicable)
+
+- DebuggerMutationRequested
+  Emitted when debugger requests a mutation.
+
+  Required attributes:
+  - mutationRequestId
+  - targetKind (Memory, Breakpoint, Policy, Other)
+  - targetIdentity
+  - mutationKind (Set, Delete, Overwrite, Enable, Disable, Modify)
+
+- DebuggerMutationStaged
+  Emitted when a debugger mutation is staged for apply-at-safe-point.
+
+  Required attributes:
+  - mutationRequestId
+  - mutationLineageId (stable id linking staged and applied)
+  - targetIdentity
+  - intendedSafePointDescriptor
+
+- DebuggerMutationApplied
+  Emitted when a debugger mutation becomes effective.
+
+  Required attributes:
+  - mutationRequestId
+  - mutationLineageId
+  - appliedAtSafePointDescriptor (if applied at safe point)
+
+- DebuggerMutationDiscarded
+  Emitted when a staged debugger mutation is discarded.
+
+  Required attributes:
+  - mutationRequestId
+  - mutationLineageId
+  - discardReasonCategory (Abort, Timeout, PolicyCancelled, TargetInvalid,
+    Other)
+
+
 ===============================================================================
 5. TRACE DURING DISCOVERY (LOCKED)
 ===============================================================================
@@ -789,6 +977,6 @@ END OF DESIGN AREA 12 - TRACING, DIAGNOSTICS & OBSERVABILITY
 --- doc-meta ---
 docId: DA-12
 file: docs/design/DA-12_TRACING_DIAGNOSTICS_AND_OBSERVABILITY.txt
-rev: 9
-git: a048cc0
+rev: 10
+git: 46774cb
 ----------------
