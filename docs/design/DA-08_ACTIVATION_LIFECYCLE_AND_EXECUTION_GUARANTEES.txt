@@ -1,19 +1,70 @@
 ===============================================================================
-DESIGN AREA 8 - ACTIVATION, LIFECYCLE & EXECUTION GUARANTEES
+DESIGN AREA DA-08 - ACTIVATION, LIFECYCLE & EXECUTION GUARANTEES
 ===============================================================================
 
 Status:
 -------
-CORE - this area defines when pack code is permitted to execute, under whose
-authority execution occurs, and which execution behaviors Turnix explicitly
-guarantees or does not guarantee.
+EVOLVING
+
+Description:
+------------
+Defines when pack code is permitted to execute, under whose authority
+execution occurs, and which execution behaviors Turnix explicitly guarantees
+or does not guarantee.
 
 Activation is the sole mechanism that transitions a pack from inert metadata
 to an executable participant under Turnix control.
 
 
+Purpose:
+--------
+Establish a strict boundary between inert pack metadata and Turnix-recognized
+execution. Define activation as the only authorized entry to runtime
+participation, define PackContext as execution authority, and specify which
+execution pathways are guaranteed (or unsupported) under Turnix orchestration.
+
+This area defines:
+- lifecycle phase ordering and the activation boundary
+- the meaning of Activated state and PackContext authority
+- pack-level activation semantics and the canonical entrypoint
+- the separation between activation and execution
+- rules for immediate execution and import-time side effects
+- JavaScript runtime entry semantics relevant to activation
+- orchestrated execution pathways and guarantees
+- failure behavior, including NotActivatedError requirements
+
+This area does NOT define:
+- generic resolution mechanics (see DA-04)
+- dependency semantics and source selection (see DA-07)
+- importing and module loading boundaries (see DA-05)
+- tracing schema and storage (see DA-12)
+- capability schemas and permission prompts (only execution boundary rules)
+
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-04
+- DA-05
+- DA-06
+- DA-07
+
+
+Downstream Documents:
+--------------------
+- tracing
+- IS-01
+- IS-02
+- DA-12
+
+
 ===============================================================================
-1. CORE CONCEPT
+01. CORE CONCEPT
 ===============================================================================
 
 Activation answers exactly one question:
@@ -41,7 +92,7 @@ Those phases may occur before activation, but NEVER imply it.
 
 
 ===============================================================================
-2. LIFECYCLE PHASES (LOCKED)
+02. LIFECYCLE PHASES (LOCKED)
 ===============================================================================
 
 Turnix operates in logically ordered, externally observable phases:
@@ -52,27 +103,28 @@ Turnix operates in logically ordered, externally observable phases:
 4) Activation
 5) Running / Finalized
 
-Execution guarantee boundary:
+Execution guarantee boundary (LOCKED):
 - Activation is the FIRST moment Turnix may intentionally execute pack code.
 - After activation, pack code MAY execute during Running, but ONLY through
   Turnix-orchestrated execution pathways (see Section 14).
 
-Any code that executes outside Turnix orchestration is outside Turnix guarantees.
+Any code that executes outside Turnix orchestration is outside Turnix
+guarantees.
 
 
 ===============================================================================
-3. WHAT "ACTIVATED" MEANS (LOCKED)
+03. WHAT "ACTIVATED" MEANS (LOCKED)
 ===============================================================================
 
 When a pack is activated:
 - Turnix creates a PackContext (ctx) for that pack instance
 - the pack's activation entrypoint is invoked
 - the pack may:
-    - register services
-    - register capabilities
-    - subscribe to Turnix events
-    - allocate runtime resources
-    - participate in Turnix-managed orchestration
+  - register services
+  - register capabilities
+  - subscribe to Turnix events
+  - allocate runtime resources
+  - participate in Turnix-managed orchestration
 
 Before activation:
 - pack metadata may be resolved
@@ -81,7 +133,7 @@ Before activation:
 
 
 ===============================================================================
-4. PACK-LEVEL ACTIVATION (LOCKED)
+04. PACK-LEVEL ACTIVATION (LOCKED)
 ===============================================================================
 
 Activation applies to the pack as a whole.
@@ -97,7 +149,7 @@ There is no partial, staged, deferred, or per-file activation.
 
 
 ===============================================================================
-5. PACKCONTEXT (ctx) - EXECUTION AUTHORITY (LOCKED)
+05. PACKCONTEXT (ctx) - EXECUTION AUTHORITY (LOCKED)
 ===============================================================================
 
 Turnix provides exactly one execution authority object to pack code:
@@ -113,17 +165,18 @@ Any code executing with a PackContext:
 - is subject to that pack's visibility, permissions, and policy
 
 Passing ctx to other code is an explicit delegation of authority.
-The delegating pack is fully responsible for all actions performed using its ctx.
+The delegating pack is fully responsible for all actions performed using its
+ctx.
 
 
 ===============================================================================
-6. ACTIVATION ENTRYPOINT (LOCKED)
+06. ACTIVATION ENTRYPOINT (LOCKED)
 ===============================================================================
 
 The sole activation entrypoint is:
     onLoad(ctx)
 
-Rules:
+Rules (LOCKED):
 - onLoad(ctx) is called exactly once per pack instance
 - it is called only by Turnix
 - ctx is always provided by Turnix
@@ -136,7 +189,7 @@ MUST be explicitly defined by Turnix.
 
 
 ===============================================================================
-7. ACTIVATION VS EXECUTION (CRITICAL DISTINCTION)
+07. ACTIVATION VS EXECUTION (CRITICAL DISTINCTION)
 ===============================================================================
 
 Activation and execution are distinct concepts.
@@ -156,7 +209,7 @@ No execution mechanism substitutes for onLoad(ctx).
 
 
 ===============================================================================
-8. IMMEDIATE EXECUTION & LANGUAGE CONSTRUCTS (LOCKED)
+08. IMMEDIATE EXECUTION & LANGUAGE CONSTRUCTS (LOCKED)
 ===============================================================================
 
 Turnix acknowledges that some languages permit immediate execution constructs,
@@ -165,11 +218,11 @@ including but not limited to:
 - module-level executable statements
 - top-level side effects
 
-RULES (LOCKED):
-- Turnix does NOT rely on, endorse, or coordinate immediate execution
-- immediate execution is DISCOURAGED in all pack code
-- immediate execution does NOT activate a pack
-- immediate execution runs outside Turnix orchestration
+Rules (LOCKED):
+- Turnix does NOT rely on, endorse, or coordinate immediate execution.
+- immediate execution is DISCOURAGED in all pack code.
+- immediate execution does NOT activate a pack.
+- immediate execution runs outside Turnix orchestration.
 
 Code that executes immediately on import:
 - runs without PackContext authority
@@ -187,14 +240,14 @@ These rules apply uniformly to:
 
 
 ===============================================================================
-9. RUNTIME ENTRIES - JAVASCRIPT SEMANTICS (LOCKED)
+09. RUNTIME ENTRIES - JAVASCRIPT SEMANTICS (LOCKED)
 ===============================================================================
 
 Manifest fields:
     runtimes.javascript.entry
     runtimes.javascript.entries
 
-Semantics:
+Semantics (LOCKED):
 
 runtimes.javascript.entry:
 - imported by Turnix during activation
@@ -341,7 +394,7 @@ It MUST NOT return:
 
 
 ===============================================================================
-17. OPEN QUESTIONS
+17. EXPLICITLY OPEN QUESTIONS
 ===============================================================================
 
 OPEN:
@@ -370,12 +423,12 @@ OPEN:
 
 
 ===============================================================================
-END OF DESIGN AREA 8 - ACTIVATION, LIFECYCLE & EXECUTION GUARANTEES
+END OF ACTIVATION, LIFECYCLE & EXECUTION GUARANTEES
 ===============================================================================
 
-
 --- doc-meta ---
-docId: docs/design/DA-08_ACTIVATION_LIFECYCLE_AND_EXECUTION_GUARANTEES.txt
-rev: 1
-git: 0000000
+docId: DA-08
+file: docs/design/DA-08_ACTIVATION_LIFECYCLE_AND_EXECUTION_GUARANTEES.txt
+rev: 7
+git: 564e6d0
 ----------------
