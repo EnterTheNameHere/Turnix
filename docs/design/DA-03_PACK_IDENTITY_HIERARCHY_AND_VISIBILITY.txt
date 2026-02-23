@@ -1,27 +1,72 @@
 ===============================================================================
-DESIGN AREA 3 - PACK IDENTITY, HIERARCHY & VISIBILITY
+DESIGN AREA DA-03 - PACK IDENTITY, HIERARCHY & VISIBILITY
 ===============================================================================
 
 Status:
 -------
-FOUNDATIONAL - directly affects resolution, imports, activation order,
-security boundaries, and mental model for creators.
+EVOLVING
+
+Description:
+------------
+Defines pack identity layers, hierarchical addressing, and visibility rules.
+This area directly affects resolution, imports, activation order, security
+boundaries, and the mental model for pack authors.
 
 This area answers:
-- What is a pack?
+- What is a pack identity?
 - How packs relate to each other
 - Who can see whom, and why
 
 
+Purpose:
+--------
+Provide a stable identity and visibility model that supports deterministic
+resolution and explicit security boundaries, while remaining understandable
+to authors and predictable at runtime.
+
+This area defines:
+- identity layers (declaredId, packTreeId, author)
+- version identity rules and inheritance
+- visibility declarations and computed global visibility
+- import visibility from parent context
+- strict separation between visibility and capabilities
+
+This area does NOT define:
+- pack discovery boundaries (see DA-02)
+- pack resolution rules and source selection (save vs global)
+- activation order and runtime lifecycle
+- capability schema, permission prompts, or enforcement mechanics
+
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-02
+
+
+Downstream Documents:
+--------------------
+- pack-manifest-structure
+- pack-uri-spec
+- pack-and-asset-resolution
+- IS-01
+- IS-02
+
+
 ===============================================================================
-1. PACK IDENTITY MODEL (LOCKED)
+01. PACK IDENTITY MODEL (LOCKED)
 ===============================================================================
 
-There are three distinct identity layers. They must never be conflated.
+There are three distinct identity layers. They MUST NOT be conflated.
 
 
-1.1 declaredId (manifest-level)
--------------------------------
+01.1 declaredId (manifest-level)
+--------------------------------
 
 Source:
 - manifest.json5 -> "id"
@@ -33,16 +78,16 @@ Rules (LOCKED):
 - no version
 - local to its parent
 
-This is a local identifier, not globally unique.
+declaredId is a local identifier, not globally unique.
 
-Example:
+Examples:
     id: "ui"
     id: "button"
     id: "llamacpp"
 
 
-1.2 packTreeId (computed)
--------------------------
+01.2 packTreeId (computed)
+--------------------------
 
 Computed during discovery.
 
@@ -60,12 +105,12 @@ Examples:
 
 Properties (LOCKED):
 - case-sensitive
-- globally unique within author scope
+- globally unique within an author scope after author is known
 - hierarchical, but not filesystem-based
 
 
-1.3 author (effective identity)
--------------------------------
+01.3 author (effective identity)
+--------------------------------
 
 Terminology (LOCKED):
 
@@ -84,7 +129,7 @@ Notes:
 
 
 ===============================================================================
-2. VERSION IDENTITY (LOCKED)
+02. VERSION IDENTITY (LOCKED)
 ===============================================================================
 
 - declaredVersion
@@ -93,12 +138,12 @@ Notes:
 - version
     -> parsed SemVerPackVersion
 
-Rules:
+Rules (LOCKED):
 - parsing happens after discovery
 - invalid semver -> pack rejected
-- no "effectiveVersion" prefix used
+- no "effectiveVersion" naming is used
 
-Version inheritance:
+Version inheritance (LOCKED):
 - if version missing, inherit from parent
 - root without version uses engine default
 
@@ -108,33 +153,33 @@ Rationale:
 
 
 ===============================================================================
-3. VISIBILITY MODEL
+03. VISIBILITY MODEL
 ===============================================================================
 
 Visibility answers: Can pack A see pack B?
 
-This is NOT the same as:
+Visibility is NOT the same as:
 - dependency declaration
 - import usage
 - activation order
 
 
-3.1 Local visibility
---------------------
+03.1 Local visibility
+---------------------
 
 Each pack has:
 - visibility:
     "public" | "private"
 
-Declared or defaulted based on pack kind.
+Visibility is declared or defaulted based on pack kind.
 
 Defaults (LOCKED):
 - contentPack -> public
 - appPack / viewPack / mod / savePack -> private
 
 
-3.2 exportNestedPacks (LOCKED)
-------------------------------
+03.2 exportNestedPacks (LOCKED)
+-------------------------------
 
 Controls whether a pack's children are visible externally.
 
@@ -148,14 +193,14 @@ Semantics:
 - true  -> all children exported
 - list  -> only listed children exported
 
-Rules:
+Rules (LOCKED):
 - list entries are localIds ONLY
 - specifying dotted ids is an error
 - applies only to direct children
 
 
-3.3 globalVisibility (computed)
--------------------------------
+03.3 globalVisibility (computed)
+--------------------------------
 
 Computed during indexing.
 
@@ -172,12 +217,12 @@ Else:
     else if parent.exportNestedPacks == true:
         globalVisibility = public
     else if parent.exportNestedPacks is list:
-        globalVisibility = public if localId in list
+        globalVisibility = public if declaredId in list
                            else private
 
 
 ===============================================================================
-4. importPacksFromParent
+04. importPacksFromParent
 ===============================================================================
 
 Purpose:
@@ -185,12 +230,12 @@ Purpose:
 - does NOT imply export
 - does NOT imply capability inheritance
 
-Recommended final name:
-    importPacksFromParent
+Name (LOCKED):
+- importPacksFromParent
 
 
-4.1 Allowed forms
------------------
+04.1 Allowed forms
+------------------
 
 Type:
 - false
@@ -210,38 +255,38 @@ Resolution:
 - resolved at runtime with visibility checks
 
 
-4.2 Default behavior (LOCKED)
------------------------------
+04.2 Default behavior (LOCKED)
+------------------------------
 
 Defaults:
 - viewPack -> false
 - all other kinds -> true
 
 Rationale:
-- views must not inherit parent UI mods
+- views MUST NOT inherit parent UI mods
 - prevents UI contamination
 - keeps views isolated
 
 
 ===============================================================================
-5. VISIBILITY VS RESOLUTION (IMPORTANT DISTINCTION)
+05. VISIBILITY VS RESOLUTION (IMPORTANT DISTINCTION) (LOCKED)
 ===============================================================================
 
 Facts (LOCKED):
-- Visibility is static (computed)
-- Resolution is contextual (runtime)
-- A pack can exist but be invisible
-- A visible pack may still fail resolution
-- Visibility != dependency
+- Visibility is static (computed).
+- Resolution is contextual (runtime).
+- A pack can exist but be invisible.
+- A visible pack may still fail resolution.
+- Visibility != dependency.
 
 
 ===============================================================================
-6. CAPABILITIES ARE NOT VISIBILITY
+06. CAPABILITIES ARE NOT VISIBILITY (LOCKED)
 ===============================================================================
 
 LOCKED:
 - capability exports are NOT inherited
-- capability imports must be explicit
+- capability imports MUST be explicit
 - parent visibility does NOT grant capabilities
 
 Rationale:
@@ -251,22 +296,22 @@ Rationale:
 
 
 ===============================================================================
-7. SAVE PACK VISIBILITY (OPEN)
+07. SAVE PACK VISIBILITY (OPEN)
 ===============================================================================
 
 Known constraints:
 - savePack copied packs are visible only to that save
-- they must override external versions
-- they must not leak globally
+- they MUST override external versions
+- they MUST NOT leak globally
 
-Open:
-- exact rules for visibility graph inside save
+OPEN:
+- exact rules for the visibility graph inside a save
 - interaction with exportNestedPacks
 - PackManager UI representation
 
 
 ===============================================================================
-8. WHY THIS AREA IS HARD
+08. WHY THIS AREA IS HARD
 ===============================================================================
 
 This area balances:
@@ -275,8 +320,8 @@ This area balances:
 - predictability
 - creator intuition
 
-Too permissive -> chaos
-Too strict     -> unusable ecosystem
+Too permissive -> chaos.
+Too strict     -> unusable ecosystem.
 
 Current design intentionally:
 - favors explicitness
@@ -285,7 +330,7 @@ Current design intentionally:
 
 
 ===============================================================================
-9. LOCKED SUMMARY
+09. LOCKED SUMMARY
 ===============================================================================
 
 LOCKED:
@@ -298,16 +343,17 @@ LOCKED:
 
 OPEN:
 - savePack visibility internals
-- tooling/UI exposure of visibility graph
+- tooling/UI exposure of the visibility graph
 
 
 ===============================================================================
-END OF DESIGN AREA 3 - PACK IDENTITY, HIERARCHY & VISIBILITY
+END OF PACK IDENTITY, HIERARCHY & VISIBILITY
 ===============================================================================
 
 
 --- doc-meta ---
-docId: docs/design/DA-03_PACK_IDENTITY_HIERARCHY_AND_VISIBILITY.txt
-rev: 1
-git: 0000000
+docId: DA-03
+file: docs/design/DA-03_PACK_IDENTITY_HIERARCHY_AND_VISIBILITY.txt
+rev: 6
+git: f283628
 ----------------
