@@ -1,26 +1,64 @@
 ===============================================================================
-DESIGN AREA 2 - ROOT SYSTEM & PACK DISCOVERY BOUNDARIES
+DESIGN AREA DA-02 - ROOT SYSTEM & PACK DISCOVERY BOUNDARIES
 ===============================================================================
 
 Status:
 -------
-CORE INFRASTRUCTURE - affects discovery, visibility, persistence, and user
-expectations. Decisions here strongly constrain all later phases.
+EVOLVING
+
+Description:
+------------
+Defines Turnix discovery boundaries: where Turnix looks for packs, what is
+eligible for discovery, and what is explicitly ignored.
+
+This area constrains:
+- visibility and resolution determinism
+- trust and override boundaries
+- authoring vs runtime separation
+- save isolation expectations
+
 
 Purpose:
 --------
-This area defines where Turnix looks for content, what it considers eligible
-for discovery, and what is explicitly ignored.
+This document specifies the root categories and the discovery rules that
+produce Discovered packs. It exists to keep discovery boring, strict, and
+predictable, preventing "ghost packs" and accidental global behavior.
 
-The root system is not merely a filesystem detail; it encodes:
-- trust boundaries
-- override semantics
-- authoring vs runtime separation
-- determinism guarantees
+This area defines:
+- root categories and their meaning
+- discovery entrypoint rules
+- directory scanning constraints
+- discovery output contract
+- save discovery policy
+
+This area does NOT define:
+- pack activation or runtime loading
+- policy evaluation (enable/disable, permissions)
+- visibility rules beyond discovery boundaries
+- indexing, resolution, selectors, or dependency solving
+- tracing schema or storage details (only trace requirements)
+
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+
+
+Downstream Documents:
+--------------------
+- DA-12
+- pack-manifest-structure
+- roots-and-discovery
+- pack-and-asset-resolution
 
 
 ===============================================================================
-1. ROOT TYPES (LOCKED)
+01. ROOT TYPES (LOCKED)
 ===============================================================================
 
 Turnix recognizes the following root categories:
@@ -33,8 +71,8 @@ Turnix recognizes the following root categories:
 Each root has a distinct semantic meaning and enforced constraints.
 
 
-1.1 CONTENT ROOTS
------------------
+01.1 Content roots
+------------------
 
 Content roots are:
 - custom/
@@ -59,8 +97,8 @@ This precedence is LOCKED and reused consistently across:
 - tie-breaking
 
 
-1.2 USERDATA ROOT
------------------
+01.2 Userdata root
+------------------
 
 userdata/ is NOT a content root.
 
@@ -73,28 +111,28 @@ It is used exclusively for:
 userdata/ MUST NEVER be scanned for packs.
 
 
-1.3 SAVES ROOT
---------------
+01.3 Saves root
+---------------
 
 saves/ contains SavePacks.
 
 LOCKED:
-- SavePacks are discoverable as save entities
-- SavePacks are NOT eligible for import as normal packs
-- Packs copied into saves are context-bound to that save only
+- SavePacks are discoverable as save entities.
+- SavePacks are NOT eligible for import as normal packs.
+- Packs copied into saves are context-bound to that save only.
 
 Default behavior:
-- shallow scanning only (see Section 5)
+- shallow scanning only (see Section 05)
 
 
 ===============================================================================
-2. DISCOVERY ENTRY POINT RULES (LOCKED)
+02. DISCOVERY ENTRY POINT RULES (LOCKED)
 ===============================================================================
 
-2.1 ROOT DIRECTORIES ARE NOT PACKS
-----------------------------------
+02.1 Root directories are not packs
+-----------------------------------
 
-A manifest located directly in a root directory is ignored.
+A manifest located directly in a root directory MUST be ignored.
 
 Examples:
 - first-party/manifest.json5
@@ -109,8 +147,8 @@ Reason:
 This condition is NOT an error.
 
 
-2.2 DISCOVERY OUTCOME TRACEABILITY
-----------------------------------
+02.2 Discovery outcome traceability
+-----------------------------------
 
 Every ignored, skipped, or rejected discovery artifact MUST be traceable.
 
@@ -120,17 +158,17 @@ Discovery MUST NOT silently ignore:
 - files that appear eligible
 
 How discovery decisions are traced, structured, and surfaced is defined in:
-    DESIGN AREA 12 - Tracing, Diagnostics & Observability
+    DESIGN AREA DA-12 - TRACING, DIAGNOSTICS & OBSERVABILITY
 
 DA-02 defines what must be traceable, not how tracing works.
 
 
 ===============================================================================
-3. DIRECTORY SCANNING RULES
+03. DIRECTORY SCANNING RULES
 ===============================================================================
 
-3.1 MANIFEST-BASED DEPTH (LOCKED)
---------------------------------
+03.1 Manifest-based depth (LOCKED)
+----------------------------------
 
 Discovery depth is defined by manifest nesting, not filesystem nesting.
 
@@ -143,8 +181,8 @@ Depth increases only when scanning below a discovered manifest.
 This rule is LOCKED.
 
 
-3.2 MAXIMUM SCAN DEPTH (LOCKED)
--------------------------------
+03.2 Maximum scan depth (LOCKED)
+--------------------------------
 
 Configuration key:
     packs.discovery.totalDepth
@@ -158,7 +196,7 @@ Default:
     totalDepth = 60
 
 Behavior:
-- exceeding the limit stops recursion
+- exceeding the limit stops recursion for that branch
 - discovery continues elsewhere
 - no fatal error is raised
 
@@ -167,8 +205,8 @@ Rationale:
 - allows controlled overrides for exotic layouts
 
 
-3.3 SYMLINK HANDLING (LOCKED)
------------------------------
+03.3 Symlink handling (LOCKED)
+------------------------------
 
 By default:
 - directory symlinks are forbidden
@@ -180,11 +218,11 @@ Rationale:
 - prevention of implicit graph expansion
 
 Policy-based relaxation MAY be introduced later.
-Discovery behavior remains deterministic regardless.
+Discovery behavior MUST remain deterministic regardless.
 
 
 ===============================================================================
-4. DISCOVERY OUTPUT (LOCKED)
+04. DISCOVERY OUTPUT (LOCKED)
 ===============================================================================
 
 Discovery produces PackDescriptor objects in Discovered state.
@@ -212,11 +250,11 @@ If a pack cannot be discovered correctly:
 
 
 ===============================================================================
-5. SAVE DISCOVERY POLICY
+05. SAVE DISCOVERY POLICY
 ===============================================================================
 
-5.1 DEFAULT SAVE SCANNING (LOCKED)
-----------------------------------
+05.1 Default save scanning (LOCKED)
+-----------------------------------
 
 By default, Turnix scans:
     saves/*/*/manifest.json5
@@ -231,8 +269,8 @@ Rationale:
 - eager scanning would be expensive and unnecessary
 
 
-5.2 DEEP SAVE SCANNING
-----------------------
+05.2 Deep save scanning (LOCKED)
+--------------------------------
 
 Deep scanning of save contents occurs ONLY when:
 - a save is explicitly loaded
@@ -248,19 +286,19 @@ This separation is LOCKED.
 
 
 ===============================================================================
-6. DISCOVERY GUARANTEES
+06. DISCOVERY GUARANTEES (LOCKED)
 ===============================================================================
 
 LOCKED guarantees:
-- Discovery is fast and side-effect free
-- Discovery does not depend on packs
-- All heavy logic belongs to indexing or activation
-- Discovery failures are classified, not fatal
-  (unless core configuration is missing)
+- Discovery is fast and side-effect free.
+- Discovery does not depend on packs.
+- All heavy logic belongs to indexing or activation.
+- Discovery failures are classified, not fatal (unless core configuration is
+  missing).
 
 
 ===============================================================================
-7. OPEN QUESTIONS
+07. EXPLICITLY OPEN QUESTIONS
 ===============================================================================
 
 OPEN:
@@ -271,7 +309,7 @@ OPEN:
 
 
 ===============================================================================
-8. WHY THIS AREA EXISTS
+08. WHY THIS AREA EXISTS
 ===============================================================================
 
 Without strict discovery boundaries:
@@ -281,16 +319,17 @@ Without strict discovery boundaries:
 - user trust erodes due to "ghost packs"
 - save isolation breaks
 
-Discovery must be boring, strict, and predictable.
+Discovery MUST be boring, strict, and predictable.
 
 
 ===============================================================================
-END OF DESIGN AREA 2 - ROOT SYSTEM & PACK DISCOVERY BOUNDARIES
+END OF ROOT SYSTEM & PACK DISCOVERY BOUNDARIES
 ===============================================================================
 
 
 --- doc-meta ---
-docId: docs/design/DA-02_ROOT_SYSTEM_AND_PACK_DISCOVERY_BOUNDARIES.txt
-rev: 1
-git: 0000000
+docId: DA-02
+file: docs/design/DA-02_ROOT_SYSTEM_AND_PACK_DISCOVERY_BOUNDARIES.txt
+rev: 6
+git: 0850287
 ----------------
