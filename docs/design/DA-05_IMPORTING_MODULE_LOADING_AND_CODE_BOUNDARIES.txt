@@ -1,12 +1,16 @@
 ===============================================================================
-DESIGN AREA 5 - IMPORTING, MODULE LOADING & CODE BOUNDARIES
+DESIGN AREA DA-05 - IMPORTING, MODULE LOADING & CODE BOUNDARIES
 ===============================================================================
 
 Status:
 -------
-CORE - this area defines how code is referenced, loaded, and made available
-across supported languages, and where strict boundaries exist between
-resolution, importing, activation, and execution.
+EVOLVING
+
+Description:
+------------
+Defines how code is referenced, loaded, and made available across supported
+languages, and where strict boundaries exist between resolution, importing,
+activation, and execution.
 
 This area is intentionally strict.
 
@@ -16,44 +20,89 @@ Importing is NOT dependency declaration.
 Importing does NOT imply permission to execute.
 
 
+Purpose:
+--------
+Prevent native language import systems from bypassing Turnix semantics
+(resolution, visibility, source selection, activation order, and execution
+authority). Provide Turnix-defined mechanisms for cross-pack interaction and
+controlled module loading.
+
+This area defines:
+- language-level import boundaries (Python vs JavaScript)
+- Turnix-mediated cross-pack access mechanisms
+- turnixImport selector rules and loading behavior
+- dependency consistency requirements for imports
+- the separation between module evaluation and Turnix-recognized execution
+- canonical activation entrypoint constraints relevant to code boundaries
+
+This area does NOT define:
+- generic resolution semantics (see DA-04)
+- dependency semantics and solver behavior
+- save copying, pinning, or substitution rules
+- activation lifecycle beyond the boundary rules stated here
+- capability schemas and permission prompting details
+
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-02
+- DA-03
+- DA-04
+
+
+Downstream Documents:
+--------------------
+- pack-uri-spec
+- IS-01
+- IS-02
+- tracing
+- DA-12
+
+
 ===============================================================================
-1. CORE PROBLEM STATEMENT
+01. CORE PROBLEM STATEMENT
 ===============================================================================
 
 Turnix does NOT allow arbitrary language-native importing across packs.
 
 Reasons:
-- Files live in multiple roots with precedence rules
-- Packs may be overridden, pinned, copied, disabled, or save-scoped
-- Activation order is centrally controlled
-- Silent or implicit code execution is forbidden
-- Native language import systems have no awareness of Turnix semantics
+- files live in multiple roots with precedence rules
+- packs may be overridden, pinned, copied, disabled, or save-scoped
+- activation order is centrally controlled
+- silent or implicit code execution is forbidden
+- native language import systems have no awareness of Turnix semantics
 
 Therefore:
-- All cross-pack code access MUST go through Turnix-defined mechanisms
-- Native imports are allowed ONLY for:
-    - language internals
-    - same-file or same-directory code
-    - Turnix core internals (explicitly whitelisted)
+- all cross-pack code access MUST go through Turnix-defined mechanisms
+- native imports are allowed ONLY for:
+  - language internals
+  - same-file or same-directory code
+  - Turnix core internals (explicitly whitelisted)
 
-Any mechanism that bypasses Turnix resolution, visibility, activation,
-or execution boundaries is forbidden.
+Any mechanism that bypasses Turnix resolution, visibility, activation, or
+execution boundaries is forbidden.
 
 
 ===============================================================================
-2. PYTHON IMPORT RULES (LOCKED)
+02. PYTHON IMPORT RULES (LOCKED)
 ===============================================================================
 
-Allowed:
+Allowed (local imports only):
     from .llamacpp_client import LlamaCppClient
     from .config import loadConfig
 
 Meaning:
-- Local file import
-- Same directory only
-- Standard Python semantics
+- local file import
+- same directory only
+- standard Python semantics
 
-Allowed (TURNIX INTERNALS ONLY):
+Allowed (Turnix core internals only; explicit whitelist):
     from backend.core.globals import configBool
 
 Disallowed:
@@ -63,15 +112,15 @@ Disallowed:
 
 Rationale:
 - Python import machinery has no awareness of:
-    - pack resolution
-    - visibility
-    - pinning
-    - savePack scoping
-- Allowing cross-pack Python imports would bypass all Turnix guarantees
+  - pack resolution
+  - visibility
+  - pinning
+  - savePack scoping
+- allowing cross-pack Python imports would bypass Turnix guarantees
 
 
 ===============================================================================
-3. PYTHON CROSS-PACK ACCESS (LOCKED MECHANISMS)
+03. PYTHON CROSS-PACK ACCESS (LOCKED MECHANISMS)
 ===============================================================================
 
 Python pack code may interact with other packs ONLY via Turnix-mediated APIs:
@@ -88,29 +137,32 @@ C) Pack metadata & activation control
     ctx.ensureActivated(selector)
 
 There is NO Python equivalent of turnixImport.
-Python code never receives executable code or symbols from other packs.
+
+Python code MUST NOT receive executable code or symbols from other packs.
 
 
 ===============================================================================
-4. JAVASCRIPT IMPORT MODEL (LOCKED)
+04. JAVASCRIPT IMPORT MODEL (LOCKED)
 ===============================================================================
 
 JavaScript runs in a browser environment.
 
-Constraints:
-- No Node.js
-- No filesystem access
-- No per-pack import maps
-- No native cross-pack imports
+Constraints (LOCKED):
+- no Node.js
+- no filesystem access
+- no per-pack import maps
+- no native cross-pack imports
 
 All dynamic cross-pack loading goes through:
     turnixImport(selector)
 
-(Name turnixResolve is reserved but not yet finalized.)
+NOTE:
+The name turnixResolve is reserved for possible future refinement but is not
+currently finalized.
 
 
 ===============================================================================
-5. turnixImport - WHAT IT IS
+05. turnixImport - WHAT IT IS
 ===============================================================================
 
 turnixImport(selector: string) is:
@@ -128,7 +180,7 @@ Behavior:
 
 
 ===============================================================================
-6. turnixImport - WHAT IT IS NOT
+06. turnixImport - WHAT IT IS NOT
 ===============================================================================
 
 turnixImport is NOT:
@@ -144,7 +196,7 @@ If resolution fails:
 
 
 ===============================================================================
-7. turnixImport SELECTOR FORMS (LOCKED)
+07. turnixImport SELECTOR FORMS (LOCKED)
 ===============================================================================
 
 Selector is NOT:
@@ -180,7 +232,7 @@ Disallowed:
 
 
 ===============================================================================
-8. DEPENDENCY CONSISTENCY RULE (LOCKED)
+08. DEPENDENCY CONSISTENCY RULE (LOCKED)
 ===============================================================================
 
 If a pack declares dependency:
@@ -196,12 +248,12 @@ Disallowed:
 
 Violations result in HARD errors.
 
-Importing MUST respect the exact resolved identity
-chosen during dependency resolution.
+Importing MUST respect the exact resolved identity chosen during dependency
+resolution.
 
 
 ===============================================================================
-9. SEMVER IN IMPORTS (LOCKED)
+09. SEMVER IN IMPORTS (LOCKED)
 ===============================================================================
 
 Semver is NOT allowed in turnixImport selectors.
@@ -224,15 +276,15 @@ For sub-entry imports:
 Resolution logic:
 - inspect runtimes.javascript.entries
 - match:
-    - exact "Button"
-    - or "Button.<extension>"
+  - exact "Button"
+  - or "Button.<extension>"
 
 Allowed extensions:
 - .js
 - .mjs
 - .ts (compiled)
 
-Rules:
+Rules (LOCKED):
 - ambiguous matches -> error
 - no match -> error
 - no fallback to runtimes.javascript.entry
@@ -264,8 +316,8 @@ turnixImport:
 - DOES NOT grant execution authority
 - DOES NOT imply lifecycle participation
 
-A module MAY be evaluated by the JavaScript runtime,
-but this evaluation is NOT considered Turnix-recognized execution.
+A module MAY be evaluated by the JavaScript runtime, but this evaluation is
+NOT considered Turnix-recognized execution.
 
 Activation is handled exclusively via:
 - PackManager
@@ -302,11 +354,11 @@ Some languages allow immediate execution constructs, including:
 - IIFE-style patterns
 - top-level side effects
 
-Turnix rules:
-- Turnix does NOT coordinate, track, or rely on immediate execution
-- Immediate execution is DISCOURAGED in all pack code
-- Import-time execution is NOT an activation mechanism
-- Importing a module does NOT imply permission to execute logic
+Turnix rules (LOCKED):
+- Turnix does NOT coordinate, track, or rely on immediate execution.
+- Immediate execution is DISCOURAGED in all pack code.
+- Import-time execution is NOT an activation mechanism.
+- Importing a module does NOT imply permission to execute logic.
 
 Code that executes immediately:
 - runs outside Turnix orchestration
@@ -330,7 +382,7 @@ This rule applies uniformly to:
 Currently supported entrypoint:
     onLoad(ctx)
 
-Rules:
+Rules (LOCKED):
 - called exactly once by Turnix
 - is the ONLY supported activation entrypoint
 - is the FIRST moment Turnix intentionally executes pack code
@@ -343,8 +395,11 @@ No other execution or activation path exists.
 16. BACKGROUND WORK GUARANTEE (LOCKED)
 ===============================================================================
 
-Turnix does NOT guarantee behavior for background work started
-outside Turnix orchestration.
+LOCKED STATEMENT:
+
+"Turnix does not guarantee behavior for background work started outside Turnix
+orchestration; only work triggered by Turnix entrypoints or capability calls
+is supported."
 
 Only work initiated via:
 - activation entrypoints
@@ -378,7 +433,7 @@ All import-related errors MUST:
 
 
 ===============================================================================
-18. OPEN QUESTIONS
+18. EXPLICITLY OPEN QUESTIONS
 ===============================================================================
 
 OPEN (NON-SEMANTIC):
@@ -408,12 +463,13 @@ OPEN:
 
 
 ===============================================================================
-END OF DESIGN AREA 5 - IMPORTING, MODULE LOADING & CODE BOUNDARIES
+END OF IMPORTING, MODULE LOADING & CODE BOUNDARIES
 ===============================================================================
 
 
 --- doc-meta ---
-docId: docs/design/DA-05_IMPORTING_MODULE_LOADING_AND_CODE_BOUNDARIES.txt
-rev: 1
-git: 0000000
+docId: DA-05
+file: docs/design/DA-05_IMPORTING_MODULE_LOADING_AND_CODE_BOUNDARIES.txt
+rev: 8
+git: 4c774ef
 ----------------
