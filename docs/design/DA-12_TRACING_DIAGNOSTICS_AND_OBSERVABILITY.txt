@@ -17,16 +17,34 @@ Tracing is structural truth.
 
 Tracing answers:
 
-    "What happened, in what order, and why?"
+    "What happened, what caused what, and why?"
 
-It must support:
+Tracing provides:
+- causal explanation (authoritative)
+- decision evidence (authoritative)
+- observed temporal sequence (non-authoritative)
+- diagnostic context (non-authoritative)
+
+Tracing is not logging.
+Tracing is structured evidence with explicit reasons and causal links.
+
+Turnix uses tracing to support:
 - debugging
 - user explanation
 - post-mortem analysis
-- reproducibility
+- reproducibility and audit
 
-Tracing is authoritative.
-If it is not traced, it did not happen.
+Authority boundary:
+- Tracing is authoritative evidence for causality and decisions.
+- Tracing is NOT authoritative state.
+- Tracing is NOT required to restore committed state.
+
+"If it is not traced, it did not happen" means:
+- Turnix MUST emit trace events for all decision-producing actions.
+- If an action cannot be found in retained trace evidence, it MUST be treated
+  as not provable from trace.
+- Trace retention is policy-driven and loss is acceptable only if it is
+  explicitly represented as loss evidence.
 
 
 ===============================================================================
@@ -60,8 +78,26 @@ Each trace event has:
 
 Events form a DAG, not a flat stream.
 
+Authority and ordering:
+- Causal ordering is authoritative and is represented by explicit DAG links.
+- Temporal ordering is observational only and MUST NOT be used to infer
+  causality or correctness.
+
 Causality MUST be preserved across subsystems.
 Temporal ordering MUST NOT be relied upon to infer causality.
+
+Correlation attributes:
+- Trace events SHOULD include stable identifiers that allow offline linking to
+  Turnix objects such as:
+  - kernelRunId
+  - appInstanceId
+  - pipelineRunId
+  - orchestrationUnitId
+  - transactionId
+  - memoryLayerId
+  - memory key identity
+- Presence of identifiers MAY vary by domain, but boundary events and mutation
+  events MUST be linkable to their owning objects.
 
 
 ===============================================================================
@@ -94,6 +130,56 @@ Snapshot interaction (LOCKED cross-reference):
 - If a snapshot includes trace evidence, it MUST satisfy the rule:
   "no included span end without included span begin."
 - This rule is satisfied by the DA-15 snapshot trace carry-forward rule.
+
+
+===============================================================================
+3.2 TRACE ROOTS AND SPAN STRATIFICATION (LOCKED)
+===============================================================================
+
+Trace storage MAY contain multiple unconnected trace DAG roots.
+
+Meaning:
+- Each root represents an independent trace origin, such as a kernel run or an
+  appInstance activation region.
+- Unconnected roots are expected and MUST be representable without ambiguity.
+
+Root span types:
+
+A) KernelRunSpan
+- Represents one Turnix kernel run (one process lifetime).
+- KernelRunSpan begin occurs when Turnix begins running.
+- KernelRunSpan end occurs when Turnix ends running.
+- KernelRunSpan begin and end MUST share a stable span identity attribute.
+
+B) AppInstanceActiveSpan
+- Represents an appInstance being active while a pack is loaded.
+- Begins when an appInstance becomes active.
+- Ends when the appInstance is deactivated, or when the KernelRunSpan ends.
+- MUST be linkable to:
+  - appInstanceId
+  - active pack identity
+  - active save identity when applicable
+
+C) WorkSpans
+- Nested spans that represent bounded work inside an AppInstanceActiveSpan.
+- Examples:
+  - pipeline runs
+  - capability calls
+  - jobs or long-running orchestration units
+
+Rules (LOCKED):
+- Span begin and span end events are trace events and participate in the trace
+  DAG.
+- Span begin MUST occur before span end in the same trace DAG.
+- A span end MUST NOT exist without a reachable span begin.
+- If an exported trace view includes a span end, it MUST also include the
+  corresponding span begin.
+- WorkSpans MUST be causally reachable from their owning AppInstanceActiveSpan
+  begin event when such ownership exists.
+
+Interpretation:
+- Root spans define "when Turnix ran" and "when an appInstance was active".
+- WorkSpans define "what happened inside that active region".
 
 
 ===============================================================================
@@ -138,6 +224,287 @@ Reasons MUST be emitted whenever:
 - behavior differs from defaults
 - debugger tooling inspects or mutates state
 - execution is paused, staged, resumed, or aborted via debugging facilities
+
+
+===============================================================================
+4.1 TRACE REASONS FOR RETENTION, CONTINUITY, AND LOSS (LOCKED)
+===============================================================================
+
+This subsection defines required trace reasons for trace retention behavior,
+continuity evidence, and explicit loss reporting.
+
+These reasons are mandatory to preserve the meaning of:
+"If it is not traced, it did not happen" under policy-driven retention.
+
+Reason naming:
+- Reasons are PascalCase.
+- Reasons are stable identifiers.
+- Reasons are machine-parseable.
+
+Domain guidance:
+- Trace retention events MUST use domain = trace or persistence.
+- Manual user actions MUST use domain = debugger or policy.
+
+All events in this subsection MUST include correlation attributes when
+available:
+- kernelRunId
+- appInstanceId
+- pipelineRunId
+- orchestrationUnitId
+- transactionId
+- activeWindow identity (if applicable)
+- policyId (if applicable)
+
+
+-------------------------------------------------------------------------------
+4.1.1 REQUIRED RETENTION AND LOSS REASONS (LOCKED)
+-------------------------------------------------------------------------------
+
+The following reasons MUST exist and MUST be emitted when applicable.
+
+A) Trace system lifecycle and storage behavior
+
+- TraceStorageWriteSucceeded
+  Emitted when a trace chunk, segment, or write unit is persisted successfully.
+
+  Required attributes:
+  - storageTarget (implementation detail label)
+  - byteCount
+  - eventCount
+  - chunkId or storageUnitId
+
+- TraceStorageWriteFailed
+  Emitted when a trace write attempt fails.
+
+  Required attributes:
+  - storageTarget
+  - errorCode (or error identifier)
+  - failureMode (example: PermissionDenied, DiskFull, IoUnavailable)
+  - droppedEventCount (0 if none)
+  - policyId (if policy influenced behavior)
+
+- TraceStorageWriteDropped
+  Emitted when trace events are intentionally dropped due to pressure or
+  non-blocking policy.
+
+  Required attributes:
+  - policyId
+  - dropReasonCategory (StoragePressure, QuotaExceeded, Backpressure)
+  - droppedEventCount
+  - affectedDomainSet (optional)
+  - scopeHint (kernelRun, appInstance, unknown)
+
+B) Explicit pruning and removal
+
+- TracePruneRequested
+  Emitted when pruning is initiated.
+
+  Required attributes:
+  - policyId
+  - pruneReasonCategory (PolicyRotation, QuotaExceeded, AgeExceeded,
+    ManualRemoval, OtherExplicitReason)
+  - intendedScope (kernelRun, appInstance, window, global)
+  - prunePlanId (stable identifier for the pruning attempt)
+
+- TracePruneApplied
+  Emitted when pruning is successfully applied.
+
+  Required attributes:
+  - policyId
+  - prunePlanId
+  - prunedTargetDescriptor
+    (a structured description such as chunkId ranges, eventId ranges, or
+     named retention buckets)
+  - prunedUnitCount
+  - prunedEventCount (if known)
+  - scopeIdentity (kernelRunId, appInstanceId, window identity if applicable)
+
+- TracePruneFailed
+  Emitted when pruning fails.
+
+  Required attributes:
+  - policyId
+  - prunePlanId
+  - errorCode (or error identifier)
+  - failureMode
+  - scopeIdentity (if known)
+
+C) Continuity and completeness claims
+
+- TraceContinuityAnchorCreated
+  Emitted when a continuity anchor is created.
+
+  Meaning:
+  - Establishes a durable point in the trace evidence chain.
+
+  Required attributes:
+  - continuityAnchorId
+  - anchorScope (kernelRun, appInstance, window, global)
+  - scopeIdentity (kernelRunId, appInstanceId, window identity if applicable)
+  - prevAnchorId (absent if first)
+  - anchorDigest (if present, must be computed deterministically)
+  - storageUnitId or chunkId (where the anchor is stored)
+
+- TraceContinuityBroken
+  Emitted when continuity cannot be maintained.
+
+  Examples:
+  - missing previous anchor
+  - corruption detected
+  - storage reset
+
+  Required attributes:
+  - anchorScope
+  - scopeIdentity (if known)
+  - breakReasonCategory (Corrupt, Missing, Reset, Unknown)
+  - lastKnownAnchorId (if any)
+
+- TraceEvidenceDeclaredIncomplete
+  Emitted when Turnix explicitly declares that retained trace evidence is not
+  complete for a scope.
+
+  Required attributes:
+  - scopeIdentity (kernelRunId, appInstanceId, window identity if applicable)
+  - incompletenessCategory (Pruned, Dropped, Corrupt, PartialExport, Unknown)
+  - policyId (if applicable)
+
+D) Kernel run and appInstance span boundaries
+
+- KernelRunSpanBegin
+  Emitted at the start of a Turnix kernel run.
+
+  Required attributes:
+  - kernelRunId
+  - spanIdentity
+
+- KernelRunSpanEnd
+  Emitted at the end of a Turnix kernel run.
+
+  Required attributes:
+  - kernelRunId
+  - spanIdentity
+  - endReasonCategory (NormalExit, Crash, ForcedExit, Restart)
+
+- AppInstanceActiveSpanBegin
+  Emitted when an appInstance becomes active.
+
+  Required attributes:
+  - appInstanceId
+  - spanIdentity
+  - activePackId (or equivalent pack identity)
+  - activeSaveIdentity (optional)
+
+- AppInstanceActiveSpanEnd
+  Emitted when an appInstance is no longer active.
+
+  Required attributes:
+  - appInstanceId
+  - spanIdentity
+  - endReasonCategory (NormalDeactivate, Crash, ForcedDeactivate, KernelExit)
+
+E) Window boundary trace reasons (cross-reference with DA-15)
+
+- SafePointWindowCreationRequested
+  Emitted when SafePointWindow creation is requested.
+
+  Required attributes:
+  - appInstanceId
+  - requestMode (ImmediateCommitted, AtQuiescence)
+  - requestId (stable identifier for the request)
+
+- SafePointWindowCreationQueued
+  Emitted when an AtQuiescence request is queued.
+
+  Required attributes:
+  - appInstanceId
+  - requestId
+  - queuePolicyId (if applicable)
+
+- SafePointWindowCreationStarted
+  Emitted when SafePointWindow creation begins.
+
+  Required attributes:
+  - appInstanceId
+  - requestId
+
+- SafePointWindowCreationSucceeded
+  Emitted when SafePointWindow creation completes successfully.
+
+  Required attributes:
+  - appInstanceId
+  - requestId
+  - safePointWindowId
+  - committedStateRoot (optional reference)
+  - includedEvidencePolicyId (optional)
+
+- SafePointWindowCreationFailed
+  Emitted when SafePointWindow creation fails.
+
+  Required attributes:
+  - appInstanceId
+  - requestId
+  - failureReasonCategory (NotQuiescent, Conflict, IoFailure, PolicyRefused,
+    OtherExplicitReason)
+
+- SafePointWindowCreationCancelled
+  Emitted when SafePointWindow creation is cancelled.
+
+  Required attributes:
+  - appInstanceId
+  - requestId
+  - cancelReasonCategory (UserCancelled, PolicyCancelled, Timeout, Other)
+
+- ActiveWindowFinalizedAsAborted
+  Emitted when an ActiveWindow is finalized into an AbortedWindow.
+
+  Required attributes:
+  - appInstanceId
+  - abortedWindowId
+  - abortReasonCategory (ExplicitAbort, Failure, Timeout, PolicyRefused,
+    CrashRecovered, OtherExplicitReason)
+
+
+-------------------------------------------------------------------------------
+4.1.2 REQUIRED ATTRIBUTES FOR KEY MUTATION TRACE (LOCKED)
+-------------------------------------------------------------------------------
+
+To support audit skeleton retention, mutation evidence MUST be representable
+even under aggressive pruning.
+
+For any committed mutation of a memory key, Turnix MUST be able to emit a
+trace event with at least the following attributes:
+
+- mutationKind (Set, Delete, Overwrite)
+- appInstanceId
+- memoryLayerId
+- memoryKey identity
+- baseRevisionId (using the absent sentinel rules in DA-15 when applicable)
+- newRevisionId
+- debuggerInitiated (true | false)
+- transactionId (if mutation was committed via a transaction)
+- orchestrationUnitId (if applicable)
+
+This event SHOULD be causally linked to:
+- the transaction commit event, and
+- the owning work span or orchestration unit span when such a span exists.
+
+
+-------------------------------------------------------------------------------
+4.1.3 OPTIONAL REASONS (OPEN)
+-------------------------------------------------------------------------------
+
+The following reasons MAY be defined to improve observability without changing
+authority semantics:
+
+- TraceExportStarted
+- TraceExportSucceeded
+- TraceExportFailed
+- TraceOfflineInspectionStarted
+- TraceOfflineInspectionFailed
+- TracePolicyChanged
+- TracePolicyChangeRefused
+- TraceRetentionClassApplied
+- TraceRetentionClassOverridden
 
 
 ===============================================================================
@@ -262,6 +629,53 @@ Trace loss is acceptable; silent behavior is not.
 
 
 ===============================================================================
+10.1 TRACE RETENTION, LOSS EVIDENCE, AND PRUNING LEDGER (LOCKED POLICY)
+===============================================================================
+
+Trace retention is policy-driven.
+
+Turnix MAY:
+- retain traces indefinitely
+- rotate traces
+- prune traces
+- drop traces under severe pressure
+
+Turnix MUST NOT:
+- silently lose trace evidence
+- silently prune trace evidence
+- silently claim completeness that does not exist
+
+Loss evidence:
+- If trace events or trace chunks are pruned, Turnix MUST emit a trace event
+  describing the pruning action.
+- If trace writes are dropped under pressure, Turnix MUST emit a trace event
+  describing the omission.
+
+Pruning and drop events MUST include:
+- policy identity (which policy caused the loss)
+- scope identity (what region is affected, such as kernelRunId, appInstanceId,
+  or window identity if applicable)
+- target identity (what was removed or omitted, expressed as ranges or chunk
+  identities)
+- reason category (PolicyPruned | StoragePressureDropped | CorruptedIsRejected |
+  ManualRemoval | OtherExplicitReason)
+
+Continuity requirement:
+- Turnix MUST maintain a minimal continuity record sufficient to establish
+  that:
+  - trace was emitted for decision-producing actions, and
+  - missing material is missing due to explicit pruning or dropping.
+- The continuity record MUST be suitable for offline inspection.
+
+Relationship to state:
+- Trace retention policy MUST NOT affect committed state correctness.
+- Loss evidence MUST allow an auditor to distinguish:
+  - "not provable due to missing evidence"
+  from
+  - "not recorded by Turnix at the time of action".
+
+
+===============================================================================
 11. TRACE ACCESS (LOCKED)
 ===============================================================================
 
@@ -373,7 +787,8 @@ END OF DESIGN AREA 12 - TRACING, DIAGNOSTICS & OBSERVABILITY
 
 
 --- doc-meta ---
-docId: docs/design/DA-12_TRACING_DIAGNOSTICS_AND_OBSERVABILITY.txt
-rev: 1
-git: 0000000
+docId: DA-12
+file: docs/design/DA-12_TRACING_DIAGNOSTICS_AND_OBSERVABILITY.txt
+rev: 9
+git: a048cc0
 ----------------
