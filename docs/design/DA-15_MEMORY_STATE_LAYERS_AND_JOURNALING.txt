@@ -180,6 +180,39 @@ This separation ensures that:
 - rollback remains reliable
 
 
+02.4 Identity and Revision Terms
+--------------------------------
+
+This subsection defines minimal identity terms required by this design area.
+
+WindowId forms:
+- safePointWindowId identifies a SafePointWindow.
+- abortedWindowId identifies an AbortedWindow.
+
+Rules:
+- safePointWindowId and abortedWindowId MUST be UUID values.
+- UUID values MUST be representable in plain text.
+
+Revision terms:
+- revisionId identifies one revision record for one committed key within one
+  committed layer.
+- baseRevisionId identifies the revisionId that a transaction observed when
+  it first touched the key (read or write).
+
+Rules:
+- revisionId MUST be a JSON safe integer.
+- revisionId uniqueness and monotonicity are required only per (layer, key).
+- Clients MAY treat revisionId as opaque read-only metadata.
+
+Absent sentinel:
+- baseRevisionId MUST support an "absent" sentinel meaning:
+  "the key was not present in the committed layer at capture time".
+
+Rules:
+- The absent sentinel MUST NOT be represented as null.
+- The absent sentinel MUST be represented as baseRevisionId = 0.
+- Valid revisionId values MUST start at 1.
+
 ===============================================================================
 03. STORAGE-NEUTRAL PAYLOAD MODEL
 ===============================================================================
@@ -694,12 +727,25 @@ This prevents lost updates and desynchronization between pipeline runs.
 Commit conflict detection applies ONLY when a transaction attempts to commit
 into committed layers.
 
-Each transaction records, per key, the base revision id visible at the time
-the key was first read or first written within that transaction.
+Each transaction records, per key, the base revision state visible at the
+time the key was first read or first written within that transaction.
+
+Base revision state is:
+- baseExists: whether the key existed in the committed layer at capture time
+- baseRevisionId: the revisionId at capture time if baseExists is true
+
+Rules:
+- baseExists MUST be captured on first read or first write of the key.
+- If baseExists is false, baseRevisionId MUST be the absent sentinel.
+- If baseExists is true, baseRevisionId MUST equal the committed key's current
+  revisionId at capture time.
 
 When committing into committed layers:
-- if the committed layer's latest revision id differs from the recorded base
-  revision id, the commit is in conflict and MUST fail deterministically.
+- if baseExists differs from the committed layer's current existence, the
+  commit is in conflict and MUST fail deterministically.
+- if baseExists is true and the committed layer's current revisionId differs
+  from baseRevisionId, the commit is in conflict and MUST fail
+  deterministically.
 
 Rules (LOCKED):
 - No silent merge is allowed.
@@ -1714,6 +1760,6 @@ END OF MEMORY, STATE, LAYERS & JOURNALING
 --- doc-meta ---
 docId: DA-15
 file: docs/design/DA-15_MEMORY_STATE_LAYERS_AND_JOURNALING.txt
-rev: 12
-git: 7e2a23d
+rev: 13
+git: 7dd9ca0
 ----------------
