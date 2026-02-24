@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Turnix docs metadata pre-commit hook (hardened, docs/ only, auto docId+file, repo-local Python)
+# Turnix docs metadata pre-commit hook (hardened, docs/ only, auto DOC_ID+DOC_FILE, repo-local Python)
 #
 # Scope:
 # - Only staged files under docs/** with .md/.txt/.json5
@@ -11,16 +11,16 @@
 # Guarantees for each targeted staged file (newest spec: doc-meta footer):
 # - Document MUST end with exactly one doc-meta block:
 #     --- doc-meta ---
-#     docId: <canonical document identifier>
-#     file: <canonical repository path>
-#     rev: <revision count>
-#     git: <short commit id>
+#     DOC_ID: <canonical document identifier>
+#     DOC_FILE: <canonical repository path>
+#     DOC_REV: <revision count>
+#     DOC_GIT: <short commit id>
 #     ----------------
-# - docId is derived from filename: "<dirs>/<docId>_<normalized>.<EXT>"
-#   - docId pattern: one or more [A-Z], then "-", then one or more [A-Z0-9]
-# - file is the repo-relative path as staged (forward slashes)
-# - rev is computed as (commit-count touching file) + 1 when the file is staged with changes
-# - git is the last commit hash that touched the file before this commit (0000000 for new files)
+# - DOC_ID is derived from filename: "<dirs>/<DOC_ID>_<normalized>.<EXT>"
+#   - DOC_ID pattern: one or more [A-Z], then "-", then one or more [A-Z0-9]
+# - DOC_FILE is the repo-relative path as staged (forward slashes)
+# - DOC_REV is computed as (commit-count touching file) + 1 when the file is staged with changes
+# - DOC_GIT is the last commit hash that touched the file before this commit (0000000 for new files)
 #
 # Safety / anti-footgun:
 # - Refuses to run if a file has partially staged changes (staged + unstaged), because the hook edits and re-stages
@@ -69,12 +69,12 @@ isDocsFileWanted() {
   esac
 }
 
-# Extract docId from repo-relative path:
+# Extract DOC_ID from repo-relative path:
 # - path must start with "docs/"
 # - filename part is after last "/"
-# - filename format: "<docId>_<normalized text>.<EXT>"
-# - docId is before first "_"
-# - docId regex: ^[A-Z]+-[A-Z0-9]+$
+# - filename format: "<DOC_ID>_<normalized text>.<EXT>"
+# - DOC_ID is before first "_"
+# - DOC_ID regex: ^[A-Z]+-[A-Z0-9]+$
 extractDocIdFromPathOrDie() {
   local path="$1"
 
@@ -87,8 +87,8 @@ extractDocIdFromPathOrDie() {
   # Must not be ".onlyextension" (no leading dot, must have at least one non-dot char before first dot)
   [[ "$base" != .* ]] || die "Filename must not start with '.': '$path'"
 
-  # Must contain underscore (docId separator)
-  [[ "$base" == *_* ]] || die "Filename must contain '_' after docId: '$path'"
+  # Must contain underscore (DOC_ID separator)
+  [[ "$base" == *_* ]] || die "Filename must contain '_' after DOC_ID: '$path'"
 
   # Must contain at least one dot for extension
   [[ "$base" == *.* ]] || die "Filename must contain an extension (a '.'): '$path'"
@@ -96,19 +96,19 @@ extractDocIdFromPathOrDie() {
   # First character must be [A-Z]
   [[ "${base:0:1}" =~ [A-Z] ]] || die "Filename must start with [A-Z]: '$path'"
 
-  # Must contain '-' (per docId pattern)
-  [[ "$base" == *-* ]] || die "Filename must contain '-' in docId: '$path'"
+  # Must contain '-' (per DOC_ID pattern)
+  [[ "$base" == *-* ]] || die "Filename must contain '-' in DOC_ID: '$path'"
 
-  local docId="${base%%_*}"
-  [[ -n "$docId" ]] || die "docId extracted from filename is empty: '$path'"
+  local DOC_ID="${base%%_*}"
+  [[ -n "$DOC_ID" ]] || die "DOC_ID extracted from filename is empty: '$path'"
 
-  # Validate docId pattern: one or more [A-Z], '-', then one or more [A-Z0-9]
-  if ! [[ "$docId" =~ ^[A-Z]+-[A-Z0-9]+$ ]]; then
-    die "Invalid docId '$docId' extracted from '$path'.
+  # Validate DOC_ID pattern: one or more [A-Z], '-', then one or more [A-Z0-9]
+  if ! [[ "$DOC_ID" =~ ^[A-Z]+-[A-Z0-9]+$ ]]; then
+    die "Invalid DOC_ID '$DOC_ID' extracted from '$path'.
 Expected pattern: one or more [A-Z], then '-', then one or more [A-Z0-9]."
   fi
 
-  printf '%s' "$docId"
+  printf '%s' "$DOC_ID"
 }
 
 # Read staged files under docs/ (NUL-delimited to handle spaces)
@@ -152,10 +152,10 @@ for f in "${targets[@]}"; do
     continue
   fi
 
-  # Validate path + derive docId from filename
+  # Validate path + derive DOC_ID from filename
   expectedDocId="$(extractDocIdFromPathOrDie "$f")"
 
-  # file is the repo-relative path (forward slashes) exactly as staged
+  # DOC_FILE is the repo-relative path (forward slashes) exactly as staged
   expectedFile="$f"
 
   # Last hash touching the file BEFORE this commit (short). If none (new file), use 0000000.
@@ -213,28 +213,28 @@ if any(line.strip() != "" for line in tail):
 
 # Build a canonical spec-compliant block (overwrite whatever was there).
 # Exact required order:
-# docId, file, rev, git
+# DOC_ID, DOC_FILE, DOC_REV, DOC_GIT
 block = [
-  f"docId: {expected_doc_id}",
-  f"file: {expected_file}",
-  f"rev: {new_rev}",
-  f"git: {new_hash}",
+  f"DOC_ID: {expected_doc_id}",
+  f"DOC_FILE: {expected_file}",
+  f"DOC_REV: {new_rev}",
+  f"DOC_GIT: {new_hash}",
 ]
 
 # Enforce line length rule:
-# - Only the value of the "file:" field MAY exceed 79 characters.
+# - Only the value of the "DOC_FILE:" field MAY exceed 79 characters.
 # - No other doc-meta line may exceed 79 characters.
 def check_len(line: str, is_file: bool) -> None:
   if is_file:
-    # file line can exceed 79, allowed by spec
+    # DOC_FILE line can exceed 79, allowed by spec
     return
   if len(line) > 79:
     raise SystemExit(f"ERROR: {path}: doc-meta line exceeds 79 chars: '{line}'")
 
-check_len(block[0], is_file=False)  # docId
-check_len(block[1], is_file=True)   # file
-check_len(block[2], is_file=False)  # rev
-check_len(block[3], is_file=False)  # git
+check_len(block[0], is_file=False)  # DOC_ID
+check_len(block[1], is_file=True)   # DOC_FILE
+check_len(block[2], is_file=False)  # DOC_REV
+check_len(block[3], is_file=False)  # DOC_GIT
 
 # Replace the existing block content (whatever it was) with the canonical block.
 new_lines = lines[: s + 1] + block + [end_marker]
