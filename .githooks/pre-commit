@@ -17,7 +17,11 @@
 #     DOC_GIT: <short commit id>
 #     ----------------
 # - DOC_ID is derived from filename: "<dirs>/<DOC_ID>_<normalized>.<EXT>"
-#   - DOC_ID pattern: one or more [A-Z], then "-", then one or more [A-Z0-9]
+#   - DOC_ID pattern:
+#     - starts with one or more [A-Z]
+#     - may contain additional "-[A-Z]+" segments
+#     - ends with "-[A-Z0-9]+"
+#     - examples: DD-01, CMR-04, DD-MN-01
 # - DOC_FILE is the repo-relative path as staged (forward slashes)
 # - DOC_REV is computed as (commit-count touching file) + 1 when the file is staged with changes
 # - DOC_GIT is the last commit hash that touched the file before this commit (0000000 for new files)
@@ -74,7 +78,7 @@ isDocsFileWanted() {
 # - filename part is after last "/"
 # - filename format: "<DOC_ID>_<normalized text>.<EXT>"
 # - DOC_ID is before first "_"
-# - DOC_ID regex: ^[A-Z]+-[A-Z0-9]+$
+# - DOC_ID regex: ^[A-Z]+(-[A-Z]+)*-[A-Z0-9]+$
 extractDocIdFromPathOrDie() {
   local path="$1"
 
@@ -102,10 +106,14 @@ extractDocIdFromPathOrDie() {
   local DOC_ID="${base%%_*}"
   [[ -n "$DOC_ID" ]] || die "DOC_ID extracted from filename is empty: '$path'"
 
-  # Validate DOC_ID pattern: one or more [A-Z], '-', then one or more [A-Z0-9]
-  if ! [[ "$DOC_ID" =~ ^[A-Z]+-[A-Z0-9]+$ ]]; then
+  # Validate DOC_ID pattern:
+  # - starts with one or more [A-Z]
+  # - may contain additional "-[A-Z]+" segments
+  # - ends with "-[A-Z0-9]+"
+  if ! [[ "$DOC_ID" =~ ^[A-Z]+(-[A-Z]+)*-[A-Z0-9]+$ ]]; then
     die "Invalid DOC_ID '$DOC_ID' extracted from '$path'.
-Expected pattern: one or more [A-Z], then '-', then one or more [A-Z0-9]."
+Expected pattern: starts with one or more [A-Z], may contain additional
+'-[A-Z]+' segments, and must end with '-[A-Z0-9]+'."
   fi
 
   printf '%s' "$DOC_ID"
