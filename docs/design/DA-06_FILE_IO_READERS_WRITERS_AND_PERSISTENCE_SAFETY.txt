@@ -8,36 +8,35 @@ EVOLVING
 
 Description:
 ------------
-Defines how data is read and written, who is allowed to do so, and how
-failures are handled without corrupting identity, history, or user trust.
+Defines how Turnix performs persistent I/O, who is allowed to perform it,
+and how failures are handled without corrupting authoritative state,
+history, or user trust.
 
-This area is NON-NEGOTIABLE.
 All persistence in Turnix is centralized and mediated.
-
 
 Purpose:
 --------
-Centralize all persistent I/O behind a single authority (IoManager) to
-preserve determinism, reversibility, and explicit uncertainty. Prevent packs
-and runtime components from bypassing safety rules by direct filesystem
-access, and ensure identity-bearing state is never silently corrupted.
+This document defines how Turnix centralizes persistent I/O behind a single
+authority so that persistence remains deterministic, reversible, and
+explicitly controlled.
 
-This area defines:
+It defines:
 - centralized I/O authority and boundaries
 - Reader / Writer provider model
 - raw access containment rules
 - root read/write permissions
-- error classification and user-mediated recovery guarantees
-- rollback points, backups, and snapshots
+- persistence safety requirements
+- backup, snapshot, and rollback boundaries
+- error classification and recovery boundaries
 - streaming I/O rules and where streaming is forbidden
 
-This area does NOT define:
+It does NOT define:
+- the general state model (see DA-04)
 - activation and lifecycle semantics (see DA-12)
 - dependency resolution semantics (see DA-11)
 - capability schemas and permission prompting (see DA-14)
-- tracing schema and storage (see DA-03)
-- pack discovery rules beyond save scanning references (see DA-07)
-
+- tracing schema or trace storage semantics (see DA-03)
+- pack discovery rules beyond save scanning implications (see DA-07)
 
 Upstream Documents:
 ------------------
@@ -47,434 +46,514 @@ Upstream Documents:
 - CMR-04
 - CMR-05
 - DA-01
+- DA-02
+- DA-03
+- DA-04
 - DA-07
 - DA-12
 
-
 Downstream Documents:
 --------------------
-- DA-03
 - DA-05
-- tracing
+- DA-14
+- DA-15
 
 
 ===============================================================================
-01. CORE PRINCIPLE (LOCKED)
+01. INTERPRETATION BASIS
 ===============================================================================
 
-ALL file reading and writing in Turnix MUST go through a centralized I/O
-authority.
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
 
-No pack, tool, or runtime component may read or write persistent data by
-accessing the filesystem directly.
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
 
-This applies to:
-- configuration
-- manifests
-- savePacks
-- logs and traces
-- caches
-- compiled assets
-- future databases or storage backends
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines persistent I/O authority, Reader / Writer
+      boundaries, and persistence-safety rules within that shared
+      interpretation model.
 
 
 ===============================================================================
-02. CENTRAL AUTHORITY: IoManager (LOCKED)
+02. CORE PRINCIPLE
 ===============================================================================
 
-Component:
-    IoManager
+02.1. Persistent I/O in Turnix routes through a centralized I/O authority.
 
-IoManager is the sole authority responsible for persistence.
+02.2. Packs, tools inside runtime orchestration, and runtime components do
+      not read or write persistent data by bypassing that authority.
 
-Responsibilities:
-- mediate all reads and writes
-- enforce root boundaries and permissions
-- normalize and validate paths
-- select appropriate readers / writers
-- classify errors
-- emit trace reasons
-- provide atomic write guarantees
-- manage backups and snapshots per policy
-- ensure rollback points for identity-bearing changes
+02.3. This applies to:
+      - configuration
+      - manifests
+      - save data
+      - logs and traces
+      - caches
+      - compiled assets
+      - future databases or storage backends
 
-No other component may bypass IoManager.
+02.4. Persistent I/O centralization exists to preserve:
+      - determinism
+      - reversibility
+      - explicit uncertainty
+      - root-boundary control
+      - user-trustworthy recovery behavior
 
-
-===============================================================================
-03. READERS & WRITERS (LOCKED CONCEPT)
-===============================================================================
-
-IoManager does not hardcode all file formats.
-
-Instead, it delegates actual data handling to registered providers:
-- Readers  -> load data from storage
-- Writers  -> persist data to storage
-
-Each Reader / Writer:
-- supports one or more specific kinds
-- declares its supported formats
-- is registered with IoManager
-- operates strictly within IoManager control
-- executes in the Turnix-controlled backend environment (never in frontend)
+02.5. This document refines the general persistence and state-safety rules
+      already constrained by [constrained-by: DA-04 03],
+      [constrained-by: DA-04 09], and
+      [constrained-by: DA-04 19].
 
 
 ===============================================================================
-04. RAW ACCESS BOUNDARY (LOCKED)
+03. CENTRAL AUTHORITY: IOMANAGER (LOCKED)
 ===============================================================================
 
-Reader / Writer implementations MAY internally use:
-- raw filesystem handles
-- platform-native APIs
-- low-level I/O operations
+03.1. IoManager is the sole authority responsible for persistent I/O.
 
-However (LOCKED):
-- raw handles MUST NOT escape the Reader / Writer boundary
-- raw paths MUST NOT be exposed to calling code
-- packs NEVER receive filesystem handles or unrestricted path APIs
+03.2. IoManager responsibilities include:
+      - mediating reads and writes
+      - enforcing root boundaries and permissions
+      - normalizing and validating storage targets
+      - selecting appropriate Readers and Writers
+      - classifying errors
+      - ensuring trace-visible persistence outcomes
+      - providing atomic-write guarantees where required
+      - managing backups and snapshots per policy
+      - preserving rollback points for identity-bearing mutations
 
-Readers return fully loaded data.
-Writers accept data to persist.
+03.3. No other component bypasses IoManager for persistent I/O.
 
-The raw filesystem is an internal implementation detail of IoManager and its
-providers, never part of the public runtime surface.
-
-
-===============================================================================
-05. BUILT-IN READERS / WRITERS (LOCKED)
-===============================================================================
-
-Turnix core provides the following built-in kinds:
-- utf8Text
-- binary
-- json
-- json5
-- jsonl
-
-These are ALWAYS available before discovery begins.
+03.4. IoManager does not replace the DA-04 state model. IoManager enforces
+      how persistence occurs for state and other persisted artifacts.
 
 
 ===============================================================================
-06. EXTENDED READERS / WRITERS (LOCKED POLICY)
+04. READERS AND WRITERS (LOCKED CONCEPT)
 ===============================================================================
 
-Additional formats (e.g. YAML, SQLite, embeddings):
-- MUST be provided by packs
-- MUST register as I/O providers with IoManager
-- MUST be activated BEFORE use
-- MUST declare supported kinds explicitly
+04.1. IoManager does not hardcode all persistence formats.
 
-Pack-provided Readers and Writers MUST NOT be usable unless the providing
-pack is activated.
+04.2. IoManager delegates concrete format handling to registered providers:
+      - Readers
+      - Writers
 
-Turnix MUST NOT attempt to auto-discover or load providers mid-read.
+04.3. A Reader loads data from storage under IoManager control.
+
+04.4. A Writer persists data to storage under IoManager control.
+
+04.5. Each Reader or Writer:
+      - supports one or more specific kinds
+      - declares its supported formats explicitly
+      - is registered with IoManager
+      - operates strictly within IoManager control
+      - executes in the Turnix-controlled backend environment
+
+04.6. Reader / Writer providers refine persistence mechanics. They do not
+      redefine platform persistence authority.
+
+
+===============================================================================
+05. RAW ACCESS BOUNDARY (LOCKED)
+===============================================================================
+
+05.1. Reader / Writer implementations may internally use:
+      - raw filesystem handles
+      - platform-native APIs
+      - low-level I/O operations
+
+05.2. Raw handles do not escape the Reader / Writer boundary.
+
+05.3. Raw paths do not become part of the calling runtime surface.
+
+05.4. Packs do not receive filesystem handles or unrestricted path APIs.
+
+05.5. Readers return loaded data or streaming views when explicit streaming
+      mode allows it.
+
+05.6. Writers accept data or explicit streams to persist under IoManager
+      control.
+
+05.7. The raw filesystem remains an internal implementation detail of
+      IoManager and its providers.
+
+
+===============================================================================
+06. BUILT-IN AND EXTENDED PROVIDERS (LOCKED POLICY)
+===============================================================================
+
+06.1. Turnix core provides built-in persistence kinds required before
+      discovery begins.
+
+06.2. Built-in kinds currently include:
+      - utf8Text
+      - binary
+      - json
+      - json5
+      - jsonl
+
+06.3. These built-in kinds remain available before discovery and indexing.
+
+06.4. Additional kinds may be provided by packs or later platform
+      extensions.
+
+06.5. Extended providers:
+      - register with IoManager
+      - declare supported kinds explicitly
+      - are not usable until the providing pack is activated
+
+06.6. Turnix does not auto-discover or load providers in the middle of a
+      read or write operation.
+
+06.7. Early phases use only built-in providers.
 
 
 ===============================================================================
 07. DISCOVERY- AND INDEXING-TIME I/O LIMITS (LOCKED)
 ===============================================================================
 
-During discovery and indexing:
+07.1. Discovery and indexing use built-in Readers only.
 
-Allowed:
-- built-in readers only
+07.2. During discovery and indexing, Turnix does not use:
+      - pack-provided Readers
+      - pack-provided Writers
+      - compilers
+      - transformers
+      - streaming I/O
 
-Disallowed:
-- pack-provided readers
-- pack-provided writers
-- compilers
-- transformers
-- streaming
+07.3. Early phases remain deterministic, fast, and independent of pack
+      activation.
 
-Rationale:
-Early phases must be deterministic, fast, and independent of packs.
+07.4. These limits remain compatible with [constrained-by: DA-07] and
+      [constrained-by: DA-12].
 
 
 ===============================================================================
-08. WRITE PERMISSIONS (LOCKED)
+08. ROOT PERMISSIONS AND WRITE AUTHORITY (LOCKED)
 ===============================================================================
 
-Writable roots at runtime:
-- userdata/
-- saves/
+08.1. Writable roots at runtime are:
+      - userdata/
+      - saves/
 
-Read-only roots at runtime:
-- custom/
-- first-party/
-- third-party/
+08.2. Read-only roots at runtime are:
+      - custom/
+      - first-party/
+      - third-party/
 
-Authoring tools MAY override these rules OUTSIDE runtime orchestration.
-Runtime orchestration MUST enforce them strictly.
+08.3. Runtime orchestration enforces these root rules strictly.
 
-IoManager enforces these rules strictly.
+08.4. Authoring tools outside runtime orchestration may define broader
+      editing behavior, but those behaviors do not weaken runtime rules.
+
+08.5. IoManager enforces root-boundary rules for runtime persistence.
+
+08.6. Root writability does not by itself authorize state mutation.
+      State-mutation authority remains constrained by the relevant higher
+      design areas.
 
 
 ===============================================================================
 09. ERROR CLASSIFICATION (LOCKED)
 ===============================================================================
 
-All I/O errors are classified into exactly one category:
+09.1. Persistent I/O errors are classified into exactly one category:
 
-A) UNRECOVERABLE (Fatal)
-   - failure to load required config schema
-   - failure to load default configuration
-   - corruption of identity-bearing state required before minimal UI is
-     available
-   -> ReactorScramError
+      A) Unrecoverable
+      B) User-decidable
+      C) Optional / best-effort
 
-B) USER-DECIDABLE
-   - corrupted userdata config
-   - missing optional files
-   - version mismatch requiring migration or reset
-   -> execution pauses, UI decision required
+09.2. Unrecoverable errors include failures such as:
+      - failure to load required configuration schema material
+      - failure to load required default configuration material
+      - corruption of identity-bearing state required before minimal
+        recovery UI is available
 
-C) OPTIONAL / BEST-EFFORT
-   - logs
-   - traces
-   - caches
-   -> warning only
+09.3. Unrecoverable errors terminate the affected operation or runtime
+      path as fatal.
 
-No silent fallback is allowed for identity-bearing data.
+09.4. User-decidable errors include failures such as:
+      - corrupted user configuration
+      - missing optional files required for a chosen action
+      - version mismatch requiring migration or reset
+      - recoverable restore decisions
 
+09.5. User-decidable errors pause normal continuation and require explicit
+      recovery flow.
 
-===============================================================================
-10. ERROR PRESENTATION & BOOTSTRAP GUARANTEE (LOCKED)
-===============================================================================
+09.6. Optional / best-effort errors include data such as:
+      - logs
+      - traces
+      - caches
 
-User recovery MUST be UI-mediated.
+09.7. Optional / best-effort failures do not corrupt authoritative state.
 
-Minimum guaranteed runtime before any user decision:
-- FastAPI running
-- index.html served
-- bootstrap.js loaded
-- rpc.js available
-- error overlay functional
-
-Before this point:
-- all errors are fatal
-- no recovery is possible
+09.8. Identity-bearing data never uses silent fallback.
 
 
 ===============================================================================
-11. TRACE REASONS (LOCKED NAMING)
+10. ERROR PRESENTATION AND RECOVERY BOOTSTRAP
 ===============================================================================
 
-Refused, skipped, or failed I/O MUST emit trace reasons.
+10.1. User recovery is mediated through a minimal guaranteed recovery
+      surface.
 
-Trace reasons:
-- use PascalCase
-- are non-user-facing by default
-- are stable identifiers
+10.2. Before that recovery surface is available, recovery decisions do not
+      occur.
 
-Examples:
-- ManifestInRootLayerDir
-- SymlinkForbidden
-- FileAccessDenied
-- ScanDepthLimitReached
+10.3. Failures before minimal recovery availability are fatal for the
+      affected boot path.
 
-Trace naming is kept here until tracing is centralized (DA-03).
+10.4. This document does not lock the permanent implementation stack of the
+      recovery surface.
 
+10.5. The platform guarantee is:
+      - a minimal recovery surface becomes available before user-decidable
+        recovery is required
+      - if that recovery surface is not yet available, the failure is
+        treated as unrecoverable in that moment
 
-===============================================================================
-12. SAVE FILE HANDLING (LOCKED)
-===============================================================================
-
-SavePacks:
-- discovered via saves/*/*/manifest.json5
-- shallow-scanned by default
-- internal copied packs NOT indexed initially
-
-Deep scanning occurs ONLY when:
-- a save is explicitly loaded
-- PackManager inspects the save
-- configuration explicitly enables deep scanning
-
-Visibility of copied packs is strictly save-local.
+10.6. This document does not define frontend implementation details for the
+      recovery surface.
 
 
 ===============================================================================
-13. CONFIG LOADING ORDER (LOCKED)
+11. TRACE VISIBILITY OF I/O OUTCOMES (LOCKED)
 ===============================================================================
 
-Configuration is loaded in this order:
-1) config schemas
-2) default configuration
-3) userdata configuration
-4) validation
-5) indexing decisions
+11.1. Refused, skipped, failed, retried, recovered, or completed I/O
+      outcomes are trace-visible.
 
-Failure in steps 1-2 -> fatal.
-Failure in step 3    -> user-decidable.
+11.2. Trace naming, reason naming, and trace storage semantics remain
+      governed by [constrained-by: DA-03].
 
-
-===============================================================================
-14. MIGRATORS & ROLLBACK GUARANTEES (LOCKED)
-===============================================================================
-
-Supported migrators:
-- ConfigMigrator
-- ManifestMigrator
-- future migrator types
-
-Rules:
-- migrators are versioned
-- applied sequentially toward target version
-- deterministic and side-effect controlled
-
-IMPORTANT (LOCKED):
-- Migrators do NOT implement inverse operations.
-- BEFORE any identity-bearing mutation is committed:
-  -> IoManager MUST create a rollback point (backup or snapshot, per policy)
-
-Identity-bearing mutations include, but are not limited to:
-- configuration migrations
-- savePack structure changes
-- PackManager-driven save edits
-- any multi-file write that must remain internally consistent
-
-Rollback is provided by IoManager, not by migrators themselves.
+11.3. This document defines the persistence-side obligation to surface I/O
+      outcomes to trace. It does not define the full tracing taxonomy.
 
 
 ===============================================================================
-15. BACKUPS & SNAPSHOTS (LOCKED CONCEPT)
+12. SAVE DATA HANDLING (LOCKED)
 ===============================================================================
 
-IoManager supports two durability mechanisms:
+12.1. Save data is discovered and loaded under the discovery and indexing
+      limits already defined by this document and by DA-07.
 
-A) File backups (single-file)
-   - previous versions may be retained
-   - used for configs, manifests, small critical files
+12.2. Save-local copied packs or save-internal artifacts do not become part
+      of initial global indexing merely because they exist in save data.
 
-B) Snapshots (multi-file atomic units)
-   - group logically related files
-   - created explicitly
-   - restored only by user-visible actions
+12.3. Deeper save inspection occurs only when:
+      - a save is explicitly loaded
+      - a management tool explicitly inspects the save
+      - explicit configuration or policy enables deeper inspection
 
-Policy controls:
-- retention
-- storage location
-- cleanup behavior
-
-No automatic rollback without policy or user consent.
+12.4. Save-local visibility remains save-local unless some other
+      authoritative document explicitly states otherwise.
 
 
 ===============================================================================
-16. STREAMING READERS / WRITERS (PLANNED, PARTIALLY LOCKED)
+13. CONFIGURATION LOADING RELATIONSHIP
 ===============================================================================
 
-Streaming is an explicit I/O mode for large or long-lived operations.
+13.1. Configuration loading and persistence use IoManager mediation.
 
-Streaming read:
-- returns an async iterator / stream
+13.2. Configuration-specific semantics are defined by [constrained-by: DA-05].
 
-Streaming write:
-- accepts a stream and stages output incrementally
+13.3. This document does not redefine configuration scopes, defaults,
+      override semantics, or effectiveConfig semantics.
 
-Core rules (LOCKED):
-- streaming is NEVER implicit
-- caller MUST request streaming explicitly
-- staging is mandatory
-- cancellation MUST be safe
+13.4. This document defines only the I/O authority and persistence-safety
+      obligations that configuration obeys.
 
 
-16.1 Streaming kinds (LOCKED)
+===============================================================================
+14. MIGRATORS AND ROLLBACK GUARANTEES (LOCKED)
+===============================================================================
+
+14.1. Migrators may exist for:
+      - configuration
+      - manifests
+      - save structures
+      - future persisted artifact classes
+
+14.2. Migrators are versioned and applied sequentially toward a target
+      compatibility state.
+
+14.3. Migrators are deterministic and side-effect controlled within their
+      defined scope.
+
+14.4. Migrators do not provide inverse operations by themselves.
+
+14.5. Before any identity-bearing mutation is committed, IoManager creates
+      a rollback point according to policy.
+
+14.6. Identity-bearing mutations include, but are not limited to:
+      - configuration migrations
+      - save structure changes
+      - manager-driven save edits
+      - multi-file writes that must remain internally consistent
+
+14.7. Rollback safety is provided by IoManager and by the DA-04 commit
+      model, not by per-migrator inverse logic.
+
+14.8. This section remains [constrained-by: DA-04 19].
+
+
+===============================================================================
+15. BACKUPS AND SNAPSHOTS (LOCKED CONCEPT)
+===============================================================================
+
+15.1. IoManager supports durability mechanisms such as:
+      - file backups
+      - snapshots
+
+15.2. File backups are suited to small critical files and prior versions.
+
+15.3. Snapshots are suited to logically related multi-file or multi-artifact
+      units.
+
+15.4. Policy controls:
+      - retention
+      - storage location
+      - cleanup behavior
+      - restoration availability
+
+15.5. Automatic rollback does not occur without explicit policy or
+      user-visible consent where such consent is required.
+
+
+===============================================================================
+16. STREAMING I/O (PARTIALLY LOCKED)
+===============================================================================
+
+16.1. Streaming is an explicit I/O mode for large or long-lived operations.
+
+16.2. Streaming read returns a stream or async iterator.
+
+16.3. Streaming write accepts a stream and stages output incrementally.
+
+16.4. Core streaming rules:
+      - streaming is never implicit
+      - the caller requests streaming explicitly
+      - staging is mandatory for streaming write
+      - cancellation remains safe
+
+16.5. Non-streaming kinds remain non-streaming unless explicitly extended.
+
+
+16.1 STREAMING KINDS (LOCKED)
 ----------------------------
 
-Examples:
-- utf8TextStream
-- binaryStream
-- jsonlStream
-- tarStream              (future)
-- saveSnapshotStream     (future)
+16.1.1. Examples of streaming kinds include:
+        - utf8TextStream
+        - binaryStream
+        - jsonlStream
+        - tarStream
+        - saveSnapshotStream
 
-Non-streaming kinds remain non-streaming.
-
-
-16.2 Cancellation & cleanup (LOCKED)
------------------------------------
-
-Streaming read:
-- cancellation closes handles
-- no persistence side effects
-
-Streaming write:
-- cancellation MUST NOT produce partial valid output
-- final destination is updated ONLY on commit
-
-Staging artifacts:
-- must be garbage-collectable
-- SHOULD be tracked for cleanup on restart
+16.1.2. Example names do not by themselves lock the full future streaming
+        catalog.
 
 
-16.3 Where streaming is forbidden (LOCKED)
+16.2 CANCELLATION AND CLEANUP (LOCKED)
+--------------------------------------
+
+16.2.1. Streaming read cancellation closes underlying handles safely.
+
+16.2.2. Streaming read cancellation does not create persistence side
+        effects.
+
+16.2.3. Streaming write cancellation does not produce partial valid final
+        output.
+
+16.2.4. Final destination update occurs only on commit.
+
+16.2.5. Staging artifacts remain garbage-collectable and cleanup-compatible.
+
+
+16.3 WHERE STREAMING IS FORBIDDEN (LOCKED)
 ------------------------------------------
 
-Streaming MUST NOT be used for:
-- discovery
-- indexing
-- manifest loading
-- config schema loading
-- default configuration loading
-- userdata configuration loading
-- dependency resolution
-- activation-critical reads
+16.3.1. Streaming is not used for:
+        - discovery
+        - indexing
+        - manifest loading
+        - configuration schema loading
+        - default configuration loading
+        - userdata configuration loading
+        - dependency resolution
+        - activation-critical reads
 
-These phases require full determinism.
+16.3.2. These phases require full deterministic materialization rather than
+        partial progressive access.
 
 
 ===============================================================================
-17. RECOVERY USING BACKUPS (LOCKED)
+17. RECOVERY USING BACKUPS AND SNAPSHOTS (LOCKED)
 ===============================================================================
 
-When user-decidable data fails to load, IoManager MAY offer:
-- restore last known good
-- reset to defaults
-- quarantine broken data
-- proceed without (only if policy allows)
+17.1. When user-decidable persisted data fails to load, IoManager may offer
+      recovery actions such as:
+      - restore last known good
+      - reset to defaults where that concept exists
+      - quarantine broken data
+      - proceed without the failed data only if explicit policy allows it
 
-All recovery actions are UI-mediated.
+17.2. Recovery actions remain UI-mediated or policy-mediated according to
+      the governing higher documents.
+
+17.3. Recovery actions remain trace-visible.
 
 
 ===============================================================================
 18. NO BACKDOORS (LOCKED)
 ===============================================================================
 
-Packs:
-- cannot bypass IoManager
-- cannot access arbitrary paths
-- cannot intercept core I/O
+18.1. Packs do not bypass IoManager.
 
-All persistence authority is centralized.
+18.2. Packs do not access arbitrary persistent paths through unrestricted
+      runtime APIs.
+
+18.3. Packs do not intercept core persistence flows.
+
+18.4. Persistent I/O authority remains centralized.
 
 
 ===============================================================================
 19. EXPLICITLY OPEN QUESTIONS
 ===============================================================================
 
-OPEN:
-- streaming backpressure API
-- resumable streaming
-- verification hooks (hashing, limits)
-- encrypted storage backends
+19.1. OPEN questions include:
+      - streaming backpressure API
+      - resumable streaming
+      - verification hooks such as hashing or limits
+      - encrypted storage backends
+      - the future boundary between logical addressing and physical storage
+        mapping
 
 
 ===============================================================================
 20. LOCKED SUMMARY
 ===============================================================================
 
-LOCKED:
-- centralized IoManager
-- Reader / Writer abstraction
-- controlled raw access boundary
-- strict root permissions
-- rollback points before identity-bearing mutations
-- UI-mediated recovery
-- deterministic early phases
-- no silent fallback
+20.1. LOCKED:
+      - centralized IoManager authority
+      - Reader / Writer provider abstraction
+      - controlled raw-access boundary
+      - strict runtime root permissions
+      - trace-visible I/O outcomes
+      - rollback points before identity-bearing mutations
+      - UI-mediated recovery
+      - deterministic early phases
+      - no silent fallback for identity-bearing data
+      - explicit streaming mode and explicit streaming-forbidden phases
 
-OPEN:
-- performance optimizations
-- future storage backends
+20.2. OPEN:
+      - performance refinements
+      - future storage backends
+      - future logical-addressing / physical-mapping refinement
 
 
 ===============================================================================
@@ -484,6 +563,6 @@ END OF DA-06 - FILE I/O, READERS / WRITERS & PERSISTENCE SAFETY
 --- doc-meta ---
 DOC_ID: DA-06
 DOC_FILE: docs/design/DA-06_FILE_IO_READERS_WRITERS_AND_PERSISTENCE_SAFETY.txt
-DOC_REV: 11
-DOC_GIT: 148f293
+DOC_REV: 12
+DOC_GIT: a21ff18
 ----------------
