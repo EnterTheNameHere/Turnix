@@ -17,12 +17,13 @@ This area constrains:
 - authoring vs runtime separation
 - save isolation expectations
 
-
 Purpose:
 --------
-This document specifies the root categories and the discovery rules that
-produce Discovered packs. It exists to keep discovery boring, strict, and
-predictable, preventing "ghost packs" and accidental global behavior.
+This document defines the root categories and discovery rules that produce
+Discovered packs.
+
+It exists to keep discovery boring, strict, and predictable, preventing
+ghost packs and accidental global behavior.
 
 This area defines:
 - root categories and their meaning
@@ -30,14 +31,15 @@ This area defines:
 - directory scanning constraints
 - discovery output contract
 - save discovery policy
+- discovery guarantees
 
 This area does NOT define:
 - pack activation or runtime loading
-- policy evaluation (enable/disable, permissions)
+- policy evaluation
 - visibility rules beyond discovery boundaries
 - indexing, resolution, selectors, or dependency solving
-- tracing schema or storage details (only trace requirements)
-
+- tracing schema or storage details
+- provider loading or streaming I/O semantics outside discovery constraints
 
 Upstream Documents:
 ------------------
@@ -47,279 +49,350 @@ Upstream Documents:
 - CMR-04
 - CMR-05
 - DA-01
-
+- DA-02
+- DA-03
+- DA-06
 
 Downstream Documents:
 --------------------
-- DA-03
-- pack-manifest-structure
-- roots-and-discovery
-- pack-and-asset-resolution
+- DA-08
+- DA-09
+- DA-10
+- DA-11
+- DA-12
 
 
 ===============================================================================
-01. ROOT TYPES (LOCKED)
+01. INTERPRETATION BASIS
 ===============================================================================
 
-Turnix recognizes the following root categories:
-- custom/
-- first-party/
-- third-party/
-- userdata/
-- saves/
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
 
-Each root has a distinct semantic meaning and enforced constraints.
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
 
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
 
-01.1 Content roots
-------------------
-
-Content roots are:
-- custom/
-- first-party/
-- third-party/
-
-These roots are scanned for packs (manifests).
-
-Precedence (highest wins):
-    custom
-    first-party
-    third-party
-
-Rationale:
-- custom      -> local overrides, authoring, experimentation
-- first-party -> shipped baseline content
-- third-party -> external content that must not silently override baseline
-
-This precedence is LOCKED and reused consistently across:
-- resolution ordering
-- deterministic selection
-- tie-breaking
-
-
-01.2 Userdata root
-------------------
-
-userdata/ is NOT a content root.
-
-It is used exclusively for:
-- persisted configuration
-- runtime state
-- user decisions
-- caches
-
-userdata/ MUST NEVER be scanned for packs.
-
-
-01.3 Saves root
----------------
-
-saves/ contains SavePacks.
-
-LOCKED:
-- SavePacks are discoverable as save entities.
-- SavePacks are NOT eligible for import as normal packs.
-- Packs copied into saves are context-bound to that save only.
-
-Default behavior:
-- shallow scanning only (see Section 05)
+01.4. This document defines root categories and discovery boundaries within
+      that shared interpretation model.
 
 
 ===============================================================================
-02. DISCOVERY ENTRY POINT RULES (LOCKED)
+02. CORE CONCEPT
 ===============================================================================
 
-02.1 Root directories are not packs
------------------------------------
+02.1. Discovery answers:
 
-A manifest located directly in a root directory MUST be ignored.
+          "Where may Turnix look for packs, and what may discovery
+           legitimately produce?"
 
-Examples:
-- first-party/manifest.json5
-- custom/manifest.json5
-- saves/manifest.json5
+02.2. Discovery is the stage that identifies candidate pack entities inside
+      allowed roots and classifies them into discovered or rejected
+      outcomes.
 
-Reason:
-- roots define namespaces, not packs
-- prevents accidental global packs
-- avoids ambiguity
+02.3. Discovery does not decide:
+      - visibility
+      - enablement
+      - selector resolution
+      - dependency satisfaction
+      - activation
+      - runtime loading
 
-This condition is NOT an error.
+02.4. Discovery is intentionally strict, boring, and side-effect free.
 
+02.5. Discovery boundaries exist to preserve:
+      - deterministic visibility inputs
+      - trust and override boundaries
+      - runtime and authoring separation
+      - save isolation
+      - predictable performance
 
-02.2 Discovery outcome traceability
------------------------------------
+02.6. Discovery remains compatible with [constrained-by: DA-06 07] for
+      early-phase I/O limits and built-in-reader-only behavior.
 
-Every ignored, skipped, or rejected discovery artifact MUST be traceable.
+02.7. Pack is the general container concept.
 
-Discovery MUST NOT silently ignore:
-- manifests
-- directories
-- files that appear eligible
+02.8. Specialized pack kinds such as AppPack, ModPack, ContentPack, and
+      SavePack remain specific uses of that broader container concept.
 
-How discovery decisions are traced, structured, and surfaced is defined in:
-    DESIGN AREA DA-03 - TRACING, DIAGNOSTICS & OBSERVABILITY
-
-DA-07 defines what must be traceable, not how tracing works.
-
-
-===============================================================================
-03. DIRECTORY SCANNING RULES
-===============================================================================
-
-03.1 Manifest-based depth (LOCKED)
-----------------------------------
-
-Discovery depth is defined by manifest nesting, not filesystem nesting.
-
-Example:
-    first-party/a/manifest.json5        -> depth 0
-    first-party/a/b/c/d/manifest.json5  -> still depth 0
-
-Depth increases only when scanning below a discovered manifest.
-
-This rule is LOCKED.
-
-
-03.2 Maximum scan depth (LOCKED)
---------------------------------
-
-Configuration key:
-    packs.discovery.totalDepth
-
-Rules:
-- totalDepth <= 0   -> unlimited
-- totalDepth == 1   -> scan only immediate subdirectories
-- totalDepth >= 2   -> exact recursion limit
-
-Default:
-    totalDepth = 60
-
-Behavior:
-- exceeding the limit stops recursion for that branch
-- discovery continues elsewhere
-- no fatal error is raised
-
-Rationale:
-- protects against runaway directory trees
-- allows controlled overrides for exotic layouts
-
-
-03.3 Symlink handling (LOCKED)
-------------------------------
-
-By default:
-- directory symlinks are forbidden
-- file symlinks are forbidden
-
-Rationale:
-- determinism
-- security
-- prevention of implicit graph expansion
-
-Policy-based relaxation MAY be introduced later.
-Discovery behavior MUST remain deterministic regardless.
+02.9. This document uses SavePack when the specific save-container pack kind
+      is meant. It uses more general pack wording when the rule applies to
+      packs broadly.
 
 
 ===============================================================================
-04. DISCOVERY OUTPUT (LOCKED)
+03. ROOT TYPES (LOCKED)
 ===============================================================================
 
-Discovery produces PackDescriptor objects in Discovered state.
+03.1. Turnix recognizes the following root categories:
+      - custom/
+      - first-party/
+      - third-party/
+      - userdata/
+      - saves/
 
-At discovery time:
-- manifest is read
-- declared fields are parsed and type-checked
-- parent relationships are established
-- packTreeId is computed
-- raw manifest data is preserved
-
-Discovery MUST NOT:
-- determine resolution source (save vs global)
-- resolve visibility
-- apply user enable/disable policy
-- parse selectors
-- activate packs
-- load runtimes
-- require compilers or providers
-
-If a pack cannot be discovered correctly:
-- it is rejected
-- the reason is recorded
-- discovery proceeds
+03.2. Each root category has a distinct semantic meaning and enforced
+      constraints.
 
 
-===============================================================================
-05. SAVE DISCOVERY POLICY
-===============================================================================
+03.1 CONTENT ROOTS (LOCKED)
+---------------------------
 
-05.1 Default save scanning (LOCKED)
------------------------------------
+03.1.1. Content roots are:
+        - custom/
+        - first-party/
+        - third-party/
 
-By default, Turnix scans:
-    saves/*/*/manifest.json5
+03.1.2. Content roots are scanned for packs.
 
-It MUST NOT:
-- recurse into save directories
-- discover copied packs eagerly
+03.1.3. Content-root precedence is:
 
-Rationale:
-- typical saves do not embed packs
-- exported saves may contain many packs
-- eager scanning would be expensive and unnecessary
+        custom
+        first-party
+        third-party
 
+03.1.4. This precedence remains reused consistently across later
+        resolution, deterministic selection, and tie-breaking.
 
-05.2 Deep save scanning (LOCKED)
---------------------------------
-
-Deep scanning of save contents occurs ONLY when:
-- a save is explicitly loaded
-- PackManager inspects a save
-- configuration explicitly enables deep save scanning
-
-At that point:
-- copied packs are discovered
-- visibility is limited to save context
-- copied-pack rules apply
-
-This separation is LOCKED.
+03.1.5. The rationale for precedence is:
+        - custom/ supports local overrides, authoring, and experimentation
+        - first-party/ provides shipped baseline content
+        - third-party/ provides external content that does not silently
+          override the baseline
 
 
-===============================================================================
-06. DISCOVERY GUARANTEES (LOCKED)
-===============================================================================
+03.2 USERDATA ROOT (LOCKED)
+---------------------------
 
-LOCKED guarantees:
-- Discovery is fast and side-effect free.
-- Discovery does not depend on packs.
-- All heavy logic belongs to indexing or activation.
-- Discovery failures are classified, not fatal (unless core configuration is
-  missing).
+03.2.1. userdata/ is not a content root.
+
+03.2.2. userdata/ is used for persisted configuration, runtime state, user
+        decisions, caches, and related persisted non-pack data.
+
+03.2.3. userdata/ is never scanned for packs.
+
+
+03.3 SAVES ROOT (LOCKED)
+------------------------
+
+03.3.1. saves/ contains SavePacks.
+
+03.3.2. SavePacks are discoverable as save entities.
+
+03.3.3. SavePacks are not eligible for import as normal content-root packs.
+
+03.3.4. Packs copied into a SavePack remain context-bound to that SavePack
+        only unless some other authoritative document explicitly states
+        otherwise.
+
+03.3.5. Default save scanning remains shallow unless later rules in this
+        document explicitly permit deeper inspection.
 
 
 ===============================================================================
-07. EXPLICITLY OPEN QUESTIONS
+04. DISCOVERY ENTRYPOINT RULES (LOCKED)
 ===============================================================================
 
-OPEN:
-- per-root default depth limits
-- per-root symlink policies
-- incremental vs full discovery
-- discovery result caching
+04.1. Root directories are namespaces rather than packs.
+
+04.2. A manifest located directly in a root directory is ignored.
+
+04.3. Examples include:
+      - first-party/manifest.json5
+      - custom/manifest.json5
+      - saves/manifest.json5
+
+04.4. This outcome is not treated as a fatal error.
+
+04.5. The rationale is:
+      - roots define namespaces rather than pack identities
+      - accidental global packs are prevented
+      - ambiguity at root level is avoided
+
+04.6. Every ignored, skipped, or rejected discovery artifact remains
+      traceable.
+
+04.7. Discovery does not silently ignore manifests, directories, or files
+      that appear eligible for discovery.
+
+04.8. This document defines what discovery outcomes must be traceable. DA-03
+      defines how tracing works.
 
 
 ===============================================================================
-08. WHY THIS AREA EXISTS
+05. DIRECTORY SCANNING RULES
 ===============================================================================
 
-Without strict discovery boundaries:
-- visibility rules become impossible to reason about
-- resolution loses determinism
-- performance degrades unpredictably
-- user trust erodes due to "ghost packs"
-- save isolation breaks
+05.1. Manifest-based depth (LOCKED)
 
-Discovery MUST be boring, strict, and predictable.
+05.1.1. Discovery depth is defined by manifest nesting rather than raw
+        filesystem nesting.
+
+05.1.2. Example:
+        - first-party/a/manifest.json5 is depth 0
+        - first-party/a/b/c/d/manifest.json5 is still depth 0
+
+05.1.3. Depth increases only when scanning below a discovered manifest.
+
+05.1.4. This rule is the governing replacement for older simpler
+        root-subdirectory scanning descriptions.
+
+05.1.5. This rule is locked because it affects deterministic discovery
+        boundaries.
+
+
+05.2. Maximum scan depth (LOCKED)
+
+05.2.1. Configuration key:
+        packs.discovery.totalDepth
+
+05.2.2. Rules:
+        - totalDepth <= 0 means unlimited
+        - totalDepth == 1 means immediate subdirectories only
+        - totalDepth >= 2 means exact recursion limit
+
+05.2.3. Default:
+        totalDepth = 60
+
+05.2.4. If the limit is exceeded, recursion stops for that branch and
+        discovery continues elsewhere.
+
+05.2.5. This condition is not fatal by itself.
+
+05.2.6. The rationale is:
+        - protection against runaway directory trees
+        - controlled override for unusual layouts
+
+
+05.3. Symlink handling (LOCKED)
+
+05.3.1. By default, directory symlinks are forbidden.
+
+05.3.2. By default, file symlinks are forbidden.
+
+05.3.3. The rationale is:
+        - determinism
+        - security boundary clarity
+        - prevention of implicit graph expansion
+
+05.3.4. Later policy-based relaxation may exist, but discovery behavior
+        remains deterministic regardless.
+
+
+===============================================================================
+06. DISCOVERY OUTPUT CONTRACT (LOCKED)
+===============================================================================
+
+06.1. Discovery produces PackDescriptor objects in Discovered state.
+
+06.2. At discovery time:
+      - manifest is read
+      - declared fields are parsed and type-checked
+      - parent relationships are established
+      - packTreeId is computed
+      - raw manifest data is preserved
+
+06.3. Discovery does not:
+      - determine resolution source (save vs global)
+      - resolve visibility
+      - apply user enable/disable policy
+      - parse selectors
+      - activate packs
+      - load runtimes
+      - require compilers or pack-provided providers
+
+06.4. If a pack cannot be discovered correctly:
+      - it is rejected
+      - the reason is recorded
+      - discovery proceeds elsewhere
+
+06.5. Discovery output remains an input to later indexing, visibility, and
+      resolution stages. It is not a runtime-loaded result by itself.
+
+
+===============================================================================
+07. SAVE DISCOVERY POLICY
+===============================================================================
+
+07.1. Default save scanning (LOCKED)
+
+07.1.1. By default, Turnix scans:
+        saves/*/*/manifest.json5
+
+07.1.2. By default, Turnix does not recurse into SavePack directories.
+
+07.1.3. By default, Turnix does not discover copied packs inside SavePacks
+        eagerly.
+
+07.1.4. The rationale is:
+        - typical saves do not embed many copied packs
+        - exported saves may contain many copied packs
+        - eager scanning would be expensive and unnecessary
+
+
+07.2. Deep save scanning (LOCKED)
+
+07.2.1. Deep scanning of SavePack contents occurs only when:
+        - a SavePack is explicitly loaded
+        - a management surface inspects a SavePack
+        - configuration explicitly enables deep save scanning
+
+07.2.2. At that point:
+        - copied packs may be discovered
+        - visibility remains limited to SavePack context
+        - copied-pack rules apply
+
+07.2.3. This separation remains locked.
+
+
+===============================================================================
+08. DISCOVERY GUARANTEES (LOCKED)
+===============================================================================
+
+08.1. Discovery is fast and side-effect free.
+
+08.2. Discovery does not depend on pack activation.
+
+08.3. Discovery does not require pack-provided Readers, Writers, compilers,
+      or runtime providers.
+
+08.4. Heavy logic belongs to later indexing, resolution, or activation
+      stages rather than to discovery.
+
+08.5. Discovery failures are classified rather than globally fatal unless
+      required core prerequisites are unavailable.
+
+08.6. Discovery remains compatible with DA-06 early-phase I/O limits and
+      with DA-03 traceability requirements.
+
+
+===============================================================================
+09. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+09.1. OPEN questions include:
+      - per-root default depth limits
+      - per-root symlink policies
+      - incremental versus full discovery
+      - discovery-result caching
+      - where full root-resolution rules should live if they are not kept
+        inside this document
+
+
+===============================================================================
+10. WHY THIS AREA EXISTS
+===============================================================================
+
+10.1. Without strict discovery boundaries:
+       - visibility rules become harder to reason about
+       - resolution loses determinism
+       - performance degrades unpredictably
+       - user trust erodes through ghost packs
+       - save isolation breaks
+
+10.2. Discovery therefore remains boring, strict, and predictable.
 
 
 ===============================================================================
@@ -329,6 +402,6 @@ END OF DA-07 - ROOT SYSTEM & PACK DISCOVERY BOUNDARIES
 --- doc-meta ---
 DOC_ID: DA-07
 DOC_FILE: docs/design/DA-07_ROOT_SYSTEM_AND_PACK_DISCOVERY_BOUNDARIES.txt
-DOC_REV: 9
-DOC_GIT: dc0b1cf
+DOC_REV: 10
+DOC_GIT: a21ff18
 ----------------
