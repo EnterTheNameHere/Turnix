@@ -8,35 +8,34 @@ EVOLVING
 
 Description:
 ------------
-Defines pack identity layers, hierarchical addressing, and visibility rules.
-This area directly affects resolution, imports, activation order, security
-boundaries, and the mental model for pack authors.
+Defines pack identity layers, hierarchical relationships, and visibility
+boundaries.
 
-This area answers:
-- What is a pack identity?
-- How packs relate to each other
-- Who can see whom, and why
-
+This area directly affects resolution, imports, activation ordering, save
+overrides, and the mental model for pack authors.
 
 Purpose:
 --------
-Provide a stable identity and visibility model that supports deterministic
-resolution and explicit security boundaries, while remaining understandable
-to authors and predictable at runtime.
+This document defines how Turnix identifies packs, how pack hierarchy is
+formed, and how visibility is computed without conflating visibility with
+resolution, activation, or capability authority.
 
-This area defines:
-- identity layers (declaredId, packTreeId, author)
-- version identity rules and inheritance
-- visibility declarations and computed global visibility
-- import visibility from parent context
-- strict separation between visibility and capabilities
+It defines:
+- pack as the general container concept
+- pack identity layers
+- hierarchical identity construction
+- author and version identity treatment
+- visibility declarations and computed visibility
+- parent-import visibility rules
+- separation between visibility and capability authority
+- save-local visibility constraints
 
-This area does NOT define:
-- pack discovery boundaries (see DA-02)
-- pack resolution rules and source selection (save vs global)
-- activation order and runtime lifecycle
-- capability schema, permission prompts, or enforcement mechanics
-
+It does NOT define:
+- root discovery boundaries (see DA-07)
+- resolution winner selection or source selection (see DA-09)
+- activation order or runtime lifecycle (see DA-12)
+- capability schema, permission prompts, or enforcement mechanics (see DA-14)
+- pack addressing syntax beyond identity and hierarchy concepts
 
 Upstream Documents:
 ------------------
@@ -46,304 +45,412 @@ Upstream Documents:
 - CMR-04
 - CMR-05
 - DA-01
+- DA-02
 - DA-07
-
 
 Downstream Documents:
 --------------------
-- pack-manifest-structure
-- pack-uri-spec
-- pack-and-asset-resolution
-- IS-01
-- IS-02
+- DA-09
+- DA-10
+- DA-11
+- DA-12
+- DA-13
+- DA-14
 
 
 ===============================================================================
-01. PACK IDENTITY MODEL (LOCKED)
+01. INTERPRETATION BASIS
 ===============================================================================
 
-There are three distinct identity layers. They MUST NOT be conflated.
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
 
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
 
-01.1 declaredId (manifest-level)
---------------------------------
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
 
-Source:
-- manifest.json5 -> "id"
-
-Rules (LOCKED):
-- string
-- no dots (.)
-- no "@"
-- no version
-- local to its parent
-
-declaredId is a local identifier, not globally unique.
-
-Examples:
-    id: "ui"
-    id: "button"
-    id: "llamacpp"
-
-
-01.2 packTreeId (computed)
---------------------------
-
-Computed during discovery.
-
-Rule:
-    packTreeId =
-        declaredId                         (if root pack)
-        parent.packTreeId + "." + declaredId
-
-Examples:
-    ui
-    ui.controls
-    ui.controls.button
-    main-menu.ui
-    main-menu.ui.button
-
-Properties (LOCKED):
-- case-sensitive
-- globally unique within an author scope after author is known
-- hierarchical, but not filesystem-based
-
-
-01.3 author (effective identity)
---------------------------------
-
-Terminology (LOCKED):
-
-- declaredAuthor
-    -> value from manifest ("author"), str or None
-
-- author
-    -> effective author identity:
-        declaredAuthor
-        OR inherited from parent
-        OR "unknown" (engine default)
-
-Notes:
-- author is computed during indexing, not discovery
-- author is part of identity, not decoration
+01.4. This document defines pack identity, hierarchy, and visibility within
+      that shared interpretation model.
 
 
 ===============================================================================
-02. VERSION IDENTITY (LOCKED)
+02. CORE CONCEPT
 ===============================================================================
 
-- declaredVersion
-    -> raw string or None from manifest
+02.1. Pack is the general container concept in Turnix.
 
-- version
-    -> parsed SemVerPackVersion
+02.2. AppPack, ModPack, ViewPack, ContentPack, and SavePack are specific pack
+      kinds within that broader container model.
 
-Rules (LOCKED):
-- parsing happens after discovery
-- invalid semver -> pack rejected
-- no "effectiveVersion" naming is used
+02.3. Packs may contain packs.
 
-Version inheritance (LOCKED):
-- if version missing, inherit from parent
-- root without version uses engine default
+02.4. Pack hierarchy is therefore a structural relationship between pack
+      containers rather than a statement about runtime activation order.
 
-Rationale:
-- version is identity-affecting
-- inheritance keeps trees coherent
+02.5. Identity answers:
+      - what this pack is
+      - where it sits in the pack hierarchy
+      - which author scope it belongs to
+      - which version identity applies
 
+02.6. Visibility answers:
+      - whether one pack is eligible to be seen from another context
 
-===============================================================================
-03. VISIBILITY MODEL
-===============================================================================
-
-Visibility answers: Can pack A see pack B?
-
-Visibility is NOT the same as:
-- dependency declaration
-- import usage
-- activation order
-
-
-03.1 Local visibility
----------------------
-
-Each pack has:
-- visibility:
-    "public" | "private"
-
-Visibility is declared or defaulted based on pack kind.
-
-Defaults (LOCKED):
-- contentPack -> public
-- appPack / viewPack / mod / savePack -> private
-
-
-03.2 exportNestedPacks (LOCKED)
--------------------------------
-
-Controls whether a pack's children are visible externally.
-
-Type:
-- false
-- true
-- list[PackLocalId]
-
-Semantics:
-- false -> no children exported
-- true  -> all children exported
-- list  -> only listed children exported
-
-Rules (LOCKED):
-- list entries are localIds ONLY
-- specifying dotted ids is an error
-- applies only to direct children
-
-
-03.3 globalVisibility (computed)
---------------------------------
-
-Computed during indexing.
-
-Rules (LOCKED):
-
-If pack has no parent:
-    globalVisibility = visibility
-
-Else:
-    if visibility == private:
-        globalVisibility = private
-    else if parent.exportNestedPacks == false:
-        globalVisibility = private
-    else if parent.exportNestedPacks == true:
-        globalVisibility = public
-    else if parent.exportNestedPacks is list:
-        globalVisibility = public if declaredId in list
-                           else private
+02.7. This document does not answer:
+      - which candidate wins during resolution
+      - which pack activates first
+      - which capability may be invoked
+      - which permission is granted
 
 
 ===============================================================================
-04. importPacksFromParent
+03. PACK IDENTITY MODEL (LOCKED)
 ===============================================================================
 
-Purpose:
-- controls which parent packs are import-visible
-- does NOT imply export
-- does NOT imply capability inheritance
+03.1. There are distinct identity layers.
 
-Name (LOCKED):
-- importPacksFromParent
+03.2. These identity layers are not conflated.
 
 
-04.1 Allowed forms
-------------------
+03.1 DECLAREDID (MANIFEST-LEVEL) (LOCKED)
+-----------------------------------------
 
-Type:
-- false
-- true
-- list[PackLocalId or relative packTreeId]
+03.1.1. declaredId is the manifest-level local identifier.
 
-Semantics:
-- false -> no parent packs visible
-- true  -> all visible parent packs imported
-- list  -> explicit whitelist
+03.1.2. declaredId comes from manifest field:
+        id
 
-Example:
-    importPacksFromParent = ["ui.Button", "service"]
+03.1.3. declaredId rules:
+        - string
+        - no dots
+        - no "@"
+        - no embedded version
+        - local to its parent pack context
 
-Resolution:
-- relative to immediate parent
-- resolved at runtime with visibility checks
+03.1.4. declaredId is not globally unique.
+
+03.1.5. Examples:
+        - ui
+        - button
+        - llamacpp
 
 
-04.2 Default behavior (LOCKED)
+03.2 PACKTREEID (COMPUTED) (LOCKED)
+-----------------------------------
+
+03.2.1. packTreeId is computed from pack hierarchy.
+
+03.2.2. packTreeId construction rule:
+        - root pack:
+          packTreeId = declaredId
+        - child pack:
+          packTreeId = parent.packTreeId + "." + declaredId
+
+03.2.3. Examples:
+        - ui
+        - ui.controls
+        - ui.controls.button
+        - main-menu.ui
+        - main-menu.ui.button
+
+03.2.4. packTreeId properties:
+        - case-sensitive
+        - hierarchical
+        - not filesystem-based
+        - unique only within the relevant author and version scope
+
+
+03.3 AUTHOR IDENTITY (LOCKED)
+-----------------------------
+
+03.3.1. declaredAuthor is the manifest-level author value or None.
+
+03.3.2. author is the effective author identity.
+
+03.3.3. author is computed as:
+        - declaredAuthor
+        - or inherited from parent
+        - or engine-defined fallback if no author exists
+
+03.3.4. author is part of identity rather than decoration.
+
+03.3.5. The exact fallback sentinel is implementation-defined unless a
+        higher document later fixes it.
+
+
+===============================================================================
+04. VERSION IDENTITY (LOCKED)
+===============================================================================
+
+04.1. declaredVersion is the raw manifest version value or None.
+
+04.2. version is the parsed version identity used by later resolution.
+
+04.3. Parsing occurs after discovery.
+
+04.4. Invalid version syntax causes pack rejection.
+
+04.5. This document does not use "effectiveVersion" naming.
+
+04.6. Version inheritance rules:
+      - if version is missing, inherit from parent
+      - if a root pack has no version, use engine-defined default behavior
+
+04.7. Version affects pack identity and later resolution compatibility.
+
+04.8. Version inheritance exists to keep pack trees coherent unless some
+      later design explicitly introduces a different rule.
+
+
+===============================================================================
+05. HIERARCHY AND CONTAINMENT (LOCKED)
+===============================================================================
+
+05.1. Pack hierarchy is a containment relationship.
+
+05.2. A child pack belongs to the pack tree of its parent.
+
+05.3. Parent-child hierarchy contributes to packTreeId construction.
+
+05.4. Parent-child hierarchy does not by itself grant:
+      - visibility
+      - capability authority
+      - activation
+      - permission
+      - runtime execution order
+
+05.5. A pack tree is structural first. Later areas define runtime behavior
+      over that structure.
+
+
+===============================================================================
+06. VISIBILITY MODEL
+===============================================================================
+
+06.1. Visibility answers whether a pack is eligible to be seen from another
+      pack context.
+
+06.2. Visibility is not the same as:
+      - dependency declaration
+      - import use
+      - activation order
+      - capability authority
+
+
+06.1 LOCAL VISIBILITY (LOCKED)
 ------------------------------
 
-Defaults:
-- viewPack -> false
-- all other kinds -> true
+06.1.1. Each pack has local visibility:
+        - public
+        - private
 
-Rationale:
-- views MUST NOT inherit parent UI mods
-- prevents UI contamination
-- keeps views isolated
+06.1.2. Local visibility is declared explicitly or obtained from per-kind
+        defaulting rules.
 
+06.1.3. Current default rules are:
+        - ContentPack -> public
+        - AppPack -> private
+        - ViewPack -> private
+        - ModPack -> private
+        - SavePack -> private
 
-===============================================================================
-05. VISIBILITY VS RESOLUTION (IMPORTANT DISTINCTION) (LOCKED)
-===============================================================================
-
-Facts (LOCKED):
-- Visibility is static (computed).
-- Resolution is contextual (runtime).
-- A pack can exist but be invisible.
-- A visible pack may still fail resolution.
-- Visibility != dependency.
+06.1.4. Local visibility is only one input to broader visibility outcome.
 
 
-===============================================================================
-06. CAPABILITIES ARE NOT VISIBILITY (LOCKED)
-===============================================================================
+06.2 EXPORTNESTEDPACKS (LOCKED)
+-------------------------------
 
-LOCKED:
-- capability exports are NOT inherited
-- capability imports MUST be explicit
-- parent visibility does NOT grant capabilities
+06.2.1. exportNestedPacks controls whether a pack's direct children become
+        externally visible beyond the local parent context.
 
-Rationale:
-- capabilities are behavioral power
-- must be explicitly acknowledged
-- prevents accidental privilege escalation
+06.2.2. Allowed forms:
+        - false
+        - true
+        - list of declaredId values
 
+06.2.3. Semantics:
+        - false -> no direct children exported
+        - true  -> all direct children exported
+        - list  -> only listed direct children exported
 
-===============================================================================
-07. SAVE PACK VISIBILITY (OPEN)
-===============================================================================
+06.2.4. List entries are direct-child declaredId values only.
 
-Known constraints:
-- savePack copied packs are visible only to that save
-- they MUST override external versions
-- they MUST NOT leak globally
+06.2.5. Dotted hierarchical ids are not valid inside exportNestedPacks.
 
-OPEN:
-- exact rules for the visibility graph inside a save
-- interaction with exportNestedPacks
-- PackManager UI representation
+06.2.6. exportNestedPacks applies only to direct children.
 
 
-===============================================================================
-08. WHY THIS AREA IS HARD
-===============================================================================
+06.3 COMPUTED GLOBAL VISIBILITY (LOCKED)
+----------------------------------------
 
-This area balances:
-- expressiveness
-- safety
-- predictability
-- creator intuition
+06.3.1. Computed visibility is derived after hierarchy is known.
 
-Too permissive -> chaos.
-Too strict     -> unusable ecosystem.
+06.3.2. For a root pack:
+        globalVisibility = visibility
 
-Current design intentionally:
-- favors explicitness
-- defers runtime checks
-- avoids static "can-see" matrices
+06.3.3. For a non-root pack:
+        - if visibility is private:
+          globalVisibility = private
+        - else if parent.exportNestedPacks is false:
+          globalVisibility = private
+        - else if parent.exportNestedPacks is true:
+          globalVisibility = public
+        - else if parent.exportNestedPacks is a list:
+          globalVisibility = public if declaredId is listed
+                             else private
+
+06.3.4. Computed visibility is static relative to the discovered/indexed
+        pack tree. It is not a runtime resolution outcome.
 
 
 ===============================================================================
-09. LOCKED SUMMARY
+07. IMPORTPACKSFROMPARENT
 ===============================================================================
 
-LOCKED:
-- declaredId vs packTreeId vs author separation
-- case-sensitive identifiers
-- no effective* naming
-- visibility + exportNestedPacks model
-- importPacksFromParent semantics
-- no capability inheritance
+07.1. importPacksFromParent controls which parent-context packs are import-
+      visible to a child pack.
 
-OPEN:
-- savePack visibility internals
-- tooling/UI exposure of the visibility graph
+07.2. importPacksFromParent does not imply:
+      - export
+      - capability inheritance
+      - permission inheritance
+
+07.3. The locked name is:
+      importPacksFromParent
+
+
+07.1 ALLOWED FORMS (LOCKED)
+---------------------------
+
+07.1.1. Allowed forms:
+        - false
+        - true
+        - list of declaredId values or relative packTreeId fragments
+
+07.1.2. Semantics:
+        - false -> no parent-context packs imported
+        - true  -> all visible parent-context packs imported
+        - list  -> explicit whitelist
+
+07.1.3. Example:
+        importPacksFromParent = ["ui.Button", "service"]
+
+07.1.4. Resolution of listed entries is relative to the immediate parent
+        context and remains subject to visibility rules.
+
+
+07.2 DEFAULT BEHAVIOR (LOCKED)
+------------------------------
+
+07.2.1. Current defaults are:
+        - ViewPack -> false
+        - all other pack kinds -> true
+
+07.2.2. The rationale is:
+        - views do not automatically inherit parent UI mods
+        - view isolation is preserved
+        - unintended UI contamination is reduced
+
+
+===============================================================================
+08. VISIBILITY VS RESOLUTION (LOCKED DISTINCTION)
+===============================================================================
+
+08.1. Visibility is static and computed from structure plus visibility
+      declarations.
+
+08.2. Resolution is contextual.
+
+08.3. A pack may exist but be invisible.
+
+08.4. A visible pack may still fail resolution.
+
+08.5. Visibility is not dependency satisfaction.
+
+08.6. This document defines eligibility to be seen, not selection of a
+      winner.
+
+
+===============================================================================
+09. CAPABILITIES ARE NOT VISIBILITY (LOCKED)
+===============================================================================
+
+09.1. Capability exports are not inherited through visibility alone.
+
+09.2. Capability imports remain explicit.
+
+09.3. Parent visibility does not grant capability authority.
+
+09.4. Capabilities are behavioral power and remain governed by later areas.
+
+09.5. This separation prevents accidental privilege escalation through
+      structural visibility alone.
+
+
+===============================================================================
+10. SAVEPACK VISIBILITY
+===============================================================================
+
+10.1. SavePack visibility remains save-local.
+
+10.2. Packs copied into a SavePack do not leak into global visibility merely
+      because they exist inside that SavePack.
+
+10.3. Save-local copied packs may override external candidates within that
+      SavePack context.
+
+10.4. Exact internal visibility rules inside one SavePack remain OPEN.
+
+10.5. Interaction with exportNestedPacks inside SavePack context remains
+      OPEN.
+
+10.6. Tooling and UI representation of SavePack-local visibility remains
+      OPEN.
+
+
+===============================================================================
+11. WHY THIS AREA IS HARD
+===============================================================================
+
+11.1. This area balances:
+       - expressiveness
+       - safety
+       - predictability
+       - creator intuition
+
+11.2. Too much permissiveness creates chaos.
+
+11.3. Too much strictness creates an unusable ecosystem.
+
+11.4. The current design favors:
+       - explicitness
+       - deferred contextual checks where appropriate
+       - structural clarity over static can-see matrices
+
+
+===============================================================================
+12. LOCKED SUMMARY
+===============================================================================
+
+12.1. LOCKED:
+       - Pack is the general container concept
+       - AppPack, ModPack, ViewPack, ContentPack, and SavePack are specific 
+         pack kinds
+       - declaredId, packTreeId, author, and version remain distinct identity
+         layers
+       - case-sensitive hierarchical identity
+       - no effectiveVersion naming
+       - visibility plus exportNestedPacks model
+       - importPacksFromParent semantics
+       - no capability inheritance from visibility alone
+       - SavePack remains save-local and does not leak globally
+
+12.2. OPEN:
+       - SavePack internal visibility graph
+       - SavePack interaction with exportNestedPacks
+       - tooling and UI exposure of visibility graphs
 
 
 ===============================================================================
@@ -353,6 +460,6 @@ END OF DA-08 - PACK IDENTITY, HIERARCHY & VISIBILITY
 --- doc-meta ---
 DOC_ID: DA-08
 DOC_FILE: docs/design/DA-08_PACK_IDENTITY_HIERARCHY_AND_VISIBILITY.txt
-DOC_REV: 9
-DOC_GIT: 39ecf8e
+DOC_REV: 10
+DOC_GIT: a21ff18
 ----------------
