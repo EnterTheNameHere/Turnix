@@ -9,43 +9,39 @@ EVOLVING
 Description:
 ------------
 Defines how packs declare hard requirements, how those requirements are
-resolved deterministically, and how resolution outcomes are enforced without
-silent substitution.
+interpreted above generic resolution mechanics, and how dependency outcomes
+are enforced without silent substitution.
 
 This area is authoritative for:
 - dependency declaration semantics
 - PackRequest meaning in dependency context
-- resolution source selection
-- deterministic selection policy
-- saved, pinned, and global pack behavior
-- ambiguity handling and required user involvement
+- dependency-specific resolution policy above DA-09
+- deterministic dependency selection policy
+- saved, pinned, and global dependency behavior
+- ambiguity handling and required external involvement
 
 Generic resolution mechanics are defined in DA-09.
 Observability and tracing are defined in DA-03.
 
-
 Purpose:
 --------
-Establish dependency semantics as hard contracts and define the policy layer
-that sits above generic resolution mechanics: resolution source selection,
-ordering rules, and persistence requirements for ambiguity decisions, while
-prohibiting silent substitution and best-effort fallback.
+This document defines dependency semantics as hard contracts and defines the
+policy layer that sits above generic resolution mechanics.
 
-This area defines:
+It defines:
 - dependency declaration semantics in manifests
 - PackRequest meaning when used as a dependency
-- exclusive resolution source model (SaveOnly / GlobalPinned / GlobalNormal)
+- exclusive dependency-resolution source model
 - version constraint enforcement policy
-- deterministic GlobalNormal selection procedure
+- deterministic GlobalNormal dependency selection procedure
 - ambiguity handling and required external involvement
 - failure conditions and last-known-good fallback boundary
 
-This area does NOT define:
-- PackRequest parsing grammar and Phase A/B mechanics (see DA-09)
-- tracing schema and storage (see DA-03)
-- activation lifecycle semantics (see DA-12)
-- visibility rules beyond the fact that they gate dependencies (see DA-13)
-
+It does NOT define:
+- PackRequest parsing grammar or generic Phase-A / Phase-B mechanics
+- tracing schema or storage
+- activation lifecycle semantics
+- visibility rules beyond the fact that they gate dependency outcomes
 
 Upstream Documents:
 ------------------
@@ -60,326 +56,368 @@ Upstream Documents:
 - DA-09
 - DA-13
 
-
 Downstream Documents:
 --------------------
-- pack-and-asset-resolution
-- pack-uri-spec
-- tracing
-- DA-03
 - DA-12
 
 
 ===============================================================================
-01. CORE CONCEPT
+01. INTERPRETATION BASIS
 ===============================================================================
 
-A dependency expresses a hard functional requirement.
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
 
-Meaning:
-    "This pack cannot function correctly unless another pack exists
-     that satisfies this request."
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
 
-Dependencies are CONTRACTS, not preferences.
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
 
-Declaring a dependency:
-- does NOT load code
-- does NOT activate a pack
-- does NOT grant visibility
-- does NOT grant capabilities
-- does NOT define activation order
-
-Failure to satisfy a dependency is a HARD FAILURE unless explicitly resolved
-through user or policy intervention.
+01.4. This document defines dependency semantics and dependency-resolution
+      policy within that shared interpretation model.
 
 
 ===============================================================================
-02. DECLARING DEPENDENCIES (MANIFEST LEVEL)
+02. CORE CONCEPT
 ===============================================================================
 
-Manifest field:
-    packs
+02.1. A dependency expresses a hard functional requirement.
 
-Type:
-    PackRequestRef | list[PackRequestRef]
+02.2. Dependency meaning is:
 
-Examples:
-    "packs": ["ui.controls"]
-    "packs": ["Turnix@ui.controls@^1.2"]
-    "packs": ["avatars", "llm.pipeline"]
+          "This pack cannot function correctly unless another pack exists
+           that satisfies this request."
 
-Rules (LOCKED):
-- absence of "packs" means no dependencies
-- empty list means explicitly no dependencies
-- every entry is a HARD dependency
-- order in the list carries no semantic meaning
+02.3. Dependencies are contracts, not preferences.
 
+02.4. Declaring a dependency does not:
+      - load code
+      - activate a pack
+      - grant visibility
+      - grant capabilities
+      - define activation order
 
-===============================================================================
-03. PACK REQUEST REFERENCE
-===============================================================================
+02.5. Failure to satisfy a dependency is a hard failure unless some other
+      accepted policy or user decision explicitly resolves it.
 
-Dependencies are expressed using PackRequestRef.
+02.6. DA-09 defines generic resolution mechanics.
 
-Canonical grammar:
-    [<author>@]<packTreeId>[@<semverRequirement>]
-
-Grammar rules are defined in DA-09 and are LOCKED.
-
-DA-11 defines how PackRequests are interpreted as dependencies.
+02.7. This document defines how dependency resolution chooses and constrains
+      the resolution context and outcome above those generic mechanics.
 
 
 ===============================================================================
-04. HARD DEPENDENCY MODEL (LOCKED)
+03. DECLARING DEPENDENCIES (MANIFEST LEVEL)
 ===============================================================================
 
-All dependencies declared via "packs" are HARD.
+03.1. Manifest field:
+      packs
 
-Consequences (LOCKED):
-- failure to resolve -> activation failure
-- no automatic disabling
-- no silent downgrade
-- no implicit fallback
-- no best-effort substitution
+03.2. Manifest type:
+      PackRequestRef
+      or
+      list of PackRequestRef
 
-Optional, soft, or advisory dependencies do NOT exist in this model.
+03.3. Examples:
+      - "packs": ["ui.controls"]
+      - "packs": ["Turnix@ui.controls@^1.2"]
+      - "packs": ["avatars", "llm.pipeline"]
 
-
-===============================================================================
-05. RESOLUTION OVERVIEW
-===============================================================================
-
-Dependency resolution consists of:
-1) resolution source determination
-2) candidate enumeration and constraint application
-3) deterministic selection or explicit failure
-
-Resolution produces exactly one of:
-- a single concrete pack identity
-- a classified, surfaced failure
-
-Resolution mechanics are defined in DA-09.
-DA-11 defines policy and source selection.
+03.4. Locked rules:
+      - absence of "packs" means no dependencies
+      - an empty list means explicitly no dependencies
+      - every entry is a hard dependency
+      - list order carries no semantic meaning by itself
 
 
 ===============================================================================
-06. RESOLUTION SOURCE MODEL (LOCKED)
+04. PACKREQUEST IN DEPENDENCY CONTEXT (LOCKED)
 ===============================================================================
 
-Every dependency is resolved from exactly ONE source.
-Sources are mutually exclusive.
+04.1. Dependencies are expressed using PackRequestRef and normalized into
+      PackRequest.
 
-Defined sources (LOCKED):
-A) SaveOnly
-B) GlobalPinned
-C) GlobalNormal
+04.2. DA-09 defines PackRequest grammar and generic parsing rules.
 
-The resolver MUST NOT mix sources.
-The resolver MUST NOT fall back between sources.
+04.3. This document defines how a PackRequest is interpreted when the
+      requesting relationship is a dependency.
 
+04.4. In dependency context, PackRequest means:
+      - resolve one satisfying concrete dependency target
+      - obey dependency-source policy
+      - obey dependency version rules
+      - fail explicitly if no permitted dependency outcome exists
 
-06.1 SaveOnly
--------------
-
-Applies when:
-- the dependency's packTreeId is listed in savePack metadata as copied
-
-Rules (LOCKED):
-- ONLY copied packs inside the savePack are eligible
-- global registry MUST NOT be consulted
-- absence of the copied pack -> HARD ERROR
-
-Saved packs (LOCKED):
-- are identified by full identity (author + packTreeId + version)
-- are owned by the savePack
-- are immutable unless explicitly replaced
-- are visible only within that save context
-
-
-06.2 GlobalPinned
------------------
-
-Applies when:
-- the dependency is bound to a pin in savePack metadata
-
-Rules (LOCKED):
-- ONLY the pinned concrete identity is eligible
-- resolution occurs in the global registry ONLY
-- pinned identity missing -> HARD ERROR
-- pin does NOT imply copying or saving
-
-Pins express explicit historical intent.
-They bypass all selector logic.
-
-
-06.3 GlobalNormal
------------------
-
-Applies in all other cases.
-
-Rules (LOCKED):
-- resolution occurs in the global registry ONLY
-- no savePack content is consulted
-- selection follows deterministic ordering rules (see Section 09)
+04.5. Dependency context does not change PackRequest structure.
+      Dependency context changes how the surrounding policy layer uses it.
 
 
 ===============================================================================
-07. CANDIDATE ENUMERATION
+05. HARD DEPENDENCY MODEL (LOCKED)
 ===============================================================================
 
-Within the selected source:
-- collect packs matching packTreeId
-- apply author constraint if present
-- apply kind constraint if present
-- apply hard constraints
+05.1. All dependencies declared through "packs" are hard dependencies.
 
-No ordering.
-No selection.
-No policy decisions.
+05.2. Consequences:
+      - failure to resolve causes activation failure
+      - no automatic disabling occurs
+      - no silent downgrade occurs
+      - no implicit fallback occurs
+      - no best-effort substitution occurs
 
-This phase answers only:
-    "Which packs are structurally eligible?"
-
-
-===============================================================================
-08. VERSION CONSTRAINT ENFORCEMENT (LOCKED)
-===============================================================================
-
-If a semver requirement is present:
-
-Concrete version:
-- ONLY that version is eligible
-- mismatch -> HARD FAILURE
-
-Version range:
-- only matching versions are eligible
-- policy MAY restrict further
-
-If no semver requirement or "*":
-- all versions are eligible
-
-If no eligible versions remain:
-- resolution fails with VersionMismatchError
+05.3. This document does not define optional, soft, or advisory dependency
+      semantics for the "packs" field.
 
 
 ===============================================================================
-09. GLOBALNORMAL SELECTION PROCEDURE (LOCKED)
+06. RESOLUTION OVERVIEW
 ===============================================================================
 
-GlobalNormal resolution uses deterministic procedural ordering.
-No scoring model exists.
+06.1. Dependency resolution consists of:
+      1) dependency-resolution source determination
+      2) candidate enumeration and constraint application under DA-09
+      3) deterministic dependency selection or explicit non-success outcome
 
-Procedure (LOCKED):
+06.2. Dependency resolution produces exactly one of:
+      - one concrete dependency target
+      - one classified failure
+      - one classified ambiguity requiring external decision
 
-STEP 1 - Version handling
--------------------------
-- If a concrete version is specified:
-  - only that version is eligible
-- If a range or "*" is specified:
-  - highest semantic version is preferred
-- Packs without version metadata are ordered LAST
+06.3. DA-09 defines the generic mechanics used inside these stages.
 
-STEP 2 - Author relationship ordering
--------------------------------------
-1) exact requested author
-2) same author as requesting pack
-3) different known author
-4) unknown author
-
-STEP 3 - Root precedence
-------------------------
-Enumeration order inherited from discovery:
-    custom -> first-party -> third-party
-
-STEP 4 - Final tie-break
-------------------------
-Lexicographic order of:
-    "<author>@<packTreeId>@<version>"
-
-Selection rule (LOCKED):
-- FIRST eligible candidate is selected
-- silent substitution is FORBIDDEN
+06.4. This document defines dependency-specific source and ordering policy.
 
 
 ===============================================================================
-10. AMBIGUITY & USER INVOLVEMENT (LOCKED)
+07. DEPENDENCY RESOLUTION SOURCE MODEL (LOCKED)
 ===============================================================================
 
-If deterministic ordering cannot produce a single candidate:
-- resolution MUST pause
-- ambiguity MUST be surfaced
-- user or policy input is REQUIRED
+07.1. Every dependency is resolved from exactly one dependency-resolution
+      source.
 
-Once a decision is made:
-- it MUST be persisted
-- future runs MUST be deterministic
+07.2. Dependency-resolution sources are mutually exclusive.
 
-The resolver itself MUST NOT guess.
+07.3. The defined sources are:
+      - SaveOnly
+      - GlobalPinned
+      - GlobalNormal
+
+07.4. The resolver does not mix these sources silently.
+
+07.5. The resolver does not fall back between these sources silently.
+
+
+07.1 SAVEONLY (LOCKED)
+----------------------
+
+07.1.1. SaveOnly applies when the dependency's packTreeId is listed in
+        SavePack metadata as copied.
+
+07.1.2. Under SaveOnly:
+        - only copied packs inside that SavePack are eligible
+        - the global registry is not consulted
+        - absence of the copied pack is a hard error
+
+07.1.3. Saved packs under this model:
+        - are identified by full identity
+          (author + packTreeId + version)
+        - are owned by the SavePack
+        - are immutable unless explicitly replaced
+        - are visible only within that save context
+
+
+07.2 GLOBALPINNED (LOCKED)
+--------------------------
+
+07.2.1. GlobalPinned applies when the dependency is bound to a pin in
+        SavePack metadata.
+
+07.2.2. Under GlobalPinned:
+        - only the pinned concrete identity is eligible
+        - resolution occurs in the global registry only
+        - a missing pinned identity is a hard error
+        - the pin does not imply copying or saving
+
+07.2.3. Pins express explicit historical intent and bypass selector-based
+        candidate choice.
+
+
+07.3 GLOBALNORMAL (LOCKED)
+--------------------------
+
+07.3.1. GlobalNormal applies in all other dependency cases.
+
+07.3.2. Under GlobalNormal:
+        - resolution occurs in the global registry only
+        - SavePack content is not consulted
+        - selection follows the deterministic procedure in section 10
 
 
 ===============================================================================
-11. FAILURE CONDITIONS (LOCKED)
+08. CANDIDATE ENUMERATION
 ===============================================================================
 
-Dependency resolution fails if:
-- no candidates remain after hard constraints
-- resolution source rules are violated
-- pinned or saved identity is missing
-- ambiguity cannot be resolved
+08.1. Within the selected dependency-resolution source:
+      - collect packs matching packTreeId
+      - apply author constraint if present
+      - apply kind constraint if present
+      - apply hard constraints
 
-Failures MUST:
-- be explicit
-- be classified
-- be observable (see DA-03)
-- never silently fall back
+08.2. This phase does not:
+      - order candidates
+      - select a winner
+      - invent policy
+      - reinterpret dependency strength
 
-
-===============================================================================
-12. LAST-KNOWN-GOOD FALLBACK (LOCKED)
-===============================================================================
-
-Turnix stores the last successfully activated graph per savePack.
-
-Rules (LOCKED):
-- resolution ALWAYS attempts fresh resolution first
-- last-known-good is NOT consulted during resolution
-- fallback is used ONLY after activation failure
-
-Fallback procedure (LOCKED):
-1) abort current activation
-2) attempt activation using stored graph
-3) propagate failure if fallback fails
+08.3. This phase answers only:
+      "Which candidates are structurally eligible inside the selected
+       dependency-resolution source?"
 
 
 ===============================================================================
-13. DEPENDENCY != ACTIVATION
+09. VERSION CONSTRAINT ENFORCEMENT (LOCKED)
 ===============================================================================
 
-Declaring or resolving a dependency:
-- does NOT activate a pack
-- does NOT load code
-- does NOT grant runtime access
+09.1. If a semantic-version requirement is present, only candidates allowed
+      by that requirement remain eligible.
 
-Activation semantics are defined in DA-12.
+09.2. If a concrete version is requested:
+      - only that version is eligible
+      - mismatch is a hard failure
+
+09.3. If a version range is requested:
+      - only matching versions are eligible
+      - surrounding policy may restrict further
+
+09.4. If no semantic-version requirement exists, or if "*" is used:
+      - all versions remain eligible
+
+09.5. If no eligible versions remain, dependency resolution fails with
+      VersionMismatchError.
 
 
 ===============================================================================
-14. LOCKED SUMMARY
+10. GLOBALNORMAL SELECTION PROCEDURE (LOCKED)
 ===============================================================================
 
-LOCKED:
-- dependencies are hard contracts
-- PackRequest interpretation is fixed
-- resolution sources are exclusive
-- saved packs are immutable and local
-- pinned packs enforce exact identity
-- GlobalNormal selection is procedural and deterministic
-- no silent substitution
-- ambiguity requires explicit decision
+10.1. GlobalNormal dependency resolution uses deterministic procedural
+      ordering.
 
-OPEN:
-- none at semantic level
-- only tooling and UI presentation remain open
+10.2. No scoring model exists in this document.
+
+10.3. Procedure:
+
+10.3.1. Step 1 - version handling
+        - if a concrete version is specified:
+          only that version remains eligible
+        - if a range or "*" is specified:
+          the highest semantic version is preferred
+        - packs without version metadata are ordered last
+
+10.3.2. Step 2 - author relationship ordering
+        1) exact requested author
+        2) same author as the requesting pack
+        3) different known author
+        4) unknown author
+
+10.3.3. Step 3 - root precedence
+        custom
+        first-party
+        third-party
+
+10.3.4. Step 4 - final tie-break
+        lexicographic order of:
+        "<author>@<packTreeId>@<version>"
+
+10.4. Selection rule:
+      - the first eligible candidate is selected
+      - silent substitution is forbidden
+
+
+===============================================================================
+11. AMBIGUITY AND REQUIRED EXTERNAL INVOLVEMENT (LOCKED)
+===============================================================================
+
+11.1. If deterministic dependency selection cannot produce one unambiguous
+      candidate, dependency resolution pauses.
+
+11.2. Ambiguity is surfaced explicitly.
+
+11.3. User decision or accepted policy input is then required.
+
+11.4. Once such a decision is made:
+      - it is persisted by the surrounding consumer
+      - future runs remain deterministic
+
+11.5. The resolver does not guess.
+
+
+===============================================================================
+12. FAILURE CONDITIONS (LOCKED)
+===============================================================================
+
+12.1. Dependency resolution fails explicitly if:
+      - no candidates remain after hard constraints
+      - dependency-resolution source rules are violated
+      - a pinned or saved identity is missing
+      - ambiguity cannot be resolved
+      - no permitted decision path exists
+
+12.2. Dependency-resolution failure is:
+      - explicit
+      - classified
+      - observable
+      - never silently resolved by fallback
+
+
+===============================================================================
+13. LAST-KNOWN-GOOD FALLBACK BOUNDARY (LOCKED)
+===============================================================================
+
+13.1. Turnix stores the last successfully activated graph per SavePack.
+
+13.2. Resolution always attempts fresh dependency resolution first.
+
+13.3. Last-known-good is not consulted during dependency resolution.
+
+13.4. Last-known-good fallback is used only after activation failure.
+
+13.5. Fallback procedure:
+      1) abort current activation
+      2) attempt activation using the stored graph
+      3) propagate failure if fallback fails
+
+
+===============================================================================
+14. DEPENDENCY IS NOT ACTIVATION
+===============================================================================
+
+14.1. Declaring or resolving a dependency does not:
+      - activate a pack
+      - load code
+      - grant runtime access
+
+14.2. Activation semantics are defined elsewhere.
+
+
+===============================================================================
+15. LOCKED SUMMARY
+===============================================================================
+
+15.1. LOCKED:
+      - dependencies are hard contracts
+      - PackRequest interpretation is fixed in dependency context
+      - dependency-resolution sources are exclusive
+      - saved packs are immutable and local
+      - pinned packs enforce exact identity
+      - GlobalNormal selection is procedural and deterministic
+      - no silent substitution
+      - ambiguity requires explicit decision
+
+15.2. OPEN:
+      - none at semantic level
+      - only tooling and UI presentation remain open
 
 
 ===============================================================================
@@ -389,6 +427,6 @@ END OF DA-11 - DEPENDENCIES, REQUIREMENTS & PACK REQUESTS
 --- doc-meta ---
 DOC_ID: DA-11
 DOC_FILE: docs/design/DA-11_DEPENDENCIES_REQUIREMENTS_AND_PACK_REQUESTS.txt
-DOC_REV: 9
-DOC_GIT: 6412870
+DOC_REV: 10
+DOC_GIT: a21ff18
 ----------------
