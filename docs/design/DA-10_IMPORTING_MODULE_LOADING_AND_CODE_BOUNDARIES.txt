@@ -14,34 +14,31 @@ activation, and execution.
 
 This area is intentionally strict.
 
-Importing is NOT resolution.
-Importing is NOT activation.
-Importing is NOT dependency declaration.
-Importing does NOT imply permission to execute.
-
+Importing is not resolution.
+Importing is not activation.
+Importing is not dependency declaration.
+Importing does not imply permission to execute.
 
 Purpose:
 --------
-Prevent native language import systems from bypassing Turnix semantics
-(resolution, visibility, source selection, activation order, and execution
-authority). Provide Turnix-defined mechanisms for cross-pack interaction and
-controlled module loading.
+This document defines how Turnix prevents native language import systems from
+bypassing Turnix semantics such as resolution, visibility, source selection,
+activation order, and execution authority.
 
-This area defines:
-- language-level import boundaries (Python vs JavaScript)
+It defines:
+- language-level import boundaries
 - Turnix-mediated cross-pack access mechanisms
 - turnixImport selector rules and loading behavior
 - dependency consistency requirements for imports
 - the separation between module evaluation and Turnix-recognized execution
 - canonical activation entrypoint constraints relevant to code boundaries
 
-This area does NOT define:
+It does NOT define:
 - generic resolution semantics (see DA-09)
 - dependency semantics and solver behavior
 - save copying, pinning, or substitution rules
 - activation lifecycle beyond the boundary rules stated here
 - capability schemas and permission prompting details
-
 
 Upstream Documents:
 ------------------
@@ -55,411 +52,491 @@ Upstream Documents:
 - DA-08
 - DA-09
 
-
 Downstream Documents:
 --------------------
-- pack-uri-spec
-- IS-01
-- IS-02
-- tracing
-- DA-03
+- DA-12
+- DA-14
+- DA-15
 
 
 ===============================================================================
-01. CORE PROBLEM STATEMENT
+01. INTERPRETATION BASIS
 ===============================================================================
 
-Turnix does NOT allow arbitrary language-native importing across packs.
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
 
-Reasons:
-- files live in multiple roots with precedence rules
-- packs may be overridden, pinned, copied, disabled, or save-scoped
-- activation order is centrally controlled
-- silent or implicit code execution is forbidden
-- native language import systems have no awareness of Turnix semantics
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
 
-Therefore:
-- all cross-pack code access MUST go through Turnix-defined mechanisms
-- native imports are allowed ONLY for:
-  - language internals
-  - same-file or same-directory code
-  - Turnix core internals (explicitly whitelisted)
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
 
-Any mechanism that bypasses Turnix resolution, visibility, activation, or
-execution boundaries is forbidden.
+01.4. This document defines importing, module-loading, and code-boundary
+      rules within that shared interpretation model.
 
 
 ===============================================================================
-02. PYTHON IMPORT RULES (LOCKED)
+02. CORE PROBLEM STATEMENT
 ===============================================================================
 
-Allowed (local imports only):
-    from .llamacpp_client import LlamaCppClient
-    from .config import loadConfig
+02.1. Native language import systems do not understand Turnix pack
+      resolution, visibility, save scoping, activation boundaries, or
+      execution authority.
 
-Meaning:
-- local file import
-- same directory only
-- standard Python semantics
+02.2. Turnix therefore does not allow arbitrary language-native importing
+      across packs.
 
-Allowed (Turnix core internals only; explicit whitelist):
-    from backend.core.globals import configBool
+02.3. Cross-pack code access routes only through Turnix-defined mechanisms.
 
-Disallowed:
-    from ui.controls import Button
-    from Turnix.ui.controls import Button
-    from first_party.mods.foo import bar
+02.4. Native imports remain allowed only for:
+      - language internals
+      - same-file or same-directory code under normal local language rules
+      - explicitly allowed Turnix core internals where such access is part of
+        the supported platform surface
 
-Rationale:
-- Python import machinery has no awareness of:
-  - pack resolution
-  - visibility
-  - pinning
-  - savePack scoping
-- allowing cross-pack Python imports would bypass Turnix guarantees
+02.5. Any mechanism that bypasses Turnix resolution, visibility, activation,
+      or execution boundaries is forbidden.
 
 
 ===============================================================================
-03. PYTHON CROSS-PACK ACCESS (LOCKED MECHANISMS)
+03. SEPARATION OF CONCERNS
 ===============================================================================
 
-Python pack code may interact with other packs ONLY via Turnix-mediated APIs:
+03.1. Importing is not dependency declaration.
 
-A) Services
-    ctx.registerService(name, instance)
-    ctx.services.get(name)
+03.2. Importing is not resolution.
 
-B) Capabilities
-    ctx.callCapability("llm.pipeline@1", args)
+03.3. Importing is not activation.
 
-C) Pack metadata & activation control
-    ctx.resolvePack(selector)
-    ctx.ensureActivated(selector)
+03.4. Importing is not execution authority.
 
-There is NO Python equivalent of turnixImport.
+03.5. Resolution answers which pack identity satisfies a request.
 
-Python code MUST NOT receive executable code or symbols from other packs.
+03.6. Importing answers how a code artifact is obtained once Turnix rules
+      permit that step.
 
+03.7. Activation answers when Turnix intentionally starts recognized pack
+      behavior.
 
-===============================================================================
-04. JAVASCRIPT IMPORT MODEL (LOCKED)
-===============================================================================
+03.8. Execution authority answers whether code may perform meaningful
+      Turnix-recognized work.
 
-JavaScript runs in a browser environment.
-
-Constraints (LOCKED):
-- no Node.js
-- no filesystem access
-- no per-pack import maps
-- no native cross-pack imports
-
-All dynamic cross-pack loading goes through:
-    turnixImport(selector)
-
-NOTE:
-The name turnixResolve is reserved for possible future refinement but is not
-currently finalized.
+03.9. This document keeps these boundaries explicit because native language
+      import systems would otherwise collapse them into one accidental path.
 
 
 ===============================================================================
-05. turnixImport - WHAT IT IS
+04. PYTHON IMPORT RULES (LOCKED)
 ===============================================================================
 
-turnixImport(selector: string) is:
-- a Turnix-aware resolver
-- a controlled loader
-- a mediated ESM importer
-- NOT equivalent to native import()
+04.1. Python pack code may use native Python imports only for local code
+      under the same-file or same-directory rule and for explicitly allowed
+      Turnix core internals.
 
-Behavior:
-- parses a Turnix selector
-- asks the backend to resolve pack identity and path
-- performs visibility and policy checks
-- fetches compiled JavaScript via HTTP
-- performs dynamic ESM import
+04.2. Local Python imports include examples such as:
+      - from .llamacpp_client import LlamaCppClient
+      - from .config import loadConfig
 
+04.3. Explicitly allowed Turnix core internal imports include only the
+      whitelisted supported surface.
 
-===============================================================================
-06. turnixImport - WHAT IT IS NOT
-===============================================================================
+04.4. Cross-pack native Python imports are not allowed.
 
-turnixImport is NOT:
-- a dependency declaration
-- an activation request
-- a visibility override
-- a permissive or best-effort loader
-- a version selector
-- an execution authorization
+04.5. Disallowed examples include:
+      - from ui.controls import Button
+      - from Turnix.ui.controls import Button
+      - from first_party.mods.foo import bar
 
-If resolution fails:
--> a HARD error is raised
+04.6. The rationale is:
+      - Python import machinery has no awareness of pack resolution
+      - Python import machinery has no awareness of visibility
+      - Python import machinery has no awareness of save scoping
+      - Python import machinery has no awareness of activation boundaries
+
+04.7. Allowing native cross-pack Python imports would bypass Turnix
+      guarantees.
 
 
 ===============================================================================
-07. turnixImport SELECTOR FORMS (LOCKED)
+05. PYTHON CROSS-PACK ACCESS (LOCKED MECHANISMS)
 ===============================================================================
 
-Selector is NOT:
-- a filesystem path
-- a URI
-- a semver-qualified reference
+05.1. Python pack code interacts with other packs only through Turnix-
+      mediated APIs.
 
-Selector IS:
-- a Turnix identity-based selector
+05.2. Supported mediated categories include:
+      - services
+      - capabilities
+      - pack metadata and activation control
 
-Supported forms:
+05.3. Example mediated patterns include:
+      - ctx.registerService(name, instance)
+      - ctx.services.get(name)
+      - ctx.callCapability("llm.pipeline@1", args)
+      - ctx.resolvePack(selector)
+      - ctx.ensureActivated(selector)
 
-A) Core / internal runtime files
-    "core/rpc.js"
-    "core/layout.js"
--> resolved relative to WEB_ROOT
+05.4. There is no Python equivalent of turnixImport.
 
-B) Pack default entry
-    "ui.controls"
--> requires declared dependency on ui.controls
--> loads runtimes.javascript.entry
-
-C) Pack sub-entry / export
-    "ui.controls/Button"
--> resolves against runtimes.javascript.entries
-
-Disallowed:
-- "../"
-- absolute paths
-- filesystem guessing
-- semver in selector
-- author mismatch with declared dependency
+05.5. Python code does not receive executable code objects or symbols from
+      other packs through native import bypass.
 
 
 ===============================================================================
-08. DEPENDENCY CONSISTENCY RULE (LOCKED)
+06. JAVASCRIPT IMPORT MODEL (LOCKED)
 ===============================================================================
 
-If a pack declares dependency:
-    "packs": ["Turnix@ui.controls@^1.2"]
+06.1. JavaScript pack code runs in a browser environment.
 
-Then allowed imports:
-    turnixImport("ui.controls")
-    turnixImport("ui.controls/Button")
+06.2. Current constraints include:
+      - no Node.js runtime assumptions
+      - no filesystem access
+      - no per-pack import maps
+      - no native cross-pack imports
 
-Disallowed:
-    turnixImport("Other@ui.controls")
-    turnixImport("ui.controls@2.0")
+06.3. Dynamic cross-pack JavaScript loading routes through:
+      turnixImport(selector)
 
-Violations result in HARD errors.
+06.4. turnixImport is a Turnix-defined mediated loader.
+      It is not equivalent to native import().
 
-Importing MUST respect the exact resolved identity chosen during dependency
-resolution.
-
-
-===============================================================================
-09. SEMVER IN IMPORTS (LOCKED)
-===============================================================================
-
-Semver is NOT allowed in turnixImport selectors.
-
-Semver belongs to:
-- manifests
-- dependency resolution
-- policy decisions
-
-Importing is identity-based, never version-based.
+06.5. Reserved names for future refinement do not change current semantics.
 
 
 ===============================================================================
-10. FILE MATCHING RULES (LOCKED)
+07. TURNIXIMPORT - WHAT IT IS
 ===============================================================================
 
-For sub-entry imports:
-    turnixImport("ui.controls/Button")
+07.1. turnixImport(selector: string) is:
+      - a Turnix-aware resolver
+      - a controlled loader
+      - a mediated ESM importer
 
-Resolution logic:
-- inspect runtimes.javascript.entries
-- match:
-  - exact "Button"
-  - or "Button.<extension>"
+07.2. turnixImport behavior includes:
+      - parsing a Turnix selector
+      - asking the backend to resolve pack identity and load target
+      - performing visibility and policy checks
+      - fetching the permitted JavaScript artifact
+      - performing dynamic ESM import of that permitted artifact
 
-Allowed extensions:
-- .js
-- .mjs
-- .ts (compiled)
-
-Rules (LOCKED):
-- ambiguous matches -> error
-- no match -> error
-- no fallback to runtimes.javascript.entry
+07.3. turnixImport does not create a second independent resolution system.
+      It depends on Turnix resolution and boundary checks already defined
+      elsewhere.
 
 
 ===============================================================================
-11. DEFAULT ENTRY BEHAVIOR (LOCKED)
+08. TURNIXIMPORT - WHAT IT IS NOT
 ===============================================================================
 
-If selector has NO sub-path:
-    turnixImport("ui.controls")
+08.1. turnixImport is not:
+      - a dependency declaration
+      - an activation request
+      - a visibility override
+      - a permissive or best-effort loader
+      - a version selector
+      - an execution authorization
 
-Then:
-- runtimes.javascript.entry MUST exist
-- it is loaded
-- module exports are returned
+08.2. If importing fails, the failure is explicit.
 
-No implicit index.js or filename guessing is allowed.
-
-
-===============================================================================
-12. IMPORTING VS ACTIVATION (CRITICAL DISTINCTION)
-===============================================================================
-
-turnixImport:
-- loads a JavaScript module
-- triggers ESM evaluation
-- DOES NOT activate the pack
-- DOES NOT grant execution authority
-- DOES NOT imply lifecycle participation
-
-A module MAY be evaluated by the JavaScript runtime, but this evaluation is
-NOT considered Turnix-recognized execution.
-
-Activation is handled exclusively via:
-- PackManager
-- ensureActivated(selector)
+08.3. turnixImport does not silently guess or broaden the requested target.
 
 
 ===============================================================================
-13. resolvePack vs ensureActivated (LOCKED SEMANTICS)
+09. TURNIXIMPORT SELECTOR FORMS (LOCKED)
 ===============================================================================
 
-resolvePack(selector):
-- resolves metadata only
-- performs visibility checks
-- does NOT load code
-- does NOT activate
+09.1. A turnixImport selector is not:
+      - a filesystem path
+      - a URI
+      - a semver-qualified reference
 
-ensureActivated(selector):
-- ensures pack activation
-- may trigger activation
-- does NOT return exports or symbols
-- may return activation diagnostics
-- may throw NotActivatedError
+09.2. A turnixImport selector is an identity-based Turnix selector within
+      the importing rules of this document.
 
-NotActivatedError indicates orchestration failure.
-This error MUST surface to the user.
+09.3. Supported conceptual forms are:
 
+      A) Core or internal runtime files
+         "core/rpc.js"
+         "core/layout.js"
 
-===============================================================================
-14. IMMEDIATE EXECUTION & SIDE EFFECTS (LOCKED POLICY)
-===============================================================================
+      B) Pack default entry
+         "ui.controls"
 
-Some languages allow immediate execution constructs, including:
-- module-level statements
-- IIFE-style patterns
-- top-level side effects
+      C) Pack sub-entry or export
+         "ui.controls/Button"
 
-Turnix rules (LOCKED):
-- Turnix does NOT coordinate, track, or rely on immediate execution.
-- Immediate execution is DISCOURAGED in all pack code.
-- Import-time execution is NOT an activation mechanism.
-- Importing a module does NOT imply permission to execute logic.
+09.4. Pack default-entry selectors require the corresponding declared
+      dependency relationship already to exist where dependency rules require
+      it.
 
-Code that executes immediately:
-- runs outside Turnix orchestration
-- runs without PackContext authority
-- is outside Turnix guarantees
-- is not considered activated, even if it runs successfully
+09.5. Pack sub-entry selectors resolve against declared JavaScript entry
+      mappings rather than filesystem guessing.
 
-All meaningful execution MUST wait for:
-    onLoad(ctx)
-
-This rule applies uniformly to:
-- Python
-- JavaScript
-- any future supported language
+09.6. Disallowed selector forms include:
+      - "../"
+      - absolute paths
+      - filesystem guessing
+      - semver in selector
+      - author mismatch against the already-resolved dependency identity
 
 
 ===============================================================================
-15. CANONICAL ENTRYPOINTS (LOCKED)
+10. DEPENDENCY CONSISTENCY RULE (LOCKED)
 ===============================================================================
 
-Currently supported entrypoint:
-    onLoad(ctx)
+10.1. Importing respects the concrete identity already chosen during
+      dependency resolution.
 
-Rules (LOCKED):
-- called exactly once by Turnix
-- is the ONLY supported activation entrypoint
-- is the FIRST moment Turnix intentionally executes pack code
-- must prepare the pack for all runtime behavior
+10.2. If a pack declares a dependency that resolves to one concrete pack
+      identity, importing must remain consistent with that chosen identity.
 
-No other execution or activation path exists.
+10.3. Allowed imports therefore remain those that refer to that already-
+      resolved identity.
 
+10.4. Disallowed imports include attempts to:
+      - switch author identity
+      - restate semver in the selector
+      - bypass the already-resolved dependency choice
 
-===============================================================================
-16. BACKGROUND WORK GUARANTEE (LOCKED)
-===============================================================================
+10.5. Examples:
 
-LOCKED STATEMENT:
+      If a pack declares dependency:
+          "packs": ["Turnix@ui.controls@^1.2"]
 
-"Turnix does not guarantee behavior for background work started outside Turnix
-orchestration; only work triggered by Turnix entrypoints or capability calls
-is supported."
+      Allowed imports:
+          turnixImport("ui.controls")
+          turnixImport("ui.controls/Button")
 
-Only work initiated via:
-- activation entrypoints
-- capability calls
-is supported.
+      Disallowed imports:
+          turnixImport("Other@ui.controls")
+          turnixImport("ui.controls@2.0")
 
-Background work started otherwise:
-- may execute
-- but is unsupported
-- untracked
-- not abortable
-- not cleaned up
+10.6. Violations are hard errors.
+
+10.7. Importing does not reopen dependency resolution.
 
 
 ===============================================================================
-17. ERROR PHILOSOPHY (LOCKED)
+11. SEMVER IN IMPORTS (LOCKED)
 ===============================================================================
 
-Import errors are HARD errors.
+11.1. Semver is not allowed in turnixImport selectors.
 
-Rationale:
-- importing implies certainty
-- permissive loading causes nondeterminism
-- failures must be visible and explainable
+11.2. Semver belongs to:
+      - manifests
+      - dependency resolution
+      - policy decisions
 
-All import-related errors MUST:
-- use the standard error envelope
-- include requesting pack identity
-- include target identity
-- include reason classification
+11.3. Importing is identity-based rather than version-selection-based.
 
 
 ===============================================================================
-18. EXPLICITLY OPEN QUESTIONS
+12. FILE MATCHING RULES (LOCKED)
 ===============================================================================
 
-OPEN (NON-SEMANTIC):
-- possible rename turnixImport -> turnixResolve
-- tooling for authoring entries mapping
-- documentation wording to avoid Python-import confusion
+12.1. For sub-entry imports such as:
+      turnixImport("ui.controls/Button")
+
+      Turnix resolves against runtimes.javascript.entries.
+
+12.2. Matching logic:
+      - exact "Button"
+      - or "Button.<extension>"
+
+12.3. Allowed current extension forms include:
+      - .js
+      - .mjs
+      - .ts compiled to the served artifact form
+
+12.4. Ambiguous matches are errors.
+
+12.5. Missing matches are errors.
+
+12.6. There is no fallback from sub-entry import to default entry.
 
 
 ===============================================================================
-19. LOCKED SUMMARY
+13. DEFAULT ENTRY BEHAVIOR (LOCKED)
 ===============================================================================
 
-LOCKED:
-- no Python cross-pack imports
-- JavaScript cross-pack loading via turnixImport only
-- importing does NOT imply activation or execution
-- no semver in imports
-- dependency consistency enforced
-- immediate execution (IIFE / top-level code) is discouraged and unsupported
-- onLoad(ctx) is the only supported activation entrypoint
-- strict, visible errors
-- activation is separate from import
+13.1. If the selector has no sub-path, Turnix loads the declared default
+      JavaScript entry for that pack.
 
-OPEN:
-- naming polish
-- authoring ergonomics
+13.1.1. Example:
+            turnixImport("ui.controls")
+
+13.2. runtimes.javascript.entry must exist.
+
+13.3. That entry is loaded.
+
+13.4. Module exports are then returned.
+
+13.5. There is no implicit index.js, filename guessing, or directory
+      guessing.
+
+
+===============================================================================
+14. IMPORTING VS ACTIVATION (CRITICAL DISTINCTION)
+===============================================================================
+
+14.1. turnixImport loads a JavaScript module and may trigger normal ESM
+      evaluation by the JavaScript runtime.
+
+14.2. That ESM module evaluation is not Turnix-recognized activation.
+
+14.3. turnixImport does not:
+      - activate the pack
+      - grant execution authority
+      - imply lifecycle participation
+
+14.4. Activation remains a separate Turnix-controlled action handled through
+      the appropriate activation mechanisms.
+
+14.5. Module evaluation that occurs merely because the JavaScript runtime
+      evaluated an imported module is not treated as Turnix-recognized pack
+      execution by itself.
+
+
+===============================================================================
+15. RESOLVEPACK VS ENSUREACTIVATED (LOCKED SEMANTICS)
+===============================================================================
+
+15.1. resolvePack(selector):
+      - resolves metadata only
+      - performs visibility checks
+      - does not load code
+      - does not activate
+
+15.2. ensureActivated(selector):
+      - ensures pack activation
+      - may trigger activation
+      - does not return exports or symbols
+      - may return activation diagnostics
+      - may raise NotActivatedError
+
+15.3. NotActivatedError indicates orchestration failure rather than native
+      import failure.
+
+15.4. NotActivatedError must surface to the user.
+
+
+===============================================================================
+16. IMMEDIATE EXECUTION AND SIDE EFFECTS (LOCKED POLICY)
+===============================================================================
+
+16.1. Some languages permit immediate execution constructs such as:
+      - module-level statements
+      - IIFE-style patterns
+      - top-level side effects
+
+16.2. Turnix does not coordinate, track, or rely on immediate execution.
+
+16.3. Immediate execution is discouraged in pack code.
+
+16.4. Import-time execution is not an activation mechanism.
+
+16.5. Importing a module does not imply permission to execute meaningful
+      Turnix-recognized logic.
+
+16.6. Code that executes immediately:
+      - runs outside Turnix orchestration
+      - runs without PackContext authority
+      - is outside Turnix guarantees
+      - is not considered activated even if it appears to work
+
+16.7. Meaningful Turnix-recognized execution waits for the supported
+      activation entrypoint.
+
+
+===============================================================================
+17. CANONICAL ENTRYPOINTS (LOCKED)
+===============================================================================
+
+17.1. The currently supported activation entrypoint is:
+      onLoad(ctx)
+
+17.2. onLoad(ctx):
+      - is called exactly once by Turnix
+      - is the only supported activation entrypoint
+      - is the first moment Turnix intentionally executes pack code
+      - prepares the pack for later runtime behavior
+
+17.3. Turnix recognizes no alternative activation path.
+
+17.4. If a pack has code, Turnix activates that pack through onLoad(ctx).
+
+
+===============================================================================
+18. BACKGROUND WORK GUARANTEE (LOCKED)
+===============================================================================
+
+18.1. Turnix does not guarantee behavior for background work started outside
+      Turnix orchestration.
+
+18.2. Only work triggered by:
+      - supported activation entrypoints
+      - capability calls
+
+      is supported by Turnix guarantees.
+
+18.3. Background work started otherwise:
+      - may execute
+      - remains unsupported
+      - remains untracked
+      - is not abortable by Turnix guarantees
+      - is not cleaned up by Turnix guarantees
+
+
+===============================================================================
+19. ERROR PHILOSOPHY (LOCKED)
+===============================================================================
+
+19.1. Import errors are hard errors.
+
+19.2. The rationale is:
+      - importing implies certainty
+      - permissive loading creates nondeterminism
+      - failures must remain visible and explainable
+
+19.3. Import-related errors:
+      - use the standard error envelope
+      - include requesting pack identity
+      - include target identity
+      - include reason classification
+
+
+===============================================================================
+20. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+20.1. OPEN questions include:
+      - possible rename turnixImport
+      - whether turnixImport remains strictly internal to Turnix, with mods
+        using ctx.resolvePack or ctx.ensureActivated instead
+      - tooling for authoring entry mappings
+      - documentation wording that avoids Python-import confusion
+
+
+===============================================================================
+21. LOCKED SUMMARY
+===============================================================================
+
+21.1. LOCKED:
+      - no Python cross-pack native imports
+      - JavaScript cross-pack loading through turnixImport only
+      - importing does not imply activation
+      - importing does not imply execution authority
+      - no semver in imports
+      - dependency consistency is enforced
+      - immediate execution (IIFE / top-level code) is discouraged and unsupported
+      - onLoad(ctx) is the only supported activation entrypoint
+      - import errors are strict and visible
+      - activation remains separate from import
+
+21.2. OPEN:
+      - naming polish
+      - authoring ergonomics
 
 
 ===============================================================================
@@ -469,6 +546,6 @@ END OF DA-10 - IMPORTING, MODULE LOADING & CODE BOUNDARIES
 --- doc-meta ---
 DOC_ID: DA-10
 DOC_FILE: docs/design/DA-10_IMPORTING_MODULE_LOADING_AND_CODE_BOUNDARIES.txt
-DOC_REV: 11
-DOC_GIT: 06a3064
+DOC_REV: 12
+DOC_GIT: a21ff18
 ----------------
