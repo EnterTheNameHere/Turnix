@@ -4,408 +4,482 @@ DESIGN AREA DA-15 - USER INTERACTION, DECISION POINTS & POLICY HANDLING
 
 Status:
 -------
-CORE - this area defines how Turnix involves the user in decisions,
-when execution is allowed to pause, how decisions are persisted,
-and how policy reduces repeated friction without hiding uncertainty.
+EVOLVING
+
+Description:
+------------
+Defines how Turnix involves the user in decisions, when execution is allowed
+to pause, how decisions are persisted, and how policy reduces repeated
+friction without hiding uncertainty.
+
+Purpose:
+--------
+This document defines the Turnix decision-handling model for situations where
+the system cannot proceed safely or deterministically on its own.
+
+It defines:
+- user interaction as a kernel concern
+- decision-point types
+- hard and soft decision handling
+- scoped pause-and-resume behavior
+- policy handling and policy persistence
+- trace-backed decision explanation
+- frontend responsibility at decision time
+- failure behavior while a decision is pending
+
+It does NOT define:
+- generic resolution mechanics (see DA-09)
+- importing and module-loading rules (see DA-10)
+- activation lifecycle or execution guarantees (see DA-12)
+- capability schemas and permission-class definitions (see DA-14)
+- tracing schema or storage details (see DA-03)
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-09
+- DA-12
+- DA-14
+
+Downstream Documents:
+--------------------
+- DA-16
 
 
 ===============================================================================
-1. CORE INTENT
+01. INTERPRETATION BASIS
 ===============================================================================
 
-Turnix must:
-- never make ambiguous decisions silently
-- never delegate authority implicitly
-- remain deterministic once a decision is made
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
 
-User interaction exists ONLY to resolve situations where the system
-cannot proceed safely or deterministically on its own.
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
 
-These situations are limited to:
-- ambiguity
-- permission
-- conflict
-- recovery
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
 
-If a decision affects identity, persistence, authority, or safety,
-it MUST be explicit and trace-backed.
+01.4. This document defines user interaction, decision points, and policy
+      handling within that shared interpretation model.
 
 
 ===============================================================================
-2. USER INTERACTION IS A SYSTEM CONCERN (LOCKED)
+02. CORE INTENT
 ===============================================================================
 
-User interaction is NOT:
-- UI-specific
-- mod-specific
-- frontend-specific
+02.1. Turnix does not make ambiguous decisions silently.
 
-User interaction IS:
-- kernel-mediated
-- policy-driven
-- serializable
-- trace-backed
+02.2. Turnix does not delegate authority implicitly.
 
-All decision points originate in the kernel.
-Mods and packs may trigger decision points,
-but never own, implement, or bypass them.
+02.3. Once a decision is made, later behavior remains deterministic within
+      the scope governed by that decision.
 
+02.4. User interaction exists only to resolve situations where Turnix cannot
+      proceed safely or deterministically on its own.
 
-===============================================================================
-3. DECISION POINT TYPES (LOCKED)
-===============================================================================
+02.5. These situations are limited to:
+      - ambiguity
+      - permission
+      - conflict
+      - recovery
 
-===============================================================================
-3.1 Resolution Decisions
-===============================================================================
-
-Resolution decisions occur when the system cannot deterministically
-select a safe option.
-
-Examples:
-- multiple eligible packs
-- semver mismatch override
-- pinned pack missing
-- last-known-good fallback
-- conflicting pack requests
-
-Outcome:
-- chosen pack / version
-- persisted resolution rule (if applicable)
-- trace explaining why this option was selected
+02.6. If a decision affects identity, persistence, authority, or safety,
+      the decision is explicit and trace-backed.
 
 
 ===============================================================================
-3.2 Permission Decisions
+03. USER INTERACTION IS A SYSTEM CONCERN (LOCKED)
 ===============================================================================
 
-Permission decisions occur when an action would cross an authority
-or trust boundary.
+03.1. User interaction is not:
+      - UI-specific
+      - mod-specific
+      - frontend-specific
 
-Examples:
-- external network access
-- filesystem writes via IoManager
-- mod installation
-- invoking a hard-classified capability
+03.2. User interaction is:
+      - kernel-mediated
+      - policy-driven
+      - serializable
+      - trace-backed
 
-Permission decisions apply ONLY to actions that:
-- mutate persisted state
-- delete persisted state
-- intentionally cross ownership boundaries
+03.3. All decision points originate in the kernel.
 
-Permission decisions MUST NOT be raised for:
-- computed-only effects
-- runtime-only transforms
-- observation or watching of values
+03.4. Mods and packs may trigger decision points.
 
-Read access is explicitly excluded from permission decisions:
-- reads either succeed or return NotFoundOrPermissionDenied
-- user interaction is NEVER allowed for reads
-- no prompting, confirmation, or policy is involved
-
-This preserves determinism, prevents probing, and avoids UI spam.
-
-Outcome:
-- allow / deny
-- optional persistence of the decision
-- scope of policy (session / app / global)
+03.5. Mods and packs do not own, implement, or bypass decision handling.
 
 
 ===============================================================================
-3.3 Recovery Decisions
+04. DECISION POINT TYPES (LOCKED)
 ===============================================================================
 
-Recovery decisions occur when persisted state cannot be safely used.
-
-Examples:
-- corrupted config file
-- unreadable savePack
-- failed migration
-- checksum mismatch
-- missing dependency for a savePack
-
-Outcome:
-- restore from backup
-- reset to defaults
-- quarantine / rename broken data
-- abort startup of the affected unit
-
-Recovery decisions MUST reference:
-- last known good state
-- available backups
-- scope of impact (engine / pack / save)
+04.1. Turnix recognizes the following decision-point types:
+      - Resolution decisions
+      - Permission decisions
+      - Recovery decisions
+      - Configuration-scope decisions
 
 
-===============================================================================
-3.4 Configuration Scope Decisions (LOCKED)
-===============================================================================
+04.1 RESOLUTION DECISIONS (LOCKED)
+----------------------------------
 
-Configuration scope decisions occur when persistence intent is
-ambiguous rather than unsafe.
+04.1.1. Resolution decisions occur when Turnix cannot deterministically
+        select one safe option.
 
-These decisions answer:
-"Where should this value live, if it is persisted at all?"
+04.1.2. Examples include:
+        - multiple eligible packs
+        - semantic-version mismatch override
+        - pinned pack missing
+        - last-known-good fallback
+        - conflicting pack requests
 
-Examples:
-- modifying a value that exists in both global and save scope
-- promoting a save-local value to pack-global or engine scope
-- deleting a value that shadows defaults
-- attempting to persist a value produced only by computation
-
-Configuration scope decisions explicitly exclude:
-- computed-only values
-- derived runtime effects
-- accessibility or reactive transforms
-
-Outcome:
-- chosen scope (engine / pack-global / save)
-- persisted rule if applicable
-- trace linking the decision to the key and scope
+04.1.3. Resolution-decision outcomes may include:
+        - chosen pack or version
+        - persisted resolution rule when applicable
+        - trace explaining why the selected option was chosen
 
 
-===============================================================================
-4. HARD VS SOFT DECISIONS (LOCKED)
-===============================================================================
+04.2 PERMISSION DECISIONS (LOCKED)
+----------------------------------
 
-===============================================================================
-4.1 Soft Decisions
-===============================================================================
+04.2.1. Permission decisions occur when an action would cross an authority
+        or trust boundary.
 
-Characteristics:
-- execution may continue if denied
-- denial does not break identity
-- may be auto-allowed by policy
+04.2.2. Examples include:
+        - external network access
+        - filesystem writes through IoManager
+        - mod installation
+        - invoking a hard-classified capability
 
-Examples:
-- version mismatch warnings
-- optional capability usage
-- non-critical override refusals
+04.2.3. Permission decisions apply only to actions that:
+        - mutate persisted state
+        - delete persisted state
+        - intentionally cross ownership boundaries
 
+04.2.4. Permission decisions are not raised for:
+        - computed-only effects
+        - runtime-only transforms
+        - observation or watching of values
 
-===============================================================================
-4.2 Hard Decisions
-===============================================================================
+04.2.5. Read access is excluded from permission decisions:
+        - reads either succeed or return NotFoundOrPermissionDenied
+        - user interaction is never used for reads
+        - prompting, confirmation, and policy do not apply to reads
 
-Characteristics:
-- execution MUST pause
-- denial blocks progress
-- user response is mandatory
+04.2.6. This preserves determinism, prevents probing, and avoids decision
+        spam.
 
-Examples:
-- replacing a pinned pack
-- destructive migration
-- restoring from backup
-- persisting a change that alters identity
-
-Hard decisions always:
-- generate trace events
-- require explicit user acknowledgement
+04.2.7. Permission-decision outcomes may include:
+        - allow
+        - deny
+        - optional persistence of the decision
+        - scope of policy such as session, app, or global
 
 
-===============================================================================
-5. PAUSING MODEL (LOCKED)
-===============================================================================
+04.3 RECOVERY DECISIONS (LOCKED)
+--------------------------------
 
-When a decision is required:
-- the triggering execution unit pauses
-- unrelated execution may continue
-- UI is notified via a kernel event
-- execution resumes only after resolution
+04.3.1. Recovery decisions occur when persisted state cannot be used
+        safely.
 
-Rules:
-- no busy waiting
-- no polling
-- no global freeze
+04.3.2. Examples include:
+        - corrupted config file
+        - unreadable SavePack
+        - failed migration
+        - checksum mismatch
+        - missing dependency for a SavePack
 
-Pause is scoped and trace-linked.
+04.3.3. Recovery-decision outcomes may include:
+        - restore from backup
+        - reset to defaults
+        - quarantine or rename broken data
+        - abort startup of the affected unit
 
-While a decision is pending:
-- no persisted mutation may be committed
-- no config write may be finalized
-- no savePack mutation may complete
-
-Computed or runtime-only effects MAY continue,
-provided they do not persist state.
+04.3.4. Recovery decisions reference:
+        - last-known-good state
+        - available backups
+        - scope of impact such as engine, pack, or save
 
 
-===============================================================================
-6. POLICY SYSTEM (LOCKED)
-===============================================================================
+04.4 CONFIGURATION-SCOPE DECISIONS (LOCKED)
+-------------------------------------------
 
-Policies define how Turnix behaves when a decision arises.
+04.4.1. Configuration-scope decisions occur when persistence intent is
+        ambiguous rather than unsafe.
 
-Policy sources:
-- global defaults
-- user-defined overrides
-- pack-provided hints (non-binding)
+04.4.2. These decisions answer:
+        "Where should this value live, if it is persisted at all?"
 
-Policies may express:
-- ask always
-- allow once
-- allow always
-- deny always (where permitted)
+04.4.3. Examples include:
+        - modifying a value that exists in both global and save scope
+        - promoting a save-local value to pack-global or engine scope
+        - deleting a value that shadows defaults
+        - attempting to persist a value produced only by computation
 
-Policies influence default responses,
-but never redefine authority.
+04.4.4. Configuration-scope decisions exclude:
+        - computed-only values
+        - derived runtime effects
+        - accessibility or reactive transforms
 
-Policies MUST NOT:
-- override ownership rules
-- bypass access levels
-- grant mutation rights forbidden by system rules
-
-Policy exists to reduce friction,
-not to weaken safety or determinism.
+04.4.5. Configuration-scope-decision outcomes may include:
+        - chosen scope such as engine, pack-global, or save
+        - persisted rule when applicable
+        - trace linking the decision to the key and scope
 
 
 ===============================================================================
-7. POLICY PERSISTENCE (LOCKED)
+05. HARD AND SOFT DECISIONS (LOCKED)
 ===============================================================================
 
-When a user makes a decision:
-- it is persisted centrally
-- future runs become deterministic
-- trace links the decision to its origin
-
-Policies are:
-- explicit
-- inspectable
-- editable via PackManager UI
-
-Silent or implicit policy creation is forbidden.
+05.1. Turnix distinguishes between soft decisions and hard decisions.
 
 
-===============================================================================
-8. TRACE INTEGRATION (LOCKED)
-===============================================================================
+05.1 SOFT DECISIONS (LOCKED)
+----------------------------
 
-Every decision point MUST emit trace events including:
-- decision type
-- triggering cause
-- affected scope (engine / pack / save)
-- available options
-- selected outcome
-- policy involvement (if any)
+05.1.1. Soft-decision characteristics:
+        - execution may continue if denied
+        - denial does not break identity
+        - policy may auto-allow where permitted
 
-User-facing explanations MUST be derived from trace data.
-UI must never invent rationale.
-
-For denied mutation attempts, trace MUST additionally record:
-- owner domain
-- caller domain
-- access level
-- authority failure reason
-
-This applies even when no user interaction occurs.
+05.1.2. Examples include:
+        - version mismatch warnings
+        - optional capability usage
+        - non-critical override refusals
 
 
-===============================================================================
-9. UI RESPONSIBILITY (LOCKED)
-===============================================================================
+05.2 HARD DECISIONS (LOCKED)
+----------------------------
 
-UI must:
-- present a clear explanation
-- show consequences
-- indicate scope of effect
-- offer only valid choices
+05.2.1. Hard-decision characteristics:
+        - execution pauses
+        - denial blocks progress
+        - user response is mandatory unless an accepted policy already
+          supplies the outcome
 
-UI must NOT:
-- invent defaults
-- auto-confirm without policy
-- bypass kernel authority
-- obscure the impact of denial
+05.2.2. Examples include:
+        - replacing a pinned pack
+        - destructive migration
+        - restoring from backup
+        - persisting a change that alters identity
+
+05.2.3. Hard decisions always:
+        - generate trace events
+        - require explicit acknowledgement of the effective outcome
 
 
 ===============================================================================
-10. MULTIPLE FRONTENDS (LOCKED)
+06. PAUSING MODEL (LOCKED)
 ===============================================================================
 
-If multiple frontends are connected:
-- the decision is shown on all
-- the first valid response wins
-- all others are dismissed
+06.1. When a decision is required:
+      - the triggering execution unit pauses
+      - unrelated execution may continue
+      - frontends are notified through a kernel-mediated event
+      - execution resumes only after decision handling completes
 
-The kernel remains the single arbiter.
+06.2. Rules:
+      - no busy waiting occurs
+      - no polling occurs
+      - no global freeze occurs
 
+06.3. Pause remains scoped and trace-linked.
 
-===============================================================================
-11. FAILURE MODES (LOCKED)
-===============================================================================
+06.4. While a decision is pending:
+      - no persisted mutation may be committed
+      - no configuration write may be finalized
+      - no SavePack mutation may complete
 
-If UI disconnects during a decision:
-- execution remains paused
-- timeout policy MAY apply
-- user may reconnect
-
-If the decision handler fails:
-- execution aborts safely
-- failure is trace-logged
-- persisted state remains unchanged
-
-
-===============================================================================
-12. MOD INVOLVEMENT (LOCKED)
-===============================================================================
-
-Mods:
-- may trigger decision points
-- may not handle them
-- must not block while awaiting UI
-
-Mods observe outcomes via ctx only.
+06.5. Computed or runtime-only effects may continue if they do not persist
+      state and do not cross the paused authority boundary.
 
 
 ===============================================================================
-13. RELATION TO DEBUGGING (LOCKED)
+07. POLICY SYSTEM (LOCKED)
 ===============================================================================
 
-Decision points:
-- are trace-visible
-- may trigger breakpoints
-- are inspectable post-factum
+07.1. Policies define how Turnix behaves when a decision arises.
 
-Debuggers may simulate decisions
-ONLY in development mode.
+07.2. Policy sources include:
+      - global defaults
+      - user-defined overrides
+      - pack-provided hints that remain non-binding
 
+07.3. Policies may express:
+      - ask always
+      - allow once
+      - allow always
+      - deny always where such denial is permitted
 
-===============================================================================
-14. WHAT IS EXPLICITLY NOT SUPPORTED
-===============================================================================
+07.4. Policies influence default responses.
 
-NOT SUPPORTED:
-- silent auto-approval without policy
-- console-based prompting
-- blocking the entire system for UI
-- mod-defined decision UIs
-- persistence of computed-only values
-- prompting the user to allow read access to restricted state
+07.5. Policies do not redefine authority.
 
+07.6. Policies do not:
+      - override ownership rules
+      - bypass access levels
+      - grant mutation rights forbidden by system rules
 
-===============================================================================
-15. OPEN QUESTIONS
-===============================================================================
-
-OPEN:
-- bulk decision management UI
-- policy import/export
-- per-session vs global policy precedence
-- scripting policy rules
+07.7. Policy exists to reduce friction rather than to weaken safety or
+      determinism.
 
 
 ===============================================================================
-16. LOCKED SUMMARY
+08. POLICY PERSISTENCE (LOCKED)
 ===============================================================================
 
-LOCKED:
-- kernel-mediated decision authority
-- clear separation of decision types
-- explicit configuration scope resolution
-- scoped pause-and-resume execution
-- persistent, inspectable policy
-- trace-derived explanations only
+08.1. When a user makes a decision:
+      - it is persisted centrally
+      - future runs become deterministic
+      - trace links the decision to its origin
 
-OPEN:
-- policy automation
-- UX refinement only
+08.2. Persisted policies are:
+      - explicit
+      - inspectable
+      - editable through Turnix management surfaces
+
+08.3. Silent or implicit policy creation is forbidden.
+
+
+===============================================================================
+09. TRACE INTEGRATION (LOCKED)
+===============================================================================
+
+09.1. Every decision point emits trace events including:
+      - decision type
+      - triggering cause
+      - affected scope such as engine, pack, or save
+      - available options
+      - selected outcome
+      - policy involvement when applicable
+
+09.2. User-facing explanations are derived from trace data.
+
+09.3. User-facing surfaces do not invent rationale.
+
+09.4. For denied mutation attempts, trace additionally records:
+      - owner domain
+      - caller domain
+      - access level
+      - authority failure reason
+
+09.5. This applies even when no user interaction occurs.
+
+
+===============================================================================
+10. FRONTEND RESPONSIBILITY (LOCKED)
+===============================================================================
+
+10.1. Frontends:
+      - present clear explanation
+      - show consequences
+      - indicate scope of effect
+      - offer only valid choices
+
+10.2. Frontends do not:
+      - invent defaults
+      - auto-confirm without policy
+      - bypass kernel authority
+      - obscure the impact of denial
+
+
+===============================================================================
+11. MULTIPLE FRONTENDS (LOCKED)
+===============================================================================
+
+11.1. If multiple frontends are connected:
+      - the decision is shown on all connected frontends
+      - the first valid response wins
+      - all other pending presentations are dismissed
+
+11.2. The kernel remains the single arbiter.
+
+
+===============================================================================
+12. FAILURE MODES (LOCKED)
+===============================================================================
+
+12.1. If a frontend disconnects during a decision:
+      - the affected execution remains paused
+      - timeout policy may apply
+      - the user may reconnect through another valid frontend
+
+12.2. If the decision handler fails:
+      - execution aborts safely
+      - failure is trace-logged
+      - persisted state remains unchanged
+
+
+===============================================================================
+13. MOD INVOLVEMENT (LOCKED)
+===============================================================================
+
+13.1. Mods may trigger decision points.
+
+13.2. Mods do not handle decision points directly.
+
+13.3. Mods do not block while awaiting frontend interaction.
+
+13.4. Mods observe decision outcomes only through Turnix-provided context
+      and results.
+
+
+===============================================================================
+14. RELATION TO DEBUGGING (LOCKED)
+===============================================================================
+
+14.1. Decision points:
+      - are trace-visible
+      - may trigger breakpoints
+      - remain inspectable after the fact
+
+14.2. Debuggers may simulate decisions only in development mode.
+
+
+===============================================================================
+15. WHAT IS EXPLICITLY NOT SUPPORTED
+===============================================================================
+
+15.1. The following are not supported:
+      - silent auto-approval without policy
+      - console-based prompting
+      - blocking the entire system for frontend interaction
+      - mod-defined decision UIs
+      - persistence of computed-only values
+      - prompting the user to allow read access to restricted state
+
+
+===============================================================================
+16. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+16.1. OPEN questions include:
+      - bulk decision-management user interfaces
+      - policy import and export
+      - per-session versus global policy precedence
+      - scripted policy rules
+
+
+===============================================================================
+17. LOCKED SUMMARY
+===============================================================================
+
+17.1. LOCKED:
+      - decision authority is kernel-mediated
+      - decision types remain distinct
+      - configuration-scope resolution is explicit
+      - execution pauses and resumes in a scoped way
+      - policy is persistent and inspectable where persisted
+      - explanations are derived only from trace-backed rationale
+
+17.2. OPEN:
+      - policy automation
+      - user-experience refinement only
 
 
 ===============================================================================
@@ -415,6 +489,6 @@ END OF DA-15 - USER INTERACTION, DECISION POINTS & POLICY HANDLING
 --- doc-meta ---
 DOC_ID: DA-15
 DOC_FILE: docs/design/DA-15_USER_INTERACTION_DECISION_POINTS_AND_POLICY_HANDLING.txt
-DOC_REV: 1
-DOC_GIT: 0000000
+DOC_REV: 7
+DOC_GIT: a13f8d1
 ----------------
