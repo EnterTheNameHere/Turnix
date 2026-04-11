@@ -8,34 +8,30 @@ EVOLVING
 
 Description:
 ------------
-Defines how packs interact at runtime without importing each other's code, and
-how Turnix mediates authority, power, and safety.
+Defines how packs interact at runtime without importing each other's code,
+and how Turnix mediates authority, power, and safety.
 
-This is the primary and ONLY supported cross-pack interaction mechanism.
-
+This is the primary and only supported cross-pack interaction mechanism.
 
 Purpose:
 --------
-Provide a strict, auditable runtime interaction model that preserves Turnix
-boundaries (no cross-pack code importing, no implicit execution authority, no
-silent persistence), while enabling controlled wiring (Services) and mediated
-execution (Capabilities) with explicit permission handling.
+This document defines the strict, auditable runtime interaction model used
+by Turnix for cross-pack wiring and cross-pack execution.
 
-This area defines:
+It defines:
 - Services as runtime wiring objects
 - Capabilities as permissioned, Turnix-mediated operations
 - permission classes and user decision handling
 - conflict rules for capability identities
 - trace and audit requirements for capability calls
-- cross-runtime symmetry (Python and JavaScript)
+- cross-runtime symmetry
 
-This area does NOT define:
-- importing and module loading rules (see DA-10)
+It does NOT define:
+- importing and module-loading rules (see DA-10)
 - activation semantics and execution guarantees (see DA-12)
 - persistence rules and file I/O (see DA-06)
 - configuration schemas and policy storage formats (see DA-05)
 - tracing schema or storage details (see DA-03)
-
 
 Upstream Documents:
 ------------------
@@ -48,321 +44,382 @@ Upstream Documents:
 - DA-10
 - DA-12
 
-
 Downstream Documents:
 --------------------
-- DA-03
-- DA-05
-- DA-06
-- tracing
-- IS-01
-- IS-02
+- DA-15
 
 
 ===============================================================================
-01. CORE DISTINCTION
+01. INTERPRETATION BASIS
 ===============================================================================
 
-Turnix defines two orthogonal runtime interaction mechanisms:
-- Services     -> shared runtime objects (wiring)
-- Capabilities -> named, permissioned operations (authority)
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
 
-They serve different purposes and MUST NOT be conflated.
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
 
-Neither Services nor Capabilities imply persistence.
-Persistence is governed exclusively by:
-- File I/O (DA-06)
-- Configuration & schemas (DA-05)
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
 
-
-===============================================================================
-02. SERVICES - RUNTIME WIRING (LOCKED)
-===============================================================================
-
-A Service is:
-- a concrete runtime object or instance
-- registered by a pack during activation
-- stored in a scoped service registry
-- retrieved explicitly by other packs
-
-Example:
-    ctx.registerService("llm", client)
-    client = ctx.services.get("llm")
-
-Properties (LOCKED):
-- services are opaque objects
-- lifetime is bound to the providing pack's activation
-- name collisions are forbidden
-- services MUST NOT perform filesystem I/O directly
-- services have NO permission layer
+01.4. This document defines services, capabilities, and permission
+      boundaries within that shared interpretation model.
 
 
 ===============================================================================
-03. SERVICE ACCESS RULES (LOCKED)
+02. CORE DISTINCTION
 ===============================================================================
 
-- Service access is explicit.
-- No inheritance.
-- No visibility-based granting.
-- No implicit availability.
+02.1. Turnix defines two orthogonal runtime interaction mechanisms:
+      - Services
+      - Capabilities
 
-If a service does not exist:
-- ctx.services.get(name) MUST fail
-  (or return None only if explicitly allowed by API contract)
+02.2. Services provide shared runtime wiring.
 
-Services are for trusted runtime wiring ONLY.
-They MUST NOT be used to bypass:
-- configuration schemas
-- persistence rules
-- permission checks
+02.3. Capabilities provide named, permissioned operations.
 
+02.4. Services and Capabilities serve different purposes and are not
+      conflated.
 
-===============================================================================
-04. CAPABILITIES - EXECUTION BOUNDARY (LOCKED)
-===============================================================================
+02.5. Neither Services nor Capabilities implies persistence.
 
-A Capability is:
-- a named operation
-- exported by a pack
-- invoked by other packs
-- mediated by Turnix
-- permission-checked
-
-Capabilities are the ONLY supported cross-pack execution boundary.
-
-Example (export):
-    ctx.registerCapability("llm.pipeline@1", handler)
-
-Example (call):
-    ctx.callCapability("llm.pipeline@1", args)
+02.6. Persistence remains governed by:
+      - DA-06 for file I/O and persistence authority
+      - DA-05 for configuration and schema-driven persisted behavior
 
 
 ===============================================================================
-05. CAPABILITY IDENTITIES & VERSIONING (LOCKED)
+03. SERVICES - RUNTIME WIRING (LOCKED)
 ===============================================================================
 
-Capability identifiers:
-    <name>@<major>
+03.1. A Service is:
+      - a concrete runtime object or instance
+      - registered by a pack during activation
+      - stored in a scoped service registry
+      - retrieved explicitly by other packs
 
-Examples:
-    "llm.pipeline@1"
-    "http.request@1"
-    "compile.typescript@1"
+03.2. Example:
+      - ctx.registerService("llm", client)
+      - client = ctx.services.get("llm")
 
-Rules (LOCKED):
-- major version only
-- incompatible change -> new major
-- no minor or patch versions
-- capability identity is stable and global
-
-
-===============================================================================
-06. CAPABILITY EXPORT VS USAGE (LOCKED DISTINCTION)
-===============================================================================
-
-Export:
-- happens at runtime via ctx.registerCapability
-- defines the authoritative behavior
-
-Usage:
-- happens via ctx.callCapability
-- invokes Turnix mediation
-
-Manifest declarations:
-- OPTIONAL
-- advisory only
-- used for tooling, diagnostics, and UX
-- never authoritative
-
-Runtime behavior always wins over manifest intent.
+03.3. Locked properties:
+      - services are opaque runtime objects
+      - service lifetime is bound to the providing pack's activation
+      - service name collisions are forbidden
+      - services must not perform direct filesystem I/O that bypasses Turnix
+        persistence authority
+      - services have no permission layer by themselves
 
 
 ===============================================================================
-07. PERMISSIONS MODEL (LOCKED CORE)
+04. SERVICE ACCESS RULES (LOCKED)
 ===============================================================================
 
-Each capability declares a permission class, immutable per major version:
-- none
-  -> always allowed
-- soft
-  -> user may be prompted
-  -> allow / deny / remember
-- hard
-  -> user MUST explicitly allow
-  -> cannot be auto-granted
+04.1. Service access is explicit.
 
-Permission classification is capability-defined and non-negotiable.
+04.2. Services are not inherited.
 
+04.3. Visibility does not grant service access.
 
-===============================================================================
-08. CAPABILITY INVOCATION FLOW (LOCKED)
-===============================================================================
+04.4. Service availability is never implicit.
 
-When ctx.callCapability(...) is invoked:
+04.5. If a service does not exist:
+      - ctx.services.get(name) must fail
+      - or must return None only when the API contract explicitly allows
+        that behavior
 
-1) Turnix evaluates permission.
-2) If allowed -> handler executes.
-3) If undecided:
-   - execution PAUSES
-   - UI prompt is shown
-   - user decision is recorded
-   - execution resumes
+04.6. Services are for trusted runtime wiring only.
 
-LOCKED:
-- Turnix MUST remain responsive during pause.
-- no background mutation may occur while paused.
-- execution resumes deterministically from the pause point.
+04.7. Services are not used to bypass:
+      - configuration schemas
+      - persistence rules
+      - permission checks
 
 
 ===============================================================================
-09. USER DECISIONS & POLICY (LOCKED)
+05. CAPABILITIES - EXECUTION BOUNDARY (LOCKED)
 ===============================================================================
 
-User decisions:
-- may be persisted
-- may be scoped (session / app / global)
-- MUST be explainable
-- MUST be reversible
+05.1. A Capability is:
+      - a named operation
+      - exported by a pack
+      - invoked by other packs
+      - mediated by Turnix
+      - permission-checked
 
-Policies may define:
-- auto-allow behavior for soft permissions
-- never-auto-allow behavior for hard permissions
+05.2. Capabilities are the only supported cross-pack execution boundary.
 
-All decisions MUST be:
-- traceable
-- attributable
-- replayable
+05.3. Example export:
+      ctx.registerCapability("llm.pipeline@1", handler)
 
-
-===============================================================================
-10. SERVICES VS CAPABILITIES - STRICT SEPARATION (LOCKED)
-===============================================================================
-
-Services:
-- direct object access
-- no permission checks
-- internal wiring only
-
-Capabilities:
-- explicit execution boundary
-- user-visible power
-- permissioned and audited
-
-LOCKED:
-- capabilities MUST NOT expose service internals directly
-- services MUST NOT be callable across packs without capability mediation
+05.4. Example call:
+      ctx.callCapability("llm.pipeline@1", args)
 
 
 ===============================================================================
-11. COMPUTED & REACTIVE BEHAVIOR (LOCKED CLARIFICATION)
+06. CAPABILITY IDENTITIES AND VERSIONING (LOCKED)
 ===============================================================================
 
-Some packs may react to runtime state or configuration changes by:
-- observing values
-- computing derived behavior
-- adjusting runtime output
+06.1. Capability identifiers use the form:
+      <name>@<major>
 
-Rules (LOCKED):
-- behavior MUST be runtime-only
-- MUST NOT mutate stored configuration or memory
-- MUST NOT intercept persistence
-- MUST NOT replace the source of truth
+06.2. Examples:
+      - "llm.pipeline@1"
+      - "http.request@1"
+      - "compile.typescript@1"
 
-Allowed mechanisms:
-- capability invocation
-- service cooperation
-- config/watch-style notifications (DA-05)
-
-This preserves:
-- determinism
-- reversibility
-- non-invasive overrides (e.g. accessibility scaling)
+06.3. Locked rules:
+      - capability identity uses major version only
+      - incompatible change creates a new major version
+      - minor or patch versions are not part of capability identity
+      - capability identity is stable and global
 
 
 ===============================================================================
-12. CONFLICTS & OVERRIDES (LOCKED)
+07. CAPABILITY EXPORT VS USAGE (LOCKED DISTINCTION)
 ===============================================================================
 
-Multiple packs exporting the same capability identity:
-- NOT allowed by default
-- conflict MUST be detected
-- resolution requires:
-  - explicit user choice
-  - or hard error
+07.1. Capability export happens at runtime through ctx.registerCapability.
 
-Silent override is forbidden.
+07.2. Capability export defines authoritative runtime behavior.
 
+07.3. Capability usage happens through ctx.callCapability.
 
-===============================================================================
-13. TRACE & AUDIT (LOCKED)
-===============================================================================
+07.4. Capability usage invokes Turnix mediation.
 
-All capability calls:
-- are traceable
-- include caller identity
-- include permission context
-- record outcome (allowed / denied / failed)
+07.5. Manifest capability declarations are optional.
 
-Trace MUST distinguish:
-- stored mutation
-- computed effect
-- denied access
+07.6. Manifest capability declarations are advisory only.
 
-This is required for debugging, trust, and reproducibility.
+07.7. Manifest capability declarations may support:
+      - tooling
+      - diagnostics
+      - user experience
+
+07.8. Manifest intent does not override runtime reality.
+
+07.9. Runtime behavior remains authoritative over manifest intent.
 
 
 ===============================================================================
-14. DEVELOPMENT-TIME DIAGNOSTICS (LOCKED)
+08. PERMISSIONS MODEL (LOCKED CORE)
 ===============================================================================
 
-In development mode, Turnix reports:
-- declared-but-unused capabilities
-- used-but-undeclared capabilities
-- exported-but-never-called capabilities
+08.1. Each capability declares one permission class.
 
-These reports are:
-- informational
-- non-fatal
-- tooling-oriented
+08.2. Permission class is immutable per major version.
 
+08.3. Permission classes are:
+      - none
+      - soft
+      - hard
 
-===============================================================================
-15. CROSS-RUNTIME SYMMETRY (LOCKED)
-===============================================================================
+08.4. none means the capability is always allowed.
 
-The same model applies to Python and JavaScript:
-- Python packs expose capabilities usable by JavaScript.
-- JavaScript UI invokes Python logic via capabilities.
-- no direct cross-language object access exists.
+08.5. soft means:
+      - user decision may be required
+      - allow, deny, and remember-style outcomes may exist
 
-Capabilities are the universal boundary.
+08.6. hard means:
+      - explicit user allowance is required
+      - the capability is not auto-granted
 
-
-===============================================================================
-16. EXPLICITLY OPEN QUESTIONS
-===============================================================================
-
-OPEN:
-- fine-grained permission scopes
-- capability discovery and browsing UI
-- dynamic permission revocation
-- subscription-based or streaming capabilities
+08.7. Permission classification is capability-defined and is not negotiated
+      by callers.
 
 
 ===============================================================================
-17. LOCKED SUMMARY
+09. CAPABILITY INVOCATION FLOW (LOCKED)
 ===============================================================================
 
-LOCKED:
-- services are runtime wiring only
-- capabilities are the sole execution boundary
-- permission model is explicit and immutable per major
-- no implicit persistence
-- no silent overrides
-- full tracing and audit
+09.1. When ctx.callCapability(...) is invoked:
+      1) Turnix evaluates permission
+      2) if allowed, the handler executes
+      3) if undecided, execution pauses for decision handling
 
-OPEN:
-- UX and policy extensions only
+09.2. During undecided permission handling:
+      - a decision surface may be shown
+      - user or policy input is obtained
+      - the resulting decision is recorded according to the governing policy
+      - execution resumes only after that decision path completes
+
+09.3. Locked rules:
+      - Turnix remains responsive while execution is paused for decision
+        handling
+      - no background mutation may occur while paused
+      - execution resumes deterministically from the pause point
+
+
+===============================================================================
+10. USER DECISIONS AND POLICY (LOCKED)
+===============================================================================
+
+10.1. User decisions may be persisted.
+
+10.2. User decisions may be scoped, for example:
+      - session
+      - app
+      - global
+
+10.3. User decisions remain explainable.
+
+10.4. User decisions remain reversible.
+
+10.5. Policy may define:
+      - auto-allow behavior for soft permissions
+      - never-auto-allow behavior for hard permissions
+
+10.6. All decisions remain:
+      - traceable
+      - attributable
+      - replayable within the meaning of the governing tracing and policy
+        documents
+
+
+===============================================================================
+11. SERVICES VS CAPABILITIES - STRICT SEPARATION (LOCKED)
+===============================================================================
+
+11.1. Services provide direct object access for runtime wiring.
+
+11.2. Services do not perform permission checks by themselves.
+
+11.3. Capabilities provide an explicit execution boundary.
+
+11.4. Capabilities represent user-visible or policy-visible power.
+
+11.5. Capabilities remain permissioned and audited.
+
+11.6. Locked rules:
+      - capabilities must not expose service internals directly as a bypass
+        path
+      - one pack must not call another pack's service-provided behavior
+        directly across pack boundaries
+      - cross-pack execution must go through capability mediation
+
+
+===============================================================================
+12. COMPUTED AND REACTIVE BEHAVIOR (LOCKED CLARIFICATION)
+===============================================================================
+
+12.1. Packs may react to runtime state or configuration changes by:
+      - observing values
+      - computing derived behavior
+      - adjusting runtime output
+
+12.2. Locked rules:
+      - such behavior remains runtime-only
+      - such behavior does not mutate stored configuration or memory by
+        itself
+      - such behavior does not intercept persistence
+      - such behavior does not replace the authoritative source of truth
+
+12.3. Allowed mechanisms include:
+      - capability invocation
+      - service cooperation
+      - config or watch-style notifications defined elsewhere
+
+12.4. This preserves:
+      - determinism
+      - reversibility
+      - non-invasive override behavior such as accessibility scaling
+
+
+===============================================================================
+13. CONFLICTS AND OVERRIDES (LOCKED)
+===============================================================================
+
+13.1. Multiple packs exporting the same capability identity are not allowed
+      by default.
+
+13.2. Such conflict is detected explicitly.
+
+13.3. Resolution requires:
+      - explicit user choice
+      - or hard failure if no permitted resolution path exists
+
+13.4. Silent override is forbidden.
+
+
+===============================================================================
+14. TRACE AND AUDIT (LOCKED)
+===============================================================================
+
+14.1. All capability calls are traceable.
+
+14.2. Capability-call trace includes:
+      - caller identity
+      - permission context
+      - outcome, such as allowed, denied, or failed
+
+14.3. Trace distinguishes:
+      - stored mutation
+      - computed effect
+      - denied access
+
+14.4. This traceability is required for:
+      - debugging
+      - trust
+      - reproducibility
+      - audit
+
+
+===============================================================================
+15. DEVELOPMENT-TIME DIAGNOSTICS (LOCKED)
+===============================================================================
+
+15.1. In development mode, Turnix reports:
+      - declared-but-unused capabilities
+      - used-but-undeclared capabilities
+      - exported-but-never-called capabilities
+
+15.2. These reports are:
+      - informational
+      - non-fatal
+      - tooling-oriented
+
+
+===============================================================================
+16. CROSS-RUNTIME SYMMETRY (LOCKED)
+===============================================================================
+
+16.1. The same interaction model applies across supported runtimes such as
+      Python and JavaScript.
+
+16.2. Python packs may expose capabilities used by JavaScript packs.
+
+16.3. JavaScript packs may invoke Python logic through capabilities.
+
+16.4. Direct cross-language object access is not part of this model.
+
+16.5. Capabilities remain the universal mediated execution boundary.
+
+
+===============================================================================
+17. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+17.1. OPEN questions include:
+      - fine-grained permission scopes
+      - capability discovery and browsing user interfaces
+      - dynamic permission revocation
+      - subscription-based or streaming capabilities
+
+
+===============================================================================
+18. LOCKED SUMMARY
+===============================================================================
+
+18.1. LOCKED:
+      - services are runtime wiring only
+      - capabilities are the sole supported cross-pack execution boundary
+      - the permission model is explicit and immutable per major version
+      - services and capabilities do not imply persistence
+      - silent overrides are forbidden
+      - capability calls remain fully traceable and auditable
+
+18.2. OPEN:
+      - user experience and policy extensions only
 
 
 ===============================================================================
@@ -372,6 +429,6 @@ END OF DA-14 - SERVICES, CAPABILITIES & PERMISSIONS
 --- doc-meta ---
 DOC_ID: DA-14
 DOC_FILE: docs/design/DA-14_SERVICES_CAPABILITIES_AND_PERMISSIONS.txt
-DOC_REV: 9
-DOC_GIT: 7959a8e
+DOC_REV: 10
+DOC_GIT: a21ff18
 ----------------
