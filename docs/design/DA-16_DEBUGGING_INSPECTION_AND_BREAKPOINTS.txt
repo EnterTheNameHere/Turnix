@@ -8,35 +8,30 @@ EVOLVING
 
 Description:
 ------------
-Defines how Turnix can be inspected while running, where execution can be
+Defines how Turnix can be inspected while running, where execution may be
 paused, and how state can be safely observed and modified without breaking
 determinism.
 
 This area is developer-facing.
 
-
 Purpose:
 --------
-Provide an intentional, observable, reversible, and scoped debugging model
-that operates on Turnix concepts (packs, pipelines, memory layers,
-capabilities) rather than language internals. Enable pausing, inspection, and
-controlled mutation without creating nondeterministic behavior or untraced
-gaps.
+This document defines the Turnix debugging model for semantic inspection,
+scoped pausing, and controlled mutation.
 
-This area defines:
+It defines:
 - semantic breakpoint types and their trigger semantics
 - pause behavior and safe mutation constraints
 - inspection surfaces and debugger action boundaries
 - manual pause and apply-at-safe-point semantics
-- job-aware breakpoint and pause behavior (if Jobs exist)
+- Job-aware breakpoint and pause behavior when Jobs exist
 - trace integration requirements for debugger actions and breakpoint events
 
-This area does NOT define:
+It does NOT define:
 - the tracing model, reason sets, or retention rules (see DA-03)
 - authoritative committed state, transactions, or windows (see DA-04)
 - activation semantics beyond pause boundaries (see DA-12)
-- concrete UI layout for debugger tooling (optional areas)
-
+- concrete user-interface layout for debugger tooling
 
 Upstream Documents:
 ------------------
@@ -49,471 +44,500 @@ Upstream Documents:
 - DA-04
 - DA-12
 
-
 ===============================================================================
-01. CORE INTENT
-===============================================================================
-
-Debugging in Turnix is not:
-- print statements
-- ad-hoc logging
-- attaching debuggers to random threads
-
-Debugging in Turnix is:
-- intentional
-- observable
-- reversible
-- scoped
-
-
-===============================================================================
-02. DEBUGGING PHILOSOPHY
+01. INTERPRETATION BASIS
 ===============================================================================
 
-Turnix debugging must:
-- not change semantic behavior by default
-- be opt-in
-- preserve causality
-- operate on Turnix concepts, not language internals
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
 
-You debug:
-- packs
-- activation
-- pipelines
-- memory layers
-- capabilities
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
 
-NOT:
-- Python frames
-- JavaScript call stacks (except as contextual information)
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines debugging, inspection, and breakpoint behavior
+      within that shared interpretation model.
+
+
+===============================================================================
+02. CORE INTENT
+===============================================================================
+
+02.1. Debugging in Turnix is not:
+      - print-statement debugging
+      - ad-hoc logging
+      - attaching debuggers to arbitrary threads as the primary model
+
+02.2. Debugging in Turnix is:
+      - intentional
+      - observable
+      - reversible where the surrounding state model allows reversal
+      - scoped
+
+02.3. Turnix debugging operates on Turnix concepts rather than on language
+      internals as the primary debugging surface.
+
+02.4. Primary debugging targets include:
+      - packs
+      - activation
+      - pipelines
+      - memory layers
+      - capabilities
+
+02.5. Python frames or JavaScript call stacks may appear as contextual
+      information, but they are not the primary debugging model.
 
 
 ===============================================================================
 03. BREAKPOINT TYPES
 ===============================================================================
 
-Turnix supports semantic breakpoints, not code-line breakpoints.
+03.1. Turnix supports semantic breakpoints rather than code-line
+      breakpoints.
+
+03.2. Supported semantic breakpoint classes include:
+      - pipeline-stage breakpoints
+      - memory breakpoints
+      - capability breakpoints
 
 
-03.1 Pipeline stage breakpoints
-------------------------------
-Pause execution when a pipeline reaches a specific stage.
+03.1 PIPELINE-STAGE BREAKPOINTS
+-------------------------------
 
-Use cases:
-- inspect prompt before sending to LLM
-- verify memory composition
-- observe transformations
+03.1.1. A pipeline-stage breakpoint pauses execution when a pipeline reaches
+        a specific stage.
 
-Breakpoint triggers:
-- stage id
-- pipeline id
-- optional condition
+03.1.2. Use cases include:
+        - inspecting a prompt before sending it to an LLM
+        - verifying memory composition
+        - observing transformations
 
-
-03.2 Memory breakpoints
-----------------------
-Pause execution when memory changes.
-
-Triggers:
-- memory key
-- memory layer
-- change type (set, delete, overwrite)
-- optional value predicate
+03.1.3. Pipeline-stage breakpoint triggers may include:
+        - stageId
+        - pipelineId
+        - optional condition
 
 
--------------------------------------------------------------------------------
-03.2.1 MEMORY BREAKPOINTS & TRANSACTIONAL STAGING
--------------------------------------------------------------------------------
+03.2 MEMORY BREAKPOINTS
+-----------------------
 
-Memory breakpoints observe state transitions, not storage mechanics.
+03.2.1. A memory breakpoint pauses execution when memory changes according
+        to the configured trigger.
 
-Definitions:
-
-- A "staged mutation" is a write into a transactional layer.
-- A "committed mutation" is a write that becomes visible in a committed
-  (authoritative) memory layer after a successful commit.
-- An "aborted mutation" is a staged mutation discarded during abort.
-
-Rules (LOCKED):
-
-1) By default, memory breakpoints MUST trigger on committed mutations only.
-
-   - Writing into a transactional layer MUST NOT trigger a memory breakpoint.
-   - Aborting a transaction MUST NOT trigger a memory breakpoint.
-   - Only the moment a value becomes authoritative is breakpoint-visible.
-
-2) Memory breakpoints MAY be configured to observe staged mutations
-   explicitly.
-
-   If enabled, a breakpoint MAY specify:
-   - observeStaged = true
-   - observeCommitted = true | false
-
-   When observeStaged is enabled:
-   - breakpoint triggers when a staged value is written
-   - breakpoint context MUST include:
-       - transaction id
-       - staging layer identity
-       - parent layer identity
-       - commit eligibility status
-
-3) Memory breakpoints MUST distinguish mutation phase.
-
-   Every breakpoint hit MUST be classified as exactly one of:
-   - StagedMutation
-   - CommittedMutation
-
-4) Breakpoints MUST NOT fire twice for the same mutation.
-
-   If a breakpoint observes staged mutations and committed mutations:
-   - the staged hit and committed hit are distinct events
-   - both MUST be trace-linked to the same mutation lineage
-
-5) Nested transactions inherit breakpoint semantics.
-
-   - A breakpoint defined on a parent session applies to all child
-     transactions unless explicitly scoped otherwise.
-   - A child transaction commit into a parent transaction MUST NOT be
-     treated as a committed mutation.
-
-   Only the outermost transaction commit produces authoritative mutation
-   events.
-
-Rationale:
-
-This model preserves determinism, prevents breakpoint storms during
-speculative execution, and aligns debugging semantics with Turnix's
-transactional authority model (see DA-04).
+03.2.2. Memory-breakpoint triggers may include:
+        - memory key
+        - memory layer
+        - change type such as set, delete, or overwrite
+        - optional value predicate
 
 
-03.3 Capability breakpoints
---------------------------
-Pause before or after a capability call.
+03.2.1 MEMORY BREAKPOINTS AND TRANSACTIONAL STAGING (LOCKED)
+------------------------------------------------------------
 
-Triggers:
-- capability name
-- caller pack
-- permission decision point
+03.2.1.1. Memory breakpoints observe state transitions rather than storage
+          mechanics.
+
+03.2.1.2. Definitions:
+          - a staged mutation is a write into a transactional layer
+          - a committed mutation is a write that becomes visible in a
+            committed authoritative memory layer after successful commit
+          - an aborted mutation is a staged mutation discarded during abort
+
+03.2.1.3. By default, memory breakpoints trigger on committed mutations
+          only.
+
+03.2.1.4. Writing into a transactional layer does not trigger a memory
+          breakpoint by default.
+
+03.2.1.5. Aborting a transaction does not trigger a memory breakpoint by
+          default.
+
+03.2.1.6. Only the moment a value becomes authoritative is breakpoint-
+          visible by default.
+
+03.2.1.7. Memory breakpoints may be configured to observe staged mutations
+          explicitly.
+
+03.2.1.8. If staged observation is enabled, a breakpoint may specify:
+          - observeStaged = true
+          - observeCommitted = true or false
+
+03.2.1.9. When observeStaged is enabled, the breakpoint may trigger when a
+          staged value is written.
+
+03.2.1.10. Staged-mutation breakpoint context includes:
+           - transactionId
+           - staging-layer identity
+           - parent-layer identity
+           - commit-eligibility status
+
+03.2.1.11. Every memory-breakpoint hit is classified as exactly one of:
+           - StagedMutation
+           - CommittedMutation
+
+03.2.1.12. Breakpoints do not fire twice for the same mutation phase.
+
+03.2.1.13. If a breakpoint observes both staged and committed mutation
+           phases, the staged hit and committed hit are distinct events.
+
+03.2.1.14. Those distinct events are trace-linked to the same mutation
+           lineage.
+
+03.2.1.15. Nested transactions inherit breakpoint semantics unless
+           explicitly scoped otherwise.
+
+03.2.1.16. A child transaction commit into a parent transaction is not
+           treated as a committed mutation.
+
+03.2.1.17. Only the outermost transaction commit produces authoritative
+           committed-mutation events.
+
+03.2.1.18. This model preserves determinism, prevents breakpoint storms
+           during speculative execution, and aligns debugging semantics with
+           the transactional authority model in DA-04.
 
 
-===============================================================================
-04. BREAKPOINT BEHAVIOR
-===============================================================================
+03.3 CAPABILITY BREAKPOINTS
+---------------------------
 
-When a breakpoint triggers:
-- execution of the triggering unit pauses
-- mutation-capable execution for the owning appInstance pauses
-- other appInstances MAY continue (if supported)
-- non-mutating kernel activity MAY continue (unless configured otherwise)
-- debugger UI is notified
-- state becomes inspectable
+03.3.1. A capability breakpoint pauses execution before or after a
+        capability call according to the configured trigger.
 
-Breakpoints NEVER:
-- auto-resume silently
-- alter execution order
-- mutate state by default
+03.3.2. Capability-breakpoint triggers may include:
+        - capability name
+        - caller pack
+        - permission decision point
 
 
 ===============================================================================
-05. LIVE DEBUGGING WITHOUT PAUSE
+04. BREAKPOINT BEHAVIOR (LOCKED)
 ===============================================================================
 
-The debugger MAY be used while Turnix is running normally.
+04.1. When a breakpoint triggers:
+      - execution of the triggering unit pauses
+      - mutation-capable execution for the owning AppInstance pauses
+      - other AppInstances may continue if the runtime supports that
+      - non-mutating kernel activity may continue unless configured
+        otherwise
+      - debugger tooling is notified
+      - relevant state becomes inspectable
 
-LOCKED:
-- Debugger inspection does NOT require a breakpoint to be hit.
-- Debugger inspection does NOT require Turnix to be in a paused state.
-
-Consequences:
-- A user may open inspectors, browse state, and request read-only views
-  at any time.
-- Such inspection MUST be traceable and marked as debugger or tooling
-  activity.
+04.2. Breakpoints do not:
+      - auto-resume silently
+      - alter execution order
+      - mutate state by default
 
 
 ===============================================================================
-06. DEBUGGER ACTIONS VS ORCHESTRATION
+05. LIVE DEBUGGING WITHOUT PAUSE (LOCKED)
 ===============================================================================
 
-Debugger UI actions are executed via Turnix-controlled remote procedure call
-and capabilities.
+05.1. The debugger may be used while Turnix is running normally.
 
-LOCKED:
-- Debugger tooling MUST NOT bypass Turnix orchestration.
-- Debugger tooling MUST NOT access raw filesystem input or output.
-- Any persistence-affecting action initiated by the debugger MUST execute
-  through the same authority path as normal runtime actions (for example
-  IoManager or services that use it).
+05.2. Debugger inspection does not require a breakpoint hit.
+
+05.3. Debugger inspection does not require Turnix to be paused.
+
+05.4. A user may open inspectors, browse state, and request read-only views
+      at any time.
+
+05.5. Such inspection is traceable and marked as debugger or tooling
+      activity.
+
+
+===============================================================================
+06. DEBUGGER ACTIONS VS ORCHESTRATION (LOCKED)
+===============================================================================
+
+06.1. Debugger actions execute through Turnix-controlled remote procedure
+      calls, capabilities, or equivalent Turnix-mediated interfaces.
+
+06.2. Debugger tooling does not bypass Turnix orchestration.
+
+06.3. Debugger tooling does not access raw filesystem input or output
+      directly as a bypass path.
+
+06.4. Any persistence-affecting debugger action executes through the same
+      authority path as normal runtime actions, for example IoManager or
+      services that use it.
 
 
 ===============================================================================
 07. INSPECTION SURFACES
 ===============================================================================
 
-Inspectable objects include:
-- PackDescriptors
-- Activation state
-- Memory layers
-- Pipeline objects
-- Capability registry
-- Services registry
+07.1. Inspectable objects include:
+      - PackDescriptors
+      - activation state
+      - memory layers
+      - pipeline objects
+      - capability registry
+      - services registry
 
-Inspection is read-only by default.
-
-
-===============================================================================
-08. CONTROLLED MUTATION
-===============================================================================
-
-Explicit mutation is allowed ONLY via:
-- debugger actions
-- explicit user confirmation
-- trace logging
-
-Examples:
-- editing a memory value
-- disabling or modifying a breakpoint
-- forcing resume or abort
-
-Every mutation emits a trace event.
+07.2. Inspection is read-only by default.
 
 
 ===============================================================================
-09. MUTATION WHILE RUNNING
+08. CONTROLLED MUTATION (LOCKED)
 ===============================================================================
 
-Controlled mutation MAY be performed while Turnix is active (not paused).
+08.1. Explicit mutation is allowed only through:
+      - debugger actions
+      - explicit user confirmation where required
+      - trace logging
 
-Rules:
-- Mutation MUST be explicit (user action in debugger UI).
-- Mutation MUST be traceable and labeled as debugger-initiated.
-- Mutation MUST obey the same permission, ownership, and scope rules as
-  normal runtime actions.
+08.2. Examples include:
+      - editing a memory value
+      - disabling or modifying a breakpoint
+      - forcing resume or abort
 
-If a mutation affects data that active execution units may read concurrently,
-the debugger MUST either:
-- require a manual pause (see Section 10), OR
-- enforce deterministic apply-at-safe-point semantics (see Section 11).
-
-
-===============================================================================
-10. MANUAL PAUSE
-===============================================================================
-
-Turnix MAY support manual pausing even when no breakpoint is hit.
-
-Purpose:
-- allow deterministic inspection and mutation
-- prevent important work from being voided by cancellation
-
-LOCKED:
-- Manual pause MUST be deterministic.
-- Manual pause MUST NOT silently cancel in-flight work.
-- If pausing cannot be achieved safely, Turnix MUST refuse the pause request
-  with an explicit, traceable reason.
-
-Manual pause MAY operate by enforcing quiescence at defined safe points:
-- between pipeline stages
-- between capability calls
-- before commit points for persistence
+08.3. Every debugger-initiated mutation emits a trace event.
 
 
 ===============================================================================
-11. APPLY-AT-SAFE-POINT
+09. MUTATION WHILE RUNNING (LOCKED)
 ===============================================================================
 
-When Turnix is not paused, debugger-initiated mutations MAY be staged and
-applied only at a deterministic safe point.
+09.1. Controlled mutation may be performed while Turnix is active and not
+      paused.
 
-Rules:
-- Staging MUST be traceable.
-- The exact safe point where the mutation becomes visible MUST be traceable.
-- Staged mutations MUST NOT partially apply.
-- If the safe point is never reached (for example execution aborts), the
-  staged mutation MUST be discarded deterministically and traced.
+09.2. Rules:
+      - mutation is explicit user action in debugger tooling
+      - mutation is traceable and labeled as debugger-initiated
+      - mutation obeys the same permission, ownership, and scope rules as
+        normal runtime actions
 
-
-===============================================================================
-12. TRACE RETENTION AND DEBUGGER ACTIONS
-===============================================================================
-
-Debugger tooling MUST NOT create untraced gaps.
-
-Rules (LOCKED):
-- Any debugger action that affects trace evidence (export, prune, clear,
-  retention policy changes) MUST emit the corresponding trace reasons defined
-  in DA-03, including retention, continuity, and loss evidence reasons.
-- Such events MUST be marked as debugger-initiated via trace attributes.
-
-Meaning:
-- Trace retention and loss evidence rules apply equally to debugger-initiated
-  trace-affecting actions.
+09.3. If a mutation affects data that active execution units may read
+      concurrently, the debugger either:
+      - requires a manual pause
+      - or enforces deterministic apply-at-safe-point semantics
 
 
 ===============================================================================
-13. DEBUGGER UI INTEGRATION
+10. MANUAL PAUSE (LOCKED)
 ===============================================================================
 
-Debugger UI:
-- subscribes via RPC
-- receives breakpoint hit events
-- shows causal context
-- allows resume, step, or abort
+10.1. Turnix may support manual pausing even when no breakpoint is hit.
 
-Debugger UI is optional but supported.
+10.2. Manual pause exists to:
+      - allow deterministic inspection and mutation
+      - prevent important work from being voided by cancellation
+
+10.3. Manual pause is deterministic.
+
+10.4. Manual pause does not silently cancel in-flight work.
+
+10.5. If pausing cannot be achieved safely, Turnix refuses the pause
+      request with an explicit, traceable reason.
+
+10.6. Manual pause may operate by enforcing quiescence at defined safe
+      points such as:
+      - between pipeline stages
+      - between capability calls
+      - before commit points for persistence
+
+
+===============================================================================
+11. APPLY-AT-SAFE-POINT (LOCKED)
+===============================================================================
+
+11.1. When Turnix is not paused, debugger-initiated mutations may be staged
+      and applied only at a deterministic safe point.
+
+11.2. Rules:
+      - staging is traceable
+      - the exact safe point where the mutation becomes visible is traceable
+      - staged mutations do not partially apply
+      - if the safe point is never reached, for example because execution
+        aborts, the staged mutation is discarded deterministically and traced
+
+
+===============================================================================
+12. TRACE RETENTION AND DEBUGGER ACTIONS (LOCKED)
+===============================================================================
+
+12.1. Debugger tooling does not create untraced gaps.
+
+12.2. Any debugger action that affects trace evidence, including export,
+      prune, clear, or retention-policy changes, emits the corresponding
+      trace reasons defined in DA-03.
+
+12.3. Such events are marked as debugger-initiated through trace
+      attributes.
+
+12.4. Trace retention and loss-evidence rules apply equally to debugger-
+      initiated trace-affecting actions.
+
+
+===============================================================================
+13. DEBUGGER USER-INTERFACE INTEGRATION
+===============================================================================
+
+13.1. Debugger user interfaces may:
+      - subscribe via RPC
+      - receive breakpoint-hit events
+      - show causal context
+      - allow resume, step, or abort
+
+13.2. Debugger user interfaces are optional but supported.
 
 
 ===============================================================================
 14. STEP MODES
 ===============================================================================
 
-Supported:
-- Resume
-- Step over (next stage or memory change)
-- Abort (fail current execution unit)
+14.1. Supported step modes include:
+      - Resume
+      - Step over, meaning the next stage or memory change
+      - Abort, meaning fail the current execution unit
 
-Unsupported:
-- instruction-level stepping
-- time travel (future area)
+14.2. Unsupported step modes include:
+      - instruction-level stepping
+      - time travel as a runtime debugger mode in this document
 
 
 ===============================================================================
-15. JOBS, LONG-RUNNING WORK & BREAKPOINTING
+15. JOBS, LONG-RUNNING WORK, AND BREAKPOINTING
 ===============================================================================
 
-Turnix MAY represent long-running work as explicit Jobs.
+15.1. Turnix may represent long-running work as explicit Jobs.
 
-If Jobs exist:
-- Jobs MUST be observable (status, owner, causal trace links).
-- Jobs MUST be abortable only through Turnix orchestration.
+15.2. If Jobs exist:
+      - Jobs are observable through status, owner, and causal trace links
+      - Jobs are abortable only through Turnix orchestration
 
-Debugger interaction with Jobs:
-- A manual pause MUST NOT implicitly abort Jobs.
-- A debugger MAY request:
-  - pause-at-safe-point for a Job
-  - breakpoint-at-safe-point for a Job
-  - explicit Job abort
+15.3. Debugger interaction with Jobs may include requests for:
+      - pause-at-safe-point for a Job
+      - breakpoint-at-safe-point for a Job
+      - explicit Job abort
 
-Safe-point pausing or breakpointing of Jobs occurs:
-- between pipeline stages
-- before or after capability boundaries
-- before commit points for persistence
+15.4. Manual pause does not implicitly abort Jobs.
 
-If a Job cannot reach a safe point:
-- this MUST be surfaced explicitly
-- no silent cancellation is permitted
+15.5. Safe-point pausing or breakpointing of Jobs occurs at boundaries such
+      as:
+      - between pipeline stages
+      - before or after capability boundaries
+      - before commit points for persistence
+
+15.6. If a Job cannot reach a safe point:
+      - that fact is surfaced explicitly
+      - no silent cancellation is permitted
 
 
 ===============================================================================
 16. SCOPING RULES
 ===============================================================================
 
-Breakpoints can be scoped to:
-- global
-- appInstance
-- view
-- pack
-- pipeline
+16.1. Breakpoints may be scoped to:
+      - global
+      - AppInstance
+      - view
+      - pack
+      - pipeline
 
-Unscoped breakpoints are discouraged.
-
-
-===============================================================================
-17. DEV VS PROD
-===============================================================================
-
-In production:
-- breakpoints disabled by default
-- inspection limited
-- mutation disallowed unless explicitly enabled
-
-In development:
-- all features available
+16.2. Unscoped breakpoints are discouraged.
 
 
 ===============================================================================
-18. FAILURE MODES
+17. DEVELOPMENT VS PRODUCTION
 ===============================================================================
 
-If debugger disconnects:
-- execution resumes or aborts based on policy
-- the chosen outcome MUST be traced using the debugger disconnect outcome
-  reasons defined in DA-03
-- no deadlock allowed
+17.1. In production:
+      - breakpoints are disabled by default
+      - inspection is limited
+      - mutation is disallowed unless explicitly enabled
 
-If breakpoint logic errors:
-- breakpoint disabled
-- error traced
+17.2. In development:
+      - all debugging features in this document are available
+
+
+===============================================================================
+18. FAILURE MODES (LOCKED)
+===============================================================================
+
+18.1. If the debugger disconnects:
+      - execution resumes or aborts according to policy
+      - the chosen outcome is traced using the debugger-disconnect outcome
+        reasons defined in DA-03
+      - deadlock is not allowed
+
+18.2. If breakpoint logic errors:
+      - the breakpoint is disabled
+      - the error is traced
 
 
 ===============================================================================
 19. RELATION TO TRACING
 ===============================================================================
 
-Every breakpoint hit:
-- emits a trace event
-- links to the causal chain
-- records inspection and mutation actions
+19.1. Every breakpoint hit:
+      - emits a trace event
+      - links to the causal chain
+      - records inspection and mutation actions when applicable
 
-Breakpoint hits and resume actions MUST be traced using the breakpoint reasons
-defined in DA-03.
+19.2. Breakpoint hits and resume actions are traced using the breakpoint
+      reasons defined in DA-03.
 
-Breakpoint hit trace events MUST include sufficient identifiers for offline
-linking when applicable, including:
-- appInstanceId
-- pipelineRunId and stage id (pipeline breakpoints)
-- memoryLayerId and memory key identity (memory breakpoints)
-- transactionId and mutation phase (StagedMutation | CommittedMutation)
-- capability identifier and caller pack identity (capability breakpoints)
-- orchestrationUnitId or Job identity (if applicable)
+19.3. Breakpoint-hit trace events include sufficient identifiers for
+      offline linking when applicable, including:
+      - appInstanceId
+      - pipelineRunId and stageId for pipeline breakpoints
+      - memoryLayerId and memory-key identity for memory breakpoints
+      - transactionId and mutation phase for staged or committed mutation
+      - capability identifier and caller-pack identity for capability
+        breakpoints
+      - orchestrationUnitId or Job identity when applicable
 
-Tracing and debugging are complementary.
+19.4. Tracing and debugging are complementary.
 
-Debugger actions that stage and apply mutations at safe points MUST be traced
-as distinct events that share a stable mutation lineage identifier.
+19.5. Debugger actions that stage and apply mutations at safe points are
+      traced as distinct events that share a stable mutation-lineage
+      identifier.
 
 
 ===============================================================================
 20. WHAT IS EXPLICITLY NOT SUPPORTED
 ===============================================================================
 
-NOT SUPPORTED:
-- arbitrary Python debugger injection
-- JavaScript eval debugging
-- modifying pack code at runtime
-- hot-patching logic without reload
+20.1. The following are not supported:
+      - arbitrary Python debugger injection
+      - JavaScript eval debugging
+      - modifying pack code at runtime
+      - hot-patching logic without reload
 
 
 ===============================================================================
 21. EXPLICITLY OPEN QUESTIONS
 ===============================================================================
 
-OPEN:
-- conditional breakpoint language
-- snapshot or restore state
-- time-travel debugging
-- replay-from-trace tooling
+21.1. OPEN questions include:
+      - conditional breakpoint language
+      - snapshot or restore state
+      - time-travel debugging
+      - replay-from-trace tooling
 
 
 ===============================================================================
 22. LOCKED SUMMARY
 ===============================================================================
 
-LOCKED:
-- semantic breakpoints
-- pipeline, memory, and capability breakpoints
-- transaction-aware breakpoint semantics
-- read-only inspection by default
-- controlled mutation with tracing
-- debugger usable while Turnix is running
-- deterministic manual pause
-- apply-at-safe-point mutation semantics
-- job-safe breakpointing and pausing
-- non-blocking debugger behavior
+22.1. LOCKED:
+      - semantic breakpoints
+      - pipeline, memory, and capability breakpoints
+      - transaction-aware breakpoint semantics
+      - read-only inspection by default
+      - controlled mutation with tracing
+      - debugger usability while Turnix is running
+      - deterministic manual pause
+      - apply-at-safe-point mutation semantics
+      - Job-safe breakpointing and pausing
+      - non-blocking debugger behavior
 
-OPEN:
-- advanced conditional logic
-- replay and time travel
+22.2. OPEN:
+      - advanced conditional logic
+      - replay and time travel
 
 
 ===============================================================================
@@ -523,6 +547,6 @@ END OF DA-16 - DEBUGGING, INSPECTION & BREAKPOINTS
 --- doc-meta ---
 DOC_ID: DA-16
 DOC_FILE: docs/design/DA-16_DEBUGGING_INSPECTION_AND_BREAKPOINTS.txt
-DOC_REV: 10
-DOC_GIT: 9a31418
+DOC_REV: 11
+DOC_GIT: a21ff18
 ----------------
