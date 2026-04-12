@@ -1,263 +1,345 @@
 ===============================================================================
-OPTIONAL DESIGN AREA A - MINIMAL BOOTSTRAP & ERROR UI SUBSYSTEM
+OPTIONAL DESIGN AREA ODA-A - MINIMAL BOOTSTRAP & ERROR UI SUBSYSTEM
 ===============================================================================
 
 Status:
 -------
-OPTIONAL BUT STRATEGIC - not required for core Turnix correctness,
-but strongly improves robustness, debuggability, and user trust.
+EVOLVING
+
+Description:
+------------
+Defines a minimal bootstrap and error-presentation layer for failures that
+occur before normal appPack activation and before the main user-facing
+Turnix surfaces are available.
+
+This area is optional in tier, but strategically important for robustness,
+debuggability, and user trust.
+
+Purpose:
+--------
+This document defines the minimal bootstrap and error-user-interface model
+used when Turnix encounters blocking failures before normal runtime surfaces
+are available.
+
+It defines:
+- bootstrap rings as a conceptual startup model
+- the role and scope of the minimal error UI
+- kernel-owned error communication and action handling
+- frontend handling during early blocking failures
+- fallback behavior when minimal UI is unavailable
+
+It does NOT define:
+- core Turnix correctness semantics
+- normal appPack user-interface behavior
+- PackManager behavior
+- mod-defined or themeable early UI extension rules
+- LLM-assisted recovery as required behavior
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-05
+- DA-06
+- DA-12
+- DA-15
+
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
+
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines a minimal bootstrap and error-user-interface
+      subsystem within that shared interpretation model.
 
 
 ===============================================================================
-1. CORE PROBLEM THIS AREA SOLVES
+02. CORE PROBLEM
 ===============================================================================
 
-Turnix must handle failures that occur:
-- before any appPack is active
-- before user UI exists
-- before mods are loaded
-- before services or capabilities are available
+02.1. Turnix may fail before:
+      - any appPack is active
+      - normal user interface exists
+      - mods are loaded
+      - services or capabilities are available for normal application use
 
-Examples:
-- corrupted global config
-- unreadable manifest
-- schema mismatch
-- missing runtime files
-- discovery failure
+02.2. Examples include:
+      - corrupted global config
+      - unreadable manifest
+      - schema mismatch
+      - missing runtime files
+      - discovery failure
 
-Without a minimal UI layer, such failures become:
-- silent
-- terminal-only
-- confusing
-- non-recoverable for non-technical users
+02.3. Without a minimal bootstrap-facing error surface, such failures may
+      become:
+      - silent
+      - terminal-only
+      - confusing
+      - harder to recover for non-technical users
 
-
-===============================================================================
-2. BOOTSTRAP PHASES (LOCKED CONCEPT)
-===============================================================================
-
-Turnix startup is conceptually split into rings:
-
-
-Ring 0 - Kernel bootstrap
--------------------------
-- process startup
-- logging
-- IoManager
-- error envelope
-- config schema loader
-- default config loader
-- user config loader
-
-Failures here are FATAL.
-No UI is guaranteed.
-
-
-Ring 1 - Minimal UI bootstrap (this area)
------------------------------------------
-- serve index.html
-- serve bootstrap.js
-- establish RPC
-- register error-reporting capability
-- render minimal error UI
-
-Failures here are SEVERE but recoverable
-with retry or user action.
-
-
-Ring 2 - Pack discovery & activation
-------------------------------------
-- content scanning
-- indexing
-- activation
-- appInstance creation
-
-Failures here are expected and user-resolvable.
+02.4. This document defines an early minimal subsystem intended to reduce
+      those failure modes without depending on normal pack-driven runtime
+      behavior.
 
 
 ===============================================================================
-3. MINIMAL ERROR UI PURPOSE
+03. BOOTSTRAP RINGS (LOCKED CONCEPT)
 ===============================================================================
 
-The minimal error UI exists ONLY to:
-- display fatal / blocking errors
-- present recovery choices
-- return a decision to kernel
-
-It is NOT:
-- a full application UI
-- a PackManager
-- themeable
-- customizable by mods
+03.1. Turnix startup may be understood as a ring-based conceptual model.
 
 
-===============================================================================
-4. ERROR UI CHARACTERISTICS (LOCKED)
-===============================================================================
+03.1 RING 0 - KERNEL BOOTSTRAP (LOCKED CONCEPT)
+-----------------------------------------------
 
-The minimal error UI must:
-- be small
-- load fast
-- have zero dependencies on packs
-- not require LLM
-- not require user config
-- not require saves
-- not require asset compilation
+03.1.1. Ring 0 includes early kernel bootstrap responsibilities such as:
+        - process startup
+        - logging
+        - IoManager
+        - error-envelope handling
+        - config schema loading
+        - default-config loading
+        - user-config loading
 
-Acceptable forms:
-- Electron window
-- browser page
-- native dialog
-- text overlay (fallback)
+03.1.2. Failures in Ring 0 are fatal.
+
+03.1.3. No user interface is guaranteed in Ring 0.
 
 
-===============================================================================
-5. ERROR COMMUNICATION MODEL (LOCKED)
-===============================================================================
+03.2 RING 1 - MINIMAL UI BOOTSTRAP (LOCKED CONCEPT)
+---------------------------------------------------
 
-Errors are sent to the UI as:
-- standard error envelope
-- with human-readable message
-- with structured payload
-- with allowed actions list
+03.2.1. Ring 1 includes the minimal bootstrap-facing error subsystem.
 
-UI responds with:
-- selected action
-- optional parameters
-- acknowledgement
+03.2.2. Ring 1 responsibilities may include:
+        - serving index.html
+        - serving bootstrap.js
+        - establishing RPC
+        - registering early error-reporting paths
+        - rendering a minimal error UI
+
+03.2.3. Failures in Ring 1 are severe.
+
+03.2.4. Ring-1 failures may still allow retry, fallback, or user action when
+        the surrounding bootstrap environment supports that.
 
 
-===============================================================================
-6. SUPPORTED USER ACTIONS (LOCKED)
-===============================================================================
+03.3 RING 2 - PACK DISCOVERY AND ACTIVATION (LOCKED CONCEPT)
+------------------------------------------------------------
 
-Typical actions:
-- Retry
-- Reset config to defaults
-- Ignore and continue (if allowed)
-- Abort startup
-- Open logs directory
+03.3.1. Ring 2 includes later startup work such as:
+        - content scanning
+        - indexing
+        - activation
+        - appInstance creation
 
-Actions are provided by kernel,
-not invented by UI.
+03.3.2. Failures in Ring 2 are expected to be more user-resolvable than
+        Ring-0 failures because the minimal interaction layer may already
+        exist by then.
 
 
 ===============================================================================
-7. UI AVAILABILITY GUARANTEE
+04. MINIMAL ERROR UI PURPOSE (LOCKED)
 ===============================================================================
 
-Once Ring 1 is complete:
-- kernel may assume UI exists
-- user decisions may be requested
-- execution may pause safely
+04.1. The minimal error UI exists only to:
+      - display fatal or blocking errors
+      - present recovery choices supplied by the kernel
+      - return a decision to the kernel
 
-Before Ring 1:
-- no user interaction allowed
-- fatal errors abort immediately
-
-
-===============================================================================
-8. OPTIONAL PACK-BASED ERROR UI (OPEN / FUTURE)
-===============================================================================
-
-Concept:
-- special pack category: errorUiPack
-- loaded before normal discovery
-- explicitly whitelisted
-- replaces built-in error UI
-
-Pros:
-- themed
-- extensible
-- reusable
-
-Cons:
-- increases bootstrap complexity
-- dependency risk
-
-Status: NOT LOCKED
+04.2. The minimal error UI is not:
+      - a full application UI
+      - a PackManager
+      - themeable by normal packs
+      - customizable by mods
 
 
 ===============================================================================
-9. MULTI-FRONTEND HANDLING (LOCKED)
+05. ERROR UI CHARACTERISTICS (LOCKED)
 ===============================================================================
 
-If multiple frontends connect:
-- error is broadcast
-- first response wins
-- others are dismissed
+05.1. The minimal error UI is:
+      - small
+      - fast to load
+      - independent of packs
+      - independent of LLM availability
+      - independent of user config
+      - independent of saves
+      - independent of asset compilation
 
-Kernel remains authority.
+05.2. Acceptable forms may include:
+      - an Electron window
+      - a browser page
+      - a native dialog
+      - a text overlay fallback
 
-
-===============================================================================
-10. LLM-ASSISTED RECOVERY (OPEN)
-===============================================================================
-
-Idea:
-- if LLM service is available
-- provide explanation / guidance
-
-Constraints:
-- must never block recovery
-- must never replace user choice
-- must never be required
-
-Status: OPEN / OPTIONAL
+05.3. The exact presentation technology is an implementation choice so long
+      as the minimal-bootstrap constraints in this document remain preserved.
 
 
 ===============================================================================
-11. FAILURE MODES
+06. ERROR COMMUNICATION MODEL (LOCKED)
 ===============================================================================
 
-If minimal UI fails to load:
-- fallback to launcher
-- fallback to console
-- abort with clear error
+06.1. Kernel-originated blocking errors are sent to the minimal UI as:
+      - the standard error envelope
+      - a human-readable message
+      - structured payload
+      - an allowed-actions list
 
-If UI disconnects:
-- pause execution
-- allow reconnect
-- enforce timeout if configured
+06.2. The UI returns:
+      - the selected action
+      - optional parameters
+      - acknowledgement when required
 
-
-===============================================================================
-12. WHAT THIS AREA DOES NOT DO
-===============================================================================
-
-Explicitly excluded:
-- save inspection
-- pack browsing
-- mod installation
-- capability invocation
-- scripting
-- theming
+06.3. Action meaning originates in the kernel rather than in the UI.
 
 
 ===============================================================================
-13. LOCKED SUMMARY
+07. SUPPORTED USER ACTIONS (LOCKED)
 ===============================================================================
 
-LOCKED:
-- concept of bootstrap rings
-- minimal error UI role
-- kernel-driven actions
-- structured error envelopes
-- pause-and-resume behavior
+07.1. Typical kernel-provided actions may include:
+      - Retry
+      - Reset config to defaults
+      - Ignore and continue when allowed
+      - Abort startup
+      - Open logs directory
 
-OPEN:
-- pack-based error UI
-- LLM-assisted guidance
-- UX refinements
+07.2. Available actions are provided by the kernel.
+
+07.3. The UI does not invent actions.
 
 
 ===============================================================================
-END OF OPTIONAL DESIGN AREA A - MINIMAL BOOTSTRAP & ERROR UI SUBSYSTEM
+08. UI AVAILABILITY GUARANTEE
 ===============================================================================
 
+08.1. Once Ring 1 is complete:
+      - the kernel may assume that a minimal decision surface exists
+      - user decisions may be requested
+      - execution may pause safely for decision handling
+
+08.2. Before Ring 1 completes:
+      - no user interaction is relied upon
+      - fatal errors abort immediately unless an even earlier fallback path
+        exists outside this document's guaranteed scope
+
+
+===============================================================================
+09. MULTI-FRONTEND HANDLING (LOCKED)
+===============================================================================
+
+09.1. If multiple frontends connect to the minimal error subsystem:
+      - the blocking error is broadcast
+      - the first valid response wins
+      - other pending presentations are dismissed
+
+09.2. The kernel remains the authority.
+
+
+===============================================================================
+10. FAILURE MODES
+===============================================================================
+
+10.1. If the minimal UI fails to load:
+      - Turnix may fall back to a launcher surface
+      - Turnix may fall back to console reporting
+      - Turnix may abort with a clear error when no safe fallback exists
+
+10.2. If the UI disconnects:
+      - execution may pause
+      - reconnect may be allowed
+      - timeout handling may apply when configured
+
+
+===============================================================================
+11. OPTIONAL PACK-BASED ERROR UI (OPEN)
+===============================================================================
+
+11.1. A future design may define a special early-loaded errorUiPack model.
+
+11.2. Such a model might:
+      - load before normal discovery
+      - require explicit whitelisting
+      - replace the built-in minimal error UI
+
+11.3. Potential advantages include:
+      - themed presentation
+      - extensibility
+      - reuse
+
+11.4. Potential costs include:
+      - increased bootstrap complexity
+      - increased dependency risk
+
+11.5. This concept remains OPEN.
+
+
+===============================================================================
+12. LLM-ASSISTED RECOVERY (OPEN)
+===============================================================================
+
+12.1. A future design may allow LLM-assisted explanation or guidance when an
+      LLM service is available.
+
+12.2. Constraints would include:
+      - LLM assistance does not block recovery
+      - LLM assistance does not replace user choice
+      - LLM assistance is never required for recovery
+
+12.3. This concept remains OPEN and optional.
+
+
+===============================================================================
+13. WHAT THIS AREA DOES NOT DO
+===============================================================================
+
+13.1. This area does not include:
+      - save inspection
+      - pack browsing
+      - mod installation
+      - normal capability invocation as a user feature surface
+      - scripting
+      - theming
+
+
+===============================================================================
+14. LOCKED SUMMARY
+===============================================================================
+
+14.1. LOCKED:
+      - bootstrap rings as a conceptual model
+      - the minimal error UI role
+      - kernel-driven actions
+      - structured error-envelope communication
+      - pause-and-resume handling once minimal UI exists
+
+14.2. OPEN:
+      - pack-based error UI
+      - LLM-assisted guidance
+      - user-experience refinements
+
+
+===============================================================================
+END OF ODA-A - MINIMAL BOOTSTRAP & ERROR UI SUBSYSTEM
+===============================================================================
 
 --- doc-meta ---
-docId: docs/design/ODA-A_MINIMAL_BOOTSTRAP_AND_ERROR_UI_SUBSYSTEM.txt
-rev: 1
-git: 0000000
+DOC_ID: ODA-A
+DOC_FILE: docs/design/ODA-A_MINIMAL_BOOTSTRAP_AND_ERROR_UI_SUBSYSTEM.txt
+DOC_REV: 6
+DOC_GIT: a597696
 ----------------
