@@ -1,224 +1,329 @@
 ===============================================================================
-OPTIONAL DESIGN AREA D - MINIMAL PACK / MOD CONTRACT
-Pragmatic, Reproducible, Low Author Burden
+OPTIONAL DESIGN AREA ODA-D - MINIMAL PACK / MOD CONTRACT
 ===============================================================================
 
-Core assumption:
-----------------
-You cannot guarantee correctness.
-You can only guarantee:
-- reproducibility
-- reversibility
-- explicit uncertainty
+Status:
+-------
+EVOLVING
 
-Anything else is illusion.
+Description:
+------------
+Defines an optional minimal contract model for pack and mod compatibility,
+version pinning, and update safety.
 
-
-===============================================================================
-1. OWNERSHIP MODEL
-===============================================================================
-
-System:
-- owns stability
-- owns versioning
-- owns rollback
-- owns enforcement of hard rules
-
-Author:
-- owns intent
-- declares minimum requirements
-- does NOT guarantee compatibility
-
-User:
-- owns decisions
-- but only after consequences are made explicit
-
-No party is asked to do what it cannot realistically do.
-
-
-===============================================================================
-2. THREE KINDS OF COMPATIBILITY (STRICTLY SEPARATED)
-===============================================================================
-
-2.1 HARD COMPATIBILITY (NON-NEGOTIABLE)
---------------------------------------
-
-If this fails, the pack MUST NOT load.
-No overrides.
-No "try anyway".
-
-Declared by author, enforced by engine.
-
-Example:
-
-engineApi: ">=1.6 <2.0"
-
-Typical contents:
-- required engine API range
-- required runtime (JS, Python, VM)
-- required execution model (ESM vs CJS, sync vs async)
-
-If mismatched:
-- loading is blocked
-- error is explicit and final
+This area is exploratory and pragmatic. It does not replace the higher
+Turnix design areas that define authoritative runtime semantics.
 
 Purpose:
-- protect the engine
-- prevent undefined behavior
+--------
+This document records a minimal compatibility and update-safety model aimed
+at low author burden, reproducibility, and explicit uncertainty.
+
+It defines:
+- a pragmatic ownership model
+- a three-part compatibility split
+- SavePack pinning as a deterministic source-of-truth concept
+- safe-default update behavior
+- storage and cleanup expectations for multiple pack versions
+
+It does NOT define:
+- authoritative dependency semantics
+- authoritative generic resolution behavior
+- authoritative activation rules
+- authoritative persistence or SavePack semantics beyond this optional model
+- any guarantee that compatibility can be proven in advance
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-02
+- DA-09
+- DA-11
+- DA-12
+
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
+
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines an optional minimal pack and mod contract model
+      within that shared interpretation model.
 
 
 ===============================================================================
+02. CORE ASSUMPTION
+===============================================================================
 
-2.2 SOFT COMPATIBILITY (INFORMATIONAL)
--------------------------------------
+02.1. Turnix does not guarantee compatibility correctness in advance.
 
-This may work, but is not guaranteed.
+02.2. This model instead prioritizes:
+      - reproducibility
+      - reversibility
+      - explicit uncertainty
 
-Optional declaration by author.
+02.3. This document treats those three properties as the practical baseline
+      for a low-burden compatibility contract.
 
-Example:
-
-testedWith:
-- engine@1.6.0
-- engine@1.6.1
-
-If current engine is outside testedWith:
-- pack MAY load
-- pack is marked as UNVERIFIED
-- system emits an informational warning
-
-The warning MUST be consequence-based, not moral.
-
-Good warning:
-"This pack has never been tested with engine 1.6.2.
-Last known working version: 1.6.0."
-
-Bad warning:
-"This pack may break. Continue?"
-
-No yes/no question.
-Only facts.
+02.4. This document does not claim that broader compatibility guarantees can
+      be made reliable merely through author declarations.
 
 
 ===============================================================================
+03. OWNERSHIP MODEL
+===============================================================================
 
-2.3 CAPABILITY COMPATIBILITY (FINE-GRAINED)
--------------------------------------------
+03.1. In this model, the system owns:
+      - stability enforcement
+      - versioning behavior
+      - rollback support
+      - enforcement of hard rules
 
-Packs declare what engine capabilities they rely on.
+03.2. In this model, the author owns:
+      - intent
+      - declaration of minimum requirements
 
-Example:
+03.3. In this model, the author does not guarantee compatibility.
 
-capabilities:
-- worldState.write
-- ui.inject
-- asset.pipeline.v1
+03.4. In this model, the user owns decisions only after consequences are
+      made explicit.
 
-Engine tracks capability changes between versions.
-
-If a capability changes:
-- pack is flagged as "potentially affected"
-- warning references the specific capability
-
-Example:
-"Capability 'ui.inject' changed behavior in engine 1.6.2."
-
-Purpose:
-- better diagnostics
-- no requirement for authors to re-release just to tag versions
+03.5. This ownership split exists so that no party is assigned a burden it
+      cannot realistically satisfy.
 
 
 ===============================================================================
-3. SAVE PACK AS THE SOURCE OF TRUTH
+04. THREE KINDS OF COMPATIBILITY (STRICTLY SEPARATED)
 ===============================================================================
 
-A SavePack MUST pin exact pack versions.
+04.1. This model separates:
+      - hard compatibility
+      - soft compatibility
+      - capability compatibility
 
-Example:
 
-savePack:
-  packId: example.mod
-  version: 2.3.1
-  hash: abcdef123456
+04.1 HARD COMPATIBILITY
+-----------------------
 
-Rules:
-- updates NEVER overwrite a SavePack
-- SavePack always loads with pinned versions
-- updates create new versions side-by-side
+04.1.1. Hard compatibility is non-negotiable in this model.
 
-Result:
-- deterministic saves
-- no silent breakage
-- rollback is trivial
+04.1.2. If hard compatibility fails, the pack does not load.
+
+04.1.3. This model does not allow override or "try anyway" behavior for hard
+        compatibility failure.
+
+04.1.4. Hard compatibility is declared by the author and enforced by the
+        engine.
+
+04.1.5. Example:
+        engineApi: ">=1.6 <2.0"
+
+04.1.6. Typical hard-compatibility content may include:
+        - required engine API range
+        - required runtime such as JavaScript, Python, or a VM
+        - required execution model such as ESM versus CJS or sync versus
+          async
+
+04.1.7. If hard compatibility mismatches:
+        - loading is blocked
+        - the error is explicit and final
+
+04.1.8. The purpose of hard compatibility is to:
+        - protect the engine
+        - prevent undefined behavior
+
+
+04.2 SOFT COMPATIBILITY
+-----------------------
+
+04.2.1. Soft compatibility is informational in this model.
+
+04.2.2. Soft compatibility means:
+        - the pack may work
+        - but the result is not guaranteed by this declaration alone
+
+04.2.3. Soft compatibility is optional for authors to declare.
+
+04.2.4. Example:
+        testedWith:
+        - engine@1.6.0
+        - engine@1.6.1
+
+04.2.5. If the current engine version is outside testedWith:
+        - the pack may still load
+        - the pack is marked as unverified
+        - the system emits an informational warning
+
+04.2.6. Warnings in this model are consequence-based rather than moralized.
+
+04.2.7. Good warning example:
+        "This pack has never been tested with engine 1.6.2.
+         Last known working version: 1.6.0."
+
+04.2.8. The model avoids yes/no prompting based only on soft compatibility.
+
+
+04.3 CAPABILITY COMPATIBILITY
+-----------------------------
+
+04.3.1. Capability compatibility is fine-grained in this model.
+
+04.3.2. Packs may declare which engine capabilities they rely on.
+
+04.3.3. Example:
+        capabilities:
+        - worldState.write
+        - ui.inject
+        - asset.pipeline@1
+
+04.3.4. If the engine tracks capability changes between versions, a pack may
+        be flagged as potentially affected when one of those capabilities
+        changes.
+
+04.3.5. Example:
+        "Capability 'ui.inject' changed behavior in engine 1.6.2."
+
+04.3.6. The purpose of capability compatibility is to improve diagnostics
+        without forcing authors to re-release merely to update version tags.
 
 
 ===============================================================================
-4. UPDATE POLICY (DEFAULT SAFE)
+05. SAVEPACK AS A SOURCE-OF-TRUTH CONCEPT
 ===============================================================================
 
-Default behavior:
-- SavePacks do NOT auto-update packs
+05.1. In this model, a SavePack pins exact pack versions.
 
-Optional per-save setting:
-- followUpdates = false (default)
-- followUpdates = true (explicit opt-in)
+05.2. Example:
+      savePack:
+        packId: example.mod
+        version: 2.3.1
+        hash: abcdef123456
 
-Global rolling profiles are allowed,
-but SavePacks remain deterministic.
+05.3. Model rules:
+      - updates do not overwrite a SavePack
+      - a SavePack loads with pinned versions
+      - updates create new versions side by side
 
+05.4. The intended result is:
+      - deterministic saves
+      - no silent breakage from updates
+      - straightforward rollback
 
-===============================================================================
-5. STORAGE AND GARBAGE COLLECTION
-===============================================================================
-
-The system may keep multiple versions of the same pack.
-
-Deletion rules:
-- versions referenced by any SavePack are NEVER deleted
-- unreferenced versions may be deleted by policy
-
-Example policies:
-- older than 30 days
-- disk quota exceeded
-- explicit user cleanup
-
-User may pin versions manually to prevent deletion.
+05.5. This section is subordinate to higher-authority SavePack and
+      persistence documents when they define the final authoritative model.
 
 
 ===============================================================================
-6. WHAT THIS CONTRACT DOES NOT REQUIRE
+06. UPDATE POLICY (DEFAULT SAFE)
 ===============================================================================
 
-It does NOT require authors to:
-- maintain parallel branches
-- publish "works with X.Y.Z"
-- update just to silence warnings
+06.1. In this model, SavePacks do not auto-update packs by default.
 
-It does NOT require users to:
-- understand dependency graphs
-- manage version pinning manually
+06.2. Example per-save setting:
+      - followUpdates = false as default
+      - followUpdates = true only by explicit opt-in
 
-It does NOT pretend compatibility can be guaranteed.
+06.3. Global rolling profiles may exist in this model.
 
-
-===============================================================================
-7. WHAT THIS CONTRACT GUARANTEES
-===============================================================================
-
-- builds that worked once can work again
-- updates are reversible
-- responsibility is explicit
-- uncertainty is visible, not hidden
-- stability is owned by the system, not outsourced
+06.4. SavePack behavior remains deterministic within that rolling-profile
+      environment.
 
 
 ===============================================================================
-END OF OPTIONAL DESIGN AREA D — MINIMAL PACK / MOD CONTRACT
+07. STORAGE AND GARBAGE COLLECTION
 ===============================================================================
 
+07.1. In this model, the system may keep multiple versions of the same pack.
+
+07.2. Versions referenced by any SavePack are not deleted.
+
+07.3. Unreferenced versions may be deleted by policy.
+
+07.4. Example deletion policies may include:
+      - older than 30 days
+      - disk quota exceeded
+      - explicit user cleanup
+
+07.5. Users may pin versions manually to prevent deletion.
+
+
+===============================================================================
+08. WHAT THIS CONTRACT DOES NOT REQUIRE
+===============================================================================
+
+08.1. This model does not require authors to:
+      - maintain parallel branches
+      - publish exact "works with X.Y.Z" claims
+      - update only to silence warnings
+
+08.2. This model does not require users to:
+      - understand dependency graphs
+      - manage version pinning manually in normal use
+
+08.3. This model does not pretend that compatibility can be guaranteed in
+      advance.
+
+
+===============================================================================
+09. WHAT THIS CONTRACT GUARANTEES
+===============================================================================
+
+09.1. Within the scope of this model:
+      - builds that worked once should be able to work again
+      - updates remain reversible
+      - responsibility remains explicit
+      - uncertainty remains visible rather than hidden
+      - stability remains system-owned rather than outsourced to authors
+
+
+===============================================================================
+10. RELATION TO HIGHER DOCUMENTS
+===============================================================================
+
+10.1. This document is optional and subordinate.
+
+10.2. If this document conflicts with higher-authority DA documents, the
+      higher-authority documents win.
+
+10.3. This document is useful only to the extent that it remains aligned
+      with the higher Turnix design.
+
+
+===============================================================================
+11. LOCKED AND OPEN
+===============================================================================
+
+11.1. LOCKED:
+      - the three-way compatibility split
+      - low-burden authoring intent
+      - reproducibility, reversibility, and explicit uncertainty as the
+        practical foundation of this model
+
+11.2. OPEN:
+      - the final authoritative form of these ideas in higher documents
+      - exact field shapes and final schema details
+      - how much of this model survives unchanged into authoritative design
+
+
+===============================================================================
+END OF ODA-D - MINIMAL PACK / MOD CONTRACT
+===============================================================================
 
 --- doc-meta ---
-docId: docs/design/ODA-D_MINIMAL_PACK_MOD_CONTRACT.txt
-rev: 1
-git: 0000000
+DOC_ID: ODA-D
+DOC_FILE: docs/design/ODA-D_MINIMAL_PACK_MOD_CONTRACT.txt
+DOC_REV: 7
+DOC_GIT: 21a1adf
 ----------------
