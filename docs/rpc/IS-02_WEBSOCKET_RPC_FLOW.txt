@@ -1,329 +1,426 @@
 ===============================================================================
-IMPLEMENTATION SPECIFICATION 2 - WEBSOCKET RPC FLOW
+IMPLEMENTATION SPECIFICATION IS-02 - WEBSOCKET RPC FLOW
 ===============================================================================
 
-This document explains how the Turnix backend wires the browser to the backend
-over the /ws endpoint, and how RPCMessage envelopes travel across that socket.
+Status:
+-------
+EVOLVING
 
-It combines behavior from:
-- the FastAPI WebSocket endpoint
-- the Session manager
-- the ViewRegistry
-- the browser-side RpcClient implementation
-
-
-===============================================================================
-HTTP BOOTSTRAP BEFORE SOCKET OPEN
-===============================================================================
-
-Before the browser opens the WebSocket connection, it performs two HTTP
-fetches that bootstrap configuration and establish identity.
-
-
-1) Settings fetch
------------------
-Endpoint:
-    GET /settings
-
-Behavior:
-- returns merged server configuration
-- bootstrap script freezes the result onto:
-      globalThis.Turnix
-
-Purpose:
-- allow early modules to read feature flags and environment switches
-- works before RPC is available
-
-
-2) View bootstrap
------------------
-Endpoint:
-    POST /api/bootstrap
-
-Behavior:
-- issues or refreshes a clientId cookie
-- binds the client to a view
-- returns:
-      - viewId
-      - viewToken
-      - current server generation number
-
-Frontend behavior:
-- stores these values
-- includes them in the subsequent "hello" RPC payload
-- also includes:
-      - per-tab clientInstanceId
-      - last persisted generation
-
-Purpose:
-- allow reconnects to resume cleanly
-- prevent accidental cross-view binding
-
-
-ViewRegistry responsibility:
-- stores server-side viewToken
-- ensures only the authenticated client can bind to a view
-- allows:
-      - multiple tabs sharing one clientId
-      - distinct viewTokens per tab
-
-
-===============================================================================
-CONNECTION LIFECYCLE
-===============================================================================
-
-1) WebSocket upgrade
---------------------
-The browser connects to:
-    ws://.../ws  (or wss://...)
-
-Backend behavior:
-- endpoint registered via mountWebSocket
-- after accept:
-    - enter receive loop
-    - discard non-text frames
-    - enforce payload size limits
-    - validate incoming frames as RPCMessage objects
-
-
-2) Client hello
----------------
-Immediately after WebSocket.OPEN, the frontend sends a "hello" frame.
-
-Properties:
-- includes view metadata
-- uses:
-    - standard schema version
-    - sys lane
-    - placeholder generation fields
-
-Validation:
-- helper enforces schema correctness before send
-
-
-3) Welcome
-----------
-On the first valid "hello":
-
-Backend behavior:
-- resolve or create the view
-- bind the WebSocket to that view
-- allocate a new generation via:
-      RPCConnection.newGeneration
-- update view state
-
-Response:
-- send a "welcome" message containing:
-      - new generation
-      - snapshot of current view/session state
-
-
-4) Client ready
----------------
-After receiving "welcome":
-
-Frontend behavior:
-- marks the connection as ready
-- flushes queued outbound messages
-- resumes subscriptions
-- reports module load status via "clientReady"
-
-Backend behavior:
-- ACK the message
-- record module metadata
-- ensure each module is processed only once per generation
-
-
-5) Heartbeat
+Description:
 ------------
-Liveness is maintained bidirectionally.
+Defines the concrete WebSocket RPC flow used between the browser-facing
+frontend and the backend over the /ws endpoint.
 
-Client:
-- periodically sends heartbeat frames
+This document is an implementation specification. It does not introduce new
+system guarantees, authority semantics, or policy rules.
 
-Server:
-- updates last-seen timestamp
-- replies with ACK
+Purpose:
+--------
+This document defines the concrete bootstrap, handshake, connection-lifecycle,
+and message-flow behavior used for WebSocket RPC transport.
 
-Failure handling:
-- missed heartbeats trigger frontend reconnection logic
+It defines:
+- HTTP bootstrap before socket open
+- WebSocket connection lifecycle
+- session and generation tracking
+- message dispatch behavior
+- acknowledgements and flow control
+- permission-check placement in the flow
+- logging and observability hooks for the transport
 
+It does NOT define:
+- new runtime authority semantics
+- new permission or policy rules
+- the RPC message schema itself beyond using IS-01
+- higher-level routing, visibility, activation, or capability semantics
+- frontend user-interface behavior beyond transport responsibilities
 
-6) Disconnect
--------------
-When the socket closes:
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- IS-01
+- DA-09
+- DA-10
+- DA-12
+- DA-14
+- DA-15
 
-Backend behavior:
-- cancel all pending requests
-- cancel active subscription coroutines
-- remove view binding
-- close the socket gracefully
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
 
-Frontend behavior:
-- clear timers
-- reject pending Promises
-- schedule exponential-backoff reconnect attempts
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines the concrete WebSocket RPC flow within that
+      shared interpretation model.
 
 
 ===============================================================================
-SESSION AND GENERATION TRACKING
+02. OVERVIEW
 ===============================================================================
 
-RPCConnection maintains per-view/client state:
+02.1. This document explains how the Turnix backend and browser-facing
+      frontend communicate over the /ws endpoint using RPCMessage envelopes.
 
-- idempotency cache
-- pending request tasks
-- active subscription coroutines
-- generation metadata
+02.2. This flow combines behavior from:
+      - the WebSocket endpoint
+      - the Session manager
+      - the ViewRegistry
+      - the frontend RpcClient implementation
 
+02.3. RPCMessage envelope structure is defined by IS-01.
 
-Generation rules:
-- each successful "hello" increments:
-      - generation number
-      - generation salt
-- messages with mismatched generation MUST be ignored
-
-
-Frontend responsibility:
-- store the latest generation
-- reject or discard any incoming message whose generation does not match
+02.4. This document defines how those envelopes move through the concrete
+      bootstrap, handshake, dispatch, acknowledgement, and disconnect flow.
 
 
 ===============================================================================
-MESSAGE DISPATCH
+03. HTTP BOOTSTRAP BEFORE SOCKET OPEN
 ===============================================================================
 
-After handshake completion:
+03.1. Before the browser opens the WebSocket connection, it performs HTTP
+      bootstrap requests that establish configuration and view identity.
 
-Backend behavior:
-- ACK every non-control message
-- dispatch based on message type and route
-
-
-Request messages:
-- routed to:
-      - object handlers, or
-      - capability-based request handlers
-- permissions enforced via:
-      _ensureCapabilityOrError
-- failures become structured "error" envelopes
-- errors correlate to the original message
+03.2. These bootstrap requests occur before normal RPC traffic is available.
 
 
-Emit / Subscribe messages:
-- dispatched to capability handlers
-- subscriptions tracked so that:
-      - cancel
-      - unsubscribe
-  can halt the associated coroutine and remove it from Session state
+03.1 SETTINGS FETCH
+-------------------
+
+03.1.1. The frontend performs:
+        GET /settings
+
+03.1.2. This request returns merged server configuration.
+
+03.1.3. The bootstrap script freezes the result onto:
+        globalThis.Turnix
+
+03.1.4. The purpose of this fetch is to allow early modules to read feature
+        flags and environment switches before RPC is available.
 
 
-Cancel messages:
-- remove pending work
-- stop active subscriptions
+03.2 VIEW BOOTSTRAP
+-------------------
+
+03.2.1. The frontend performs:
+        POST /api/bootstrap
+
+03.2.2. This request:
+        - issues or refreshes a clientId cookie
+        - binds the client to a view
+        - returns:
+          - viewId
+          - viewToken
+          - current server generation number
+
+03.2.3. The frontend stores these values.
+
+03.2.4. The frontend includes these values in the later hello RPC payload.
+
+03.2.5. The frontend also includes:
+        - per-tab clientInstanceId
+        - last persisted generation when available
+
+03.2.6. The purpose of view bootstrap is to:
+        - allow reconnects to resume cleanly
+        - prevent accidental cross-view binding
 
 
-Frontend behavior:
-- workload messages targeting capabilities are auto-ACKed
-- messages are dispatched to:
-      - call
-      - emit
-      - subscribe
-  handlers
-- replies and errors resolve or reject Promises
-- subscription updates trigger local event emitters
+03.3 VIEWREGISTRY RESPONSIBILITY
+--------------------------------
+
+03.3.1. ViewRegistry stores the server-side viewToken.
+
+03.3.2. ViewRegistry ensures that only the authenticated client can bind to
+        a view.
+
+03.3.3. ViewRegistry may allow:
+        - multiple tabs sharing one clientId
+        - distinct viewTokens per tab
 
 
 ===============================================================================
-ACKNOWLEDGEMENTS AND FLOW CONTROL
+04. CONNECTION LIFECYCLE
 ===============================================================================
 
-Automatic ACKs:
----------------
-Backend:
-- ACKs every message except:
-      - ack
+04.1. The WebSocket RPC lifecycle consists of:
+      - WebSocket upgrade
+      - client hello
+      - welcome
+      - clientReady
       - heartbeat
-
-Frontend:
-- ACKs all non-handshake messages
-
-ACK contents:
-- original message id
-- sys lane routing
+      - disconnect handling
 
 
-Budget and retry windows:
--------------------------
-- request and emit helpers attach budgetMs
-- derived from timeout and priority policy
-- frontend tracks:
+04.1 WEBSOCKET UPGRADE
+----------------------
+
+04.1.1. The browser connects to:
+        ws://.../ws
+        or
+        wss://.../ws
+
+04.1.2. The backend registers the endpoint through the WebSocket-mounting
+        path used by the implementation.
+
+04.1.3. After accept, backend behavior includes:
+        - entering the receive loop
+        - discarding non-text frames
+        - enforcing payload-size limits
+        - validating incoming frames as RPCMessage objects
+
+
+04.2 CLIENT HELLO
+-----------------
+
+04.2.1. Immediately after WebSocket.OPEN, the frontend sends a hello frame.
+
+04.2.2. The hello frame:
+        - includes view metadata
+        - uses the standard schema version
+        - uses the sys lane
+        - carries placeholder or bootstrap generation values as required by
+          the current connection state
+
+04.2.3. Frontend helper logic enforces schema correctness before send.
+
+
+04.3 WELCOME
+------------
+
+04.3.1. On the first valid hello, backend behavior includes:
+        - resolving or creating the view
+        - binding the WebSocket to that view
+        - allocating a new generation through RPCConnection.newGeneration
+        - updating view state
+
+04.3.2. The backend then sends a welcome message containing:
+        - the new generation
+        - a snapshot of current view or session state
+
+
+04.4 CLIENTREADY
+----------------
+
+04.4.1. After receiving welcome, the frontend:
+        - marks the connection as ready
+        - flushes queued outbound messages
+        - resumes subscriptions
+        - reports module-load status through clientReady
+
+04.4.2. Backend behavior on clientReady includes:
+        - acknowledging the message
+        - processing frontend-reported module metadata for loading
+        - ensuring each reported module is processed only once per
+          generation
+
+
+04.5 HEARTBEAT
+--------------
+
+04.5.1. Liveness is maintained bidirectionally.
+
+04.5.2. The client periodically sends heartbeat frames.
+
+04.5.3. The server:
+        - updates last-seen timestamp
+        - replies with acknowledgement behavior defined for heartbeat
+
+04.5.4. Missed heartbeats trigger frontend reconnection logic.
+
+
+04.6 DISCONNECT
+---------------
+
+04.6.1. When the socket closes, backend behavior includes:
+        - cancelling pending requests
+        - cancelling active subscription coroutines
+        - removing the view binding
+        - closing the socket gracefully
+
+04.6.2. When the socket closes, frontend behavior includes:
+        - clearing timers
+        - rejecting pending Promises
+        - scheduling reconnect attempts with backoff
+
+
+===============================================================================
+05. SESSION AND GENERATION TRACKING
+===============================================================================
+
+05.1. RPCConnection maintains per-view or per-client state such as:
+      - idempotency cache
+      - pending request tasks
+      - active subscription coroutines
+      - generation metadata
+
+05.2. Generation rules:
+      - each successful hello increments generation number and generation
+        salt
+      - messages with mismatched generation are ignored or rejected by the
+        continuity rules enforced by the implementation
+
+05.3. Frontend responsibility includes:
+      - storing the latest generation
+      - rejecting or discarding incoming messages whose generation does not
+        match the active session expectation
+
+
+===============================================================================
+06. MESSAGE DISPATCH
+===============================================================================
+
+06.1. After handshake completion, backend behavior:
+      - acknowledges non-control messages according to transport rules
+      - dispatches messages based on message type and route
+
+06.2. Request messages are routed to:
+      - object handlers
+      - capability-based request handlers
+
+06.3. Permission checks occur through the backend capability-permission path
+      used by the implementation.
+
+06.4. Failures become structured error envelopes that correlate to the
+      original message.
+
+06.5. Emit and subscribe messages are dispatched to capability handlers.
+
+06.6. Subscription state is tracked so that cancel and unsubscribe can halt
+      the associated coroutine and remove it from session state.
+
+06.7. Cancel messages remove pending work and stop active subscriptions.
+
+06.8. Frontend behavior includes:
+      - dispatching workload messages to call, emit, or subscribe handlers
+      - resolving or rejecting Promises from replies and errors
+      - forwarding subscription updates to local event emitters or
+        equivalent handlers
+
+
+===============================================================================
+07. ACKNOWLEDGEMENTS AND FLOW CONTROL
+===============================================================================
+
+07.1. Backend automatic acknowledgement behavior:
+      - acknowledges every message except ack and heartbeat, unless the
+        implementation defines a narrower handshake exception path
+
+07.2. Frontend automatic acknowledgement behavior:
+      - acknowledges non-handshake messages according to the current client
+        transport rules
+
+07.3. Acknowledgement contents include:
+      - the original message id
+      - sys-lane routing or equivalent control-lane metadata
+
+07.4. Request and emit helpers attach budgetMs derived from timeout and
+      priority policy.
+
+07.5. Frontend flow-control tracking may include:
       - per-lane in-flight counters
       - per-lane queues
-- additional messages are queued until:
-      - ACK arrives
+
+07.6. Additional messages may be queued until:
+      - acknowledgement arrives
       - reply arrives
+      - local flow-control policy permits send
 
-Purpose:
-- prevent overload
-- support best-effort cancellation on timeout
+07.7. The purpose of this model is to:
+      - prevent overload
+      - support best-effort cancellation on timeout
 
 
-Idempotency:
-------------
-- request and emit helpers generate idempotencyKey
-- server caches:
+===============================================================================
+08. IDEMPOTENCY
+===============================================================================
+
+08.1. Request and emit helpers generate idempotencyKey.
+
+08.2. The server may cache:
       - idempotencyKey
       - previous reply
-- duplicate invocations:
+
+08.3. Duplicate invocations may:
       - return cached reply
-      - do NOT re-run handlers
+      - avoid re-running handlers
 
 
 ===============================================================================
-PERMISSIONS AND PRINCIPALS
+09. PERMISSIONS AND PRINCIPALS
 ===============================================================================
 
-Before invoking a capability handler:
+09.1. Before invoking a capability handler, backend behavior derives the
+      principal from the message and verifies required capability
+      permissions.
 
-Backend behavior:
-- derive the principal from the message
-- verify required capability permissions
+09.2. Permission failure produces a structured error envelope.
 
-Failure handling:
-- produce structured error envelope
-- include retry metadata
-- allow frontend to present clear feedback
+09.3. Error payload may include retry-related metadata when the higher
+      permission and decision model allows that behavior.
 
+09.4. Frontend handling may use this structured result to present clear
+      feedback through the higher-level user-interaction model.
 
-===============================================================================
-LOGGING AND OBSERVABILITY
-===============================================================================
-
-Backend:
-- serialize outbound frames using safeJsonDumps
-- pass frames through the RPC logging decision engine
-- logging is:
-      - centralized
-      - policy-controlled
-      - lane-aware
-
-Frontend:
-- exposes equivalent logging hooks
-- applies the same filtering rules
-
-Result:
-- coherent cross-side debugging
-- no divergent logging semantics
+09.5. This document does not define permission semantics themselves.
+      Higher DA documents define those semantics.
 
 
 ===============================================================================
-END OF IMPLEMENTATION SPECIFICATION 2 - WEBSOCKET RPC FLOW
+10. LOGGING AND OBSERVABILITY
 ===============================================================================
 
+10.1. Backend behavior includes:
+      - serializing outbound frames with safeJsonDumps or an equivalent
+        helper
+      - passing frames through the RPC logging-decision engine
+      - centralized, policy-controlled, lane-aware logging
+
+10.2. Frontend behavior may expose equivalent logging hooks and filtering
+      rules.
+
+10.3. The intended result is:
+      - coherent cross-side debugging
+      - no divergent logging semantics
+
+10.4. This logging model exists to keep transport behavior inspectable
+      without redefining the higher tracing system.
+
+
+===============================================================================
+11. RELATION TO HIGHER DOCUMENTS
+===============================================================================
+
+11.1. This document is constrained by higher-authority documents.
+
+11.2. This document does not introduce new system guarantees, authority
+      semantics, or policy rules.
+
+11.3. Visibility, activation, capability, permission, and decision-handling
+      semantics remain governed by higher DA documents.
+
+11.4. This document defines only the concrete WebSocket transport flow used
+      to carry those higher-level concepts.
+
+
+===============================================================================
+END OF IS-02 - WEBSOCKET RPC FLOW
+===============================================================================
 
 --- doc-meta ---
-docId: docs/rpc/IS-02_WEBSOCKET_RPC_FLOW.txt
-rev: 12
-git: 50da6eb
+DOC_ID: IS-02
+DOC_FILE: docs/rpc/IS-02_WEBSOCKET_RPC_FLOW.txt
+DOC_REV: 13
+DOC_GIT: f42bbd8
 ----------------
