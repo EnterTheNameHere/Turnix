@@ -8,30 +8,61 @@
 # - Git
 # - Repo-local embeddable Python at ./python-embedded/python.exe
 #
-# Guarantees for each targeted staged file (newest spec: doc-meta footer):
-# - Document MUST end with exactly one doc-meta block:
+# Guarantees for each targeted staged file:
+# - Document MUST end with exactly one metadata block, which is one of:
+#
+#   doc-meta footer:
 #     --- doc-meta ---
 #     DOC_ID: <canonical document identifier>
 #     DOC_FILE: <canonical repository path>
 #     DOC_REV: <revision count>
 #     DOC_GIT: <short commit id>
 #     ----------------
-# - DOC_ID is derived from filename: "<dirs>/<DOC_ID>_<normalized>.<EXT>"
-#   - DOC_ID pattern:
-#     - starts with one or more [A-Z]
-#     - may contain additional "-[A-Z]+" segments
-#     - ends with "-[A-Z0-9]+"
-#     - examples: DD-01, CMR-04, DD-MN-01
+#
+#   bootstrap-meta footer:
+#     --- bootstrap-meta ---
+#     DOC_ID: <basename without extension>
+#     DOC_FILE: <canonical repository path>
+#     DOC_REV: <revision count>
+#     DOC_GIT: <short commit id>
+#     DOC_STATUS: <status>
+#     ----------------------
+#
+#   file-meta footer:
+#     --- file-meta ---
+#     DOC_ID: <basename without extension>
+#     DOC_FILE: <canonical repository path>
+#     DOC_REV: <revision count>
+#     DOC_GIT: <short commit id>
+#     DOC_STATUS: <status>
+#     -----------------
+#
+# - DOC_ID rules:
+#   - doc-meta:
+#     - derived from filename: "<DOC_ID>_<normalized text>.<EXT>"
+#     - DOC_ID pattern:
+#       - starts with one or more [A-Z]
+#       - may contain additional "-[A-Z]+" segments
+#       - ends with "-[A-Z0-9]+"
+#       - examples: DD-01, CMR-04, DD-MN-01
+#   - bootstrap-meta / file-meta:
+#     - basename without extension, copied as-is
+#     - example:
+#         docs/AI_WORKFLOW_BOOTSTRAP.txt -> DOC_ID: AI_WORKFLOW_BOOTSTRAP
+#
 # - DOC_FILE is the repo-relative path as staged (forward slashes)
 # - DOC_REV is computed as (commit-count touching file) + 1 when the file is staged with changes
 # - DOC_GIT is the last commit hash that touched the file before this commit (0000000 for new files)
+# - For bootstrap-meta and file-meta:
+#   - existing DOC_STATUS is preserved if present
+#   - if missing, DOC_STATUS: STABLE is added
 #
 # Safety / anti-footgun:
 # - Refuses to run if a file has partially staged changes (staged + unstaged), because the hook edits and re-stages
 #   the whole file and would destroy partial staging.
-# - Refuses ambiguous/malformed doc-meta blocks (missing/duplicate markers, content after footer, etc.)
+# - Refuses ambiguous/malformed metadata blocks (missing/duplicate markers, content after footer, etc.)
 # - Refuses if required tools are missing
-# - Enforces doc-meta structure and ordering; overwrites the doc-meta block content to match spec
+# - Enforces metadata structure and ordering; overwrites the metadata block content to match spec
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -73,7 +104,7 @@ isDocsFileWanted() {
   esac
 }
 
-# Extract DOC_ID from repo-relative path:
+# Extract DOC_ID from repo-relative path for doc-meta:
 # - path must start with "docs/"
 # - filename part is after last "/"
 # - filename format: "<DOC_ID>_<normalized text>.<EXT>"
@@ -119,6 +150,24 @@ Expected pattern: starts with one or more [A-Z], may contain additional
   printf '%s' "$DOC_ID"
 }
 
+# Extract basename without extension for bootstrap-meta / file-meta.
+extractBasenameWithoutExtensionOrDie() {
+  local path="$1"
+
+  [[ -n "$path" ]] || die "Path cannot be empty"
+  [[ "$path" == docs/* ]] || die "Path must be under docs/: '$path'"
+
+  local base="${path##*/}"
+  [[ -n "$base" ]] || die "Filename cannot be empty: '$path'"
+  [[ "$base" != .* ]] || die "Filename must not start with '.': '$path'"
+  [[ "$base" == *.* ]] || die "Filename must contain an extension (a '.'): '$path'"
+
+  local stem="${base%.*}"
+  [[ -n "$stem" ]] || die "Basename without extension is empty: '$path'"
+
+  printf '%s' "$stem"
+}
+
 # Read staged files under docs/ (NUL-delimited to handle spaces)
 mapfile -d '' stagedFiles < <(git diff --cached --name-only -z --diff-filter=ACMR -- docs/)
 
@@ -160,8 +209,21 @@ for f in "${targets[@]}"; do
     continue
   fi
 
-  # Validate path + derive DOC_ID from filename
-  expectedDocId="$(extractDocIdFromPathOrDie "$f")"
+  # Decide DOC_ID rule from metadata marker:
+  # - doc-meta       -> strict DOC_ID extracted from filename prefix
+  # - bootstrap-meta -> full basename without extension
+  # - file-meta      -> full basename without extension
+  if grep -Fqx -- '--- doc-meta ---' "$f"; then
+    expectedDocId="$(extractDocIdFromPathOrDie "$f")"
+  elif grep -Fqx -- '--- bootstrap-meta ---' "$f" || grep -Fqx -- '--- file-meta ---' "$f"; then
+    expectedDocId="$(extractBasenameWithoutExtensionOrDie "$f")"
+  else
+    die "Missing supported metadata start marker in '$f'.
+Expected one of:
+  --- doc-meta ---
+  --- bootstrap-meta ---
+  --- file-meta ---"
+  fi
 
   # DOC_FILE is the repo-relative path (forward slashes) exactly as staged
   expectedFile="$f"
@@ -185,8 +247,13 @@ expected_file = sys.argv[3]
 new_rev = int(sys.argv[4])
 new_hash = sys.argv[5]
 
-start_marker = "--- doc-meta ---"
-end_marker = "----------------"
+doc_start_marker = "--- doc-meta ---"
+bootstrap_start_marker = "--- bootstrap-meta ---"
+file_start_marker = "--- file-meta ---"
+
+doc_end_marker = "----------------"
+bootstrap_end_marker = "----------------------"
+file_end_marker = "-----------------"
 
 with open(path, "r", encoding="utf-8", newline="") as f:
   text = f.read()
@@ -198,30 +265,76 @@ if "\r\n" in text and "\n" in text:
 
 lines = text.replace("\r\n", "\n").split("\n")
 
-# Find exactly one start marker
-starts = [i for i, line in enumerate(lines) if line == start_marker]
-if len(starts) != 1:
-  raise SystemExit(
-    f"ERROR: {path}: expected exactly one '{start_marker}' line, found {len(starts)}"
-  )
-s = starts[0]
+doc_starts = [i for i, line in enumerate(lines) if line == doc_start_marker]
+bootstrap_starts = [i for i, line in enumerate(lines) if line == bootstrap_start_marker]
+file_starts = [i for i, line in enumerate(lines) if line == file_start_marker]
 
-# Find end marker after start
+total_starts = len(doc_starts) + len(bootstrap_starts) + len(file_starts)
+if total_starts != 1:
+  raise SystemExit(
+    f"ERROR: {path}: expected exactly one metadata start marker "
+    f"('{doc_start_marker}', '{bootstrap_start_marker}', or '{file_start_marker}'), "
+    f"found {total_starts}"
+  )
+
+if doc_starts:
+  start_marker = doc_start_marker
+  end_marker = doc_end_marker
+  s = doc_starts[0]
+  meta_kind = "doc"
+elif bootstrap_starts:
+  start_marker = bootstrap_start_marker
+  end_marker = bootstrap_end_marker
+  s = bootstrap_starts[0]
+  meta_kind = "bootstrap"
+else:
+  start_marker = file_start_marker
+  end_marker = file_end_marker
+  s = file_starts[0]
+  meta_kind = "file"
+
+# Find correct end marker after start
 try:
   e = next(i for i in range(s + 1, len(lines)) if lines[i] == end_marker)
 except StopIteration:
-  raise SystemExit(f"ERROR: {path}: missing end marker '{end_marker}' after doc-meta start")
+  raise SystemExit(f"ERROR: {path}: missing end marker '{end_marker}' after metadata start")
 
-# Spec requires doc-meta at end of document (footer). Allow only trailing empty lines after end marker.
+# Metadata block must be at end of document. Allow only trailing empty lines after end marker.
 tail = lines[e + 1 :]
 if any(line.strip() != "" for line in tail):
   raise SystemExit(
-    f"ERROR: {path}: doc-meta block must be at the end of the document; found content after '{end_marker}'"
+    f"ERROR: {path}: metadata block must be at the end of the document; "
+    f"found content after '{end_marker}'"
   )
 
-# Build a canonical spec-compliant block (overwrite whatever was there).
-# Exact required order:
-# DOC_ID, DOC_FILE, DOC_REV, DOC_GIT
+# Parse existing metadata lines between markers
+existing_block_lines = lines[s + 1 : e]
+existing_fields: dict[str, str] = {}
+
+for line in existing_block_lines:
+  stripped = line.strip()
+  if not stripped:
+    continue
+  if ":" not in line:
+    raise SystemExit(
+      f"ERROR: {path}: malformed metadata line inside '{start_marker}': '{line}'"
+    )
+  key, value = line.split(":", 1)
+  key = key.strip()
+  value = value.lstrip()
+  if not key:
+    raise SystemExit(
+      f"ERROR: {path}: malformed metadata line inside '{start_marker}': '{line}'"
+    )
+  existing_fields[key] = value
+
+# Build canonical block.
+# doc:
+#   DOC_ID, DOC_FILE, DOC_REV, DOC_GIT
+#
+# bootstrap/file:
+#   DOC_ID, DOC_FILE, DOC_REV, DOC_GIT, DOC_STATUS
+#   preserve existing DOC_STATUS if present, otherwise default to STABLE
 block = [
   f"DOC_ID: {expected_doc_id}",
   f"DOC_FILE: {expected_file}",
@@ -229,26 +342,30 @@ block = [
   f"DOC_GIT: {new_hash}",
 ]
 
+if meta_kind in {"bootstrap", "file"}:
+  doc_status = existing_fields.get("DOC_STATUS", "STABLE")
+  block.append(f"DOC_STATUS: {doc_status}")
+
 # Enforce line length rule:
 # - Only the value of the "DOC_FILE:" field MAY exceed 79 characters.
-# - No other doc-meta line may exceed 79 characters.
+# - No other metadata line may exceed 79 characters.
 def check_len(line: str, is_file: bool) -> None:
   if is_file:
-    # DOC_FILE line can exceed 79, allowed by spec
     return
   if len(line) > 79:
-    raise SystemExit(f"ERROR: {path}: doc-meta line exceeds 79 chars: '{line}'")
+    raise SystemExit(f"ERROR: {path}: metadata line exceeds 79 chars: '{line}'")
 
 check_len(block[0], is_file=False)  # DOC_ID
 check_len(block[1], is_file=True)   # DOC_FILE
 check_len(block[2], is_file=False)  # DOC_REV
 check_len(block[3], is_file=False)  # DOC_GIT
+if meta_kind in {"bootstrap", "file"}:
+  check_len(block[4], is_file=False)  # DOC_STATUS
 
-# Replace the existing block content (whatever it was) with the canonical block.
+# Replace the existing block content with the canonical block.
 new_lines = lines[: s + 1] + block + [end_marker]
 
 # Preserve a single trailing newline if the original file had one.
-# (split("\n") drops the final empty item only if there was no trailing newline)
 had_trailing_newline = text.endswith("\n") or text.endswith("\r\n")
 new_text = newline.join(new_lines)
 if had_trailing_newline:
