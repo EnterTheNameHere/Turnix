@@ -155,12 +155,13 @@ Upstream Documents:
       - message (human-readable)
       - reason (PascalCase enum)
       - attributes (structured key-value data)
-      - optional parentEventId
+      - optional parentEventIds
 
 04.2. Events form a trace DAG rather than a flat stream.
 
 04.3. Causal ordering is authoritative and is represented by explicit DAG
-      links.
+      links formed through parentEventIds and other causal span links
+      defined in this document.
 
 04.4. Temporal ordering is observational only.
 
@@ -187,69 +188,87 @@ Upstream Documents:
        objects.
 
 
-04.0 TRACE DAG NAMING AND MEANING (LOCKED)
+04.1 PARENT LINKS AND DAG STRUCTURE (LOCKED)
+--------------------------------------------
+
+04.1.1. A trace event may reference zero, one, or multiple parent events.
+
+04.1.2. parentEventIds, when present, is the set of explicit causal
+        parents of that trace event.
+
+04.1.3. Multiple parent links are permitted.
+
+04.1.4. Absence of parent links means independent trace origin rather than
+        simultaneity.
+
+04.1.5. A trace event does not list the same parent event more than once.
+
+04.1.6. Parent links express causal structure rather than temporal order.
+
+
+04.2 TRACE DAG NAMING AND MEANING (LOCKED)
 ------------------------------------------
 
-04.0.1. "Trace Directed Acyclic Graph" is the canonical name for the causal
-       trace structure defined by this document.
+04.2.1. "Trace Directed Acyclic Graph" is the canonical name for the causal
+        trace structure defined by this document.
 
-04.0.2. "trace DAG" is the permitted abbreviation.
+04.2.2. "trace DAG" is the permitted abbreviation.
 
-04.0.3. The trace DAG is the directed acyclic graph formed by trace events
-       and their explicit causal links.
+04.2.3. The trace DAG is the directed acyclic graph formed by trace events
+        and their explicit parent and span-causality links.
 
-04.0.4. The trace DAG is authoritative for causal structure within
-       retained trace evidence.
+04.2.4. The trace DAG is authoritative for causal structure within
+        retained trace evidence.
 
-04.0.5. The trace DAG is not a substitute for authoritative committed
-       state.
+04.2.5. The trace DAG is not a substitute for authoritative committed
+        state.
 
 
-04.1 TRACE SPANS AND ORDERING (LOCKED)
+04.3 TRACE SPANS AND ORDERING (LOCKED)
 --------------------------------------
 
-04.1.1. Trace spans represent bounded work with a start and an end.
+04.3.1. Trace spans represent bounded work with a start and an end.
 
-04.1.2. A span has a begin event and an end event.
+04.3.2. A span has a begin event and an end event.
 
-04.1.3. Span begin and span end events are trace events and participate in
+04.3.3. Span begin and span end events are trace events and participate in
         the trace DAG.
 
-04.1.4. Span begin occurs before span end in the same trace DAG.
+04.3.4. Span begin occurs before span end in the same trace DAG.
 
-04.1.5. A span end does not exist without a reachable span begin.
+04.3.5. A span end does not exist without a reachable span begin.
 
-04.1.6. Any export, snapshot, or offline trace view that includes span end
+04.3.6. Any export, snapshot, or offline trace view that includes span end
         also includes the corresponding span begin.
 
-04.1.7. Span begin and span end share a stable span identity attribute.
+04.3.7. Span begin and span end share a stable span identity attribute.
 
-04.1.8. The exact span identity encoding remains OPEN.
+04.3.8. The exact span identity encoding remains OPEN.
 
-04.1.9. Span begin and span end are connected by explicit causality links.
+04.3.9. Span begin and span end are connected by explicit causality links.
 
-04.1.10. The trace DAG allows reconstruction of:
+04.3.10. The trace DAG allows reconstruction of:
          - which span is open at a SafePointWindow boundary
          - which spans were closed by that boundary
 
-04.1.11. If a snapshot includes trace evidence, it satisfies the rule:
+04.3.11. If a snapshot includes trace evidence, it satisfies the rule:
          "no included span end without included span begin."
 
-04.1.12. This snapshot requirement is [satisfied-by: DA-08 11.8].
+04.3.12. This snapshot requirement is [satisfied-by: DA-08 11.8].
 
 
-04.2 TRACE ROOTS AND SPAN STRATIFICATION (LOCKED)
+04.4 TRACE ROOTS AND SPAN STRATIFICATION (LOCKED)
 -------------------------------------------------
 
-04.2.1. Trace storage may contain multiple unconnected trace DAG roots.
+04.4.1. Trace storage may contain multiple unconnected trace DAG roots.
 
-04.2.2. Each root represents an independent trace origin, such as a kernel
+04.4.2. Each root represents an independent trace origin, such as a kernel
         run or an appInstance activation region.
 
-04.2.3. Unconnected roots are expected and remain representable without
+04.4.3. Unconnected roots are expected and remain representable without
         ambiguity.
 
-04.2.4. Root span types are:
+04.4.4. Root span types are:
 
         A) KernelRunSpan
         - Represents one Turnix kernel run.
@@ -276,22 +295,22 @@ Upstream Documents:
           - capability calls
           - jobs or long-running orchestration units
 
-04.2.5. Span begin and span end events participate in the trace DAG.
+04.4.5. Span begin and span end events participate in the trace DAG.
 
-04.2.6. Span begin occurs before span end in the same trace DAG.
+04.4.6. Span begin occurs before span end in the same trace DAG.
 
-04.2.7. A span end does not exist without a reachable span begin.
+04.4.7. A span end does not exist without a reachable span begin.
 
-04.2.8. If an exported trace view includes a span end, it also includes the
+04.4.8. If an exported trace view includes a span end, it also includes the
         corresponding span begin.
 
-04.2.9. WorkSpans remain causally reachable from their owning
+04.4.9. WorkSpans remain causally reachable from their owning
         AppInstanceActiveSpan begin event when such ownership exists.
 
-04.2.10. Root spans define when Turnix ran and when an appInstance was
+04.4.10. Root spans define when Turnix ran and when an appInstance was
          active.
 
-04.2.11. WorkSpans define what happened inside that active region.
+04.4.11. WorkSpans define what happened inside that active region.
 
 
 ===============================================================================
@@ -1088,6 +1107,7 @@ Upstream Documents:
       - stable PascalCase reasons
       - canonical Trace Directed Acyclic Graph naming and meaning
       - causal DAG model
+      - multi-parent causal event linkage
       - successful paths remain observable, not only failures
       - a successful path that cannot be explained is an observability
         failure
@@ -1115,6 +1135,6 @@ END OF DA-03 - TRACING, DIAGNOSTICS & OBSERVABILITY
 --- doc-meta ---
 DOC_ID: DA-03
 DOC_FILE: docs/design/DA-03_TRACING_DIAGNOSTICS_AND_OBSERVABILITY.txt
-DOC_REV: 18
-DOC_GIT: 6cdaad5
+DOC_REV: 19
+DOC_GIT: aa21b7f
 ----------------
