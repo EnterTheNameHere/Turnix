@@ -25,6 +25,7 @@ It defines:
 - inspection surfaces and debugger action boundaries
 - manual pause and apply-at-safe-point semantics
 - Job-aware breakpoint and pause behavior when Jobs exist
+- undo and redo semantics for debugger tooling
 - trace integration requirements for debugger actions and breakpoint events
 
 It does NOT define:
@@ -278,6 +279,18 @@ Upstream Documents:
 
 07.2. Inspection is read-only by default.
 
+07.3. Debugger inspection may distinguish between:
+      - committed values currently authoritative
+      - staged values present only in transactional layers
+      - unresolved or unavailable state when the requested surface cannot be
+        read safely or meaningfully in the current execution context
+
+07.4. Inspection surfaces do not silently collapse committed and staged
+      state into one undifferentiated view.
+
+07.5. If a debugger surface presents both committed and staged state, the
+      distinction remains explicit.
+
 
 ===============================================================================
 08. CONTROLLED MUTATION (LOCKED)
@@ -355,132 +368,161 @@ Upstream Documents:
 
 
 ===============================================================================
-12. TRACE RETENTION AND DEBUGGER ACTIONS (LOCKED)
+12. UNDO AND REDO SEMANTICS
 ===============================================================================
 
-12.1. Debugger tooling does not create untraced gaps.
+12.1. Debugger tooling may support undo of debugger-initiated changes within
+      the boundaries defined by the Turnix state model.
 
-12.2. Any debugger action that affects trace evidence, including export,
+12.2. Undo that affects authoritative state operates on committed revisions.
+
+12.3. Undo that affects authoritative state is performed as a new explicit
+      debugger-initiated mutation.
+
+12.4. Undo that affects authoritative state is trace-visible.
+
+12.5. Undo does not bypass transaction, permission, ownership, scope, or
+      safe-point rules defined elsewhere in this document and in DA-04.
+
+12.6. Redo history is debugger-local, ephemeral, and non-authoritative.
+
+12.7. Redo history does not become committed state merely because debugger
+      tooling remembers it.
+
+12.8. Redo history is discarded deterministically when a new committed
+      revision makes the stored redo path no longer valid.
+
+12.9. Debugger tooling does not present ephemeral redo state as if it were
+      authoritative system history.
+
+
+===============================================================================
+13. TRACE RETENTION AND DEBUGGER ACTIONS (LOCKED)
+===============================================================================
+
+13.1. Debugger tooling does not create untraced gaps.
+
+13.2. Any debugger action that affects trace evidence, including export,
       prune, clear, or retention-policy changes, emits the corresponding
       trace reasons defined in DA-03.
 
-12.3. Such events are marked as debugger-initiated through trace
+13.3. Such events are marked as debugger-initiated through trace
       attributes.
 
-12.4. Trace retention and loss-evidence rules apply equally to debugger-
+13.4. Trace retention and loss-evidence rules apply equally to debugger-
       initiated trace-affecting actions.
 
 
 ===============================================================================
-13. DEBUGGER USER-INTERFACE INTEGRATION
+14. DEBUGGER USER-INTERFACE INTEGRATION
 ===============================================================================
 
-13.1. Debugger user interfaces may:
+14.1. Debugger user interfaces may:
       - subscribe via RPC
       - receive breakpoint-hit events
       - show causal context
-      - allow resume, step, or abort
+      - allow resume, step, abort, undo, or redo where supported
 
-13.2. Debugger user interfaces are optional but supported.
+14.2. Debugger user interfaces are optional but supported.
 
 
 ===============================================================================
-14. STEP MODES
+15. STEP MODES
 ===============================================================================
 
-14.1. Supported step modes include:
+15.1. Supported step modes include:
       - Resume
       - Step over, meaning the next stage or memory change
       - Abort, meaning fail the current execution unit
 
-14.2. Unsupported step modes include:
+15.2. Unsupported step modes include:
       - instruction-level stepping
       - time travel as a runtime debugger mode in this document
 
 
 ===============================================================================
-15. JOBS, LONG-RUNNING WORK, AND BREAKPOINTING
+16. JOBS, LONG-RUNNING WORK, AND BREAKPOINTING
 ===============================================================================
 
-15.1. Turnix may represent long-running work as explicit Jobs.
+16.1. Turnix may represent long-running work as explicit Jobs.
 
-15.2. If Jobs exist:
+16.2. If Jobs exist:
       - Jobs are observable through status, owner, and causal trace links
       - Jobs are abortable only through Turnix orchestration
 
-15.3. Debugger interaction with Jobs may include requests for:
+16.3. Debugger interaction with Jobs may include requests for:
       - pause-at-safe-point for a Job
       - breakpoint-at-safe-point for a Job
       - explicit Job abort
 
-15.4. Manual pause does not implicitly abort Jobs.
+16.4. Manual pause does not implicitly abort Jobs.
 
-15.5. Safe-point pausing or breakpointing of Jobs occurs at boundaries such
+16.5. Safe-point pausing or breakpointing of Jobs occurs at boundaries such
       as:
       - between pipeline stages
       - before or after capability boundaries
       - before commit points for persistence
 
-15.6. If a Job cannot reach a safe point:
+16.6. If a Job cannot reach a safe point:
       - that fact is surfaced explicitly
       - no silent cancellation is permitted
 
 
 ===============================================================================
-16. SCOPING RULES
+17. SCOPING RULES
 ===============================================================================
 
-16.1. Breakpoints may be scoped to:
+17.1. Breakpoints may be scoped to:
       - global
       - AppInstance
       - view
       - pack
       - pipeline
 
-16.2. Unscoped breakpoints are discouraged.
+17.2. Unscoped breakpoints are discouraged.
 
 
 ===============================================================================
-17. DEVELOPMENT VS PRODUCTION
+18. DEVELOPMENT VS PRODUCTION
 ===============================================================================
 
-17.1. In production:
+18.1. In production:
       - breakpoints are disabled by default
       - inspection is limited
       - mutation is disallowed unless explicitly enabled
 
-17.2. In development:
+18.2. In development:
       - all debugging features in this document are available
 
 
 ===============================================================================
-18. FAILURE MODES (LOCKED)
+19. FAILURE MODES (LOCKED)
 ===============================================================================
 
-18.1. If the debugger disconnects:
+19.1. If the debugger disconnects:
       - execution resumes or aborts according to policy
       - the chosen outcome is traced using the debugger-disconnect outcome
         reasons defined in DA-03
       - deadlock is not allowed
 
-18.2. If breakpoint logic errors:
+19.2. If breakpoint logic errors:
       - the breakpoint is disabled
       - the error is traced
 
 
 ===============================================================================
-19. RELATION TO TRACING
+20. RELATION TO TRACING
 ===============================================================================
 
-19.1. Every breakpoint hit:
+20.1. Every breakpoint hit:
       - emits a trace event
       - links to the causal chain
       - records inspection and mutation actions when applicable
 
-19.2. Breakpoint hits and resume actions are traced using the breakpoint
+20.2. Breakpoint hits and resume actions are traced using the breakpoint
       reasons defined in DA-03.
 
-19.3. Breakpoint-hit trace events include sufficient identifiers for
+20.3. Breakpoint-hit trace events include sufficient identifiers for
       offline linking when applicable, including:
       - appInstanceId
       - pipelineRunId and stageId for pipeline breakpoints
@@ -490,18 +532,18 @@ Upstream Documents:
         breakpoints
       - orchestrationUnitId or Job identity when applicable
 
-19.4. Tracing and debugging are complementary.
+20.4. Tracing and debugging are complementary.
 
-19.5. Debugger actions that stage and apply mutations at safe points are
+20.5. Debugger actions that stage and apply mutations at safe points are
       traced as distinct events that share a stable mutation-lineage
       identifier.
 
 
 ===============================================================================
-20. WHAT IS EXPLICITLY NOT SUPPORTED
+21. WHAT IS EXPLICITLY NOT SUPPORTED
 ===============================================================================
 
-20.1. The following are not supported:
+21.1. The following are not supported:
       - arbitrary Python debugger injection
       - JavaScript eval debugging
       - modifying pack code at runtime
@@ -509,10 +551,10 @@ Upstream Documents:
 
 
 ===============================================================================
-21. EXPLICITLY OPEN QUESTIONS
+22. EXPLICITLY OPEN QUESTIONS
 ===============================================================================
 
-21.1. OPEN questions include:
+22.1. OPEN questions include:
       - conditional breakpoint language
       - snapshot or restore state
       - time-travel debugging
@@ -520,10 +562,10 @@ Upstream Documents:
 
 
 ===============================================================================
-22. LOCKED SUMMARY
+23. LOCKED SUMMARY
 ===============================================================================
 
-22.1. LOCKED:
+23.1. LOCKED:
       - semantic breakpoints
       - pipeline, memory, and capability breakpoints
       - transaction-aware breakpoint semantics
@@ -532,10 +574,13 @@ Upstream Documents:
       - debugger usability while Turnix is running
       - deterministic manual pause
       - apply-at-safe-point mutation semantics
+      - undo of authoritative debugger changes operates on committed
+        revisions as new explicit debugger-initiated work
+      - redo history is debugger-local, ephemeral, and non-authoritative
       - Job-safe breakpointing and pausing
       - non-blocking debugger behavior
 
-22.2. OPEN:
+23.2. OPEN:
       - advanced conditional logic
       - replay and time travel
 
@@ -547,6 +592,6 @@ END OF DA-18 - DEBUGGING, INSPECTION & BREAKPOINTS
 --- doc-meta ---
 DOC_ID: DA-18
 DOC_FILE: docs/design/DA-18_DEBUGGING_INSPECTION_AND_BREAKPOINTS.txt
-DOC_REV: 14
-DOC_GIT: 10093de
+DOC_REV: 15
+DOC_GIT: 023e3de
 ----------------
