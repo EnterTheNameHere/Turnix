@@ -1,5 +1,5 @@
 ===============================================================================
-DESIGN AREA DA-04 - MEMORY, STATE, LAYERS & JOURNALING
+DESIGN AREA DA-04 - MEMORY, STATE & AUTHORITATIVE COMMIT MODEL
 ===============================================================================
 
 Status:
@@ -8,45 +8,42 @@ EVOLVING
 
 Description:
 ------------
-Defines how Turnix runtime values become authoritative state, how state is
-layered and mutated, how commits and rollback boundaries work, and how
-non-authoritative historical evidence is recorded without becoming a hidden
-dependency.
+Defines how Turnix distinguishes runtime memory from authoritative state, how
+state is layered and mutated, and how committed state changes become
+deterministic, restorable, and traceable without depending on observational
+history.
 
-Purpose and Scope:
-------------------
-This design area defines the authoritative model for runtime memory, state,
-and historical evidence in Turnix.
+Purpose:
+--------
+This document defines the authoritative memory and state model used by Turnix.
 
 It defines:
 - what "memory" means in Turnix
 - what "state" means in Turnix
-- how runtime state is layered
-- how mutations are staged and committed
-- how persistence relates to runtime memory
-- how rollback and reproducibility are achieved
-- how historical evidence is recorded without becoming authoritative
-- what is considered authoritative vs observational
-- what a Trace Directed Acyclic Graph (trace DAG) is
-- what Windows represent and why they exist
-- what SafePointWindow, ActiveWindow, and AbortedWindow mean
-- how WindowManifests relate to finalized Windows
-- how exports relate to finalized Windows
-- what a Minimal Audit Bundle (MAB) is and what it is not
-- what Replay, Resume, and Retry mean in Turnix
-- the storage-neutral payload model used by committed state, savePacks,
-  traces, journals, windows, manifests, and exports
-- how offline comparison operates and what results it may produce
+- authority boundaries between committed and non-committed material
+- layer-based runtime memory structure
+- transactional staging and commit or abort rules
+- commit conflict detection for authoritative mutation
+- orchestration boundaries for state mutation
+- persistence as protection against loss rather than the definition of truth
+- static-data mutation intent
+- revision and state-retention rules
+- migration commit rules for authoritative state mutation
+- state-boundary constraints for tooling-initiated mutation
+- restoration boundary rules for committed state
 
 It does NOT define:
-- user interface layout or presentation rules for memory tooling
-- concrete file formats for manifests, exports, traces, journals, or chunks
-  beyond LOCKED semantic contracts
-- specific digest algorithms, canonical serialization rules, or codec formats
-  beyond LOCKED constraints
-- concurrency-first execution; this area assumes deterministic single-lane
-  execution unless explicitly enabled elsewhere
-- lifecycle rules for documents (see CMR-03)
+- tracing structure, trace event schema, or trace storage semantics
+  (see DA-03)
+- payload identity, ChunkId, or ValueRef representation contracts
+  (see DA-05)
+- concrete persistent I/O authority, Readers, Writers, or filesystem rules
+  (see DA-06)
+- configuration-specific scope, schema, and migration semantics
+  (see DA-07)
+- windows, manifests, exports, replay workflows, or audit bundles
+  (see later design areas)
+- debugger pause, breakpoint, or execution-control behavior (see DA-16)
 
 Upstream Documents:
 ------------------
@@ -55,1711 +52,614 @@ Upstream Documents:
 - CMR-03
 - CMR-04
 - CMR-05
+- DA-01
+- DA-02
+- DA-03
 
 
 ===============================================================================
-01. CORE INTENT
+01. INTERPRETATION BASIS
 ===============================================================================
 
-This design area defines the semantic contract for all memory- and
-state-related behavior in Turnix.
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
 
-Turnix MUST:
-- preserve deterministic state evolution
-- make all authoritative state transitions explicit
-- support rollback and reproducibility
-- support inspection, explanation, and audit
-- separate authority from observation
-- avoid unbounded growth by policy-driven retention
-- avoid silent data loss
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
 
-Turnix MUST NOT:
-- conflate state with logs, traces, or journals
-- treat observational data as authoritative
-- require infinite history retention
-- depend on journal completeness for correctness
-- make silent pruning or reconciliation decisions
-- imply determinism where it does not exist
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
 
-This design area establishes the hard boundary between:
-- authoritative committed state
-- non-authoritative runtime activity
-- non-authoritative historical evidence
-
-All other sections in this design area elaborate on this boundary.
+01.4. This document defines the authoritative memory and state model within
+      that shared interpretation model.
 
 
 ===============================================================================
-02. TERMS AND AUTHORITY BOUNDARIES
+02. CORE CONCEPT
 ===============================================================================
 
-This section defines core terminology and the authority boundaries that govern
-memory, state, and historical material in Turnix.
+02.1. This design area answers:
 
-These definitions are LOCKED and apply uniformly across all subsystems.
+          "Which runtime values are authoritative, when do they become
+           authoritative, and how does Turnix preserve deterministic
+           committed-state evolution?"
+
+02.2. Turnix distinguishes strictly between:
+      - runtime memory
+      - committed state
+      - non-authoritative observational material
+
+02.3. Runtime memory is not authoritative merely because it is resident,
+      visible, or currently in use.
+
+02.4. Committed state is authoritative because it has passed through the
+      Turnix commit boundary defined by this document.
+
+02.5. Turnix preserves deterministic committed-state evolution by making
+      authoritative mutation explicit, staged, and commit-bounded.
+
+02.6. Turnix preserves rollback and restoration by ensuring that committed
+      state can be restored without requiring non-authoritative historical
+      material.
+
+02.7. Observational material may explain what happened, but it does not
+      define what the committed truth of the system is.
 
 
-02.1 Memory vs State
---------------------
+===============================================================================
+03. MEMORY, STATE, AND AUTHORITY CLASSES
+===============================================================================
 
-Memory:
-- is the runtime representation of values
-- may exist only in-process
-- may include speculative, staged, or transient data
-- is mutable
-- is not inherently authoritative
+03.1. Memory is the runtime representation of values.
 
-State:
-- is the authoritative outcome of committed memory
-- exists independently of runtime residency
-- is the source of truth for restoration and comparison
-- is immutable once committed, except through new revisions
+03.2. Memory may:
+      - exist only in-process
+      - include speculative values
+      - include staged transactional values
+      - include transient runtime-only values
 
-Rules (LOCKED):
-- Memory MAY exist without persistence.
-- Persistence MAY exist without memory being resident.
-- Only committed state is authoritative.
-- Runtime memory MUST NOT be treated as authoritative unless committed.
+03.3. Memory is mutable.
+
+03.4. Memory is not inherently authoritative.
+
+03.5. State is the authoritative outcome of committed memory.
+
+03.6. State exists independently of runtime residency.
+
+03.7. State is the source of truth for restoration and deterministic
+      comparison.
+
+03.8. Committed state is immutable once committed except through a later
+      committed revision.
+
+03.9. Memory may exist without persistence.
+
+03.10. Persisted state may exist without current runtime residency.
+
+03.11. Only committed state is authoritative.
+
+03.12. Runtime memory is not treated as authoritative unless it has become
+       committed state through the commit rules defined by this document.
 
 
-02.2 Authority Classes
+03.1 AUTHORITY CLASSES
 ----------------------
 
-Turnix distinguishes between authoritative and non-authoritative material.
+03.1.1. Turnix distinguishes exactly two authority classes:
 
-Authority classes (LOCKED):
+        A) Authoritative
+        B) Non-authoritative
 
-A) Authoritative
-- committed memory layers
-- committed configuration
-- state captured by a SafePointWindow
+03.1.2. Authoritative material includes:
+        - committed memory layers
+        - committed configuration
+        - other committed state governed by the Turnix commit model
 
-Authoritative material:
-- defines the current truth of the system
-- is sufficient to restore system state deterministically
-- is required for correctness
+03.1.3. Authoritative material defines current system truth.
 
-B) Non-authoritative
-- transactional staging layers
-- uncommitted runtime memory
-- trace contents
-- journal contents
-- Minimal Audit Bundles (MAB)
-- ActiveWindow contents and metadata
-- evidence roots attached to WindowManifests
+03.1.4. Authoritative material is sufficient for deterministic restoration
+        within the boundaries defined by this document.
 
-Non-authoritative material:
-- MAY be used for explanation, audit, or debugging
-- MUST NOT be required for state correctness
-- MUST NOT affect restoration or equality checks
-- MAY be incomplete, truncated, or missing by policy
+03.1.5. Authoritative material is required for correctness.
+
+03.1.6. Non-authoritative material includes:
+        - transactional staging layers
+        - uncommitted runtime memory
+        - debugger staging artifacts
+        - traces
+        - journals
+        - other observational or explanatory material
+
+03.1.7. Non-authoritative material may support:
+        - explanation
+        - audit
+        - debugging
+        - diagnosis
+
+03.1.8. Non-authoritative material is not required for state correctness.
+
+03.1.9. Non-authoritative material does not affect authoritative-state
+        equality.
+
+03.1.10. Non-authoritative material may be incomplete, truncated, or
+         missing according to explicit policy without changing committed
+         state meaning.
 
 
-02.3 Authority Separation Rules
+03.2 AUTHORITY SEPARATION RULES
 -------------------------------
 
-Rules (LOCKED):
-- Authoritative state MUST be derivable without access to:
-  - journals
-  - traces
-  - transactional layers
-  - debugger artifacts
-- Non-authoritative material MUST NOT be required to:
-  - restore committed state
-  - evaluate StateEquality
-  - validate correctness of committed values
-- Loss of non-authoritative material MUST NOT:
-  - corrupt committed state
-  - change committed meaning
-  - invalidate determinism guarantees
+03.2.1. Authoritative state is derivable without requiring access to:
+        - traces
+        - journals
+        - transactional layers
+        - debugger-only artifacts
 
-This separation ensures that:
-- correctness does not depend on observation
-- audit does not become a hidden dependency
-- safety is preserved under retention pressure
-- rollback remains reliable
+03.2.2. Non-authoritative material is not required to:
+        - restore committed state
+        - evaluate committed-state equality
+        - validate correctness of committed values
+
+03.2.3. Loss of non-authoritative material does not:
+        - corrupt committed state
+        - change committed meaning
+        - invalidate determinism guarantees for committed restoration
+
+03.2.4. This authority separation preserves correctness without turning
+        observation into a hidden dependency.
 
 
-02.4 Identity and Revision Terms
+===============================================================================
+04. IDENTITY AND REVISION TERMS
+===============================================================================
+
+04.1. A revisionId identifies one committed revision record for one key
+      within one committed layer.
+
+04.2. A baseRevisionId identifies the revisionId that a transaction
+      observed when it first touched the key by read or write.
+
+04.3. revisionId is a JSON-safe integer.
+
+04.4. revisionId uniqueness and monotonicity are required only per
+      (layer, key).
+
+04.5. Clients may treat revisionId as opaque read-only metadata.
+
+04.6. baseRevisionId supports an absent sentinel meaning:
+      "the key was not present in the committed layer at capture time."
+
+04.7. The absent sentinel is represented as baseRevisionId = 0.
+
+04.8. The absent sentinel is not represented as null.
+
+04.9. Valid committed revisionId values start at 1.
+
+
+===============================================================================
+05. MEMORY LAYERS
+===============================================================================
+
+05.1. Turnix manages runtime memory as a set of layered stores.
+
+05.2. Layers represent:
+      - authority
+      - scope
+      - lifetime
+      - rollback boundaries
+
+05.3. There is no single global memory object.
+
+05.4. Each layer contains real values for its own scope.
+
+05.5. Reads resolve according to the active layer stack for the requesting
+      scope.
+
+05.6. Example layer kinds include:
+      - kernel-global
+      - appInstance
+      - session
+      - view
+      - transactional
+
+05.7. Example layer kinds do not lock the complete future layer catalog.
+
+05.8. A committed layer is representable at the commit boundary through the
+      committed value representation contract defined elsewhere.
+
+05.9. Layer serialization preserves committed value meaning rather than live
+      runtime object identity.
+
+05.10. Runtime residency is an implementation detail and does not change the
+       meaning of a committed layer.
+
+
+===============================================================================
+06. TRANSACTIONS
+===============================================================================
+
+06.1. A transaction is a temporary staging overlay used to record
+      speculative mutations before they become authoritative.
+
+06.2. A transaction overlays one or more parent layers.
+
+06.3. A transaction captures all writes during its lifetime.
+
+06.4. A transaction may read from parent layers.
+
+06.5. A transaction is resolved only by commit or abort.
+
+06.6. Primary transaction use includes:
+      - pipeline execution
+      - capability calls with mutation
+      - tooling-initiated staged mutation
+      - other orchestrated speculative work
+
+
+06.1 COMMIT AND ABORT
+---------------------
+
+06.1.1. A transaction ends in exactly one outcome:
+        - commit
+        - abort
+
+06.1.2. Partial propagation does not occur.
+
+06.1.3. Commit is atomic.
+
+06.1.4. Abort is atomic.
+
+06.1.5. Commit and abort outcomes are trace-visible.
+
+06.1.6. Commit and abort preserve rollback guarantees.
+
+06.1.7. On commit, staged values propagate to the target authoritative
+        layer or to a parent transaction according to nesting rules.
+
+06.1.8. On abort, all staged mutations are discarded deterministically.
+
+
+06.2 NESTED TRANSACTION STACKING
 --------------------------------
 
-This subsection defines minimal identity terms required by this design area.
+06.2.1. If a pipeline run creates or enters a child session while an
+        enclosing pipeline run is active, the child session inherits the
+        enclosing transactional view.
 
-WindowId forms:
-- safePointWindowId identifies a SafePointWindow.
-- abortedWindowId identifies an AbortedWindow.
+06.2.2. Reads resolve first-match from the child transaction downward
+        through the inherited stack.
 
-Rules:
-- safePointWindowId and abortedWindowId MUST be UUID values.
-- UUID values MUST be representable in plain text.
+06.2.3. Writes target the child transaction.
 
-Revision terms:
-- revisionId identifies one revision record for one committed key within one
-  committed layer.
-- baseRevisionId identifies the revisionId that a transaction observed when
-  it first touched the key (read or write).
+06.2.4. Committing the child transaction propagates its writes into the
+        parent transaction.
 
-Rules:
-- revisionId MUST be a JSON safe integer.
-- revisionId uniqueness and monotonicity are required only per (layer, key).
-- Clients MAY treat revisionId as opaque read-only metadata.
+06.2.5. No child transaction commits directly into committed layers while
+        an enclosing transaction exists.
 
-Absent sentinel:
-- baseRevisionId MUST support an "absent" sentinel meaning:
-  "the key was not present in the committed layer at capture time".
+06.2.6. Only the outermost transaction commit mutates committed layers.
 
-Rules:
-- The absent sentinel MUST NOT be represented as null.
-- The absent sentinel MUST be represented as baseRevisionId = 0.
-- Valid revisionId values MUST start at 1.
+06.2.7. This stacking rule prevents lost updates and desynchronization
+        across nested pipeline activity.
 
-===============================================================================
-03. STORAGE-NEUTRAL PAYLOAD MODEL
-===============================================================================
 
-This section defines how committed state, savePacks, traces, journals,
-windows, manifests, and exports reference immutable payload data without
-assuming a specific storage backend.
-
-This model is LOCKED at the semantic level.
-
-
-03.1 Core Idea
---------------
-
-Authoritative committed state does not embed mutable runtime objects.
-
-Instead:
-- committed state references immutable payload bytes
-- runtime objects are decoded views of immutable payloads
-- persistence format is storage-neutral
-
-This allows:
-- deterministic restoration
-- safe sharing of payloads
-- offline inspection
-- backend-agnostic storage implementations
-
-
-03.2 Core Terms
----------------
-
-Chunk:
-- an immutable byte sequence
-- addressed by a ChunkId
-
-ValueRef:
-- an immutable reference describing how to obtain and decode a value payload
-
-Codec:
-- a deterministic decoding rule
-- identified by codecId
-
-Schema:
-- optional typing and version metadata
-- used for typed decoding and migration
-
-Root manifest:
-- an immutable manifest
-- enumerates references (ChunkId, ValueRef)
-- defines a reachability root for garbage collection
-
-
-03.3 Payload Rules
-------------------
-
-Rules (LOCKED):
-- A committed key in a committed layer or committed configuration MUST be
-  representable as:
-
-      key -> ValueRef
-
-  at the SafePointWindow boundary.
-
-- A ValueRef MUST be immutable once created.
-
-- A ValueRef MUST NOT depend on:
-  - transactional layers
-  - journal completeness
-  - trace completeness
-  - external side effects
-  in order to decode successfully.
-
-- If a ValueRef cannot be decoded:
-  - the failure MUST be explicit
-  - the value MUST NOT be treated as authoritative
-
-- A live runtime object, if resident, is the decoded form of a ValueRef.
-  Runtime residency is an implementation detail and MUST NOT change meaning.
-
-
-03.4 Value Origin and Static Data
----------------------------------
-
-Static data is pack-provided or bundled resource data.
-
-Rules (LOCKED):
-- A ValueRef MAY reference payload bytes originating from static data.
-- If committed state stores a value derived from static data, it MUST still be
-  representable as a ValueRef at the SafePointWindow boundary.
-- "Patch" and "Copy" semantics apply at the value-meaning level, not at the
-  chunk storage level.
-- Chunk reuse or duplication is an implementation detail as long as
-  the ValueRef meaning is preserved.
-
-
-03.5 IoManager Boundary
------------------------
-
-All persistence required to resolve ValueRefs and Chunks is mediated by
-IoManager (DA-06).
-
-Rules (LOCKED):
-- Packs MUST NOT resolve chunk storage directly.
-- Packs MUST NOT write payload bytes referenced by ValueRefs directly.
-- Readers and Writers that implement chunk storage or codecs operate under
-  IoManager authority and are subject to DA-06 restrictions.
-
-
-03.6 Payload Sharing Across Artifacts
--------------------------------------
-
-Payload chunks MAY be shared across artifacts.
-
-Meaning:
-- the same ChunkId MAY be referenced by multiple windows, manifests, traces,
-  journals, Minimal Audit Bundles, and exports.
-
-Rules (LOCKED):
-- Payload sharing MUST NOT change authority boundaries.
-- Sharing MUST be safe under reachability-based garbage collection.
-- Sharing inside a savePack MUST NOT weaken immutability guarantees.
-- If an export claims immutability, it MUST be self-contained with respect to
-  retained payloads, subject to explicit partial-export policy.
-
-
-===============================================================================
-04. CHUNK IDENTITY CONTRACT
-===============================================================================
-
-This section defines the minimum, storage-agnostic contract for identifying
-immutable payload data referenced by savePacks, windows, traces, journals,
-manifests, and exports.
-
-This contract is LOCKED at the semantic level.
-Encoding details remain OPEN within stated constraints.
-
-
-04.1 Purpose
-------------
-
-The Chunk Identity Contract exists to:
-- provide stable identity for immutable payload data
-- enable integrity verification
-- support reachability-based garbage collection
-- allow export, import, and copying between storage backends
-- avoid assumptions about filesystem layout or databases
-
-This contract does NOT define:
-- physical storage layout
-- file formats
-- compression or encryption mechanisms
-- network transport
-- persistence policy
-
-
-04.2 Chunk Definition
----------------------
-
-A Chunk is an immutable byte sequence.
-
-Rules (LOCKED):
-- A Chunk MUST be immutable once created.
-- Chunk immutability MUST be enforced by the storage implementation.
-- A Chunk MUST be addressable by a stable ChunkId.
-- A Chunk MUST be retrievable given its ChunkId, unless it has been removed
-  by explicit garbage-collection policy.
-
-
-04.3 Chunk Identity
--------------------
-
-A ChunkId is the canonical identity of a Chunk.
-
-Rules (LOCKED):
-- Two Chunks are the same Chunk if and only if their ChunkId is identical.
-- ChunkId MUST be stable across:
-  - export and import
-  - copying between storage backends
-  - savePack repackaging
-
-ChunkId MUST NOT depend on:
-- filesystem paths
-- database row identifiers
-- local timestamps
-- machine identity
-- wall-clock time
-
-
-04.4 Content Addressing Requirement
------------------------------------
-
-ChunkId MUST be content-derived.
-
-Meaning:
-- ChunkId is computed from the chunk's payload bytes and declared identity
-  metadata.
-
-Rules (LOCKED):
-- ChunkId MUST be derived from:
-  A) the payload byte sequence
-  B) the chunk metadata fields that participate in identity
-- ChunkId MUST NOT be derived from values expected to differ across
-  machines or runs, including:
-  - absolute paths
-  - hostnames
-  - random identifiers
-  - wall-clock time
-
-
-04.5 Required Chunk Metadata
-----------------------------
-
-Each Chunk MUST have an associated ChunkHeader.
-
-ChunkHeader fields:
-- chunkId
-- chunkType
-- byteLength
-- hashAlgorithm
-- contentHash
-
-Rules (LOCKED):
-- byteLength MUST equal the number of bytes in the payload.
-- contentHash MUST be computed over the payload bytes.
-- hashAlgorithm MUST name a deterministic hash function.
-- chunkType MUST be a stable, explicit identifier.
-- chunkType MUST NOT change the meaning of chunk identity.
-
-Example chunkType values (non-exhaustive):
-- stateLayerValues
-- configValues
-- revisionIndex
-- journalEntries
-- traceEvents
-- traceIndex
-- windowManifest
-- packManifest
-- blob
-
-
-04.6 Integrity Verification
---------------------------
-
-Integrity check procedure:
-- recompute contentHash from payload bytes
-- compare with stored contentHash
-
-Rules (LOCKED):
-- Storage MUST reject retrieval as corrupt if integrity verification fails.
-- Corruption MUST be trace-visible when detected.
-- Corrupt data MUST NOT be treated as authoritative.
-- ChunkId MUST be verified to match the identity-relevant header fields.
-
-
-04.7 ChunkId Encoding
----------------------
-
-The exact encoding of ChunkId is OPEN, but constrained.
-
-Rules (LOCKED):
-- ChunkId MUST be representable in plain text.
-- ChunkId MUST be stable byte-for-byte across export and import.
-- ChunkId MUST avoid characters disallowed by Turnix document style
-  when printed in specifications or manifests.
-
-Permitted encoding examples (illustrative only):
-- hash-based hexadecimal
-- hash-based base32 or base64url without padding
-- explicit "algorithm:hash" forms
-
-
-04.8 Format Awareness and Versioning
-------------------------------------
-
-Chunk identity MUST be format-aware.
-
-Meaning:
-- payloads representing the same semantic value in different encodings MUST
-  produce different ChunkIds.
-
-Rules (LOCKED):
-- Any change to payload serialization format MUST result in a new ChunkId.
-- chunkType MAY include a schemaId or formatId as part of header metadata.
-
-
-04.9 Reachability and Garbage Collection Support
-------------------------------------------------
-
-Reachability is defined by explicit root manifests.
-
-Rules (LOCKED):
-- All chunk references MUST be by ChunkId.
-- Storage MUST allow enumeration of chunk references starting from a root
-  manifest sufficient to compute reachability.
-- Garbage collection MAY delete chunks unreachable from all roots, subject to
-  explicit policy.
-- Garbage collection MUST NOT delete any chunk reachable from an authoritative
-  root.
-- Garbage collection MUST NOT occur silently; actions MUST be trace-visible.
-
-Example roots (non-exhaustive):
-- savePack manifests
-- pinned WindowManifests
-- pinned Minimal Audit Bundle manifests
-- other explicitly designated policy roots
-
-
-04.10 Optional Chunk Capabilities
----------------------------------
-
-Optional features MAY be supported by storage backends:
-- compression
-- encryption at rest
-- chunk streaming
-- logical chunk packing into containers
-- partial retrieval via index chunks
-
-Rules (LOCKED):
-- Optional capabilities MUST NOT change chunk identity semantics.
-- If storage transforms bytes (compression, encryption), ChunkId MUST be
-  computed over canonical payload bytes, OR the canonical rule MUST be
-  explicitly redefined in the storage specification.
-- Paging and partial retrieval MUST be expressed through chunks and index
-  chunks and MUST NOT introduce hidden references outside reachability.
-
-
-===============================================================================
-05. VALUEREF (LOCKED)
-===============================================================================
-
-A ValueRef is an immutable reference to a value payload used by committed
-layers and committed config.
-
-A ValueRef is NOT a pointer to live runtime memory.
-A ValueRef is a deterministic decoding contract for a specific payload.
-
-Rules (LOCKED):
-- A committed key in a committed layer or committed config MUST be
-  representable as (key -> ValueRef) at the SafePointWindow boundary.
-- A ValueRef MUST be immutable once created.
-- A ValueRef MUST NOT require transactional layers, journal completeness, or
-  external side effects to decode.
-- If a ValueRef cannot be decoded, the failure MUST be explicit.
-
-A ValueRef MAY be resolved eagerly (value is resident) or lazily (value is not
-resident). This is an implementation choice and MUST NOT change semantics.
-
-
-05.1 ValueRef Forms
--------------------
-
-A ValueRef is exactly one of the following forms:
-
-A) InlineValueRef
-- payload bytes are stored directly inside the ValueRef
-
-B) ChunkValueRef
-- payload bytes are stored in a Chunk and referenced by ChunkId
-
-Rules (LOCKED):
-- Both forms MUST include an explicit codec identifier.
-- ChunkValueRef MUST include integrity metadata sufficient to validate
-  retrieved payload bytes.
-- InlineValueRef MAY include integrity metadata.
-- External references (network, arbitrary file path) are not part of ValueRef
-  unless explicitly introduced later. If introduced later, they MUST NOT be
-  used for authoritative committed state unless deterministic retrieval is
-  guaranteed.
-
-
-05.2 ValueRef Required Fields
------------------------------
-
-All ValueRef forms MUST include:
-- codecId
-  Stable identifier describing how payload bytes decode into a value.
-
-All ChunkValueRef MUST include:
-- chunkId
-  Stable identity of immutable payload bytes.
-- integrity
-  Integrity metadata used to validate retrieved payload bytes.
-
-A ValueRef MAY include:
-- contentType
-  Informational media type. Not required for correctness.
-- schemaId and schemaVersion
-  Optional schema linkage for typed decoding (Section 05.3).
-
-
-05.3 Schemaless Default and Optional Schema
--------------------------------------------
-
-Values are schemaless by default.
-
-Schemaless default means:
-- a ValueRef without schema fields decodes into a generic runtime structure
-  defined by its codec (examples: map, list, scalar, bytes)
-
-Optional schema means:
-- a ValueRef MAY include schemaId (and schemaVersion if needed)
-- if schema is present, decoding is schema-aware and MAY produce a typed
-  runtime object or a typed structure
-
-Rules (LOCKED):
-- Presence of schema fields MUST NOT be required for storing simple values.
-- If schema fields are present and schema-aware decode fails, failure MUST be
-  explicit unless an explicit policy allows fallback to schemaless decode.
-- Any fallback behavior MUST be trace-visible.
-
-
-===============================================================================
-06. MEMORY LAYERS (LOCKED)
-===============================================================================
-
-Turnix manages memory as a set of layered stores.
-
-Layers represent:
-- authority
-- scope
-- lifetime
-- rollback boundaries
-
-Examples of layers include (non-exhaustive):
-- kernel-global
-- appInstance
-- session
-- view
-- transactional
-
-Rules (LOCKED):
-- There is NO single "global memory object".
-- Each layer contains real values.
-- Reads resolve according to the active layer stack for the requesting scope.
-
-Committed layer contract (LOCKED):
-- At a SafePointWindow boundary, a committed memory layer MUST be
-  representable as:
-      key -> ValueRef
-- Layer serialization MUST serialize ValueRefs, not live object identities.
-
-
-===============================================================================
-07. TRANSACTIONS (LOCKED)
-===============================================================================
-
-A transaction is a temporary staging overlay used to record speculative
-mutations before they become authoritative.
-
-Properties:
-- overlays one or more parent layers
-- captures all writes during its lifetime
-- allows reads from parent layers
-- is resolved only by commit or abort
-
-Primary usage:
-- pipeline execution
-- capability calls with mutation
-- debugger-initiated staging
-
-
-07.1 Commit and Abort
----------------------
-
-Rules (LOCKED):
-- A transaction MUST end in exactly one outcome:
-  - commit
-  - abort
-- Partial propagation is forbidden.
-- Commit and abort:
-  - are atomic
-  - are trace-backed
-  - preserve rollback guarantees
-
-On commit:
-- values propagate to their target authoritative layers or to a parent
-  transaction, depending on nesting rules
-
-On abort:
-- all staged mutations are discarded deterministically
-
-
-07.2 Nested Pipeline Runs and Transaction Stacking
---------------------------------------------------
-
-If a pipeline run creates or enters another session (a child session) while an
-enclosing pipeline run is active, the child session MUST inherit the enclosing
-transactional view.
-
-Effective read/write stack:
-
-    kernel layer
-    appInstance layer
-    parent session layer
-    parent transaction layer (txnParent)
-    child transaction layer  (txnChild)
-
-Rules (LOCKED):
-- Reads resolve first-match from txnChild downward.
-- Writes always target txnChild.
-- Committing txnChild propagates its writes into txnParent.
-- No child transaction may commit directly into committed layers while an
-  enclosing transaction exists.
-- Only the outermost transaction commit may mutate committed layers.
-
-This prevents lost updates and desynchronization between pipeline runs.
-
-
-07.3 Commit into Committed Layers and Conflict Detection
+06.3 COMMIT INTO COMMITTED LAYERS AND CONFLICT DETECTION
 --------------------------------------------------------
 
-Commit conflict detection applies ONLY when a transaction attempts to commit
-into committed layers.
+06.3.1. Commit conflict detection applies only when a transaction attempts
+        to commit into committed layers.
 
-Each transaction records, per key, the base revision state visible at the
-time the key was first read or first written within that transaction.
+06.3.2. A transaction records, per touched key, the committed base revision
+        state visible when the key was first read or first written.
 
-Base revision state is:
-- baseExists: whether the key existed in the committed layer at capture time
-- baseRevisionId: the revisionId at capture time if baseExists is true
+06.3.3. The recorded base state includes:
+        - whether the key existed in the committed layer at capture time
+        - which committed revisionId the key had if it existed
 
-Rules:
-- baseExists MUST be captured on first read or first write of the key.
-- If baseExists is false, baseRevisionId MUST be the absent sentinel.
-- If baseExists is true, baseRevisionId MUST equal the committed key's current
-  revisionId at capture time.
+06.3.4. If the key did not exist at capture time, baseRevisionId is the
+        absent sentinel.
 
-When committing into committed layers:
-- if baseExists differs from the committed layer's current existence, the
-  commit is in conflict and MUST fail deterministically.
-- if baseExists is true and the committed layer's current revisionId differs
-  from baseRevisionId, the commit is in conflict and MUST fail
-  deterministically.
+06.3.5. If the key existed at capture time, baseRevisionId equals the
+        committed key's current revisionId at that time.
 
-Rules (LOCKED):
-- No silent merge is allowed.
-- No last-write-wins is allowed.
-- No heuristic reconciliation is allowed.
-- Any override requires explicit user or policy decision (DA-15).
+06.3.6. When committing into committed layers, the commit is in conflict if
+        the recorded existence state differs from the committed layer's
+        current existence state.
 
-Conflict detection MUST NOT be applied to txnChild -> txnParent propagation.
-txnChild -> txnParent propagation is not authoritative mutation.
+06.3.7. When committing into committed layers, the commit is in conflict if
+        the recorded committed revisionId differs from the committed layer's
+        current revisionId.
+
+06.3.8. A conflicting commit fails deterministically.
+
+06.3.9. Silent merge does not occur.
+
+06.3.10. Last-write-wins behavior does not occur.
+
+06.3.11. Heuristic reconciliation does not occur.
+
+06.3.12. Any override requires explicit user decision or explicit policy
+         defined elsewhere.
+
+06.3.13. Conflict detection is not applied to child-transaction propagation
+         into a parent transaction, because that propagation is not yet an
+         authoritative mutation.
 
 
 ===============================================================================
-08. ORCHESTRATION (LOCKED)
+07. ORCHESTRATION UNITS AND MUTATION BOUNDARIES
 ===============================================================================
 
-An Orchestration Unit is a kernel-tracked execution unit that is permitted to
-mutate Turnix-managed state within an AppInstance.
+07.1. An Orchestration Unit is a kernel-tracked execution unit that is
+      permitted to mutate Turnix-managed state within an appInstance.
 
-Examples (non-exhaustive):
-- a pipeline run, including its stage callbacks
-- a capability handler invocation
-- a debugger-initiated mutation transaction
-- config mutation request processing
+07.2. Example Orchestration Units include:
+      - a pipeline run, including its stage callbacks
+      - a capability handler invocation
+      - a tooling-initiated mutation transaction
+      - configuration mutation request processing
 
-Work started outside Turnix orchestration is not an Orchestration Unit until
-it re-enters through orchestration boundaries.
+07.3. Work started outside Turnix orchestration is not an Orchestration Unit
+      until it re-enters through orchestration boundaries.
+
+07.4. Turnix guarantees apply only to work that occurs within Turnix
+      orchestration boundaries or re-enters through them.
 
 
-08.1 Single-Lane AppInstance Orchestration
+07.1 SINGLE-LANE APPINSTANCE ORCHESTRATION
 ------------------------------------------
 
-Turnix orchestrates execution in a deterministic single-lane model.
+07.1.1. Turnix uses a deterministic single-lane orchestration model within
+        one appInstance unless an explicit concurrency mode is defined
+        elsewhere.
 
-Rules (LOCKED):
-- Within a given AppInstance, Turnix MUST NOT execute multiple Orchestration
-  Units concurrently.
-- Awaited input/output or model calls MAY suspend the current unit, but
-  MUST NOT allow another unit that can mutate the same AppInstance state to
-  run concurrently unless an explicit concurrency mode is enabled by the
-  kernel.
-- Work started outside Turnix orchestration is outside Turnix guarantees. Any
-  mutation MUST re-enter through orchestration boundaries.
+07.1.2. Within one appInstance, Turnix does not execute multiple
+        Orchestration Units concurrently when those units may mutate the
+        same appInstance state.
 
+07.1.3. Awaited input/output or model calls may suspend the current unit.
 
-===============================================================================
-09. PERSISTENCE MODEL (LOCKED)
-===============================================================================
+07.1.4. Suspension does not authorize another state-mutating unit to run
+        concurrently in the same appInstance unless an explicit concurrency
+        mode permits that behavior.
 
-Persistence is protection against loss, not the definition of state.
+07.1.5. Work started outside Turnix orchestration remains outside Turnix
+        guarantees until it re-enters through orchestration boundaries.
 
-Rules (LOCKED):
-- any committed value MAY be persisted
-- persistence is handled exclusively by Turnix
-- persistence is asynchronous but ordered
-- failure to persist MUST be trace-visible
-
-Persistence does not imply:
-- immediate disk residency
-- exclusive in-memory presence
-- unlimited retention
+07.1.6. Any mutation that seeks Turnix guarantees re-enters through
+        orchestration boundaries before becoming authoritative.
 
 
 ===============================================================================
-10. STATIC DATA AND MUTATION INTENT (LOCKED)
+08. PERSISTENCE AS PROTECTION, NOT TRUTH
 ===============================================================================
 
-Static data is data provided by:
-- packs
-- configuration
-- bundled resources
+08.1. Persistence protects committed state against loss.
 
-Static data is read-only by default.
+08.2. Persistence does not define what state truth is.
 
-When a mutation is attempted on static data, intent MUST be explicit:
+08.3. Committed state truth is determined by the commit model defined by
+      this document.
 
-A) Patch
-- original key remains authoritative
-- patch is applied on each read
-- patch is persisted as overlay data
+08.4. Any committed value may be persisted.
 
-B) Copy
-- a new key is created
-- data is copied and modified
-- original remains unchanged
+08.5. Persistence of committed state occurs under Turnix authority.
 
-This decision MAY require user interaction (DA-15).
+08.6. Persistence ordering is controlled by Turnix.
 
+08.7. Persistence failure is trace-visible.
 
-===============================================================================
-11. REVISIONS AND STATE GARBAGE COLLECTION (LOCKED)
-===============================================================================
+08.8. Persistence does not imply:
+      - immediate disk residency
+      - continuous in-memory residency
+      - unlimited retention
 
-Committed state values MAY have revisions.
-
-Revisions exist to support:
-- rollback
-- auditing
-- debugging
-
-Revision retention is policy-driven.
-
-Garbage collection MAY remove:
-- old revisions
-- unreachable historical states
-
-Garbage collection MUST NOT:
-- remove data required to reconstruct current committed state
-- occur silently
-- violate rollback guarantees
-
-Interaction with payload model (LOCKED):
-- Removing a revision MAY make older ValueRefs unreachable.
-- Chunk garbage collection MUST obey reachability rules (Section 04.9).
-- Revision removal MUST NOT invalidate the ability to restore the latest
-  committed state for each committed key.
+08.9. This section defines the state-model meaning of persistence only. It
+      does not redefine the separate persistent I/O authority defined
+      elsewhere.
 
 
 ===============================================================================
-12. JOURNAL (LOCKED)
+09. STATIC DATA AND MUTATION INTENT
 ===============================================================================
 
-The journal records observational evidence of system activity.
+09.1. Static data is data provided by:
+      - packs
+      - configuration defaults
+      - bundled resources
 
-Journal is:
-- append-only
-- non-authoritative
-- non-blocking
-- trace-adjacent
+09.2. Static data is read-only by default.
 
-Examples:
-- raw user input attempts
-- raw assistant output (including aborted streams)
-- intermediate pipeline artifacts
-- debugging captures
+09.3. When a mutation is attempted on static data, the intended mutation
+      mode is explicit.
 
-Rules (LOCKED):
-- Journal data is NOT state.
-- Journal data is NOT required for correctness.
+09.4. Turnix recognizes exactly two mutation-intent modes for static data:
 
+      A) Patch
+      B) Copy
 
-12.1 Journal Retention Model
-----------------------------
+09.5. In Patch mode:
+      - the original key remains authoritative
+      - a patch is applied on each read
+      - the patch is persisted as overlay data
 
-Journal retention follows a best-effort model.
+09.6. In Copy mode:
+      - a new key is created
+      - data is copied and modified
+      - the original remains unchanged
 
-LOCKED MEANING:
-- If retention limits are exceeded (size, age, quota), older journal entries
-  MAY be pruned.
-- If storage is unavailable or under severe pressure, journal writes MAY be
-  dropped rather than blocking execution.
-- Any pruning or dropped writes MUST be trace-visible and classified.
+09.7. Static-data mutation intent may require explicit user decision or
+      policy handling defined elsewhere.
 
-Journal loss MUST NOT affect correctness.
-
-
-12.2 Journal Retention Policies
--------------------------------
-
-Retention policies MAY include:
-- maximum total size
-- maximum age
-- per-appInstance quota
-- per-save quota
-- per-category quota
-
-Policies are:
-- explicit
-- inspectable
-- configurable
-
-Journal garbage collection:
-- occurs incrementally
-- emits trace events (what, why, policy)
-- MUST NOT block execution
-
-
-12.3 Journal Retention Classes
-------------------------------
-
-Journal entries MAY declare a retention class:
-
-A) ephemeral
-- safe to prune aggressively
-- streaming chunks, transient outputs
-
-B) bounded
-- retained per policy
-- suitable for post-mortem analysis
-
-C) pinned
-- pruned only by explicit user action
-- intended for rare use
-
-Retention class affects garbage collection only.
+09.8. Static-data mutation intent remains visible and explainable after the
+      fact.
 
 
 ===============================================================================
-13. TRACE DIRECTED ACYCLIC GRAPH (TRACE DAG) (LOCKED)
+10. REVISIONS AND STATE GARBAGE COLLECTION
 ===============================================================================
 
-Turnix tracing is modeled as a Trace Directed Acyclic Graph (trace DAG).
+10.1. Committed state values may have revisions.
 
-Definition:
-- A trace DAG is a directed acyclic graph of trace events.
-- Each trace event MAY reference zero or more parent trace events.
-- Cycles are forbidden.
+10.2. Revisions support:
+      - rollback
+      - audit
+      - debugging
+      - committed-state history
 
-Trace DAG properties:
-- Causality is explicit.
-- Temporal order is NOT authoritative.
-- Multiple parent links are permitted.
-- Absence of a parent link implies independent origin, not simultaneity.
+10.3. Revision retention is policy-driven.
 
-Trace DAG guarantees:
-- Every decision-producing action MUST emit at least one trace event.
-- Every trace event MUST belong to exactly one trace DAG.
-- Trace DAG identity MUST be stable across export and inspection.
+10.4. State garbage collection may remove:
+      - older revisions
+      - unreachable historical committed states
 
-Naming:
-- "Trace Directed Acyclic Graph" is the canonical name.
-- "trace DAG" is the permitted abbreviation.
+10.5. State garbage collection does not remove data required to reconstruct
+      the latest committed state for each committed key.
 
-Trace DAG is authoritative for:
-- causal explanation
-- audit reconstruction
-- debugger correlation
-- policy enforcement provenance
+10.6. State garbage collection does not occur silently.
 
-Trace DAG is NOT authoritative for:
-- state reconstruction
-- replay semantics
-- rollback eligibility
+10.7. State garbage collection does not violate rollback guarantees that the
+      retained policy still claims to preserve.
+
+10.8. Removal of older revisions may make older committed value
+      representations unreachable.
+
+10.9. Historical removal does not invalidate the ability to restore the
+      latest retained committed state.
 
 
 ===============================================================================
-14. WINDOWS AND SAFEPOINTWINDOWS (LOCKED)
+11. TOOLING-INITIATED STATE MUTATION CONSTRAINTS
 ===============================================================================
 
-An AppInstance maintains an ordered sequence of Windows.
+11.1. Tooling may inspect Turnix-managed memory and committed state through
+      appropriate controlled surfaces.
 
-A Window is a bounded segment of runtime history and evidence.
+11.2. Tooling-initiated edits occur inside a transaction.
 
-A Window is exactly one of:
-- SafePointWindow
-- AbortedWindow
-- ActiveWindow
+11.3. Tooling-created transactions follow the same commit or abort rules as
+      runtime transactions.
 
-Exactly one ActiveWindow MAY exist per AppInstance.
-ActiveWindow, if it exists, MUST be the last Window in the sequence.
+11.4. Tooling commits propagate according to normal transaction-layer rules.
 
+11.5. Tooling actions do not finalize committed state in the middle of
+      active pipeline work merely because the tooling surface exists.
 
-14.1 SafePointWindow
---------------------
+11.6. Tooling-originated state mutation is labeled distinctly in trace.
 
-A SafePointWindow is an authoritative committed boundary.
+11.7. This document defines only the state-contract constraints for
+      tooling-initiated mutation.
 
-A SafePointWindow MUST satisfy:
-- all state mutations included are committed
-- no transactional layer state is included
-- the SafePointWindow is restorable deterministically
-- the SafePointWindow is trace-correlated and explainable via the trace DAG
-
-A SafePointWindow MUST contain:
-- committed layers and committed config (authoritative)
-- trace DAG material sufficient to identify the SafePointWindow and its scope
-
-A SafePointWindow MUST NOT contain:
-- transactional layer contents
-
-A SafePointWindow MAY contain (policy-driven):
-- revision history
-- journal material
-- additional trace or journal not required for correctness
-
-A SafePointWindow MUST have:
-- safePointWindowId (stable identity)
-
-Retention and garbage collection:
-- trace, journal, and revisions within a SafePointWindow MAY be truncated or
-  removed per explicit policy
-- at least one authoritative value per committed key MUST remain sufficient to
-  restore the SafePointWindow deterministically
-
-
-14.2 ActiveWindow
------------------
-
-ActiveWindow is the current in-flight region after the last SafePointWindow.
-
-ActiveWindow MUST contain:
-- trace DAG events emitted after the last SafePointWindow
-- journal entries produced after the last SafePointWindow
-- metadata about active Orchestration Units sufficient for diagnosis
-- transactional staging layers and in-flight transactional state
-
-Rules (LOCKED):
-- ActiveWindow MUST be treated as non-authoritative.
-- ActiveWindow MAY be discarded during recovery.
-
-Immutability rule (pressure handling) (LOCKED):
-- ActiveWindow trace and journal MUST NOT be pruned or garbage collected.
-- If storage pressure occurs:
-  - journal writes MAY be dropped (as already defined) but the drop MUST be
-    trace-visible and classified
-  - trace events MUST still record the fact of omission
-
-
-14.3 AbortedWindow
-------------------
-
-An AbortedWindow is a finalized ActiveWindow that did NOT produce committed
-state changes.
-
-An AbortedWindow MUST contain:
-- trace DAG events describing what happened post-previous SafePointWindow
-- a finalization event identifying the abort outcome and reason category
-
-An AbortedWindow MAY contain:
-- journal evidence (policy-driven)
-
-An AbortedWindow MUST NOT contain:
-- committed layers or config changes
-- transactional layer contents
-- claims of authority
-
-An AbortedWindow MUST have:
-- abortedWindowId (stable identity)
-
-Retention and garbage collection (LOCKED):
-- AbortedWindow trace and journal MAY be truncated or removed per explicit
-  policy
-- if an AbortedWindow is retained (not fully removed), it MUST retain enough
-  trace meaning to explain:
-  - that it was aborted (not committed)
-  - why it was aborted (reason category and causal links)
-- an AbortedWindow MAY be fully removed only if policy permits and at least
-  one later SafePointWindow exists OR the engine explicitly accepts loss of
-  that audit region
-
-
-14.4 Finalization Rules
------------------------
-
-ActiveWindow MUST be finalized as exactly one of:
-- SafePointWindow (commit path)
-- AbortedWindow (abort or fail path)
-
-Finalizing ActiveWindow into SafePointWindow (LOCKED):
-- requires that all applicable transactions are resolved
-  (committed or aborted)
-- produces a SafePointWindow with a new safePointWindowId
-- produces a trace event SafePointCreationSucceeded
-
-Finalizing ActiveWindow into AbortedWindow (LOCKED):
-- occurs when in-flight work concludes without producing a new
-  SafePointWindow and committed state remains as the last SafePointWindow
-- produces a trace event ActiveWindowFinalizedAsAborted with reason category
-
-Finalization MUST NOT produce partial artifacts.
-
-
-14.5 Ordered List Representation
---------------------------------
-
-The Window sequence can be represented as an ordered list.
-
-Rules (LOCKED):
-- SafePointWindow has safePointWindowId
-- AbortedWindow has abortedWindowId
-- ordering is explicit (sequence index)
-- ActiveWindow does not require an id because it is always last, unique, and
-  mutable-in-progress
-
-
-14.6 SafePointWindow Creation Request Modes
--------------------------------------------
-
-Turnix MAY support multiple SafePointWindow creation request modes.
-
-Mode A: ImmediateCommitted
-
-Meaning:
-- creation MUST NOT wait for quiescence
-- if an eligible SafePointWindow can be created immediately, it is created
-- if a SafePointWindow cannot be created immediately, the request fails
-  deterministically with explicit reason
-
-Mode B: AtQuiescence
-
-Meaning:
-- creation is attempted only when no Orchestration Unit is active for the
-  target AppInstance
-- the request MAY be queued until quiescence is reached
-
-If Mode B is supported, it MUST be policy-bounded as defined below.
-
-
-14.7 AtQuiescence Queueing and Policy Bounds
---------------------------------------------
-
-If AtQuiescence is requested while an Orchestration Unit is active:
-- Turnix MAY queue the request until quiescence is reached.
-- Turnix MUST emit a trace event at request time indicating the request is
-  queued and not yet satisfied.
-- Turnix MUST emit a trace event when creation succeeds, fails, times out,
-  or is cancelled.
-
-If queued requests are not persisted, this MUST be explicit:
-- a queued AtQuiescence request MAY be lost on crash or restart
-- loss MUST NOT be silent and MUST be trace-visible before the crash point
-  when possible
-
-AtQuiescence requests MUST be bounded by explicit policy. Policy options:
-
-A) Timeout
-- the request MUST fail deterministically after the configured time limit
-  if quiescence is not reached
-
-B) PauseAtSafePoint
-- Turnix MAY attempt a deterministic pause at a defined safe point as
-  described in DA-16
-- if safe-point pause cannot be achieved safely, Turnix MUST fail the request
-  with an explicit reason
-
-AtQuiescence MUST NOT:
-- silently wait forever
-- silently cancel in-flight work
-- silently downgrade into ImmediateCommitted without explicit user or policy
-
-
-14.8 Trace DAG Correlation Rules
---------------------------------
-
-The trace DAG records decisions and causality.
-
-SafePointWindow correlation rules (LOCKED):
-- Each SafePointWindow MUST have a trace DAG event identifying it.
-- The trace DAG MUST identify:
-  - safePointWindowId
-  - the committed scope(s) it covers
-  - the reason it was created
-  - whether it includes revision or journal material per policy
-
-The trace DAG MUST distinguish:
-- events that contributed to committed state at the SafePointWindow
-- events that occurred after the SafePointWindow (ActiveWindow events)
-
-This distinction MUST NOT rely on timestamps alone.
-
-
-14.9 SafePointWindow Creation Events
-------------------------------------
-
-Turnix MUST emit trace DAG events for:
-- SafePointWindow creation request
-- SafePointWindow creation start
-- SafePointWindow creation success
-- SafePointWindow creation failure
-- SafePointWindow creation cancellation (policy-driven)
-
-SafePointWindow creation failure MUST NOT create partial artifacts.
-SafePointWindow creation cancellation MUST be explicit and trace-visible.
-
-
-14.10 Authority and Determinism Boundary
-----------------------------------------
-
-SafePointWindow guarantees (LOCKED):
-- determinism of committed state restoration
-- ability to reconstruct which committed values exist and why
-- committed state does not depend on journal completeness
-- committed state does not depend on non-committed transactions
-
-ActiveWindow non-guarantees (LOCKED):
-- no deterministic replay of in-flight work
-- no deterministic reproduction of external side effects
-- no deterministic ordering after restart beyond SafePointWindow restoration
-
-If a crash occurs within the ActiveWindow (LOCKED):
-- the system MAY discard all ActiveWindow activity
-- the system MAY attempt to resume, but MUST treat resumption as new work
-- any such attempt MUST be explicit and trace-visible
+11.8. Breakpoints, pausing, step control, and debugger execution behavior
+      are defined elsewhere.
 
 
 ===============================================================================
-15. WINDOWMANIFESTS AND EXPORTS (OPEN WITH LOCKED CONSTRAINTS)
+12. COMMITTED-STATE RESTORATION BOUNDARY
 ===============================================================================
 
-A WindowManifest is an immutable manifest representing exactly one finalized
-Window (SafePointWindow or AbortedWindow).
+12.1. Turnix supports deterministic restoration of committed state.
 
-This section remains OPEN regarding exact serialization formats, but has
-LOCKED constraints and LOCKED interoperability contracts with ChunkId and
-ValueRef.
+12.2. Deterministic restoration means that committed state can be restored
+      from retained authoritative material without requiring
+      non-authoritative historical material.
 
+12.3. Deterministic restoration does not imply deterministic reconstruction
+      of in-flight runtime activity that never became committed.
 
-15.1 Locked WindowManifest Constraints
---------------------------------------
+12.4. Deterministic restoration does not imply deterministic replay of
+      external side effects.
 
-Rules (LOCKED):
-- A WindowManifest MUST be immutable once created.
-- A WindowManifest MUST represent exactly one finalized Window.
-- A WindowManifest MUST NOT represent an ActiveWindow.
-- A WindowManifest MUST be inspectable offline (Section 15.7).
+12.5. Restoration of committed state is authoritative.
 
-Authority rules (LOCKED):
-- A SafePointWindowManifest MAY contain authoritative committed state roots.
-- An AbortedWindowManifest MUST NOT contain authoritative committed state
-  roots.
-- Trace, journal, and MAB roots are evidence-only and MUST be labeled as such.
+12.6. Any later resumed or retried work after restoration is new work and is
+      not retroactively part of the earlier committed mutation.
 
+12.7. Later workflow concepts such as Replay, Resume, and Retry remain
+      constrained by the restoration boundary defined in this section.
 
-15.2 WindowManifest Types
--------------------------
-
-A WindowManifest is exactly one of:
-- SafePointWindowManifest
-- AbortedWindowManifest
-
-
-15.3 SafePointWindowManifest
-----------------------------
-
-LOCKED WITH OPEN FORMATS.
-
-A SafePointWindowManifest MUST include:
-- safePointWindowId
-- windowType = SafePointWindow
-- committedStateRoot
-
-Definition:
-- committedStateRoot is a ChunkId of a manifest or index that enumerates all
-  committed layers and committed config for that SafePointWindow by ValueRef.
-
-Optional roots (policy-driven):
-- traceRoot
-- journalRoot
-- revisionRoot
-- mabRoot
-
-Rules (LOCKED):
-- Optional roots MUST NOT add authority.
-- Optional roots MUST be explicitly labeled non-authoritative evidence.
-
-
-15.4 AbortedWindowManifest
---------------------------
-
-LOCKED WITH OPEN FORMATS.
-
-An AbortedWindowManifest MUST include:
-- abortedWindowId
-- windowType = AbortedWindow
-- traceRoot
-
-Optional roots (policy-driven):
-- journalRoot
-- mabRoot
-
-Rules (LOCKED):
-- An AbortedWindowManifest MUST NOT define committedStateRoot.
-- If traceRoot is absent, the AbortedWindowManifest MUST explicitly declare
-  "traceAbsent" and the reason category for absence (policy, pruned, corrupt).
-- A default AbortedWindowManifest SHOULD include traceRoot.
-
-
-15.5 Evidence Carry-Forward Consistency
----------------------------------------
-
-Carry-forward rule for optional evidence (LOCKED):
-- If a WindowManifest includes trace evidence, it MAY reference chunks whose
-  creation predates the window, but only to preserve internal consistency of
-  included evidence.
-- If a WindowManifest includes a trace span close event, the corresponding
-  span open event MUST also be included.
-
-[NOTE] The ordering rule for span open before span close is LOCKED in DA-03.
-
-
-15.6 Window Exports
--------------------
-
-LOCKED POLICY + OPEN FORMATS.
-
-Export is a portable, immutable serialization of one WindowManifest closure.
-
-Terminology:
-- WindowExport: an exported artifact derived from a WindowManifest
-- SafePointWindowExport: a WindowExport derived from SafePointWindowManifest
-- AbortedWindowExport: a WindowExport derived from AbortedWindowManifest
-
-Rules (LOCKED):
-- Export MUST NOT add authority.
-- Export MUST NOT include transactional layer contents.
-- Export MUST be self-contained with respect to retained payloads.
-
-Meaning:
-- A WindowExport MUST copy into itself every referenced chunk required to
-  decode the exported closure, subject to explicit "partial export" policy.
-- If partial export is used, missing material MUST be explicit and impacts
-  comparison results (NotComparable).
-
-
-15.7 Offline Inspection
------------------------
-
-WindowManifests and WindowExports MUST be inspectable offline.
-
-Meaning:
-- An offline tool MAY resolve referenced ChunkIds and decode ValueRefs without
-  running Turnix orchestration logic.
-
-Rules (LOCKED):
-- Offline inspection MUST NOT require capability calls.
-- Offline inspection MUST NOT require journal completeness.
-- Offline inspection MUST treat evidence roots as evidence only.
-
-
-15.8 Window Digest Support
---------------------------
-
-OPEN WITH LOCKED CONSTRAINTS.
-
-Purpose:
-- provide OPTIONAL accelerators for equality checks
-- digests are not identities
-- digests exist only to avoid expensive deep comparisons
-
-Rules (LOCKED):
-- A digest field MAY be present in WindowManifests or WindowExports.
-- If present, a digest MUST be computed from a canonical serialization of the
-  compared material for that digest type.
-- If canonical serialization rules are not defined for a digest type, that
-  digest type MUST NOT be emitted.
-- Tools MUST treat digests as hints:
-  - if digests match, tools MAY conclude Equal for the corresponding mode
-  - if digests differ, tools MUST conclude NotEqual for the corresponding mode
-  - if a digest is missing, tools MUST compute it on demand OR fall back to
-    structural comparison
-
-Digest fields (non-exhaustive):
-- stateDigest
-  Canonical serialization of committed layers and committed config only.
-- strictStateDigest
-  Canonical serialization of committed state plus revision material included
-  per declared strict mode.
-- evidenceDigest
-  Canonical serialization of included trace, journal material per declared
-  inclusion policy.
-- exportManifestDigest
-  Canonical serialization of the export manifest logical content.
-
-
-15.9 Equality Modes
--------------------
-
-Equality checks MAY be performed in multiple modes.
-
-Definitions (LOCKED):
-
-A) StateEquality
-- compares committed key/value pairs only (latest values only)
-- ignores revision history entirely
-
-B) StrictStateEquality
-- compares committed key/value pairs AND revision history that is present
-- if required revision material is missing for one side, result is
-  NotComparable (not NotEqual)
-
-C) EvidenceEquality
-- compares included evidence closure (trace, journal, MAB as included)
-- does not imply equality of state unless used in addition to state modes
-
-D) ExportEquality
-- compares export closure as packaged, including declared partial or missing
-  flags
-- intended for verifying that two exports are the same packaged artifact
-
-Rules (LOCKED):
-- Tools MUST state which mode is used.
-- Default mode MUST be StateEquality unless explicitly requested otherwise.
+12.8. This document defines the restoration boundary only. It does not
+      define the full workflow semantics of Replay, Resume, or Retry.
 
 
 ===============================================================================
-16. MINIMAL AUDIT BUNDLE (MAB) (LOCKED)
+13. MIGRATION COMMIT RULE
 ===============================================================================
 
-A Minimal Audit Bundle (MAB) is a non-authoritative export artifact intended
-to support audit, explanation, and offline inspection.
+13.1. Migration that changes authoritative committed state occurs as normal
+      orchestrated work inside a transaction.
 
-Purpose:
-- capture sufficient evidence to explain what happened and why
-- allow external or offline audit
-- preserve causal structure without requiring full state
+13.2. Migration that changes authoritative committed state results in a new
+      committed state boundary on success.
 
-A MAB is NOT:
-- authoritative state
-- a WindowManifest
-- replayable
-- sufficient for restoration
+13.3. Migration is abortable.
 
+13.4. If migration aborts, partial authoritative mutation does not occur.
 
-16.1 MAB Required Contents
---------------------------
+13.5. If one migration operation attempts multiple authoritative changes,
+      the migration transaction is atomic with respect to the affected
+      committed layers.
 
-A Minimal Audit Bundle MUST include:
-- one or more trace DAGs
-- all trace events referenced by those DAGs
-- trace metadata required to interpret reason codes
-- enough metadata to correlate trace events to:
-  - AppInstance identity
-  - session identity
-  - Orchestration Unit identity (if applicable)
-  - safePointWindowId and WindowExport identity (if any)
-
-A Minimal Audit Bundle MUST NOT include:
-- authoritative committed state in full
-- transactional layers
-- uncommitted mutations
-- executable code
-- capability implementations
-- secrets or credentials
-
-
-16.2 MAB Optional Contents
---------------------------
-
-A Minimal Audit Bundle MAY include:
-- selected journal entries referenced by trace events
-- selected committed state excerpts (read-only)
-- revision metadata without value payloads
-
-If included, journal material:
-- MUST preserve journal metadata (including retention class)
-- MAY be incomplete, truncated, or redacted per explicit policy
-
-If included, state excerpts:
-- MUST be labeled non-authoritative
-- MUST be read-only
-- MUST include revision identifiers
-- MUST NOT imply completeness
-
-
-16.3 MAB Integrity and Loss Model
----------------------------------
-
-Integrity guarantees (LOCKED):
-- A MAB MUST preserve trace DAG structure exactly.
-- Trace parent-child relationships MUST NOT be altered.
-- Missing data MUST be explicitly marked.
-
-Loss tolerance (LOCKED):
-- A MAB MAY be incomplete.
-- Incompleteness MUST be explicit.
-- Absence of data MUST NOT imply absence of behavior.
-
-MAB creation failure (LOCKED):
-- MUST emit trace events
-- MUST NOT affect runtime state
-
-MAB creation (LOCKED):
-- MAY occur while Turnix is running
-- MUST NOT pause execution by default
-- MUST NOT block orchestration
-
-
-16.4 MAB Non-goals
-------------------
-
-A Minimal Audit Bundle explicitly does NOT provide:
-- determinism guarantees
-- replay capability
-- state restoration
-- debugging time travel
-- completeness guarantees
+13.6. If migration cannot complete safely, it aborts and authoritative
+      state remains identical to the pre-migration committed state.
 
 
 ===============================================================================
-17. MEMORY INSPECTOR AND TOOLING SEMANTICS (LOCKED STATE CONTRACT)
+14. WHAT IS EXPLICITLY NOT REQUIRED
 ===============================================================================
 
-The Memory Inspector is a tooling surface for observing and manipulating
-Turnix-managed memory.
+14.1. Turnix does not require:
+      - infinite committed history retention
+      - journal-backed determinism
+      - journal-backed recovery
+      - trace-backed correctness
+      - concurrency-first execution
+      - deterministic reconstruction of uncommitted runtime activity
 
-This section defines memory and state semantics only. Breakpoint triggering,
-pause behavior, and execution control are governed by DA-16.
+14.2. Turnix does not imply determinism where determinism does not exist.
 
-Capabilities:
-- enumerate memory layers and their composition
-- inspect values with:
-  - origin layer
-  - revision identifiers
-  - transactional visibility
-- view active transactional stacks
-- inspect staged vs committed values
-
-Transactional interaction:
-- Inspector-initiated edits MUST occur inside a transaction.
-- The inspector MAY create its own temporary transactional overlay.
-- Inspector transactions follow the same commit or abort rules as runtime
-  transactions.
-- Inspector commits propagate only one layer downward.
-- Inspector actions MUST NOT finalize committed state mid-pipeline.
-
-Undo / redo semantics:
-- Undo operates on committed revisions.
-- Redo is inspector-local, ephemeral, and non-authoritative.
-- Redo history MUST be discarded deterministically when a new revision is
-  committed.
-
-Breakpoints and change observation:
-- Memory breakpoints MAY observe:
-  - committed layer mutations
-  - transactional layer mutations
-- Whether transactional changes trigger breakpoints is defined by DA-16
-  breakpoint configuration and safe-point rules.
-
-Debugger-initiated mutation:
-- Obeys all ownership, permission, and scope rules.
-- Is trace-labeled as tooling activity.
-- May be staged and applied at safe points (DA-16).
+14.3. Turnix does not treat observational completeness as a requirement for
+      committed-state correctness.
 
 
 ===============================================================================
-18. REPLAY, RESUME, AND RETRY (LOCKED)
+15. LOCKED SUMMARY
 ===============================================================================
 
-Replay is deterministic reconstruction of a SafePointWindow state and its
-causal story.
+15.1. LOCKED:
+      - runtime memory and committed state are distinct
+      - only committed state is authoritative
+      - authoritative and non-authoritative material remain separate
+      - memory is layered by authority, scope, lifetime, and rollback
+        boundary
+      - transactions stage speculative mutation and end only in atomic
+        commit or atomic abort
+      - nested transaction stacking prevents child authoritative commits
+        while an enclosing transaction exists
+      - conflict detection applies when committing into committed layers
+      - appInstance mutation follows deterministic single-lane orchestration
+        unless another mode is explicitly defined elsewhere
+      - persistence protects state against loss but does not define truth
+      - static-data mutation intent is explicit as Patch or Copy
+      - revision retention is policy-driven and does not invalidate latest
+        committed-state restoration
+      - tooling-initiated mutation obeys the normal transaction model
+      - committed-state restoration is deterministic only within the
+        committed-state boundary
+      - migration that changes authoritative state is transactional and
+        abortable
 
-Replay in Turnix means:
-- restore committed state at a SafePointWindow
-- inspect or step through trace DAG events that produced it
-
-Replay MUST NOT:
-- imply re-running external effects
-- imply deterministically reproducing the ActiveWindow
-
-Resume is the attempt to continue execution after restoring a SafePointWindow.
-
-Resume MAY involve:
-- re-running orchestration units that were in-flight
-- retrying external calls
-- abandoning in-flight work and starting new work
-
-Rules (LOCKED):
-- Resume is not deterministic in outcome.
-- Resume MUST be explicit and trace-visible.
-
-Retry is a new orchestration attempt for a previously failed or incomplete
-action.
-
-Examples:
-- a model call
-- a network call
-- a file write
-
-Rules (LOCKED):
-- Retry MUST be modeled as new work.
-- Retry MUST be trace-visible.
-- Retry MUST NOT be implied by replay.
+15.2. OPEN:
+      - none in this document at present
 
 
 ===============================================================================
-19. MIGRATION COMMIT RULE (LOCKED)
-===============================================================================
-
-Migration mechanics are defined in DA-06 (IoManager rollback guarantees) and
-in DA-15 (policy and user decision handling). This section locks the state
-contract because it affects determinism boundaries.
-
-Rules (LOCKED):
-- Migration that changes authoritative committed state MUST occur as normal
-  orchestrated work inside a transaction.
-- A migration that changes authoritative committed state MUST result in a new
-  SafePointWindow on success.
-- Migration MUST be abortable. If migration aborts, partial authoritative
-  mutation MUST NOT occur.
-
-Implication (LOCKED):
-- If a migration attempts multiple changes, the migration transaction MUST be
-  atomic with respect to authoritative layers and committed config.
-- If the migration cannot complete safely, it MUST abort, leaving
-  authoritative state identical to the pre-migration SafePointWindow.
-
-
-===============================================================================
-20. CROSS-SESSION AUDIT WORKFLOWS (OPEN)
-===============================================================================
-
-Audit workflows operate across:
-- traces
-- committed state
-- revisions
-- journal entries
-
-Audit MAY support:
-- reconstructing decision chains
-- inspecting state evolution over time
-- correlating journal evidence with trace events
-
-Audit workflows MUST NOT:
-- mutate state
-- require journal completeness
-- assume replayability
-
-
-===============================================================================
-21. WHAT IS EXPLICITLY NOT REQUIRED
-===============================================================================
-
-Turnix does NOT require:
-- infinite history
-- journal-backed replay
-- journal-backed determinism
-- journal-backed recovery
-- concurrency-first execution
-- audit completeness guarantees
-
-
-===============================================================================
-22. COMPARISON RESULT TYPE (LOCKED)
-===============================================================================
-
-All equality checks MUST return a ComparisonResult.
-
-ComparisonResult is an enum with exactly three values:
-- Equal
-- NotEqual
-- NotComparable
-
-Rules (LOCKED):
-- ComparisonResult MUST NOT be represented as:
-  - boolean
-  - integer
-  - float
-  - string not in the enum set
-- APIs MUST NOT provide alternate return types or "truthy/falsy" equivalents.
-- If an API language lacks enums, the API MUST expose:
-  - a closed set of named constants, OR
-  - a tagged union or sealed type
-  with exactly the three values above.
-- Any comparison API that offers a convenience boolean (example: isEqual())
-  MUST be forbidden.
-
-Behavior rules (LOCKED):
-- NotComparable MUST be returned when required material is missing due to:
-  - policy pruning
-  - partial export
-  - corruption
-  - unsupported strict submode
-- NotComparable MUST NOT be treated as NotEqual by Turnix tooling.
-- Any user interface presentation MUST distinguish NotComparable from
-  NotEqual.
-
-
-===============================================================================
-23. LOCKED SUMMARY
-===============================================================================
-
-LOCKED:
-- Memory vs State authority boundary (only committed state is authoritative)
-- storage-neutral payload model:
-  - committed keys representable as (key -> ValueRef)
-  - Chunk identity and integrity rules
-  - IoManager mediation for ValueRef or Chunk persistence
-  - schemaless default with optional schema fields
-  - payload sharing across artifacts without changing authority
-- layered memory model
-- transactional staging with atomic commit or abort
-- nested transaction stacking for child pipeline runs
-- commit conflict detection for commits into committed layers
-- single-lane AppInstance orchestration with orchestration re-entry boundaries
-- persistence as protection, not truth
-- static data Patch or Copy mutation intent
-- revisions retention and reachability-safe garbage collection
-- journal as best-effort non-authoritative evidence
-- trace DAG as causal authority (not state authority)
-- window model with SafePointWindow, ActiveWindow, AbortedWindow
-- SafePointWindow determinism boundary and ActiveWindow non-guarantees
-- WindowManifest model:
-  - SafePointWindowManifest has committedStateRoot
-  - AbortedWindowManifest has evidence roots only
-  - manifests are immutable and offline inspectable
-- WindowExport model:
-  - portable, immutable closure of a WindowManifest
-  - exports are self-contained unless explicitly partial
-- Minimal Audit Bundle non-authoritative semantics and integrity rules
-- Memory Inspector edits via transactions and trace-labeled tooling mutation
-- Replay, Resume, Retry definitions and non-guarantees
-- migration commit rule requiring atomic transaction and new SafePointWindow
-- digest support for manifests and exports:
-  - digests are optional and computed on demand
-  - digests are derived from canonical serialization rules
-  - missing digests require computation or structural comparison
-- equality modes and ComparisonResult enum requirements
-
-OPEN:
-- ChunkId encoding choice beyond LOCKED constraints
-- WindowManifest and WindowExport serialization formats beyond LOCKED
-  constraints
-- optional chunk features beyond LOCKED constraints (compression, encryption,
-  streaming, packing, paging, index chunks)
-- digest algorithms and canonical serialization choices for each digest type
-- cross-session audit workflows and tooling user experience
-
-
-===============================================================================
-END OF DA-04 - MEMORY, STATE, LAYERS & JOURNALING
+END OF DA-04 - MEMORY, STATE & AUTHORITATIVE COMMIT MODEL
 ===============================================================================
 
 --- doc-meta ---
 DOC_ID: DA-04
 DOC_FILE: docs/design/DA-04_MEMORY_STATE_AND_AUTHORITATIVE_COMMIT_MODEL.txt
-DOC_REV: 1
-DOC_GIT: 0000000
+DOC_REV: 18
+DOC_GIT: 344e324
 ----------------

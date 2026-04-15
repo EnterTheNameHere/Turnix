@@ -1,0 +1,968 @@
+===============================================================================
+DESIGN AREA DA-08 - WINDOWS, HISTORICAL EVIDENCE, EXPORTS &
+OFFLINE COMPARISON
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines how Turnix groups runtime history into bounded Windows, how finalized
+Windows preserve committed boundaries and non-authoritative evidence, and how
+portable exports and offline comparison operate without turning retained
+history into a hidden correctness dependency.
+
+This document defines finalized evidence and artifact boundaries around
+committed state. It does not redefine the committed-state model itself.
+
+Purpose:
+--------
+This document defines the Turnix model for Windows, historical evidence,
+portable finalized artifacts, and offline comparison.
+
+It defines:
+- what Windows mean in Turnix
+- SafePointWindow, ActiveWindow, and AbortedWindow semantics
+- finalization of in-flight runtime regions
+- SafePointWindow creation request modes and lifecycle visibility
+- journal as non-authoritative evidence
+- trace correlation rules for finalized Windows
+- WindowManifest semantics
+- WindowExport semantics
+- Minimal Audit Bundle (MAB) semantics
+- optional digest support for comparison acceleration
+- offline inspection boundaries
+- equality modes for finalized artifacts
+- ComparisonResult semantics
+- Replay, Resume, and Retry workflow boundaries as they relate to finalized
+  Windows and retained evidence
+
+It does NOT define:
+- the general memory and authoritative-state model
+  (see MEMORY, STATE & AUTHORITATIVE COMMIT MODEL)
+- payload identity, ChunkId, or ValueRef representation contracts
+  (see PAYLOAD IDENTITY, CHUNKS & VALUEREF REPRESENTATION)
+- concrete persistent I/O authority, Readers, Writers, or filesystem rules
+  (see FILE I/O, READERS / WRITERS & PERSISTENCE SAFETY)
+- tracing structure, trace event schema, span semantics, or trace storage
+  semantics (see TRACING, DIAGNOSTICS & OBSERVABILITY)
+- configuration-specific state, schema, or migration semantics
+  (see CONFIGURATION, SCHEMAS & MIGRATION)
+- debugger pause, breakpoint, or execution-control behavior
+  (see DEBUGGING, INSPECTION & BREAKPOINTS)
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-02
+- DA-03
+- DA-04
+- DA-05
+- DA-06
+
+
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
+
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines Window, evidence, export, and offline
+      comparison semantics within that shared interpretation model.
+
+
+===============================================================================
+02. CORE CONCEPT
+===============================================================================
+
+02.1. This design area answers:
+
+          "How does Turnix preserve bounded committed-state history and
+           bounded historical evidence without making retained history a
+           hidden correctness dependency?"
+
+02.2. Turnix groups runtime history into bounded Windows.
+
+02.3. A Window is a bounded region of runtime history and retained evidence
+      associated with one appInstance.
+
+02.4. Windows distinguish:
+      - authoritative committed boundaries
+      - non-authoritative in-flight activity
+      - non-authoritative historical evidence
+
+02.5. Finalized Windows preserve what was committed, what was aborted, and
+      what evidence remains retained for explanation, audit, and offline
+      inspection.
+
+02.6. This document does not redefine authoritative state.
+
+02.7. This document defines how finalized Windows and their portable
+      derivatives relate to authoritative state and retained evidence.
+
+02.8. Historical evidence may support explanation, audit, and debugging.
+
+02.9. Historical evidence does not become a hidden correctness dependency.
+
+
+===============================================================================
+03. JOURNAL AS NON-AUTHORITATIVE EVIDENCE
+===============================================================================
+
+03.1. The journal records observational evidence of system activity.
+
+03.2. Journal content is:
+      - append-oriented
+      - non-authoritative
+      - non-blocking
+      - evidence-oriented rather than correctness-defining
+
+03.3. Journal content may include:
+      - raw user input attempts
+      - raw assistant output, including aborted streams
+      - intermediate pipeline artifacts
+      - debugging captures
+      - other explanatory material
+
+03.4. Journal data is not state.
+
+03.5. Journal data is not required for correctness.
+
+03.6. Journal loss does not change committed-state meaning.
+
+03.7. Journal retention follows explicit best-effort policy.
+
+03.8. If retention limits are exceeded, older journal material may be
+      pruned.
+
+03.9. If storage is unavailable or under severe pressure, journal writes may
+      be dropped rather than block execution.
+
+03.10. Journal pruning or dropped writes are trace-visible and classified.
+
+03.11. Journal entries may declare a retention class.
+
+03.12. Retention classes may include:
+       - ephemeral
+       - bounded
+       - pinned
+
+03.13. Retention class affects garbage collection only.
+
+03.14. Journal retention policy does not alter authority boundaries.
+
+
+03.1 JOURNAL RETENTION POLICIES
+-------------------------------
+
+03.1.1. Journal retention policy is explicit.
+
+03.1.2. Journal retention policy is inspectable.
+
+03.1.3. Journal retention policy is configurable.
+
+03.1.4. Journal retention policy may use one or more policy axes such as:
+        - maximum total size
+        - maximum age
+        - per-appInstance quota
+        - per-save quota
+        - per-category quota
+
+03.1.5. Journal garbage collection may operate incrementally.
+
+03.1.6. Incremental journal garbage collection does not block execution.
+
+03.1.7. Journal garbage collection remains trace-visible.
+
+03.1.8. Journal garbage collection does not weaken the non-authoritative
+        status of journal evidence.
+
+
+===============================================================================
+04. WINDOW MODEL
+===============================================================================
+
+04.1. An appInstance maintains an ordered sequence of Windows.
+
+04.2. A Window is exactly one of:
+      - SafePointWindow
+      - AbortedWindow
+      - ActiveWindow
+
+04.3. Exactly one ActiveWindow may exist per appInstance.
+
+04.4. If an ActiveWindow exists, it is the last Window in the sequence.
+
+04.5. SafePointWindow and AbortedWindow are finalized Windows.
+
+04.6. ActiveWindow is not a finalized Window.
+
+04.7. Window ordering is explicit.
+
+04.8. Window ordering does not rely on inference from timestamps alone.
+
+04.9. The ordered Window sequence preserves:
+      - finalized committed boundaries
+      - finalized abort boundaries
+      - the current in-flight region, if one exists
+
+
+===============================================================================
+05. SAFEPOINTWINDOW
+===============================================================================
+
+05.1. A SafePointWindow is an authoritative committed boundary.
+
+05.2. A SafePointWindow includes only committed state material for the
+      authoritative portion of that Window.
+
+05.3. A SafePointWindow is deterministically restorable within the
+      committed-state restoration boundary defined by
+      MEMORY, STATE & AUTHORITATIVE COMMIT MODEL.
+
+05.4. A SafePointWindow is trace-correlated and explainable through retained
+      trace evidence, subject to explicit retention policy.
+
+05.5. A SafePointWindow is correlated to retained trace identity and scope
+      evidence sufficient to identify the Window and its relation to
+      committed work.
+
+05.6. A SafePointWindow does not contain transactional layer contents as
+      authoritative material.
+
+05.7. A SafePointWindow may additionally retain, by policy:
+      - revision history
+      - journal material
+      - additional trace evidence
+      - other non-authoritative evidence compatible with this document
+
+05.8. Retained optional evidence does not add authority.
+
+05.9. A SafePointWindow has safePointWindowId as stable identity.
+
+05.10. safePointWindowId is a UUID value representable in plain text.
+
+05.11. Trace, journal, and revision material retained within a
+       SafePointWindow may be truncated or removed according to explicit
+       policy.
+
+05.12. Retention reduction within a SafePointWindow does not invalidate the
+       retained authoritative committed-state boundary, provided enough
+       authoritative material remains to restore that SafePointWindow
+       deterministically.
+
+
+===============================================================================
+06. ACTIVEWINDOW
+===============================================================================
+
+06.1. ActiveWindow is the current in-flight region after the last finalized
+      committed boundary.
+
+06.2. ActiveWindow contains activity that has not yet been finalized as a
+      SafePointWindow or AbortedWindow.
+
+06.3. ActiveWindow contains:
+      - trace events emitted after the last finalized SafePointWindow
+      - journal entries produced after the last finalized SafePointWindow
+      - metadata about active Orchestration Units sufficient for diagnosis
+      - transactional staging layers and in-flight transactional state
+
+06.4. ActiveWindow is non-authoritative.
+
+06.5. ActiveWindow may be discarded during recovery.
+
+06.6. ActiveWindow does not guarantee deterministic replay.
+
+06.7. ActiveWindow does not guarantee deterministic reconstruction of
+      external side effects.
+
+06.8. ActiveWindow trace and journal material are not pruned out from the
+      in-flight region merely because they are non-authoritative.
+
+06.9. If storage pressure occurs:
+      - journal writes may be dropped according to explicit policy
+      - trace records still preserve the fact of omission
+
+06.10. Omission handling remains trace-visible and classified.
+
+06.11. ActiveWindow does not require its own stable Window identity while it
+       remains the unique mutable tail of the Window sequence.
+
+
+===============================================================================
+07. ABORTEDWINDOW
+===============================================================================
+
+07.1. An AbortedWindow is a finalized ActiveWindow that did not produce a
+      new authoritative committed boundary.
+
+07.2. An AbortedWindow contains:
+      - retained trace evidence describing what happened after the previous
+        finalized SafePointWindow
+      - a finalization outcome identifying the abort path and reason
+        category
+
+07.3. An AbortedWindow may retain, by policy:
+      - journal evidence
+      - other non-authoritative evidence compatible with this document
+
+07.4. An AbortedWindow does not contain authoritative committed-state
+      changes as part of its own finalized outcome.
+
+07.5. An AbortedWindow does not contain transactional layer contents as
+      retained authoritative material.
+
+07.6. An AbortedWindow does not claim authority.
+
+07.7. An AbortedWindow has abortedWindowId as stable identity.
+
+07.8. abortedWindowId is a UUID value representable in plain text.
+
+07.9. An AbortedWindow may be truncated or partially removed according to
+      explicit policy.
+
+07.10. If an AbortedWindow is retained at all, it retains enough trace
+       meaning to explain:
+       - that the Window was aborted rather than committed
+       - why it was aborted
+       - how it relates causally to the retained evidence still present
+
+07.11. An AbortedWindow may be fully removed only if explicit policy permits
+       the removal and either:
+       - at least one later SafePointWindow exists
+       - or the engine explicitly accepts loss of that audit region
+
+07.12. When such removal occurs, the platform remains explicit and honest
+       about the loss of that audit region.
+
+
+===============================================================================
+08. FINALIZATION RULES
+===============================================================================
+
+08.1. ActiveWindow is finalized as exactly one of:
+      - SafePointWindow
+      - AbortedWindow
+
+08.2. Finalization does not produce partial finalized artifacts.
+
+08.3. Finalization into SafePointWindow requires that all transactions
+      relevant to the finalized committed boundary are resolved.
+
+08.4. Finalization into SafePointWindow produces:
+      - a new SafePointWindow
+      - a new safePointWindowId
+      - trace-visible success of finalized committed-boundary creation
+
+08.5. Finalization into AbortedWindow occurs when in-flight work concludes
+      without producing a new SafePointWindow and the authoritative committed
+      state remains that of the last finalized SafePointWindow.
+
+08.6. Finalization into AbortedWindow produces:
+      - a new AbortedWindow
+      - a new abortedWindowId
+      - trace-visible abort finalization with reason category
+
+08.7. Finalization preserves the distinction between:
+      - committed authoritative outcome
+      - non-authoritative retained evidence about failed or aborted work
+
+
+===============================================================================
+09. SAFEPOINTWINDOW CREATION REQUEST MODES
+===============================================================================
+
+09.1. Turnix may support multiple SafePointWindow creation request modes.
+
+09.2. Request-mode semantics are explicit.
+
+09.3. Request-mode semantics are trace-visible.
+
+09.4. Turnix does not silently substitute one request mode for another.
+
+
+09.1 IMMEDIATECOMMITTED
+-----------------------
+
+09.1.1. ImmediateCommitted means that SafePointWindow creation is attempted
+        without waiting for quiescence.
+
+09.1.2. If an eligible SafePointWindow can be created immediately, it is
+        created.
+
+09.1.3. If an eligible SafePointWindow cannot be created immediately, the
+        request fails deterministically with an explicit reason.
+
+09.1.4. ImmediateCommitted does not silently degrade into waiting behavior.
+
+
+09.2 ATQUIESCENCE
+-----------------
+
+09.2.1. AtQuiescence means that SafePointWindow creation is attempted only
+        when no Orchestration Unit is active for the target appInstance.
+
+09.2.2. If AtQuiescence is requested while an Orchestration Unit is active,
+        Turnix may queue the request until quiescence is reached.
+
+09.2.3. Queued AtQuiescence requests are explicit.
+
+09.2.4. Queued AtQuiescence requests are trace-visible.
+
+09.2.5. If queued AtQuiescence requests are not persisted, that limitation
+        remains explicit.
+
+09.2.6. A queued AtQuiescence request may be lost on crash or restart only
+        when that loss is compatible with explicit policy and explicit trace
+        visibility before the crash point when possible.
+
+
+09.3 QUEUEING, TIMEOUT, AND SAFE-POINT PAUSE POLICY
+---------------------------------------------------
+
+09.3.1. AtQuiescence waiting is bounded by explicit policy.
+
+09.3.2. Bounded waiting may use one or more policy mechanisms such as:
+        - timeout
+        - pause-at-safe-point attempt
+
+09.3.3. If timeout policy applies and quiescence is not reached within the
+        configured bound, the request fails deterministically.
+
+09.3.4. If pause-at-safe-point policy is used, Turnix may attempt a
+        deterministic pause at a defined safe point.
+
+09.3.5. If safe-point pause cannot be achieved safely, the request fails
+        with an explicit reason.
+
+09.3.6. Turnix does not silently wait forever.
+
+09.3.7. Turnix does not silently cancel in-flight work in order to satisfy
+        SafePointWindow creation.
+
+09.3.8. Turnix does not silently downgrade AtQuiescence into
+        ImmediateCommitted.
+
+09.3.9. Any user or policy decision that changes creation behavior remains
+        explicit and trace-visible.
+
+
+===============================================================================
+10. SAFEPOINTWINDOW CREATION LIFECYCLE VISIBILITY
+===============================================================================
+
+10.1. SafePointWindow creation has an explicit lifecycle.
+
+10.2. The lifecycle includes:
+      - request
+      - queued state when applicable
+      - creation start
+      - creation success
+      - creation failure
+      - creation cancellation when cancellation occurs
+
+10.3. Turnix emits trace-visible lifecycle events for each applicable stage
+      of that lifecycle, consistent with the tracing requirements defined in
+      TRACING, DIAGNOSTICS & OBSERVABILITY.
+
+10.4. Queued state remains distinguishable from started creation.
+
+10.5. Failure does not create a partial finalized artifact.
+
+10.6. Cancellation is explicit.
+
+10.7. Lifecycle visibility remains consistent with the creation request mode
+      in effect.
+
+
+===============================================================================
+11. TRACE CORRELATION WITH WINDOWS AND FINALIZED EVIDENCE
+===============================================================================
+
+11.1. This document consumes the trace model defined by
+      TRACING, DIAGNOSTICS & OBSERVABILITY.
+
+11.2. This document does not redefine trace events, trace DAG structure,
+      span semantics, or trace storage semantics.
+
+11.3. Finalized Windows are correlated to trace evidence through explicit
+      retained trace identity and causal relationships rather than through
+      timestamps alone.
+
+11.4. Each SafePointWindow is identifiable through retained trace evidence
+      that states:
+      - safePointWindowId
+      - the committed scope or scopes covered
+      - the reason or creation path
+      - whether optional evidence classes are included by policy
+
+11.5. Each AbortedWindow is identifiable through retained trace evidence
+      that states:
+      - abortedWindowId
+      - the abort outcome
+      - the abort reason category
+      - the causal relation to the retained evidence still present
+
+11.6. Trace correlation distinguishes:
+      - events that contributed to committed state included in a
+        SafePointWindow
+      - events that remained in later ActiveWindow or AbortedWindow regions
+
+11.7. This distinction does not rely on timestamps alone.
+
+11.8. If retained finalized evidence includes a trace span close event, the
+      corresponding span open event is also included.
+
+11.9. Evidence carry-forward may reference older retained trace material
+      only to preserve internal consistency of the retained evidence closure.
+
+11.10. Trace incompleteness, pruning, corruption, or partial export remains
+       explicit when it affects retained finalized evidence.
+
+
+===============================================================================
+12. WINDOWMANIFESTS
+===============================================================================
+
+12.1. A WindowManifest is an immutable manifest representing exactly one
+      finalized Window.
+
+12.2. A WindowManifest never represents an ActiveWindow.
+
+12.3. A WindowManifest is inspectable offline.
+
+12.4. A WindowManifest is exactly one of:
+      - SafePointWindowManifest
+      - AbortedWindowManifest
+
+
+12.1 SAFEPOINTWINDOWMANIFEST
+----------------------------
+
+12.1.1. A SafePointWindowManifest includes:
+        - safePointWindowId
+        - windowType = SafePointWindow
+        - committedStateRoot
+
+12.1.2. committedStateRoot identifies the retained committed-state closure
+        for that SafePointWindow through the representation contracts
+        defined elsewhere.
+
+12.1.3. A SafePointWindowManifest may additionally include, by policy:
+        - traceRoot
+        - journalRoot
+        - revisionRoot
+        - mabRoot
+
+12.1.4. Optional roots are explicitly labeled as non-authoritative evidence
+        roots.
+
+12.1.5. Optional roots do not add authority to the SafePointWindowManifest.
+
+12.1.6. mabRoot, when present, is an evidence root only and does not add
+        authority to the SafePointWindowManifest.
+
+
+12.2 ABORTEDWINDOWMANIFEST
+--------------------------
+
+12.2.1. An AbortedWindowManifest includes:
+        - abortedWindowId
+        - windowType = AbortedWindow
+
+12.2.2. An AbortedWindowManifest may include:
+        - traceRoot
+        - journalRoot
+        - mabRoot
+
+12.2.3. An AbortedWindowManifest does not define committedStateRoot.
+
+12.2.4. If retained trace evidence for the AbortedWindow is absent, the
+        AbortedWindowManifest declares that absence explicitly together
+        with the reason category for that absence.
+
+12.2.5. An AbortedWindowManifest does not become authoritative merely
+        because it is finalized and immutable.
+
+
+===============================================================================
+13. WINDOWEXPORTS
+===============================================================================
+
+13.1. A WindowExport is a portable immutable serialization of one
+      WindowManifest closure.
+
+13.2. A WindowExport is derived from exactly one finalized WindowManifest.
+
+13.3. A WindowExport is exactly one of:
+      - SafePointWindowExport
+      - AbortedWindowExport
+
+13.4. Export does not add authority.
+
+13.5. Export does not include transactional layer contents.
+
+13.6. Export is self-contained with respect to retained payloads required to
+      decode the exported closure, unless explicit partial-export policy is
+      used.
+
+13.7. If partial-export policy is used, missing material is explicit.
+
+13.8. Explicit missing material affects comparison outcomes where the
+      selected comparison mode requires that material.
+
+13.9. Export identity is not the same concept as committed-state identity.
+
+13.10. Export closure remains compatible with the payload and reachability
+       contracts defined elsewhere.
+
+
+===============================================================================
+14. MINIMAL AUDIT BUNDLE (MAB)
+===============================================================================
+
+14.1. A Minimal Audit Bundle is a non-authoritative export artifact intended
+      to support audit, explanation, and offline inspection.
+
+14.2. A Minimal Audit Bundle is not:
+      - authoritative state
+      - a WindowManifest
+      - sufficient for restoration
+      - a guarantee of replayability
+      - a guarantee of completeness
+
+14.3. A Minimal Audit Bundle includes:
+      - one or more retained trace roots
+      - all retained trace events in the selected retained trace closure
+      - metadata required to interpret retained trace reasons
+      - enough correlation metadata to relate retained evidence to relevant
+        appInstance, session, Orchestration Unit, Window, or export identity
+
+14.4. A Minimal Audit Bundle may additionally include:
+      - selected journal entries referenced by trace evidence
+      - selected committed-state excerpts as read-only evidence
+      - selected revision metadata without full value payloads
+
+14.5. Any committed-state excerpts included in a Minimal Audit Bundle are
+      labeled non-authoritative evidence excerpts.
+
+14.6. If journal material is included, the included journal material
+      preserves the journal metadata required to interpret that evidence
+      correctly, including retention class.
+
+14.7. A Minimal Audit Bundle does not include:
+      - transactional layers
+      - uncommitted mutations
+      - executable code
+      - capability implementations
+      - secrets or credentials
+
+14.8. A Minimal Audit Bundle preserves retained causal structure exactly
+      for the trace evidence it includes.
+
+14.9. Missing data in a Minimal Audit Bundle is explicit.
+
+14.9.1. A Minimal Audit Bundle remains honest about retained gaps,
+        pruning, corruption, and other explicit incompleteness affecting the
+        included evidence.
+
+14.10. Absence of data in a Minimal Audit Bundle does not imply absence of
+       behavior.
+
+14.11. Minimal Audit Bundle creation failure is trace-visible.
+
+14.12. Minimal Audit Bundle creation failure does not affect runtime state.
+
+14.13. Minimal Audit Bundle creation may occur while Turnix is running.
+
+14.14. Minimal Audit Bundle creation does not pause execution by default.
+
+14.15. Minimal Audit Bundle creation does not block orchestration by
+       default.
+
+
+===============================================================================
+15. OPTIONAL DIGEST SUPPORT AND COMPARISON ACCELERATORS
+===============================================================================
+
+15.1. Finalized artifacts may include optional digest fields.
+
+15.2. Optional digest fields are accelerators for comparison work.
+
+15.3. Optional digest fields are not identities.
+
+15.4. Optional digest fields do not add authority.
+
+15.5. A digest field is emitted only when canonical serialization rules for
+      that digest type are defined.
+
+15.6. If canonical serialization rules for a digest type are not defined,
+      that digest type is not emitted.
+
+15.7. If the relevant digest values match for the selected comparison mode,
+      tools may conclude Equal for that mode without deeper structural
+      comparison.
+
+15.8. If the relevant digest values differ for the selected comparison mode,
+      tools conclude NotEqual for that mode.
+
+15.9. If the relevant digest value is missing for the selected comparison
+      mode, tools either:
+      - compute the digest on demand
+      - or fall back to structural comparison
+
+15.10. Digest categories may include:
+       - stateDigest
+       - strictStateDigest
+       - evidenceDigest
+       - exportManifestDigest
+
+15.11. Each digest category corresponds to a distinct comparison scope.
+
+15.12. A digest category name is not reused for a different comparison scope
+       unless an explicit coordinated revision changes that meaning.
+
+15.13. Digest algorithms and canonical serialization details remain open
+       within the constraints of this document.
+
+
+===============================================================================
+16. OFFLINE INSPECTION
+===============================================================================
+
+16.1. WindowManifests, WindowExports, and Minimal Audit Bundles are
+      inspectable offline within the limits of their retained contents.
+
+16.2. Offline inspection may resolve retained payload references and decode
+      retained value representations without running Turnix orchestration
+      logic.
+
+16.3. Offline inspection does not require capability calls.
+
+16.4. Offline inspection does not require journal completeness.
+
+16.5. Offline inspection treats evidence roots as evidence only.
+
+16.6. Offline inspection does not elevate retained evidence into
+      authoritative state.
+
+16.7. If retained material is partial, pruned, corrupt, or unavailable,
+      offline inspection reports that limitation explicitly.
+
+
+===============================================================================
+17. REPLAY, RESUME, AND RETRY
+===============================================================================
+
+17.1. Replay is deterministic reconstruction of a retained SafePointWindow
+      state together with the retained causal story available for that
+      Window.
+
+17.2. Replay restores committed state within the restoration boundary
+      defined by MEMORY, STATE & AUTHORITATIVE COMMIT MODEL.
+
+17.3. Replay does not imply re-running external effects.
+
+17.4. Replay does not imply deterministic reconstruction of ActiveWindow
+      activity that never became committed.
+
+17.5. Resume is an attempt to continue execution after restoring a retained
+      SafePointWindow.
+
+17.6. Resume may involve:
+      - re-running in-flight orchestration units
+      - abandoning in-flight work
+      - retrying selected external calls
+      - starting new work from the restored committed boundary
+
+17.7. Resume is not deterministic in outcome.
+
+17.8. Resume is explicit and trace-visible.
+
+17.9. Retry is a new orchestration attempt for a previously failed,
+      incomplete, or intentionally retried action.
+
+17.10. Retry is modeled as new work.
+
+17.11. Retry is trace-visible.
+
+17.12. Retry is not implied by Replay.
+
+17.13. Replay, Resume, and Retry remain constrained by the committed-state
+       restoration boundary defined by MEMORY, STATE & AUTHORITATIVE
+       COMMIT MODEL.
+
+
+===============================================================================
+18. EQUALITY MODES AND COMPARISONRESULT
+===============================================================================
+
+18.1. Equality checks over finalized Windows, exports, or retained evidence
+      return ComparisonResult.
+
+18.2. ComparisonResult is an enum with exactly three values:
+      - Equal
+      - NotEqual
+      - NotComparable
+
+18.3. ComparisonResult is not represented as:
+      - boolean
+      - integer
+      - float
+      - an open-ended string set
+
+18.4. If an API language lacks enums, the API exposes either:
+      - a closed set of named constants
+      - a tagged union
+      - a sealed type
+      with exactly the three ComparisonResult values above
+
+18.5. A convenience boolean equality API is not provided.
+
+18.6. Any user-facing presentation distinguishes NotComparable from
+      NotEqual.
+
+18.7. Equality checks may be performed in multiple modes.
+
+18.8. Tools state explicitly which equality mode is used.
+
+18.9. Default equality mode is StateEquality unless another mode is
+      explicitly requested.
+
+
+18.1 EQUALITY MODES
+-------------------
+
+18.1.1. StateEquality compares retained committed key/value pairs only.
+
+18.1.2. StateEquality ignores revision history.
+
+18.1.3. StrictStateEquality compares retained committed key/value pairs plus
+        retained revision history required by the strict mode.
+
+18.1.4. If required retained revision material is missing for one side
+        under StrictStateEquality, the result is NotComparable rather than
+        NotEqual.
+
+18.1.5. EvidenceEquality compares retained evidence closure such as trace,
+        journal, and audit-bundle material as included.
+
+18.1.6. EvidenceEquality does not imply state equality unless state modes
+        are also satisfied.
+
+18.1.7. ExportEquality compares exported closure as packaged, including
+        explicit missing or partial-export flags.
+
+18.1.8. ExportEquality is intended for verifying that two exports are the
+        same packaged artifact closure.
+
+18.1.9. NotComparable is returned when required retained material for the
+        selected mode is missing due to causes such as:
+        - policy pruning
+        - partial export
+        - corruption
+        - unsupported strict submode
+
+18.1.10. NotComparable is not treated as NotEqual by Turnix tooling.
+
+
+===============================================================================
+19. CROSS-SESSION AUDIT WORKFLOWS
+===============================================================================
+
+19.1. Audit workflows may operate across retained traces, retained
+      committed-state artifacts, retained revisions, and retained journal
+      evidence.
+
+19.2. Audit workflows may support:
+      - reconstructing retained decision chains
+      - inspecting retained state evolution
+      - correlating retained journal evidence with retained trace evidence
+      - comparing retained finalized artifacts across sessions
+
+19.3. Audit workflows do not mutate state.
+
+19.4. Audit workflows do not require journal completeness.
+
+19.5. Audit workflows do not assume replayability.
+
+19.6. Audit workflows remain honest about retained gaps, pruned evidence,
+      and explicit incompleteness.
+
+
+===============================================================================
+20. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+20.1. OPEN questions include:
+      - exact WindowManifest serialization format
+      - exact WindowExport serialization format
+      - exact Minimal Audit Bundle packaging format
+      - future audit-tooling user experience and visualization
+
+
+===============================================================================
+21. LOCKED SUMMARY
+===============================================================================
+
+21.1. LOCKED:
+      - runtime history is grouped into ordered Windows
+      - Windows are SafePointWindow, AbortedWindow, and ActiveWindow
+      - SafePointWindow is a finalized authoritative committed boundary
+      - ActiveWindow is the current non-authoritative in-flight region
+      - AbortedWindow is a finalized non-authoritative abort region
+      - finalization produces exactly one finalized outcome from
+        ActiveWindow
+      - SafePointWindow creation modes and lifecycle visibility are explicit
+      - journal is non-authoritative evidence and retention loss does not
+        affect committed-state meaning
+      - journal retention policy is explicit, inspectable, and configurable
+      - finalized Windows are correlated to retained trace evidence through
+        explicit causal identity rather than timestamps alone
+      - WindowManifest is immutable and represents exactly one finalized
+        Window
+      - WindowExport is a portable immutable closure of one finalized
+        WindowManifest
+      - Minimal Audit Bundle is non-authoritative and preserves retained
+        causal structure for included evidence
+      - included journal material in a Minimal Audit Bundle preserves
+        required journal metadata, including retention class
+      - optional digests are comparison accelerators rather than identities
+      - offline inspection operates on retained contents without requiring
+        orchestration logic
+      - Replay, Resume, and Retry remain constrained by the restoration
+        boundary defined by MEMORY, STATE & AUTHORITATIVE COMMIT MODEL
+      - equality modes are explicit and return ComparisonResult with exactly
+        Equal, NotEqual, and NotComparable
+
+21.2. OPEN:
+      - concrete packaging and serialization formats
+      - future audit-tooling experience
+
+
+===============================================================================
+END OF DA-08 - WINDOWS, HISTORICAL EVIDENCE, EXPORTS &
+OFFLINE COMPARISON
+===============================================================================
+
+--- doc-meta ---
+DOC_ID: DA-08
+DOC_FILE: docs/design/DA-08_WINDOWS_HISTORICAL_EVIDENCE_EXPORTS_AND_OFFLINE_COMPARISON.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------

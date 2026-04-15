@@ -1,0 +1,591 @@
+===============================================================================
+DESIGN AREA DA-05 - PAYLOAD IDENTITY, CHUNKS & VALUEREF REPRESENTATION
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines the storage-neutral representation contract for committed values in
+Turnix, including immutable payload identity, Chunk semantics, and ValueRef
+forms.
+
+This document makes committed value representation stable across storage
+backends without turning storage realization into platform truth.
+
+Purpose:
+--------
+This document defines how authoritative committed values are represented in
+Turnix independently of any specific storage backend, file layout, or
+database implementation.
+
+It defines:
+- the storage-neutral payload model for committed values
+- immutable payload identity through Chunk and ChunkId
+- integrity requirements for committed payload material
+- ValueRef as the committed value representation contract
+- schemaless default and optional schema linkage for committed values
+- payload sharing and reachability constraints across retained artifacts
+- boundary rules between representation semantics and persistent I/O
+  authority
+
+It does NOT define:
+- the general memory and authoritative-state model (see DA-04)
+- concrete persistent I/O authority, Readers, Writers, or filesystem rules
+  (see DA-06)
+- tracing structure, trace event schema, or trace storage semantics
+  (see DA-03)
+- configuration-specific scope, defaults, or migration semantics
+  (see DA-07)
+- windows, manifests, exports, or audit-bundle semantics
+  (see later design areas)
+- concrete digest algorithms, canonical serialization formats, or codec
+  implementations beyond the semantic constraints stated here
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-02
+- DA-03
+- DA-04
+
+
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
+
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines committed value representation and payload
+      identity semantics within that shared interpretation model.
+
+
+===============================================================================
+02. CORE CONCEPT
+===============================================================================
+
+02.1. This design area answers:
+
+          "How are committed values represented so that they remain stable,
+           inspectable, and independent of any one storage backend?"
+
+02.2. Turnix does not treat committed state as live runtime object identity.
+
+02.3. Turnix represents committed values through immutable payload
+      references.
+
+02.4. Runtime objects are decoded views of committed payload material.
+
+02.5. Runtime residency is an implementation detail and does not change the
+      meaning of a committed value.
+
+02.6. Representation semantics remain storage-neutral.
+
+02.7. Storage-neutral representation means that committed value meaning does
+      not depend on:
+      - filesystem path
+      - database row identity
+      - runtime pointer identity
+      - machine-local layout accident
+
+02.8. This document defines the representation contract only.
+
+02.9. This document does not define who is allowed to persist payload
+      material or how persistent I/O is performed. Those authority rules
+      belong elsewhere.
+
+
+===============================================================================
+03. STORAGE-NEUTRAL PAYLOAD MODEL
+===============================================================================
+
+03.1. Authoritative committed state does not embed mutable runtime objects.
+
+03.2. A committed value is representable as immutable payload material plus
+      deterministic decoding information.
+
+03.3. Committed state references immutable payload bytes rather than live
+      runtime object identity.
+
+03.4. Runtime objects are decoded views of immutable payload material.
+
+03.5. This model supports:
+      - deterministic restoration
+      - backend-agnostic storage realization
+      - offline inspection
+      - safe payload sharing
+      - stable artifact closure
+
+03.6. A committed key in a committed layer or committed configuration is
+      representable at the commit boundary as:
+
+          key -> ValueRef
+
+03.7. A ValueRef is immutable once created.
+
+03.8. A ValueRef does not depend on:
+      - transactional layers
+      - journal completeness
+      - trace completeness
+      - hidden external side effects
+
+03.9. If a committed value cannot be decoded from its retained authoritative
+      representation, the failure is explicit.
+
+03.10. A decode failure does not cause the value to be treated as valid
+       authoritative content.
+
+
+===============================================================================
+04. CORE TERMS
+===============================================================================
+
+04.1. A Chunk is an immutable byte sequence.
+
+04.2. A ChunkId is the canonical identity of a Chunk.
+
+04.3. A ValueRef is an immutable reference describing how to obtain and
+      decode committed value payload material.
+
+04.4. A codec is a deterministic decoding rule identified by codecId.
+
+04.5. A schema is optional typing and version metadata that may participate
+      in typed decode and compatibility handling.
+
+04.6. A root manifest is an immutable manifest that enumerates referenced
+      payload roots and defines a reachability root for retained artifact
+      closure.
+
+04.6.1. Later documents may define specialized manifest kinds that satisfy
+        this root-manifest role for particular retained artifact classes.
+
+04.7. This document defines the semantic meaning of these terms.
+
+04.8. This document does not define their concrete on-disk realization.
+
+
+===============================================================================
+05. CHUNKS AND CHUNK IDENTITY
+===============================================================================
+
+05.1. A Chunk is immutable once created.
+
+05.2. Chunk immutability is enforced by the storage implementation that
+      realizes this contract.
+
+05.3. A Chunk is addressable by a stable ChunkId.
+
+05.4. A retained Chunk is retrievable by ChunkId unless it has been removed
+      by explicit retention or garbage-collection policy compatible with
+      authoritative reachability guarantees.
+
+05.5. Two Chunks are the same Chunk if and only if their ChunkId is
+      identical.
+
+05.6. ChunkId is stable across:
+      - export and import
+      - copying between storage backends
+      - savePack repackaging
+      - other storage relocation that preserves the same payload material
+
+05.7. ChunkId does not depend on:
+      - filesystem paths
+      - database row identifiers
+      - local timestamps
+      - machine identity
+      - wall-clock time
+
+05.8. ChunkId is content-derived.
+
+05.9. Content-derived means that ChunkId is computed from:
+      - the payload byte sequence
+      - the identity-relevant chunk metadata fields
+
+05.10. ChunkId is not derived from values expected to differ across
+       machines or runs.
+
+05.11. ChunkId is representable in plain text.
+
+05.12. ChunkId remains byte-for-byte stable across export and import.
+
+05.13. The exact ChunkId encoding remains open within the constraints of
+       this document.
+
+
+===============================================================================
+06. CHUNK HEADER AND INTEGRITY
+===============================================================================
+
+06.1. Each Chunk has associated identity-relevant header metadata.
+
+06.2. That header metadata includes:
+      - chunkId
+      - chunkType
+      - byteLength
+      - hashAlgorithm
+      - contentHash
+
+06.3. byteLength equals the number of bytes in the payload.
+
+06.4. contentHash is computed over the payload bytes.
+
+06.5. hashAlgorithm names a deterministic hash function.
+
+06.6. chunkType is a stable explicit identifier for the chunk's artifact
+      role.
+
+06.7. chunkType does not redefine Chunk identity semantics by itself.
+
+06.8. Example chunkType values include:
+      - stateLayerValues
+      - configValues
+      - revisionIndex
+      - journalEntries
+      - traceEvents
+      - traceIndex
+      - windowManifest
+      - packManifest
+      - blob
+
+06.9. Example chunkType values are illustrative and do not lock the full
+      future chunkType catalog.
+
+06.10. Integrity verification is performed by recomputing contentHash from
+       payload bytes and comparing it with the stored contentHash.
+
+06.11. If integrity verification fails, retrieval of that retained chunk is
+       treated as corrupt.
+
+06.12. Corrupt payload material is not treated as authoritative.
+
+06.13. Corruption detection is trace-visible through the tracing system
+       defined elsewhere.
+
+06.14. ChunkId is verified against the identity-relevant header fields when
+       integrity validation requires that check.
+
+
+===============================================================================
+07. FORMAT AWARENESS AND IDENTITY STABILITY
+===============================================================================
+
+07.1. Chunk identity is format-aware.
+
+07.2. Format-aware means that payloads representing the same semantic value
+      in different encodings produce different ChunkIds unless some later
+      authoritative rule explicitly defines a canonical equivalence model.
+
+07.3. Any change to payload serialization format results in a different
+      Chunk identity.
+
+07.4. Identity does not collapse multiple encodings into one merely because
+      their decoded semantic value could be judged similar.
+
+07.5. identity-relevant metadata may include format or schema-related
+      markers when that metadata participates in identity.
+
+
+===============================================================================
+08. VALUEREF
+===============================================================================
+
+08.1. A ValueRef is an immutable reference to committed value payload
+      material.
+
+08.2. A ValueRef is not a pointer to live runtime memory.
+
+08.3. A ValueRef is a deterministic decoding contract for one committed
+      value payload.
+
+08.4. A committed key in a committed layer or committed configuration is
+      representable as key -> ValueRef at the commit boundary.
+
+08.5. A ValueRef is immutable once created.
+
+08.6. A ValueRef does not require:
+      - transactional layers
+      - journal completeness
+      - trace completeness
+      - hidden runtime side effects
+      in order to decode successfully.
+
+08.7. If a ValueRef cannot be decoded, the failure is explicit.
+
+08.8. A committed value whose ValueRef cannot be decoded is not treated as
+      valid authoritative content.
+
+08.9. A ValueRef may be resolved eagerly or lazily.
+
+08.10. Eager versus lazy resolution is an implementation choice and does not
+       change ValueRef semantics.
+
+
+08.1 VALUEREF FORMS
+-------------------
+
+08.1.1. A ValueRef is exactly one of the following forms:
+
+        A) InlineValueRef
+        B) ChunkValueRef
+
+08.1.2. InlineValueRef stores payload bytes directly inside the ValueRef.
+
+08.1.3. ChunkValueRef stores payload bytes in a Chunk and references them by
+        ChunkId.
+
+08.1.4. Both ValueRef forms include an explicit codec identifier.
+
+08.1.5. ChunkValueRef includes integrity metadata sufficient to validate
+        retrieved payload bytes.
+
+08.1.6. InlineValueRef may include integrity metadata.
+
+08.1.7. Arbitrary network references and arbitrary file-path references are
+        not part of ValueRef under this document.
+
+08.1.8. If a later authoritative document ever introduces external
+        references, such references do not become valid for authoritative
+        committed state unless deterministic retrieval is explicitly
+        guaranteed.
+
+
+08.2 VALUEREF REQUIRED FIELDS
+-----------------------------
+
+08.2.1. Every ValueRef includes:
+        - codecId
+
+08.2.2. codecId is a stable identifier describing how payload bytes decode
+        into a runtime value.
+
+08.2.3. Every ChunkValueRef includes:
+        - chunkId
+        - integrity metadata
+
+08.2.4. chunkId identifies the immutable payload bytes.
+
+08.2.5. integrity metadata is sufficient to validate the retrieved payload
+        bytes used by that ChunkValueRef.
+
+08.2.6. A ValueRef may additionally include:
+        - contentType
+        - schemaId
+        - schemaVersion
+
+08.2.7. Optional fields do not become required merely because some artifact
+        classes use them.
+
+
+===============================================================================
+09. SCHEMALESS DEFAULT AND OPTIONAL SCHEMA LINKAGE
+===============================================================================
+
+09.1. Committed values are schemaless by default.
+
+09.2. Schemaless default means that a ValueRef without schema linkage
+      decodes into the generic runtime structure defined by its codec.
+
+09.3. Generic runtime structure may include:
+      - map
+      - list
+      - scalar
+      - bytes
+
+09.4. A ValueRef may include schema linkage through schemaId and, where
+      required, schemaVersion.
+
+09.5. If schema linkage is present, decoding may be schema-aware and may
+      produce a typed runtime object or typed structured result.
+
+09.6. Presence of schema linkage is not required for storing simple values.
+
+09.7. If schema-aware decode fails, the failure is explicit unless some
+      later authoritative policy explicitly permits fallback.
+
+09.8. Any permitted fallback from schema-aware decode to schemaless decode
+      remains trace-visible.
+
+09.9. This document defines schema linkage only as optional committed-value
+      representation metadata.
+
+09.10. This document does not define the full generalized schema system used
+       by configuration or other structured domains.
+
+
+===============================================================================
+10. VALUE ORIGIN AND STATIC DATA
+===============================================================================
+
+10.1. A ValueRef may reference payload bytes originating from static data.
+
+10.2. Static origin does not exempt a committed value from the committed
+      representation contract defined by this document.
+
+10.3. If committed state stores a value derived from static data, that
+      committed value remains representable as a ValueRef at the commit
+      boundary.
+
+10.4. Patch and Copy semantics apply at the level of committed value
+      meaning rather than raw chunk storage identity.
+
+10.5. Chunk reuse or duplication is an implementation detail when committed
+      value meaning remains preserved.
+
+
+===============================================================================
+11. PAYLOAD SHARING, ROOTS, AND REACHABILITY
+===============================================================================
+
+11.1. Payload chunks may be shared across retained artifacts.
+
+11.2. The same ChunkId may be referenced by multiple retained artifacts such
+      as:
+      - committed state roots
+      - windows
+      - manifests
+      - traces
+      - journals
+      - exports
+      - audit bundles
+
+11.3. Payload sharing does not change authority boundaries.
+
+11.4. Payload sharing is safe only when reachability can be determined from
+      explicit retained roots.
+
+11.5. All retained chunk references use ChunkId.
+
+11.6. Storage realization allows enumeration of chunk references from a root
+      manifest sufficient to compute reachability.
+
+11.7. Garbage collection may delete chunks unreachable from all retained
+      roots according to explicit policy.
+
+11.8. Garbage collection does not delete any chunk reachable from an
+      authoritative retained root.
+
+11.9. Garbage collection is trace-visible.
+
+11.10. Example retained roots include:
+       - savePack manifests
+       - pinned window manifests
+       - pinned audit-bundle manifests
+       - other explicitly designated policy roots
+
+11.11. Example retained roots are illustrative and do not lock the full
+       future root catalog.
+
+
+===============================================================================
+12. BOUNDARY TO PERSISTENT I/O AUTHORITY
+===============================================================================
+
+12.1. This document defines payload representation and identity semantics.
+
+12.2. This document does not define who may read or write persistent payload
+      material directly.
+
+12.3. Persistent access required to resolve retained Chunk material or
+      committed ValueRef payload routes through the centralized persistent
+      I/O authority defined elsewhere.
+
+12.4. Packs do not resolve chunk storage directly.
+
+12.5. Packs do not write payload bytes referenced by authoritative
+      committed ValueRefs directly.
+
+12.6. Readers, Writers, codecs, and storage providers that realize this
+      representation contract remain subordinate to the persistent I/O
+      authority defined elsewhere.
+
+12.7. Representation semantics remain stable even if the persistent storage
+      backend changes.
+
+
+===============================================================================
+13. OPTIONAL CAPABILITIES AND OPEN ENCODING CHOICES
+===============================================================================
+
+13.1. Storage realizations may support optional capabilities such as:
+      - compression
+      - encryption at rest
+      - chunk streaming
+      - logical chunk packing into containers
+      - partial retrieval through index chunks
+
+13.2. Optional capabilities do not change Chunk or ValueRef identity
+      semantics.
+
+13.3. If storage transforms bytes for transport or persistence convenience,
+      Chunk identity still follows the canonical payload rule defined by the
+      storage realization that implements this contract.
+
+13.4. Paging and partial retrieval are expressed through retained chunk or
+      index-chunk structure rather than hidden references outside explicit
+      reachability.
+
+13.5. The exact ChunkId encoding remains open.
+
+13.6. Concrete digest algorithms remain open.
+
+13.7. Concrete canonical serialization rules remain open except where some
+      later authoritative document defines them for a specific artifact
+      class.
+
+
+===============================================================================
+14. LOCKED SUMMARY
+===============================================================================
+
+14.1. LOCKED:
+      - committed values are represented through immutable payload
+        references rather than live runtime object identity
+      - a committed key is representable as key -> ValueRef at the commit
+        boundary
+      - Chunk is immutable byte payload identified by stable ChunkId
+      - ChunkId is content-derived and independent of path, machine, and
+        wall-clock accident
+      - integrity failure is explicit and corrupt payload is not treated as
+        authoritative
+      - ValueRef is immutable and decodes deterministically from retained
+        authoritative payload material
+      - ValueRef forms are InlineValueRef and ChunkValueRef
+      - committed values are schemaless by default with optional schema
+        linkage
+      - payload sharing across retained artifacts does not change authority
+        boundaries
+      - reachability is determined from explicit retained roots
+      - representation semantics are separate from persistent I/O authority
+
+14.2. OPEN:
+      - exact ChunkId encoding
+      - concrete digest algorithms
+      - concrete canonical serialization rules
+      - optional storage capabilities within the constraints of this
+        document
+
+
+===============================================================================
+END OF DA-05 - PAYLOAD IDENTITY, CHUNKS & VALUEREF REPRESENTATION
+===============================================================================
+
+--- doc-meta ---
+DOC_ID: DA-05
+DOC_FILE: docs/design/DA-05_PAYLOAD_IDENTITY_CHUNKS_AND_VALUEREF_REPRESENTATION.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
