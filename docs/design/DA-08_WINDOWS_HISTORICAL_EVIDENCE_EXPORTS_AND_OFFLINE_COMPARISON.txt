@@ -195,24 +195,28 @@ Upstream Documents:
 04. WINDOW MODEL
 ===============================================================================
 
-04.1. An appInstance maintains an ordered sequence of Windows.
+04.1. An appInstance maintains one explicit ordered Window sequence.
 
-04.2. A Window is exactly one of:
+04.2. Every Window in that sequence is exactly one of:
       - SafePointWindow
       - AbortedWindow
       - ActiveWindow
 
-04.3. Exactly one ActiveWindow may exist per appInstance.
+04.3. No other Window kind is part of this model unless a later
+      authoritative revision defines it explicitly.
 
-04.4. If an ActiveWindow exists, it is the last Window in the sequence.
+04.4. At most one ActiveWindow exists for one appInstance at a time.
 
-04.5. SafePointWindow and AbortedWindow are finalized Windows.
+04.5. If an ActiveWindow exists, it is the unique mutable tail of the
+      Window sequence.
 
-04.6. ActiveWindow is not a finalized Window.
+04.6. SafePointWindow and AbortedWindow are finalized Window forms.
+      ActiveWindow is not finalized.
 
 04.7. Window ordering is explicit.
 
-04.8. Window ordering does not rely on inference from timestamps alone.
+04.8. Window ordering does not rely on timestamps, inference, or
+      presentation order.
 
 04.9. The ordered Window sequence preserves:
       - finalized committed boundaries
@@ -237,21 +241,23 @@ Upstream Documents:
 05. SAFEPOINTWINDOW
 ===============================================================================
 
-05.1. A SafePointWindow is an authoritative committed boundary.
+05.1. A SafePointWindow is a finalized authoritative committed boundary.
 
-05.2. A SafePointWindow includes only committed state material for the
-      authoritative portion of that Window.
+05.2. The authoritative portion of a SafePointWindow contains committed
+      state material only.
 
-05.3. A SafePointWindow is deterministically restorable within the
+05.3. Transactional layer contents are not part of the authoritative
+      SafePointWindow boundary.
+
+05.4. A SafePointWindow remains deterministically restorable within the
       committed-state restoration boundary defined by
       [defined-in: DA-04 12].
 
-05.4. A SafePointWindow is trace-correlated and explainable through retained
-      trace evidence, subject to explicit retention policy.
-
-05.5. A SafePointWindow is correlated to retained trace identity and scope
-      evidence sufficient to identify the Window and its relation to
-      committed work.
+05.5. A retained SafePointWindow includes retained trace identity and scope
+      evidence sufficient to identify:
+      - the SafePointWindow itself
+      - the committed scope or scopes it covers
+      - its relation to the committed work it finalizes
 
 05.6. A SafePointWindow does not contain transactional layer contents as
       authoritative material.
@@ -262,7 +268,7 @@ Upstream Documents:
       - additional trace evidence
       - other non-authoritative evidence compatible with this document
 
-05.8. Retained optional evidence does not add authority.
+05.8. Optional retained evidence does not add authority.
 
 05.9. A SafePointWindow has safePointWindowId as stable identity.
 
@@ -275,9 +281,9 @@ Upstream Documents:
        authoritative material remains to restore that SafePointWindow
        deterministically.
 
-05.12. A retained SafePointWindow is not considered complete unless
-       retained trace identity and scope evidence remain sufficient to
-       identify the Window and its committed scope.
+05.12. A retained SafePointWindow is not treated as complete if retained
+       trace identity and scope evidence are insufficient to identify the
+       Window and its committed scope.
 
 
 ===============================================================================
@@ -298,23 +304,28 @@ Upstream Documents:
 
 06.4. ActiveWindow is non-authoritative.
 
-06.5. ActiveWindow may be discarded during recovery.
+06.5. ActiveWindow does not define committed truth.
 
-06.6. ActiveWindow does not guarantee deterministic replay.
+06.6. ActiveWindow may be discarded during recovery.
 
-06.7. ActiveWindow does not guarantee deterministic reconstruction of
-      external side effects.
+06.7. ActiveWindow is not interpreted as a deterministic replay boundary.
 
-06.8. ActiveWindow trace and journal material are not pruned out from the
+06.8. ActiveWindow does not guarantee deterministic reconstruction of:
+      - in-flight activity
+      - external side effects
+      - pre-crash execution ordering beyond what later committed boundaries
+        explicitly retain
+
+06.9. ActiveWindow trace and journal material are not pruned out from the
       in-flight region merely because they are non-authoritative.
 
-06.9. If storage pressure occurs:
-      - journal writes may be dropped according to explicit policy
-      - trace records still preserve the fact of omission
+06.10. If storage pressure occurs:
+       - journal writes may be dropped according to explicit policy
+       - trace records still preserve the fact of omission
 
-06.10. Omission handling remains trace-visible and classified.
+06.11. Omission handling remains trace-visible and classified.
 
-06.11. ActiveWindow does not require its own stable Window identity while it
+06.12. ActiveWindow does not require its own stable Window identity while it
        remains the unique mutable tail of the Window sequence.
 
 
@@ -336,30 +347,34 @@ Upstream Documents:
       - other non-authoritative evidence compatible with this document
 
 07.4. An AbortedWindow does not contain authoritative committed-state
-      changes as part of its own finalized outcome.
+      changes as part of its finalized outcome.
 
-07.5. An AbortedWindow does not contain transactional layer contents as
-      retained authoritative material.
+07.5. An AbortedWindow does not preserve transactional layer contents as
+      authoritative material.
 
-07.6. An AbortedWindow does not claim authority.
+07.6. An AbortedWindow is finalized evidence of non-commit outcome, not a
+      committed boundary.
 
-07.7. An AbortedWindow has abortedWindowId as stable identity.
+07.7. An AbortedWindow does not acquire authority merely because it is
+      finalized, retained, or exported.
 
-07.8. An AbortedWindow may be truncated or partially removed according to
+07.8. An AbortedWindow has abortedWindowId as stable identity.
+
+07.9. An AbortedWindow may be truncated or partially removed according to
       explicit policy.
 
-07.9. If an AbortedWindow is retained at all, it retains enough trace
-      meaning to explain:
-      - that the Window was aborted rather than committed
-      - why it was aborted
-      - how it relates causally to the retained evidence still present
+07.10. If an AbortedWindow is retained at all, it retains enough trace
+       meaning to explain:
+       - that the Window was aborted rather than committed
+       - why it was aborted
+       - how it relates causally to the retained evidence still present
 
-07.10. An AbortedWindow may be fully removed only if explicit policy
+07.11. An AbortedWindow may be fully removed only if explicit policy
        permits the removal and either:
        - at least one later SafePointWindow exists
        - or the engine explicitly accepts loss of that audit region
 
-07.11. When such removal occurs, the platform remains explicit and honest
+07.12. When such removal occurs, the platform remains explicit and honest
        about the loss of that audit region.
 
 
@@ -367,30 +382,35 @@ Upstream Documents:
 08. FINALIZATION RULES
 ===============================================================================
 
-08.1. ActiveWindow is finalized as exactly one of:
+08.1. ActiveWindow finalizes as exactly one outcome:
       - SafePointWindow
       - AbortedWindow
 
-08.2. Finalization does not produce partial finalized artifacts.
+08.2. Finalization never produces both outcomes for the same ActiveWindow.
 
-08.3. Finalization into SafePointWindow requires that all transactions
+08.3. Finalization never produces a partial finalized artifact.
+
+08.4. Finalization never preserves an unresolved mixed state in which a
+      Window is partly authoritative and partly aborted.
+
+08.5. Finalization into SafePointWindow requires that all transactions
       relevant to the finalized committed boundary are resolved.
 
-08.4. Finalization into SafePointWindow produces:
+08.6. Finalization into SafePointWindow produces:
       - a new SafePointWindow
       - a new safePointWindowId
       - trace-visible success of finalized committed-boundary creation
 
-08.5. Finalization into AbortedWindow occurs when in-flight work concludes
+08.7. Finalization into AbortedWindow occurs when in-flight work concludes
       without producing a new SafePointWindow and the authoritative committed
       state remains that of the last finalized SafePointWindow.
 
-08.6. Finalization into AbortedWindow produces:
+08.8. Finalization into AbortedWindow produces:
       - a new AbortedWindow
       - a new abortedWindowId
       - trace-visible abort finalization with reason category
 
-08.7. Finalization preserves the distinction between:
+08.9. Finalization preserves the distinction between:
       - committed authoritative outcome
       - non-authoritative retained evidence about failed or aborted work
 
@@ -554,11 +574,17 @@ Upstream Documents:
 12.1. A WindowManifest is an immutable manifest representing exactly one
       finalized Window.
 
-12.2. A WindowManifest never represents an ActiveWindow.
+12.2. Manifest immutability preserves representation stability only. It does
+      not by itself create authority.
 
-12.3. A WindowManifest is inspectable offline.
+12.3. Authority derives from the Window kind and retained roots represented,
+      not from the fact that a manifest exists.
 
-12.4. A WindowManifest is exactly one of:
+12.4. A WindowManifest never represents an ActiveWindow.
+
+12.5. A WindowManifest is inspectable offline.
+
+12.6. A WindowManifest is exactly one of:
       - SafePointWindowManifest
       - AbortedWindowManifest
 
@@ -628,20 +654,25 @@ Upstream Documents:
 
 13.4. Export does not add authority.
 
-13.5. Export does not include transactional layer contents.
+13.5. Export does not convert non-authoritative evidence into authoritative
+      state.
 
-13.6. Export is self-contained with respect to retained payloads required to
+13.6. Export does not preserve transactional layer contents.
+
+13.7. Exported form changes portability, not semantics.
+
+13.8. Export is self-contained with respect to retained payloads required to
       decode the exported closure, unless explicit partial-export policy is
       used.
 
-13.7. If partial-export policy is used, missing material is explicit.
+13.9. If partial-export policy is used, missing material is explicit.
 
-13.8. Explicit missing material affects comparison outcomes where the
-      selected comparison mode requires that material.
+13.10. Explicit missing material affects comparison outcomes where the
+       selected comparison mode requires that material.
 
-13.9. Export identity is not the same concept as committed-state identity.
+13.11. Export identity is not the same concept as committed-state identity.
 
-13.10. Export closure remains compatible with the payload and reachability
+13.12. Export closure remains compatible with the payload and reachability
        contracts defined elsewhere.
 
 
@@ -655,9 +686,9 @@ Upstream Documents:
 14.2. A Minimal Audit Bundle is not:
       - authoritative state
       - a WindowManifest
-      - sufficient for restoration
-      - a guarantee of replayability
-      - a guarantee of completeness
+      - a restoration artifact
+      - a replay guarantee
+      - a completeness guarantee
 
 14.3. A Minimal Audit Bundle includes:
       - one or more retained trace roots
@@ -686,14 +717,13 @@ Upstream Documents:
       - capability implementations
       - secrets or credentials
 
-14.8. A Minimal Audit Bundle preserves retained causal structure exactly
-      for the trace evidence it includes.
+14.8. A Minimal Audit Bundle preserves retained causal structure exactly for
+      the trace evidence it includes.
 
-14.9. Missing data in a Minimal Audit Bundle is explicit.
+14.9. Missing data is explicit.
 
-14.10. A Minimal Audit Bundle remains honest about retained gaps, pruning,
-       corruption, and other explicit incompleteness affecting the included
-       evidence.
+14.10. Missing data, pruning, corruption, and retained gaps do not silently
+       disappear behind presentation, packaging, or export format.
 
 14.11. Absence of data in a Minimal Audit Bundle does not imply absence of
        behavior.
@@ -770,12 +800,15 @@ Upstream Documents:
 
 16.4. Offline inspection does not require journal completeness.
 
-16.5. Offline inspection treats evidence roots as evidence only.
+16.5. Offline inspection treats retained evidence as evidence only.
 
-16.6. Offline inspection does not elevate retained evidence into
-      authoritative state.
+16.6. Offline inspection does not promote evidence roots, evidence excerpts,
+      or exported packaging into authoritative state.
 
-16.7. If retained material is partial, pruned, corrupt, or unavailable,
+16.7. Lack of orchestration at inspection time does not weaken the authority
+      boundary defined by the represented artifact.
+
+16.8. If retained material is partial, pruned, corrupt, or unavailable,
       offline inspection reports that limitation explicitly.
 
 
@@ -853,6 +886,11 @@ Upstream Documents:
 18.7. Equality checks may be performed in multiple modes.
 
 18.8. Tools state explicitly which equality mode is used.
+
+18.8.1. Equality mode is part of the semantic claim made by the comparison
+        result.
+
+18.8.2. A comparison result without its mode is incomplete.
 
 18.9. Default equality mode is StateEquality unless another mode is
       explicitly requested.
@@ -982,6 +1020,6 @@ OFFLINE COMPARISON
 --- doc-meta ---
 DOC_ID: DA-08
 DOC_FILE: docs/design/DA-08_WINDOWS_HISTORICAL_EVIDENCE_EXPORTS_AND_OFFLINE_COMPARISON.txt
-DOC_REV: 2
-DOC_GIT: 023e3de
+DOC_REV: 3
+DOC_GIT: 42eaed3
 ----------------
