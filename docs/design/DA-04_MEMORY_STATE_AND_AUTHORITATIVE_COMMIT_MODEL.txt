@@ -90,20 +90,31 @@ Upstream Documents:
       - non-authoritative observational material
 
 02.3. Runtime memory is not authoritative merely because it is resident,
-      visible, or currently in use.
+      visible, active, or currently in use.
 
-02.4. Committed state is authoritative because it has passed through the
-      Turnix commit boundary defined by this document.
+02.4. Committed state is authoritative only because it has crossed the
+      explicit commit boundary defined by this document.
 
 02.5. Turnix preserves deterministic committed-state evolution by making
       authoritative mutation explicit, staged, and commit-bounded.
 
 02.6. Turnix preserves rollback and restoration by ensuring that committed
-      state can be restored without requiring non-authoritative historical
-      material.
+      state remains restorable without requiring non-authoritative
+      historical material.
 
 02.7. Observational material may explain what happened, but it does not
-      define what the committed truth of the system is.
+      define the committed truth of the system.
+
+02.8. Turnix does not treat observation as authority.
+
+02.9. Turnix does not require observational completeness for committed-state
+      correctness.
+
+02.10. Turnix does not imply determinism outside the committed-state
+       boundary defined by this document.
+
+02.11. Later sections of this document refine and apply these rules.
+       They do not weaken them.
 
 
 ===============================================================================
@@ -208,6 +219,12 @@ Upstream Documents:
 03.2.4. This authority separation preserves correctness without turning
         observation into a hidden dependency.
 
+03.2.5. Turnix does not treat traces, journals, or debugger-only artifacts
+        as authoritative state.
+
+03.2.6. Turnix does not allow committed-state correctness to depend on
+        whether such material is complete, retained, or present.
+
 
 ===============================================================================
 04. IDENTITY AND REVISION TERMS
@@ -234,6 +251,10 @@ Upstream Documents:
 04.8. The absent sentinel is not represented as null.
 
 04.9. Valid committed revisionId values start at 1.
+
+04.10. Revision metadata supports conflict detection and committed-state
+       history. It does not by itself create authority outside committed
+       state.
 
 
 ===============================================================================
@@ -273,6 +294,10 @@ Upstream Documents:
 05.10. Runtime residency is an implementation detail and does not change the
        meaning of a committed layer.
 
+05.11. Layering defines visibility, rollback, and mutation boundaries. It
+       does not blur the distinction between committed and non-committed
+       material.
+
 
 ===============================================================================
 06. TRANSACTIONS
@@ -294,6 +319,12 @@ Upstream Documents:
       - capability calls with mutation
       - tooling-initiated staged mutation
       - other orchestrated speculative work
+
+06.7. A transaction is not authoritative merely because it contains staged
+      values.
+
+06.8. Staged mutation does not become committed truth until commit into an
+      authoritative boundary occurs under the rules of this document.
 
 
 06.1 COMMIT AND ABORT
@@ -318,6 +349,13 @@ Upstream Documents:
 
 06.1.8. On abort, all staged mutations are discarded deterministically.
 
+06.1.9. A transaction does not remain in an unresolved half-committed
+        state.
+
+06.1.10. Commit does not silently drop part of staged mutation.
+
+06.1.11. Abort does not silently preserve part of staged mutation.
+
 
 06.2 NESTED TRANSACTION STACKING
 --------------------------------
@@ -341,6 +379,9 @@ Upstream Documents:
 
 06.2.7. This stacking rule prevents lost updates and desynchronization
         across nested pipeline activity.
+
+06.2.8. Nested transactional propagation is not itself authoritative
+        mutation into committed state.
 
 
 06.3 COMMIT INTO COMMITTED LAYERS AND CONFLICT DETECTION
@@ -385,6 +426,12 @@ Upstream Documents:
          into a parent transaction, because that propagation is not yet an
          authoritative mutation.
 
+06.3.14. Turnix does not silently reconcile conflicting authoritative
+         mutation.
+
+06.3.15. Turnix does not silently change conflict meaning through fallback,
+         guesswork, or convenience behavior.
+
 
 ===============================================================================
 07. ORCHESTRATION UNITS AND MUTATION BOUNDARIES
@@ -404,6 +451,9 @@ Upstream Documents:
 
 07.4. Turnix guarantees apply only to work that occurs within Turnix
       orchestration boundaries or re-enters through them.
+
+07.5. Mutation outside orchestration does not acquire Turnix guarantees by
+      implication.
 
 
 07.1 SINGLE-LANE APPINSTANCE ORCHESTRATION
@@ -428,6 +478,12 @@ Upstream Documents:
 
 07.1.6. Any mutation that seeks Turnix guarantees re-enters through
         orchestration boundaries before becoming authoritative.
+
+07.1.7. Turnix does not imply concurrency safety merely because execution
+        is asynchronous or suspended.
+
+07.1.8. Turnix does not imply determinism for mutation paths that occur
+        outside orchestration boundaries.
 
 
 ===============================================================================
@@ -457,6 +513,11 @@ Upstream Documents:
 08.9. This section defines the state-model meaning of persistence only. It
       does not redefine the separate persistent I/O authority defined
       elsewhere.
+
+08.10. Persistence failure does not silently redefine committed-state truth.
+
+08.11. Persistence exists to protect committed state, not to decide whether
+       committed state exists.
 
 
 ===============================================================================
@@ -494,6 +555,11 @@ Upstream Documents:
 09.8. Static-data mutation intent remains visible and explainable after the
       fact.
 
+09.9. Static data does not become freely mutable merely because a runtime
+      actor wants to modify it.
+
+09.10. Turnix does not silently substitute Patch for Copy or Copy for Patch.
+
 
 ===============================================================================
 10. REVISIONS AND STATE GARBAGE COLLECTION
@@ -527,6 +593,12 @@ Upstream Documents:
 10.9. Historical removal does not invalidate the ability to restore the
       latest retained committed state.
 
+10.10. Turnix does not silently discard material that retained-policy
+       guarantees still depend on.
+
+10.11. Retention policy may bound history. It does not silently rewrite
+       current committed truth.
+
 
 ===============================================================================
 11. TOOLING-INITIATED STATE MUTATION CONSTRAINTS
@@ -552,6 +624,12 @@ Upstream Documents:
 
 11.8. Breakpoints, pausing, step control, and debugger execution behavior
       are defined elsewhere.
+
+11.9. Tooling does not bypass normal authority boundaries merely because it
+      is privileged tooling.
+
+11.10. Tooling-originated mutation does not become committed truth except
+       through the same commit model that governs runtime mutation.
 
 
 ===============================================================================
@@ -581,6 +659,13 @@ Upstream Documents:
 12.8. This document defines the restoration boundary only. It does not
       define the full workflow semantics of Replay, Resume, or Retry.
 
+12.9. Turnix does not imply that uncommitted activity becomes reproducible
+      merely because committed state is restorable.
+
+12.10. Turnix does not imply that external effects are reversible,
+       replayable, or reconstructible merely because committed state can be
+       restored.
+
 
 ===============================================================================
 13. MIGRATION COMMIT RULE
@@ -603,6 +688,11 @@ Upstream Documents:
 13.6. If migration cannot complete safely, it aborts and authoritative
       state remains identical to the pre-migration committed state.
 
+13.7. Migration does not bypass the normal commit boundary.
+
+13.8. Migration does not acquire permission to perform partial
+      authoritative mutation merely because it is migration work.
+
 
 ===============================================================================
 14. WHAT IS EXPLICITLY NOT REQUIRED
@@ -620,6 +710,13 @@ Upstream Documents:
 
 14.3. Turnix does not treat observational completeness as a requirement for
       committed-state correctness.
+
+14.4. Turnix does not require non-authoritative history to remain complete
+      in order for committed state to remain authoritative.
+
+14.5. Turnix does not require hidden fallback, reconciliation, or
+      observational reconstruction in order to preserve committed-state
+      correctness.
 
 
 ===============================================================================
@@ -660,6 +757,6 @@ END OF DA-04 - MEMORY, STATE & AUTHORITATIVE COMMIT MODEL
 --- doc-meta ---
 DOC_ID: DA-04
 DOC_FILE: docs/design/DA-04_MEMORY_STATE_AND_AUTHORITATIVE_COMMIT_MODEL.txt
-DOC_REV: 19
-DOC_GIT: 4c4c5b1
+DOC_REV: 20
+DOC_GIT: 6cdaad5
 ----------------
