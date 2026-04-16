@@ -25,6 +25,7 @@ portable finalized artifacts, and offline comparison.
 It defines:
 - what Windows mean in Turnix
 - SafePointWindow, ActiveWindow, and AbortedWindow semantics
+- Window identity terms
 - finalization of in-flight runtime regions
 - SafePointWindow creation request modes and lifecycle visibility
 - journal as non-authoritative evidence
@@ -40,18 +41,16 @@ It defines:
   Windows and retained evidence
 
 It does NOT define:
-- the general memory and authoritative-state model
-  (see MEMORY, STATE & AUTHORITATIVE COMMIT MODEL)
+- the general memory and authoritative-state model (see DA-04)
 - payload identity, ChunkId, or ValueRef representation contracts
-  (see PAYLOAD IDENTITY, CHUNKS & VALUEREF REPRESENTATION)
+  (see DA-05)
 - concrete persistent I/O authority, Readers, Writers, or filesystem rules
-  (see FILE I/O, READERS / WRITERS & PERSISTENCE SAFETY)
+  (see DA-06)
 - tracing structure, trace event schema, span semantics, or trace storage
-  semantics (see TRACING, DIAGNOSTICS & OBSERVABILITY)
+  semantics (see DA-03)
 - configuration-specific state, schema, or migration semantics
-  (see CONFIGURATION, SCHEMAS & MIGRATION)
-- debugger pause, breakpoint, or execution-control behavior
-  (see DEBUGGING, INSPECTION & BREAKPOINTS)
+  (see DA-07)
+- debugger pause, breakpoint, or execution-control behavior (see DA-18)
 
 Upstream Documents:
 ------------------
@@ -221,6 +220,19 @@ Upstream Documents:
       - the current in-flight region, if one exists
 
 
+04.1 WINDOW IDENTITY TERMS
+--------------------------
+
+04.1.1. safePointWindowId identifies one SafePointWindow.
+
+04.1.2. abortedWindowId identifies one AbortedWindow.
+
+04.1.3. safePointWindowId and abortedWindowId are UUID values.
+
+04.1.4. safePointWindowId and abortedWindowId are representable in plain
+        text.
+
+
 ===============================================================================
 05. SAFEPOINTWINDOW
 ===============================================================================
@@ -232,7 +244,7 @@ Upstream Documents:
 
 05.3. A SafePointWindow is deterministically restorable within the
       committed-state restoration boundary defined by
-      MEMORY, STATE & AUTHORITATIVE COMMIT MODEL.
+      [defined-in: DA-04 12].
 
 05.4. A SafePointWindow is trace-correlated and explainable through retained
       trace evidence, subject to explicit retention policy.
@@ -254,16 +266,18 @@ Upstream Documents:
 
 05.9. A SafePointWindow has safePointWindowId as stable identity.
 
-05.10. safePointWindowId is a UUID value representable in plain text.
-
-05.11. Trace, journal, and revision material retained within a
+05.10. Trace, journal, and revision material retained within a
        SafePointWindow may be truncated or removed according to explicit
        policy.
 
-05.12. Retention reduction within a SafePointWindow does not invalidate the
+05.11. Retention reduction within a SafePointWindow does not invalidate the
        retained authoritative committed-state boundary, provided enough
        authoritative material remains to restore that SafePointWindow
        deterministically.
+
+05.12. A retained SafePointWindow is not considered complete unless
+       retained trace identity and scope evidence remain sufficient to
+       identify the Window and its committed scope.
 
 
 ===============================================================================
@@ -331,23 +345,21 @@ Upstream Documents:
 
 07.7. An AbortedWindow has abortedWindowId as stable identity.
 
-07.8. abortedWindowId is a UUID value representable in plain text.
-
-07.9. An AbortedWindow may be truncated or partially removed according to
+07.8. An AbortedWindow may be truncated or partially removed according to
       explicit policy.
 
-07.10. If an AbortedWindow is retained at all, it retains enough trace
-       meaning to explain:
-       - that the Window was aborted rather than committed
-       - why it was aborted
-       - how it relates causally to the retained evidence still present
+07.9. If an AbortedWindow is retained at all, it retains enough trace
+      meaning to explain:
+      - that the Window was aborted rather than committed
+      - why it was aborted
+      - how it relates causally to the retained evidence still present
 
-07.11. An AbortedWindow may be fully removed only if explicit policy permits
-       the removal and either:
+07.10. An AbortedWindow may be fully removed only if explicit policy
+       permits the removal and either:
        - at least one later SafePointWindow exists
        - or the engine explicitly accepts loss of that audit region
 
-07.12. When such removal occurs, the platform remains explicit and honest
+07.11. When such removal occurs, the platform remains explicit and honest
        about the loss of that audit region.
 
 
@@ -478,7 +490,7 @@ Upstream Documents:
 
 10.3. Turnix emits trace-visible lifecycle events for each applicable stage
       of that lifecycle, consistent with the tracing requirements defined in
-      TRACING, DIAGNOSTICS & OBSERVABILITY.
+      [constrained-by: DA-03 05.1.1.6].
 
 10.4. Queued state remains distinguishable from started creation.
 
@@ -495,7 +507,7 @@ Upstream Documents:
 ===============================================================================
 
 11.1. This document consumes the trace model defined by
-      TRACING, DIAGNOSTICS & OBSERVABILITY.
+      [defined-in: DA-03 04].
 
 11.2. This document does not redefine trace events, trace DAG structure,
       span semantics, or trace storage semantics.
@@ -585,18 +597,19 @@ Upstream Documents:
         - abortedWindowId
         - windowType = AbortedWindow
 
-12.2.2. An AbortedWindowManifest may include:
-        - traceRoot
+12.2.2. The default AbortedWindowManifest form includes traceRoot.
+
+12.2.3. An AbortedWindowManifest may additionally include:
         - journalRoot
         - mabRoot
 
-12.2.3. An AbortedWindowManifest does not define committedStateRoot.
+12.2.4. An AbortedWindowManifest does not define committedStateRoot.
 
-12.2.4. If retained trace evidence for the AbortedWindow is absent, the
-        AbortedWindowManifest declares that absence explicitly together
-        with the reason category for that absence.
+12.2.5. If traceRoot is absent, the AbortedWindowManifest declares that
+        absence explicitly together with the reason category for that
+        absence.
 
-12.2.5. An AbortedWindowManifest does not become authoritative merely
+12.2.6. An AbortedWindowManifest does not become authoritative merely
         because it is finalized and immutable.
 
 
@@ -648,7 +661,8 @@ Upstream Documents:
 
 14.3. A Minimal Audit Bundle includes:
       - one or more retained trace roots
-      - all retained trace events in the selected retained trace closure
+      - all retained trace events reachable within the retained trace
+        closure selected for the bundle from those roots
       - metadata required to interpret retained trace reasons
       - enough correlation metadata to relate retained evidence to relevant
         appInstance, session, Orchestration Unit, Window, or export identity
@@ -677,22 +691,22 @@ Upstream Documents:
 
 14.9. Missing data in a Minimal Audit Bundle is explicit.
 
-14.9.1. A Minimal Audit Bundle remains honest about retained gaps,
-        pruning, corruption, and other explicit incompleteness affecting the
-        included evidence.
+14.10. A Minimal Audit Bundle remains honest about retained gaps, pruning,
+       corruption, and other explicit incompleteness affecting the included
+       evidence.
 
-14.10. Absence of data in a Minimal Audit Bundle does not imply absence of
+14.11. Absence of data in a Minimal Audit Bundle does not imply absence of
        behavior.
 
-14.11. Minimal Audit Bundle creation failure is trace-visible.
+14.12. Minimal Audit Bundle creation failure is trace-visible.
 
-14.12. Minimal Audit Bundle creation failure does not affect runtime state.
+14.13. Minimal Audit Bundle creation failure does not affect runtime state.
 
-14.13. Minimal Audit Bundle creation may occur while Turnix is running.
+14.14. Minimal Audit Bundle creation may occur while Turnix is running.
 
-14.14. Minimal Audit Bundle creation does not pause execution by default.
+14.15. Minimal Audit Bundle creation does not pause execution by default.
 
-14.15. Minimal Audit Bundle creation does not block orchestration by
+14.16. Minimal Audit Bundle creation does not block orchestration by
        default.
 
 
@@ -734,8 +748,8 @@ Upstream Documents:
 
 15.11. Each digest category corresponds to a distinct comparison scope.
 
-15.12. A digest category name is not reused for a different comparison scope
-       unless an explicit coordinated revision changes that meaning.
+15.12. A digest category name is not reused for a different comparison
+       scope unless an explicit coordinated revision changes that meaning.
 
 15.13. Digest algorithms and canonical serialization details remain open
        within the constraints of this document.
@@ -774,7 +788,7 @@ Upstream Documents:
       Window.
 
 17.2. Replay restores committed state within the restoration boundary
-      defined by MEMORY, STATE & AUTHORITATIVE COMMIT MODEL.
+      defined by [defined-in: DA-04 12].
 
 17.3. Replay does not imply re-running external effects.
 
@@ -804,8 +818,7 @@ Upstream Documents:
 17.12. Retry is not implied by Replay.
 
 17.13. Replay, Resume, and Retry remain constrained by the committed-state
-       restoration boundary defined by MEMORY, STATE & AUTHORITATIVE
-       COMMIT MODEL.
+       restoration boundary defined by [defined-in: DA-04 12].
 
 
 ===============================================================================
@@ -923,6 +936,8 @@ Upstream Documents:
 21.1. LOCKED:
       - runtime history is grouped into ordered Windows
       - Windows are SafePointWindow, AbortedWindow, and ActiveWindow
+      - safePointWindowId and abortedWindowId are shared Window identity
+        terms
       - SafePointWindow is a finalized authoritative committed boundary
       - ActiveWindow is the current non-authoritative in-flight region
       - AbortedWindow is a finalized non-authoritative abort region
@@ -932,10 +947,14 @@ Upstream Documents:
       - journal is non-authoritative evidence and retention loss does not
         affect committed-state meaning
       - journal retention policy is explicit, inspectable, and configurable
+      - a retained SafePointWindow is not complete unless retained trace
+        identity and scope evidence remain sufficient to identify the Window
+        and its committed scope
       - finalized Windows are correlated to retained trace evidence through
         explicit causal identity rather than timestamps alone
       - WindowManifest is immutable and represents exactly one finalized
         Window
+      - the default AbortedWindowManifest form includes traceRoot
       - WindowExport is a portable immutable closure of one finalized
         WindowManifest
       - Minimal Audit Bundle is non-authoritative and preserves retained
@@ -946,7 +965,7 @@ Upstream Documents:
       - offline inspection operates on retained contents without requiring
         orchestration logic
       - Replay, Resume, and Retry remain constrained by the restoration
-        boundary defined by MEMORY, STATE & AUTHORITATIVE COMMIT MODEL
+        boundary defined by [defined-in: DA-04 12]
       - equality modes are explicit and return ComparisonResult with exactly
         Equal, NotEqual, and NotComparable
 
@@ -963,6 +982,6 @@ OFFLINE COMPARISON
 --- doc-meta ---
 DOC_ID: DA-08
 DOC_FILE: docs/design/DA-08_WINDOWS_HISTORICAL_EVIDENCE_EXPORTS_AND_OFFLINE_COMPARISON.txt
-DOC_REV: 1
-DOC_GIT: 4c4c5b1
+DOC_REV: 2
+DOC_GIT: 023e3de
 ----------------
