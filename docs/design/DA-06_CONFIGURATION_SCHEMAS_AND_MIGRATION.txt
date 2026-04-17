@@ -26,7 +26,7 @@ This area defines:
 - configuration scopes and precedence rules
 - schema role for configuration
 - defaults and override-input rules
-- ownership and access-metadata rules for configuration
+- configuration ownership identity
 - the configuration materialization pipeline
 - effectiveConfig and computed transform constraints
 - config access API semantics
@@ -36,9 +36,9 @@ This area defines:
 
 This area does NOT define:
 - the general memory/state model (see DA-04)
-- direct filesystem I/O rules beyond the IoManager bridge (see DA-06)
+- direct filesystem I/O rules beyond the IoManager bridge (see DA-07)
 - tracing schema and storage (see DA-03)
-- debugger pause and mutation safety semantics (see DA-16)
+- debugger pause and mutation safety semantics (see DA-18)
 - a fully generalized schema system for all future structured data domains
 
 Upstream Documents:
@@ -140,7 +140,7 @@ Downstream Documents:
 
 
 ===============================================================================
-04. CONFIGURATION SCOPES AND OWNERSHIP (LOCKED)
+04. CONFIGURATION SCOPES, OWNERSHIP, AND IDENTITY (LOCKED)
 ===============================================================================
 
 04.1. Turnix distinguishes configuration by scope:
@@ -180,8 +180,27 @@ Downstream Documents:
 
 04.9. There is no shared global bag of configuration keys.
 
-04.10. Configuration ownership and cross-pack mutation authority remain
-       compatible with [ref: ODA-E 3], [ref: ODA-E 5], and
+04.10. canonicalPackId is the persistent configuration-ownership identity
+       for pack-global and save-bound configuration.
+
+04.11. canonicalPackId is exactly:
+
+       resolvedAuthor + "@" + packTreeId
+
+04.12. canonicalPackId does not include version or semver.
+
+04.13. Version metadata may be stored inside configuration files,
+       migration metadata, or both, but version is not part of the
+       persistent ownership identity.
+
+04.14. resolvedAuthor must exist through:
+       - declared author
+       - or inherited author
+
+04.15. If resolvedAuthor cannot be determined, the pack is invalid.
+
+04.16. Configuration ownership and cross-pack mutation authority remain
+       compatible with [ref: ODA-E 4], [ref: ODA-E 5], and
        [ref: ODA-E 6].
 
 
@@ -197,7 +216,7 @@ Downstream Documents:
       - compatibility expectations
       - access-level metadata when configuration authority rules require it
 
-05.2. Schemas are not a source of defaults.
+05.2. Schemas are not a source of runtime defaults.
 
 05.3. Schemas do not by themselves create authoritative values.
 
@@ -318,7 +337,7 @@ Downstream Documents:
 
 08.8. Computed layers remain traceable.
 
-08.9. Computed layers remain compatible with [ref: ODA-E 8].
+08.9. Computed layers remain compatible with [ref: ODA-E 9].
 
 08.10. Diagnostic validation of effectiveConfig may exist, but stored-value
        validation remains authoritative.
@@ -335,40 +354,61 @@ Downstream Documents:
       config.engine.get(key)
       config.engine.set(key, value)
       config.engine.delete(key)
+      config.engine.deleteTree(prefixKey)
+      config.engine.tryGet(key)
 
 09.3. Pack-global scope API:
 
       config.user.get(packSelector, key)
       config.user.set(packSelector, key, value)
       config.user.delete(packSelector, key)
+      config.user.deleteTree(packSelector, prefixKey)
+      config.user.tryGet(packSelector, key)
 
-09.4. Save-bound scope API:
+09.4. Save-bound scope API for the current owner pack context:
 
       config.save.get(key)
       config.save.set(key, value)
       config.save.delete(key)
+      config.save.deleteTree(prefixKey)
+      config.save.tryGet(key)
 
-09.5. Read semantics:
+09.5. Save-bound scope API for explicit target pack ownership:
 
-09.5.1. get() returns value or raises NotFoundOrPermissionDenied.
+      config.save.getFrom(packSelector, key)
+      config.save.setFrom(packSelector, key, value)
+      config.save.deleteFrom(packSelector, key)
+      config.save.deleteTreeFrom(packSelector, prefixKey)
+      config.save.tryGetFrom(packSelector, key)
 
-09.5.2. tryGet() may return None instead of throwing.
+09.6. Read semantics:
 
-09.5.3. The API does not distinguish not-found from permission-denied
+09.6.1. get() returns value or raises NotFoundOrPermissionDenied.
+
+09.6.2. tryGet() returns value when present or None when the addressed key
+        does not exist.
+
+09.6.3. The API does not distinguish not-found from permission-denied
         programmatically.
 
-09.6. Write semantics:
+09.6.4. The real denial reason remains trace-visible internally.
 
-09.6.1. Writes target an explicit owner scope.
+09.7. Write semantics:
 
-09.6.2. Writes may trigger permission decisions or user decisions.
+09.7.1. Writes target an explicit owner scope.
 
-09.6.3. delete() removes override inputs only. It never mutates defaults.
+09.7.2. Writes may trigger permission decisions or user decisions.
 
-09.6.4. Subtree deletion is supported.
+09.7.3. delete() removes exactly the addressed override key. It never
+        mutates defaults.
 
-09.7. Cross-pack configuration access remains compatible with
-      [ref: ODA-E 6], [ref: ODA-E 10], and [ref: ODA-E 13].
+09.7.4. deleteTree() removes the addressed override node and its subtree.
+        It never mutates defaults.
+
+09.7.5. Delete is a write-class operation.
+
+09.8. Cross-pack configuration access remains compatible with
+      [ref: ODA-E 6], [ref: ODA-E 11], and [ref: ODA-E 13].
 
 
 ===============================================================================
@@ -557,8 +597,13 @@ Downstream Documents:
       - configuration is authoritative state
       - configuration follows the DA-04 memory/state model
       - explicit configuration scopes and ownership
-      - schema governs configuration structure, constraints, compatibility,
-        and access metadata
+      - canonicalPackId for persistent config ownership is
+        resolvedAuthor + "@" + packTreeId
+      - canonicalPackId excludes version
+      - a pack without resolvable author is invalid
+      - schema governs configuration structure, constraints,
+        compatibility, and access metadata
+      - schemas are not the runtime source of defaults
       - defaults are immutable input material
       - overrides are explicit user-authored persisted deviations
       - effectiveConfig is a derived runtime-visible view, not a separate
@@ -566,7 +611,12 @@ Downstream Documents:
       - configuration migration follows DA-04 migration commit rules
       - IoManager mediates persistence
       - recovery is explicit
+      - the public config API is scope-explicit and ownership-aware
+      - delete() removes exactly the addressed override key
+      - deleteTree() removes the addressed override node and subtree
       - read semantics use NotFoundOrPermissionDenied
+      - tryGet() returns None for absent keys and does not expose
+        not-found versus permission-denied programmatically
 
 19.2. OPEN:
       - generalized schema-system expansion beyond configuration-first use
@@ -580,6 +630,6 @@ END OF DA-06 - CONFIGURATION, SCHEMAS & MIGRATION
 --- doc-meta ---
 DOC_ID: DA-06
 DOC_FILE: docs/design/DA-06_CONFIGURATION_SCHEMAS_AND_MIGRATION.txt
-DOC_REV: 13
-DOC_GIT: 10093de
+DOC_REV: 14
+DOC_GIT: 023e3de
 ----------------
