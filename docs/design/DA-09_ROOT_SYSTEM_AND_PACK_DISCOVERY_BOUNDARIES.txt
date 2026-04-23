@@ -8,25 +8,36 @@ EVOLVING
 
 Description:
 ------------
-Defines Turnix discovery boundaries: where Turnix looks for packs, what is
-eligible for discovery, and what is explicitly ignored.
+Defines Turnix root origins, root categories, candidate-root formation, and
+discovery boundaries: where Turnix may look, what each origin may contribute,
+how bootstrap path selection works, and what discovery is allowed to produce.
 
 This area constrains:
-- visibility and resolution determinism
+- deterministic discovery inputs
+- root-origin meaning and precedence
+- bootstrap path selection for userdata and saves
+- content-root aggregation
 - trust and override boundaries
-- authoring vs runtime separation
 - save isolation expectations
+- authoring versus runtime separation
 
 Purpose:
 --------
-This document defines the root categories and discovery rules that produce
-Discovered packs.
+This document defines the root-origin model, root categories, candidate-root
+rules, and discovery behavior that produce discovered packs and root
+candidates.
 
 It exists to keep discovery boring, strict, and predictable, preventing
-ghost packs and accidental global behavior.
+ghost packs, accidental global behavior, silent path substitution, and
+root-origin confusion.
 
 This area defines:
-- root categories and their meaning
+- root origin kinds and their meaning
+- root categories and allowed origin/category combinations
+- candidate roots, selected roots, and preferred roots
+- userdata bootstrap path resolution
+- saves path resolution
+- content-root candidate and preferred-write behavior
 - discovery entrypoint rules
 - directory scanning constraints
 - discovery output contract
@@ -35,7 +46,7 @@ This area defines:
 
 This area does NOT define:
 - pack activation or runtime loading
-- policy evaluation
+- policy evaluation beyond the root/bootstrap model defined here
 - visibility rules beyond discovery boundaries
 - indexing, resolution, selectors, or dependency solving
 - tracing schema or storage details
@@ -51,6 +62,7 @@ Upstream Documents:
 - DA-01
 - DA-02
 - DA-03
+- DA-06
 - DA-07
 
 Downstream Documents:
@@ -60,6 +72,7 @@ Downstream Documents:
 - DA-12
 - DA-13
 - DA-14
+- DA-17
 
 
 ===============================================================================
@@ -75,8 +88,9 @@ Downstream Documents:
 01.3. The CORE META-RULES documents define the general rule language and
       interpretation model used by this document.
 
-01.4. This document defines root categories and discovery boundaries within
-      that shared interpretation model.
+01.4. This document defines root origins, root categories, bootstrap path
+      behavior, and discovery boundaries within that shared interpretation
+      model.
 
 
 ===============================================================================
@@ -85,32 +99,36 @@ Downstream Documents:
 
 02.1. Discovery answers:
 
-          "Where may Turnix look for packs, and what may discovery
-           legitimately produce?"
+          "Where may Turnix look, which root categories may each origin
+           contribute, and what discovered or rejected candidate entities
+           may discovery legitimately produce?"
 
 02.2. Discovery is the stage that identifies candidate pack entities inside
       allowed roots and classifies them into discovered or rejected
       outcomes.
 
-02.3. Discovery does not decide:
+02.3. Discovery also establishes candidate roots for non-pack categories such
+      as userdata and saves, but it does not by itself grant runtime meaning
+      beyond the root/bootstrap model defined here.
+
+02.4. Discovery does not decide:
       - visibility
       - enablement
       - selector resolution
       - dependency satisfaction
       - activation
       - runtime loading
+      - capability authority
+      - policy outcomes beyond the root/bootstrap model defined here
 
-02.4. Discovery is intentionally strict, boring, and side-effect free.
+02.5. Discovery is intentionally strict, boring, and side-effect free.
 
-02.5. Discovery boundaries exist to preserve:
+02.6. Discovery boundaries exist to preserve:
       - deterministic visibility inputs
       - trust and override boundaries
       - runtime and authoring separation
       - save isolation
       - predictable performance
-
-02.6. Discovery remains compatible with [constrained-by: DA-07 07] for
-      early-phase I/O limits and built-in-reader-only behavior.
 
 02.7. Pack is the general container concept.
 
@@ -121,180 +139,527 @@ Downstream Documents:
       is meant. It uses more general pack wording when the rule applies to
       packs broadly.
 
+02.10. Discovery remains compatible with [constrained-by: DA-07 07] for
+       early-phase I/O limits and built-in-reader-only behavior.
+
 
 ===============================================================================
-03. ROOT TYPES (LOCKED)
+03. ROOT ORIGIN KINDS (LOCKED)
 ===============================================================================
 
-03.1. Turnix recognizes the following root categories:
+03.1. Turnix recognizes the following root origin kinds:
+      - CLI root
+      - ENV root
+      - user-added root
+      - built-in root
+      - repo root
+      - externally-managed content root
+
+03.2. Root origin kind describes where a root came from.
+
+03.3. Root origin kind does not by itself determine whether a candidate
+      should win later resolution. Later areas apply their own deterministic
+      selection rules.
+
+03.4. Root origin kind does determine:
+      - which root categories that origin may host
+      - bootstrap behavior where applicable
+      - provenance and hygiene restrictions
+      - whether the origin may contribute content only
+
+03.5. The repo root is also the normal installation-place baseline. For
+      simplicity this document refers to it as repo root.
+
+03.6. Externally-managed content roots are content-only roots by semantics.
+      This is a provenance and safety-hygiene rule. It is not presented as a
+      hard adversarial-security guarantee.
+
+
+===============================================================================
+04. ROOT CATEGORIES (LOCKED)
+===============================================================================
+
+04.1. Turnix recognizes the following root categories:
       - custom/
       - first-party/
       - third-party/
       - userdata/
       - saves/
 
-03.2. Each root category has a distinct semantic meaning and enforced
+04.2. Each root category has distinct semantic meaning and enforced
       constraints.
 
+04.3. Root categories are subdirectories under a root origin base.
 
-03.1 CONTENT ROOTS (LOCKED)
----------------------------
+04.4. Extra root paths are interpreted as root bases.
 
-03.1.1. Content roots are:
-        - custom/
-        - first-party/
-        - third-party/
+04.5. If a provided absolute path already points to a category directory
+      itself, Turnix normalizes it back to the containing root base.
 
-03.1.2. Content roots are scanned for packs.
+04.6. Relative paths are invalid for persisted root configuration.
 
-03.1.3. Content-root precedence is:
-
-        custom
-        first-party
-        third-party
-
-03.1.4. This precedence remains reused consistently across later
-        resolution, deterministic selection, and tie-breaking.
-
-03.1.5. The rationale for precedence is:
-        - custom/ supports local overrides, authoring, and experimentation
-        - first-party/ provides shipped baseline content
-        - third-party/ provides external content that does not silently
-          override the baseline
-
-
-03.2 USERDATA ROOT (LOCKED)
----------------------------
-
-03.2.1. userdata/ is not a content root.
-
-03.2.2. userdata/ is used for persisted configuration, runtime state, user
-        decisions, caches, and related persisted non-pack data.
-
-03.2.3. userdata/ is never scanned for packs.
-
-
-03.3 SAVES ROOT (LOCKED)
-------------------------
-
-03.3.1. saves/ contains SavePacks.
-
-03.3.2. SavePacks are discoverable as save entities.
-
-03.3.3. SavePacks are not eligible for import as normal content-root packs.
-
-03.3.4. Packs copied into a SavePack remain context-bound to that SavePack
-        only unless some other authoritative document explicitly states
-        otherwise.
-
-03.3.5. Default save scanning remains shallow unless later rules in this
-        document explicitly permit deeper inspection.
+04.7. Stored/configured root hints use normalized absolute root-base paths.
 
 
 ===============================================================================
-04. DISCOVERY ENTRYPOINT RULES (LOCKED)
+05. ORIGIN/CATEGORY ALLOWANCE MATRIX (LOCKED)
 ===============================================================================
 
-04.1. Root directories are namespaces rather than packs.
+05.1. CLI root may contribute:
+      - userdata
+      - saves
+      - custom
+      - first-party
+      - third-party
 
-04.2. A manifest located directly in a root directory is ignored.
+05.2. Under CLI semantics:
+      - userdata is explicit and final
+      - saves is explicit and final
+      - custom is explicit and exclusive
+      - first-party is an extra root only
+      - third-party is an extra root only
 
-04.3. Examples include:
+05.3. ENV root may contribute:
+      - userdata
+      - saves
+      - custom
+      - first-party
+      - third-party
+
+05.4. Under ENV semantics:
+      - userdata is a bootstrap seed and follows the normal userdata
+        bootstrap rules in section 09
+      - saves is an explicit path
+      - custom is an explicit path
+      - first-party is an extra root
+      - third-party is an extra root
+
+05.5. user-added roots may contribute all five categories.
+
+05.6. built-in roots may contribute all five categories.
+
+05.7. repo root may contribute all five categories.
+
+05.8. externally-managed content roots may contribute only third-party.
+
+05.9. externally-managed content roots do not contribute:
+      - custom
+      - first-party
+      - userdata
+      - saves
+
+05.10. This document does not treat externally-managed content roots as
+       trusted merely because they are managed externally.
+
+
+===============================================================================
+06. CATEGORY MEANING (LOCKED)
+===============================================================================
+
+06.1. Content categories are:
+      - custom/
+      - first-party/
+      - third-party/
+
+06.2. userdata/ and saves/ are not content categories.
+
+06.3. custom/ is a special workspace/override category.
+
+06.4. first-party/ is shipped or officially updated content baseline.
+
+06.5. third-party/ is external content.
+
+06.6. userdata/ is used for persisted configuration, runtime state, user
+      decisions, caches, and related persisted non-pack data.
+
+06.7. saves/ contains SavePacks and related save-context state.
+
+06.8. SavePacks are discoverable as save entities.
+
+06.9. SavePacks are not eligible for import as normal content-root packs.
+
+06.10. Packs copied into a SavePack remain context-bound to that SavePack
+       only unless some other authoritative document explicitly states
+       otherwise.
+
+06.11. Save-local pack material is a distinct nearer source context and
+       precedes ordinary content-root precedence.
+
+06.12. Therefore custom does not override save-local pack material by
+       default.
+
+
+===============================================================================
+07. CANDIDATE ROOTS, SELECTED ROOTS, AND PREFERRED ROOTS
+===============================================================================
+
+07.1. Turnix maintains candidate roots per category.
+
+07.2. A candidate root is any discovered or configured root base that is
+      allowed to host the category in question.
+
+07.3. Candidate roots remain known to Turnix for:
+      - reporting
+      - diagnostics
+      - UI
+      - later selection
+      - content discovery where applicable
+
+07.4. Turnix distinguishes:
+      - candidate roots
+      - selected roots
+      - preferred roots
+
+07.5. Selected roots are explicit user choices for active state categories.
+
+07.6. Preferred roots are the last used usable directories for a category.
+
+07.7. Preferred roots are sticky.
+
+07.8. If a stored preferred root remains usable, Turnix keeps using it even
+      if another candidate becomes writable later.
+
+07.9. Preferred roots are revalidated when reused.
+
+07.10. Preferred roots are not blindly trusted.
+
+07.11. For userdata and saves:
+       - selected root is stronger than preferred root
+       - selected root expresses explicit user choice
+       - preferred root expresses the last used usable operational target
+
+07.12. Selected and preferred may differ for userdata or saves if the
+       selected root becomes unusable and controlled recovery causes Turnix
+       to use another root.
+
+07.13. Such mismatch must be surfaced to the user rather than hidden.
+
+07.14. If no usable selected or preferred root exists, Turnix chooses:
+       1) the first existing usable concrete category directory
+       2) otherwise the first writable candidate where the category
+          directory can be created
+       3) otherwise no usable target exists and normal recovery/error rules
+          apply
+
+07.15. Existing concrete category directories therefore outrank merely
+       creatable writable candidates.
+
+
+===============================================================================
+08. CONTENT-ROOT AGGREGATION AND PRECEDENCE
+===============================================================================
+
+08.1. Content-root categories are scanned from all allowed candidate roots.
+
+08.2. Content-root precedence remains:
+      custom
+      first-party
+      third-party
+
+08.3. This precedence remains reused consistently across later
+      resolution, deterministic selection, and tie-breaking unless some
+      other authoritative document explicitly states otherwise.
+
+08.4. The rationale for content-root precedence is:
+      - custom supports local overrides, authoring, and experimentation
+      - first-party provides shipped baseline content
+      - third-party provides external content that does not silently replace
+        the baseline merely by existing
+
+08.5. CLI custom is exclusive and suppresses other custom roots.
+
+08.6. CLI first-party and CLI third-party are extra roots only and do not
+      suppress ordinary discovery of those categories.
+
+08.7. ENV first-party and ENV third-party are extra roots only.
+
+08.8. If no preferred writable content root exists for a category:
+      - choose first existing usable concrete category directory
+      - otherwise choose first writable candidate where the category
+        directory can be created
+      - otherwise surface lack of writable target through normal recovery
+        behavior
+
+08.9. If preferred first-party, preferred third-party, or preferred custom
+      becomes unreadable or unwritable:
+      - surface this to the user
+      - do not silently substitute
+      - Turnix may suggest a new writable target or allow user selection
+      - persistence of the new preference follows the normal path-config
+        rules
+
+08.10. first-party and third-party are content categories. They are normally
+       read-only to the runtime. Pack Manager may install or update there if
+       the chosen writable target is actually writable.
+
+08.11. custom may remain non-existing without error until some operation
+       explicitly requires writing there.
+
+
+===============================================================================
+09. USERDATA BOOTSTRAP RESOLUTION (LOCKED)
+===============================================================================
+
+09.1. userdata has exactly one active root.
+
+09.2. userdata bootstrap exists because the system may need a userdata root
+      before normal engine configuration is available.
+
+09.3. The exact storage location of `paths.config.json` is defined by
+      DA-06. This document defines how userdata bootstrap uses it.
+
+09.4. CLI userdata behavior:
+      - if CLI userdata is provided, that directory is final for userdata
+      - if it does not exist, this is a hard error
+      - if `paths.config.json` there contains
+        `redirectUserdataDirectoryTo`, `userdataDirectoryRoots`, or
+        `selectedUserdata` pointing elsewhere, userdata bootstrap ignores
+        those for userdata relocation and warns that CLI mode overrides them
+
+09.5. ENV userdata behavior:
+      - ENV userdata is a bootstrap seed
+      - if ENV userdata is set but invalid or unusable for bootstrap, this
+        is a hard error
+      - unlike CLI userdata, ENV userdata participates in the normal
+        userdata bootstrap behavior
+
+09.6. If CLI userdata is not provided, bootstrap seeds userdata candidates
+      from:
+      - ENV userdata
+      - built-in roots
+      - repo fallback
+
+09.7. `redirectUserdataDirectoryTo` is immediate userdata bootstrap hint.
+
+09.8. Redirect applies only to userdata.
+
+09.9. Redirect may be followed once.
+
+09.10. If redirected directory has `paths.config.json`, that file becomes
+       canonical.
+
+09.11. If redirected directory has no `paths.config.json`, that is still
+       valid. The redirected directory becomes the userdata candidate and
+       bootstrap continues.
+
+09.12. `userdataDirectoryRoots` are extra userdata root hints.
+
+09.13. Extra userdata roots are search hints only. They do not cause direct
+       jump by themselves.
+
+09.14. Extra userdata roots are expanded only one level.
+
+09.15. Non-canonical `paths.config.json` may still contribute bootstrap
+       hints such as redirect and extra roots.
+
+09.16. Only the canonical `paths.config.json` may define final persisted
+       selected/preferred userdata state.
+
+09.17. `selectedUserdata` expresses explicit user-selected active userdata.
+
+09.18. If `selectedUserdata` equals the containing directory of the
+       canonical file:
+       - that self-selection stabilizes userdata at that directory
+       - do not jump
+       - ignore redirect for relocation with warning if both are present
+       - ignore extra userdata roots for userdata relocation
+
+09.19. If a hint file contributes `userdataDirectoryRoots` and does not
+       self-select:
+       - add those roots as userdata candidates
+       - remove the containing directory from userdata candidates
+
+09.20. If canonical `selectedUserdata` differs from the containing
+       directory:
+       - respect it
+       - jump once to that directory
+       - do not go back
+       - if the selected directory has no `paths.config.json`, that is fine
+       - if that selected directory later contains a `paths.config.json`
+         whose `selectedUserdata` again differs, warn and do not jump again
+
+09.21. If no canonical `paths.config.json` exists at all:
+       - this is acceptable on first run
+       - choose usable userdata by the general selected/preferred fallback
+         rule from section 07
+       - Turnix may later create `paths.config.json` there
+
+09.22. If the active userdata root, or the canonical persisted path-config
+       location used for saving, becomes unreadable or unwritable:
+       - do not silently switch
+       - surface the problem to the user
+       - Turnix may offer copying or migrating data from the old userdata if
+         it remains readable
+       - old userdata does not remain a parallel live source
+       - inability to persist the new path/config change is an explicit
+         failure of that persistence action rather than a reason to silently
+         write elsewhere
+
+09.23. If no usable writable userdata root exists:
+       - the system has no usable active userdata target
+       - directory queries may yield no usable target
+       - persistence attempts fail under the normal centralized recovery
+         path
+
+
+===============================================================================
+10. SAVES ROOT RESOLUTION (LOCKED)
+===============================================================================
+
+10.1. saves also has exactly one active writable root.
+
+10.2. Unlike userdata, saves does not use redirect semantics.
+
+10.3. `selectedSaves` in canonical `paths.config.json` is the explicit
+       selected saves root.
+
+10.4. `savesDirectoryRoots` are extra save-root hints.
+
+10.5. Extra save roots are candidates only. They do not imply jump by
+       themselves.
+
+10.6. If `selectedSaves` exists and is still usable, it is used.
+
+10.7. If `selectedSaves` exists but is no longer usable:
+       - do not silently fall through
+       - surface the problem to the user
+       - allow controlled recovery or reselection through the normal
+         centralized path
+
+10.8. If no usable `selectedSaves` exists:
+       - use stored preferred saves if still usable
+       - otherwise choose first existing usable concrete saves directory
+       - otherwise choose first writable candidate where saves directory can
+         be created
+       - otherwise surface lack of writable saves target
+
+10.9. If previously used saves root becomes non-writable but remains
+      readable:
+      - surface the change explicitly
+      - show previous saves path
+      - show writable replacement if one is found
+      - allow user selection of another saves root
+      - continue to expose readable old saves for loading where possible
+
+10.10. If a save is later written into the writable saves root, that
+       writable copy becomes the nearer source and shadows the read-only
+       copy in later discovery/listing.
+
+10.11. This read-only old / writable new shadowing behavior applies to
+       saves only. It does not apply to userdata.
+
+
+===============================================================================
+11. DISCOVERY ENTRYPOINT RULES (LOCKED)
+===============================================================================
+
+11.1. Root directories are namespaces rather than packs.
+
+11.2. A manifest located directly in a category root directory is ignored.
+
+11.3. Examples include:
       - first-party/manifest.json5
       - custom/manifest.json5
       - saves/manifest.json5
 
-04.4. This outcome is not treated as a fatal error.
+11.4. This outcome is not treated as a fatal error.
 
-04.5. The rationale is:
+11.5. The rationale is:
       - roots define namespaces rather than pack identities
       - accidental global packs are prevented
       - ambiguity at root level is avoided
 
-04.6. Every ignored, skipped, or rejected discovery artifact remains
+11.6. Every ignored, skipped, or rejected discovery artifact remains
       traceable.
 
-04.7. Discovery does not silently ignore manifests, directories, or files
+11.7. Discovery does not silently ignore manifests, directories, or files
       that appear eligible for discovery.
 
-04.8. This document defines what discovery outcomes must be traceable. DA-03
-      defines how tracing works.
+11.8. This document defines what discovery outcomes must be traceable.
+      DA-03 defines how tracing works.
 
 
 ===============================================================================
-05. DIRECTORY SCANNING RULES
+12. DIRECTORY SCANNING RULES
 ===============================================================================
 
-05.1. Manifest-based depth (LOCKED)
+12.1. Manifest-based depth (LOCKED)
 
-05.1.1. Discovery depth is defined by manifest nesting rather than raw
+12.1.1. Discovery depth is defined by manifest nesting rather than raw
         filesystem nesting.
 
-05.1.2. Example:
+12.1.2. Example:
         - first-party/a/manifest.json5 is depth 0
         - first-party/a/b/c/d/manifest.json5 is still depth 0
 
-05.1.3. Depth increases only when scanning below a discovered manifest.
+12.1.3. Depth increases only when scanning below a discovered manifest.
 
-05.1.4. This rule is the governing replacement for older simpler
+12.1.4. This rule is the governing replacement for older simpler
         root-subdirectory scanning descriptions.
 
-05.1.5. This rule is locked because it affects deterministic discovery
+12.1.5. This rule is locked because it affects deterministic discovery
         boundaries.
 
+12.2. Maximum scan depth (LOCKED)
 
-05.2. Maximum scan depth (LOCKED)
-
-05.2.1. Configuration key:
+12.2.1. Configuration key:
         packs.discovery.totalDepth
 
-05.2.2. Rules:
+12.2.2. Rules:
         - totalDepth <= 0 means unlimited
         - totalDepth == 1 means immediate subdirectories only
         - totalDepth >= 2 means exact recursion limit
 
-05.2.3. Default:
+12.2.3. Default:
         totalDepth = 60
 
-05.2.4. If the limit is exceeded, recursion stops for that branch and
+12.2.4. If the limit is exceeded, recursion stops for that branch and
         discovery continues elsewhere.
 
-05.2.5. This condition is not fatal by itself.
+12.2.5. This condition is not fatal by itself.
 
-05.2.6. The rationale is:
+12.2.6. The rationale is:
         - protection against runaway directory trees
         - controlled override for unusual layouts
 
+12.3. Symlink handling (LOCKED)
 
-05.3. Symlink handling (LOCKED)
+12.3.1. By default, directory symlinks are forbidden.
 
-05.3.1. By default, directory symlinks are forbidden.
+12.3.2. By default, file symlinks are forbidden.
 
-05.3.2. By default, file symlinks are forbidden.
-
-05.3.3. The rationale is:
+12.3.3. The rationale is:
         - determinism
         - security boundary clarity
         - prevention of implicit graph expansion
 
-05.3.4. Later policy-based relaxation may exist, but discovery behavior
+12.3.4. Later policy-based relaxation may exist, but discovery behavior
         remains deterministic regardless.
 
 
 ===============================================================================
-06. DISCOVERY OUTPUT CONTRACT (LOCKED)
+13. DISCOVERY OUTPUT CONTRACT (LOCKED)
 ===============================================================================
 
-06.1. Discovery produces PackDescriptor objects in Discovered state.
+13.1. Discovery produces PackDescriptor objects in Discovered state.
 
-06.2. At discovery time:
+13.2. Discovery classifies candidate pack entities into discovered or
+      rejected outcomes.
+
+13.3. At discovery time:
       - manifest is read
       - declared fields are parsed and type-checked
       - parent relationships are established
       - packTreeId is computed
       - raw manifest data is preserved
 
-06.3. Discovery does not:
+13.4. Discovery also preserves multiple distinct discovered candidates even
+      when later stages may determine some are equivalent.
+
+13.5. Discovery therefore may retain multiple equivalent discovered
+      candidates as separate entries for provenance and diagnostics.
+
+13.6. Discovery does not:
       - determine resolution source (save vs global)
       - resolve visibility
       - apply user enable/disable policy
@@ -303,96 +668,124 @@ Downstream Documents:
       - load runtimes
       - require compilers or pack-provided providers
 
-06.4. If a pack cannot be discovered correctly:
+13.7. If a pack cannot be discovered correctly:
       - it is rejected
       - the reason is recorded
       - discovery proceeds elsewhere
 
-06.5. Discovery output remains an input to later indexing, visibility, and
+13.8. Discovery output remains an input to later indexing, visibility, and
       resolution stages. It is not a runtime-loaded result by itself.
 
 
 ===============================================================================
-07. SAVE DISCOVERY POLICY
+14. MANIFESTS ARE WHOLE ARTIFACTS (LOCKED)
 ===============================================================================
 
-07.1. Default save scanning (LOCKED)
+14.1. Discovery treats each manifest as a whole-definition artifact.
 
-07.1.1. By default, Turnix scans:
+14.2. Duplicate manifest candidates are selected, not merged.
+
+14.3. Duplicate manifest candidates are shadowed, not stacked.
+
+14.4. No additive field composition across duplicate manifests occurs.
+
+14.5. Later resolution therefore operates on whole candidate artifacts
+      produced by discovery rather than merged manifest fragments.
+
+14.6. DA-11 reuses this boundary when selecting among discovered candidates.
+
+
+===============================================================================
+15. SAVE DISCOVERY POLICY
+===============================================================================
+
+15.1. Default save scanning (LOCKED)
+
+15.1.1. By default, Turnix scans:
         saves/*/*/manifest.json5
 
-07.1.2. By default, Turnix does not recurse into SavePack directories.
+15.1.2. By default, Turnix does not recurse into SavePack directories.
 
-07.1.3. By default, Turnix does not discover copied packs inside SavePacks
+15.1.3. By default, Turnix does not discover copied packs inside SavePacks
         eagerly.
 
-07.1.4. The rationale is:
+15.1.4. The rationale is:
         - typical saves do not embed many copied packs
         - exported saves may contain many copied packs
         - eager scanning would be expensive and unnecessary
 
+15.2. Deep save scanning (LOCKED)
 
-07.2. Deep save scanning (LOCKED)
-
-07.2.1. Deep scanning of SavePack contents occurs only when:
+15.2.1. Deep scanning of SavePack contents occurs only when:
         - a SavePack is explicitly loaded
         - a management surface inspects a SavePack
         - configuration explicitly enables deep save scanning
 
-07.2.2. At that point:
+15.2.2. At that point:
         - copied packs may be discovered
         - visibility remains limited to SavePack context
         - copied-pack rules apply
 
-07.2.3. This separation remains locked.
+15.2.3. This separation remains locked.
 
 
 ===============================================================================
-08. DISCOVERY GUARANTEES (LOCKED)
+16. DISCOVERY GUARANTEES (LOCKED)
 ===============================================================================
 
-08.1. Discovery is fast and side-effect free.
+16.1. Discovery is fast and side-effect free.
 
-08.2. Discovery does not depend on pack activation.
+16.2. Discovery does not depend on pack activation.
 
-08.3. Discovery does not require pack-provided Readers, Writers, compilers,
+16.3. Discovery does not require pack-provided Readers, Writers, compilers,
       or runtime providers.
 
-08.4. Heavy logic belongs to later indexing, resolution, or activation
-      stages rather than to discovery.
+16.4. Heavy logic belongs to later indexing, resolution, activation, or
+      manager/tooling stages rather than to discovery.
 
-08.5. Discovery failures are classified rather than globally fatal unless
+16.5. Discovery failures are classified rather than globally fatal unless
       required core prerequisites are unavailable.
 
-08.6. Discovery remains compatible with DA-07 early-phase I/O limits and
+16.6. Discovery remains compatible with DA-07 early-phase I/O limits and
       with DA-03 traceability requirements.
 
+16.7. Discovery may preserve more provenance information than later
+      deterministic selection will use. This is intentional and useful for
+      diagnostics.
+
 
 ===============================================================================
-09. EXPLICITLY OPEN QUESTIONS
+17. EXPLICITLY OPEN QUESTIONS
 ===============================================================================
 
-09.1. OPEN questions include:
+17.1. OPEN questions include:
       - per-root default depth limits
       - per-root symlink policies
       - incremental versus full discovery
       - discovery-result caching
-      - where full root-resolution rules should live if they are not kept
-        inside this document
+      - whether any later document should split some bootstrap details from
+        this area for maintainability only
+
+17.2. Root meaning, root/bootstrap semantics, and candidate-root behavior
+      defined in this document are otherwise treated as semantically locked.
 
 
 ===============================================================================
-10. WHY THIS AREA EXISTS
+18. WHY THIS AREA EXISTS
 ===============================================================================
 
-10.1. Without strict discovery boundaries:
-       - visibility rules become harder to reason about
-       - resolution loses determinism
-       - performance degrades unpredictably
-       - user trust erodes through ghost packs
-       - save isolation breaks
+18.1. Without strict root-origin and discovery boundaries:
+      - visibility rules become harder to reason about
+      - resolution loses determinism
+      - performance degrades unpredictably
+      - user trust erodes through ghost packs
+      - save isolation breaks
+      - bootstrap path behavior becomes magical
 
-10.2. Discovery therefore remains boring, strict, and predictable.
+18.2. Discovery therefore remains boring, strict, and predictable.
+
+18.3. Pack Manager and UI may be more helpful and exploratory, but that
+      helpfulness must not silently migrate into discovery itself.
 
 
 ===============================================================================
@@ -402,6 +795,6 @@ END OF DA-09 - ROOT SYSTEM & PACK DISCOVERY BOUNDARIES
 --- doc-meta ---
 DOC_ID: DA-09
 DOC_FILE: docs/design/DA-09_ROOT_SYSTEM_AND_PACK_DISCOVERY_BOUNDARIES.txt
-DOC_REV: 13
-DOC_GIT: 10093de
+DOC_REV: 14
+DOC_GIT: 023e3de
 ----------------
