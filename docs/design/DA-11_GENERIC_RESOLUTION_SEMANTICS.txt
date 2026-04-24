@@ -9,20 +9,21 @@ EVOLVING
 Description:
 ------------
 Defines the generic, dependency-agnostic resolution machinery used by Turnix
-to interpret PackRequests, enumerate candidates, apply constraints, and
-produce deterministic outcomes.
+to interpret PackRequests, enumerate candidates, apply constraints, compare
+candidate identity, and produce deterministic outcomes.
 
 This document defines resolution mechanics only.
 
 This area strictly separates:
 - request parsing
 - candidate enumeration
+- whole-candidate comparison
 - constraint application
 - deterministic selection
 - ambiguity and failure signaling
 
-Nothing in this area implies loading, activation, execution order, or runtime
-access.
+Nothing in this area implies loading, activation, execution order, runtime
+access, or user-decision policy.
 
 Purpose:
 --------
@@ -33,6 +34,8 @@ It defines:
 - PackRequest grammar
 - PackRequest parsing and internal representation
 - candidate enumeration phases
+- whole-candidate resolution boundary inherited from discovery
+- candidate equivalence and non-equivalence handling
 - hard and soft constraint handling
 - deterministic selection contract
 - ambiguity and failure signaling
@@ -44,6 +47,7 @@ It does NOT define:
 - pack identity and visibility semantics (see DA-10)
 - dependency meaning or strength
 - save-specific override policy
+- warning, allow, deny, remember, or user-decision behavior (see DA-17)
 - activation, execution, or lifecycle semantics
 - capability authority or permission mechanics
 
@@ -103,6 +107,7 @@ Downstream Documents:
 02.4. Resolution does not:
       - rescan the filesystem
       - read manifests lazily
+      - merge manifest fragments
       - activate packs
       - load runtimes
       - guess policy
@@ -112,9 +117,12 @@ Downstream Documents:
 02.6. Discovery builds the candidate universe. Resolution selects from that
       already-built universe.
 
-02.7. Resolution remains strictly separate from activation and runtime use.
+02.7. Resolution works on whole discovered candidate artifacts produced by
+      DA-09 discovery, not on merged fragments of multiple manifests.
 
-02.8. This document defines generic mechanics, not consumer-specific
+02.8. Resolution remains strictly separate from activation and runtime use.
+
+02.9. This document defines generic mechanics, not consumer-specific
       strategy.
 
 
@@ -217,6 +225,9 @@ Downstream Documents:
 
 06.6. The resolver does not trigger new discovery.
 
+06.7. The resolver does not combine partial candidate data into a new
+      candidate.
+
 
 ===============================================================================
 07. CANDIDATE ENUMERATION - PHASE A (LOCKED)
@@ -237,236 +248,324 @@ Downstream Documents:
       - apply consumer preference
       - perform fallback
       - interpret optionality
+      - merge candidates
 
 07.4. This phase answers only:
       "Which candidates could structurally satisfy this request?"
 
 
 ===============================================================================
-08. CONSTRAINT APPLICATION - PHASE B (LOCKED)
+08. WHOLE-CANDIDATE BOUNDARY (LOCKED)
 ===============================================================================
 
-08.1. Constraint application removes or restricts candidates after structural
-      enumeration.
+08.1. Resolution operates on whole discovered candidate artifacts supplied by
+      the registry snapshot.
 
-08.2. Constraint classes are:
+08.2. The candidate universe is produced by discovery and indexing.
+
+08.3. Manifest candidates are selected as whole definitions during the
+      discovery/indexing pipeline described by DA-09.
+
+08.4. Resolution does not merge duplicate manifests.
+
+08.5. Resolution does not stack manifest fields.
+
+08.6. Resolution does not compose a synthetic candidate from several
+      shadowed candidates.
+
+08.7. If several discovered candidates exist for the same apparent pack,
+      resolution compares those candidates as whole candidates.
+
+08.8. This boundary prevents resolution from becoming a hidden manifest
+      merge stage.
+
+
+===============================================================================
+09. CANDIDATE EQUIVALENCE AND FINGERPRINTS (LOCKED)
+===============================================================================
+
+09.1. Candidate equivalence means two or more candidates represent the same
+      concrete pack content for the current comparison purpose.
+
+09.2. When pack fingerprints are available and relevant to the current
+      comparison, equality of the full fingerprint string establishes
+      fingerprint equivalence for that comparison.
+
+09.3. The full fingerprint string is compared as a whole.
+
+09.4. If two candidates are fingerprint-equivalent, they are treated as
+      equivalent candidates for selection.
+
+09.5. Equivalent candidates do not all load or all become winners.
+
+09.6. The first equivalent candidate in deterministic order wins.
+
+09.7. Later equivalent candidates remain separate shadowed-equivalent
+      entries for diagnostics, provenance, and explanation.
+
+09.8. Shadowed-equivalent candidates remain observable.
+
+09.9. If candidates share the same canonicalPackId and packVersion but have
+      different fingerprints, they are not equivalent.
+
+09.10. A same-identity same-version fingerprint difference is a candidate
+       divergence. This document classifies the candidates as
+       non-equivalent; warning, allow, deny, remember, or user-decision
+       behavior belongs to DA-17 and to the surrounding consumer.
+
+09.11. Candidate origin by itself does not prove authenticity.
+
+09.12. Resolution may expose candidate origin as context, but origin alone
+       does not decide that one candidate is authentic and another is not.
+
+
+===============================================================================
+10. CONSTRAINT APPLICATION - PHASE B (LOCKED)
+===============================================================================
+
+10.1. Constraint application removes or restricts candidates after structural
+      enumeration and whole-candidate comparison.
+
+10.2. Constraint classes are:
       - hard constraints
       - soft constraints
 
 
-08.1 HARD CONSTRAINTS (LOCKED)
+10.1 HARD CONSTRAINTS (LOCKED)
 ------------------------------
 
-08.1.1. Hard constraints permanently exclude candidates.
+10.1.1. Hard constraints permanently exclude candidates.
 
-08.1.2. Examples include:
+10.1.2. Examples include:
         - packTreeId mismatch
         - required author mismatch
         - kind mismatch
         - visibility violation
         - forbidden root or source within the current resolution context
         - concrete version mismatch
+        - fingerprint mismatch when an exact fingerprint expectation is
+          supplied by the current consumer context
 
-08.1.3. A candidate that fails a hard constraint is not selectable.
+10.1.3. A candidate that fails a hard constraint is not selectable.
 
-08.1.4. A candidate that fails a hard constraint is not offered as a valid
+10.1.4. A candidate that fails a hard constraint is not offered as a valid
         outcome.
 
-08.1.5. Hard-constraint failure remains observable through the higher
+10.1.5. Hard-constraint failure remains observable through the higher
         diagnostic and tracing system.
 
 
-08.2 SOFT CONSTRAINTS (LOCKED)
+10.2 SOFT CONSTRAINTS (LOCKED)
 ------------------------------
 
-08.2.1. Soft constraints discourage selection without erasing candidate
+10.2.1. Soft constraints discourage selection without erasing candidate
         identity.
 
-08.2.2. Examples include:
+10.2.2. Examples include:
         - prerelease discouraged by policy
         - deprecated pack
         - policy-based discouragement
 
-08.2.3. Soft-constrained candidates remain known to the resolver.
+10.2.3. Soft-constrained candidates remain known to the resolver.
 
-08.2.4. Soft-constrained candidates are not selected unless the surrounding
+10.2.4. Soft-constrained candidates are not selected unless the surrounding
         consumer context explicitly allows them.
 
-08.2.5. Soft constraints apply to candidates rather than to request
+10.2.5. Soft constraints apply to candidates rather than to request
         mandatory or optional semantics.
 
-08.2.6. Request strength or optionality is defined outside this document.
+10.2.6. Request strength or optionality is defined outside this document.
 
-08.2.7. If soft-constrained candidates become allowed, they remain subject
+10.2.7. If soft-constrained candidates become allowed, they remain subject
         to deterministic ordering.
 
 
 ===============================================================================
-09. RESOLUTION CONTEXT AND SOURCE BOUNDARY (LOCKED)
+11. RESOLUTION CONTEXT AND SOURCE BOUNDARY (LOCKED)
 ===============================================================================
 
-09.1. Resolution always occurs inside one explicit resolution context.
+11.1. Resolution always occurs inside one explicit resolution context.
 
-09.2. The resolution context determines:
+11.2. The resolution context determines:
       - which candidate population is visible to the resolver
       - which source boundaries are legal
       - which policy constraints are in force
       - which ordering criteria will later be applied
+      - whether an exact fingerprint expectation is being enforced
 
-09.3. The generic resolver does not invent or switch resolution context.
+11.3. The generic resolver does not invent or switch resolution context.
 
-09.4. The generic resolver does not mix contexts silently.
+11.4. The generic resolver does not mix contexts silently.
 
-09.5. If the surrounding consumer violates context assumptions, resolution
+11.5. If the surrounding consumer violates context assumptions, resolution
       fails explicitly.
 
-09.6. This document does not define the final save-specific or consumer-
+11.6. This document does not define the final save-specific or consumer-
       specific source model. It only requires that one explicit context
       applies during one resolution attempt.
 
 
 ===============================================================================
-10. DETERMINISTIC SELECTION (LOCKED)
+12. DETERMINISTIC SELECTION (LOCKED)
 ===============================================================================
 
-10.1. After constraints are applied, the resolver imposes a total,
+12.1. After constraints are applied, the resolver imposes a total,
       deterministic ordering on the remaining selectable candidates.
 
-10.2. The resolver selects the first candidate in that ordering.
+12.2. The resolver selects the first candidate in that ordering.
 
-10.3. Ordering is:
+12.3. Ordering is:
       - stable
       - reproducible
       - independent of incidental iteration order
       - free of randomness
 
-10.4. The exact ordering criteria are supplied by the surrounding consumer.
+12.4. The exact ordering criteria are supplied by the surrounding consumer.
 
-10.5. Silent substitution is forbidden.
+12.5. Silent substitution is forbidden.
+
+12.6. Equivalent candidates follow the same deterministic ordering rule:
+      the first equivalent candidate wins, and later equivalent candidates
+      remain shadowed-equivalent rather than loaded as additional winners.
 
 
 ===============================================================================
-11. SUCCESSFUL RESOLUTION OBSERVABILITY (LOCKED)
+13. SUCCESSFUL RESOLUTION OBSERVABILITY (LOCKED)
 ===============================================================================
 
-11.1. Successful resolution outcomes remain observable.
+13.1. Successful resolution outcomes remain observable.
 
-11.2. Observability covers successful resolution paths as well as failures.
+13.2. Observability covers successful resolution paths as well as failures.
 
-11.3. A successful resolution outcome remains explainable after the fact.
+13.3. A successful resolution outcome remains explainable after the fact.
 
-11.4. Resolution observability supports explanation of:
+13.4. Resolution observability supports explanation of:
       - why the selected candidate won
       - why another candidate did not win
       - why a candidate was excluded
+      - why a candidate was shadowed as equivalent
       - why the active resolution context permitted this outcome
 
-11.5. This document requires successful-resolution observability. DA-03
+13.5. This document requires successful-resolution observability. DA-03
       defines the tracing and diagnostic mechanisms that realize it.
 
-11.6. If a successful resolution path cannot be explained after the fact,
+13.6. If a successful resolution path cannot be explained after the fact,
       that is an observability failure.
 
 
 ===============================================================================
-12. AMBIGUITY HANDLING (LOCKED)
+14. AMBIGUITY HANDLING (LOCKED)
 ===============================================================================
 
-12.1. If deterministic ordering cannot reduce the selectable candidates to
+14.1. If deterministic ordering cannot reduce the selectable candidates to
       one unambiguous result, resolution pauses.
 
-12.2. Ambiguity is classified explicitly.
+14.2. Ambiguity is classified explicitly.
 
-12.3. External policy or user decision is then required.
+14.3. External policy or user decision is then required.
 
-12.4. Once such a decision is made by the surrounding consumer, that
+14.4. Once such a decision is made by the surrounding consumer, that
       decision is persisted by the consumer rather than by the generic
       resolver.
 
-12.5. The generic resolver does not guess.
+14.5. The generic resolver does not guess.
 
-12.6. The generic resolver does not auto-persist decisions.
+14.6. The generic resolver does not auto-persist decisions.
+
+14.7. Fingerprint divergence, when not treated as a hard constraint by the
+      current context, may be surfaced to the surrounding consumer as an
+      ambiguity or warning-class condition. DA-17 defines user-facing
+      decision behavior.
 
 
 ===============================================================================
-13. FAILURE CONDITIONS (LOCKED)
+15. FAILURE CONDITIONS (LOCKED)
 ===============================================================================
 
-13.1. Resolution fails explicitly if:
+15.1. Resolution fails explicitly if:
       - no candidates exist after hard constraints
       - no candidates are selectable under the supplied context
       - context rules are violated
       - ambiguity requires decision and no decision path is available
 
-13.2. Resolution failure is:
+15.2. Resolution failure is:
       - explicit
       - classified
       - observable
 
-13.3. Resolution failure never falls back silently.
+15.3. Resolution failure never falls back silently.
 
 
 ===============================================================================
-14. RESOLUTION IS NOT ACTIVATION
+16. RESOLUTION IS NOT ACTIVATION
 ===============================================================================
 
-14.1. Resolution determines which concrete pack identity satisfies a
+16.1. Resolution determines which concrete pack identity satisfies a
       request.
 
-14.2. Resolution does not:
+16.2. Resolution does not:
       - load code
       - activate packs
       - guarantee execution order
       - grant runtime access
 
-14.3. Activation and lifecycle behavior are defined elsewhere.
+16.3. Activation and lifecycle behavior are defined elsewhere.
 
 
 ===============================================================================
-15. ERROR MODEL (LOCKED)
+17. ERROR MODEL (LOCKED)
 ===============================================================================
 
-15.1. Resolution errors include examples such as:
+17.1. Resolution errors include examples such as:
       - NotFoundError
       - VersionMismatchError
       - AmbiguousResolutionError
       - PermissionDeniedError
 
-15.2. Resolution errors use the standard error envelope.
+17.2. Resolution errors use the standard error envelope.
 
-15.3. Resolution errors include:
+17.3. Resolution errors include:
       - PackRequest context
       - resolution context
       - reason classification
 
-15.4. This document does not lock the final full error taxonomy beyond the
+17.4. This document does not lock the final full error taxonomy beyond the
       requirement that classification remains explicit.
 
 
 ===============================================================================
-16. LOCKED SUMMARY
+18. LOCKED SUMMARY
 ===============================================================================
 
-16.1. LOCKED:
+18.1. LOCKED:
       - PackRequest grammar and disambiguation rules
       - immutable PackRequest internal representation
       - side-effect-free resolution
       - no lazy discovery during resolution
+      - no manifest merging during resolution
+      - whole-candidate boundary inherited from DA-09 discovery
+      - fingerprint-equivalent candidates select only the first winner
+      - shadowed-equivalent candidates remain observable
+      - same canonicalPackId and packVersion with different fingerprints are
+        non-equivalent candidates
       - phase-A candidate enumeration
       - phase-B hard and soft constraint handling
       - deterministic ordering and winner selection contract
       - concrete version mismatch is a hard exclusion
+      - exact fingerprint mismatch is a hard exclusion when such an
+        expectation is supplied by context
       - successful resolution outcomes remain observable
       - explicit ambiguity signaling
       - no silent substitution
       - resolution remains separate from activation
 
-16.2. DEFERRED:
+18.2. DEFERRED:
       - dependency semantics
       - save-specific override policy
       - pinning and copying rules
       - activation and lifecycle behavior
       - consumer-specific ordering criteria
+      - user-facing warning and remembered-decision behavior
 
 
 ===============================================================================
@@ -476,6 +575,6 @@ END OF DA-11 - GENERIC RESOLUTION SEMANTICS
 --- doc-meta ---
 DOC_ID: DA-11
 DOC_FILE: docs/design/DA-11_GENERIC_RESOLUTION_SEMANTICS.txt
-DOC_REV: 14
-DOC_GIT: 10093de
+DOC_REV: 15
+DOC_GIT: TEMP
 ----------------
