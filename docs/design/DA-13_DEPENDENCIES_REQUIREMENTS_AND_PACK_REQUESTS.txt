@@ -8,16 +8,20 @@ EVOLVING
 
 Description:
 ------------
-Defines how packs declare hard requirements, how those requirements are
-interpreted above generic resolution mechanics, and how dependency outcomes
-are enforced without silent substitution.
+Defines how packs declare hard requirements, how shared pack specifiers are
+interpreted above generic resolution mechanics, how provider-role
+requirements are expressed, and how advisory pack relations are represented
+without silently changing loader or activation behavior.
 
 This area is authoritative for:
 - dependency declaration semantics
 - PackRequest meaning in dependency context
+- shared pack-specifier structure across dependency-like manifest fields
 - dependency-specific resolution policy above DA-11
 - deterministic dependency selection policy
 - saved, pinned, and global dependency behavior
+- provider-role requirement semantics
+- advisory pack-relation semantics for Pack Manager and UI
 - ambiguity handling and required external involvement
 
 Generic resolution mechanics are defined in DA-11.
@@ -31,9 +35,12 @@ policy layer that sits above generic resolution mechanics.
 It defines:
 - dependency declaration semantics in manifests
 - PackRequest meaning when used as a dependency
+- shared pack-specifier normalization rules
 - exclusive dependency-resolution source model
-- version constraint enforcement policy
+- version and fingerprint expectation rules
 - deterministic GlobalNormal dependency selection procedure
+- provider-role requirement and provider declaration semantics
+- advisory pack-relation metadata semantics
 - ambiguity handling and required external involvement
 - failure conditions and last-known-good fallback boundary
 
@@ -42,6 +49,7 @@ It does NOT define:
 - tracing schema or storage
 - activation lifecycle semantics
 - visibility rules beyond the fact that they gate dependency outcomes
+- Pack Manager heuristics or load-list generation behavior
 
 Upstream Documents:
 ------------------
@@ -55,6 +63,7 @@ Upstream Documents:
 - DA-10
 - DA-11
 - DA-15
+- DA-17
 
 Downstream Documents:
 --------------------
@@ -74,8 +83,9 @@ Downstream Documents:
 01.3. The CORE META-RULES documents define the general rule language and
       interpretation model used by this document.
 
-01.4. This document defines dependency semantics and dependency-resolution
-      policy within that shared interpretation model.
+01.4. This document defines dependency semantics, provider-role semantics,
+      advisory pack-relation semantics, and dependency-resolution policy
+      within that shared interpretation model.
 
 
 ===============================================================================
@@ -98,128 +108,227 @@ Downstream Documents:
       - grant capabilities
       - define activation order
 
-02.5. Failure to satisfy a dependency is a hard failure unless some other
-      accepted policy or user decision explicitly resolves it.
+02.5. Failure to satisfy a hard dependency is a hard failure unless some
+      other accepted policy or user decision explicitly resolves it.
 
 02.6. DA-11 defines generic resolution mechanics.
 
 02.7. This document defines how dependency resolution chooses and constrains
       the resolution context and outcome above those generic mechanics.
 
+02.8. Advisory pack relations are not dependencies.
+
+02.9. Provider-role requirements are dependency/resolution-layer semantics.
+      They are similar in spirit to capabilities because they depend on a
+      named function/role rather than one concrete implementation, but they
+      are not runtime capability invocation semantics.
+
 
 ===============================================================================
-03. DECLARING DEPENDENCIES (MANIFEST LEVEL)
+03. SHARED PACK-SPECIFIER MODEL (LOCKED)
 ===============================================================================
 
-03.1. Manifest field:
+03.1. Manifest fields that refer to packs use one shared pack-specifier
+      structure unless some other authoritative document explicitly states
+      otherwise.
+
+03.2. The shared pack-specifier structure may appear as:
+      - one single specifier
+      - or an array of specifiers
+
+03.3. A shared pack specifier ultimately denotes one or more accepted pack
+      forms.
+
+03.4. The surrounding field defines the meaning of that acceptance.
+
+03.5. Shared syntax does not imply shared semantics.
+
+03.6. A hard dependency field, an advisory field, and a role-related field
+      may therefore reuse the same pack-specifier structure while producing
+      different higher-level meaning.
+
+03.7. The shared pack-specifier structure supports the already-existing
+      versionless PackRequestRef forms where the surrounding field semantics
+      allow them.
+
+03.8. Fingerprint is an optional strengthening of an exact concrete pack
+      form. Fingerprint is never a vague compatibility hint by itself.
+
+
+===============================================================================
+04. DECLARING HARD DEPENDENCIES (MANIFEST LEVEL)
+===============================================================================
+
+04.1. Manifest field:
       packs
 
-03.2. Manifest type:
-      PackRequestRef
+04.2. Manifest type:
+      pack specifier
       or
-      list of PackRequestRef
+      array of pack specifiers
 
-03.3. Examples:
+04.3. Examples:
       - "packs": ["ui.controls"]
       - "packs": ["Turnix@ui.controls@^1.2"]
       - "packs": ["avatars", "llm.pipeline"]
 
-03.4. Locked rules:
-      - absence of "packs" means no dependencies
-      - an empty list means explicitly no dependencies
-      - every entry is a hard dependency
+04.4. Locked rules:
+      - absence of "packs" means no hard dependencies
+      - an empty list means explicitly no hard dependencies
+      - every entry under "packs" is a hard dependency meaning
       - list order carries no semantic meaning by itself
 
+04.5. This document does not define optional, soft, or advisory dependency
+      semantics for the "packs" field.
+
 
 ===============================================================================
-04. PACKREQUEST IN DEPENDENCY CONTEXT (LOCKED)
+05. PACKREQUEST IN DEPENDENCY CONTEXT (LOCKED)
 ===============================================================================
 
-04.1. Dependencies are expressed using PackRequestRef and normalized into
-      PackRequest.
+05.1. Dependencies are expressed using PackRequestRef and normalized into
+      PackRequest and accepted-entry form.
 
-04.2. DA-11 defines PackRequest grammar and generic parsing rules.
+05.2. DA-11 defines PackRequest grammar and generic parsing rules.
 
-04.3. This document defines how a PackRequest is interpreted when the
+05.3. This document defines how a PackRequest is interpreted when the
       requesting relationship is a dependency.
 
-04.4. In dependency context, PackRequest means:
+05.4. In dependency context, PackRequest means:
       - resolve one satisfying concrete dependency target
       - obey dependency-source policy
-      - obey dependency version rules
+      - obey dependency version and fingerprint rules
       - fail explicitly if no permitted dependency outcome exists
 
-04.5. Dependency context does not change PackRequest structure.
+05.5. Dependency context does not change PackRequest structure.
       Dependency context changes how the surrounding policy layer uses it.
 
 
 ===============================================================================
-05. HARD DEPENDENCY MODEL (LOCKED)
+06. ACCEPTED-ENTRY NORMALIZATION (LOCKED)
 ===============================================================================
 
-05.1. All dependencies declared through "packs" are hard dependencies.
+06.1. A dependency request is internally normalized into one or more
+      accepted pack entries.
 
-05.2. Consequences:
+06.2. Each accepted entry contains:
+      - canonicalPackId or PackRequest-identifiable pack reference
+      - packVersion or version requirement according to the original form
+      - optional fingerprint
+
+06.3. A dependency is satisfied if at least one normalized accepted entry
+      can be resolved successfully under the active dependency-resolution
+      source and context.
+
+06.4. Normal shorthand forms normalize as follows.
+
+06.5. Name-only dependency form remains allowed where existing field
+      semantics already allow versionless PackRequestRef.
+
+06.6. Name-only shorthand normalizes to an accepted entry with:
+      - pack identity from the PackRequestRef
+      - no exact version requirement
+      - no fingerprint
+
+06.7. Name plus version normalizes to an accepted entry with:
+      - pack identity from the PackRequestRef
+      - the given version requirement or exact version
+      - no fingerprint
+
+06.8. Name plus exact version plus fingerprint normalizes to an accepted
+      entry with:
+      - pack identity from the PackRequestRef
+      - the given exact version
+      - the given fingerprint
+
+06.9. Fingerprint requires exact concrete version.
+
+06.10. The following are invalid:
+       - name plus fingerprint with no version
+       - name plus range plus fingerprint
+       - name plus wildcard plus fingerprint
+
+06.11. Multiple accepted entries in the same dependency express one-of
+       semantics at the accepted-entry level.
+
+06.12. This allows cases such as:
+       - one of several known-good versions of the same pack
+       - one of several concrete packs that satisfy the declared dependency
+         intent
+
+06.13. Fingerprint comparison is performed only for accepted entries that
+       actually declare a fingerprint.
+
+
+===============================================================================
+07. HARD DEPENDENCY MODEL (LOCKED)
+===============================================================================
+
+07.1. All dependencies declared through "packs" are hard dependencies.
+
+07.2. Consequences:
       - failure to resolve causes activation failure
       - no automatic disabling occurs
       - no silent downgrade occurs
       - no implicit fallback occurs
       - no best-effort substitution occurs
 
-05.3. This document does not define optional, soft, or advisory dependency
+07.3. This document does not define optional, soft, or advisory dependency
       semantics for the "packs" field.
 
 
 ===============================================================================
-06. RESOLUTION OVERVIEW
+08. RESOLUTION OVERVIEW
 ===============================================================================
 
-06.1. Dependency resolution consists of:
+08.1. Dependency resolution consists of:
       1) dependency-resolution source determination
       2) candidate enumeration and constraint application under DA-11
       3) deterministic dependency selection or explicit non-success outcome
 
-06.2. Dependency resolution produces exactly one of:
+08.2. Dependency resolution produces exactly one of:
       - one concrete dependency target
       - one classified failure
       - one classified ambiguity requiring external decision
 
-06.3. DA-11 defines the generic mechanics used inside these stages.
+08.3. DA-11 defines the generic mechanics used inside these stages.
 
-06.4. This document defines dependency-specific source and ordering policy.
+08.4. This document defines dependency-specific source and ordering policy.
+
+08.5. Advisory pack relations do not participate in this resolution process.
 
 
 ===============================================================================
-07. DEPENDENCY RESOLUTION SOURCE MODEL (LOCKED)
+09. DEPENDENCY RESOLUTION SOURCE MODEL (LOCKED)
 ===============================================================================
 
-07.1. Every dependency is resolved from exactly one dependency-resolution
-      source.
+09.1. Every hard dependency is resolved from exactly one dependency-
+      resolution source.
 
-07.2. Dependency-resolution sources are mutually exclusive.
+09.2. Dependency-resolution sources are mutually exclusive.
 
-07.3. The defined sources are:
+09.3. The defined sources are:
       - SaveOnly
       - GlobalPinned
       - GlobalNormal
 
-07.4. The resolver does not mix these sources silently.
+09.4. The resolver does not mix these sources silently.
 
-07.5. The resolver does not fall back between these sources silently.
+09.5. The resolver does not fall back between these sources silently.
 
 
-07.1 SAVEONLY (LOCKED)
+09.1 SAVEONLY (LOCKED)
 ----------------------
 
-07.1.1. SaveOnly applies when the dependency's packTreeId is listed in
+09.1.1. SaveOnly applies when the dependency's packTreeId is listed in
         SavePack metadata as copied.
 
-07.1.2. Under SaveOnly:
+09.1.2. Under SaveOnly:
         - only copied packs inside that SavePack are eligible
         - the global registry is not consulted
         - absence of the copied pack is a hard error
 
-07.1.3. Saved packs under this model:
+09.1.3. Saved packs under this model:
         - are identified by full identity
           (author + packTreeId + version)
         - are owned by the SavePack
@@ -227,144 +336,225 @@ Downstream Documents:
         - are visible only within that save context
 
 
-07.2 GLOBALPINNED (LOCKED)
+09.2 GLOBALPINNED (LOCKED)
 --------------------------
 
-07.2.1. GlobalPinned applies when the dependency is bound to a pin in
+09.2.1. GlobalPinned applies when the dependency is bound to a pin in
         SavePack metadata.
 
-07.2.2. Under GlobalPinned:
+09.2.2. Under GlobalPinned:
         - only the pinned concrete identity is eligible
         - resolution occurs in the global registry only
         - a missing pinned identity is a hard error
         - the pin does not imply copying or saving
 
-07.2.3. Pins express explicit historical intent and bypass selector-based
+09.2.3. Pins express explicit historical intent and bypass selector-based
         candidate choice.
 
 
-07.3 GLOBALNORMAL (LOCKED)
+09.3 GLOBALNORMAL (LOCKED)
 --------------------------
 
-07.3.1. GlobalNormal applies in all other dependency cases.
+09.3.1. GlobalNormal applies in all other dependency cases.
 
-07.3.2. Under GlobalNormal:
+09.3.2. Under GlobalNormal:
         - resolution occurs in the global registry only
         - SavePack content is not consulted
-        - selection follows the deterministic procedure in section 10
+        - selection follows the deterministic procedure in section 11
 
 
 ===============================================================================
-08. CANDIDATE ENUMERATION
+10. VERSION AND FINGERPRINT ENFORCEMENT (LOCKED)
 ===============================================================================
 
-08.1. Within the selected dependency-resolution source:
-      - collect packs matching packTreeId
-      - apply author constraint if present
-      - apply kind constraint if present
-      - apply hard constraints
-
-08.2. This phase does not:
-      - order candidates
-      - select a winner
-      - invent policy
-      - reinterpret dependency strength
-
-08.3. This phase answers only:
-      "Which candidates are structurally eligible inside the selected
-       dependency-resolution source?"
-
-
-===============================================================================
-09. VERSION CONSTRAINT ENFORCEMENT (LOCKED)
-===============================================================================
-
-09.1. If a semantic-version requirement is present, only candidates allowed
+10.1. If a semantic-version requirement is present, only candidates allowed
       by that requirement remain eligible.
 
-09.2. If a concrete version is requested:
+10.2. If a concrete version is requested:
       - only that version is eligible
       - mismatch is a hard failure
 
-09.3. If a version range is requested:
+10.3. If a version range is requested:
       - only matching versions are eligible
       - surrounding policy may restrict further
 
-09.4. If no semantic-version requirement exists, or if "*" is used:
+10.4. If no semantic-version requirement exists, or if "*" is used:
       - all versions remain eligible
 
-09.5. If no eligible versions remain, dependency resolution fails with
+10.5. If no eligible versions remain, dependency resolution fails with
       VersionMismatchError.
 
+10.6. If an accepted entry declares a fingerprint:
+      - the resolved dependency must also match that fingerprint
+      - fingerprint mismatch is a non-success outcome for that accepted
+        entry
+
+10.7. Fingerprint expectation is therefore an exact-artifact lock for that
+      accepted entry.
+
+10.8. Multiple accepted entries may be used to declare several known-good
+      exact versions or exact fingerprints.
+
 
 ===============================================================================
-10. GLOBALNORMAL SELECTION PROCEDURE (LOCKED)
+11. GLOBALNORMAL SELECTION PROCEDURE (LOCKED)
 ===============================================================================
 
-10.1. GlobalNormal dependency resolution uses deterministic procedural
+11.1. GlobalNormal dependency resolution uses deterministic procedural
       ordering.
 
-10.2. No scoring model exists in this document.
+11.2. No scoring model exists in this document.
 
-10.3. Procedure:
+11.3. Procedure:
 
-10.3.1. Step 1 - version handling
+11.3.1. Step 1 - version handling
         - if a concrete version is specified:
           only that version remains eligible
-        - if a range or "*" is specified:
+        - if a range or versionless form is specified:
           the highest semantic version is preferred
         - packs without version metadata are ordered last
 
-10.3.2. Step 2 - author relationship ordering
+11.3.2. Step 2 - author relationship ordering
         1) exact requested author
         2) same author as the requesting pack
         3) different known author
         4) unknown author
 
-10.3.3. Step 3 - root precedence
+11.3.3. Step 3 - root precedence
         custom
         first-party
         third-party
 
-10.3.4. Step 4 - final tie-break
+11.3.4. Step 4 - final tie-break
         lexicographic order of:
         "<author>@<packTreeId>@<version>"
 
-10.4. Selection rule:
+11.4. Selection rule:
       - the first eligible candidate is selected
       - silent substitution is forbidden
 
 
 ===============================================================================
-11. AMBIGUITY AND REQUIRED EXTERNAL INVOLVEMENT (LOCKED)
+12. REQUIRED ROLES AND PROVIDED ROLES (LOCKED)
 ===============================================================================
 
-11.1. If deterministic dependency selection cannot produce one unambiguous
+12.1. Manifest field for role requirements:
+      requiredRoles
+
+12.2. requiredRoles may be one role name or an array of role names.
+
+12.3. Role names currently have no version component.
+
+12.4. requiredRoles is separate from hard pack dependencies declared in
+      packs.
+
+12.5. A required role means the pack expects one provider of that named role
+      to be available when the surrounding runtime logic uses it.
+
+12.6. requiredRoles is a dependency/resolution-layer declaration rather than
+      a runtime capability call.
+
+12.7. Manifest field for role providers:
+      providedRoles
+
+12.8. providedRoles may be one role name or an array of role names.
+
+12.9. A pack declaring providedRoles says that it can serve as a provider
+      for those roles.
+
+12.10. If several providers declare the same role, runtime/provider
+       selection behavior is defined outside this document. By current
+       locked design, the first registered provider wins by default, and
+       specific-provider request may be used programmatically.
+
+12.11. requiredRoles does not itself force loader reordering or magical
+       dependency-graph mutation.
+
+12.12. Pack Manager may use role metadata to help users build sensible load
+       lists, but runtime behavior remains explicit.
+
+12.13. This document does not yet define role-version matching, manifest-side
+       preferred provider constraints, or wildcard role semantics.
+
+
+===============================================================================
+13. ADVISORY PACK RELATIONS (LOCKED)
+===============================================================================
+
+13.1. The following manifest fields are advisory pack-relation metadata:
+      - supportedPacks
+      - conflictingPacks
+      - recommendedPacks
+
+13.2. Each of these fields may be one pack specifier or an array of pack
+      specifiers.
+
+13.3. These fields reuse the shared pack-specifier structure from section 03.
+
+13.4. The surrounding advisory field defines the meaning of the specifier.
+
+13.5. supportedPacks means:
+      - this pack is specifically known to be compatible with those packs
+      - if they are available, this pack is expected to work with them
+
+13.6. conflictingPacks means:
+      - if one of those packs is present, issues are known or expected
+
+13.7. recommendedPacks means:
+      - those packs are good to use together
+      - they express useful synergy or ecosystem guidance
+
+13.8. Advisory pack relations are hints.
+
+13.9. Advisory pack relations are not:
+      - hard dependencies
+      - hard activation blockers
+      - generic resolution constraints
+      - loader/runtime warning rules by themselves
+
+13.10. Advisory pack relations are for:
+       - Pack Manager
+       - UI
+       - compatibility presentation
+       - helping the user assemble a load list
+
+13.11. Advisory pack relations do not participate in dependency graph
+       enforcement or activation validity.
+
+13.12. A shared pack-specifier structure does not upgrade advisory metadata
+       into dependency semantics.
+
+
+===============================================================================
+14. AMBIGUITY AND REQUIRED EXTERNAL INVOLVEMENT (LOCKED)
+===============================================================================
+
+14.1. If deterministic dependency selection cannot produce one unambiguous
       candidate, dependency resolution pauses.
 
-11.2. Ambiguity is surfaced explicitly.
+14.2. Ambiguity is surfaced explicitly.
 
-11.3. User decision or accepted policy input is then required.
+14.3. User decision or accepted policy input is then required.
 
-11.4. Once such a decision is made:
+14.4. Once such a decision is made:
       - it is persisted by the surrounding consumer
       - future runs remain deterministic
 
-11.5. The resolver does not guess.
+14.5. The resolver does not guess.
 
 
 ===============================================================================
-12. FAILURE CONDITIONS (LOCKED)
+15. FAILURE CONDITIONS (LOCKED)
 ===============================================================================
 
-12.1. Dependency resolution fails explicitly if:
+15.1. Dependency resolution fails explicitly if:
       - no candidates remain after hard constraints
       - dependency-resolution source rules are violated
       - a pinned or saved identity is missing
       - ambiguity cannot be resolved
       - no permitted decision path exists
 
-12.2. Dependency-resolution failure is:
+15.2. Dependency-resolution failure is:
       - explicit
       - classified
       - observable
@@ -372,52 +562,62 @@ Downstream Documents:
 
 
 ===============================================================================
-13. LAST-KNOWN-GOOD FALLBACK BOUNDARY (LOCKED)
+16. LAST-KNOWN-GOOD FALLBACK BOUNDARY (LOCKED)
 ===============================================================================
 
-13.1. Turnix stores the last successfully activated graph per SavePack.
+16.1. Turnix stores the last successfully activated graph per SavePack.
 
-13.2. Resolution always attempts fresh dependency resolution first.
+16.2. Resolution always attempts fresh dependency resolution first.
 
-13.3. Last-known-good is not consulted during dependency resolution.
+16.3. Last-known-good is not consulted during dependency resolution.
 
-13.4. Last-known-good fallback is used only after activation failure.
+16.4. Last-known-good fallback is used only after activation failure.
 
-13.5. Fallback procedure:
+16.5. Fallback procedure:
       1) abort current activation
       2) attempt activation using the stored graph
       3) propagate failure if fallback fails
 
 
 ===============================================================================
-14. DEPENDENCY IS NOT ACTIVATION
+17. DEPENDENCY IS NOT ACTIVATION
 ===============================================================================
 
-14.1. Declaring or resolving a dependency does not:
+17.1. Declaring or resolving a dependency does not:
       - activate a pack
       - load code
       - grant runtime access
 
-14.2. Activation semantics are defined elsewhere.
+17.2. Activation semantics are defined elsewhere.
 
 
 ===============================================================================
-15. LOCKED SUMMARY
+18. LOCKED SUMMARY
 ===============================================================================
 
-15.1. LOCKED:
+18.1. LOCKED:
       - dependencies are hard contracts
       - PackRequest interpretation is fixed in dependency context
+      - shared pack-specifier structure is reused across dependency-like
+        manifest fields
+      - accepted-entry normalization supports versionless, versioned, and
+        exact-version-plus-fingerprint forms where allowed
+      - fingerprint requires exact concrete version
       - dependency-resolution sources are exclusive
       - saved packs are immutable and local
       - pinned packs enforce exact identity
       - GlobalNormal selection is procedural and deterministic
+      - requiredRoles and providedRoles are separate manifest semantics from
+        packs
+      - supportedPacks, conflictingPacks, and recommendedPacks are advisory
+        metadata only
       - no silent substitution
       - ambiguity requires explicit decision
 
-15.2. OPEN:
-      - none at semantic level
-      - only tooling and UI presentation remain open
+18.2. OPEN:
+      - role-version model
+      - richer manifest-side provider constraints
+      - tooling and UI presentation only
 
 
 ===============================================================================
@@ -427,6 +627,6 @@ END OF DA-13 - DEPENDENCIES, REQUIREMENTS & PACK REQUESTS
 --- doc-meta ---
 DOC_ID: DA-13
 DOC_FILE: docs/design/DA-13_DEPENDENCIES_REQUIREMENTS_AND_PACK_REQUESTS.txt
-DOC_REV: 13
-DOC_GIT: 10093de
+DOC_REV: 14
+DOC_GIT: TEMP
 ----------------
