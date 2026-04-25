@@ -23,12 +23,16 @@ It defines:
 - hard and soft decision handling
 - scoped pause-and-resume behavior
 - policy handling and policy persistence
+- run, save, and global policy scope precedence
+- remembered permission-policy key semantics
+- remembered fingerprint-mismatch-policy key semantics
 - trace-backed decision explanation
 - frontend responsibility at decision time
 - failure behavior while a decision is pending
 
 It does NOT define:
 - generic resolution mechanics (see DA-11)
+- config storage file placement (see DA-06)
 - importing and module-loading rules (see DA-12)
 - activation lifecycle or execution guarantees (see DA-14)
 - capability schemas and permission-class definitions (see DA-16)
@@ -42,6 +46,7 @@ Upstream Documents:
 - CMR-04
 - CMR-05
 - DA-01
+- DA-06
 - DA-11
 - DA-14
 - DA-16
@@ -87,9 +92,13 @@ Downstream Documents:
       - permission
       - conflict
       - recovery
+      - suspicious content divergence
 
-02.6. If a decision affects identity, persistence, authority, or safety,
-      the decision is explicit and trace-backed.
+02.6. If a decision affects identity, persistence, authority, safety, or
+      known content equivalence, the decision is explicit and trace-backed.
+
+02.7. Decision handling reduces uncertainty by recording an explicit user or
+      policy outcome. It does not prove authenticity, trust, or correctness.
 
 
 ===============================================================================
@@ -123,6 +132,7 @@ Downstream Documents:
       - Permission decisions
       - Recovery decisions
       - Configuration-scope decisions
+      - Fingerprint-mismatch decisions
 
 
 04.1 RESOLUTION DECISIONS (LOCKED)
@@ -177,8 +187,18 @@ Downstream Documents:
 04.2.7. Permission-decision outcomes may include:
         - allow
         - deny
-        - optional persistence of the decision
-        - scope of policy such as session, app, or global
+        - for this run
+        - remember
+
+04.2.8. For capability-based permission decisions, the remembered
+        permission identity uses the exact versioned capability identifier.
+
+04.2.9. A capability permission for storage.export@1 is remembered against
+        storage.export@1, not against storage.export, storage, or a wildcard
+        family.
+
+04.2.10. This document does not introduce wildcard, prefix, or versionless
+         fallback lookup for capability permission policies.
 
 
 04.3 RECOVERY DECISIONS (LOCKED)
@@ -232,6 +252,47 @@ Downstream Documents:
         - trace linking the decision to the key and scope
 
 
+04.5 FINGERPRINT-MISMATCH DECISIONS (LOCKED)
+--------------------------------------------
+
+04.5.1. Fingerprint-mismatch decisions occur when Turnix has an expected
+        pack fingerprint and the computed fingerprint differs.
+
+04.5.2. Fingerprint mismatch means content divergence from an expected pack
+        representation. It does not prove malicious action or authenticity
+        failure.
+
+04.5.3. Fingerprint-mismatch decision triggers are:
+        - same canonicalPackId and same packVersion with different
+          fingerprints
+        - SavePack expected fingerprint mismatch
+        - manifest-declared dependency fingerprint mismatch
+
+04.5.4. Manifest-declared dependency fingerprint mismatch applies only when
+        the manifest actually declares an expected fingerprint.
+
+04.5.5. Origin-only collision is not a fingerprint-mismatch decision trigger.
+
+04.5.6. A first-party-looking source, repo source, third-party source,
+        custom source, save-local source, or externally-managed content
+        source does not by itself prove which candidate is authentic.
+
+04.5.7. Candidate origin may be shown as context to the user, but origin
+        alone is not treated as proof.
+
+04.5.8. Fingerprint-mismatch-decision outcomes may include:
+        - allow
+        - deny
+        - for this run
+        - remember
+
+04.5.9. Allowing for this run does not update the stored expected
+        fingerprint.
+
+04.5.10. Remembering a fingerprint-mismatch decision records acceptance of
+         the specific mismatch under the selected policy scope.
+
+
 ===============================================================================
 05. HARD AND SOFT DECISIONS (LOCKED)
 ===============================================================================
@@ -271,6 +332,10 @@ Downstream Documents:
 05.2.3. Hard decisions always:
         - generate trace events
         - require explicit acknowledgement of the effective outcome
+
+05.2.4. Fingerprint-mismatch decisions may be hard or soft depending on the
+        surrounding consumer context and impact. SavePack reproducibility or
+        exact dependency expectations may require hard handling.
 
 
 ===============================================================================
@@ -312,9 +377,10 @@ Downstream Documents:
 
 07.3. Policies may express:
       - ask always
-      - allow once
-      - allow always
-      - deny always where such denial is permitted
+      - allow for this run
+      - deny for this run
+      - allow and remember
+      - deny and remember
 
 07.4. Policies influence default responses.
 
@@ -328,14 +394,31 @@ Downstream Documents:
 07.7. Policy exists to reduce friction rather than to weaken safety or
       determinism.
 
+07.8. Policy evaluation order is:
+      1) run policy
+      2) save policy
+      3) global policy
+
+07.9. Run policy overrides save policy.
+
+07.10. Save policy overrides global policy.
+
+07.11. Run policy is memory-only and ends with the current Turnix run.
+
+07.12. Save policy is persisted inside the save-bound policy storage defined
+       by DA-06.
+
+07.13. Global policy is persisted inside the global policy storage defined
+       by DA-06.
+
 
 ===============================================================================
 08. POLICY PERSISTENCE (LOCKED)
 ===============================================================================
 
-08.1. When a user makes a decision:
-      - it is persisted centrally
-      - future runs become deterministic
+08.1. When a user makes a remembered decision:
+      - it is persisted centrally in the selected scope
+      - future matching decisions become deterministic within that scope
       - trace links the decision to its origin
 
 08.2. Persisted policies are:
@@ -345,12 +428,97 @@ Downstream Documents:
 
 08.3. Silent or implicit policy creation is forbidden.
 
+08.4. Run-scope policy is not persisted.
+
+08.5. Save-scope and global-scope policy storage locations are defined by
+      DA-06.
+
+08.6. Persisted policy files contain distinct remembered-decision classes
+      for permission policies and fingerprint policies.
+
+08.7. Exact JSON record layout inside policy files is defined outside this
+      document and remains storage-format detail unless another document
+      locks it.
+
 
 ===============================================================================
-09. TRACE INTEGRATION (LOCKED)
+09. PERMISSION POLICY KEYS (LOCKED)
 ===============================================================================
 
-09.1. Every decision point emits trace events including:
+09.1. Remembered general permission policy is keyed by:
+      - packCanonicalId
+      - exact versioned capability id
+
+09.2. The exact versioned capability id is the capability id that caused the
+      permission decision.
+
+09.3. Versionless capability family lookup is not used for remembered
+      permission policy.
+
+09.4. Wildcard capability matching is not used for remembered permission
+      policy.
+
+09.5. Broader prefix lookup is not used for remembered permission policy.
+
+09.6. Permission policy records store comparison metadata, including:
+      - tierMode
+      - acceptedAtPackVersion
+      - remembered outcome
+
+09.7. tierMode controls when the user is asked again for pack-version
+      changes.
+
+09.8. Pedantic tier asks again when the pack major version changes.
+
+09.9. Second tier asks again when the pack minor version changes.
+
+09.10. Normal tier asks again only when no remembered decision applies.
+
+09.11. The pack version is comparison metadata. It is not part of the
+       permission policy identity key.
+
+
+===============================================================================
+10. FINGERPRINT POLICY KEYS (LOCKED)
+===============================================================================
+
+10.1. Remembered fingerprint-mismatch policy is keyed by:
+      - canonicalPackId
+      - packVersion
+      - expectedFingerprint
+      - actualFingerprint
+
+10.2. expectedFingerprint and actualFingerprint are full fingerprint
+      strings.
+
+10.3. The fingerprint algorithm/version is part of the full fingerprint
+      string rather than a separate policy-key field.
+
+10.4. Fingerprint-mismatch policy is specific to the exact mismatch pair.
+
+10.5. Remembering one fingerprint mismatch does not bless all future
+      mismatches for the same pack or version.
+
+10.6. For-this-run fingerprint acceptance does not update persisted policy
+      and does not update an expected fingerprint.
+
+10.7. Remembered fingerprint acceptance may update the applicable policy
+      record for the selected scope.
+
+10.8. SavePack fingerprint mismatch defaults to save-scope persistence when
+      the user chooses remember, unless a higher explicit policy says
+      otherwise.
+
+10.9. General permission decisions default to global-scope persistence when
+      the user chooses remember, unless a higher explicit policy says
+      otherwise.
+
+
+===============================================================================
+11. TRACE INTEGRATION (LOCKED)
+===============================================================================
+
+11.1. Every decision point emits trace events including:
       - decision type
       - triggering cause
       - affected scope such as engine, pack, or save
@@ -358,116 +526,134 @@ Downstream Documents:
       - selected outcome
       - policy involvement when applicable
 
-09.2. User-facing explanations are derived from trace data.
+11.2. Fingerprint-mismatch decisions additionally trace:
+      - canonicalPackId
+      - packVersion
+      - expectedFingerprint
+      - actualFingerprint
+      - candidate origin context when available
 
-09.3. User-facing surfaces do not invent rationale.
+11.3. Permission decisions additionally trace:
+      - packCanonicalId
+      - exact versioned capability id when capability-based
+      - tierMode when policy participates
+      - acceptedAtPackVersion when a remembered policy participates
 
-09.4. For denied mutation attempts, trace additionally records:
+11.4. User-facing explanations are derived from trace data.
+
+11.5. User-facing surfaces do not invent rationale.
+
+11.6. For denied mutation attempts, trace additionally records:
       - owner domain
       - caller domain
       - access level
       - authority failure reason
 
-09.5. This applies even when no user interaction occurs.
+11.7. This applies even when no user interaction occurs.
 
 
 ===============================================================================
-10. FRONTEND RESPONSIBILITY (LOCKED)
+12. FRONTEND RESPONSIBILITY (LOCKED)
 ===============================================================================
 
-10.1. Frontends:
+12.1. Frontends:
       - present clear explanation
       - show consequences
       - indicate scope of effect
       - offer only valid choices
 
-10.2. Frontends do not:
+12.2. Frontends do not:
       - invent defaults
       - auto-confirm without policy
       - bypass kernel authority
       - obscure the impact of denial
 
+12.3. For fingerprint-mismatch decisions, frontends may show origin context,
+      but must not present origin as authenticity proof.
+
 
 ===============================================================================
-11. MULTIPLE FRONTENDS (LOCKED)
+13. MULTIPLE FRONTENDS (LOCKED)
 ===============================================================================
 
-11.1. If multiple frontends are connected:
+13.1. If multiple frontends are connected:
       - the decision is shown on all connected frontends
       - the first valid response wins
       - all other pending presentations are dismissed
 
-11.2. The kernel remains the single arbiter.
+13.2. The kernel remains the single arbiter.
 
 
 ===============================================================================
-12. FAILURE MODES (LOCKED)
+14. FAILURE MODES (LOCKED)
 ===============================================================================
 
-12.1. If a frontend disconnects during a decision:
+14.1. If a frontend disconnects during a decision:
       - the affected execution remains paused
       - timeout policy may apply
       - the user may reconnect through another valid frontend
 
-12.2. If the decision handler fails:
+14.2. If the decision handler fails:
       - execution aborts safely
       - failure is trace-logged
       - persisted state remains unchanged
 
 
 ===============================================================================
-13. MOD INVOLVEMENT (LOCKED)
+15. MOD INVOLVEMENT (LOCKED)
 ===============================================================================
 
-13.1. Mods may trigger decision points.
+15.1. Mods may trigger decision points.
 
-13.2. Mods do not handle decision points directly.
+15.2. Mods do not handle decision points directly.
 
-13.3. Mods do not block while awaiting frontend interaction.
+15.3. Mods do not block while awaiting frontend interaction.
 
-13.4. Mods observe decision outcomes only through Turnix-provided context
+15.4. Mods observe decision outcomes only through Turnix-provided context
       and results.
 
 
 ===============================================================================
-14. RELATION TO DEBUGGING (LOCKED)
+16. RELATION TO DEBUGGING (LOCKED)
 ===============================================================================
 
-14.1. Decision points:
+16.1. Decision points:
       - are trace-visible
       - may trigger breakpoints
       - remain inspectable after the fact
 
-14.2. Debuggers may simulate decisions only in development mode.
+16.2. Debuggers may simulate decisions only in development mode.
 
 
 ===============================================================================
-15. WHAT IS EXPLICITLY NOT SUPPORTED
+17. WHAT IS EXPLICITLY NOT SUPPORTED
 ===============================================================================
 
-15.1. The following are not supported:
+17.1. The following are not supported:
       - silent auto-approval without policy
       - console-based prompting
       - blocking the entire system for frontend interaction
       - mod-defined decision UIs
       - persistence of computed-only values
       - prompting the user to allow read access to restricted state
+      - treating origin alone as authenticity proof
+      - wildcard capability permission matching
+      - versionless capability permission fallback
 
 
 ===============================================================================
-16. EXPLICITLY OPEN QUESTIONS
+18. EXPLICITLY OPEN QUESTIONS
 ===============================================================================
 
-16.1. OPEN questions include:
+18.1. OPEN questions include:
       - bulk decision-management user interfaces
       - policy import and export
-      - per-session versus global policy precedence
       - scripted policy rules
 
-16.2. Cross-scope copy and promotion are accepted conceptually, but the
+18.2. Cross-scope copy and promotion are accepted conceptually, but the
       concrete API and user-interaction model remain OPEN.
 
-16.3. OPEN cross-scope copy and promotion questions include:
+18.3. OPEN cross-scope copy and promotion questions include:
       - exact API shape
       - whether copy and promotion are direct API calls, decision-driven
         flows, or both
@@ -502,18 +688,26 @@ Downstream Documents:
 
 
 ===============================================================================
-17. LOCKED SUMMARY
+19. LOCKED SUMMARY
 ===============================================================================
 
-17.1. LOCKED:
+19.1. LOCKED:
       - decision authority is kernel-mediated
       - decision types remain distinct
       - configuration-scope resolution is explicit
+      - fingerprint-mismatch decision handling is explicit and trace-backed
+      - origin alone is not authenticity proof
       - execution pauses and resumes in a scoped way
       - policy is persistent and inspectable where persisted
+      - run policy overrides save policy and save policy overrides global
+        policy
+      - permission policy keys use packCanonicalId and exact versioned
+        capability id
+      - fingerprint policy keys use canonicalPackId, packVersion,
+        expectedFingerprint, and actualFingerprint
       - explanations are derived only from trace-backed rationale
 
-17.2. OPEN:
+19.2. OPEN:
       - policy automation
       - user-experience refinement only
       - detailed cross-scope copy and promotion model
@@ -526,6 +720,6 @@ END OF DA-17 - USER INTERACTION, DECISION POINTS & POLICY HANDLING
 --- doc-meta ---
 DOC_ID: DA-17
 DOC_FILE: docs/design/DA-17_USER_INTERACTION_DECISION_POINTS_AND_POLICY_HANDLING.txt
-DOC_REV: 11
-DOC_GIT: 023e3de
+DOC_REV: 12
+DOC_GIT: 93dc75a
 ----------------
