@@ -9,8 +9,9 @@ EVOLVING
 Description:
 ------------
 Defines configuration as schema-governed authoritative state, explains how
-configuration is layered and materialized, and defines how configuration
-evolves without silent breakage.
+configuration is layered and materialized, defines how configuration is
+stored and located, and defines how configuration evolves without silent
+breakage.
 
 Configuration is data with identity.
 Breaking it silently is forbidden.
@@ -18,8 +19,8 @@ Breaking it silently is forbidden.
 Purpose:
 --------
 This document defines how configuration exists, how configuration is
-validated, how configuration evolves over time, and how user state is
-protected.
+validated, how configuration evolves over time, how configuration is
+materialized into persistent files, and how user state is protected.
 
 This area defines:
 - configuration as a specialized use of the Turnix state model
@@ -30,6 +31,9 @@ This area defines:
 - the configuration materialization pipeline
 - effectiveConfig and computed transform constraints
 - config access API semantics
+- persistent config storage layout and file placement
+- policies.config.json and paths.config.json placement
+- duplicate schema/default/config file selection rules
 - migration rules and state-safety boundaries
 - IoManager mediation requirements for persistence
 - error classification and recovery boundaries
@@ -39,6 +43,7 @@ This area does NOT define:
 - direct filesystem I/O rules beyond the IoManager bridge (see DA-07)
 - tracing schema and storage (see DA-03)
 - debugger pause and mutation safety semantics (see DA-18)
+- the full root/bootstrap candidate model (see DA-09)
 - a fully generalized schema system for all future structured data domains
 
 Upstream Documents:
@@ -53,6 +58,7 @@ Upstream Documents:
 - DA-03
 - DA-04
 - DA-07
+- DA-09
 
 Downstream Documents:
 --------------------
@@ -76,7 +82,8 @@ Downstream Documents:
       interpretation model used by this document.
 
 01.4. This document defines configuration, schema use for configuration,
-      and migration constraints within that shared interpretation model.
+      storage materialization for configuration, and migration constraints
+      within that shared interpretation model.
 
 
 ===============================================================================
@@ -86,7 +93,8 @@ Downstream Documents:
 02.1. Configuration answers:
 
           "Which parameters influence Turnix and packs at runtime,
-           and how are they made safe, stable, and evolvable?"
+           how are they made safe, stable, and evolvable,
+           and where are they persisted?"
 
 02.2. Configuration is authoritative state.
 
@@ -104,6 +112,7 @@ Downstream Documents:
       - schema-governed validation and interpretation
       - defaults and override inputs
       - effectiveConfig materialization
+      - persistent configuration file placement
       - configuration migration and recovery
 
 02.6. Configuration remains explainable, reversible, and protected from
@@ -130,12 +139,16 @@ Downstream Documents:
 03.4. Configuration persistence is protection against loss rather than the
       definition of truth, [constrained-by: DA-04 09].
 
-03.5. Configuration mutation that changes authoritative committed state is
+03.5. Storage layout and file placement defined later in this document do
+      not redefine authority. They define where authoritative
+      configuration is persisted, not what makes it authoritative.
+
+03.6. Configuration mutation that changes authoritative committed state is
       normal orchestrated work and follows the general transaction and
       commit rules from [constrained-by: DA-04 07] and
       [constrained-by: DA-04 19].
 
-03.6. This document does not create a separate state architecture for
+03.7. This document does not create a separate state architecture for
       configuration.
 
 
@@ -229,19 +242,22 @@ Downstream Documents:
 05.5. The schema model described here is storage-agnostic at the semantic
       level.
 
-05.6. Current schema realization may use JSON-like structured forms, but
+05.6. Storage placement and file realization defined later in this document
+      do not redefine schema meaning.
+
+05.7. Current schema realization may use JSON-like structured forms, but
       this document does not lock the full implementation dialect.
 
-05.7. Schema evolution rules:
+05.8. Schema evolution rules:
 
-05.7.1. Released schema meaning does not rewrite old meaning silently.
+05.8.1. Released schema meaning does not rewrite old meaning silently.
 
-05.7.2. Breaking schema change requires an explicit new compatibility
+05.8.2. Breaking schema change requires an explicit new compatibility
         boundary and matching migration treatment.
 
-05.7.3. Access-level metadata does not change silently.
+05.8.3. Access-level metadata does not change silently.
 
-05.8. This document defines schema use for configuration first. It does not
+05.9. This document defines schema use for configuration first. It does not
       yet define the full generalized schema system for manifests and other
       structured data domains.
 
@@ -269,18 +285,41 @@ Downstream Documents:
 
 06.9. Override inputs are not modified silently.
 
-06.10. Override inputs are the only user-authored persisted configuration
+06.10. Override inputs are not silently rewritten by storage
+       materialization, migration, normalization, or persistence side
+       effects.
+
+06.11. Override inputs are the only user-authored persisted configuration
        input layer.
 
-06.11. This does not create an exception to the general DA-04 state model.
+06.12. This does not create an exception to the general DA-04 state model.
        Authoritative committed configuration still follows normal state
        mutation and commit rules.
 
-06.12. Defaults may change between pack or platform versions at author
+06.13. Defaults may change between pack or platform versions at author
        responsibility.
 
-06.13. If changed defaults alter effective behavior, that change remains
+06.14. Changed defaults remain authored input change, not user-authored
+       override change.
+
+06.15. If changed defaults alter effective behavior, that change remains
        distinguishable from user-authored overrides.
+
+06.16. Duplicate schema, default, or configuration file is selected, not
+       stacked.
+
+06.17. Duplicate schema, default, or configuration file is shadowed, not
+       merged.
+
+06.18. Deterministic selection rule:
+       - first candidate in deterministic order wins
+       - later duplicates remain shadowed
+       - no additive combination occurs
+
+06.19. Diagnostics and tracing should surface duplicate schema, default, or
+       configuration files as strongly as they can, including when
+       duplicates are equivalent, which file was selected, and which files
+       were shadowed.
 
 
 ===============================================================================
@@ -412,15 +451,137 @@ Downstream Documents:
 
 
 ===============================================================================
-10. IOMANAGER MEDIATION (LOCKED)
+10. CONFIG STORAGE LAYOUT (LOCKED)
 ===============================================================================
 
-10.1. Configuration services and providers do not perform filesystem I/O
+10.1. Turnix-written live and save-bound configuration files use strict JSON.
+
+10.2. Human-facing defaults and other authored source material may use
+      comment-capable JSON dialects where other authoritative documents
+      permit it.
+
+10.3. Turnix-written live/save configuration files do not use comments as a
+      semantic mechanism.
+
+10.4. Comments never carry structure, authority, migration meaning, or
+      loader instructions.
+
+10.5. Engine-global live configuration is stored under:
+
+      userdata/config/engine/
+
+10.6. Save-bound engine configuration is stored under:
+
+      saves/<appPackId>/<instanceId>/config/engine/
+
+10.7. Pack-global live configuration is stored under:
+
+      userdata/config/packs/
+
+10.8. Save-bound pack configuration is stored under:
+
+      saves/<appPackId>/<instanceId>/config/packs/
+
+10.9. Engine-global config file form is:
+
+      userdata/config/engine/<name>.config.json
+
+10.10. Save-bound engine config file form is:
+
+       saves/<appPackId>/<instanceId>/config/engine/<name>.config.json
+
+10.11. Pack-global config file form is:
+
+       userdata/config/packs/<canonicalPackId>.config.json
+
+10.12. Save-bound pack config file form is:
+
+       saves/<appPackId>/<instanceId>/config/packs/<canonicalPackId>.config.json
+
+10.13. paths.config.json is engine-owned configuration and is stored at:
+
+       userdata/config/engine/paths.config.json
+
+10.14. Global policies.config.json is stored at:
+
+       userdata/config/engine/policies.config.json
+
+10.15. Save-bound policies.config.json is stored at:
+
+       saves/<appPackId>/<instanceId>/config/engine/policies.config.json
+
+10.16. One clearly owned file per owner/name is the current rule.
+
+10.17. For engine config, one engine config domain maps to one file.
+
+10.18. For pack-owned config, one owning pack maps to one file.
+
+10.19. Later expansion to more complex grouping is possible, but this
+       document currently locks one clearly owned file per owner/name.
+
+10.20. Defaults and authored configuration material remain load-only at
+       runtime. Turnix runtime does not rewrite them as part of ordinary
+       persistence.
+
+10.21. The root/bootstrap behavior of paths.config.json fields is defined
+       in DA-09. This document is authoritative for field naming,
+       ownership classification, storage placement, and persistence
+       materialization.
+
+10.22. paths.config.json is engine-owned persisted configuration. Its file
+       placement does not by itself redefine the higher bootstrap semantics
+       that DA-09 governs.
+
+10.23. Locked field names for paths.config.json are:
+       - redirectUserdataDirectoryTo
+       - userdataDirectoryRoots
+       - savesDirectoryRoots
+       - customDirectoryRoots
+       - firstPartyDirectoryRoots
+       - thirdPartyDirectoryRoots
+       - selectedUserdata
+       - selectedSaves
+       - preferredUserdata
+       - preferredSaves
+       - preferredCustom
+       - preferredFirstParty
+       - preferredThirdParty
+
+10.24. selected* fields express explicit user-selected roots for active
+       state categories.
+
+10.25. preferred* fields express the last used usable directory for their
+       category.
+
+10.26. preferred* is sticky.
+
+10.27. Stored preferred* values are always rechecked for continued
+       usability and, where writing is required, writability before reuse.
+
+10.28. preferred* is not replaced merely because a different candidate
+       becomes writable later.
+
+10.29. selected* for userdata and saves overrides preferred* when usable.
+
+10.30. selected* and preferred* for userdata or saves may differ when a
+       previously selected path becomes unusable and controlled recovery
+       causes Turnix to use another path.
+
+10.31. DA-09 defines how selected* and *DirectoryRoots participate in
+       bootstrap and candidate-root behavior. This document does not
+       duplicate that bootstrap logic.
+
+
+===============================================================================
+11. IOMANAGER MEDIATION (LOCKED)
+===============================================================================
+
+11.1. Configuration services and providers do not perform filesystem I/O
       directly.
 
-10.2. Configuration persistence routes through IoManager.
+11.2. Configuration persistence routes through IoManager.
 
-10.3. IoManager enforces:
+11.3. IoManager enforces:
       - root boundaries
       - permissions
       - atomic writes
@@ -428,172 +589,255 @@ Downstream Documents:
       - error classification
       - recovery surfaces
 
-10.4. IoManager mediation remains [constrained-by: DA-04 03.5] and
+11.4. IoManager mediation remains [constrained-by: DA-04 03.5] and
       [constrained-by: DA-07].
 
-10.5. This document does not redefine direct filesystem rules.
+11.5. This document defines storage layout, file placement, and ownership
+      mapping for configuration.
+
+11.6. This document does not redefine low-level filesystem behavior,
+      direct filesystem I/O rules, or DA-07 persistence mechanics.
+
+11.7. If selected/preferred directories or canonical persisted config
+      locations cannot be written:
+      - Turnix does not silently fall through to some other writable path
+      - this is surfaced through IoManager or delegated manager flow
+      - a failed persistence action fails explicitly rather than faking
+        success elsewhere
+
+11.8. Path/config placement failure follows the same explicit recovery
+      model as other configuration persistence failure. It does not create
+      a separate silent fallback path.
+
+11.9. Directory/path queries may yield no usable target when no valid
+      directory is currently available.
+
+11.10. Consumers that can tolerate such absence may handle it in controlled
+       form. Consumers that cannot tolerate it propagate failure normally
+       into the surrounding error-handling model.
+
+11.11. User prompting and recovery remain centralized through IoManager or
+       delegated manager flow rather than ad hoc consumer logic.
+
+11.12. This remains aligned with the broader decision-handling and failure
+       propagation model defined in DA-17.
 
 
 ===============================================================================
-11. CONFIGURATION MIGRATION (LOCKED)
+12. CONFIGURATION MIGRATION (LOCKED)
 ===============================================================================
 
-11.1. Configuration migration evolves authoritative configuration state.
+12.1. Configuration migration evolves authoritative configuration state.
 
-11.2. Configuration migration is not a side path outside normal state rules.
+12.2. Configuration migration is not a side path outside normal state rules.
 
-11.3. Configuration migration that changes authoritative committed state
+12.3. Configuration migration that changes authoritative committed state
       follows [constrained-by: DA-04 19].
 
-11.4. Configuration migration runs before stored-value validation of the
+12.4. Configuration migration runs before stored-value validation of the
       migrated result.
 
-11.5. Migrators are versioned and ordered.
+12.5. Migrators are versioned and ordered.
 
-11.6. Multiple migrators may run sequentially.
+12.6. Multiple migrators may run sequentially.
 
-11.7. A migrator is a deterministic transformation from one configuration
+12.7. A migrator is a deterministic transformation from one configuration
       representation to another.
 
-11.8. Migration may inspect previous values.
+12.8. Migration may inspect previous values.
 
-11.9. Migration does not discard user intent silently.
+12.9. Migration does not discard user intent silently.
 
-11.10. Migration preserves ownership and access metadata unless an explicit
+12.10. Migration preserves ownership and access metadata unless an explicit
        accepted migration rule changes them.
 
-11.11. If migration cannot complete safely, migration aborts and
+12.11. If migration cannot complete safely, migration aborts and
        authoritative configuration remains identical to the pre-migration
        committed state.
 
 
 ===============================================================================
-12. MIGRATION SAFETY, BACKUP, AND RECOVERY (LOCKED)
+13. MIGRATION SAFETY, BACKUP, AND RECOVERY (LOCKED)
 ===============================================================================
 
-12.1. Before writing migrated configuration, IoManager may create a
+13.1. Before writing migrated configuration, IoManager may create a
       recoverable snapshot of the last known good state.
 
-12.2. Migrated authoritative configuration writes are atomic.
+13.2. Migrated authoritative configuration writes are atomic.
 
-12.3. Rollback capability remains available when policy requires it.
+13.3. Rollback capability remains available when policy requires it.
 
-12.4. No silent fallback is allowed.
+13.4. No silent fallback is allowed.
 
-12.5. User-mediated recovery options may include:
+13.5. User-mediated recovery options may include:
       - restore last known good
       - reset to defaults
       - quarantine broken configuration
       - abort affected startup or affected operation
 
-12.6. Recovery remains explicit and trace-visible.
+13.6. Recovery remains explicit and trace-visible.
 
 
 ===============================================================================
-13. MANIFEST MIGRATION AND CONFIGURATION MIGRATION (LOCKED DISTINCTION)
+14. MANIFEST MIGRATION AND CONFIGURATION MIGRATION (LOCKED DISTINCTION)
 ===============================================================================
 
-13.1. Manifest migration and configuration migration are separate concerns.
+14.1. Manifest migration and configuration migration are separate concerns.
 
-13.2. Manifest migration evolves pack or artifact metadata.
+14.2. Manifest migration evolves pack or artifact metadata.
 
-13.3. Configuration migration evolves user or engine configuration state.
+14.3. Configuration migration evolves user or engine configuration state.
 
-13.4. These migration classes remain separate even when they use related
+14.4. These migration classes remain separate even when they use related
       schema ideas.
 
-13.5. This document defines configuration migration only.
+14.5. This document defines configuration migration only.
 
 
 ===============================================================================
-14. SAVE-BOUND CONFIGURATION (LOCKED)
+15. SAVE-BOUND CONFIGURATION (LOCKED)
 ===============================================================================
 
-14.1. Save-bound configuration is isolated per save.
+15.1. Save-bound configuration is isolated per save.
 
-14.2. Save-bound configuration overrides pack-global and engine values
+15.2. Save-bound configuration overrides pack-global and engine values
       within that save context.
 
-14.3. Save-bound configuration migrates independently.
+15.3. Save-bound configuration migrates independently.
 
-14.4. Save-bound configuration is included in save-bound authoritative
+15.4. Save-bound configuration is included in save-bound authoritative
       state snapshots and restoration boundaries.
 
-14.5. Corruption or deletion of save-bound configuration does not by itself
+15.5. Corruption or deletion of save-bound configuration does not by itself
       alter global configuration state.
 
+15.6. Engine save-bound configuration is allowed.
+
+15.7. Pack-owned save-bound configuration follows the same owner/file model
+      as pack-global configuration, but under the save-bound location.
+
+15.8. policies.config.json may therefore exist in save-bound engine config
+      storage without changing the general ownership model.
+
 
 ===============================================================================
-15. ERROR HANDLING AND RECOVERY BOUNDARIES (LOCKED)
+16. POLICY STORAGE (LOCKED)
 ===============================================================================
 
-15.1. Configuration errors are classified.
+16.1. Global persisted policies are stored in:
 
-15.2. Fatal examples include:
+      userdata/config/engine/policies.config.json
+
+16.2. Save-scoped persisted policies are stored in:
+
+      saves/<appPackId>/<instanceId>/config/engine/policies.config.json
+
+16.3. Run-scoped policy is memory-only and is never persisted.
+
+16.4. policies.config.json contains top-level sections:
+      - permissionPolicies
+      - fingerprintPolicies
+
+16.5. permissionPolicies and fingerprintPolicies are semantically distinct
+      remembered-decision classes.
+
+16.6. permissionPolicies persist remembered permission decisions.
+
+16.7. fingerprintPolicies persist remembered fingerprint-mismatch
+      acceptance decisions.
+
+16.8. Exact internal JSON record shape inside those sections remains
+      intentionally flexible for now.
+
+16.9. Identity keys and higher-level decision semantics for these policy
+      classes are defined by the permission and decision-handling areas
+      that use them.
+
+16.10. This document is authoritative for storage location, file placement,
+       and top-level persistent config structure.
+
+
+===============================================================================
+17. ERROR HANDLING AND RECOVERY BOUNDARIES (LOCKED)
+===============================================================================
+
+17.1. Configuration errors are classified.
+
+17.2. Fatal examples include:
       - missing required schema material
       - missing required defaults material where defaults are mandatory
       - failure before minimal recovery UI is ready
 
-15.3. Recoverable examples include:
+17.3. Recoverable examples include:
       - invalid user value
       - parse errors
       - migration-required state
       - restore-from-backup decisions
 
-15.4. Recovery remains UI-driven or policy-driven where the surrounding
+17.4. Recovery remains UI-driven or policy-driven where the surrounding
       design permits it.
 
-15.5. Configuration handling does not invent defaults, ignore invalid
+17.5. Configuration handling does not invent defaults, ignore invalid
       stored values, or auto-reset silently.
 
 
 ===============================================================================
-16. DEV-MODE DIAGNOSTICS (LOCKED)
+18. DEV-MODE DIAGNOSTICS (LOCKED)
 ===============================================================================
 
-16.1. Development diagnostics may report:
+18.1. Development diagnostics may report:
       - unused keys
       - deprecated keys
       - schema drift
       - effective-config diagnostics
       - access denials as informational diagnostics
+      - duplicate schema, default, or configuration files
+      - shadowed equivalent or divergent config files
 
-16.2. Development diagnostics are non-fatal unless some other authoritative
+18.2. Development diagnostics are non-fatal unless some other authoritative
       document explicitly states otherwise.
 
-16.3. Development diagnostics do not rewrite stored configuration.
+18.3. Development diagnostics do not rewrite stored configuration.
 
 
 ===============================================================================
-17. NO IMPLICIT FALLBACKS (LOCKED)
+19. NO IMPLICIT FALLBACKS (LOCKED)
 ===============================================================================
 
-17.1. Turnix does not:
+19.1. Turnix does not:
       - invent defaults
       - ignore invalid stored values
       - auto-reset without consent or explicit policy
       - treat parse errors as empty configuration
+      - silently write to some other config file because the chosen one
+        failed
+      - silently move selected/preferred config state elsewhere
 
-17.2. Explicitness takes precedence over convenience.
+19.2. Explicitness takes precedence over convenience.
 
 
 ===============================================================================
-18. EXPLICITLY OPEN QUESTIONS
+20. EXPLICITLY OPEN QUESTIONS
 ===============================================================================
 
-18.1. OPEN questions include:
+20.1. OPEN questions include:
       - hot-reload semantics
       - config-diff UI
       - cross-scope promotion UX
       - when the broader generalized schema system should split from
         configuration-first design
+      - whether later implementation requires finer-grained policy file
+        partitioning
+
+20.2. Storage meaning, file placement, and owner/path identity defined in
+      this document are otherwise treated as semantically locked.
 
 
 ===============================================================================
-19. LOCKED SUMMARY
+21. LOCKED SUMMARY
 ===============================================================================
 
-19.1. LOCKED:
+21.1. LOCKED:
       - configuration is authoritative state
       - configuration follows the DA-04 memory/state model
       - explicit configuration scopes and ownership
@@ -617,10 +861,29 @@ Downstream Documents:
       - read semantics use NotFoundOrPermissionDenied
       - tryGet() returns None for absent keys and does not expose
         not-found versus permission-denied programmatically
+      - engine live config path is
+        userdata/config/engine/<name>.config.json
+      - save-bound engine config path is
+        saves/<appPackId>/<instanceId>/config/engine/<name>.config.json
+      - pack-global config path is
+        userdata/config/packs/<canonicalPackId>.config.json
+      - save-bound pack config path is
+        saves/<appPackId>/<instanceId>/config/packs/<canonicalPackId>.config.json
+      - paths.config.json is stored at
+        userdata/config/engine/paths.config.json
+      - policies.config.json is stored at
+        userdata/config/engine/policies.config.json
+      - save-bound policies.config.json is stored at
+        saves/<appPackId>/<instanceId>/config/engine/policies.config.json
+      - one clearly owned file per owner/name is the current rule
+      - Turnix-written live/save config files use strict JSON
+      - duplicate schema, default, or configuration file is
+        selected, not stacked
 
-19.2. OPEN:
+21.2. OPEN:
       - generalized schema-system expansion beyond configuration-first use
       - UX and tooling only
+      - internal record JSON shape inside persisted policy sections
 
 
 ===============================================================================
@@ -630,6 +893,6 @@ END OF DA-06 - CONFIGURATION, SCHEMAS & MIGRATION
 --- doc-meta ---
 DOC_ID: DA-06
 DOC_FILE: docs/design/DA-06_CONFIGURATION_SCHEMAS_AND_MIGRATION.txt
-DOC_REV: 14
-DOC_GIT: 023e3de
+DOC_REV: 15
+DOC_GIT: 791b176
 ----------------
