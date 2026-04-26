@@ -1,0 +1,1185 @@
+===============================================================================
+TURNIX — JOBS, ORCHESTRATION OUTCOMES, RPC TIMEOUTS, AND TRACE OWNERSHIP
+INTEGRATION PROPOSAL
+===============================================================================
+
+Status:
+-------
+PROPOSED INTEGRATION NOTE
+
+Purpose:
+--------
+This proposal extracts unresolved ideas from a stale reconciliation thread and
+rewrites them as current-document integration material.
+
+It does not introduce authority by itself.
+
+It proposes integration of:
+
+1. Job lifecycle semantics
+2. Superseded as a first-class non-error lifecycle outcome
+3. RPC transport timeout vs Job execution timeout separation
+4. Subject-owned trace lifecycle obligations
+5. Orchestration Unit / Job / transaction relationship clarification
+
+This proposal assumes the current direction where transaction commit/abort does
+not directly finalize into SafePointWindow or AbortedWindow.
+
+Instead:
+
+- transactions occur inside the active runtime region
+- committed and aborted transactional outcomes are trace-visible
+- the surrounding ActiveWindow later finalizes into SafePointWindow or
+  AbortedWindow when the window layer can safely finalize that region
+- SafePointWindow / AbortedWindow finalization remains a Window-layer concern,
+  not a per-transaction automatic side effect
+
+
+===============================================================================
+01. TRACE OWNERSHIP RULE
+===============================================================================
+
+01.1 Problem
+-----------
+
+Turnix has a broad tracing doctrine:
+
+- trace what happened
+- trace why it happened
+- trace where it happened
+- trace who caused it
+- trace how it flowed through the system
+- trace causal parentage
+- use events and spans to make lifecycle and causality explicit
+
+However, DA-03 should not become the owner of every object lifecycle in the
+system.
+
+Jobs, RPC messages, capabilities, transactions, configuration mutations,
+migrations, decisions, and Windows each have their own lifecycle semantics.
+
+DA-03 owns the tracing system itself.
+
+The object-owning design areas should define what lifecycle transitions exist
+and what must be traced for those objects.
+
+01.2 Proposed rule
+------------------
+
+Tracing does not own object lifecycles.
+
+Tracing records lifecycle truth.
+
+The object-owning design area defines the lifecycle truth that must be traced.
+
+01.3 Proposed DA-03 integration
+-------------------------------
+
+Add a clarification to DA-03 similar to:
+
+DA-03 defines the shared tracing mechanism.
+
+DA-03 owns:
+
+- trace event structure
+- trace DAG semantics
+- span semantics
+- causal parent links
+- reason naming rules
+- trace retention and loss evidence
+- general observability obligations
+- general distinction between trace evidence and committed state
+
+DA-03 does not own every lifecycle model in Turnix.
+
+When another design area defines a lifecycle-owning object, that design area
+defines:
+
+- the object's lifecycle states
+- valid lifecycle transitions
+- terminal states, if any
+- which transitions are trace-visible
+- which reason categories are meaningful for that object
+- which trace attributes are required for that object's events
+- which spans or parent event links represent causal ownership
+
+Subject-specific trace obligations remain subordinate to DA-03 trace mechanics.
+
+01.4 Examples
+-------------
+
+DA-04 should define trace obligations for:
+
+- transactions
+- Orchestration Units
+- authoritative mutation boundaries
+- committed-state mutation
+
+DA-06 should define trace obligations for:
+
+- configuration override mutation
+- configuration migration
+- effectiveConfig materialization where relevant
+- config validation and rejection
+
+DA-08 should define trace obligations for:
+
+- ActiveWindow lifecycle
+- SafePointWindow creation
+- AbortedWindow finalization
+- Window export and evidence completeness
+
+DA-16 should define trace obligations for:
+
+- capability invocation
+- capability permission context
+- capability result/failure outcome
+
+DA-17 should define trace obligations for:
+
+- user decisions
+- permission decisions
+- recovery decisions
+- policy decisions
+- remembered policy use
+
+The Job-owning document should define trace obligations for:
+
+- Job creation
+- Job start
+- Job progress
+- Job completion
+- Job failure
+- Job cancellation
+- Job timeout
+- Job supersession
+
+IS-02 or the RPC-owning implementation specification should define trace
+obligations for:
+
+- RPC message receipt
+- acknowledgement
+- dispatch
+- reply delivery
+- transport cancellation
+- transport timeout
+- generation mismatch
+- disconnect behavior
+
+01.5 Why this matters
+---------------------
+
+Without this rule, DA-03 risks becoming a dumping ground for every lifecycle.
+
+With this rule:
+
+- DA-03 stays clean and systemic
+- lifecycle truth stays with the object that owns the lifecycle
+- trace events remain consistent
+- future documents know where to place trace requirements
+
+
+===============================================================================
+02. JOB MODEL
+===============================================================================
+
+02.1 Problem
+-----------
+
+Current documents contain partial Job-related ideas, especially around
+long-running work, debugging, safe points, RPC pending tasks, and cancellation.
+
+However, there is not yet a complete Job model defining:
+
+- what a Job is
+- when a Job is created
+- its lifecycle states
+- its terminal states
+- result and error ownership
+- progress updates
+- timeout behavior
+- cancellation behavior
+- supersession behavior
+- relation to Orchestration Units
+- relation to RPC requests
+- relation to capability calls
+
+This creates ambiguity between:
+
+- RPC request tracking
+- capability execution
+- long-running work
+- background processing
+- cancellable work
+- observable progress
+- actual authoritative mutation
+
+02.2 Proposed definition
+------------------------
+
+A Job is a kernel-managed lifecycle object representing an accepted unit of
+work whose progress, completion, cancellation, timeout, or supersession may be
+observed.
+
+A Job is an observable request/work handle.
+
+A Job is not itself authoritative state mutation.
+
+A Job may complete without committing state.
+
+A Job may be associated with one or more Orchestration Units.
+
+A Job may be created for:
+
+- RPC request/await operations
+- long-running capability calls
+- internal scheduled work
+- background processing that has entered Turnix orchestration
+- tooling operations that need observable progress
+- debugger-safe work where progress and cancellation matter
+
+2.3 Non-goals
+-------------
+
+A Job is not:
+
+- a transaction
+- a SafePointWindow
+- an AbortedWindow
+- a capability by itself
+- a raw asyncio task
+- a WebSocket message
+- a guarantee of authoritative mutation
+- a persistence boundary
+
+A Job does not become authoritative merely because it exists.
+
+2.4 Job identity
+----------------
+
+Each Job has a stable jobId.
+
+jobId identifies one accepted Job lifecycle.
+
+A jobId is not reused.
+
+If the broader ID system uses prefixes, jobId should use the current accepted
+Turnix ID style for lifecycle objects.
+
+Suggested future prefix if aligned with the ID system:
+
+- job_
+
+This proposal does not lock final ID prefix unless the ID document or owning
+Job document accepts it.
+
+2.5 Job state machine
+---------------------
+
+Proposed states:
+
+- Pending
+- Running
+- Succeeded
+- Failed
+- Cancelled
+- TimedOut
+- Superseded
+
+Terminal states:
+
+- Succeeded
+- Failed
+- Cancelled
+- TimedOut
+- Superseded
+
+Rules:
+
+- A Job starts as Pending or Running depending on creation context.
+- A Pending Job may transition to Running.
+- A Pending Job may transition to Cancelled, TimedOut, or Superseded.
+- A Running Job may transition to Succeeded, Failed, Cancelled, TimedOut, or
+  Superseded.
+- Terminal states are final.
+- A Job reaches exactly one terminal state.
+- A Job never leaves a terminal state.
+- Worker completion after terminal state is ignored unless a later explicit
+  diagnostic record is emitted.
+- Ignored late completion does not change the Job result.
+
+2.6 Result and error ownership
+------------------------------
+
+Result rules:
+
+- result exists only for Succeeded.
+- result is absent for Failed, Cancelled, TimedOut, and Superseded.
+
+Error rules:
+
+- error exists for Failed.
+- timeoutError or timeout metadata exists for TimedOut.
+- Cancelled may include cancellation metadata but not a failure error.
+- Superseded may include supersession metadata but not a failure error.
+
+Cancellation and supersession are not represented as ordinary failure errors.
+
+2.7 Progress
+------------
+
+A Job may report progress.
+
+Progress is observational lifecycle state, not authoritative mutation.
+
+Progress may include:
+
+- current phase
+- percent or unit progress when meaningful
+- human-readable status
+- last progress timestamp
+- last progress reason
+- current owner or active Orchestration Unit when available
+
+Progress updates are trace-visible when meaningful.
+
+Progress updates do not commit authoritative state by themselves.
+
+2.8 Job timeout
+---------------
+
+A Job may have an execution timeout.
+
+Job timeout applies after the Job has been accepted.
+
+Job timeout is not the same as RPC transport timeout.
+
+Timeout rules:
+
+- timeout uses a monotonic clock
+- timeout policy source is explicit
+- if deadline is reached before terminal completion, the Job transitions to
+  TimedOut
+- worker cancellation is requested where possible
+- later worker completion is ignored
+- timeout is trace-visible
+
+Timeout trace attributes should include:
+
+- jobId
+- timeout policy source
+- deadline or timeout duration
+- monotonic elapsed time
+- last known progress phase
+- active Orchestration Unit, if any
+- cancellation request result, if attempted
+
+2.9 Job cancellation
+--------------------
+
+Cancellation is a request to stop work.
+
+Cancellation is intentional.
+
+Cancellation is not failure.
+
+Cancellation rules:
+
+- cancellation source is explicit
+- cancellation transitions a non-terminal Job to Cancelled unless timeout,
+  success, failure, or supersession already won the terminal race
+- cancellation requests worker stop where possible
+- cancellation does not roll back already committed authoritative state
+- if work has uncommitted transactional staging, that staging is aborted or
+  discarded according to transaction rules
+- cancellation is trace-visible
+
+Cancellation sources may include:
+
+- user
+- frontend disconnect policy
+- RPC cancel message
+- timeout handling
+- scheduler
+- debugger
+- system shutdown
+- higher-priority orchestration policy
+
+2.10 Supersession
+-----------------
+
+Supersession is a first-class terminal outcome.
+
+Superseded means:
+
+The Job ended because newer authoritative input, newer work, or a higher-priority
+replacement made the old work no longer relevant.
+
+Supersession is not failure.
+
+Supersession is not timeout.
+
+Supersession is not ordinary user cancellation, although user action may cause
+the supersession.
+
+Examples:
+
+- a user sends prompt B while prompt A is still processing, and policy says B
+  replaces A
+- live preview computation is replaced by a newer edit
+- streaming input invalidates earlier partial processing
+- scheduler replaces lower-priority work
+- a newer RPC request supersedes an older in-flight request for the same
+  semantic target
+
+Supersession rules:
+
+- Superseded is terminal.
+- Superseded produces no result.
+- Superseded records the superseding cause when known.
+- Superseded does not roll back already committed authoritative state.
+- Superseded stops or abandons only work that has not yet become authoritative,
+  unless some separate explicit compensation policy exists.
+- Superseded is trace-visible.
+- Superseded is reported distinctly from Failed, Cancelled, and TimedOut.
+
+Supersession metadata may include:
+
+- supersededByJobId
+- supersededByRequestId
+- supersededByInputId
+- supersessionPolicy
+- supersessionReason
+- replacedSemanticTarget
+
+2.11 Late worker completion
+---------------------------
+
+If a worker completes after the Job is already terminal:
+
+- the Job terminal state remains unchanged
+- the late result is ignored
+- the late completion may be traced as diagnostic evidence
+- no reply/result is delivered from the late completion
+- no authoritative mutation may be committed from late completion unless that
+  mutation already committed before the terminal transition
+
+This prevents races where a cancelled, timed-out, or superseded operation later
+appears to succeed.
+
+2.12 Job trace obligations
+--------------------------
+
+The Job-owning document should define these trace events or equivalent
+reasoned lifecycle records:
+
+- JobCreated
+- JobQueued
+- JobStarted
+- JobProgressUpdated
+- JobSucceeded
+- JobFailed
+- JobCancellationRequested
+- JobCancelled
+- JobTimeoutScheduled
+- JobTimedOut
+- JobSuperseded
+- JobLateCompletionIgnored
+- JobWorkerCancellationRequested
+- JobWorkerCancellationFailed
+- JobWorkerCancellationSucceeded
+
+Required/common trace attributes:
+
+- jobId
+- jobKind
+- owner domain
+- request origin
+- parent RPC message id, if any
+- capability id, if any
+- Orchestration Unit id, if any
+- appInstanceId, if any
+- timeout policy, if any
+- cancellation source, if any
+- supersession source, if any
+- terminal state
+- result or error classification where applicable
+
+The trace events should link causally to:
+
+- the RPC request that created the Job
+- the capability call that created or used the Job
+- the Orchestration Unit that executed the work
+- any transaction commit or abort caused by the work
+- any decision point that paused or influenced the work
+
+
+===============================================================================
+03. ORCHESTRATION UNIT OUTCOMES
+===============================================================================
+
+03.1 Problem
+-----------
+
+Current DA-04 defines Orchestration Units as kernel-tracked execution units
+permitted to mutate Turnix-managed state within an appInstance.
+
+However, the stale proposal raised useful lifecycle terminology that is not yet
+fully formalized:
+
+- Committed
+- Aborted
+- Failed
+- Cancelled
+- Superseded
+
+The idea is worth keeping, but must be integrated carefully so it does not
+conflict with the current transaction/window model.
+
+03.2 Proposed definition
+------------------------
+
+An Orchestration Unit is an execution-authority unit.
+
+A Job is an observable lifecycle handle.
+
+A transaction is a staging and commit boundary.
+
+These are related but distinct.
+
+3.3 Proposed Orchestration Unit outcomes
+----------------------------------------
+
+Possible Orchestration Unit terminal outcomes:
+
+- Completed
+- Failed
+- Cancelled
+- Superseded
+
+For mutation-bearing Orchestration Units, Completed may include one of:
+
+- committed authoritative mutation
+- no authoritative mutation
+- aborted or discarded transactional staging
+
+Alternative naming:
+
+- SucceededNoCommit
+- SucceededCommitted
+- Failed
+- Cancelled
+- Superseded
+
+This proposal does not lock exact names.
+
+The important requirement is that the outcome model distinguishes:
+
+- successful execution that committed authoritative state
+- successful execution that did not need to commit state
+- aborted/discarded staging
+- unexpected failure
+- intentional cancellation
+- intentional supersession
+
+3.4 Avoid direct OU outcome = Window finalization
+------------------------------------------------
+
+Do not define:
+
+- OU Committed means SafePointWindow created
+- OU Aborted means AbortedWindow created
+
+That would reintroduce the superseded stale design.
+
+Correct relationship:
+
+- an OU may commit or abort transactions
+- those transaction outcomes occur within the current ActiveWindow
+- the ActiveWindow later finalizes into SafePointWindow or AbortedWindow
+  according to DA-08 rules
+- OU and transaction trace evidence contributes to the later Window evidence
+
+3.5 Superseded Orchestration Unit
+---------------------------------
+
+An Orchestration Unit may end as Superseded when its work is intentionally
+replaced by newer work or higher-priority work.
+
+Superseded is not failure.
+
+Superseded is trace-visible.
+
+Superseded does not undo already committed authoritative state.
+
+If the OU has open transactional staging when superseded:
+
+- the transaction aborts or is discarded according to DA-04 rules
+- the supersession trace links to the transaction abort/discard event
+
+3.6 OU trace obligations
+------------------------
+
+The Orchestration Unit owning document should define trace events such as:
+
+- OrchestrationUnitCreated
+- OrchestrationUnitStarted
+- OrchestrationUnitCompleted
+- OrchestrationUnitFailed
+- OrchestrationUnitCancelled
+- OrchestrationUnitSuperseded
+- OrchestrationUnitTransactionOpened
+- OrchestrationUnitTransactionCommitted
+- OrchestrationUnitTransactionAborted
+- OrchestrationUnitDecisionPending
+- OrchestrationUnitDecisionResolved
+
+Trace attributes should include:
+
+- orchestrationUnitId
+- appInstanceId
+- owner/caller identity
+- work kind
+- parent jobId, if any
+- parent capability id, if any
+- parent RPC message id, if any
+- transactionId, if any
+- terminal outcome
+- reason
+- supersession source, if any
+
+
+===============================================================================
+04. RPC TRANSPORT TIMEOUT VS JOB EXECUTION TIMEOUT
+===============================================================================
+
+04.1 Problem
+-----------
+
+RPC transport concerns and Job execution concerns are easy to confuse.
+
+A WebSocket request may fail to send, fail to acknowledge, disconnect before
+reply, or timeout at the transport layer.
+
+A Job may be accepted and then exceed its execution deadline.
+
+These are different failures.
+
+Conflating them would make traces and user-facing errors misleading.
+
+04.2 Definitions
+----------------
+
+RPC transport acknowledgement means:
+
+The transport layer received or acknowledged a message envelope according to
+the RPC protocol.
+
+RPC delivery/reply timeout means:
+
+The transport or caller did not receive the expected acknowledgement or reply
+within the transport/caller timeout budget.
+
+Job execution timeout means:
+
+The accepted Job exceeded its execution deadline after the backend accepted it
+as work.
+
+04.3 Proposed rules
+-------------------
+
+Transport timeout is not Job timeout.
+
+Job timeout is not transport timeout.
+
+A request may have:
+
+- no transport acknowledgement
+- transport acknowledgement but no accepted Job
+- accepted Job but failed reply delivery
+- accepted Job that succeeds
+- accepted Job that fails
+- accepted Job that times out
+- accepted Job that is cancelled
+- accepted Job that is superseded
+
+Transport failure does not automatically imply Job failure.
+
+Job failure does not automatically imply transport failure.
+
+If transport disconnects while a Job continues, policy decides whether:
+
+- the Job continues detached
+- the Job is cancelled
+- the Job is superseded
+- the Job result is retained for later retrieval
+- the Job result is discarded if no consumer remains
+
+That policy decision is trace-visible.
+
+04.4 RPC implementation spec integration
+----------------------------------------
+
+IS-02 or the current RPC implementation specification should define:
+
+- when a request is considered received
+- when it is acknowledged
+- when it is accepted as a Job
+- what reply means when a Job exists
+- whether the initial reply returns a Job handle or final result
+- how disconnect affects accepted Jobs
+- how cancel messages affect accepted Jobs
+- how timeout budget maps to transport timeout, Job timeout, or both
+
+04.5 Trace obligations
+----------------------
+
+RPC trace events should distinguish:
+
+- RPCMessageReceived
+- RPCMessageAcknowledged
+- RPCRequestDispatched
+- RPCRequestAcceptedAsJob
+- RPCReplySent
+- RPCReplyDeliveryFailed
+- RPCTransportTimeout
+- RPCConnectionDisconnected
+- RPCCancelRequested
+- RPCGenerationMismatch
+- RPCRequestRejectedBeforeJob
+
+Job trace events then own execution lifecycle after acceptance.
+
+Causal link:
+
+RPCRequestAcceptedAsJob -> JobCreated
+
+04.6 Example
+------------
+
+Example 1:
+
+- client sends request
+- server acknowledges message
+- server creates Job
+- WebSocket disconnects
+- policy allows Job to continue
+- Job succeeds
+- result retained for reconnect
+
+This is not transport success in the delivery sense, but it is Job success.
+
+Example 2:
+
+- client sends request
+- server acknowledges message
+- server creates Job
+- Job exceeds execution deadline
+- Job transitions to TimedOut
+- server sends timeout result if connection still exists
+
+This is not message delivery timeout. It is Job execution timeout.
+
+Example 3:
+
+- client sends request
+- server never acknowledges
+- frontend times out waiting for ack
+
+This is transport failure. A Job may never have existed.
+
+
+===============================================================================
+05. CAPABILITIES AND JOBS
+===============================================================================
+
+05.1 Problem
+-----------
+
+Capability invocation can be short and immediate, or long-running and
+observable.
+
+Current DA-16 defines capabilities as permissioned, Turnix-mediated operations.
+
+The stale proposal suggests that request/await capability calls should create
+Jobs.
+
+This is worth integrating, but needs care.
+
+05.2 Proposed model
+-------------------
+
+Capability invocation modes may include:
+
+A) Emit / fire-and-forget
+   - no Job is required
+   - transport acknowledgement may exist
+   - errors may be trace-visible
+   - no awaited result lifecycle is promised
+
+B) Request / await immediate
+   - caller awaits direct result
+   - no Job required if operation is short and completes in the request path
+   - still trace-visible
+
+C) Request / await Job-backed
+   - operation is accepted as a Job
+   - caller receives Job handle or subscribes to Job lifecycle
+   - progress, result, error, cancellation, timeout, and supersession are
+     governed by Job rules
+
+This proposal does not require every awaited capability call to create a Job.
+
+Instead, it proposes that long-running, cancellable, progress-reporting, or
+timeout-managed capability execution uses the Job model.
+
+05.3 Capability trace obligations
+---------------------------------
+
+Capability trace should link to Job trace when a Job is created.
+
+Possible trace attributes:
+
+- capabilityId
+- callerPackId
+- targetPackId
+- permission decision id
+- jobId if created
+- orchestrationUnitId if execution entered one
+- invocation mode
+- outcome
+
+05.4 Capability safety rule
+---------------------------
+
+Capability execution does not expose raw service objects across pack boundaries.
+
+If a capability creates a Job, the Job is a lifecycle handle, not a service
+object and not a direct reference to implementation internals.
+
+
+===============================================================================
+06. TRANSACTIONS, CONFIGURATION, AND WINDOWS
+===============================================================================
+
+06.1 Corrected current model
+----------------------------
+
+The stale proposal claimed:
+
+- transaction commit finalizes into SafePointWindow
+- transaction abort finalizes into AbortedWindow
+
+This is superseded.
+
+Corrected model:
+
+- transactions stage and commit/abort authoritative mutation under DA-04
+- configuration override mutation and migration follow those state rules under
+  DA-06
+- committed or aborted transaction evidence belongs to the current ActiveWindow
+  region under DA-08
+- SafePointWindow finalization occurs when the Window layer creates a finalized
+  committed boundary
+- AbortedWindow finalization occurs when the ActiveWindow finalizes without a
+  new committed boundary
+- transaction boundaries and Window boundaries are related but not identical
+
+06.2 Proposed trace relationship
+--------------------------------
+
+A transaction commit should trace:
+
+- transaction id
+- touched committed layers
+- affected keys or scopes where allowed
+- base revision information where relevant
+- new revision information where relevant
+- Orchestration Unit id
+- Job id if any
+- capability id if any
+- config scope if config was changed
+
+A later SafePointWindow creation should trace:
+
+- safePointWindowId
+- committed scope or scopes covered
+- relation to transaction commit evidence included in the finalized region
+- evidence completeness or incompleteness
+
+A transaction abort should trace:
+
+- transaction id
+- abort reason
+- staged mutation discarded
+- Orchestration Unit id
+- Job id if any
+
+A later AbortedWindow finalization should trace:
+
+- abortedWindowId
+- abort outcome
+- retained evidence
+- reason category
+- relation to the active region that did not commit into a new safe point
+
+06.3 Config-specific trace obligations
+--------------------------------------
+
+Configuration mutation trace should be owned by DA-06 and include:
+
+- config scope
+- owner identity
+- key or subtree
+- mutation kind
+- validation outcome
+- migration version/source/target when applicable
+- transaction id
+- Orchestration Unit id
+- Job id if applicable
+- decision id if a user/policy decision was required
+
+effectiveConfig materialization trace should be distinct from stored mutation
+trace.
+
+Computed config effect must not appear as stored override mutation.
+
+
+===============================================================================
+07. SUPERSEDED AS FIRST-CLASS NON-ERROR OUTCOME
+===============================================================================
+
+07.1 Problem
+-----------
+
+Many systems collapse superseded work into cancellation or failure.
+
+Turnix should not.
+
+Supersession preserves a different truth:
+
+The work stopped because newer input or higher-priority work replaced it.
+
+That is not an error.
+
+7.2 Proposed definition
+-----------------------
+
+Superseded is a terminal non-error outcome for work that is intentionally
+abandoned because it was replaced by newer authoritative input, newer accepted
+work, or higher-priority work.
+
+Superseded applies only to in-flight or not-yet-authoritative work.
+
+Superseded does not rewrite committed history.
+
+7.3 Applies to
+--------------
+
+Superseded may apply to:
+
+- Jobs
+- Orchestration Units
+- RPC request handling
+- scheduled work
+- preview/recompute work
+- streaming response work
+- pipeline runs, if the pipeline model accepts it
+
+7.4 Does not apply to
+---------------------
+
+Superseded does not apply to already committed authoritative state.
+
+If committed state must be changed because a newer input supersedes older
+state, that change is a new authoritative mutation, not retroactive
+supersession.
+
+7.5 Trace obligations
+---------------------
+
+Supersession trace should include:
+
+- superseded work identity
+- superseding work identity when known
+- supersession source
+- policy or rule that allowed supersession
+- whether worker cancellation was requested
+- whether transactional staging was aborted
+- whether any committed state had already been produced
+- terminal outcome = Superseded
+
+Suggested trace reasons:
+
+- JobSuperseded
+- OrchestrationUnitSuperseded
+- RPCRequestSuperseded
+- PipelineRunSuperseded
+- SupersededWorkerCompletionIgnored
+
+7.6 User-facing meaning
+-----------------------
+
+User-facing diagnostics should not present Superseded as failure.
+
+Possible wording:
+
+- Replaced by newer request
+- Replaced by newer input
+- Stopped because newer work took precedence
+
+Avoid:
+
+- Failed
+- Crashed
+- Cancelled by error
+
+
+===============================================================================
+08. CONSOLIDATED INTEGRATION TARGETS
+===============================================================================
+
+08.1 DA-03
+----------
+
+Add or clarify trace ownership rule:
+
+- DA-03 owns trace mechanics
+- subject documents own subject lifecycle trace obligations
+
+Possibly add generic guidance:
+
+- lifecycle-owning objects define their own trace reasons and required
+  attributes
+- DA-03 constrains reason style, DAG links, spans, retention, and evidence
+  semantics
+
+08.2 DA-04
+----------
+
+Add or refine Orchestration Unit outcome semantics.
+
+Clarify:
+
+- OU is execution authority
+- Job is observable lifecycle handle
+- transaction is mutation staging/commit boundary
+- OU transaction outcomes do not directly equal Window finalization
+- Superseded may be a non-error OU outcome if accepted
+
+08.3 DA-06
+----------
+
+Add explicit config lifecycle trace obligations, if not already detailed enough:
+
+- override mutation
+- validation
+- migration
+- effectiveConfig materialization
+- computed transforms
+- distinction between stored mutation and derived effect
+
+08.4 DA-08
+----------
+
+Clarify relationship between transaction evidence and ActiveWindow /
+SafePointWindow / AbortedWindow.
+
+Possible addition:
+
+- transaction commits and aborts occur within ActiveWindow evidence until
+  Window finalization
+- SafePointWindow finalization may include committed transaction evidence
+- AbortedWindow finalization may include aborted/cancelled/failed/superseded
+  work evidence
+
+08.5 DA-16
+----------
+
+Add capability-to-Job relationship if accepted:
+
+- short capability calls may complete directly
+- long-running/progress/cancellable capability calls may create Jobs
+- Job handle is not a service object
+- capability trace links to Job lifecycle
+
+08.6 DA-17
+----------
+
+Clarify decision/policy interaction with:
+
+- cancellation
+- timeout
+- supersession
+- continuation after transport disconnect
+- remembered policy for handling similar future conditions, if any
+
+08.7 DA-18
+----------
+
+Reference formal Job model once integrated.
+
+Keep debugger safe-point behavior aligned with Job safe points.
+
+Debugger pause/breakpoint for Jobs should use the accepted Job lifecycle states.
+
+08.8 IS-02 or RPC implementation spec
+-------------------------------------
+
+Define transport vs Job lifecycle separation:
+
+- message acknowledgement
+- request dispatch
+- accepted-as-Job
+- reply delivery
+- cancel message behavior
+- disconnect behavior
+- transport timeout
+- Job timeout
+- request supersession
+
+
+===============================================================================
+09. SHORT CARRY-FORWARD SUMMARY
+===============================================================================
+
+Integrate these ideas:
+
+1. Tracing ownership rule
+   DA-03 defines tracing mechanics.
+   Subject documents define their own lifecycle trace obligations.
+
+2. Job model
+   Job is an observable kernel-managed work lifecycle object, distinct from
+   transaction, Orchestration Unit, RPC message, and Window.
+
+3. Job lifecycle
+   Pending, Running, Succeeded, Failed, Cancelled, TimedOut, Superseded.
+   Terminal state is final.
+   Late worker completion after terminal state is ignored and trace-visible.
+
+4. Superseded
+   First-class non-error terminal outcome for work replaced by newer input or
+   higher-priority work.
+
+5. RPC transport timeout vs Job timeout
+   Transport acknowledgement/delivery is not execution lifecycle.
+   Job timeout begins after accepted work exists.
+
+6. Capability/Job relationship
+   Long-running or observable capability execution may create or attach to Jobs.
+   Do not expose raw service objects.
+
+7. Correct transaction/window relationship
+   Transactions do not automatically finalize into SafePointWindow or
+   AbortedWindow.
+   Transaction outcomes belong to the current ActiveWindow evidence region until
+   Window finalization occurs.
+
+--- file-meta ---
+DOC_ID: JOBS_ORCHESTRATION_OUTCOMES_RPC_TIMEOUTS__TRACE_OWNERSHIP_INTEGRATION
+DOC_FILE: docs/design/upcoming/JOBS_ORCHESTRATION_OUTCOMES_RPC_TIMEOUTS__TRACE_OWNERSHIP_INTEGRATION.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+DOC_STATUS: STABLE
+-----------------

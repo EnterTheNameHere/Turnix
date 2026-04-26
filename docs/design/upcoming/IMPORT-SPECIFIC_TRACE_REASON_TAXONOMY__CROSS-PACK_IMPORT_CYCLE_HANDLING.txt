@@ -1,0 +1,766 @@
+IMPORT-SPECIFIC TRACE REASON TAXONOMY
+AND CROSS-PACK IMPORT CYCLE HANDLING
+============================================================
+
+Status:
+-------
+PROPOSED INTEGRATION NOTE
+
+Purpose:
+--------
+This note extracts two unresolved import-system ideas from a stale design
+thread and rewrites them as current-document integration proposals.
+
+The ideas are:
+
+1. Import-specific trace reason taxonomy
+2. Cross-pack import cycle handling
+
+These proposals do not define authority by themselves. They are intended as
+candidate material for targeted updates to the current Turnix design documents.
+
+Likely integration targets:
+- DA-12 - Importing, Module Loading & Code Boundaries
+- DA-03 - Tracing, Diagnostics & Observability
+- DA-14 - Activation, Lifecycle & Execution Guarantees
+- DA-15 - Visibility, Exports & Access Control
+
+
+===============================================================================
+01. IMPORT-SPECIFIC TRACE REASON TAXONOMY
+===============================================================================
+
+01.1 Problem
+-----------
+
+Current DA-12 defines strict Turnix-controlled importing semantics:
+
+- importing is not dependency declaration
+- importing is not resolution
+- importing is not activation
+- importing is not execution authority
+- JavaScript cross-pack loading routes through turnixImport(selector)
+- cross-pack native Python imports are not allowed
+- import errors are hard errors
+- import errors use the standard error envelope
+- import errors include requesting pack identity, target identity, and reason
+  classification
+
+Current DA-03 defines general tracing semantics:
+
+- trace events form a trace DAG
+- reasons are stable PascalCase identifiers
+- trace events preserve causality and decision evidence
+- success paths remain observable
+- failures remain explainable
+- surfaced errors map to trace events
+
+However, current documents do not yet appear to define a precise import-specific
+reason taxonomy. This leaves import failures traceable in principle, but less
+stable and less searchable than other explicitly named trace domains.
+
+The missing piece is not a new import rule. The missing piece is a stable set of
+reason names and minimum trace attributes for Turnix-boundary import attempts.
+
+01.2 Design intent
+------------------
+
+A Turnix-boundary import attempt should be explainable after the fact.
+
+A developer or user should be able to answer:
+
+- Which pack requested the import?
+- What selector was requested?
+- Which pack or module did the selector resolve toward?
+- Which boundary check failed, if any?
+- Did the failure come from visibility, export mapping, dependency identity,
+  activation/lifecycle boundary, runtime mismatch, missing entry, ambiguity, or
+  host-loader failure?
+- Was module evaluation reached?
+- Did Turnix deny the import before handing control to the host runtime loader?
+- Was the import part of activation, runtime lazy loading, tooling, or some
+  other orchestrated path?
+- What causal event triggered the import?
+
+01.3 Proposed integration in DA-12
+----------------------------------
+
+Add a new subsection near DA-12 import error handling or trace discussion.
+
+Suggested title:
+
+IMPORT TRACE REASONS AND ATTRIBUTES
+
+Proposed text:
+
+Turnix-boundary import attempts are trace-visible.
+
+A Turnix-boundary import attempt is any import or module-loading operation that
+uses Turnix import semantics rather than same-pack native language import
+semantics.
+
+For JavaScript, turnixImport(selector) is a Turnix-boundary import attempt.
+
+For any future language surface that crosses pack, visibility, runtime, or
+Turnix-controlled module boundaries, the same trace obligation applies.
+
+Each Turnix-boundary import attempt emits trace evidence that includes:
+
+- requesting pack identity
+- requested selector
+- resolved target pack identity when resolution reaches that stage
+- resolved target entry or sub-entry when resolution reaches that stage
+- import phase
+- outcome
+- reason
+- parent causal event or span when available
+
+Import trace reasons are stable PascalCase identifiers.
+
+Import tracing distinguishes:
+
+A) Request parsing and selector validation
+B) visibility and access checks
+C) dependency-consistency checks
+D) export or entry mapping checks
+E) runtime or language compatibility checks
+F) activation/lifecycle precondition checks where applicable
+G) host-loader execution or evaluation failure
+H) successful import completion
+
+The host-language loader exception is diagnostic detail. It is not the
+creator-facing reason category by itself.
+
+Turnix-shaped import failure remains the surfaced boundary result.
+
+01.4 Proposed reason taxonomy
+-----------------------------
+
+The exact names may be adjusted during document integration, but the taxonomy
+should cover at least the following categories.
+
+Successful / neutral reasons:
+
+- ImportRequested
+  Emitted when a Turnix-boundary import attempt begins.
+
+- ImportResolved
+  Emitted when Turnix resolves the import request to a permitted target
+  artifact before host-runtime loading.
+
+- ImportCompleted
+  Emitted when the import completes successfully and the permitted module
+  surface is returned.
+
+Selector and request-shape failures:
+
+- ImportSelectorInvalid
+  The selector is not a valid Turnix import selector.
+
+- ImportSelectorUnsupported
+  The selector uses a form that is syntactically valid in some context but not
+  supported by the current import surface.
+
+- ImportSemVerInSelector
+  Semver appeared in a turnixImport selector, where semver is not allowed.
+
+- ImportPathTraversalDenied
+  The selector attempted filesystem traversal such as "../" or equivalent.
+
+- ImportFilesystemPathDenied
+  The selector was a filesystem path, absolute path, URI, or path-like request
+  rather than an identity-based Turnix selector.
+
+Resolution and identity failures:
+
+- ImportTargetNotFound
+  No target pack or entry could be found for the selector within the allowed
+  context.
+
+- ImportTargetAmbiguous
+  The selector matched more than one possible target and no deterministic valid
+  outcome existed.
+
+- ImportDependencyIdentityMismatch
+  The requested import would switch author identity, version identity, or
+  resolved dependency identity compared with the dependency selected earlier.
+
+- ImportResolutionContextInvalid
+  The import was attempted in a context that does not provide a valid importing
+  pack identity, dependency context, or visibility context.
+
+Visibility and export failures:
+
+- ImportTargetNotVisible
+  The requesting pack is not permitted to reference the target pack.
+
+- ImportTargetNotExported
+  The target module or sub-entry is not part of the explicit importable surface.
+
+- ImportEntryNotDeclared
+  The requested sub-entry is not declared in the target pack's JavaScript entry
+  mappings or equivalent future import surface.
+
+- ImportEntryAmbiguous
+  The requested sub-entry maps to more than one declared artifact.
+
+- ImportDefaultEntryMissing
+  The selector requested a default entry but the target pack has no declared
+  default JavaScript entry or equivalent current-runtime entry.
+
+Runtime and language boundary failures:
+
+- ImportRuntimeUnsupported
+  The requested import crosses into a runtime that the current import surface
+  cannot load.
+
+- ImportCrossRuntimeDenied
+  The requested import crosses a runtime boundary that Turnix does not allow for
+  that import surface.
+
+- ImportRuntimeArtifactUnavailable
+  The target pack exists, but the requested runtime artifact is unavailable.
+
+Activation and lifecycle boundary failures:
+
+- ImportTargetNotActivated
+  The import requires an already activated target under a future or specific
+  API rule, but the target is not activated.
+
+- ImportActivationBoundaryViolation
+  The import attempt would imply activation, execution authority, or lifecycle
+  participation that DA-12/DA-14 keep separate.
+
+- ImportDuringInvalidLifecyclePhase
+  The import was requested during a lifecycle phase where that import class is
+  not allowed.
+
+Host loader and evaluation failures:
+
+- ImportHostLoaderFailed
+  Turnix permitted the import target, but the host runtime loader failed while
+  loading the artifact.
+
+- ImportModuleEvaluationFailed
+  The host runtime evaluated the permitted module and evaluation failed.
+
+- ImportUnsupportedImmediateExecutionObserved
+  Immediate execution or side-effect behavior occurred in a way that is
+  diagnostic-relevant, while remaining outside Turnix activation semantics.
+
+Cycle-related failures:
+
+- ImportCycleDetected
+  A Turnix-boundary import cycle was detected.
+
+- ImportLifecycleCycleDetected
+  A cycle crosses import and activation/lifecycle boundaries.
+
+- ImportRuntimeCycleDenied
+  A host-runtime cycle would cross Turnix-controlled boundaries and cannot be
+  delegated safely to native loader behavior.
+
+Permission / policy failures, if later policy applies directly to import:
+
+- ImportPolicyDenied
+  A policy denied the import attempt.
+
+- ImportPermissionDenied
+  A permission boundary denied the import attempt.
+
+These should be used only if import itself gains a policy or permission check.
+They must not blur import with capability invocation permission.
+
+01.5 Minimum trace attributes
+-----------------------------
+
+Each import trace event should include whichever of these fields are known at
+the point of emission:
+
+Required when available:
+
+- requesterPackId
+- requesterCanonicalPackId
+- selector
+- importSurface
+  Example: turnixImport
+- importPhase
+  Example: ParseSelector, ResolveTarget, CheckVisibility, CheckEntry,
+  HostLoad, ModuleEvaluation, Completed
+- outcome
+  Example: Started, Allowed, Denied, Failed, Completed
+- reason
+
+Target fields when resolution reached target identity:
+
+- targetPackId
+- targetCanonicalPackId
+- targetPackTreeId
+- targetAuthor
+- targetVersion
+- targetRuntime
+- targetEntry
+- targetSubEntry
+
+Context fields when available:
+
+- appInstanceId
+- activationId
+- orchestrationUnitId
+- capabilityCallId
+- transactionId
+- parentEventIds
+- trace span identity
+
+Diagnostic fields when applicable:
+
+- visibilityRule
+- dependencyIdentityExpected
+- dependencyIdentityRequested
+- entryMappingKey
+- hostLoaderErrorClass
+- hostLoaderErrorMessage
+- cyclePath
+- lifecyclePhase
+
+01.6 DA-03 integration
+----------------------
+
+DA-03 should not need to own all import semantics.
+
+DA-03 should own the fact that import tracing has stable reason names and
+minimum trace shape.
+
+Suggested DA-03 addition:
+
+Import-related trace reasons are emitted for Turnix-boundary import attempts.
+
+Import trace events use domain = import or module-loading.
+
+Import trace events preserve causal links to:
+
+- activation events when import occurs during activation
+- capability events when import is triggered inside a capability path
+- debugger or tooling events when import is triggered by tooling
+- runtime orchestration events when import is lazy or deferred
+
+Import trace events distinguish:
+
+- Turnix boundary denial
+- Turnix target resolution failure
+- host-loader failure after Turnix allowed loading
+- host module-evaluation failure after loading began
+
+01.7 Why this belongs in current docs
+-------------------------------------
+
+This proposal strengthens existing rules rather than creating new authority.
+
+DA-12 already requires strict and visible import failures.
+
+DA-03 already requires stable reasons and traceable success/failure paths.
+
+The proposed taxonomy makes that obligation concrete for imports.
+
+
+===============================================================================
+02. CROSS-PACK IMPORT CYCLE HANDLING
+===============================================================================
+
+02.1 Problem
+-----------
+
+Native module systems may tolerate, partially initialize, or expose unstable
+values during import cycles.
+
+That behavior is a host-language detail.
+
+Turnix-boundary imports are different because they may cross:
+
+- pack boundaries
+- visibility boundaries
+- dependency identity boundaries
+- activation boundaries
+- runtime boundaries
+- future policy or permission boundaries
+
+If cross-pack import cycles are left to host-language behavior, Turnix risks
+allowing native loader quirks to decide platform-level semantics.
+
+That would weaken:
+
+- deterministic explanation
+- lifecycle control
+- activation/import separation
+- visibility enforcement
+- traceability
+- future cross-runtime consistency
+
+02.2 Design intent
+------------------
+
+A cross-pack import cycle is not automatically forbidden merely because cycles
+exist in a host language.
+
+However, when a cycle crosses a Turnix boundary, Turnix must detect and classify
+it at the boundary level.
+
+Turnix should not allow a cross-pack cycle to become an invisible native-loader
+quirk.
+
+The important distinction:
+
+A) Same-pack local module cycle
+   This may remain a host-language/local implementation concern.
+
+B) Turnix-boundary import cycle
+   This is a Turnix concern and must be detected, traced, and surfaced as a
+   structured outcome.
+
+02.3 Proposed integration in DA-12
+----------------------------------
+
+Add a new subsection near turnixImport behavior or import failure handling.
+
+Suggested title:
+
+CROSS-PACK IMPORT CYCLES
+
+Proposed text:
+
+Same-pack local module cycles are local implementation behavior unless they
+cross a Turnix boundary.
+
+Turnix-boundary import cycles are Turnix-controlled boundary conditions.
+
+A Turnix-boundary import cycle exists when an active import chain attempts to
+re-enter a Turnix-boundary import target already present in the same unresolved
+Turnix import chain.
+
+Turnix-boundary import cycles include cycles across:
+
+- pack boundaries
+- visibility boundaries
+- dependency-resolved identity boundaries
+- activation or lifecycle boundaries
+- runtime boundaries
+
+Turnix detects such cycles before delegating further loading to the host
+runtime when detection is possible.
+
+When a Turnix-boundary import cycle is detected:
+
+- Turnix fails the import explicitly
+- the failure is structured
+- the cycle path is trace-visible
+- no host-language partial-initialization behavior is treated as platform truth
+- no visibility, dependency, or activation boundary is bypassed
+
+Same-pack native module cycles remain outside this rule unless they attempt a
+Turnix-boundary import as part of the cycle.
+
+02.4 Cycle classification
+-------------------------
+
+Cycle classes should be classified separately because they imply different
+risks.
+
+A) LocalImplementationCycle
+
+A cycle contained inside one pack and one runtime using local native imports.
+
+Suggested handling:
+- not a Turnix boundary error by itself
+- host language semantics apply
+- Turnix may surface diagnostics if the cycle causes module load failure
+
+B) CrossPackImportCycle
+
+A cycle where pack A uses Turnix-boundary import to import pack B, and the
+unresolved chain eventually attempts to import pack A again or another pending
+target in the same chain.
+
+Suggested handling:
+- Turnix boundary failure
+- trace reason: ImportCycleDetected
+- include cyclePath
+
+C) ImportActivationCycle
+
+A cycle where import and activation expectations become entangled.
+
+Example:
+- pack A activation imports pack B module
+- pack B activation or import path requires pack A activation result
+- the chain cannot be resolved without treating import as activation or
+  activation as import
+
+Suggested handling:
+- Turnix boundary failure
+- trace reason: ImportLifecycleCycleDetected
+- preserve DA-14 rule that import does not activate and activation does not
+  return code/symbols
+
+D) CrossRuntimeImportCycle
+
+A cycle crossing two or more runtimes.
+
+Example:
+- JavaScript import path enters a Python-mediated boundary or future runtime
+  bridge, which then attempts to import back into the original JavaScript pack
+
+Suggested handling:
+- Turnix boundary failure unless a future implementation specification defines
+  a safe bridge model
+- trace reason: ImportRuntimeCycleDenied
+
+E) DependencyIdentityCycle
+
+A cycle where an import attempts to reopen or alter a dependency identity
+already chosen earlier in the chain.
+
+Suggested handling:
+- hard failure
+- trace reason: ImportDependencyIdentityMismatch or ImportCycleDetected
+- do not reopen dependency resolution
+
+02.5 Import chain tracking
+--------------------------
+
+Turnix should track an import chain for Turnix-boundary imports.
+
+An import chain record should include:
+
+- importing pack identity
+- requested selector
+- resolved target pack identity when known
+- target entry or sub-entry when known
+- runtime
+- lifecycle phase
+- parent import event
+- import attempt id
+
+During a Turnix-boundary import attempt, Turnix checks whether the requested
+target is already unresolved in the active chain.
+
+If yes, Turnix emits a cycle failure.
+
+Cycle detection compares stable Turnix identities, not raw filesystem paths.
+
+Possible comparison keys:
+
+- requester canonicalPackId
+- target canonicalPackId
+- target runtime
+- target entry/sub-entry
+- active lifecycle phase
+
+02.6 Cycle trace shape
+----------------------
+
+When a cycle is detected, trace should include:
+
+- reason = ImportCycleDetected or more specific cycle reason
+- cyclePath
+- requesterPackId
+- currentSelector
+- repeatedTargetIdentity
+- repeatedTargetEntry
+- importAttemptId
+- parentImportAttemptId
+- lifecyclePhase
+- runtime
+- whether activation was involved
+- whether host loader had already been entered
+
+cyclePath should be structured rather than prose-only.
+
+Example conceptual shape:
+
+cyclePath:
+  - requester: PackA
+    selector: PackB/widget
+    target: PackB
+    entry: widget
+    runtime: javascript
+  - requester: PackB
+    selector: PackC/tools
+    target: PackC
+    entry: tools
+    runtime: javascript
+  - requester: PackC
+    selector: PackA/shared
+    target: PackA
+    entry: shared
+    runtime: javascript
+
+02.7 Failure behavior
+---------------------
+
+A Turnix-boundary import cycle failure:
+
+- is a hard import failure
+- does not activate any pack
+- does not grant execution authority
+- does not partially return module surfaces
+- does not allow fallback to native path loading
+- does not auto-disable dependency consistency checks
+- does not silently continue with partially initialized exports
+
+If the cycle occurs during activation:
+
+- activation of the affected pack fails
+- the activation failure remains trace-linked to the import cycle
+- dependent activation does not proceed unless an existing higher-level
+  fallback rule explicitly permits a separate fallback path
+
+02.8 Relationship to DA-14
+--------------------------
+
+Cycle handling must preserve activation/import separation.
+
+A cycle must not be resolved by pretending that:
+
+- importing activates a pack
+- activation returns executable symbols
+- ensureActivated returns module namespaces
+- module evaluation counts as Turnix-recognized activation
+
+If resolving the cycle requires any of those interpretations, the correct
+outcome is structured failure.
+
+02.9 Relationship to DA-15
+--------------------------
+
+Visibility is checked before a target is treated as a valid cycle participant.
+
+If the target is not visible, the failure is visibility denial, not a cycle.
+
+If the target is visible and the chain re-enters an unresolved Turnix-boundary
+target, the failure is cycle detection.
+
+This ordering prevents cycle diagnostics from leaking invisible target details.
+
+02.10 Relationship to DA-16
+---------------------------
+
+Import cycles must not be solved by converting imports into capability calls
+implicitly.
+
+If behavior should be mediated, it belongs behind a capability.
+
+If module access is required, it remains subject to import cycle handling.
+
+Import and capability invocation remain separate concepts.
+
+02.11 Integration recommendation
+--------------------------------
+
+Add concise normative rules to DA-12.
+
+Add stable trace reasons to DA-03.
+
+Optionally add a short note to DA-14 saying activation-time import cycle
+failures remain activation failures when they occur during activation.
+
+Do not add cycle behavior to DA-16 unless the discussion is about replacing a
+module dependency with a capability boundary by explicit design.
+
+
+===============================================================================
+03. CONSOLIDATED PATCH PLAN
+===============================================================================
+
+03.1 DA-12 additions
+--------------------
+
+Add sections covering:
+
+1. Import trace obligations
+2. Import-specific structured failure categories
+3. Cross-pack import cycle handling
+4. Import-chain tracking at the Turnix boundary
+
+These sections should avoid redefining DA-03 trace mechanics.
+
+DA-12 should define:
+- what counts as a Turnix-boundary import attempt
+- when import trace events occur
+- which import failures are classified
+- when cycles are Turnix boundary failures
+- how import cycles preserve activation/import separation
+
+03.2 DA-03 additions
+--------------------
+
+Add import-specific reason names and minimum event attributes.
+
+DA-03 should define:
+- reason names
+- trace domain
+- required or expected attributes
+- causal linkage expectations
+- cycle trace evidence shape
+
+DA-03 should not define import semantics.
+
+03.3 DA-14 additions
+--------------------
+
+Add a short cross-reference or clarification:
+
+If an import failure or import cycle occurs during activation, activation fails
+according to the normal activation failure model.
+
+Turnix does not resolve activation-time import cycles by treating import as
+activation or activation as module access.
+
+03.4 DA-15 additions
+--------------------
+
+Likely optional.
+
+If added, only clarify that visibility denial takes precedence over cycle
+disclosure when the target is not visible.
+
+This avoids leaking hidden target structure through cycle diagnostics.
+
+03.5 Avoid
+----------
+
+Do not:
+- expose raw host-loader cycles as platform semantics
+- let native loader partial initialization define Turnix behavior
+- create a second import resolution model
+- make imports act like capabilities
+- make activation return module surfaces
+- use filesystem path identity for cycle detection
+- emit trace events with vague reasons such as ImportFailed when a more precise
+  reason is available
+
+
+===============================================================================
+04. SHORT CARRY-FORWARD SUMMARY
+===============================================================================
+
+Import-specific trace taxonomy:
+
+Turnix-boundary imports need stable PascalCase trace reasons and minimum trace
+attributes so import success, denial, host-loader failure, and boundary failure
+remain explainable.
+
+Cross-pack import cycle handling:
+
+Same-pack local module cycles may remain host-language behavior, but cycles
+crossing Turnix import boundaries must be detected, traced, and surfaced as
+structured Turnix failures. Cross-pack cycles must not be delegated silently to
+native loader quirks or resolved by blurring import, activation, visibility, or
+capability boundaries.
+
+--- file-meta ---
+DOC_ID: IMPORT-SPECIFIC_TRACE_REASON_TAXONOMY__CROSS-PACK_IMPORT_CYCLE_HANDLING
+DOC_FILE: docs/design/upcoming/IMPORT-SPECIFIC_TRACE_REASON_TAXONOMY__CROSS-PACK_IMPORT_CYCLE_HANDLING.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+DOC_STATUS: STABLE
+-----------------
