@@ -1,0 +1,407 @@
+===============================================================================
+DESIGN AREA DA-19 - JOBS, LONG-RUNNING WORK & CANCELLATION
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines Job identity, Job lifecycle boundaries, cancellation semantics, and
+Job-owned trace reason identifiers for asynchronous or long-running work.
+
+This document is intentionally minimal at creation time. It exists to give
+Job lifecycle semantics a proper ownership home instead of leaving Jobs as
+memory-only design discussion or placing Job-specific lifecycle rules in the
+tracing substrate.
+
+Purpose:
+--------
+This document defines the Turnix Job lifecycle and identity anchor.
+
+It defines:
+- Job as explicit requested work with lifecycle state
+- Job identity and owner correlation
+- relationship between Jobs and Orchestration Units
+- Job completion, failure, cancellation, timeout, and safe-point pause
+  boundaries
+- Job-domain trace reason identifiers
+- minimum trace evidence for Job lifecycle events
+
+It does NOT define:
+- trace event structure, trace DAG semantics, or span mechanics (see DA-03)
+- authoritative committed state or transaction semantics (see DA-04)
+- Window, SafePointWindow, or AbortedWindow semantics (see DA-08)
+- pack activation semantics or PackContext authority (see DA-14)
+- service, capability, or permission semantics (see DA-16)
+- debugger UI layout or breakpoint behavior (see DA-18)
+- concrete RPC message schemas or transport behavior (see IS-01 and IS-02)
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-03
+- DA-04
+- DA-08
+- DA-14
+- DA-16
+- DA-18
+- DA-20
+
+Downstream Documents:
+--------------------
+- Future Job implementation specification
+
+
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
+
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines Job lifecycle, identity, and cancellation
+      semantics within that shared interpretation model.
+
+
+===============================================================================
+02. CORE CONCEPT
+===============================================================================
+
+02.1. A Job answers:
+
+          "What requested work is waiting, running, completed, failed,
+           cancelled, timed out, or paused at a safe point?"
+
+02.2. A Job is an explicit lifecycle object representing requested work.
+
+02.3. A Job may represent short work or long-running work.
+
+02.4. A Job has identity independent of any one RPC message, UI request,
+      or transport event.
+
+02.5. A Job provides a stable handle for:
+      - completion signaling
+      - progress reporting
+      - failure reporting
+      - cancellation request
+      - timeout handling
+      - safe-point pause interaction when supported
+
+02.6. A Job is not merely a Promise, coroutine, callback, thread, or task.
+
+02.7. A Job may be implemented using runtime primitives, but those runtime
+      primitives do not define the Job lifecycle semantics.
+
+02.8. A Job does not become authoritative committed state merely because it
+      exists, runs, or completes.
+
+02.9. Job effects become authoritative only through the state, transaction,
+      Window, capability, and persistence rules owned by the documents that
+      govern those effects.
+
+
+===============================================================================
+03. JOB IDENTITY
+===============================================================================
+
+03.1. A jobId identifies one Job.
+
+03.2. jobId is stable for the lifetime of that Job.
+
+03.3. jobId is not reused for a different Job during the same appInstance
+      active region.
+
+03.4. jobId is the correlation identity used by Job-owned trace evidence.
+
+03.5. jobId does not identify the result payload by itself.
+
+03.6. jobId does not identify an Orchestration Unit by itself.
+
+03.7. jobId does not identify an RPC request by itself.
+
+
+===============================================================================
+04. JOB OWNERSHIP AND CORRELATION
+===============================================================================
+
+04.1. A Job has an owning scope.
+
+04.2. The owning scope may include:
+      - appInstanceId
+      - orchestrationUnitId
+      - caller pack identity
+      - capability identifier
+      - RPC request identity
+      - debugger request identity
+      - user decision identity
+
+04.3. Identifier presence varies by Job origin.
+
+04.4. Missing optional correlation identifiers do not invalidate the Job.
+
+04.5. Required correlation identifiers for a concrete Job class are defined
+      by the document or implementation specification that creates that Job
+      class.
+
+04.6. This document defines the shared Job identity and lifecycle boundary.
+
+04.7. This document does not define every possible Job origin.
+
+
+===============================================================================
+05. RELATION TO ORCHESTRATION UNITS
+===============================================================================
+
+05.1. A Job may be backed by one Orchestration Unit.
+
+05.2. A Job may coordinate multiple Orchestration Units when a later
+      document explicitly defines that behavior.
+
+05.3. An Orchestration Unit may be associated with a Job when the unit is
+      performing requested work that requires Job lifecycle visibility.
+
+05.4. Not every Orchestration Unit is necessarily a Job.
+
+05.5. Not every Job detail is necessarily represented by an Orchestration
+      Unit.
+
+05.6. Job lifecycle identity and Orchestration Unit mutation authority remain
+      distinct concepts.
+
+05.7. State mutation authority remains constrained by DA-04 even when work
+      is represented as a Job.
+
+
+===============================================================================
+06. JOB LIFECYCLE
+===============================================================================
+
+06.1. A Job lifecycle has explicit observable outcomes.
+
+06.2. A Job may be:
+      - created
+      - queued
+      - running
+      - completed
+      - failed
+      - cancellation requested
+      - cancelled
+      - timed out
+      - pause requested
+      - paused at a safe point
+      - resumed
+
+06.3. A Job reaches at most one terminal outcome.
+
+06.4. Terminal outcomes include:
+      - completed
+      - failed
+      - cancelled
+      - timed out
+
+06.5. A terminal Job does not later become running again.
+
+06.6. Retry is modeled as new work unless a later document explicitly
+      defines a retry relationship.
+
+06.7. A retry does not reuse the previous jobId.
+
+06.8. A Job may report progress while it is non-terminal.
+
+06.9. Progress reporting does not by itself imply committed state mutation.
+
+06.10. Completion reports the Job's requested work outcome. It does not by
+       itself define whether any side effect became authoritative.
+
+
+===============================================================================
+07. CANCELLATION, TIMEOUT, AND DISCARDING WORK
+===============================================================================
+
+07.1. Cancellation is explicit.
+
+07.2. Cancellation request and cancellation outcome are distinct lifecycle
+      events.
+
+07.3. A cancellation request does not guarantee immediate cancellation.
+
+07.4. A Job may refuse or defer cancellation only through explicit policy or
+      explicit lifecycle semantics defined by the Job owner.
+
+07.5. Cancelling a Job discards the Job's uncommitted work from the
+      perspective of the Job result.
+
+07.6. Cancellation does not silently roll back committed state.
+
+07.7. Committed state produced before cancellation remains governed by the
+      state and Window documents that own committed-state meaning.
+
+07.8. Timeout is an explicit lifecycle outcome or failure cause.
+
+07.9. Timeout does not silently convert into cancellation unless the owning
+      Job semantics define that conversion explicitly.
+
+07.10. Cancellation and timeout remain trace-visible.
+
+
+===============================================================================
+08. SAFE-POINT PAUSE AND DEBUGGER INTERACTION
+===============================================================================
+
+08.1. A Job may support pause-at-safe-point behavior.
+
+08.2. Pause-at-safe-point is explicit.
+
+08.3. Pause request and pause achievement are distinct lifecycle events.
+
+08.4. A Job that cannot reach a safe point reports that limitation
+      explicitly.
+
+08.5. Safe-point pause does not silently cancel the Job.
+
+08.6. Debugger breakpoint and inspection behavior remains constrained by
+      DA-18.
+
+08.7. Window creation waiting and safe-point policy remain constrained by
+      DA-08.
+
+
+===============================================================================
+09. JOB TRACE REASON IDENTIFIERS
+===============================================================================
+
+09.1. DA-19 owns the Job-domain trace reason identifiers used for Job
+      lifecycle, progress, cancellation, timeout, and safe-point pause
+      events.
+
+09.2. The following Job-domain trace reasons are defined:
+
+      - JobCreated
+      - JobQueued
+      - JobStarted
+      - JobProgressReported
+      - JobCompleted
+      - JobFailed
+      - JobCancellationRequested
+      - JobCancelled
+      - JobTimeoutReached
+      - JobPauseAtSafePointRequested
+      - JobPausedAtSafePoint
+      - JobPauseDeferred
+      - JobResumed
+
+09.3. JobCreated is emitted when a Job object is created.
+
+09.4. JobQueued is emitted when a Job is accepted but not yet running.
+
+09.5. JobStarted is emitted when Job execution begins.
+
+09.6. JobProgressReported is emitted when a Job reports progress.
+
+09.7. JobCompleted is emitted when a Job completes successfully.
+
+09.8. JobFailed is emitted when a Job ends in failure.
+
+09.9. JobCancellationRequested is emitted when cancellation is requested for
+      a Job.
+
+09.10. JobCancelled is emitted when a Job reaches the cancelled terminal
+       outcome.
+
+09.11. JobTimeoutReached is emitted when a Job reaches its timeout boundary.
+
+09.12. JobPauseAtSafePointRequested is emitted when pause-at-safe-point is
+       requested for a Job.
+
+09.13. JobPausedAtSafePoint is emitted when a Job reaches and applies a
+       safe-point pause.
+
+09.14. JobPauseDeferred is emitted when a Job cannot pause immediately but
+       the pause request remains pending or deferred by policy.
+
+09.15. JobResumed is emitted when a paused Job resumes.
+
+09.16. Job lifecycle trace evidence records enough context to explain:
+       - jobId
+       - appInstanceId when applicable
+       - orchestrationUnitId when applicable
+       - caller pack identity when applicable
+       - capability identifier when applicable
+       - RPC request identity when applicable
+       - debugger request identity when applicable
+       - terminal outcome when the Job reaches one
+       - failureReasonCategory when the Job fails
+       - cancelReasonCategory when cancellation completes
+       - timeoutPolicyId when timeout policy participates
+       - safePointDescriptor when a safe point is reached
+
+09.17. DA-03 defines the trace substrate used to represent Job lifecycle
+       trace evidence.
+
+09.18. DA-19 defines only the Job-domain ownership of these trace reasons
+       and required correlation evidence.
+
+
+===============================================================================
+10. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+10.1. OPEN questions include:
+      - exact Job state machine shape
+      - whether all Jobs require queued state
+      - whether timeout is terminal outcome or failure subclass in concrete
+        APIs
+      - exact progress payload semantics
+      - exact relationship between Jobs, RPC requests, subscriptions, and
+        capability calls
+      - exact Job result envelope structure
+      - exact cancellation refusal or deferral taxonomy
+
+10.2. These questions remain open because this document currently exists to
+      establish ownership boundaries needed by the DA-03 tracing migration
+      and the upcoming Job proposal integration.
+
+
+===============================================================================
+11. LOCKED SUMMARY
+===============================================================================
+
+11.1. LOCKED:
+      - Job is an explicit lifecycle object representing requested work
+      - Job identity is distinct from RPC request identity
+      - Job identity is distinct from Orchestration Unit identity
+      - jobId is the Job correlation identity
+      - Job lifecycle has observable terminal outcomes
+      - cancellation request and cancellation outcome are distinct
+      - timeout is explicit
+      - safe-point pause is explicit
+      - Job-domain trace reason identifiers are owned by DA-19
+      - DA-03 owns the trace substrate, not Job lifecycle semantics
+
+11.2. OPEN:
+      - detailed Job lifecycle workflows beyond identity, cancellation,
+        timeout, safe-point, and trace-ownership boundaries
+
+
+===============================================================================
+END OF DA-19 - JOBS, LONG-RUNNING WORK & CANCELLATION
+===============================================================================
+
+--- doc-meta ---
+DOC_ID: DA-19
+DOC_FILE: docs/design/DA-19_JOBS_LONG_RUNNING_WORK_AND_CANCELLATION.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
