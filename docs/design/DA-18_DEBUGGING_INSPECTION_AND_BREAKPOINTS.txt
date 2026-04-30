@@ -29,7 +29,7 @@ It defines:
 - trace integration requirements for debugger actions and breakpoint events
 
 It does NOT define:
-- the tracing model, reason sets, or retention rules (see DA-03)
+- the tracing model, trace event schema, or retention rules (see DA-03)
 - authoritative committed state, transactions, or windows (see DA-04)
 - activation semantics beyond pause boundaries (see DA-14)
 - concrete user-interface layout for debugger tooling
@@ -446,17 +446,23 @@ Upstream Documents:
 13. TRACE RETENTION AND DEBUGGER ACTIONS (LOCKED)
 ===============================================================================
 
-13.1. Debugger tooling does not create untraced gaps.
+13.1. Debugger tooling does not create untraced gaps for debugger actions
+      that inspect, pause, resume, abort, stage, apply, discard, or mutate
+      Turnix-managed state.
 
-13.2. Any debugger action that affects trace evidence, including export,
-      prune, clear, or retention-policy changes, emits the corresponding
-      trace reasons defined in DA-03.
+13.2. Debugger actions that affect trace evidence, including export, prune,
+      clear, or retention-policy changes, remain trace-visible.
 
-13.3. Such events are marked as debugger-initiated through trace
-      attributes.
+13.3. Debugger-originated trace-affecting actions are marked as
+      debugger-initiated through trace attributes.
 
 13.4. Trace retention and loss-evidence rules apply equally to debugger-
       initiated trace-affecting actions.
+
+13.5. DA-03 defines the tracing substrate used to represent debugger trace
+      evidence.
+
+13.6. This document defines debugger-specific trace obligations.
 
 
 ===============================================================================
@@ -546,43 +552,145 @@ Upstream Documents:
 ===============================================================================
 
 19.1. If the debugger disconnects:
-      - execution resumes or aborts according to policy
-      - the chosen outcome is traced using the debugger-disconnect outcome
-        reasons defined in DA-03
+      - execution resumes, aborts, or refuses to hold according to policy
+      - the chosen outcome is trace-visible
       - deadlock is not allowed
 
-19.2. If breakpoint logic errors:
+19.2. Debugger disconnect outcome trace evidence distinguishes:
+      - execution resumed after debugger disconnect by policy
+      - active work aborted after debugger disconnect by policy
+      - hold refused because holding is unsupported, unsafe, or impossible
+
+19.3. Debugger disconnect outcome trace evidence records enough context to
+      explain:
+      - debugger client identity
+      - policy identity
+      - disconnect kind
+      - affected target when work is aborted
+      - refusal reason category when hold is refused
+
+19.4. If breakpoint logic errors:
       - the breakpoint is disabled
-      - the error is traced
+      - the error is trace-visible
 
 
 ===============================================================================
 20. RELATION TO TRACING
 ===============================================================================
 
-20.1. Every breakpoint hit:
-      - emits a trace event
-      - links to the causal chain
-      - records inspection and mutation actions when applicable
+20.1. Debugger connection lifecycle trace evidence distinguishes:
+      - debugger connected
+      - debugger disconnected
 
-20.2. Breakpoint hits and resume actions are traced using the breakpoint
-      reasons defined in DA-03.
+20.2. Debugger connection trace evidence records enough context to explain:
+      - debugger client identity
+      - connectionKind when a debugger connects
+      - disconnect kind when a debugger disconnects
 
-20.3. Breakpoint-hit trace events include sufficient identifiers for
-      offline linking when applicable, including:
-      - appInstanceId
-      - pipelineRunId and stageId for pipeline breakpoints
-      - memoryLayerId and memory-key identity for memory breakpoints
-      - transactionId and mutation phase for staged or committed mutation
-      - capability identifier and caller-pack identity for capability
-        breakpoints
-      - orchestrationUnitId or Job identity when applicable
+20.3. Every breakpoint hit emits trace evidence.
 
-20.4. Tracing and debugging are complementary.
+20.4. Breakpoint-hit trace evidence links to the causal chain.
 
-20.5. Debugger actions that stage and apply mutations at safe points are
-      traced as distinct events that share a stable mutation-lineage
-      identifier.
+20.5. Breakpoint-hit trace evidence records inspection and mutation actions
+      when applicable.
+
+20.6. Breakpoint-hit trace evidence distinguishes breakpoint type.
+
+20.7. Breakpoint-hit trace evidence includes:
+      - breakpointId
+      - breakpoint type
+      - breakpoint scope
+      - appInstanceId when applicable
+
+20.8. Pipeline breakpoint-hit trace evidence additionally includes:
+      - pipelineRunId
+      - stageId
+
+20.9. Memory breakpoint-hit trace evidence additionally includes:
+      - memoryLayerId
+      - memory-key identity
+      - mutation phase
+      - mutationKind
+      - transactionId when applicable
+
+20.10. Capability breakpoint-hit trace evidence additionally includes:
+       - capability identifier
+       - caller-pack identity
+       - decisionPoint when applicable
+
+20.11. Breakpoint-hit trace evidence includes orchestrationUnitId or Job
+       identity when applicable.
+
+20.12. Manual pause trace evidence distinguishes:
+       - pause requested
+       - pause granted
+       - pause refused
+       - pause-at-safe-point requested
+       - pause-at-safe-point applied
+
+20.13. Manual pause trace evidence records enough context to explain:
+       - request identity
+       - pause scope
+       - target identity
+       - whether a safe point was reached
+       - safe-point descriptor when applicable
+       - refusal reason category when pause is refused
+
+20.14. Debugger inspection trace evidence records:
+       - inspection kind
+       - target kind
+       - target identity when applicable
+
+20.15. Debugger mutation trace evidence distinguishes:
+       - mutation requested
+       - mutation staged
+       - mutation applied
+       - mutation discarded
+
+20.16. Debugger mutation trace evidence records enough context to explain:
+       - mutation request identity
+       - mutation lineage identity
+       - target kind
+       - target identity
+       - mutation kind
+       - intended safe point when staged
+       - applied safe point when applied
+       - discard reason category when discarded
+
+20.17. Debugger actions that stage and apply mutations at safe points are
+       traced as distinct events that share a stable mutation-lineage
+       identifier.
+
+20.18. DA-18 owns the debugger-domain trace reason identifiers used for
+       debugger inspection, breakpoints, manual pause, safe-point pause,
+       debugger disconnect outcomes, and debugger-initiated mutation.
+
+20.19. The following debugger-domain trace reasons are defined:
+
+       - DebuggerConnected
+       - DebuggerDisconnected
+       - DebuggerDisconnectedResume
+       - DebuggerDisconnectedAbort
+       - DebuggerDisconnectedHoldRefused
+       - BreakpointHit
+       - BreakpointResumed
+       - ManualPauseRequested
+       - ManualPauseGranted
+       - ManualPauseRefused
+       - PauseAtSafePointRequested
+       - PauseAtSafePointApplied
+       - DebuggerInspection
+       - DebuggerMutationRequested
+       - DebuggerMutationStaged
+       - DebuggerMutationApplied
+       - DebuggerMutationDiscarded
+
+20.20. Tracing and debugging are complementary.
+
+20.21. DA-03 defines trace event structure, trace DAG semantics, span
+       mechanics, and trace retention semantics.
+
+20.22. This document defines debugger-specific trace obligations.
 
 
 ===============================================================================
@@ -623,6 +731,8 @@ Upstream Documents:
       - undo of authoritative debugger changes operates on committed
         revisions as new explicit debugger-initiated work
       - redo history is debugger-local, ephemeral, and non-authoritative
+      - debugger-specific trace obligations are owned here
+      - debugger-domain trace reason identifiers are owned by DA-18
       - Job-safe breakpointing and pausing
       - non-blocking debugger behavior
 
@@ -638,6 +748,6 @@ END OF DA-18 - DEBUGGING, INSPECTION & BREAKPOINTS
 --- doc-meta ---
 DOC_ID: DA-18
 DOC_FILE: docs/design/DA-18_DEBUGGING_INSPECTION_AND_BREAKPOINTS.txt
-DOC_REV: 16
-DOC_GIT: c9eaee8
+DOC_REV: 17
+DOC_GIT: a13c63d
 ----------------
