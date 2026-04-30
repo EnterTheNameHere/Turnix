@@ -372,12 +372,19 @@ Upstream Documents:
        - why it was aborted
        - how it relates causally to the retained evidence still present
 
-07.11. An AbortedWindow may be fully removed only if explicit policy
-       permits the removal and either:
+07.11. AbortedWindow finalization trace evidence records enough context to
+       explain:
+       - appInstanceId
+       - abortedWindowId
+       - abort reason category
+       - causal relation to retained evidence still present
+
+07.12. An AbortedWindow may be fully removed only if explicit policy permits
+       the removal and either:
        - at least one later SafePointWindow exists
        - or the engine explicitly accepts loss of that audit region
 
-07.12. When such removal occurs, the platform remains explicit and honest
+07.13. When such removal occurs, the platform remains explicit and honest
        about the loss of that audit region.
 
 
@@ -511,62 +518,129 @@ Upstream Documents:
       - creation failure
       - creation cancellation when cancellation occurs
 
-10.3. Turnix emits trace-visible lifecycle events for each applicable stage
-      of that lifecycle, consistent with the tracing requirements defined in
-      [constrained-by: DA-03 05.1.1.6].
+10.3. Turnix emits trace-visible lifecycle evidence for each applicable
+      stage of that lifecycle.
 
-10.4. Queued state remains distinguishable from started creation.
+10.4. SafePointWindow creation trace evidence distinguishes:
+      - SafePointWindow creation requested
+      - SafePointWindow creation queued
+      - SafePointWindow creation started
+      - SafePointWindow creation succeeded
+      - SafePointWindow creation failed
+      - SafePointWindow creation cancelled
 
-10.5. Failure does not create a partial finalized artifact.
+10.5. DA-08 owns the Window-domain trace reason identifiers used for
+      SafePointWindow creation and ActiveWindow abort finalization.
 
-10.6. Cancellation is explicit.
+10.6. The following Window-domain trace reasons are defined:
 
-10.7. Lifecycle visibility remains consistent with the creation request mode
-      in effect.
+      - SafePointWindowCreationRequested
+      - SafePointWindowCreationQueued
+      - SafePointWindowCreationStarted
+      - SafePointWindowCreationSucceeded
+      - SafePointWindowCreationFailed
+      - SafePointWindowCreationCancelled
+      - ActiveWindowFinalizedAsAborted
+
+10.7. SafePointWindowCreationRequested trace evidence records enough context
+      to explain:
+      - appInstanceId
+      - requestMode
+      - requestId
+
+10.8. SafePointWindowCreationQueued trace evidence records enough context to
+      explain:
+      - appInstanceId
+      - requestId
+      - queuePolicyId when applicable
+
+10.9. SafePointWindowCreationStarted trace evidence records enough context to
+      explain:
+      - appInstanceId
+      - requestId
+
+10.10. SafePointWindowCreationSucceeded trace evidence records enough context
+       to explain:
+       - appInstanceId
+       - requestId
+       - safePointWindowId
+       - committedStateRoot when available
+       - includedEvidencePolicyId when applicable
+
+10.11. SafePointWindowCreationFailed trace evidence records enough context
+       to explain:
+       - appInstanceId
+       - requestId
+       - failureReasonCategory
+
+10.12. SafePointWindowCreationCancelled trace evidence records enough context
+       to explain:
+       - appInstanceId
+       - requestId
+       - cancelReasonCategory
+
+10.13. ActiveWindowFinalizedAsAborted trace evidence records enough context
+       to explain:
+       - appInstanceId
+       - abortedWindowId
+       - abortReasonCategory
+
+10.14. Queued state remains distinguishable from started creation.
+
+10.15. Failure does not create a partial finalized artifact.
+
+10.16. Cancellation is explicit.
+
+10.17. Lifecycle visibility remains consistent with the creation request mode
+       in effect.
+
+10.18. DA-03 defines the tracing substrate used to represent
+       SafePointWindow creation and ActiveWindow finalization evidence.
 
 
 ===============================================================================
 11. TRACE CORRELATION WITH WINDOWS AND FINALIZED EVIDENCE
 ===============================================================================
 
-11.1. This document consumes the trace model defined by
-      [defined-in: DA-03 04].
+11.1. This document consumes the trace substrate defined by DA-03.
 
-11.2. This document does not redefine trace events, trace DAG structure,
-      span semantics, or trace storage semantics.
+11.2. This document defines Window-specific trace obligations.
 
-11.3. Finalized Windows are correlated to trace evidence through explicit
+11.3. This document does not redefine trace event structure, trace DAG
+      structure, span semantics, or trace storage semantics.
+
+11.4. Finalized Windows are correlated to trace evidence through explicit
       retained trace identity and causal relationships rather than through
       timestamps alone.
 
-11.4. Each SafePointWindow is identifiable through retained trace evidence
+11.5. Each SafePointWindow is identifiable through retained trace evidence
       that states:
       - safePointWindowId
       - the committed scope or scopes covered
       - the reason or creation path
       - whether optional evidence classes are included by policy
 
-11.5. Each AbortedWindow is identifiable through retained trace evidence
+11.6. Each AbortedWindow is identifiable through retained trace evidence
       that states:
       - abortedWindowId
       - the abort outcome
       - the abort reason category
       - the causal relation to the retained evidence still present
 
-11.6. Trace correlation distinguishes:
+11.7. Trace correlation distinguishes:
       - events that contributed to committed state included in a
         SafePointWindow
       - events that remained in later ActiveWindow or AbortedWindow regions
 
-11.7. This distinction does not rely on timestamps alone.
+11.8. This distinction does not rely on timestamps alone.
 
-11.8. If retained finalized evidence includes a trace span close event, the
-      corresponding span open event is also included.
+11.9. If retained finalized evidence includes a trace span end event, the
+      corresponding span begin event is also included.
 
-11.9. Evidence carry-forward may reference older retained trace material
-      only to preserve internal consistency of the retained evidence closure.
+11.10. Evidence carry-forward may reference older retained trace material
+       only to preserve internal consistency of the retained evidence closure.
 
-11.10. Trace incompleteness, pruning, corruption, or partial export remains
+11.11. Trace incompleteness, pruning, corruption, or partial export remains
        explicit when it affects retained finalized evidence.
 
 
@@ -985,6 +1059,8 @@ Upstream Documents:
       - finalization produces exactly one finalized outcome from
         ActiveWindow
       - SafePointWindow creation modes and lifecycle visibility are explicit
+      - SafePointWindow creation trace obligations are owned here
+      - Window-domain trace reason identifiers are owned by DA-08
       - journal is non-authoritative evidence and retention loss does not
         affect committed-state meaning
       - journal retention policy is explicit, inspectable, and configurable
@@ -1023,6 +1099,6 @@ OFFLINE COMPARISON
 --- doc-meta ---
 DOC_ID: DA-08
 DOC_FILE: docs/design/DA-08_WINDOWS_HISTORICAL_EVIDENCE_EXPORTS_AND_OFFLINE_COMPARISON.txt
-DOC_REV: 5
-DOC_GIT: 3d70e95
+DOC_REV: 6
+DOC_GIT: 7112ca1
 ----------------
