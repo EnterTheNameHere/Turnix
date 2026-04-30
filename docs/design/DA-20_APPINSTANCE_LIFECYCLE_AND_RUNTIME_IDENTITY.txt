@@ -1,0 +1,254 @@
+===============================================================================
+DESIGN AREA DA-20 - APPINSTANCE LIFECYCLE & RUNTIME IDENTITY
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines AppInstance runtime identity, active-region lifecycle boundaries, and
+AppInstance-owned trace reason identifiers.
+
+This document is intentionally minimal at creation time. It exists to give
+AppInstance lifecycle semantics a proper ownership home instead of placing
+AppInstance-specific lifecycle rules in the tracing substrate.
+
+Purpose:
+--------
+This document defines the AppInstance lifecycle and runtime identity anchor
+for Turnix.
+
+It defines:
+- appInstanceId as runtime instance identity
+- relationship between AppInstance, AppPack, and active save context
+- AppInstance active-region lifecycle boundaries
+- AppInstanceActiveSpanBegin and AppInstanceActiveSpanEnd trace reasons
+- minimum trace evidence for AppInstance active-region span boundaries
+
+It does NOT define:
+- trace event structure, trace DAG semantics, or span mechanics (see DA-03)
+- authoritative committed state or transaction semantics (see DA-04)
+- Window, SafePointWindow, or AbortedWindow semantics (see DA-08)
+- pack activation semantics, onLoad(ctx), or PackContext authority
+  (see DA-14)
+- service, capability, or permission semantics (see DA-16)
+- Job lifecycle or long-running work semantics (future design area)
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-03
+- DA-04
+- DA-08
+- DA-14
+- DA-16
+
+Downstream Documents:
+--------------------
+- Future Job lifecycle design area
+
+
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
+
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines AppInstance lifecycle and runtime identity
+      semantics within that shared interpretation model.
+
+
+===============================================================================
+02. CORE CONCEPT
+===============================================================================
+
+02.1. AppInstance lifecycle answers:
+
+          "Which running instance of an AppPack is active, which save
+           context is bound to it, and when does its runtime active region
+           begin and end?"
+
+02.2. An AppInstance is a runtime instance of an AppPack.
+
+02.3. An AppInstance may be associated with an active save context.
+
+02.4. AppInstance identity is distinct from pack identity.
+
+02.5. AppInstance identity is distinct from save identity.
+
+02.6. AppInstance lifecycle is distinct from pack activation.
+
+02.7. Pack activation occurs inside or in relation to an AppInstance active
+      region, but activation does not define the AppInstance active region
+      by itself.
+
+02.8. AppInstance lifecycle provides the runtime container boundary in which
+      activation, state mutation, Windows, capabilities, debugging, tracing,
+      and future Jobs may occur.
+
+
+===============================================================================
+03. APPINSTANCE IDENTITY
+===============================================================================
+
+03.1. appInstanceId identifies one AppInstance.
+
+03.2. appInstanceId is stable for the lifetime of that AppInstance.
+
+03.3. appInstanceId is not reused for a different AppInstance during the
+      same kernel run.
+
+03.4. appInstanceId is the correlation identity used by AppInstance-owned
+      trace evidence.
+
+03.5. appInstanceId does not identify an AppPack by itself.
+
+03.6. appInstanceId does not identify a SavePack by itself.
+
+
+===============================================================================
+04. RELATION TO APPPACK AND SAVE CONTEXT
+===============================================================================
+
+04.1. An AppInstance has one active AppPack identity.
+
+04.2. The active AppPack identity identifies the executable pack whose
+      runtime instance is represented by the AppInstance.
+
+04.3. An AppInstance may have one active save identity when running from or
+      against a save context.
+
+04.4. Absence of active save identity means no save context is bound, not
+      that the AppInstance identity is invalid.
+
+04.5. Save binding semantics remain constrained by the SavePack and Window
+      documents that own save and historical evidence behavior.
+
+
+===============================================================================
+05. APPINSTANCE ACTIVE REGION
+===============================================================================
+
+05.1. An AppInstance active region is the bounded runtime interval during
+      which an AppInstance is active.
+
+05.2. An active region begins when the AppInstance becomes active.
+
+05.3. An active region ends when the AppInstance is no longer active.
+
+05.4. At most one active region exists for one AppInstance at a time.
+
+05.5. Work occurring inside an AppInstance active region remains linkable to
+      that AppInstance when the owning subsystem records AppInstance
+      correlation evidence.
+
+05.6. Ending an AppInstance active region does not by itself define whether
+      in-flight work committed, aborted, retried, or resumed.
+
+05.7. Window finalization semantics are defined by DA-08.
+
+05.8. Pack activation failure semantics are defined by DA-14.
+
+
+===============================================================================
+06. APPINSTANCE TRACE REASON IDENTIFIERS
+===============================================================================
+
+06.1. DA-20 owns the AppInstance-domain trace reason identifiers used for
+      AppInstance active-region span boundaries.
+
+06.2. The following AppInstance-domain trace reasons are defined:
+
+      - AppInstanceActiveSpanBegin
+      - AppInstanceActiveSpanEnd
+
+06.3. AppInstanceActiveSpanBegin is emitted when an AppInstance becomes
+      active.
+
+06.4. AppInstanceActiveSpanBegin trace evidence records enough context to
+      explain:
+      - appInstanceId
+      - spanIdentity
+      - activePackId or equivalent active pack identity
+      - activeSaveIdentity when applicable
+
+06.5. AppInstanceActiveSpanEnd is emitted when an AppInstance is no longer
+      active.
+
+06.6. AppInstanceActiveSpanEnd trace evidence records enough context to
+      explain:
+      - appInstanceId
+      - spanIdentity
+      - endReasonCategory
+
+06.7. AppInstanceActiveSpanEnd endReasonCategory distinguishes:
+      - NormalDeactivate
+      - Crash
+      - ForcedDeactivate
+      - KernelExit
+
+06.8. DA-03 defines the trace substrate used to represent AppInstance span
+      evidence.
+
+06.9. DA-20 defines only the AppInstance-domain ownership of these trace
+      reasons and required correlation evidence.
+
+
+===============================================================================
+07. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+07.1. OPEN questions include:
+      - AppInstance creation request semantics
+      - AppInstance shutdown request semantics
+      - AppInstance restart semantics
+      - relationship between AppInstance lifecycle and future Job lifecycle
+      - exact appInstanceId representation
+
+07.2. These questions remain open because this document currently exists to
+      establish ownership boundaries needed by the DA-03 tracing migration.
+
+
+===============================================================================
+08. LOCKED SUMMARY
+===============================================================================
+
+08.1. LOCKED:
+      - AppInstance identity is distinct from pack identity
+      - AppInstance identity is distinct from save identity
+      - AppInstance lifecycle is distinct from pack activation
+      - appInstanceId is the runtime instance correlation identity
+      - AppInstance active regions have begin and end boundaries
+      - AppInstance-domain trace reason identifiers are owned by DA-20
+      - AppInstanceActiveSpanBegin and AppInstanceActiveSpanEnd are defined
+        here
+      - DA-03 owns the trace substrate, not AppInstance lifecycle semantics
+
+08.2. OPEN:
+      - detailed AppInstance lifecycle workflows beyond active-region
+        identity boundaries
+
+
+===============================================================================
+END OF DA-20 - APPINSTANCE LIFECYCLE & RUNTIME IDENTITY
+===============================================================================
+
+--- doc-meta ---
+DOC_ID: DA-20
+DOC_FILE: docs/design/DA-20_APPINSTANCE_LIFECYCLE_AND_RUNTIME_IDENTITY.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
