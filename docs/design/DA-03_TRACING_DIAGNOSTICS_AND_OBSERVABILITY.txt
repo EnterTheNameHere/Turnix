@@ -8,33 +8,42 @@ EVOLVING
 
 Description:
 ------------
-Defines the Turnix tracing model, including trace events, causal structure,
-reasons, span rules, and retention-loss evidence, enabling offline audit and
-explanation without making trace retention a hidden correctness dependency.
+Defines the Turnix tracing substrate, including trace events, causal
+structure, spans, trace evidence, retention-loss evidence, and diagnostic
+access, without owning domain-specific lifecycle or tracing obligations.
 
 Purpose:
 --------
-This design area defines the Turnix tracing, diagnostics, and observability
-model.
+This design area defines the shared Turnix tracing, diagnostics, and
+observability substrate.
 
 It defines:
-- what tracing means in Turnix and what it is authoritative for
-- trace event fields and causal DAG semantics
-- trace spans, ordering constraints, and trace roots
-- trace reasons and required reason sets
-- retention, pruning, and loss evidence requirements
-- required tracing coverage for discovery, resolution, activation, and
-  capabilities
-- configuration and state trace integration rules
-- trace access and user-facing diagnostics constraints
-- error envelope integration requirements
+- what trace evidence means in Turnix
+- what trace evidence is authoritative for
+- trace event structure
+- trace DAG semantics
+- parent links and causal links
+- trace span mechanics
+- trace roots and span stratification
+- trace reason field semantics
+- trace attribute field semantics
+- trace retention, pruning, and loss evidence
+- trace access and user-facing diagnostic constraints
+- error-envelope correlation with trace evidence
 
 It does NOT define:
+- which domain objects must be traced
+- which domain lifecycle transitions exist
+- which domain events are important enough to record
+- which object-specific trace reasons must be emitted
+- which object-specific trace attributes are required
+- discovery, resolution, activation, capability, configuration, state,
+  Window, debugger, RPC, or Job lifecycle semantics
 - authoritative committed state, transactions, or windows (see DA-04)
 - debugger pause and mutation safety semantics (see DA-18)
 - concrete storage formats, codecs, or digest algorithms
   (see DA-05, DA-06, DA-08)
-- UI layout for trace viewers or debugger tooling (see OPTIONAL DESIGN AREAS)
+- UI layout for trace viewers or debugger tooling
 
 Upstream Documents:
 ------------------
@@ -43,6 +52,21 @@ Upstream Documents:
 - CMR-03
 - CMR-04
 - CMR-05
+
+Downstream Documents:
+--------------------
+- DA-04
+- DA-06
+- DA-08
+- DA-09
+- DA-11
+- DA-13
+- DA-14
+- DA-16
+- DA-17
+- DA-18
+- IS-01
+- IS-02
 
 
 ===============================================================================
@@ -59,7 +83,7 @@ Upstream Documents:
       interpretation model used by this document.
 
 01.4. This document defines tracing, diagnostics, and observability
-      semantics within that shared interpretation model.
+      substrate semantics within that shared interpretation model.
 
 
 ===============================================================================
@@ -70,884 +94,348 @@ Upstream Documents:
 
           "What happened, what caused what, and why?"
 
-02.2. Tracing provides:
-      - causal explanation (authoritative)
-      - decision evidence (authoritative)
-      - observed temporal sequence (non-authoritative)
-      - diagnostic context (non-authoritative)
+02.2. Tracing is structured evidence with explicit reasons and causal
+      links.
 
 02.3. Tracing is not logging.
 
-02.4. Tracing is structured evidence with explicit reasons and causal links.
+02.4. Plain logs are secondary and optional.
 
-02.5. Turnix uses tracing to support:
-      - debugging
-      - user explanation
-      - post-mortem analysis
-      - reproducibility and audit
+02.5. Logs do not replace trace evidence.
 
-02.6. Tracing is authoritative evidence for:
-      - causality
-      - decisions
-      - audit reconstruction within retained evidence
-      - debugger and tooling correlation within retained evidence
-      - policy-enforcement provenance within retained evidence
+02.6. Tracing provides:
+      - causal explanation
+      - decision evidence
+      - observed temporal sequence
+      - diagnostic context
 
-02.7. Tracing is not authoritative for:
+02.7. Tracing is authoritative evidence for:
+      - causality represented inside retained trace evidence
+      - decisions represented inside retained trace evidence
+      - audit reconstruction within retained trace evidence
+      - debugger and tooling correlation within retained trace evidence
+      - policy-enforcement provenance within retained trace evidence
+
+02.8. Tracing is not authoritative for:
       - committed state
       - committed-state restoration
       - replay semantics
       - rollback eligibility by itself
+      - object lifecycle truth outside retained trace evidence
 
-02.8. "If it is not traced, it did not happen" means:
-      - Turnix emits trace events for all decision-producing actions
+02.9. "If it is not traced, it did not happen" means:
+      - trace evidence is the proof that a trace-using subsystem recorded
+        the action
       - if an action cannot be found in retained trace evidence, the action
         is not provable from trace
-      - trace retention is policy-driven and loss is acceptable only when
-        loss is explicitly represented as loss evidence
+      - trace retention is policy-driven
+      - trace loss is acceptable only when loss is explicitly represented
+        as loss evidence
 
-02.9. Success paths are traceable too, not only failures.
+02.10. This mantra does not make this document the owner of every domain
+       object's tracing obligations.
 
-02.10. If only failures are observable, accidental success remains invisible
-       until it stops being successful.
+02.11. Trace evidence can represent successful, failed, refused, cancelled,
+      superseded, and other domain-defined outcomes.
 
-02.11. A successful path that cannot be explained after the fact is an
-       observability failure.
+02.12. Trace evidence supports explanation of an outcome only when the
+       owning domain records evidence for that outcome.
 
-02.12. Tracing therefore supports questions such as:
-       - why a capability grant was accepted
-       - why a resource resolved to a given pack
-       - why a state value existed at a given moment
-       - why one handler path was selected over another
-       - why a UI result was delivered
+02.13. A trace consumer does not infer an unrecorded outcome merely because
+       failure evidence is absent.
 
-02.13. Reason fields, causal links, and before/after state exist so that
-       Turnix can explain not only that something happened, but why it
-       happened.
+02.14. Reason fields, causal links, and attributes allow Turnix to explain
+       recorded events without treating unrecorded events as proven.
 
+02.15. The design area that owns an object, lifecycle, workflow, or
+       subsystem defines whether and how that subject uses the tracing
+       substrate.
 
-===============================================================================
-03. TRACE FIRST, LOG SECOND (LOCKED)
-===============================================================================
+02.16. If a domain chooses not to emit trace evidence for a meaningful
+       action, that absence is a weakness of that domain's design.
 
-03.1. Turnix prioritizes:
-      - structured trace events
-      - explicit reasons
-      - causal relationships
-
-03.2. Plain logs are secondary and optional.
-
-03.3. Logs are not relied upon for correctness or explanation.
-
-03.4. Logs do not replace trace evidence.
+02.17. That absence does not change the tracing substrate defined by this
+       document.
 
 
 ===============================================================================
-04. TRACE EVENT MODEL (LOCKED)
+03. TRACE SUBSTRATE OWNERSHIP
 ===============================================================================
 
-04.1. Each trace event has:
+03.1. DA-03 owns the tracing substrate.
+
+03.2. DA-03 defines how trace evidence is represented, related, retained,
+      accessed, and interpreted.
+
+03.3. DA-03 does not own domain lifecycles.
+
+03.4. DA-03 does not prescribe object-specific trace coverage.
+
+03.5. DA-03 does not define which transitions exist for another design
+      area's object.
+
+03.6. DA-03 does not define which domain events are important enough to
+      record.
+
+03.7. The owner of each lifecycle, subsystem, workflow, or object defines
+      its own tracing obligations when trace evidence is required for that
+      subject.
+
+03.8. Subject-specific trace obligations remain subordinate to the trace
+      mechanics defined by this document.
+
+03.9. Subject-specific documents do not redefine trace event structure,
+      trace DAG semantics, span mechanics, retention-loss meaning, or trace
+      access semantics.
+
+03.10. Moving a subject-specific trace obligation out of DA-03 does not
+       weaken the obligation when the subject-owning document preserves it.
+
+03.11. The migration of subject-specific trace obligations preserves one
+       authority home per concept.
+
+
+===============================================================================
+04. TRACE EVENT MODEL
+===============================================================================
+
+04.1. A trace event is one structured evidence record.
+
+04.2. Each trace event has:
       - eventId
       - timestamp
-      - level (info | warn | error | fatal)
-      - domain (discovery, resolution, activation, io, config,
-        capability, debugger, etc.)
-      - message (human-readable)
-      - reason (PascalCase enum)
-      - attributes (structured key-value data)
+      - level
+      - domain
+      - message
+      - reason
+      - attributes
       - optional parentEventIds
 
-04.2. Events form a trace DAG rather than a flat stream.
+04.3. eventId identifies one trace event.
 
-04.3. Causal ordering is authoritative and is represented by explicit DAG
-      links formed through parentEventIds and other causal span links
-      defined in this document.
+04.4. timestamp records observed emission time.
 
-04.4. Temporal ordering is observational only.
+04.5. timestamp is observational.
 
-04.5. Temporal ordering does not determine causality or correctness.
+04.6. timestamp does not define causality.
 
-04.6. Turnix does not use temporal ordering to infer causality or
-      correctness.
+04.7. level classifies presentation severity.
 
-04.7. Causality is preserved across subsystems.
+04.8. domain classifies the subsystem or subject area that emitted the
+      event.
 
-04.8. Correlation attributes should include stable identifiers that allow
-      offline linking to Turnix objects such as:
-      - kernelRunId
-      - appInstanceId
-      - pipelineRunId
-      - orchestrationUnitId
-      - transactionId
-      - memoryLayerId
-      - memory key identity
+04.9. message provides a human-readable explanation.
 
-04.9. Identifier presence may vary by domain.
+04.10. reason provides a machine-readable reason identifier.
 
-04.10. Boundary events and mutation events remain linkable to their owning
+04.11. attributes provide structured data required to interpret the event.
+
+04.12. parentEventIds records explicit causal parents when such parents
+       exist.
+
+04.13. The exact concrete serialization of trace events is defined outside
+       this document.
+
+04.14. Concrete serialization does not change trace event semantics.
+
+
+===============================================================================
+05. TRACE DAG
+===============================================================================
+
+05.1. Events form a trace DAG rather than a flat stream.
+
+05.2. "Trace Directed Acyclic Graph" is the canonical name for the causal
+      trace structure defined by this document.
+
+05.3. "trace DAG" is the permitted abbreviation.
+
+05.4. The trace DAG is the directed acyclic graph formed by trace events
+      and their explicit parent and span-causality links.
+
+05.5. Causal ordering is authoritative within retained trace evidence.
+
+05.6. Causal ordering is represented by explicit DAG links.
+
+05.7. Temporal ordering is observational only.
+
+05.8. Temporal ordering does not determine causality or correctness.
+
+05.9. Turnix does not infer causality from timestamps.
+
+05.10. Cycles do not occur in the trace DAG.
+
+05.11. No trace event is causally reachable from itself through parent or
+       span-causality links.
+
+05.12. The trace DAG is not a substitute for authoritative committed state.
+
+
+===============================================================================
+06. PARENT LINKS
+===============================================================================
+
+06.1. A trace event may reference zero, one, or multiple parent events.
+
+06.2. parentEventIds, when present, is the set of explicit causal parents
+      of that trace event.
+
+06.3. Multiple parent links are permitted.
+
+06.4. Absence of parent links means independent trace origin.
+
+06.5. Absence of parent links does not imply simultaneity.
+
+06.6. A trace event does not list the same parent event more than once.
+
+06.7. Parent links express causal structure rather than temporal order.
+
+
+===============================================================================
+07. TRACE SPANS
+===============================================================================
+
+07.1. Trace spans represent bounded work with a start and an end.
+
+07.2. A span has a begin event and an end event.
+
+07.3. Span begin and span end events are trace events.
+
+07.4. Span begin and span end events participate in the trace DAG.
+
+07.5. Span begin occurs before span end in the same trace DAG.
+
+07.6. A span end does not exist without a reachable span begin.
+
+07.7. Span begin and span end share a stable span identity attribute.
+
+07.8. The exact span identity encoding remains OPEN.
+
+07.9. Span begin and span end are connected by explicit causality links.
+
+07.10. Any export, snapshot, or offline trace view that includes span end
+       also includes the corresponding span begin.
+
+07.11. If a snapshot includes trace evidence, it satisfies the rule:
+       "no included span end without included span begin."
+
+07.12. This snapshot requirement is [satisfied-by: DA-08 11.9].
+
+
+===============================================================================
+08. TRACE ROOTS AND SPAN STRATIFICATION
+===============================================================================
+
+08.1. Trace storage may contain multiple unconnected trace DAG roots.
+
+08.2. Each root represents an independent trace origin.
+
+08.3. Unconnected roots are expected and remain representable without
+      ambiguity.
+
+08.4. Root spans identify the outer retained causal region for trace
+      evidence.
+
+08.5. Nested spans identify bounded work inside a retained causal region.
+
+08.6. Span stratification allows trace consumers to distinguish broad
+      runtime regions from nested bounded work.
+
+08.7. A subject-owning document may define subject-specific span kinds.
+
+08.8. Subject-specific span kinds do not redefine the span mechanics in
+      this document.
+
+08.9. A subject-specific span remains a trace span when it follows the
+      begin, end, identity, and causal-link rules in this document.
+
+08.10. DA-03 owns the trace-substrate reason identifiers used for kernel-run
+       trace root spans.
+
+08.11. The following kernel-run trace span reasons are defined:
+
+       - KernelRunSpanBegin
+       - KernelRunSpanEnd
+
+08.12. KernelRunSpanBegin is emitted when Turnix begins a kernel run.
+
+08.13. KernelRunSpanBegin trace evidence records enough context to explain:
+       - kernelRunId
+       - spanIdentity
+
+08.14. KernelRunSpanEnd is emitted when Turnix ends a kernel run.
+
+08.15. KernelRunSpanEnd trace evidence records enough context to explain:
+       - kernelRunId
+       - spanIdentity
+       - endReasonCategory
+
+08.16. KernelRunSpanEnd endReasonCategory distinguishes:
+       - NormalExit
+       - Crash
+       - ForcedExit
+       - Restart
+
+
+===============================================================================
+09. TRACE REASON FIELD
+===============================================================================
+
+09.1. reason is the machine-readable reason field on a trace event.
+
+09.2. Reason values identify why an event was emitted.
+
+09.3. Reason values are interpreted within the domain that owns them.
+
+09.4. DA-03 does not define a global catalog of domain-specific reason
+      values.
+
+09.5. DA-03 does not define object-specific reason naming schemes.
+
+09.6. DA-03 does not require a domain to use a particular reason value for
+      an object-specific transition.
+
+09.7. The document that owns a domain, lifecycle, or workflow defines the
+      reason values needed by that subject.
+
+09.8. Subject-owned reason values are interpreted through the trace event
+      mechanics defined here.
+
+09.9. Reason examples in this document are illustrative when present.
+
+09.10. Illustrative reason examples do not create required domain coverage.
+
+
+===============================================================================
+10. TRACE ATTRIBUTES
+===============================================================================
+
+10.1. attributes is the structured key-value data attached to a trace event.
+
+10.2. Attributes carry event-specific evidence.
+
+10.3. Attributes support offline linking between trace evidence and Turnix
        objects.
 
+10.4. Stable identifiers may appear in attributes when the emitting domain
+      owns or knows those identifiers.
 
-04.1 PARENT LINKS AND DAG STRUCTURE (LOCKED)
---------------------------------------------
+10.5. Identifier presence varies by domain.
 
-04.1.1. A trace event may reference zero, one, or multiple parent events.
+10.6. DA-03 does not define every object-specific attribute set.
 
-04.1.2. parentEventIds, when present, is the set of explicit causal
-        parents of that trace event.
+10.7. The subject-owning document defines which attributes are required for
+      its own events when it defines trace obligations.
 
-04.1.3. Multiple parent links are permitted.
+10.8. Subject-specific attributes do not redefine the attribute field
+      mechanics defined by this document.
 
-04.1.4. Absence of parent links means independent trace origin rather than
-        simultaneity.
-
-04.1.5. A trace event does not list the same parent event more than once.
-
-04.1.6. Parent links express causal structure rather than temporal order.
-
-
-04.2 TRACE DAG NAMING AND MEANING (LOCKED)
-------------------------------------------
-
-04.2.1. "Trace Directed Acyclic Graph" is the canonical name for the causal
-        trace structure defined by this document.
-
-04.2.2. "trace DAG" is the permitted abbreviation.
-
-04.2.3. The trace DAG is the directed acyclic graph formed by trace events
-        and their explicit parent and span-causality links.
-
-04.2.4. Cycles do not occur in the trace DAG.
-
-04.2.5. No trace event is causally reachable from itself through parent or
-        span-causality links.
-
-04.2.6. The trace DAG is authoritative for causal structure within
-        retained trace evidence.
-
-04.2.7. The trace DAG is not a substitute for authoritative committed
-        state.
-
-
-04.3 TRACE SPANS AND ORDERING (LOCKED)
---------------------------------------
-
-04.3.1. Trace spans represent bounded work with a start and an end.
-
-04.3.2. A span has a begin event and an end event.
-
-04.3.3. Span begin and span end events are trace events and participate in
-        the trace DAG.
-
-04.3.4. Span begin occurs before span end in the same trace DAG.
-
-04.3.5. A span end does not exist without a reachable span begin.
-
-04.3.6. Any export, snapshot, or offline trace view that includes span end
-        also includes the corresponding span begin.
-
-04.3.7. Span begin and span end share a stable span identity attribute.
-
-04.3.8. The exact span identity encoding remains OPEN.
-
-04.3.9. Span begin and span end are connected by explicit causality links.
-
-04.3.10. The trace DAG allows reconstruction of:
-         - which span is open at a SafePointWindow boundary
-         - which spans were closed by that boundary
-
-04.3.11. If a snapshot includes trace evidence, it satisfies the rule:
-         "no included span end without included span begin."
-
-04.3.12. This snapshot requirement is [satisfied-by: DA-08 11.8].
-
-
-04.4 TRACE ROOTS AND SPAN STRATIFICATION (LOCKED)
--------------------------------------------------
-
-04.4.1. Trace storage may contain multiple unconnected trace DAG roots.
-
-04.4.2. Each root represents an independent trace origin, such as a kernel
-        run or an appInstance activation region.
-
-04.4.3. Unconnected roots are expected and remain representable without
-        ambiguity.
-
-04.4.4. Root span types are:
-
-        A) KernelRunSpan
-        - Represents one Turnix kernel run.
-        - KernelRunSpan begin occurs when Turnix begins running.
-        - KernelRunSpan end occurs when Turnix ends running.
-        - KernelRunSpan begin and end share a stable span identity
-          attribute.
-
-        B) AppInstanceActiveSpan
-        - Represents an appInstance being active while a pack is loaded.
-        - Begins when an appInstance becomes active.
-        - Ends when the appInstance is deactivated, or when the
-          KernelRunSpan ends.
-        - Remains linkable to:
-          - appInstanceId
-          - active pack identity
-          - active save identity when applicable
-
-        C) WorkSpans
-        - Nested spans representing bounded work inside an
-          AppInstanceActiveSpan.
-        - Examples:
-          - pipeline runs
-          - capability calls
-          - jobs or long-running orchestration units
-
-04.4.5. Span begin and span end events participate in the trace DAG.
-
-04.4.6. Span begin occurs before span end in the same trace DAG.
-
-04.4.7. A span end does not exist without a reachable span begin.
-
-04.4.8. If an exported trace view includes a span end, it also includes the
-        corresponding span begin.
-
-04.4.9. WorkSpans remain causally reachable from their owning
-        AppInstanceActiveSpan begin event when such ownership exists.
-
-04.4.10. Root spans define when Turnix ran and when an appInstance was
-         active.
-
-04.4.11. WorkSpans define what happened inside that active region.
+10.9. Boundary events and mutation events remain linkable to their owning
+      objects when the owning domain requires that linkage.
 
 
 ===============================================================================
-05. TRACE REASONS (LOCKED)
-===============================================================================
-
-05.1. Reasons are:
-      - stable identifiers
-      - PascalCase
-      - machine-parseable
-      - semantically precise
-
-05.2. Example reasons include:
-      - ManifestInRootLayerDir
-      - SymlinkForbidden
-      - ScanDepthLimitReached
-      - PermissionDenied
-      - NotActivated
-      - SemVerParseError
-      - ConfigValueOverridden
-      - ConfigValueComputed
-      - ConfigWriteBlocked
-      - RestoreFromBackupChosen
-
-05.3. Debugger-related examples include:
-      - DebuggerInspection
-      - DebuggerMutationRequested
-      - DebuggerMutationApplied
-      - DebuggerMutationStaged
-      - DebuggerMutationDiscarded
-      - ManualPauseRequested
-      - ManualPauseGranted
-      - ManualPauseRefused
-      - JobPausedAtSafePoint
-      - JobPauseDeferred
-      - JobAbortRequested
-
-05.4. Turnix emits reasons whenever:
-      - a decision is made
-      - a value source changes
-      - a write is accepted or refused
-      - behavior differs from defaults
-      - debugger tooling inspects or mutates state
-      - execution is paused, staged, resumed, or aborted via debugging
-        facilities
-
-
-05.1 TRACE REASONS FOR RETENTION, CONTINUITY, AND LOSS (LOCKED)
----------------------------------------------------------------
-
-05.1.1. This subsection defines required trace reasons for trace retention
-        behavior, continuity evidence, and explicit loss reporting.
-
-05.1.2. These reasons preserve the meaning of:
-        "If it is not traced, it did not happen"
-        under policy-driven retention.
-
-05.1.3. Trace retention events use domain = trace or persistence.
-
-05.1.4. Manual user actions use domain = debugger or policy.
-
-05.1.5. Events in this subsection include correlation attributes when
-        available:
-        - kernelRunId
-        - appInstanceId
-        - pipelineRunId
-        - orchestrationUnitId
-        - transactionId
-        - activeWindow identity (if applicable)
-        - policyId (if applicable)
-
-
-05.1.1 REQUIRED RETENTION AND LOSS REASONS (LOCKED)
----------------------------------------------------
-
-05.1.1.1. The following reasons exist and are emitted when applicable.
-
-05.1.1.2. Trace system lifecycle and storage behavior:
-
-        - TraceStorageWriteSucceeded
-          Emitted when a trace chunk, segment, or write unit is persisted
-          successfully.
-
-          Required attributes:
-          - storageTarget (implementation detail label)
-          - byteCount
-          - eventCount
-          - chunkId or storageUnitId
-
-        - TraceStorageWriteFailed
-          Emitted when a trace write attempt fails.
-
-          Required attributes:
-          - storageTarget
-          - errorCode (or error identifier)
-          - failureMode (example: PermissionDenied, DiskFull, IoUnavailable)
-          - droppedEventCount (0 if none)
-          - policyId (if policy influenced behavior)
-
-        - TraceStorageWriteDropped
-          Emitted when trace events are intentionally dropped due to
-          pressure or non-blocking policy.
-
-          Required attributes:
-          - policyId
-          - dropReasonCategory (StoragePressure, QuotaExceeded, Backpressure)
-          - droppedEventCount
-          - affectedDomainSet (optional)
-          - scopeHint (kernelRun, appInstance, unknown)
-
-05.1.1.3. Explicit pruning and removal:
-
-        - TracePruneRequested
-          Emitted when pruning is initiated.
-
-          Required attributes:
-          - policyId
-          - pruneReasonCategory (PolicyRotation, QuotaExceeded, AgeExceeded,
-            ManualRemoval, OtherExplicitReason)
-          - intendedScope (kernelRun, appInstance, window, global)
-          - prunePlanId (stable identifier for the pruning attempt)
-
-        - TracePruneApplied
-          Emitted when pruning is successfully applied.
-
-          Required attributes:
-          - policyId
-          - prunePlanId
-          - prunedTargetDescriptor
-            (a structured description such as chunkId ranges, eventId
-             ranges, or named retention buckets)
-          - prunedUnitCount
-          - prunedEventCount (if known)
-          - scopeIdentity (kernelRunId, appInstanceId, window identity if
-            applicable)
-
-        - TracePruneFailed
-          Emitted when pruning fails.
-
-          Required attributes:
-          - policyId
-          - prunePlanId
-          - errorCode (or error identifier)
-          - failureMode
-          - scopeIdentity (if known)
-
-05.1.1.4. Continuity and completeness claims:
-
-        - TraceContinuityAnchorCreated
-          Emitted when a continuity anchor is created.
-
-          Meaning:
-          - Establishes a durable point in the trace evidence chain.
-
-          Required attributes:
-          - continuityAnchorId
-          - anchorScope (kernelRun, appInstance, window, global)
-          - scopeIdentity (kernelRunId, appInstanceId, window identity if
-            applicable)
-          - prevAnchorId (absent if first)
-          - anchorDigest (if present, computed deterministically)
-          - storageUnitId or chunkId (where the anchor is stored)
-
-        - TraceContinuityBroken
-          Emitted when continuity cannot be maintained.
-
-          Examples:
-          - missing previous anchor
-          - corruption detected
-          - storage reset
-
-          Required attributes:
-          - anchorScope
-          - scopeIdentity (if known)
-          - breakReasonCategory (Corrupt, Missing, Reset, Unknown)
-          - lastKnownAnchorId (if any)
-
-        - TraceEvidenceDeclaredIncomplete
-          Emitted when Turnix explicitly declares that retained trace
-          evidence is not complete for a scope.
-
-          Required attributes:
-          - scopeIdentity (kernelRunId, appInstanceId, window identity if
-            applicable)
-          - incompletenessCategory (Pruned, Dropped, Corrupt, PartialExport,
-            Unknown)
-          - policyId (if applicable)
-
-05.1.1.5. Kernel run and appInstance span boundaries:
-
-        - KernelRunSpanBegin
-          Emitted at the start of a Turnix kernel run.
-
-          Required attributes:
-          - kernelRunId
-          - spanIdentity
-
-        - KernelRunSpanEnd
-          Emitted at the end of a Turnix kernel run.
-
-          Required attributes:
-          - kernelRunId
-          - spanIdentity
-          - endReasonCategory (NormalExit, Crash, ForcedExit, Restart)
-
-        - AppInstanceActiveSpanBegin
-          Emitted when an appInstance becomes active.
-
-          Required attributes:
-          - appInstanceId
-          - spanIdentity
-          - activePackId (or equivalent pack identity)
-          - activeSaveIdentity (optional)
-
-        - AppInstanceActiveSpanEnd
-          Emitted when an appInstance is no longer active.
-
-          Required attributes:
-          - appInstanceId
-          - spanIdentity
-          - endReasonCategory (NormalDeactivate, Crash, ForcedDeactivate,
-            KernelExit)
-
-05.1.1.6. Window boundary trace reasons aligned with DA-08:
-
-        - SafePointWindowCreationRequested
-          Emitted when SafePointWindow creation is requested.
-
-          Required attributes:
-          - appInstanceId
-          - requestMode (ImmediateCommitted, AtQuiescence)
-          - requestId (stable identifier for the request)
-
-        - SafePointWindowCreationQueued
-          Emitted when an AtQuiescence request is queued.
-
-          Required attributes:
-          - appInstanceId
-          - requestId
-          - queuePolicyId (if applicable)
-
-        - SafePointWindowCreationStarted
-          Emitted when SafePointWindow creation begins.
-
-          Required attributes:
-          - appInstanceId
-          - requestId
-
-        - SafePointWindowCreationSucceeded
-          Emitted when SafePointWindow creation completes successfully.
-
-          Required attributes:
-          - appInstanceId
-          - requestId
-          - safePointWindowId
-          - committedStateRoot (optional reference)
-          - includedEvidencePolicyId (optional)
-
-        - SafePointWindowCreationFailed
-          Emitted when SafePointWindow creation fails.
-
-          Required attributes:
-          - appInstanceId
-          - requestId
-          - failureReasonCategory (NotQuiescent, Conflict, IoFailure,
-            PolicyRefused, OtherExplicitReason)
-
-        - SafePointWindowCreationCancelled
-          Emitted when SafePointWindow creation is cancelled.
-
-          Required attributes:
-          - appInstanceId
-          - requestId
-          - cancelReasonCategory (UserCancelled, PolicyCancelled, Timeout,
-            Other)
-
-        - ActiveWindowFinalizedAsAborted
-          Emitted when an ActiveWindow is finalized into an AbortedWindow.
-
-          Required attributes:
-          - appInstanceId
-          - abortedWindowId
-          - abortReasonCategory (ExplicitAbort, Failure, Timeout,
-            PolicyRefused, CrashRecovered, OtherExplicitReason)
-
-
-05.1.2 REQUIRED ATTRIBUTES FOR KEY MUTATION TRACE (LOCKED)
-----------------------------------------------------------
-
-05.1.2.1. Turnix remains able to emit audit-skeleton mutation evidence even
-          under aggressive pruning.
-
-05.1.2.2. For any committed mutation of a memory key, Turnix emits or can
-          reconstruct a trace event with at least:
-          - mutationKind (Set, Delete, Overwrite)
-          - appInstanceId
-          - memoryLayerId
-          - memoryKey identity
-          - baseRevisionId
-          - newRevisionId
-          - debuggerInitiated (true | false)
-          - transactionId (if mutation was committed via a transaction)
-          - orchestrationUnitId (if applicable)
-
-05.1.2.3. baseRevisionId follows the absent-sentinel and revision rules
-          defined in DA-04 04.6-04.9.
-
-05.1.2.4. Mutation evidence is causally linked to:
-          - the transaction commit event
-          - the owning work span or orchestration unit span when such a
-            span exists
-
-
-05.1.3 OPTIONAL REASONS (OPEN)
-------------------------------
-
-05.1.3.1. Additional reasons may be defined to improve observability
-          without changing authority semantics.
-
-05.1.3.2. Examples include:
-        - TraceExportStarted
-        - TraceExportSucceeded
-        - TraceExportFailed
-        - TraceOfflineInspectionStarted
-        - TraceOfflineInspectionFailed
-        - TracePolicyChanged
-        - TracePolicyChangeRefused
-        - TraceRetentionClassApplied
-        - TraceRetentionClassOverridden
-
-
-05.1.4 DEBUGGER TRACE REASONS (REQUIRED) (LOCKED)
--------------------------------------------------
-
-05.1.4.1. This subsection defines required trace reasons for debugger
-          inspection, breakpoints, pausing, and debugger-initiated
-          mutation.
-
-05.1.4.2. These reasons are emitted when applicable.
-
-05.1.4.3. These events are causally linked to the owning span or unit when
-          such ownership exists.
-
-05.1.4.4. These events include correlation attributes when available:
-        - appInstanceId
-        - pipelineRunId
-        - orchestrationUnitId
-        - transactionId
-        - Job identity (if applicable)
-
-05.1.4.5. Debugger connection lifecycle:
-
-        - DebuggerConnected
-          Emitted when a debugger client successfully connects.
-
-          Required attributes:
-          - debuggerClientId (stable per connection)
-          - connectionKind (UI, headless, other)
-
-        - DebuggerDisconnected
-          Emitted when a debugger client disconnects unexpectedly or
-          intentionally.
-
-          Required attributes:
-          - debuggerClientId
-          - disconnectKind (Normal, Unexpected, Timeout, TransportError)
-
-05.1.4.6. Debugger disconnect outcome policy effect:
-
-        Exactly one of the following is emitted when a debugger disconnect
-        causes or triggers a policy outcome for active debugging control.
-
-        - DebuggerDisconnectedResume
-          Emitted when execution continues after debugger disconnect by
-          policy.
-
-          Required attributes:
-          - debuggerClientId
-          - policyId
-
-        - DebuggerDisconnectedAbort
-          Emitted when active work is aborted after debugger disconnect by
-          policy.
-
-          Required attributes:
-          - debuggerClientId
-          - policyId
-          - abortTarget (Job, orchestrationUnit, appInstance)
-
-        - DebuggerDisconnectedHoldRefused
-          Emitted if policy would require holding execution but holding is
-          not allowed or cannot be achieved safely.
-
-          Required attributes:
-          - debuggerClientId
-          - policyId
-          - refusalReasonCategory (NotSupported, NotSafe, NotQuiescent,
-            Other)
-
-05.1.4.7. Breakpoint hit and handling:
-
-        - BreakpointHit
-          Emitted when any breakpoint triggers.
-
-          Required attributes:
-          - breakpointId
-          - breakpointType (PipelineStage, Memory, Capability)
-          - scope (global, appInstance, view, pack, pipeline)
-
-          Required attributes by type:
-          - PipelineStage:
-            - pipelineRunId
-            - stageId
-          - Memory:
-            - memoryLayerId
-            - memoryKey identity
-            - mutationPhase (StagedMutation, CommittedMutation)
-            - mutationKind (Set, Delete, Overwrite)
-            - transactionId (if applicable)
-          - Capability:
-            - capabilityId
-            - callerPackId
-            - decisionPoint (Before, After, PermissionDecision)
-
-        - BreakpointResumed
-          Emitted when execution resumes after a breakpoint hit.
-
-          Required attributes:
-          - breakpointId
-          - resumeMode (Resume, StepOver, AbortRequested)
-
-05.1.4.8. Manual pause and safe-point pause:
-
-        - ManualPauseRequested
-          Emitted when a manual pause is requested.
-
-          Required attributes:
-          - requestId
-          - pauseScope (appInstance, Job, global)
-          - targetIdentity (appInstanceId or Job identity)
-
-        - ManualPauseGranted
-          Emitted when manual pause is achieved.
-
-          Required attributes:
-          - requestId
-          - achievedAtSafePoint (true | false)
-          - safePointDescriptor (if achievedAtSafePoint is true)
-
-        - ManualPauseRefused
-          Emitted when manual pause is refused.
-
-          Required attributes:
-          - requestId
-          - refusalReasonCategory (NotSafe, NotSupported, NotQuiescent,
-            PolicyRefused, Other)
-
-        - PauseAtSafePointRequested
-          Emitted when pause-at-safe-point is requested.
-
-          Required attributes:
-          - requestId
-          - targetIdentity (Job identity or orchestrationUnitId)
-
-        - PauseAtSafePointApplied
-          Emitted when pause-at-safe-point is reached and applied.
-
-          Required attributes:
-          - requestId
-          - safePointDescriptor
-
-05.1.4.9. Debugger inspection and mutation:
-
-        - DebuggerInspection
-          Emitted when the debugger performs an inspection action.
-
-          Required attributes:
-          - inspectionKind (ReadValue, Enumerate, Query, Other)
-          - targetKind (Memory, Layer, Pipeline, CapabilityRegistry,
-            ServicesRegistry)
-          - targetIdentity (as applicable)
-
-        - DebuggerMutationRequested
-          Emitted when debugger requests a mutation.
-
-          Required attributes:
-          - mutationRequestId
-          - targetKind (Memory, Breakpoint, Policy, Other)
-          - targetIdentity
-          - mutationKind (Set, Delete, Overwrite, Enable, Disable, Modify)
-
-        - DebuggerMutationStaged
-          Emitted when a debugger mutation is staged for apply-at-safe-point.
-
-          Required attributes:
-          - mutationRequestId
-          - mutationLineageId (stable id linking staged and applied)
-          - targetIdentity
-          - intendedSafePointDescriptor
-
-        - DebuggerMutationApplied
-          Emitted when a debugger mutation becomes effective.
-
-          Required attributes:
-          - mutationRequestId
-          - mutationLineageId
-          - appliedAtSafePointDescriptor (if applied at safe point)
-
-        - DebuggerMutationDiscarded
-          Emitted when a staged debugger mutation is discarded.
-
-          Required attributes:
-          - mutationRequestId
-          - mutationLineageId
-          - discardReasonCategory (Abort, Timeout, PolicyCancelled,
-            TargetInvalid, Other)
-
-
-===============================================================================
-06. TRACE DURING DISCOVERY (LOCKED)
-===============================================================================
-
-06.1. Discovery emits trace events for:
-      - manifest found
-      - manifest skipped
-      - manifest rejected
-      - depth limit reached
-      - symlink refusal
-
-06.2. Discovery does not skip silently.
-
-06.3. Each ignored artifact has a reason.
-
-
-===============================================================================
-07. TRACE DURING RESOLUTION (LOCKED)
-===============================================================================
-
-07.1. Resolution emits:
-      - candidate sets
-      - filters applied
-      - soft rejections
-      - hard rejections
-      - scoring results
-      - ambiguity detection
-      - user decision points
-
-07.2. Resolution trace remains sufficient to:
-      - reconstruct resolution logic offline
-      - explain why one pack or version was chosen
-      - explain why another was not
-
-
-===============================================================================
-08. TRACE DURING ACTIVATION (LOCKED)
-===============================================================================
-
-08.1. Activation emits:
-      - activation start
-      - dependency activation ordering
-      - entrypoint invocation
-      - service registration
-      - capability registration
-      - activation failure or success
-
-08.2. Activation trace defines runtime causality and scope boundaries.
-
-
-===============================================================================
-09. CAPABILITY CALL TRACING (LOCKED)
-===============================================================================
-
-09.1. Every capability call emits:
-      - caller pack identity
-      - target capability identifier
-      - permission classification
-      - permission decision
-      - execution outcome
-      - duration
-
-09.2. Capability trace distinguishes:
-      - denied execution
-      - deferred execution
-      - successful execution
-
-09.3. In this section, deferred execution means waiting on UI.
-
-09.4. Capability call tracing is required for trust and audit.
-
-
-===============================================================================
-10. CONFIG AND STATE TRACE INTEGRATION (LOCKED)
-===============================================================================
-
-10.1. Configuration and state interactions are traced distinctly.
-
-10.2. Trace differentiates between:
-
-      A) Stored mutation
-      - change written via IoManager
-      - persisted to userdata or savePack
-      - attributed to scope (engine / pack-global / save)
-
-      B) Computed effect
-      - derived value
-      - reactive transform
-      - accessibility scaling
-      - runtime-only override
-
-      C) Read resolution
-      - which layer provided the value
-      - defaults vs user override vs save override
-
-10.3. Debugger-initiated state changes are labeled explicitly and are not
-      conflated with runtime or pack-originated mutations.
-
-10.4. Computed effects do not appear as stored mutations.
-
-10.5. Trace attributes include:
-      - config key or state key
-      - scope (engine | pack-global | save | runtime)
-      - source layer
-      - pack identity (if applicable)
-      - debuggerInitiated: true | false
-
-10.6. State trace integration remains [constrained-by: DA-04 05],
-      [constrained-by: DA-04 06], and
-      [constrained-by: DA-18 07-12].
-
-
-===============================================================================
-11. TRACE STORAGE (LOCKED POLICY)
+11. TRACE STORAGE AND LOSS EVIDENCE
 ===============================================================================
 
 11.1. Trace data is:
@@ -956,78 +444,105 @@ Upstream Documents:
       - bounded or rotating
       - safe to drop under pressure
 
-11.2. Failure to write trace remains trace-visible.
+11.2. Failure to write trace evidence does not block execution.
 
-11.3. Failure to write trace does not block execution.
+11.3. Failure to write trace evidence does not affect committed-state
+      correctness.
 
-11.4. Trace loss is acceptable. Silent trace loss is not.
+11.4. Trace loss is acceptable.
 
+11.5. Silent trace loss is not acceptable.
 
-11.1 TRACE RETENTION, LOSS EVIDENCE, AND PRUNING LEDGER (LOCKED POLICY)
-----------------------------------------------------------------------
+11.6. Trace retention is policy-driven.
 
-11.1.1. Trace retention is policy-driven.
+11.7. Turnix may:
+      - retain traces indefinitely
+      - rotate traces
+      - prune traces
+      - drop traces under severe pressure
 
-11.1.2. Turnix may:
-        - retain traces indefinitely
-        - rotate traces
-        - prune traces
-        - drop traces under severe pressure
+11.8. Turnix does not silently claim trace completeness that does not exist.
 
-11.1.3. Turnix does not:
-        - silently lose trace evidence
-        - silently prune trace evidence
-        - silently claim completeness that does not exist
+11.9. If trace evidence is pruned, dropped, corrupted, partially exported,
+      or otherwise incomplete, retained evidence represents that limitation
+      explicitly when the limitation is known.
 
-11.1.4. If trace events or trace chunks are pruned, Turnix emits a trace
-        event describing the pruning action.
+11.10. Loss evidence allows an auditor to distinguish:
+       - not provable due to missing evidence
+       from
+       - not recorded by Turnix at the time of action
 
-11.1.5. If trace writes are dropped under pressure, Turnix emits a trace
-        event describing the omission.
+11.11. Trace retention policy does not affect committed state correctness.
 
-11.1.6. Pruning and drop events include:
-        - policy identity
-        - scope identity
-        - target identity
-        - reason category
-          (for example: PolicyPruned, StoragePressureDropped,
-          CorruptedIsRejected, ManualRemoval, OtherExplicitReason)
+11.12. These rules remain [constrained-by: DA-04 03.2],
+       [constrained-by: DA-08 17], and [constrained-by: DA-08 18].
 
-11.1.7. Turnix maintains a minimal continuity record sufficient to
-        establish:
-        - trace existed for decision-producing actions
-        - missing material is missing due to explicit pruning or dropping
+11.13. DA-03 owns trace-substrate reason identifiers for trace storage,
+       trace pruning, trace continuity, and trace incompleteness.
 
-11.1.8. The continuity record remains suitable for offline inspection.
+11.14. The following trace-substrate reasons are defined:
 
-11.1.9. Trace retention policy does not affect committed state correctness.
+       - TraceStorageWriteSucceeded
+       - TraceStorageWriteFailed
+       - TraceStorageWriteDropped
+       - TracePruneRequested
+       - TracePruneApplied
+       - TracePruneFailed
+       - TraceContinuityAnchorCreated
+       - TraceContinuityBroken
+       - TraceEvidenceDeclaredIncomplete
 
-11.1.10. Loss evidence allows an auditor to distinguish:
-         - not provable due to missing evidence
-         from
-         - not recorded by Turnix at the time of action
+11.15. TraceStorageWriteSucceeded is emitted when a trace storage write unit
+       is persisted successfully.
 
-11.1.11. These rules remain [constrained-by: DA-04 03.2],
-         [constrained-by: DA-08 17], and
-         [constrained-by: DA-08 18].
+11.16. TraceStorageWriteFailed is emitted when a trace storage write attempt
+       fails.
+
+11.17. TraceStorageWriteDropped is emitted when trace events are intentionally
+       dropped due to pressure, quota, or non-blocking trace policy.
+
+11.18. TracePruneRequested is emitted when trace pruning is initiated.
+
+11.19. TracePruneApplied is emitted when trace pruning is successfully
+       applied.
+
+11.20. TracePruneFailed is emitted when trace pruning fails.
+
+11.21. TraceContinuityAnchorCreated is emitted when a trace continuity anchor
+       is created.
+
+11.22. TraceContinuityBroken is emitted when trace continuity cannot be
+       maintained.
+
+11.23. TraceEvidenceDeclaredIncomplete is emitted when Turnix explicitly
+       declares retained trace evidence incomplete for a scope.
 
 
 ===============================================================================
-12. TRACE ACCESS (LOCKED)
+12. TRACE ACCESS
 ===============================================================================
 
-12.1. Trace access occurs through:
-      - TraceMonitor UI
-      - backend APIs
-      - future export formats
+12.1. Trace access occurs through controlled Turnix surfaces.
 
 12.2. Trace consumers do not rely on direct file scraping.
 
 12.3. Trace consumers rely on structured access.
 
+12.4. Trace access may support:
+      - TraceMonitor UI
+      - backend APIs
+      - debugger tooling
+      - future export formats
+
+12.5. A trace access surface preserves causal meaning.
+
+12.6. A trace access surface does not fabricate reasons.
+
+12.7. A trace access surface does not hide known evidence loss.
+
 
 ===============================================================================
-13. USER-FACING DIAGNOSTICS (LOCKED)
+13. USER-FACING DIAGNOSTICS
 ===============================================================================
 
 13.1. Trace events may be surfaced to users as:
@@ -1037,100 +552,192 @@ Upstream Documents:
       - error dialogs
       - debugger inspection views
 
-13.2. User-facing views:
-      - simplify presentation
-      - preserve causality
-      - do not fabricate reasons
+13.2. User-facing views may simplify presentation.
 
-13.3. Raw trace remains developer-facing.
+13.3. User-facing views preserve causality.
+
+13.4. User-facing views do not fabricate reasons.
+
+13.5. Raw trace remains developer-facing unless a surface explicitly exposes
+      it.
 
 
 ===============================================================================
-14. ERROR ENVELOPE INTEGRATION (LOCKED)
+14. ERROR ENVELOPE CORRELATION
 ===============================================================================
 
-14.1. All surfaced errors include:
+14.1. Surfaced Turnix errors include trace correlation evidence when
+      available.
+
+14.2. A surfaced error includes or remains linkable to:
       - error code
-      - human message
+      - human-readable message
       - reason
-      - trace correlation identifiers
+      - trace correlation identifiers when available
 
-14.2. Errors and traces remain inseparable.
+14.3. Error envelopes do not replace trace evidence.
 
-14.3. Every surfaced error maps to trace events.
+14.4. Surfaced errors and trace evidence remain linked when trace evidence
+      exists for the failing operation.
+
+14.5. A surfaced error maps to one or more trace events when the error
+      occurs inside Turnix-traced execution.
+
+14.6. If trace evidence for a surfaced error is unavailable, incomplete,
+      pruned, dropped, corrupt, or not yet initialized, that limitation
+      remains explicit.
+
+14.7. Concrete error-envelope schemas are defined by the owning protocol or
+      implementation specification.
+
+14.8. The owning protocol or implementation specification remains
+      constrained by the trace-correlation semantics defined here.
+
+14.9. DD-02 defines the interface doctrine for surfaced failure structure.
+
+14.10. DA-03 defines only the trace-correlation obligation for surfaced
+       errors.
 
 
 ===============================================================================
-15. DEV-MODE ENHANCEMENTS (LOCKED)
+15. DEVELOPMENT-MODE TRACE ENHANCEMENTS
 ===============================================================================
 
-15.1. Development mode may add:
+15.1. Development mode may add trace and diagnostic enrichment.
+
+15.2. Development-mode trace enrichment may include:
       - verbose traces
       - speculative branches
       - why-not-chosen explanations
       - layer-resolution breakdowns
       - debugger-specific annotations
 
-15.2. Dev-mode enhancements are explicit.
+15.3. Development-mode trace enrichment is explicit.
 
-15.3. Dev-mode enhancements are never enabled silently.
+15.4. Development-mode trace enrichment is never enabled silently.
 
-15.4. Dev-mode enhancements do not change runtime behavior.
+15.5. Development-mode trace enrichment does not change runtime behavior.
 
+15.6. Development-mode trace enrichment does not create authoritative state.
 
-===============================================================================
-16. NO HEURISTIC SUPPRESSION (LOCKED)
-===============================================================================
+15.7. Development-mode trace enrichment does not create additional
+      authority.
 
-16.1. Turnix does not:
-      - suppress obvious traces
-      - collapse distinct decisions
-      - infer reasons without recording them
-      - merge computed effects with stored changes
-      - hide debugger-originated actions
-
-16.2. Explicit evidence takes precedence over clever omission.
+15.8. Development-mode trace enrichment does not replace domain-owned trace
+      obligations.
 
 
 ===============================================================================
-17. EXPLICITLY OPEN QUESTIONS
+16. NO HEURISTIC TRACE SUPPRESSION
 ===============================================================================
 
-17.1. OPEN questions include:
-      - trace visualization schemas
-      - time-travel replay tooling
+16.1. Turnix does not infer reasons without recording them.
+
+16.2. Turnix does not fabricate causal links from temporal ordering.
+
+16.3. Turnix does not hide known trace loss.
+
+16.4. Turnix does not present incomplete trace evidence as complete.
+
+16.5. A subject-owning document may decide that a subject does not emit
+      trace evidence for a given action.
+
+16.6. If a subject-owning document requires trace evidence for an action,
+      the trace substrate does not silently suppress that evidence.
+
+
+===============================================================================
+17. MIGRATED DOMAIN TRACE OBLIGATIONS
+===============================================================================
+
+17.1. Earlier revisions of this document contained domain-specific trace
+      obligations.
+
+17.2. Those obligations are moving to the documents that own the affected
+      domains.
+
+17.3. Discovery-specific trace obligations belong in the discovery-owning
+      design area.
+
+17.4. Resolution-specific trace obligations belong in the resolution-owning
+      design area.
+
+17.5. Activation-specific trace obligations belong in the activation-owning
+      design area.
+
+17.6. Capability-specific trace obligations belong in the capability-owning
+      design area.
+
+17.7. State and transaction trace obligations belong in the state-owning
+      design area.
+
+17.8. Configuration trace obligations belong in the configuration-owning
+      design area.
+
+17.9. Window trace obligations belong in the Window-owning design area.
+
+17.10. Debugger trace obligations belong in the debugger-owning design
+       area.
+
+17.11. RPC trace obligations belong in the RPC implementation
+       specification or a higher RPC semantic document when one exists.
+
+17.12. This migration changes ownership location.
+
+17.13. This migration does not intentionally weaken valid domain trace
+       obligations that are preserved in their owning documents.
+
+
+===============================================================================
+18. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+18.1. OPEN questions include:
+      - concrete trace visualization schemas
+      - trace storage formats
+      - trace export formats
       - cross-session trace stitching
       - diff-oriented trace views
+      - exact span identity encoding
 
 
 ===============================================================================
-18. LOCKED SUMMARY
+19. LOCKED SUMMARY
 ===============================================================================
 
-18.1. LOCKED:
-      - structured tracing everywhere
-      - stable PascalCase reasons
-      - canonical Trace Directed Acyclic Graph naming and meaning
-      - causal DAG model
-      - multi-parent causal event linkage
-      - successful paths remain observable, not only failures
-      - a successful path that cannot be explained is an observability
-        failure
-      - trace spans with explicit begin/end and carry-forward constraints
-      - kernel-run, appInstance, and work-span stratification
-      - required retention, loss, continuity, and window-boundary reasons
-      - required per-event attributes for retention, continuity, window, and
-        debugger reason families
-      - full discovery, resolution, activation coverage
-      - capability auditing
-      - config vs computed distinction
-      - debugger inspection and mutation traceability
-      - scope-aware tracing
-      - retention-loss evidence and continuity claims
-      - DA-08-aligned SafePoint and ActiveWindow correlation rules
+19.1. LOCKED:
+      - DA-03 owns the tracing substrate
+      - DA-03 does not own object-specific lifecycle truth
+      - tracing is structured evidence rather than logging
+      - trace-substrate reason identifiers are owned by DA-03
+      - trace evidence explains what happened, what caused what, and why
+      - retained trace evidence is authoritative for retained causal proof
+      - trace evidence is not authoritative committed state
+      - trace evidence does not define rollback eligibility by itself
+      - the trace DAG is the canonical causal structure
+      - temporal order does not define causality
+      - parent links express explicit causal parentage
+      - trace spans have begin and end events
+      - span end does not exist without a reachable span begin
+      - exported or snapshotted trace evidence does not include span end
+        without the corresponding span begin
+      - trace roots and span stratification are representable
+      - reason is a machine-readable event field
+      - domain documents own their own reason values and required
+        attributes
+      - trace retention is policy-driven
+      - trace loss is acceptable only when represented honestly
+      - trace access occurs through controlled Turnix surfaces
+      - user-facing diagnostics preserve causality and do not fabricate
+        reasons
+      - surfaced errors correlate with trace evidence where available
+      - development-mode trace enrichment is explicit and non-authoritative
+      - development-mode enhancements do not change runtime behavior
+      - domain-specific trace obligations live in the documents that own
+        those domains
 
-18.2. OPEN:
-      - visualization and tooling only
+19.2. OPEN:
+      - concrete formats and tooling refinements only
 
 
 ===============================================================================
@@ -1140,6 +747,6 @@ END OF DA-03 - TRACING, DIAGNOSTICS & OBSERVABILITY
 --- doc-meta ---
 DOC_ID: DA-03
 DOC_FILE: docs/design/DA-03_TRACING_DIAGNOSTICS_AND_OBSERVABILITY.txt
-DOC_REV: 20
-DOC_GIT: b011e69
+DOC_REV: 21
+DOC_GIT: c8cc0b8
 ----------------
