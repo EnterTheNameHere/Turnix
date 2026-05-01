@@ -25,6 +25,8 @@ It defines:
 - transactional staging and commit or abort rules
 - commit conflict detection for authoritative mutation
 - orchestration boundaries for state mutation
+- Orchestration Unit authority and outcome boundaries
+- relationship between Orchestration Units, Jobs, and transactions
 - state and transaction trace obligations
 - persistence as protection against loss rather than the definition of truth
 - static-data mutation intent
@@ -43,7 +45,12 @@ It does NOT define:
 - configuration-specific scope, schema, and migration semantics
   (see DA-06)
 - windows, manifests, exports, replay workflows, or audit bundles
-  (see later design areas)
+  (see DA-08)
+- pack activation semantics or PackContext authority (see DA-14)
+- service, capability, or permission semantics (see DA-16)
+- Job lifecycle, Job result, Job timeout, or Job cancellation semantics
+  (see DA-19)
+- AppInstance lifecycle or runtime identity semantics (see DA-20)
 - debugger pause, breakpoint, or execution-control behavior (see DA-18)
 
 Upstream Documents:
@@ -56,6 +63,19 @@ Upstream Documents:
 - DA-01
 - DA-02
 - DA-03
+- DA-19
+- DA-20
+
+Downstream Documents:
+--------------------
+- DA-06
+- DA-08
+- DA-16
+- DA-17
+- DA-18
+- DA-19
+- IS-01
+- IS-02
 
 
 ===============================================================================
@@ -358,6 +378,13 @@ Upstream Documents:
 
 06.1.11. Abort does not silently preserve part of staged mutation.
 
+06.1.12. A transaction commit does not directly finalize a
+         SafePointWindow.
+
+06.1.13. A transaction abort does not directly finalize an AbortedWindow.
+
+06.1.14. Window finalization remains owned by DA-08.
+
 
 06.2 NESTED TRANSACTION STACKING
 --------------------------------
@@ -462,6 +489,7 @@ Upstream Documents:
         - debuggerInitiated
         - transactionId when mutation was committed through a transaction
         - orchestrationUnitId when applicable
+        - jobId when applicable
 
 06.4.6. baseRevisionId follows the absent-sentinel and revision rules
         defined in section 04.
@@ -470,13 +498,26 @@ Upstream Documents:
         - the transaction commit event when a transaction commits the
           mutation
         - the owning Orchestration Unit when such ownership exists
+        - the owning Job when such ownership exists
         - the owning trace span when such a span exists
 
 06.4.8. Abort trace evidence does not imply committed mutation.
 
 06.4.9. Commit trace evidence does not by itself define Window finalization.
 
-06.4.10. DA-03 defines the tracing substrate used to represent state and
+06.4.10. Transaction trace evidence records enough context, when available,
+         to explain:
+         - transactionId
+         - appInstanceId
+         - orchestrationUnitId when applicable
+         - jobId when applicable
+         - affected committed layers when allowed
+         - affected keys or scopes when allowed
+         - base revision information when relevant
+         - new revision information when relevant
+         - abort reason when the transaction aborts
+
+06.4.11. DA-03 defines the tracing substrate used to represent state and
          transaction trace evidence.
 
 
@@ -487,49 +528,248 @@ Upstream Documents:
 07.1. An Orchestration Unit is a kernel-tracked execution unit that is
       permitted to mutate Turnix-managed state within an appInstance.
 
-07.2. Example Orchestration Units include:
+07.2. An Orchestration Unit is an execution-authority unit.
+
+07.3. A Job is an observable lifecycle handle.
+
+07.4. A transaction is a mutation staging and commit boundary.
+
+07.5. Orchestration Units, Jobs, and transactions are related but distinct.
+
+07.6. Example Orchestration Units include:
       - a pipeline run, including its stage callbacks
       - a capability handler invocation
       - a tooling-initiated mutation transaction
       - configuration mutation request processing
 
-07.3. Work started outside Turnix orchestration is not an Orchestration Unit
+07.7. Work started outside Turnix orchestration is not an Orchestration Unit
       until it re-enters through orchestration boundaries.
 
-07.4. Turnix guarantees apply only to work that occurs within Turnix
+07.8. Turnix guarantees apply only to work that occurs within Turnix
       orchestration boundaries or re-enters through them.
 
-07.5. Mutation outside orchestration does not acquire Turnix guarantees by
+07.9. Mutation outside orchestration does not acquire Turnix guarantees by
       implication.
 
+07.10. An Orchestration Unit may be associated with a Job.
 
-07.1 SINGLE-LANE APPINSTANCE ORCHESTRATION
+07.11. An Orchestration Unit may execute without being associated with a
+       Job.
+
+07.12. A Job may coordinate more than one Orchestration Unit only when the
+       Job-owning or workflow-owning design explicitly defines that
+       coordination.
+
+07.13. An Orchestration Unit may open, commit, or abort transactions under
+       the rules of this document.
+
+07.14. An Orchestration Unit outcome does not by itself define Job terminal
+       outcome.
+
+07.15. A Job terminal outcome does not by itself define Orchestration Unit
+       outcome.
+
+07.16. An Orchestration Unit outcome does not by itself define transaction
+       commit or abort.
+
+07.17. A transaction commit or abort does not by itself define the
+       Orchestration Unit outcome.
+
+
+07.1 ORCHESTRATION UNIT OUTCOMES
+---------------------------------
+
+07.1.1. An Orchestration Unit reaches exactly one terminal outcome.
+
+07.1.2. Orchestration Unit terminal outcomes are:
+        - Completed
+        - Failed
+        - Cancelled
+        - Superseded
+
+07.1.3. Completed means the Orchestration Unit finished its execution path
+        without ending as Failed, Cancelled, or Superseded.
+
+07.1.4. Failed means the Orchestration Unit ended because an unexpected or
+        error outcome prevented successful completion.
+
+07.1.5. Cancelled means the Orchestration Unit ended because intentional
+        cancellation stopped the unit before completion.
+
+07.1.6. Superseded means the Orchestration Unit ended because newer work,
+        newer accepted input, or higher-priority work replaced it.
+
+07.1.7. Superseded is not failure.
+
+07.1.8. Superseded is not timeout.
+
+07.1.9. Superseded does not roll back authoritative state that was already
+        committed.
+
+07.1.10. Completed may include:
+         - committed authoritative mutation
+         - no authoritative mutation
+         - aborted or discarded transactional staging
+
+07.1.11. The document or workflow that owns a concrete Orchestration Unit
+         class may define narrower outcome meanings that remain compatible
+         with this section.
+
+07.1.12. An Orchestration Unit terminal outcome is trace-visible.
+
+
+07.2 ORCHESTRATION UNITS AND TRANSACTIONS
+-----------------------------------------
+
+07.2.1. A mutation-bearing Orchestration Unit may open a transaction.
+
+07.2.2. A non-mutating Orchestration Unit does not require a transaction.
+
+07.2.3. A Completed Orchestration Unit may commit a transaction when the
+        unit produced authoritative mutation.
+
+07.2.4. A Completed Orchestration Unit may produce no authoritative
+        mutation.
+
+07.2.5. A Completed Orchestration Unit may abort or discard transactional
+        staging when successful execution required no authoritative
+        mutation.
+
+07.2.6. A Failed Orchestration Unit aborts or discards open transactional
+        staging according to transaction rules.
+
+07.2.7. A Cancelled Orchestration Unit aborts or discards open
+        transactional staging according to transaction rules.
+
+07.2.8. A Superseded Orchestration Unit aborts or discards open
+        transactional staging according to transaction rules.
+
+07.2.9. An Orchestration Unit outcome does not convert already committed
+        authoritative mutation into uncommitted mutation.
+
+07.2.10. If committed state must be changed after an Orchestration Unit is
+         cancelled, failed, or superseded, that change is a later
+         authoritative mutation.
+
+
+07.3 ORCHESTRATION UNITS AND WINDOWS
+------------------------------------
+
+07.3.1. Orchestration Unit outcomes occur inside the current active runtime
+        region.
+
+07.3.2. Transaction commit or abort evidence may contribute to later Window
+        evidence.
+
+07.3.3. Orchestration Unit outcome evidence may contribute to later Window
+        evidence.
+
+07.3.4. Orchestration Unit Completed does not mean a SafePointWindow was
+        created.
+
+07.3.5. Orchestration Unit Failed, Cancelled, or Superseded does not mean an
+        AbortedWindow was created.
+
+07.3.6. SafePointWindow and AbortedWindow finalization remain owned by
+        DA-08.
+
+
+07.4 ORCHESTRATION UNIT TRACE REASON IDENTIFIERS
+------------------------------------------------
+
+07.4.1. DA-04 owns the Orchestration Unit trace reason identifiers used for
+        Orchestration Unit lifecycle, transaction association, and decision
+        waiting inside state-mutating orchestration.
+
+07.4.2. The following Orchestration Unit trace reasons are defined:
+
+        - OrchestrationUnitCreated
+        - OrchestrationUnitStarted
+        - OrchestrationUnitCompleted
+        - OrchestrationUnitFailed
+        - OrchestrationUnitCancelled
+        - OrchestrationUnitSuperseded
+        - OrchestrationUnitTransactionOpened
+        - OrchestrationUnitTransactionCommitted
+        - OrchestrationUnitTransactionAborted
+        - OrchestrationUnitDecisionPending
+        - OrchestrationUnitDecisionResolved
+
+07.4.3. OrchestrationUnitCreated is emitted when an Orchestration Unit is
+        created.
+
+07.4.4. OrchestrationUnitStarted is emitted when Orchestration Unit
+        execution begins.
+
+07.4.5. OrchestrationUnitCompleted is emitted when an Orchestration Unit
+        reaches the Completed terminal outcome.
+
+07.4.6. OrchestrationUnitFailed is emitted when an Orchestration Unit
+        reaches the Failed terminal outcome.
+
+07.4.7. OrchestrationUnitCancelled is emitted when an Orchestration Unit
+        reaches the Cancelled terminal outcome.
+
+07.4.8. OrchestrationUnitSuperseded is emitted when an Orchestration Unit
+        reaches the Superseded terminal outcome.
+
+07.4.9. OrchestrationUnitTransactionOpened is emitted when an Orchestration
+        Unit opens or enters a transaction.
+
+07.4.10. OrchestrationUnitTransactionCommitted is emitted when a transaction
+         associated with an Orchestration Unit commits.
+
+07.4.11. OrchestrationUnitTransactionAborted is emitted when a transaction
+         associated with an Orchestration Unit aborts or is discarded.
+
+07.4.12. OrchestrationUnitDecisionPending is emitted when an Orchestration
+         Unit is waiting on a decision point that can affect its execution or
+         mutation outcome.
+
+07.4.13. OrchestrationUnitDecisionResolved is emitted when such a decision
+         point resolves.
+
+07.4.14. Orchestration Unit trace evidence records enough context to
+         explain:
+         - orchestrationUnitId
+         - appInstanceId
+         - owner or caller identity when available
+         - work kind
+         - parent jobId when applicable
+         - parent capability identifier when applicable
+         - parent RPC message identity when applicable
+         - transactionId when applicable
+         - terminal outcome when the unit reaches one
+         - supersession source when applicable
+
+
+07.5 SINGLE-LANE APPINSTANCE ORCHESTRATION
 ------------------------------------------
 
-07.1.1. Turnix uses a deterministic single-lane orchestration model within
+07.5.1. Turnix uses a deterministic single-lane orchestration model within
         one appInstance unless an explicit concurrency mode is defined
         elsewhere.
 
-07.1.2. Within one appInstance, Turnix does not execute multiple
+07.5.2. Within one appInstance, Turnix does not execute multiple
         Orchestration Units concurrently when those units may mutate the
         same appInstance state.
 
-07.1.3. Awaited input/output or model calls may suspend the current unit.
+07.5.3. Awaited input/output or model calls may suspend the current unit.
 
-07.1.4. Suspension does not authorize another state-mutating unit to run
+07.5.4. Suspension does not authorize another state-mutating unit to run
         concurrently in the same appInstance unless an explicit concurrency
         mode permits that behavior.
 
-07.1.5. Work started outside Turnix orchestration remains outside Turnix
+07.5.5. Work started outside Turnix orchestration remains outside Turnix
         guarantees until it re-enters through orchestration boundaries.
 
-07.1.6. Any mutation that seeks Turnix guarantees re-enters through
+07.5.6. Any mutation that seeks Turnix guarantees re-enters through
         orchestration boundaries before becoming authoritative.
 
-07.1.7. Turnix does not imply concurrency safety merely because execution
+07.5.7. Turnix does not imply concurrency safety merely because execution
         is asynchronous or suspended.
 
-07.1.8. Turnix does not imply determinism for mutation paths that occur
+07.5.8. Turnix does not imply determinism for mutation paths that occur
         outside orchestration boundaries.
 
 
@@ -778,11 +1018,22 @@ Upstream Documents:
         boundary
       - transactions stage speculative mutation and end only in atomic
         commit or atomic abort
+      - transaction commit does not directly finalize a SafePointWindow
+      - transaction abort does not directly finalize an AbortedWindow
       - nested transaction stacking prevents child authoritative commits
         while an enclosing transaction exists
       - conflict detection applies when committing into committed layers
       - state mutation and transaction outcomes remain trace-visible under
         this document's ownership
+      - Orchestration Unit is an execution-authority unit
+      - Job is an observable lifecycle handle
+      - transaction is a mutation staging and commit boundary
+      - Orchestration Units, Jobs, and transactions remain distinct
+      - Orchestration Unit terminal outcomes are Completed, Failed,
+        Cancelled, and Superseded
+      - Superseded Orchestration Unit outcome is not failure
+      - Orchestration Unit outcome does not by itself define Job terminal
+        outcome, transaction outcome, or Window finalization
       - appInstance mutation follows deterministic single-lane orchestration
         unless another mode is explicitly defined elsewhere
       - persistence protects state against loss but does not define truth
@@ -796,7 +1047,10 @@ Upstream Documents:
         abortable
 
 15.2. OPEN:
-      - none in this document at present
+      - exact concrete Orchestration Unit outcome envelope
+      - exact Orchestration Unit trace payload taxonomy
+      - exact relationship between specific Orchestration Unit classes and
+        Job-backed workflows
 
 
 ===============================================================================
@@ -806,6 +1060,6 @@ END OF DA-04 - MEMORY, STATE & AUTHORITATIVE COMMIT MODEL
 --- doc-meta ---
 DOC_ID: DA-04
 DOC_FILE: docs/design/DA-04_MEMORY_STATE_AND_AUTHORITATIVE_COMMIT_MODEL.txt
-DOC_REV: 22
-DOC_GIT: 7e1850d
+DOC_REV: 23
+DOC_GIT: 0000000
 ----------------
