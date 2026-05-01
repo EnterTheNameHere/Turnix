@@ -9,7 +9,8 @@ EVOLVING
 Description:
 ------------
 Defines how packs interact at runtime without importing each other's code,
-and how Turnix mediates authority, power, and safety.
+and how Turnix mediates authority, power, safety, and Job-backed capability
+execution.
 
 This is the primary and only supported cross-pack interaction mechanism.
 
@@ -24,6 +25,8 @@ It defines:
 - permission classes and decision triggers
 - capability identity and version rules
 - conflict rules for capability identities
+- capability invocation flow and execution modes
+- capability relationship to Jobs when execution is Job-backed
 - trace and audit requirements for capability calls
 - cross-runtime symmetry
 
@@ -35,6 +38,8 @@ It does NOT define:
 - remembered-decision precedence and user-decision persistence semantics
   (see DA-17)
 - tracing schema or storage details (see DA-03)
+- Job lifecycle, Job result, Job timeout, or Job cancellation semantics
+  (see DA-19)
 
 Upstream Documents:
 ------------------
@@ -44,12 +49,18 @@ Upstream Documents:
 - CMR-04
 - CMR-05
 - DA-01
+- DA-03
 - DA-12
 - DA-14
+- DA-17
+- DA-19
 
 Downstream Documents:
 --------------------
 - DA-17
+- DA-19
+- IS-01
+- IS-02
 
 
 ===============================================================================
@@ -65,8 +76,9 @@ Downstream Documents:
 01.3. The CORE META-RULES documents define the general rule language and
       interpretation model used by this document.
 
-01.4. This document defines services, capabilities, and permission
-      boundaries within that shared interpretation model.
+01.4. This document defines services, capabilities, permission boundaries,
+      and capability-to-Job correlation within that shared interpretation
+      model.
 
 
 ===============================================================================
@@ -91,6 +103,13 @@ Downstream Documents:
       - DA-06 for configuration and schema-driven persisted behavior
       - DA-17 for remembered-decision policy handling when user decisions
         are involved
+
+02.7. Capabilities may use Jobs for observable execution lifecycle when the
+      capability operation requires Job semantics.
+
+02.8. A Job handle is not a Service.
+
+02.9. A Job handle is not a raw implementation object.
 
 
 ===============================================================================
@@ -139,6 +158,8 @@ Downstream Documents:
       - configuration schemas
       - persistence rules
       - permission checks
+      - capability mediation
+      - Job lifecycle boundaries
 
 
 ===============================================================================
@@ -159,6 +180,15 @@ Downstream Documents:
 
 05.4. Example call:
       ctx.callCapability("llm.pipeline@1", args)
+
+05.5. A capability invocation may complete without creating a Job.
+
+05.6. A capability invocation may create or attach to a Job when the
+      operation requires observable Job lifecycle semantics.
+
+05.7. A Job-backed capability remains a capability invocation.
+
+05.8. Job-backed execution does not bypass capability mediation.
 
 
 ===============================================================================
@@ -250,7 +280,8 @@ Downstream Documents:
 
 09.1. When ctx.callCapability(...) is invoked:
       1) Turnix evaluates permission
-      2) if allowed, the handler executes
+      2) if allowed, the handler executes or accepted Job-backed execution
+         begins
       3) if undecided, execution pauses for decision handling
 
 09.2. During undecided permission handling:
@@ -264,6 +295,57 @@ Downstream Documents:
         handling
       - no background mutation may occur while paused
       - execution resumes deterministically from the pause point
+
+09.4. Permission evaluation occurs before capability execution begins.
+
+09.5. Job-backed execution does not skip permission evaluation.
+
+
+09.1 CAPABILITY EXECUTION MODES AND JOBS
+----------------------------------------
+
+09.1.1. Capability invocation may use direct execution or Job-backed
+        execution.
+
+09.1.2. Direct execution means the capability handler completes the
+        capability operation in the immediate invocation path.
+
+09.1.3. Job-backed execution means the capability operation is represented
+        by or attached to a Job lifecycle owned by DA-19.
+
+09.1.4. Not every capability invocation creates a Job.
+
+09.1.5. Short or immediate capability operations may complete directly.
+
+09.1.6. Long-running capability execution may create or attach to a Job.
+
+09.1.7. Cancellable capability execution may create or attach to a Job.
+
+09.1.8. Progress-reporting capability execution may create or attach to a
+        Job.
+
+09.1.9. Timeout-managed capability execution may create or attach to a Job.
+
+09.1.10. A capability invocation that creates or attaches to a Job remains
+         subject to the same permission model as a direct capability
+         invocation.
+
+09.1.11. A Job-backed capability returns or exposes only the lifecycle
+         surface defined for that operation.
+
+09.1.12. A Job-backed capability does not expose service internals.
+
+09.1.13. A Job-backed capability does not expose raw implementation objects.
+
+09.1.14. A Job-backed capability does not grant callers direct access to the
+         underlying execution mechanism.
+
+09.1.15. Job lifecycle semantics, terminal outcomes, cancellation, timeout,
+         supersession, progress, and late completion handling are defined by
+         DA-19.
+
+09.1.16. Capability semantics continue to own permission, mediation, and
+         cross-pack execution boundary behavior.
 
 
 ===============================================================================
@@ -318,6 +400,8 @@ Downstream Documents:
       - one pack must not call another pack's service-provided behavior
         directly across pack boundaries
       - cross-pack execution must go through capability mediation
+      - Job-backed capability execution does not expose service internals
+      - Job handles do not provide direct service access
 
 
 ===============================================================================
@@ -375,68 +459,89 @@ Downstream Documents:
       - exact versioned capability identity used for permission matching
       - permission classification
       - permission decision when one occurs
+      - invocation mode
       - execution outcome
+      - jobId when a Job is created or attached
       - duration or elapsed execution evidence when available
 
 14.3. Capability-call trace evidence distinguishes:
       - denied execution
       - deferred execution while waiting on decision handling
-      - successful execution
-      - failed execution
+      - direct successful execution
+      - direct failed execution
+      - Job-backed execution accepted by the capability boundary
 
 14.4. In this section, deferred execution means waiting on decision handling
       before the capability handler is allowed to run.
 
-14.5. DA-16 owns the capability-domain trace reason identifiers used for
+14.5. Job-backed execution acceptance is not a Job terminal outcome.
+
+14.6. Job-backed execution acceptance is not capability success by itself
+      unless the operation's contract defines successful acceptance as the
+      direct capability result.
+
+14.7. When a capability invocation creates or attaches to a Job, the Job
+      lifecycle trace remains causally linked to the capability invocation
+      trace evidence through DA-03 trace DAG parentage.
+
+14.8. When a capability invocation creates or attaches to a Job, the Job
+      lifecycle itself is traced through DA-19 Job-domain trace reasons.
+
+14.9. DA-16 owns the capability-domain trace reason identifiers used for
       capability calls, permission evaluation, deferred execution, denied
-      execution, successful execution, and failed execution.
+      execution, direct successful execution, and direct failed execution.
 
-14.6. The following capability-domain trace reasons are defined:
+14.10. The following capability-domain trace reasons are defined:
 
-      - CapabilityCallRequested
-      - CapabilityPermissionEvaluated
-      - CapabilityExecutionDenied
-      - CapabilityExecutionDeferred
-      - CapabilityExecutionStarted
-      - CapabilityExecutionSucceeded
-      - CapabilityExecutionFailed
+       - CapabilityCallRequested
+       - CapabilityPermissionEvaluated
+       - CapabilityExecutionDenied
+       - CapabilityExecutionDeferred
+       - CapabilityExecutionStarted
+       - CapabilityExecutionSucceeded
+       - CapabilityExecutionFailed
 
-14.7. CapabilityCallRequested is emitted when a pack invokes a capability
-      through Turnix mediation.
+14.11. CapabilityCallRequested is emitted when a pack invokes a capability
+       through Turnix mediation.
 
-14.8. CapabilityPermissionEvaluated is emitted when Turnix evaluates the
-      permission classification and applicable decision state for a
-      capability call.
+14.12. CapabilityPermissionEvaluated is emitted when Turnix evaluates the
+       permission classification and applicable decision state for a
+       capability call.
 
-14.9. CapabilityExecutionDenied is emitted when a capability call is refused
-      before handler execution.
+14.13. CapabilityExecutionDenied is emitted when a capability call is
+       refused before handler execution.
 
-14.10. CapabilityExecutionDeferred is emitted when a capability call waits on
-       decision handling before handler execution.
+14.14. CapabilityExecutionDeferred is emitted when a capability call waits
+       on decision handling before handler execution.
 
-14.11. CapabilityExecutionStarted is emitted when the capability handler is
-       allowed to begin execution.
+14.15. CapabilityExecutionStarted is emitted when the capability handler is
+       allowed to begin execution or accepted Job-backed execution begins.
 
-14.12. CapabilityExecutionSucceeded is emitted when the capability handler
-       completes successfully.
+14.16. CapabilityExecutionSucceeded is emitted when direct capability
+       execution completes successfully, or when the capability contract
+       defines successful Job acceptance as the direct capability result.
 
-14.13. CapabilityExecutionFailed is emitted when the capability handler
-       fails after execution begins.
+14.17. CapabilityExecutionFailed is emitted when direct capability execution
+       fails after execution begins, or when Job-backed acceptance fails
+       before a Job lifecycle exists.
 
-14.14. Capability-call trace evidence does not expose service internals as a
+14.18. Capability-call trace evidence does not expose service internals as a
        bypass path.
 
-14.15. Capability-call trace evidence is required for:
+14.19. Capability-call trace evidence is required for:
        - debugging
        - trust
        - reproducibility
        - audit
 
-14.16. DA-03 defines the tracing substrate used to represent capability-call
+14.20. DA-03 defines the tracing substrate used to represent capability-call
        evidence.
 
-14.17. DA-17 defines decision trace obligations when capability permission
+14.21. DA-17 defines decision trace obligations when capability permission
        decisions are required.
+
+14.22. DA-19 defines Job lifecycle trace obligations when capability
+       execution creates or attaches to a Job.
 
 
 ===============================================================================
@@ -469,6 +574,9 @@ Downstream Documents:
 
 16.5. Capabilities remain the universal mediated execution boundary.
 
+16.6. Job-backed capability execution does not change cross-runtime
+      boundary rules.
+
 
 ===============================================================================
 17. EXPLICITLY OPEN QUESTIONS
@@ -480,6 +588,10 @@ Downstream Documents:
       - capability discovery and browsing user interfaces
       - dynamic permission revocation
       - subscription-based or streaming capabilities
+      - exact capability API form for Job-backed execution
+      - exact returned Job handle representation
+      - exact distinction between successful Job acceptance and final Job
+        success in concrete capability APIs
 
 
 ===============================================================================
@@ -489,16 +601,26 @@ Downstream Documents:
 18.1. LOCKED:
       - services are runtime wiring only
       - capabilities are the sole supported cross-pack execution boundary
+      - capability invocation may complete directly or become Job-backed
+      - not every capability invocation creates a Job
+      - Job-backed capability execution remains capability-mediated
+      - Job-backed capability execution does not expose service internals
+      - Job handle is not a Service or raw implementation object
+      - Job lifecycle semantics are owned by DA-19
       - the permission model is explicit and immutable per major version
       - remembered capability permission matching uses exact versioned
         capability identity
       - services and capabilities do not imply persistence
       - silent overrides are forbidden
       - capability calls remain fully trace-visible and auditable
+      - capability trace evidence includes jobId when a Job is created or
+        attached
+      - Job lifecycle trace is causally linked to capability invocation trace
+        when a capability creates or attaches to a Job
       - capability-domain trace reason identifiers are owned by DA-16
 
 18.2. OPEN:
-      - user experience and policy extensions only
+      - user experience, policy, streaming, and Job-backed API extensions
 
 
 ===============================================================================
@@ -508,6 +630,6 @@ END OF DA-16 - SERVICES, CAPABILITIES & PERMISSIONS
 --- doc-meta ---
 DOC_ID: DA-16
 DOC_FILE: docs/design/DA-16_SERVICES_CAPABILITIES_AND_PERMISSIONS.txt
-DOC_REV: 15
-DOC_GIT: 32e7494
+DOC_REV: 16
+DOC_GIT: 0000000
 ----------------
