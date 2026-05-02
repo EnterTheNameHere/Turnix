@@ -1,3 +1,996 @@
+===============================================================================
+DESIGN AREA DA-23 - EXECUTION BOUNDARIES, ADAPTERS & CODE RUNTIMES
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines execution adapters as Turnix-managed code runtime boundaries, defines
+how declared pack code enters execution environments, and preserves Kernel
+authority across same-language, browser, local, remote, and future runtime
+forms.
+
+This document owns the abstract adapter and code-runtime boundary model.
+It does not define concrete Python worker protocols, browser bootstrap flow,
+WebSocket frames, container setup, or implementation-specific loader details.
+
+Purpose:
+--------
+This document defines how Turnix executes declared pack code without allowing
+host-language convenience, frontend runtime behavior, transport choice, or
+deployment shape to bypass Turnix authority.
+
+It defines:
+- Kernel authority over adapter-mediated execution
+- Execution Adapter, adapter kind, and adapter instance terms
+- distinction between adapter mediation and sandboxing
+- relationship between pack code and backend implementation code
+- code artifact recognition, declaration, binding, permission, and execution
+- adapter lifecycle and execution-context rules
+- PackContext as a pack-facing authority context
+- Python pack code as adapter-executed pack code
+- browser JavaScript as frontend adapter-executed pack code
+- in-process adapter calls as transport optimization only
+- adapter relationship to RPC, channels, and transports
+- adapter relationship to AppInstance, AppPack, and SavePack
+- adapter relationship to activation, capabilities, Jobs, decisions, and
+  committed state
+- adapter failure, disconnect, and trace obligations
+- initial adapter classes and open future adapter forms
+
+It does NOT define:
+- generic resolution mechanics (see DA-11)
+- importing and module-loading selector details (see DA-12)
+- activation lifecycle beyond adapter boundary constraints (see DA-14)
+- capability permission semantics (see DA-16)
+- user decision and remembered policy semantics (see DA-17)
+- Job lifecycle, timeout, cancellation, or progress semantics (see DA-19)
+- AppInstance lifecycle or runtime identity semantics (see DA-20)
+- abstract RPC, channel, and transport semantics (see DA-21)
+- UI, View, and frontend runtime presentation semantics (see DA-22)
+- concrete RPC message schema (see IS-01)
+- concrete WebSocket flow (see IS-02)
+- concrete Python subprocess, container, or worker protocol details
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-02
+- DA-03
+- DA-04
+- DA-07
+- DA-11
+- DA-12
+- DA-14
+- DA-16
+- DA-17
+- DA-19
+- DA-20
+- DA-21
+- DA-22
+
+Downstream Documents:
+--------------------
+- DA-12
+- DA-14
+- DA-16
+- DA-20
+- DA-21
+- DA-22
+- IS-01
+- IS-02
+- future adapter implementation specifications
+- future Python adapter implementation specifications
+- future browser frontend implementation specifications
+
+
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
+
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines execution adapter, code runtime, and execution
+      boundary semantics within that shared interpretation model.
+
+
+===============================================================================
+02. CORE CONCEPT
+===============================================================================
+
+02.1. This design area answers:
+
+          "How does declared pack code execute in Turnix without becoming
+           hidden backend authority or transport-defined authority?"
+
+02.2. Kernel owns execution authority.
+
+02.3. Adapters execute declared pack code.
+
+02.4. Transports carry messages.
+
+02.5. RPC defines the logical communication boundary.
+
+02.6. Capabilities define what pack code may do.
+
+02.7. SavePack stores durable executed state.
+
+02.8. An execution adapter is a Turnix-managed runtime boundary for declared
+      pack code.
+
+02.9. Adapter execution does not grant authority by itself.
+
+02.10. Pack code gains Turnix-recognized authority only through
+       Turnix-created context and Kernel-mediated boundaries.
+
+02.11. Same host language does not imply same authority.
+
+02.12. Python is the current Turnix backend implementation language.
+
+02.13. Python pack code is not backend implementation code.
+
+02.14. Python pack code remains pack-provided code and crosses the same
+       Turnix authority boundary as other adapter-executed code.
+
+02.15. Direct backend access by pack code is not a valid Turnix authority
+       path.
+
+02.16. Later sections refine and apply these rules. They do not weaken them.
+
+
+===============================================================================
+03. PRIMARY AUTHORITY RULE
+===============================================================================
+
+03.1. The Kernel owns:
+      - platform execution authority
+      - AppInstance lifecycle authority
+      - orchestration authority
+      - authoritative state mutation authority
+      - SavePack persistence authority through the owning documents
+      - capability routing authority
+      - permission evaluation authority
+      - policy and decision authority
+      - trace correlation authority
+      - boundary translation authority
+
+03.2. An adapter does not own Kernel authority.
+
+03.3. An adapter does not own committed state authority.
+
+03.4. An adapter does not own capability authority.
+
+03.5. An adapter does not own policy authority.
+
+03.6. An adapter does not own persistence authority.
+
+03.7. An adapter may execute code only within the authority granted through
+      Turnix-controlled lifecycle, context, and capability boundaries.
+
+03.8. Adapter implementation details do not redefine authority.
+
+03.9. Host-language convenience does not redefine authority.
+
+03.10. Deployment topology does not redefine authority.
+
+03.11. Transport choice does not redefine authority.
+
+
+===============================================================================
+04. EXECUTION ADAPTER TERMS
+===============================================================================
+
+04.1. An Execution Adapter is a Turnix-managed execution environment capable
+      of loading and running declared pack code.
+
+04.2. Adapter kind identifies the adapter category.
+
+04.3. Example adapter kinds include:
+      - browser-javascript
+      - python-inprocess
+      - python-subprocess
+      - cli
+      - remote-client
+      - test
+      - future csharp
+      - future containerized-python
+
+04.4. Adapter instance identifies one live adapter participant or runtime
+      participant when such identity is needed.
+
+04.5. Adapter binding is the association between:
+      - declared code artifact
+      - adapter kind
+      - pack identity
+      - AppInstance context when applicable
+      - execution policy
+      - requested or granted capability surface
+
+04.6. Adapter execution means code execution occurring inside or through an
+      Execution Adapter.
+
+04.7. Adapter mediation means that adapter-executed code interacts with
+      Turnix through Turnix-controlled context, RPC, capability, lifecycle,
+      and policy boundaries.
+
+04.8. Adapter mediation is not sandboxing.
+
+04.9. Sandbox means a security isolation mechanism that restricts what code
+      can do outside Turnix semantic boundaries.
+
+04.10. An adapter may provide sandboxing.
+
+04.11. An adapter may run without strong sandboxing.
+
+04.12. Absence of sandboxing does not convert adapter-executed code into
+       backend implementation code.
+
+
+===============================================================================
+05. CODE ARTIFACT PHASES
+===============================================================================
+
+05.1. Turnix distinguishes the following phases for executable code
+      artifacts:
+      1) recognition
+      2) declaration
+      3) binding
+      4) permission
+      5) loading
+      6) activation
+      7) runtime execution
+
+05.2. Recognition means Turnix identifies a file or resource as a code
+      artifact.
+
+05.3. Recognition does not imply execution.
+
+05.4. Declaration means a manifest or other accepted pack metadata declares
+      the artifact's intended executable role.
+
+05.5. Declaration does not imply activation.
+
+05.6. Binding means Turnix determines which adapter kind may execute the
+      declared artifact.
+
+05.7. Binding does not imply permission.
+
+05.8. Permission means Turnix determines whether execution is allowed in the
+      current pack, AppInstance, SavePack, policy, and trust context.
+
+05.9. Permission does not imply capability authority beyond the granted
+      context.
+
+05.10. Loading means an adapter obtains, imports, compiles, evaluates, or
+       prepares the artifact according to its runtime rules.
+
+05.11. Loading does not imply Turnix-recognized activation.
+
+05.12. Activation means Turnix intentionally invokes the supported activation
+       entrypoint under the rules of DA-14.
+
+05.13. Runtime execution after activation occurs only through
+       Turnix-orchestrated pathways.
+
+05.14. Code files are not executed merely because they exist.
+
+05.15. Turnix does not infer executable authority from file extension alone.
+
+
+===============================================================================
+06. DECLARED EXECUTABLE ARTIFACTS
+===============================================================================
+
+06.1. Executable artifacts are explicit.
+
+06.2. A pack that provides executable code declares:
+      - artifact identity
+      - adapter kind or adapter binding requirement
+      - entrypoint role
+      - lifecycle role
+      - requested capability surface where applicable
+      - trust or execution-policy requirement where applicable
+
+06.3. A declared executable artifact remains subject to:
+      - discovery rules
+      - resolution rules
+      - dependency rules
+      - visibility rules
+      - import and module-loading rules
+      - activation rules
+      - capability rules
+      - policy rules
+
+06.4. Declaration does not bypass any later boundary.
+
+06.5. Missing declaration prevents Turnix-recognized execution of that
+      artifact.
+
+06.6. Tooling may identify undeclared code artifacts.
+
+06.7. Tooling identification is diagnostic and does not activate or execute
+      code.
+
+
+===============================================================================
+07. PACK CODE AND BACKEND IMPLEMENTATION CODE
+===============================================================================
+
+07.1. Backend implementation code is part of the trusted Turnix Kernel or
+      trusted backend implementation surface.
+
+07.2. Pack code is code supplied by a pack.
+
+07.3. Pack code remains pack code even when written in the backend
+      implementation language.
+
+07.4. Python pack code is adapter-executed pack code.
+
+07.5. Python pack code is not granted backend implementation authority by
+      being Python.
+
+07.6. Python pack code does not import backend internals as an authority
+      path.
+
+07.7. Python pack code does not mutate Kernel-owned state directly.
+
+07.8. Python pack code does not perform Turnix persistent I/O directly as an
+      authority path.
+
+07.9. Python pack code uses Turnix-created context, capability calls, and
+      mediated APIs.
+
+07.10. The same distinction applies to future languages that are also used
+       by Turnix implementation components.
+
+07.11. Same process does not mean same authority.
+
+07.12. Same runtime does not mean same authority.
+
+07.13. Same language does not mean same authority.
+
+
+===============================================================================
+08. PACKCONTEXT AND ADAPTER CONTEXT
+===============================================================================
+
+08.1. PackContext is the pack-facing execution-authority context defined by
+      DA-14 and constrained by this document.
+
+08.2. PackContext is created only by Turnix.
+
+08.3. PackContext is not a raw backend service object exposed to pack code.
+
+08.4. PackContext is not unrestricted access to Kernel internals.
+
+08.5. PackContext operations route through Kernel-owned boundaries.
+
+08.6. PackContext may be represented differently in different adapters.
+
+08.7. A browser JavaScript PackContext may communicate through WebSocket or
+      another browser-compatible transport.
+
+08.8. A Python in-process PackContext may use direct in-process calls.
+
+08.9. Representation difference does not change authority meaning.
+
+08.10. PackContext may expose convenient language bindings.
+
+08.11. Convenient language bindings remain subordinate to capability,
+       policy, transaction, trace, persistence, and lifecycle rules.
+
+08.12. Passing PackContext to other code remains explicit authority
+       delegation under DA-14.
+
+
+===============================================================================
+09. RPC-SHAPED AUTHORITY BOUNDARY
+===============================================================================
+
+09.1. Adapter-executed code interacts with Kernel authority through an
+      RPC-shaped boundary.
+
+09.2. RPC-shaped means the interaction preserves:
+      - explicit caller identity
+      - explicit target or capability identity
+      - structured request, event, or command meaning
+      - permission and policy evaluation where applicable
+      - trace correlation
+      - structured result or error outcome
+      - lifecycle ownership
+      - AppInstance and SavePack context where applicable
+
+09.3. RPC-shaped does not require network transport.
+
+09.4. RPC-shaped does not require JSON.
+
+09.5. RPC-shaped does not require WebSocket.
+
+09.6. An in-process function call may implement the transport side of an
+      RPC-shaped boundary.
+
+09.7. An in-process function call does not bypass the authority boundary.
+
+09.8. Direct call may be used as transport optimization.
+
+09.9. Direct backend authority must not be used as a pack-code authority
+      path.
+
+09.10. DA-21 owns abstract RPC, channel, transport, and message-flow
+       semantics.
+
+09.11. This document owns why adapter-executed pack code must cross such a
+       boundary to participate in Turnix.
+
+
+===============================================================================
+10. RELATION TO TRANSPORTS
+===============================================================================
+
+10.1. Transport is the concrete carrier of messages.
+
+10.2. Transport does not define adapter authority.
+
+10.3. Transport does not define capability authority.
+
+10.4. Transport does not define Job lifecycle.
+
+10.5. Transport does not define committed-state mutation.
+
+10.6. Adapter implementations may use transports such as:
+      - WebSocket
+      - in-process channel
+      - stdio
+      - local socket
+      - named pipe
+      - TCP socket
+      - future inter-process transport
+      - future testing transport
+
+10.7. Transport disconnect does not automatically cancel adapter-originated
+      or adapter-observed work.
+
+10.8. Transport timeout does not automatically imply Job timeout.
+
+10.9. DA-21 owns abstract transport and channel semantics.
+
+10.10. IS documents own concrete transport flow when such flow is specified.
+
+
+===============================================================================
+11. RELATION TO APPINSTANCE, APPPACK, AND SAVEPACK
+===============================================================================
+
+11.1. Adapter execution occurs within or against a Kernel-recognized runtime
+      context.
+
+11.2. AppInstance is the runtime container in which AppPack execution occurs.
+
+11.3. AppInstance identity is distinct from AppPack identity.
+
+11.4. AppInstance identity is distinct from SavePack identity.
+
+11.5. SavePack stores durable executed state for an AppPack.
+
+11.6. Adapter-executed code does not own SavePack state.
+
+11.7. Adapter-executed code requests mutation through Kernel-mediated
+      boundaries.
+
+11.8. Authoritative mutation becomes committed state only under DA-04.
+
+11.9. Persistent I/O for committed state remains mediated by DA-07.
+
+11.10. A writable SavePack is owned by at most one running AppInstance
+       unless a later authoritative document defines a multi-writer mode.
+
+11.11. Multiple adapters may attach to or participate in one AppInstance
+       only under explicit lifecycle, policy, and View or runtime rules.
+
+11.12. Multiple AppInstances under one Kernel remain separate runtime
+       containers unless explicit capability or orchestration rules connect
+       them.
+
+
+===============================================================================
+12. RELATION TO ACTIVATION
+===============================================================================
+
+12.1. Adapter loading is not activation.
+
+12.2. Adapter readiness is not activation.
+
+12.3. Adapter connection is not activation.
+
+12.4. Activation remains owned by DA-14.
+
+12.5. Activation is the first moment Turnix intentionally executes pack code
+      with Turnix-recognized authority.
+
+12.6. Activation invokes the supported entrypoint through the appropriate
+      adapter when the pack's executable artifact belongs to an adapter
+      runtime.
+
+12.7. onLoad(ctx) receives a Turnix-created context.
+
+12.8. Immediate, import-time, module-top-level, or otherwise runtime-native
+      execution remains unsupported as Turnix-recognized execution.
+
+12.9. Adapter implementations do not introduce alternate activation
+      entrypoints by themselves.
+
+12.10. Future adapter-specific activation details remain constrained by
+       DA-14 and this document.
+
+
+===============================================================================
+13. RELATION TO IMPORTING AND MODULE LOADING
+===============================================================================
+
+13.1. Importing is not adapter execution authority.
+
+13.2. Module loading is not adapter execution authority.
+
+13.3. Native language import systems must not bypass Turnix execution
+      boundaries.
+
+13.4. DA-12 owns importing, module-loading, and code-boundary rules.
+
+13.5. This document owns the broader adapter execution boundary in which
+      those import and loading rules operate.
+
+13.6. A module loaded by an adapter does not become activated merely because
+      the adapter runtime evaluated it.
+
+13.7. A Python import inside pack code does not create backend authority.
+
+13.8. A JavaScript module import inside browser code does not create Kernel
+      authority.
+
+13.9. Turnix-mediated loading preserves pack identity, visibility,
+      dependency consistency, activation, and authority boundaries.
+
+
+===============================================================================
+14. RELATION TO SERVICES AND CAPABILITIES
+===============================================================================
+
+14.1. Capabilities define what adapter-executed pack code may do.
+
+14.2. Capability invocation remains mediated by Turnix under DA-16.
+
+14.3. Adapter-executed code may invoke capabilities only through the
+      context or RPC/capability surface granted to it.
+
+14.4. Capability-routed adapter messages remain capability-mediated.
+
+14.5. In-process adapter calls remain capability-mediated.
+
+14.6. Job-backed capability execution remains capability-mediated.
+
+14.7. Services are runtime wiring objects under DA-16.
+
+14.8. Services do not provide a cross-pack execution bypass.
+
+14.9. Services do not provide an adapter authority bypass.
+
+14.10. Adapter-executed code does not receive service internals across pack
+       boundaries as a substitute for capability mediation.
+
+
+===============================================================================
+15. RELATION TO DECISIONS, POLICY, AND PERMISSIONS
+===============================================================================
+
+15.1. Adapter execution may trigger decision points.
+
+15.2. Adapter execution does not own decision handling.
+
+15.3. Decision handling remains Kernel-mediated under DA-17.
+
+15.4. Frontend adapters may present decisions.
+
+15.5. CLI adapters may present decisions.
+
+15.6. Remote client adapters may present decisions when allowed.
+
+15.7. Presentation is not decision ownership.
+
+15.8. The Kernel remains the single arbiter of accepted decision outcomes.
+
+15.9. Permission decisions for adapter-executed work follow the owning
+      capability, policy, and decision documents.
+
+15.10. Adapter implementations do not create hidden default policy.
+
+15.11. Adapter implementations do not auto-confirm decisions without policy
+       authority.
+
+
+===============================================================================
+16. RELATION TO JOBS AND LONG-RUNNING WORK
+===============================================================================
+
+16.1. Adapter-executed work may create or observe Jobs.
+
+16.2. Job lifecycle remains owned by DA-19.
+
+16.3. Adapter lifecycle is distinct from Job lifecycle.
+
+16.4. Transport lifecycle is distinct from Job lifecycle.
+
+16.5. Underlying adapter runtime tasks are distinct from Job lifecycle.
+
+16.6. A Job may exist after the adapter or transport that initiated it
+      disconnects when policy allows that behavior.
+
+16.7. Adapter disconnect does not automatically cancel, supersede, time out,
+      detach, retain, or discard Job-backed work.
+
+16.8. Such outcomes require Job lifecycle and policy handling under the
+      owning documents.
+
+16.9. Late completion after Job terminal outcome remains governed by DA-19.
+
+
+===============================================================================
+17. RELATION TO UI, VIEWS, AND FRONTEND ADAPTERS
+===============================================================================
+
+17.1. Browser JavaScript execution for Views is adapter-executed frontend
+      code.
+
+17.2. DA-22 owns UI, View, and frontend runtime semantics.
+
+17.3. This document owns the general adapter boundary that also applies to
+      frontend code.
+
+17.4. Frontend adapter code is presentation and interaction code unless a
+      Kernel-mediated operation accepts its request.
+
+17.5. Browser state is not authoritative state.
+
+17.6. Reloading, disconnecting, or reconnecting a browser frontend does not
+      redefine AppInstance state.
+
+17.7. View packs remain packs and remain subject to pack, import,
+      activation, visibility, capability, policy, and adapter rules.
+
+17.8. Frontend code may hold presentation-local state.
+
+17.9. Presentation-local state becomes authoritative only through
+      Kernel-mediated committed mutation.
+
+
+===============================================================================
+18. ADAPTER TRUST AND ISOLATION
+===============================================================================
+
+18.1. Adapter mediation is not sandboxing.
+
+18.2. Browser JavaScript has browser-provided sandbox properties.
+
+18.3. Python in-process execution is not a security sandbox.
+
+18.4. Python subprocess execution provides process separation but not
+      complete security by itself.
+
+18.5. Containerized execution may provide stronger isolation when the
+      concrete implementation defines and enforces such isolation.
+
+18.6. Virtual-machine or remote execution may provide other isolation forms
+      when defined by implementation specifications.
+
+18.7. Isolation mechanism does not change Turnix semantic authority.
+
+18.8. Lack of isolation does not grant backend authority.
+
+18.9. Unsandboxed adapter-executed code requires explicit trust or policy
+      treatment.
+
+18.10. Third-party or externally supplied executable code is not executed
+       through unsafe adapters unless explicit policy permits that path.
+
+18.11. Trust classification, permission prompts, and policy persistence
+       remain governed by the owning decision and policy documents.
+
+
+===============================================================================
+19. INITIAL ADAPTER CLASSES
+===============================================================================
+
+19.1. BrowserJSAdapter runs JavaScript pack code in a browser frontend
+      runtime.
+
+19.2. BrowserJSAdapter is normally used for View packs, UI packs, and other
+      frontend presentation surfaces.
+
+19.3. BrowserJSAdapter owns no authoritative persistent state.
+
+19.4. PythonInProcessAdapter runs Python pack code in the same process as
+      the backend implementation.
+
+19.5. PythonInProcessAdapter is trusted or policy-gated adapter execution.
+
+19.6. PythonInProcessAdapter still uses Turnix context, capability, trace,
+      and lifecycle boundaries.
+
+19.7. PythonInProcessAdapter is not backend implementation authority.
+
+19.8. PythonSubprocessAdapter runs Python pack code in a worker process.
+
+19.9. PythonSubprocessAdapter communicates with the Kernel through an
+      RPC-shaped boundary over an implementation-defined transport.
+
+19.10. PythonSubprocessAdapter provides process separation but not complete
+       security by itself.
+
+19.11. CliAdapter presents command-line interaction and may act as a control
+       surface for a runtime host.
+
+19.12. CliAdapter is not the Kernel by itself.
+
+19.13. RemoteClientAdapter connects to a Kernel over an explicit transport.
+
+19.14. RemoteClientAdapter does not own state authority.
+
+19.15. TestAdapter provides controlled execution and observation surfaces for
+       tests.
+
+19.16. TestAdapter does not weaken runtime authority boundaries merely
+       because it exists for testing.
+
+19.17. Future adapter classes remain constrained by this document.
+
+
+===============================================================================
+20. ADAPTER LIFECYCLE
+===============================================================================
+
+20.1. Adapter lifecycle may include:
+      - declared
+      - selected
+      - created
+      - connected
+      - ready
+      - loading artifact
+      - executing activation
+      - running
+      - stopping
+      - disconnected
+      - failed
+      - closed
+
+20.2. Concrete adapter lifecycle states may be refined by implementation
+      specifications.
+
+20.3. Adapter lifecycle does not replace pack activation lifecycle.
+
+20.4. Adapter lifecycle does not replace AppInstance lifecycle.
+
+20.5. Adapter lifecycle does not replace Job lifecycle.
+
+20.6. Adapter readiness means the adapter can participate in the expected
+      runtime flow.
+
+20.7. Adapter readiness does not imply pack activation success.
+
+20.8. Adapter readiness does not imply capability permission.
+
+20.9. Adapter failure is explicit.
+
+20.10. Adapter failure does not silently redefine Job terminal outcome.
+
+20.11. Adapter failure does not silently redefine AppInstance lifecycle.
+
+20.12. Adapter failure does not silently redefine committed-state meaning.
+
+20.13. If adapter failure affects accepted work, decision and Job policy
+       documents govern the resulting lifecycle handling.
+
+
+===============================================================================
+21. ADAPTER TRACE AND OBSERVABILITY
+===============================================================================
+
+21.1. Adapter lifecycle and adapter-mediated execution remain trace-visible
+      where trace evidence exists.
+
+21.2. Adapter trace evidence distinguishes:
+      - adapter selected
+      - adapter created
+      - adapter connected
+      - adapter ready
+      - adapter artifact loading started
+      - adapter artifact loading failed
+      - adapter activation dispatch started
+      - adapter execution started
+      - adapter execution failed
+      - adapter disconnected
+      - adapter closed
+
+21.3. Adapter trace evidence records enough context, when available, to
+      explain:
+      - adapter kind
+      - adapter instance identity
+      - pack identity
+      - declared artifact identity
+      - appInstanceId when applicable
+      - active save identity when applicable
+      - transport kind when applicable
+      - channel identity when applicable
+      - RPC message identity when applicable
+      - capability identity when applicable
+      - jobId when applicable
+      - failure reason category when failure occurs
+
+21.4. Adapter trace evidence does not replace activation trace evidence.
+
+21.5. Adapter trace evidence does not replace RPC trace evidence.
+
+21.6. Adapter trace evidence does not replace capability trace evidence.
+
+21.7. Adapter trace evidence does not replace Job trace evidence.
+
+21.8. Adapter trace evidence does not replace AppInstance trace evidence.
+
+21.9. DA-03 defines the tracing substrate.
+
+21.10. DA-14 owns activation-domain trace obligations.
+
+21.11. DA-16 owns capability-domain trace obligations.
+
+21.12. DA-19 owns Job-domain trace obligations.
+
+21.13. DA-20 owns AppInstance-domain trace obligations.
+
+21.14. DA-21 owns RPC trace correlation semantics.
+
+21.15. DA-22 owns UI-domain trace obligations.
+
+
+===============================================================================
+22. RELATION TO RUNTIME HOSTS AND LOCAL-FIRST USE
+===============================================================================
+
+22.1. Turnix may run as a runtime host.
+
+22.2. CLI is a control surface or adapter into the runtime host.
+
+22.3. Browser frontend is a frontend adapter or client surface into the
+      runtime host.
+
+22.4. LAN clients are remote client adapters or frontend clients when
+      explicitly allowed.
+
+22.5. Local-first does not require same-machine execution.
+
+22.6. Local-first means the authoritative runtime and state remain under
+      user-controlled local infrastructure.
+
+22.7. Valid local-first forms include:
+      - same-machine Kernel and frontend
+      - LAN machine hosting the Kernel with another machine as frontend
+      - home server hosting Kernel and SavePack state
+      - powerful local AI machine hosting Kernel-adjacent execution with a
+        lighter client presentation surface
+
+22.8. LAN exposure is explicit and policy-governed.
+
+22.9. Default local bind behavior remains implementation-specific but must
+      not silently expose the runtime to LAN or internet clients.
+
+22.10. A second runtime host does not silently acquire writable ownership of
+       the same workspace.
+
+22.11. Workspace ownership and host locking are owned by the relevant root,
+       persistence, and runtime-host documents when defined.
+
+
+===============================================================================
+23. WHAT IS EXPLICITLY NOT SUPPORTED
+===============================================================================
+
+23.1. The following are not supported:
+      - pack code importing backend internals as authority
+      - Python pack code treated as backend implementation code
+      - native language imports bypassing pack boundaries
+      - adapter loading treated as activation
+      - adapter execution treated as capability permission
+      - transport acknowledgement treated as work success
+      - direct filesystem access as a Turnix persistence authority path
+      - frontend state treated as authoritative state
+      - services used as cross-pack execution bypass
+      - in-process calls bypassing capability mediation
+      - adapter failure silently cancelling Jobs
+      - transport disconnect silently cancelling Jobs
+      - hidden adapter selection fallback
+      - hidden execution of undeclared code artifacts
+      - hidden LAN exposure
+      - treating container, process, or VM isolation as core Turnix semantics
+        without explicit implementation definition
+
+
+===============================================================================
+24. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+24.1. OPEN questions include:
+      - exact adapter manifest schema
+      - exact adapter binding representation
+      - exact adapter instance identity representation
+      - exact adapter trust classification vocabulary
+      - exact Python in-process adapter API
+      - exact Python subprocess adapter protocol
+      - exact containerized adapter contract
+      - exact CLI adapter behavior
+      - exact runtime-host command surface
+      - exact workspace ownership and host locking document ownership
+      - exact relation between adapter lifecycle events and implementation
+        trace reason identifiers
+      - whether adapter-domain trace reason identifiers remain here or move
+        into implementation specifications
+      - whether DA-21 and DA-22 become indexed before or alongside this
+        document
+
+
+===============================================================================
+25. LOCKED SUMMARY
+===============================================================================
+
+25.1. LOCKED:
+      - Kernel owns execution authority
+      - adapters execute declared pack code
+      - transports carry messages
+      - RPC defines the logical communication boundary
+      - capabilities define what adapter-executed code may do
+      - SavePack stores durable executed state
+      - adapter execution does not grant authority by itself
+      - adapter mediation is not sandboxing
+      - same language does not imply same authority
+      - Python pack code is not backend implementation code
+      - Python pack code remains adapter-executed pack code
+      - PackContext is a pack-facing authority context, not raw backend
+        internals
+      - direct in-process calls may optimize transport but do not bypass
+        authority boundaries
+      - code artifact recognition does not imply execution
+      - executable code artifacts are declared before Turnix-recognized
+        execution
+      - adapter loading is not activation
+      - activation remains owned by DA-14
+      - capability invocation remains owned by DA-16
+      - Job lifecycle remains owned by DA-19
+      - AppInstance runtime identity remains owned by DA-20
+      - UI and View frontend semantics remain owned by DA-22
+      - unsandboxed adapter execution requires explicit trust or policy
+        treatment
+      - adapter failure does not silently redefine AppInstance, Job, or
+        committed-state meaning
+
+25.2. OPEN:
+      - concrete adapter schemas, protocols, identifiers, isolation classes,
+        runtime-host commands, and implementation trace details
+
+
+===============================================================================
+END OF DA-23 - EXECUTION BOUNDARIES, ADAPTERS & CODE RUNTIMES
+===============================================================================
 
 --- doc-meta ---
 DOC_ID: DA-23
