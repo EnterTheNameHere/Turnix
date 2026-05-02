@@ -24,14 +24,19 @@ It defines:
 - WebSocket connection lifecycle
 - session and generation tracking
 - message dispatch behavior
+- RPC envelope completion-marker handling through IS-01
 - acknowledgements and flow control
 - permission-check placement in the flow
+- transport timeout versus Job timeout separation
+- transport disconnect versus Job lifecycle separation
 - logging and observability hooks for the transport
 
 It does NOT define:
 - new runtime authority semantics
 - new permission or policy rules
 - the RPC message schema itself beyond using IS-01
+- Job lifecycle states, terminal outcomes, or Job result semantics
+  (see DA-19)
 - higher-level routing, visibility, activation, or capability semantics
 - frontend user-interface behavior beyond transport responsibilities
 
@@ -49,6 +54,7 @@ Upstream Documents:
 - DA-14
 - DA-16
 - DA-17
+- DA-19
 
 ===============================================================================
 01. INTERPRETATION BASIS
@@ -84,6 +90,15 @@ Upstream Documents:
 
 02.4. This document defines how those envelopes move through the concrete
       bootstrap, handshake, dispatch, acknowledgement, and disconnect flow.
+
+02.5. Transport flow is distinct from Job lifecycle.
+
+02.6. Transport timeout is distinct from Job timeout.
+
+02.7. Transport disconnect is distinct from Job cancellation.
+
+02.8. Request acceptance as Job-backed work is distinct from final Job
+      success.
 
 
 ===============================================================================
@@ -179,7 +194,13 @@ Upstream Documents:
         - entering the receive loop
         - discarding non-text frames
         - enforcing payload-size limits
+        - parsing text frames as JSON
         - validating incoming frames as RPCMessage objects
+        - validating the IS-01 envelope completion marker before dispatch
+
+04.1.4. A frame that fails JSON parsing, RPCMessage validation, generation
+        validation, or envelope completion-marker validation is not routed as
+        workload.
 
 
 04.2 CLIENT HELLO
@@ -193,8 +214,12 @@ Upstream Documents:
         - uses the sys lane
         - carries placeholder or bootstrap generation values as required by
           the current connection state
+        - carries isComplete = true according to IS-01
 
 04.2.3. Frontend helper logic enforces schema correctness before send.
+
+04.2.4. Frontend helper logic verifies the serialized envelope completion
+        marker before send according to IS-01.
 
 
 04.3 WELCOME
@@ -209,6 +234,8 @@ Upstream Documents:
 04.3.2. The backend then sends a welcome message containing:
         - the new generation
         - a snapshot of current view or session state
+
+04.3.3. The welcome message carries isComplete = true according to IS-01.
 
 
 04.4 CLIENTREADY
@@ -226,6 +253,9 @@ Upstream Documents:
         - ensuring each reported module is processed only once per
           generation
 
+04.4.3. clientReady is processed only after normal RPCMessage and completion-
+        marker validation succeeds.
+
 
 04.5 HEARTBEAT
 --------------
@@ -240,20 +270,40 @@ Upstream Documents:
 
 04.5.4. Missed heartbeats trigger frontend reconnection logic.
 
+04.5.5. Missed heartbeats indicate transport liveness failure.
+
+04.5.6. Missed heartbeats do not by themselves define Job timeout.
+
 
 04.6 DISCONNECT
 ---------------
 
 04.6.1. When the socket closes, backend behavior includes:
-        - cancelling pending requests
-        - cancelling active subscription coroutines
-        - removing the view binding
-        - closing the socket gracefully
+        - classifying the transport disconnect when possible
+        - resolving or rejecting transport-local pending waits
+        - applying explicit policy for Job-backed work when Jobs are
+          affected
+        - cancelling transport-owned subscription delivery when appropriate
+        - removing the view binding when required by the connection model
+        - closing the socket gracefully when possible
 
 04.6.2. When the socket closes, frontend behavior includes:
-        - clearing timers
-        - rejecting pending Promises
-        - scheduling reconnect attempts with backoff
+        - clearing transport timers
+        - rejecting or marking transport-local pending Promises according to
+          transport rules
+        - scheduling reconnect attempts with backoff when reconnection is
+          allowed
+
+04.6.3. Transport disconnect does not automatically cancel a Job.
+
+04.6.4. Transport disconnect does not automatically time out a Job.
+
+04.6.5. Transport disconnect may trigger work-lifecycle policy handling
+      under DA-17 when accepted or in-flight work exists.
+
+04.6.6. If policy causes a Job to continue detached, cancel, supersede,
+      retain result, or discard result, the Job lifecycle meaning remains
+      governed by DA-19.
 
 
 ===============================================================================
@@ -263,7 +313,7 @@ Upstream Documents:
 05.1. RPCConnection maintains per-view or per-client state such as:
       - idempotency cache
       - pending request tasks
-      - active subscription coroutines
+      - active subscription delivery state
       - generation metadata
 
 05.2. Generation rules:
@@ -277,12 +327,18 @@ Upstream Documents:
       - rejecting or discarding incoming messages whose generation does not
         match the active session expectation
 
+05.4. Generation mismatch is a transport/session continuity failure.
+
+05.5. Generation mismatch does not by itself define Job cancellation,
+      timeout, failure, or supersession.
+
 
 ===============================================================================
 06. MESSAGE DISPATCH
 ===============================================================================
 
 06.1. After handshake completion, backend behavior:
+      - validates IS-01 envelope completion marker before dispatch
       - acknowledges non-control messages according to transport rules
       - dispatches messages based on message type and route
 
@@ -296,106 +352,219 @@ Upstream Documents:
 06.4. Failures become structured error envelopes that correlate to the
       original message.
 
-06.5. Emit and subscribe messages are dispatched to capability handlers.
+06.5. Completion-marker validation failure is treated as malformed or
+      incomplete transport message handling rather than as a routed workload
+      error.
 
-06.6. Subscription state is tracked so that cancel and unsubscribe can halt
-      the associated coroutine and remove it from session state.
+06.6. Emit and subscribe messages are dispatched to capability handlers.
 
-06.7. Cancel messages remove pending work and stop active subscriptions.
+06.7. Subscription state is tracked so that unsubscribe can halt subscription
+      delivery and remove subscription transport state.
 
-06.8. Frontend behavior includes:
-      - dispatching workload messages to call, emit, or subscribe handlers
-      - resolving or rejecting Promises from replies and errors
-      - forwarding subscription updates to local event emitters or
-        equivalent handlers
+06.8. Cancel messages affect pending requests, subscriptions, or Job-backed
+      work only according to the message type, route, operation contract,
+      and applicable policy.
+
+06.9. Cancel for transport-local pending work may remove pending transport
+      wait state.
+
+06.10. Cancel for subscription delivery may stop delivery and remove
+       subscription state.
+
+06.11. Cancel for Job-backed work becomes a Job cancellation request or
+       work-lifecycle policy input when applicable.
+
+06.12. Cancel does not directly kill arbitrary underlying execution.
+
+06.13. Frontend behavior includes:
+       - dispatching workload messages to call, emit, or subscribe handlers
+       - resolving or rejecting Promises from replies and errors
+       - forwarding subscription updates to local event emitters or
+         equivalent handlers
+       - treating request acceptance as Job-backed work separately from
+         final Job success
 
 
 ===============================================================================
-07. ACKNOWLEDGEMENTS AND FLOW CONTROL
+07. JOB-BACKED REQUEST FLOW
 ===============================================================================
 
-07.1. Backend automatic acknowledgement behavior:
+07.1. A request may complete with an immediate reply.
+
+07.2. A request may complete with a structured error envelope.
+
+07.3. A request may be accepted as Job-backed work.
+
+07.4. Request acceptance as Job-backed work is not final Job success.
+
+07.5. Request acceptance as Job-backed work carries Job metadata using the
+      IS-01 envelope fields available for Job metadata.
+
+07.6. The exact Job handle, result, error, progress, and retained-result
+      envelope shapes remain constrained by DA-19 OPEN questions.
+
+07.7. After request acceptance as Job-backed work, later Job lifecycle
+      updates may be carried by reply, stateUpdate, subscription update, or
+      another concrete message pattern defined later.
+
+07.8. IS-02 does not lock the final Job update delivery pattern until DA-19
+      resolves the relevant Job envelope questions.
+
+07.9. IS-02 does define the transport separation rules:
+      - transport timeout is distinct from Job timeout
+      - transport disconnect is distinct from Job cancellation
+      - request acceptance as Job-backed work is distinct from final Job
+        success
+      - Job lifecycle updates are carried using IS-01 envelopes without this
+        document defining the final Job result, error, progress, or retained-
+        result envelope shape
+
+
+===============================================================================
+08. ACKNOWLEDGEMENTS AND FLOW CONTROL
+===============================================================================
+
+08.1. Backend automatic acknowledgement behavior:
       - acknowledges every message except ack and heartbeat, unless the
         implementation defines a narrower handshake exception path
 
-07.2. Frontend automatic acknowledgement behavior:
+08.2. Frontend automatic acknowledgement behavior:
       - acknowledges non-handshake messages according to the current client
         transport rules
 
-07.3. Acknowledgement contents include:
+08.3. Acknowledgement contents include:
       - the original message id
       - sys-lane routing or equivalent control-lane metadata
 
-07.4. Request and emit helpers attach budgetMs derived from timeout and
-      priority policy.
+08.4. Request and emit helpers attach budgetMs derived from transport
+      timeout and priority policy.
 
-07.5. Frontend flow-control tracking may include:
+08.5. budgetMs is a transport/request waiting budget unless an operation
+      explicitly defines a separate higher-level meaning.
+
+08.6. budgetMs does not by itself define Job timeout.
+
+08.7. Frontend flow-control tracking may include:
       - per-lane in-flight counters
       - per-lane queues
 
-07.6. Additional messages may be queued until:
+08.8. Additional messages may be queued until:
       - acknowledgement arrives
       - reply arrives
       - local flow-control policy permits send
 
-07.7. The purpose of this model is to:
+08.9. The purpose of this model is to:
       - prevent overload
-      - support best-effort cancellation on timeout
+      - support transport-level timeout handling
+      - support cancellation request emission when policy and operation
+        contract allow it
+
+08.10. Transport-level timeout handling does not imply Job cancellation.
+
+08.11. Transport-level timeout handling does not imply Job timeout.
+
+08.12. Transport-level timeout handling does not imply underlying execution
+       stop.
 
 
 ===============================================================================
-08. IDEMPOTENCY
+09. IDEMPOTENCY
 ===============================================================================
 
-08.1. Request and emit helpers generate idempotencyKey.
+09.1. Request and emit helpers generate idempotencyKey.
 
-08.2. The server may cache:
+09.2. The server may cache:
       - idempotencyKey
       - previous reply
 
-08.3. Duplicate invocations may:
+09.3. Duplicate invocations may:
       - return cached reply
       - avoid re-running handlers
 
+09.4. For Job-backed work, idempotency behavior may return existing
+      accepted Job metadata rather than creating duplicate Job-backed work,
+      when that behavior is supported by the operation contract.
+
+09.5. This document does not define retained Job result behavior.
+
+09.6. Retained Job result behavior remains OPEN under DA-19 until the Job
+      envelope model is finalized.
+
 
 ===============================================================================
-09. PERMISSIONS AND PRINCIPALS
+10. PERMISSIONS AND PRINCIPALS
 ===============================================================================
 
-09.1. Before invoking a capability handler, backend behavior derives the
+10.1. Before invoking a capability handler, backend behavior derives the
       principal from the message and verifies required capability
       permissions.
 
-09.2. Permission failure produces a structured error envelope.
+10.2. Permission failure produces a structured error envelope.
 
-09.3. Error payload may include retry-related metadata when the higher
+10.3. Error payload may include retry-related metadata when the higher
       permission and decision model allows that behavior.
 
-09.4. Frontend handling may use this structured result to present clear
+10.4. Frontend handling may use this structured result to present clear
       feedback through the higher-level user-interaction model.
 
-09.5. This document does not define permission semantics themselves.
+10.5. This document does not define permission semantics themselves.
       Higher DA documents define those semantics.
 
+10.6. Capability invocations that become Job-backed remain capability-
+      mediated under DA-16.
+
+10.7. Job-backed capability execution does not bypass permission checks.
+
 
 ===============================================================================
-10. TRANSPORT OBSERVABILITY AND TRACE CORRELATION
+11. TRANSPORT TIMEOUT AND JOB TIMEOUT
 ===============================================================================
 
-10.1. Backend behavior includes:
+11.1. RPC transport timeout is local waiting, acknowledgement, reply,
+      liveness, or frame-budget behavior owned by the transport flow.
+
+11.2. Job timeout is a Job lifecycle outcome owned by DA-19.
+
+11.3. Transport timeout may reject or resolve a frontend Promise according
+      to transport rules.
+
+11.4. Transport timeout may cause a cancel message or cancellation request
+      when policy and operation contract allow it.
+
+11.5. Transport timeout does not automatically transition a Job to TimedOut.
+
+11.6. Transport timeout does not automatically cancel a Job.
+
+11.7. Transport timeout does not automatically stop underlying execution.
+
+11.8. Job timeout does not mean the WebSocket transport failed.
+
+11.9. Job timeout does not mean an acknowledgement, reply, or heartbeat
+      timeout occurred.
+
+11.10. When both transport timeout and Job timeout are possible, user-facing
+       and trace-facing surfaces preserve the distinction.
+
+
+===============================================================================
+12. TRANSPORT OBSERVABILITY AND TRACE CORRELATION
+===============================================================================
+
+12.1. Backend behavior includes:
       - serializing outbound frames with safeJsonDumps or an equivalent
         helper
+      - validating IS-01 envelope completion marker before send
       - passing frames through the RPC logging-decision engine
       - centralized, policy-controlled, lane-aware logging
 
-10.2. Frontend behavior may expose equivalent logging hooks and filtering
+12.2. Frontend behavior may expose equivalent logging hooks and filtering
       rules.
 
-10.3. Logging remains secondary to trace evidence.
+12.3. Logging remains secondary to trace evidence.
 
-10.4. Logging does not replace trace correlation.
+12.4. Logging does not replace trace correlation.
 
-10.5. WebSocket RPC flow remains trace-correlatable across:
+12.5. WebSocket RPC flow remains trace-correlatable across:
       - HTTP bootstrap when correlation metadata is available
       - WebSocket upgrade
       - client hello
@@ -405,11 +574,15 @@ Upstream Documents:
       - request dispatch
       - emit dispatch
       - subscribe dispatch
+      - request acceptance as Job-backed work
       - cancellation and unsubscribe handling
       - error propagation
+      - completion-marker validation failure
+      - transport timeout
       - disconnect handling
+      - disconnect policy outcome when known
 
-10.6. RPC transport trace evidence records enough context, when available,
+12.6. RPC transport trace evidence records enough context, when available,
       to explain:
       - message id
       - correlatesTo
@@ -421,41 +594,87 @@ Upstream Documents:
       - client identity
       - appInstanceId
       - jobId
+      - envelope completion-marker validation failure
+      - transport timeout category
       - disconnect reason or transport failure category
+      - disconnect policy outcome when known
 
-10.7. Structured error envelopes preserve correlation to the original
+12.7. Structured error envelopes preserve correlation to the original
       message and trace correlation metadata when available.
 
-10.8. Transport observability does not define capability, permission,
+12.8. Transport observability does not define capability, permission,
       activation, decision, Job, or AppInstance semantics.
 
-10.9. DA-03 defines the tracing substrate used to represent RPC transport
+12.9. DA-03 defines the tracing substrate used to represent RPC transport
       evidence.
 
-10.10. IS-01 defines the wire-envelope fields used to carry RPC correlation
-       metadata.
+12.10. IS-01 defines the wire-envelope fields used to carry RPC correlation
+       metadata, Job metadata, and envelope completion markers.
 
-10.11. The intended result is:
+12.11. DA-17 defines work-lifecycle policy trace obligations when transport
+       behavior causes a policy decision.
+
+12.12. DA-19 defines Job lifecycle trace obligations when transport behavior
+       affects a Job.
+
+12.13. The intended result is:
        - coherent cross-side debugging
        - no divergent logging semantics
        - RPC messages that remain linkable to trace evidence where trace
          evidence exists
+       - transport failures that do not masquerade as Job lifecycle outcomes
 
 
 ===============================================================================
-11. RELATION TO HIGHER DOCUMENTS
+13. RELATION TO HIGHER DOCUMENTS
 ===============================================================================
 
-11.1. This document is constrained by higher-authority documents.
+13.1. This document is constrained by higher-authority documents.
 
-11.2. This document does not introduce new system guarantees, authority
+13.2. This document does not introduce new system guarantees, authority
       semantics, or policy rules.
 
-11.3. Visibility, activation, capability, permission, and decision-handling
-      semantics remain governed by higher DA documents.
+13.3. Visibility, activation, capability, permission, decision-handling, and
+      Job lifecycle semantics remain governed by higher DA documents.
 
-11.4. This document defines only the concrete WebSocket transport flow used
+13.4. This document defines only the concrete WebSocket transport flow used
       to carry those higher-level concepts.
+
+13.5. IS-01 defines RPC envelope schema, including isComplete and Job
+      metadata fields.
+
+13.6. DA-16 defines capability mediation when an RPC message invokes a
+      capability.
+
+13.7. DA-17 defines work-lifecycle policy decisions triggered by transport
+      disconnect, timeout, cancellation, or supersession conditions.
+
+13.8. DA-19 defines Job lifecycle states, terminal outcomes, timeout,
+      cancellation, supersession, progress, late completion, and OPEN Job
+      envelope questions.
+
+
+===============================================================================
+14. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+14.1. OPEN questions include:
+      - concrete WebSocket flow for Job-backed request acceptance, progress,
+        terminal outcome delivery, and retained-result retrieval, pending
+        DA-19 Job envelope decisions
+      - exact transport behavior for retained Job result lookup after
+        reconnect
+      - exact frontend Promise behavior when a request is accepted as a Job
+        but the final Job result is delivered later
+      - exact subscription relationship to Job progress and terminal outcome
+        delivery
+
+14.2. Job-backed RPC flow remains intentionally partial until DA-19 resolves
+      the OPEN Job envelope questions.
+
+14.3. Until those questions are resolved, IS-02 defines only transport
+      separation rules and does not lock final Job result, error, progress,
+      or retained-result envelope shape.
 
 
 ===============================================================================
@@ -465,6 +684,6 @@ END OF IS-02 - WEBSOCKET RPC FLOW
 --- doc-meta ---
 DOC_ID: IS-02
 DOC_FILE: docs/design/IS-02_WEBSOCKET_RPC_FLOW.txt
-DOC_REV: 17
-DOC_GIT: f402f2d
+DOC_REV: 18
+DOC_GIT: 0000000
 ----------------
