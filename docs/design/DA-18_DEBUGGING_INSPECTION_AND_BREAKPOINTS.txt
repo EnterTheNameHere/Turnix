@@ -25,6 +25,7 @@ It defines:
 - inspection surfaces and debugger action boundaries
 - manual pause and apply-at-safe-point semantics
 - Job-aware breakpoint and pause behavior when Jobs exist
+- debugger-originated Job lifecycle control boundaries
 - undo and redo semantics for debugger tooling
 - trace integration requirements for debugger actions and breakpoint events
 
@@ -32,6 +33,9 @@ It does NOT define:
 - the tracing model, trace event schema, or retention rules (see DA-03)
 - authoritative committed state, transactions, or windows (see DA-04)
 - activation semantics beyond pause boundaries (see DA-14)
+- decision and policy handling semantics (see DA-17)
+- Job lifecycle states, terminal outcomes, or Job result semantics
+  (see DA-19)
 - concrete user-interface layout for debugger tooling
 
 Upstream Documents:
@@ -44,6 +48,8 @@ Upstream Documents:
 - DA-03
 - DA-04
 - DA-14
+- DA-17
+- DA-19
 
 ===============================================================================
 01. INTERPRETATION BASIS
@@ -86,6 +92,7 @@ Upstream Documents:
       - pipelines
       - memory layers
       - capabilities
+      - Jobs when Jobs exist
 
 02.5. Python frames or JavaScript call stacks may appear as contextual
       information, but they are not the primary debugging model.
@@ -211,6 +218,13 @@ Upstream Documents:
         - caller pack
         - permission decision point
 
+03.3.3. Capability breakpoints may observe capability invocations that later
+        create or attach to Jobs.
+
+03.3.4. If a capability invocation creates or attaches to a Job, the Job
+        lifecycle remains owned by DA-19 rather than by the capability
+        breakpoint.
+
 
 ===============================================================================
 04. BREAKPOINT BEHAVIOR (LOCKED)
@@ -229,6 +243,8 @@ Upstream Documents:
       - auto-resume silently
       - alter execution order
       - mutate state by default
+      - silently cancel Jobs
+      - silently supersede Jobs
 
 
 ===============================================================================
@@ -264,6 +280,11 @@ Upstream Documents:
       authority path as normal runtime actions, for example IoManager or
       services that use it.
 
+06.5. Debugger-originated Job control actions execute through Turnix
+      lifecycle and policy surfaces.
+
+06.6. Debugger tooling does not mutate Job terminal state directly.
+
 
 ===============================================================================
 07. INSPECTION SURFACES
@@ -276,6 +297,7 @@ Upstream Documents:
       - pipeline objects
       - capability registry
       - services registry
+      - Jobs when Jobs exist
 
 07.2. Inspection is read-only by default.
 
@@ -311,6 +333,12 @@ Upstream Documents:
 07.11. Inspecting committed-state history does not bypass the committed-state
        authority model defined elsewhere.
 
+07.12. Debugger inspection may inspect Job lifecycle state, owner, progress,
+       terminal outcome, and causal trace links when Jobs exist.
+
+07.13. Inspecting a Job does not grant direct access to the underlying
+       execution mechanism.
+
 
 ===============================================================================
 08. CONTROLLED MUTATION (LOCKED)
@@ -324,7 +352,7 @@ Upstream Documents:
 08.2. Examples include:
       - editing a memory value
       - disabling or modifying a breakpoint
-      - forcing resume or abort
+      - forcing resume or abort of a debugger pause scope
 
 08.3. Every debugger-initiated mutation emits a trace event.
 
@@ -341,6 +369,11 @@ Upstream Documents:
 08.7. If debugger tooling uses such an overlay, the overlay remains distinct
       from committed state until normal commit rules make the mutation
       authoritative.
+
+08.8. Job lifecycle control is not controlled mutation of committed state.
+
+08.9. Job lifecycle control remains constrained by DA-19 and by policy
+      handling when policy participates.
 
 
 ===============================================================================
@@ -376,14 +409,19 @@ Upstream Documents:
 
 10.4. Manual pause does not silently cancel in-flight work.
 
-10.5. If pausing cannot be achieved safely, Turnix refuses the pause
+10.5. Manual pause does not silently supersede in-flight work.
+
+10.6. If pausing cannot be achieved safely, Turnix refuses the pause
       request with an explicit, traceable reason.
 
-10.6. Manual pause may operate by enforcing quiescence at defined safe
+10.7. Manual pause may operate by enforcing quiescence at defined safe
       points such as:
       - between pipeline stages
       - between capability calls
       - before commit points for persistence
+
+10.8. Manual pause of a Job remains non-terminal unless a later explicit
+      lifecycle or policy outcome changes the Job state under DA-19.
 
 
 ===============================================================================
@@ -473,9 +511,18 @@ Upstream Documents:
       - subscribe via RPC
       - receive breakpoint-hit events
       - show causal context
-      - allow resume, step, abort, undo, or redo where supported
+      - allow resume, step, abort of a debugger pause scope, undo, or redo
+        where supported
+      - request Job pause-at-safe-point, cancellation, or supersession where
+        supported
 
 14.2. Debugger user interfaces are optional but supported.
+
+14.3. Debugger user interfaces do not present Superseded Job outcomes as
+      failures.
+
+14.4. Debugger user interfaces do not present paused-at-safe-point Jobs as
+      terminal.
 
 
 ===============================================================================
@@ -485,11 +532,16 @@ Upstream Documents:
 15.1. Supported step modes include:
       - Resume
       - Step over, meaning the next stage or memory change
-      - Abort, meaning fail the current execution unit
+      - Abort, meaning fail the current debugger-controlled execution scope
 
 15.2. Unsupported step modes include:
       - instruction-level stepping
       - time travel as a runtime debugger mode in this document
+
+15.3. Step modes do not redefine Job lifecycle states.
+
+15.4. If step or abort actions affect a Job, the resulting Job lifecycle
+      outcome remains governed by DA-19.
 
 
 ===============================================================================
@@ -499,25 +551,43 @@ Upstream Documents:
 16.1. Turnix may represent long-running work as explicit Jobs.
 
 16.2. If Jobs exist:
-      - Jobs are observable through status, owner, and causal trace links
-      - Jobs are abortable only through Turnix orchestration
+      - Jobs are observable through status, owner, progress, terminal
+        outcome, and causal trace links
+      - Jobs are controlled only through Turnix lifecycle, orchestration, or
+        policy surfaces
+      - Job lifecycle semantics remain owned by DA-19
 
 16.3. Debugger interaction with Jobs may include requests for:
       - pause-at-safe-point for a Job
       - breakpoint-at-safe-point for a Job
-      - explicit Job abort
+      - resume of a paused Job
+      - cancellation request for a Job
+      - supersession request for a Job where supported
 
-16.4. Manual pause does not implicitly abort Jobs.
+16.4. Manual pause does not implicitly cancel Jobs.
 
-16.5. Safe-point pausing or breakpointing of Jobs occurs at boundaries such
+16.5. Manual pause does not implicitly supersede Jobs.
+
+16.6. Safe-point pausing or breakpointing of Jobs occurs at boundaries such
       as:
       - between pipeline stages
       - before or after capability boundaries
       - before commit points for persistence
 
-16.6. If a Job cannot reach a safe point:
+16.7. If a Job cannot reach a safe point:
       - that fact is surfaced explicitly
       - no silent cancellation is permitted
+      - no silent supersession is permitted
+
+16.8. A paused-at-safe-point Job remains non-terminal.
+
+16.9. Debugger-originated cancellation, supersession, continuation, or hold
+      behavior may require work-lifecycle policy handling under DA-17.
+
+16.10. The debugger does not directly write a Job terminal state.
+
+16.11. Job terminal outcomes caused or requested through debugger action are
+       recorded through Job lifecycle evidence owned by DA-19.
 
 
 ===============================================================================
@@ -530,8 +600,14 @@ Upstream Documents:
       - view
       - pack
       - pipeline
+      - Job when Jobs exist
 
 17.2. Unscoped breakpoints are discouraged.
+
+17.3. A Job-scoped breakpoint does not create a Job.
+
+17.4. A Job-scoped breakpoint applies only to the Job lifecycle or work
+      region selected by the debugger configuration.
 
 
 ===============================================================================
@@ -546,19 +622,24 @@ Upstream Documents:
 18.2. In development:
       - all debugging features in this document are available
 
+18.3. Development availability does not allow debugger tooling to bypass
+      Job lifecycle, policy, transaction, or capability authority boundaries.
+
 
 ===============================================================================
 19. FAILURE MODES (LOCKED)
 ===============================================================================
 
 19.1. If the debugger disconnects:
-      - execution resumes, aborts, or refuses to hold according to policy
+      - execution resumes, cancels, supersedes, aborts the affected
+        debugger-controlled scope, or refuses to hold according to policy
       - the chosen outcome is trace-visible
       - deadlock is not allowed
 
 19.2. Debugger disconnect outcome trace evidence distinguishes:
       - execution resumed after debugger disconnect by policy
-      - active work aborted after debugger disconnect by policy
+      - active work cancelled, superseded, or aborted after debugger
+        disconnect by policy
       - hold refused because holding is unsupported, unsafe, or impossible
 
 19.3. Debugger disconnect outcome trace evidence records enough context to
@@ -566,12 +647,18 @@ Upstream Documents:
       - debugger client identity
       - policy identity
       - disconnect kind
-      - affected target when work is aborted
+      - affected target when work is cancelled, superseded, or aborted
       - refusal reason category when hold is refused
 
 19.4. If breakpoint logic errors:
       - the breakpoint is disabled
       - the error is trace-visible
+
+19.5. If debugger disconnect policy affects a Job, the Job lifecycle outcome
+      remains governed by DA-19.
+
+19.6. If debugger disconnect policy is a work-lifecycle policy decision,
+      the policy handling remains governed by DA-17.
 
 
 ===============================================================================
@@ -618,36 +705,42 @@ Upstream Documents:
        - caller-pack identity
        - decisionPoint when applicable
 
-20.11. Breakpoint-hit trace evidence includes orchestrationUnitId or Job
+20.11. Job-scoped breakpoint-hit trace evidence additionally includes:
+       - jobId
+       - Job state when available
+       - Job terminal outcome when available
+
+20.12. Breakpoint-hit trace evidence includes orchestrationUnitId or Job
        identity when applicable.
 
-20.12. Manual pause trace evidence distinguishes:
+20.13. Manual pause trace evidence distinguishes:
        - pause requested
        - pause granted
        - pause refused
        - pause-at-safe-point requested
        - pause-at-safe-point applied
 
-20.13. Manual pause trace evidence records enough context to explain:
+20.14. Manual pause trace evidence records enough context to explain:
        - request identity
        - pause scope
        - target identity
        - whether a safe point was reached
        - safe-point descriptor when applicable
        - refusal reason category when pause is refused
+       - jobId when the target is a Job
 
-20.14. Debugger inspection trace evidence records:
+20.15. Debugger inspection trace evidence records:
        - inspection kind
        - target kind
        - target identity when applicable
 
-20.15. Debugger mutation trace evidence distinguishes:
+20.16. Debugger mutation trace evidence distinguishes:
        - mutation requested
        - mutation staged
        - mutation applied
        - mutation discarded
 
-20.16. Debugger mutation trace evidence records enough context to explain:
+20.17. Debugger mutation trace evidence records enough context to explain:
        - mutation request identity
        - mutation lineage identity
        - target kind
@@ -657,15 +750,21 @@ Upstream Documents:
        - applied safe point when applied
        - discard reason category when discarded
 
-20.17. Debugger actions that stage and apply mutations at safe points are
+20.18. Debugger-originated Job control is trace-visible and remains linked
+       to Job lifecycle evidence when it affects a Job.
+
+20.19. Debugger-originated Job control trace evidence records policy source
+       when policy participates.
+
+20.20. Debugger actions that stage and apply mutations at safe points are
        traced as distinct events that share a stable mutation-lineage
        identifier.
 
-20.18. DA-18 owns the debugger-domain trace reason identifiers used for
+20.21. DA-18 owns the debugger-domain trace reason identifiers used for
        debugger inspection, breakpoints, manual pause, safe-point pause,
        debugger disconnect outcomes, and debugger-initiated mutation.
 
-20.19. The following debugger-domain trace reasons are defined:
+20.22. The following debugger-domain trace reasons are defined:
 
        - DebuggerConnected
        - DebuggerDisconnected
@@ -685,12 +784,18 @@ Upstream Documents:
        - DebuggerMutationApplied
        - DebuggerMutationDiscarded
 
-20.20. Tracing and debugging are complementary.
+20.23. Tracing and debugging are complementary.
 
-20.21. DA-03 defines trace event structure, trace DAG semantics, span
+20.24. DA-03 defines trace event structure, trace DAG semantics, span
        mechanics, and trace retention semantics.
 
-20.22. This document defines debugger-specific trace obligations.
+20.25. DA-17 defines work-lifecycle policy trace obligations when policy
+       participates in debugger-originated Job control.
+
+20.26. DA-19 defines Job lifecycle trace obligations when debugger-originated
+       control affects a Job.
+
+20.27. This document defines debugger-specific trace obligations.
 
 
 ===============================================================================
@@ -702,6 +807,8 @@ Upstream Documents:
       - JavaScript eval debugging
       - modifying pack code at runtime
       - hot-patching logic without reload
+      - directly writing Job terminal state from debugger tooling
+      - silently cancelling or superseding Jobs from debugger tooling
 
 
 ===============================================================================
@@ -713,6 +820,7 @@ Upstream Documents:
       - snapshot or restore state
       - time-travel debugging
       - replay-from-trace tooling
+      - exact debugger UI affordances for Job lifecycle control
 
 
 ===============================================================================
@@ -721,24 +829,30 @@ Upstream Documents:
 
 23.1. LOCKED:
       - semantic breakpoints
-      - pipeline, memory, and capability breakpoints
+      - pipeline, memory, capability, and Job-scoped breakpoints
       - transaction-aware breakpoint semantics
       - read-only inspection by default
       - controlled mutation with tracing
       - debugger usability while Turnix is running
       - deterministic manual pause
+      - manual pause does not silently cancel or supersede Jobs
       - apply-at-safe-point mutation semantics
       - undo of authoritative debugger changes operates on committed
         revisions as new explicit debugger-initiated work
       - redo history is debugger-local, ephemeral, and non-authoritative
       - debugger-specific trace obligations are owned here
       - debugger-domain trace reason identifiers are owned by DA-18
-      - Job-safe breakpointing and pausing
+      - Job-safe breakpointing and pausing align with DA-19 Job lifecycle
+      - debugger-originated Job control is explicit, trace-visible, and
+        constrained by DA-17 and DA-19
+      - paused-at-safe-point Jobs remain non-terminal
+      - debugger tooling does not directly write Job terminal state
       - non-blocking debugger behavior
 
 23.2. OPEN:
       - advanced conditional logic
       - replay and time travel
+      - exact debugger UI affordances for Job lifecycle control
 
 
 ===============================================================================
@@ -748,6 +862,6 @@ END OF DA-18 - DEBUGGING, INSPECTION & BREAKPOINTS
 --- doc-meta ---
 DOC_ID: DA-18
 DOC_FILE: docs/design/DA-18_DEBUGGING_INSPECTION_AND_BREAKPOINTS.txt
-DOC_REV: 17
-DOC_GIT: a13c63d
+DOC_REV: 18
+DOC_GIT: d2b2648
 ----------------
