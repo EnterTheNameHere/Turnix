@@ -17,7 +17,8 @@ system guarantees, authority semantics, or policy rules.
 Purpose:
 --------
 This document defines the concrete RPC message envelope, its fields, helper
-construction expectations, and serialization responsibilities.
+construction expectations, serialization responsibilities, and envelope
+completion-marker behavior.
 
 It defines:
 - core RPC wire models
@@ -25,11 +26,13 @@ It defines:
 - per-type field expectations
 - helper-constructor responsibilities
 - serialization and routing expectations
+- envelope completion-marker behavior
 
 It does NOT define:
 - new runtime authority semantics
 - new permission or policy rules
 - tracing semantics beyond carrying correlation metadata
+- Job lifecycle semantics beyond carrying Job metadata (see DA-19)
 - WebSocket lifecycle behavior beyond what the message schema requires
 - higher-level routing, visibility, activation, or capability semantics
 
@@ -46,6 +49,7 @@ Upstream Documents:
 - DA-14
 - DA-16
 - DA-17
+- DA-19
 
 ===============================================================================
 01. INTERPRETATION BASIS
@@ -126,6 +130,8 @@ Upstream Documents:
         - validating message shape
         - inferring delivery lane through model validation when the lane
           is omitted and inference is permitted
+        - carrying isComplete as the final serialized top-level field for
+          complete envelopes
 
 
 ===============================================================================
@@ -136,6 +142,18 @@ Upstream Documents:
       None, or the implementation default for that side.
 
 04.2. The envelope fields are defined below.
+
+04.3. JSON object field order is not treated as general semantic meaning by
+      Turnix.
+
+04.4. This schema nevertheless requires canonical serializer field order for
+      the top-level RPC envelope so that isComplete can act as an envelope
+      tail sentinel.
+
+04.5. Complete envelopes serialize isComplete as the final top-level field.
+
+04.6. No top-level envelope field appears after isComplete in canonical
+      serialized form.
 
 
 04.1 v
@@ -247,10 +265,15 @@ Upstream Documents:
 04.10 job
 ---------
 
-04.10.1. job mirrors backend job-progress snapshots when long-running work
-         reports state.
+04.10.1. job carries Job lifecycle snapshot or Job handle metadata when a
+         message reports, accepts, updates, or completes Job-backed work.
 
 04.10.2. The concrete job structure is job-type specific.
+
+04.10.3. job does not define Job lifecycle semantics.
+
+04.10.4. DA-19 defines Job lifecycle states, terminal outcomes, progress,
+         cancellation, timeout, supersession, and late completion handling.
 
 
 04.11 idempotencyKey
@@ -365,21 +388,30 @@ Upstream Documents:
 04.18 chunkNo
 -------------
 
-04.18.1. chunkNo is the chunk index when payloads are streamed.
+04.18.1. chunkNo is the chunk index when payloads are streamed or sent as an
+         ordered message series.
 
 04.18.2. chunk numbering starts at 0 or 1 depending on helper convention.
 
-04.18.3. chunkNo is monotonically increasing within the stream.
+04.18.3. chunkNo is monotonically increasing within the ordered series.
 
 
 04.19 final
 -----------
 
-04.19.1. final marks the final chunk in a stream.
+04.19.1. final marks the final message in a streamed or ordered message
+         series.
 
 04.19.2. final accepts:
          - boolean
          - integer flag, where non-zero is treated as true
+
+04.19.3. final is a series-level marker.
+
+04.19.4. final is not a single-envelope completion marker.
+
+04.19.5. A message may be complete as an individual envelope even when final
+         is false or absent.
 
 
 04.20 payload
@@ -393,6 +425,53 @@ Upstream Documents:
          - reply requires a result payload
          - error requires an error object
          - stateUpdate carries state deltas
+
+
+04.21 isComplete
+----------------
+
+04.21.1. isComplete marks that the sender intentionally completed
+         construction of the full top-level RPC envelope before serialized
+         send.
+
+04.21.2. isComplete is boolean.
+
+04.21.3. A complete RPC envelope sets isComplete = true.
+
+04.21.4. isComplete is serialized as the final top-level field of a
+         complete RPC envelope.
+
+04.21.5. No top-level envelope field is serialized after isComplete in
+         canonical serialized form.
+
+04.21.6. If isComplete is missing, the receiver treats the envelope as
+         incomplete.
+
+04.21.7. If isComplete is false, null, or not boolean true, the receiver
+         treats the envelope as incomplete.
+
+04.21.8. An incomplete envelope is not processed as a valid RPC message.
+
+04.21.9. isComplete is not a semantic correctness marker.
+
+04.21.10. isComplete does not prove that the message content is correct.
+
+04.21.11. isComplete does not replace JSON parsing, schema validation,
+          generation validation, routing validation, permission checks,
+          trace correlation, transport framing, stream or ordered-series
+          sequencing, or final.
+
+04.21.12. isComplete exists to detect accidental incomplete envelope
+          construction, unintended partial content emission, and truncation
+          where the tail of the serialized top-level envelope did not make it
+          through.
+
+04.21.13. Because isComplete is the final top-level field, a serialized
+          envelope that lacks isComplete has not reached the declared end of
+          the complete envelope.
+
+04.21.14. A receiver accepts isComplete only after the complete JSON frame
+          has parsed successfully and the top-level envelope validates.
 
 
 ===============================================================================
@@ -415,6 +494,9 @@ Upstream Documents:
       - setting default budgetMs for the operation kind
       - copying idempotencyKey from the triggering message when applicable
       - enforcing required fields per message type
+      - setting isComplete = true only after the envelope has been fully
+        constructed
+      - ensuring isComplete is the final serialized top-level field
 
 05.4. The frontend mirrors these helper expectations in RpcClient so that
       both sides construct symmetric envelopes.
@@ -423,9 +505,17 @@ Upstream Documents:
       - schema version
       - system lane
       - acknowledgement budget where applicable
+      - envelope completion marking
 
 05.6. This shared helper behavior exists to keep message construction
       deterministic and free of ad-hoc exceptions.
+
+05.7. Helper constructors do not set isComplete = true before required
+      top-level fields and required payload structures for the message type
+      have been supplied.
+
+05.8. Before sending, serialization verifies that the canonical serialized
+      top-level envelope ends with isComplete = true.
 
 
 ===============================================================================
@@ -435,23 +525,36 @@ Upstream Documents:
 06.1. "hello":
       - carries gen
       - carries client identity information in payload
+      - carries isComplete = true
 
 06.2. "request":
       - carries route
       - carries op and or path as required by the target
       - carries payload or args as required by the operation
+      - carries isComplete = true
 
 06.3. "reply":
       - carries correlatesTo
       - carries payload
+      - carries isComplete = true
 
 06.4. "error":
       - carries correlatesTo
       - carries an error payload
       - carries or preserves trace correlation metadata when available
+      - carries isComplete = true
 
-06.5. Other message types obey the field expectations required by their role
+06.5. "stateUpdate":
+      - carries state-update payload
+      - carries isComplete = true
+
+06.6. Other message types obey the field expectations required by their role
       and the helper constructors that create them.
+
+06.7. All complete message types carry isComplete = true.
+
+06.8. Compatibility mode may accept older envelopes without isComplete only
+      when that compatibility behavior is explicit and scoped.
 
 
 ===============================================================================
@@ -460,13 +563,18 @@ Upstream Documents:
 
 07.1. Backend send flow is:
       1) build or mutate an RPCMessage through helper constructors
-      2) serialize using a JSON helper such as safeJsonDumps
-      3) feed the frame into the RPC logging-decision engine
-      4) transmit the JSON string over the transport
+      2) complete the envelope by setting isComplete = true as the final
+         top-level field
+      3) serialize using a JSON helper such as safeJsonDumps
+      4) verify the serialized top-level envelope ends with isComplete = true
+         according to the canonical serializer field order
+      5) feed the frame into the RPC logging-decision engine
+      6) transmit the JSON string over the transport
 
 07.2. Serialization steps may include:
       - dumping the model to a plain structure
       - applying deterministic separators or ordering where appropriate
+      - ensuring isComplete remains the final serialized top-level field
 
 07.3. Logging-decision flow may include:
       - deciding whether to log based on lane, type, and level
@@ -475,8 +583,11 @@ Upstream Documents:
 07.4. Frontend receive flow is:
       1) parse incoming text frames as JSON
       2) validate the basic structure
-      3) apply optional logging hooks
-      4) route messages by type, lane, and route
+      3) verify that isComplete is present and true unless explicit
+         compatibility handling applies
+      4) reject incomplete envelopes before routing
+      5) apply optional logging hooks
+      6) route messages by type, lane, and route
 
 07.5. Frontend routing behavior includes:
       - control frames update connection and generation state
@@ -488,9 +599,15 @@ Upstream Documents:
       - routed deterministically
       - logged consistently
       - correlated for tracing
+      - rejected when the envelope completion marker is absent or false
 
 07.7. This document does not require ad-hoc special cases outside the schema
       and helper model defined here.
+
+07.8. The completion marker is checked before a parsed envelope is routed.
+
+07.9. Failure of completion-marker validation is treated as malformed or
+      incomplete message handling rather than as a routed workload error.
 
 
 ===============================================================================
@@ -502,11 +619,17 @@ Upstream Documents:
 08.2. This document does not introduce new system guarantees, authority
       semantics, or policy rules.
 
-08.3. Routing, visibility, activation, capability, permission, and
-      decision-handling semantics remain governed by higher DA documents.
+08.3. Routing, visibility, activation, capability, permission,
+      decision-handling, and Job lifecycle semantics remain governed by
+      higher DA documents.
 
 08.4. This document defines only the concrete wire structure used to carry
       those higher-level concepts.
+
+08.5. isComplete defines a wire-envelope completion marker only.
+
+08.6. isComplete does not add authority to the payload, result, error,
+      Job snapshot, trace correlation metadata, or routed operation.
 
 
 ===============================================================================
@@ -516,6 +639,6 @@ END OF IS-01 - RPC MESSAGE SCHEMA
 --- doc-meta ---
 DOC_ID: IS-01
 DOC_FILE: docs/design/IS-01_RPC_MESSAGE_SCHEMA.txt
-DOC_REV: 15
-DOC_GIT: f402f2d
+DOC_REV: 16
+DOC_GIT: 0000000
 ----------------
