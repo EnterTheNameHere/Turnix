@@ -1,6 +1,714 @@
+===============================================================================
+DESIGN AREA DA-22 - UI, VIEWS & FRONTEND RUNTIME
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines Turnix UI and View semantics as presentation, interaction, and
+frontend runtime surfaces that remain subordinate to kernel authority,
+RPC/channel boundaries, capability mediation, decision handling, and
+committed-state rules.
+
+This document owns the abstract UI/View model. Concrete browser assets,
+component layouts, JavaScript framework choices, and WebSocket frame flow
+remain implementation details or implementation specifications.
+
+Purpose:
+--------
+This document defines how Turnix presents runtime state, receives user input,
+loads frontend view code, and connects frontend surfaces to the kernel without
+turning UI behavior into hidden authority.
+
+It defines:
+- UI as a presentation and interaction surface
+- View as a kernel-bound frontend runtime surface
+- View identity and lifecycle boundaries
+- relationship between Views, AppInstances, and frontend clients
+- frontend runtime authority boundaries
+- UI pack and view pack participation boundaries
+- UI state, presentation state, and authoritative state separation
+- frontend event and command flow through RPC
+- decision presentation responsibilities
+- debugger UI boundaries
+- accessibility and presentation transforms
+- UI trace and observability obligations
+
+It does NOT define:
+- concrete RPC envelope fields (see IS-01)
+- concrete WebSocket flow (see IS-02)
+- abstract RPC, channel, and transport semantics (see DA-21)
+- trace event structure, trace DAG semantics, or span mechanics (see DA-03)
+- authoritative committed state or transaction semantics (see DA-04)
+- importing and module-loading boundaries (see DA-12)
+- activation lifecycle and PackContext authority (see DA-14)
+- service, capability, or permission semantics (see DA-16)
+- user decision and remembered policy semantics (see DA-17)
+- debugging, inspection, and breakpoint semantics (see DA-18)
+- Job lifecycle or long-running work semantics (see DA-19)
+- AppInstance lifecycle or runtime identity semantics (see DA-20)
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-02
+- DA-03
+- DA-04
+- DA-12
+- DA-14
+- DA-16
+- DA-17
+- DA-18
+- DA-19
+- DA-20
+- DA-21
+- IS-01
+- IS-02
+
+Downstream Documents:
+--------------------
+- future frontend implementation specifications
+- future View runtime implementation specifications
+- future UI component and developer-tooling specifications
+
+
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
+
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines UI, View, frontend runtime, presentation, and
+      interaction semantics within that shared interpretation model.
+
+
+===============================================================================
+02. CORE CONCEPT
+===============================================================================
+
+02.1. UI answers:
+
+          "How does Turnix present state and decisions to users, receive
+           interaction, and connect frontend surfaces to kernel-mediated
+           behavior without granting the frontend hidden authority?"
+
+02.2. UI is a presentation and interaction surface.
+
+02.3. UI is not authoritative state by itself.
+
+02.4. UI is not capability authority by itself.
+
+02.5. UI is not policy authority by itself.
+
+02.6. UI is not persistence authority by itself.
+
+02.7. A View is a kernel-bound frontend runtime surface.
+
+02.8. A View may present one AppInstance, one tool surface, one debugger
+      surface, one management surface, or another kernel-recognized surface
+      class.
+
+02.9. A View receives state and sends interaction through Turnix-mediated
+      channels.
+
+02.10. A View does not become authoritative merely because the user can see
+       or interact with it.
+
+02.11. User interaction becomes meaningful only when the kernel accepts the
+       corresponding command, decision, capability call, or RPC message.
+
+
+===============================================================================
+03. UI, VIEW, AND FRONTEND CLIENT TERMS
+===============================================================================
+
+03.1. UI means the user-facing presentation and interaction layer.
+
+03.2. View means a kernel-recognized frontend surface with identity,
+      lifecycle, state delivery, and interaction routing.
+
+03.3. Frontend client means a concrete connected client instance such as a
+      browser tab, embedded frontend, developer tool, or future frontend
+      host.
+
+03.4. One frontend client may bind to one View.
+
+03.5. Multiple frontend clients may bind to one View only when the View
+      binding model and policy permit that behavior.
+
+03.6. One AppInstance may have zero, one, or multiple Views depending on the
+      runtime and policy model.
+
+03.7. A View may exist for a non-AppInstance surface such as:
+      - launcher
+      - pack manager
+      - configuration editor
+      - debugger
+      - audit viewer
+      - future management surface
+
+03.8. View identity is distinct from AppInstance identity.
+
+03.9. View identity is distinct from frontend client identity.
+
+03.10. Frontend client identity is distinct from user identity.
+
+03.11. Concrete cookie, token, and bootstrap details belong to
+       implementation specifications.
+
+
+===============================================================================
+04. VIEW LIFECYCLE
+===============================================================================
+
+04.1. A View lifecycle has explicit observable phases.
+
+04.2. View lifecycle phases may include:
+      - created
+      - bound to frontend client
+      - initialized
+      - ready
+      - disconnected
+      - reconnected
+      - closed
+
+04.3. View creation does not activate packs by itself.
+
+04.4. View creation does not create an AppInstance by itself unless an
+      explicit launcher or runtime workflow defines that behavior.
+
+04.5. View binding associates a frontend client with a kernel-recognized
+      View identity.
+
+04.6. View readiness means the frontend can receive and process the View's
+      expected runtime messages.
+
+04.7. View readiness does not imply AppInstance readiness.
+
+04.8. View readiness does not imply pack activation success.
+
+04.9. View disconnect is a frontend or transport condition.
+
+04.10. View disconnect does not automatically cancel Jobs.
+
+04.11. View disconnect does not automatically deactivate the AppInstance.
+
+04.12. View disconnect does not automatically discard authoritative state.
+
+04.13. If View disconnect affects accepted or in-flight work, DA-17 and
+       DA-19 govern policy and Job lifecycle outcomes.
+
+04.14. View closure releases the View runtime surface.
+
+04.15. View closure does not by itself define whether AppInstance work
+       committed, aborted, continued, detached, or was retried.
+
+
+===============================================================================
+05. FRONTEND RUNTIME AUTHORITY BOUNDARY
+===============================================================================
+
+05.1. Frontend runtime code executes as presentation and interaction logic.
+
+05.2. Frontend runtime code does not gain direct authority over committed
+      state.
+
+05.3. Frontend runtime code does not mutate files directly as a Turnix
+      authority path.
+
+05.4. Frontend runtime code does not bypass RPC, capability, policy,
+      transaction, or persistence boundaries.
+
+05.5. Frontend runtime code sends requests, emits events, subscribes to
+      updates, and presents received state through DA-21 RPC semantics.
+
+05.6. Kernel-side handlers decide whether a frontend request is valid.
+
+05.7. Kernel-side handlers decide whether a frontend request crosses a
+      capability, policy, persistence, or mutation boundary.
+
+05.8. A frontend command is not authoritative merely because the user
+      clicked, typed, dragged, confirmed, or otherwise interacted with the
+      UI.
+
+05.9. Frontend code may hold presentation-local state.
+
+05.10. Presentation-local state does not become committed state unless a
+       kernel-mediated mutation commits it under DA-04 and related
+       documents.
+
+
+===============================================================================
+06. VIEW PACKS AND UI PACK PARTICIPATION
+===============================================================================
+
+06.1. View packs and UI-related packs may provide frontend modules,
+      components, layouts, or interaction behavior.
+
+06.2. View packs remain packs.
+
+06.3. View packs remain subject to discovery, identity, resolution,
+      dependency, import, activation, visibility, and capability rules.
+
+06.4. A View pack does not gain authority merely because it renders visible
+      UI.
+
+06.5. A View pack does not bypass turnixImport or other code-boundary rules.
+
+06.6. JavaScript frontend code loaded for a View remains constrained by
+      DA-12 import and module-loading rules.
+
+06.7. View pack activation remains constrained by DA-14.
+
+06.8. View pack interaction with backend behavior remains mediated through
+      RPC, services, capabilities, or other Turnix-defined surfaces.
+
+06.9. View pack code must not assume another pack is activated merely
+      because that pack appears in the UI.
+
+06.10. UI extension points are explicit.
+
+06.11. UI extension points do not imply arbitrary mutation authority.
+
+
+===============================================================================
+07. UI STATE, PRESENTATION STATE, AND AUTHORITATIVE STATE
+===============================================================================
+
+07.1. UI may present state snapshots, deltas, computed projections,
+      validation results, progress, diagnostics, and decision prompts.
+
+07.2. Presented state is not authoritative merely because it is presented.
+
+07.3. Presentation state may include:
+      - selected tab
+      - scroll position
+      - expanded tree node
+      - local filter
+      - temporary draft input
+      - layout size
+      - frontend-only cache
+
+07.4. Presentation state is non-authoritative unless explicitly persisted
+      through Turnix-managed state or configuration.
+
+07.5. UI projections may simplify or summarize authoritative state.
+
+07.6. UI projections do not replace the authoritative source of truth.
+
+07.7. If a UI projection omits, filters, groups, rounds, truncates, or
+      summarizes state, the projection remains presentation-only.
+
+07.8. If a presented value can become stale, the UI does not present stale
+      data as confirmed current truth.
+
+07.9. The kernel remains responsible for authoritative mutation and
+      validation of submitted changes.
+
+07.10. Frontend-side validation may improve user experience.
+
+07.11. Frontend-side validation does not replace kernel validation.
+
+
+===============================================================================
+08. FRONTEND EVENT AND COMMAND FLOW
+===============================================================================
+
+08.1. Frontend interactions become Turnix-visible only when sent through a
+      Turnix-mediated channel.
+
+08.2. Frontend interactions may produce:
+      - RPC request
+      - RPC emit
+      - capability-routed request
+      - decision response
+      - subscription request
+      - cancellation request
+      - debugger command
+      - configuration or management command
+
+08.3. The kernel classifies the received interaction.
+
+08.4. The kernel routes the interaction through the appropriate authority
+      surface.
+
+08.5. If the interaction invokes a capability, DA-16 governs capability
+      mediation and permission semantics.
+
+08.6. If the interaction answers a decision point, DA-17 governs decision
+      handling.
+
+08.7. If the interaction controls a Job, DA-19 governs Job lifecycle
+      semantics.
+
+08.8. If the interaction controls debugger behavior, DA-18 governs debugger
+      semantics.
+
+08.9. If the interaction mutates committed state, DA-04 governs commit
+      semantics.
+
+08.10. If the interaction persists configuration, DA-06 and DA-17 govern
+       configuration and policy scope behavior.
+
+08.11. UI event order does not by itself define committed-state order.
+
+08.12. Committed-state order is defined by the relevant kernel-owned commit
+       and orchestration boundaries.
+
+
+===============================================================================
+09. DECISION PRESENTATION RESPONSIBILITIES
+===============================================================================
+
+09.1. UI may present kernel-originated decision points.
+
+09.2. Decision presentation is not decision ownership.
+
+09.3. DA-17 owns decision and policy semantics.
+
+09.4. The UI presents only valid options supplied or authorized by the
+      kernel.
+
+09.5. The UI does not invent hidden defaults.
+
+09.6. The UI does not auto-confirm decisions without policy authority.
+
+09.7. The UI presents consequences, scope, and persistence effect when such
+      information is available.
+
+09.8. The UI preserves distinctions between:
+      - allow and deny
+      - for-this-run and remember
+      - soft and hard decisions
+      - capability permission decisions and work-lifecycle policy decisions
+      - transport timeout and Job timeout
+      - cancellation and supersession
+      - failure and Superseded
+
+09.9. If multiple frontend clients present the same decision point, the
+      kernel remains the single arbiter of the accepted response.
+
+09.10. A stale or already-resolved decision presentation is dismissed or
+       marked inactive rather than accepted again.
+
+
+===============================================================================
+10. DEBUGGER AND TOOLING UI BOUNDARIES
+===============================================================================
+
+10.1. Debugger UI is a frontend surface for debugger behavior.
+
+10.2. Debugger UI does not own debugger semantics.
+
+10.3. DA-18 owns debugger inspection, breakpoint, pause, mutation,
+      disconnect, and Job-control semantics.
+
+10.4. Debugger UI may request inspection, pause, resume, mutation,
+      cancellation, supersession, or safe-point behavior only through
+      Turnix-mediated channels.
+
+10.5. Debugger UI does not directly write committed state.
+
+10.6. Debugger UI does not directly write Job terminal state.
+
+10.7. Debugger UI does not bypass policy decisions when policy is required.
+
+10.8. Debugger UI distinguishes staged, committed, unavailable, and
+      unresolved state when those distinctions are surfaced.
+
+10.9. Debugger UI does not present paused-at-safe-point Jobs as terminal.
+
+10.10. Debugger UI does not present Superseded as failure.
+
+
+===============================================================================
+11. ACCESSIBILITY AND PRESENTATION TRANSFORMS
+===============================================================================
+
+11.1. UI may apply presentation transforms for accessibility, readability,
+      localization, scaling, filtering, grouping, or layout.
+
+11.2. Presentation transforms are runtime presentation behavior.
+
+11.3. Presentation transforms do not mutate authoritative state by
+      themselves.
+
+11.4. Presentation transforms do not change capability, permission,
+      decision, Job, or debugging semantics.
+
+11.5. If a presentation transform is persisted as user preference, that
+      persistence follows configuration and policy rules defined elsewhere.
+
+11.6. Computed-only presentation transforms are not persisted merely because
+      they are visible.
+
+11.7. UI does not silently persist computed-only presentation effects as
+      configuration or committed state.
+
+
+===============================================================================
+12. VIEW DISCONNECT, RECONNECT, AND MULTI-CLIENT BEHAVIOR
+===============================================================================
+
+12.1. A frontend client may disconnect while a View remains meaningful.
+
+12.2. A View may reconnect when the connection model permits reconnection.
+
+12.3. Reconnect does not imply replay of all missed frontend-local events.
+
+12.4. Reconnect may receive a fresh snapshot, generation update, retained
+      update state, or another implementation-defined recovery surface.
+
+12.5. Concrete reconnect flow belongs to implementation specifications.
+
+12.6. Multi-client View behavior is explicit.
+
+12.7. Multiple frontend clients do not create multiple authoritative truths
+      for the same View.
+
+12.8. If concurrent frontend interactions conflict, the kernel resolves the
+      conflict through normal authority, ordering, policy, and commit rules.
+
+12.9. View disconnect does not silently cancel, supersede, detach, retain,
+      or discard accepted work.
+
+12.10. Those outcomes require policy or lifecycle authority defined in the
+       owning documents.
+
+
+===============================================================================
+13. UI TRACE AND OBSERVABILITY
+===============================================================================
+
+13.1. UI and View lifecycle behavior remains trace-visible where trace
+      evidence exists.
+
+13.2. UI trace evidence distinguishes:
+      - View created
+      - frontend client bound
+      - View initialized
+      - View ready
+      - View disconnected
+      - View reconnected
+      - View closed
+      - frontend command received
+      - decision presented
+      - decision response submitted
+      - UI-originated cancellation requested
+      - UI-originated debugger command requested
+
+13.3. UI trace evidence records enough context, when available, to explain:
+      - viewId
+      - frontend client identity
+      - appInstanceId when applicable
+      - active pack identity when applicable
+      - active save identity when applicable
+      - RPC message identity when applicable
+      - decision identity when applicable
+      - jobId when applicable
+      - debugger request identity when applicable
+      - command kind
+      - disconnect or reconnect reason category when applicable
+
+13.4. UI trace evidence does not replace RPC trace evidence.
+
+13.5. UI trace evidence does not replace decision trace evidence.
+
+13.6. UI trace evidence does not replace capability, Job, debugger, or
+      AppInstance trace evidence.
+
+13.7. DA-03 defines the tracing substrate.
+
+13.8. DA-21 defines RPC trace correlation semantics.
+
+13.9. DA-17 defines decision trace obligations.
+
+13.10. DA-18 defines debugger trace obligations.
+
+13.11. DA-19 defines Job lifecycle trace obligations.
+
+13.12. DA-20 defines AppInstance trace obligations.
+
+
+===============================================================================
+14. UI DOMAIN TRACE REASON IDENTIFIERS
+===============================================================================
+
+14.1. DA-22 owns the UI-domain trace reason identifiers used for View
+      lifecycle, frontend binding, frontend command receipt, decision
+      presentation, and UI-originated control requests.
+
+14.2. The following UI-domain trace reasons are defined:
+
+      - ViewCreated
+      - ViewFrontendBound
+      - ViewInitialized
+      - ViewReady
+      - ViewDisconnected
+      - ViewReconnected
+      - ViewClosed
+      - UICommandReceived
+      - UIDecisionPresented
+      - UIDecisionResponseSubmitted
+      - UICancelRequested
+      - UIDebuggerCommandRequested
+
+14.3. ViewCreated is emitted when a View identity is created by the kernel.
+
+14.4. ViewFrontendBound is emitted when a frontend client is bound to a
+      View.
+
+14.5. ViewInitialized is emitted when the View initialization path begins or
+      completes according to the concrete implementation contract.
+
+14.6. ViewReady is emitted when the frontend reports or reaches the ready
+      condition for the View.
+
+14.7. ViewDisconnected is emitted when the frontend client or View
+      connection disconnects.
+
+14.8. ViewReconnected is emitted when a frontend client reconnects to an
+      existing View identity under valid reconnection rules.
+
+14.9. ViewClosed is emitted when the View is closed or released by the
+      kernel.
+
+14.10. UICommandReceived is emitted when a frontend command is received and
+       accepted for classification by the kernel.
+
+14.11. UIDecisionPresented is emitted when a decision point is presented to
+       a frontend client.
+
+14.12. UIDecisionResponseSubmitted is emitted when a frontend client submits
+       a decision response.
+
+14.13. UICancelRequested is emitted when a frontend interaction requests
+       cancellation or withdrawal of interest.
+
+14.14. UIDebuggerCommandRequested is emitted when debugger UI requests a
+       debugger action.
+
+14.15. UI-domain trace reasons describe UI/View behavior only.
+
+14.16. UI-domain trace reasons do not define capability outcome, Job
+       terminal outcome, decision outcome, debugger outcome, or committed-
+       state mutation outcome.
+
+
+===============================================================================
+15. RELATION TO IMPLEMENTATION SPECIFICATIONS
+===============================================================================
+
+15.1. Implementation specifications may define:
+       - concrete browser bootstrap flow
+       - concrete View registry behavior
+       - concrete frontend asset loading
+       - concrete component mounting
+       - concrete frontend state synchronization
+       - concrete reconnection behavior
+       - concrete UI event payloads
+       - concrete CSS, layout, or component conventions
+
+15.2. Implementation specifications do not redefine:
+       - UI as non-authoritative presentation
+       - View identity and lifecycle meaning
+       - kernel ownership of decisions
+       - RPC, capability, Job, debugger, and committed-state boundaries
+
+15.3. If a frontend implementation requires a semantic rule not defined
+      here, this document is updated first or alongside that implementation
+      specification.
+
+
+===============================================================================
+16. WHAT IS EXPLICITLY NOT SUPPORTED
+===============================================================================
+
+16.1. The following are not supported:
+      - frontend-only authoritative mutation
+      - UI-controlled bypass of capability mediation
+      - UI-controlled bypass of decision handling
+      - UI-controlled bypass of persistence authority
+      - UI-controlled direct filesystem access as a Turnix authority path
+      - UI-created hidden policy defaults
+      - UI-created hidden activation or pack-loading behavior
+      - presenting transport timeout as Job timeout
+      - presenting Job timeout as transport timeout
+      - presenting Superseded as failure
+      - treating visible state as authoritative merely because it is visible
+
+
+===============================================================================
+17. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+17.1. OPEN questions include:
+      - exact viewId representation
+      - exact frontend client identity representation
+      - exact View registry implementation contract
+      - exact View lifecycle event envelope
+      - exact browser bootstrap implementation specification
+      - exact frontend state synchronization strategy
+      - exact UI extension-point catalog
+      - exact multi-client View behavior
+      - exact retained update behavior after reconnect
+      - exact UI component conventions and developer tooling
+
+
+===============================================================================
+18. LOCKED SUMMARY
+===============================================================================
+
+18.1. LOCKED:
+      - UI is presentation and interaction, not authority by itself
+      - View is a kernel-bound frontend runtime surface
+      - View identity is distinct from AppInstance identity
+      - View identity is distinct from frontend client identity
+      - frontend runtime code does not directly mutate committed state
+      - frontend runtime code does not bypass RPC, capability, policy,
+        transaction, or persistence boundaries
+      - View packs remain subject to normal pack, import, activation,
+        visibility, and capability rules
+      - presentation state is non-authoritative unless explicitly persisted
+        through Turnix-managed state or configuration
+      - frontend-side validation does not replace kernel validation
+      - decision presentation is not decision ownership
+      - debugger UI does not own debugger semantics
+      - accessibility and presentation transforms do not mutate
+        authoritative state by themselves
+      - View disconnect does not silently cancel, supersede, detach, retain,
+        or discard accepted work
+      - UI-domain trace reason identifiers are owned by DA-22
+      - UI trace evidence does not replace RPC, decision, capability, Job,
+        debugger, or AppInstance trace evidence
+
+18.2. OPEN:
+      - concrete View registry, frontend bootstrap, state sync, UI extension,
+        and component implementation details
+
+
+===============================================================================
+END OF DA-22 - UI, VIEWS & FRONTEND RUNTIME
+===============================================================================
+
 --- doc-meta ---
 DOC_ID: DA-22
 DOC_FILE: docs/design/DA-22_UI_VIEWS_AND_FRONTEND_RUNTIME.txt
-DOC_REV: 1
+DOC_REV: 2
 DOC_GIT: 0000000
 ----------------
