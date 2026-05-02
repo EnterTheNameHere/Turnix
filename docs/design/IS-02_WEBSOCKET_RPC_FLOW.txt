@@ -29,6 +29,7 @@ It defines:
 - permission-check placement in the flow
 - transport timeout versus Job timeout separation
 - transport disconnect versus Job lifecycle separation
+- RPC transport-domain trace reason identifiers
 - logging and observability hooks for the transport
 
 It does NOT define:
@@ -571,13 +572,18 @@ Upstream Documents:
       - welcome
       - clientReady
       - heartbeat
+      - message receive
+      - acknowledgement
       - request dispatch
       - emit dispatch
       - subscribe dispatch
       - request acceptance as Job-backed work
       - cancellation and unsubscribe handling
+      - reply delivery
+      - send failure
       - error propagation
       - completion-marker validation failure
+      - generation mismatch
       - transport timeout
       - disconnect handling
       - disconnect policy outcome when known
@@ -617,12 +623,118 @@ Upstream Documents:
 12.12. DA-19 defines Job lifecycle trace obligations when transport behavior
        affects a Job.
 
-12.13. The intended result is:
+12.13. IS-02 owns the RPC transport-domain trace reason identifiers used for
+       message receipt, acknowledgement, dispatch, request acceptance,
+       reply delivery, cancellation request handling, timeout, generation
+       mismatch, disconnect handling, disconnect policy application, and
+       envelope completion-marker rejection.
+
+12.14. The following RPC transport-domain trace reasons are defined:
+
+       - RPCMessageReceived
+       - RPCMessageAcknowledged
+       - RPCMessageSendFailed
+       - RPCRequestDispatched
+       - RPCRequestRejectedBeforeJob
+       - RPCRequestAcceptedAsJob
+       - RPCReplySent
+       - RPCReplyDeliveryFailed
+       - RPCTransportTimeout
+       - RPCCancelRequested
+       - RPCGenerationMismatch
+       - RPCConnectionDisconnected
+       - RPCDisconnectPolicyApplied
+       - RPCEnvelopeIncompleteRejected
+
+12.15. RPCMessageReceived is emitted when a complete incoming RPC envelope is
+       received and accepted for validation or dispatch.
+
+12.16. RPCMessageAcknowledged is emitted when an RPC message is acknowledged
+       according to transport acknowledgement rules.
+
+12.17. RPCMessageSendFailed is emitted when an outbound RPC message cannot
+       be sent or delivery failure is detected for a non-reply transport
+       message.
+
+12.18. RPCRequestDispatched is emitted when an RPC request is routed to an
+       object handler or capability-based request handler.
+
+12.19. RPCRequestRejectedBeforeJob is emitted when an RPC request is rejected
+       before Job-backed work exists.
+
+12.20. RPCRequestRejectedBeforeJob means DA-19 Job terminal outcomes do not
+       apply to that rejected request.
+
+12.21. RPCRequestAcceptedAsJob is emitted when an RPC request is accepted as
+       Job-backed work.
+
+12.22. RPCRequestAcceptedAsJob is not final Job success.
+
+12.23. RPCRequestAcceptedAsJob does not define Job terminal outcome.
+
+12.24. DA-19 owns later Job lifecycle trace reasons after Job-backed work
+       exists.
+
+12.25. RPCReplySent is emitted when a reply envelope is sent or accepted by
+       the transport send path.
+
+12.26. RPCReplyDeliveryFailed is emitted when a reply envelope cannot be
+       delivered or delivery failure is detected for a reply.
+
+12.27. RPCTransportTimeout is emitted when transport-level waiting,
+       acknowledgement, reply, liveness, or frame-budget timeout occurs.
+
+12.28. RPCTransportTimeout is not JobTimedOut.
+
+12.29. RPCCancelRequested is emitted when a cancel message is received or
+       produced by transport-level cancellation behavior.
+
+12.30. RPCCancelRequested is not JobCancelled.
+
+12.31. RPCGenerationMismatch is emitted when an RPC message is rejected,
+       ignored, or classified because its generation does not match the
+       active session expectation.
+
+12.32. RPCConnectionDisconnected is emitted when the WebSocket connection is
+       disconnected or closed.
+
+12.33. RPCDisconnectPolicyApplied is emitted when disconnect handling applies
+       a policy outcome to affected work.
+
+12.34. RPCDisconnectPolicyApplied does not define Job terminal outcome by
+       itself.
+
+12.35. RPCEnvelopeIncompleteRejected is emitted when an envelope is rejected
+       because IS-01 completion-marker validation fails.
+
+12.36. RPCEnvelopeIncompleteRejected is not a routed workload error.
+
+12.37. RPC transport-domain trace evidence for these reasons records enough
+       context, when available, to explain:
+       - message id
+       - correlatesTo
+       - lane
+       - route
+       - message type
+       - generation identity
+       - view identity
+       - client identity
+       - appInstanceId
+       - jobId when applicable
+       - request identity when applicable
+       - subscription identity when applicable
+       - timeout category when applicable
+       - disconnect reason or transport failure category when applicable
+       - disconnect policy outcome when applicable
+       - completion-marker failure category when applicable
+
+12.38. The intended result is:
        - coherent cross-side debugging
        - no divergent logging semantics
        - RPC messages that remain linkable to trace evidence where trace
          evidence exists
        - transport failures that do not masquerade as Job lifecycle outcomes
+       - Job lifecycle outcomes that do not masquerade as transport failures
 
 
 ===============================================================================
@@ -684,6 +796,6 @@ END OF IS-02 - WEBSOCKET RPC FLOW
 --- doc-meta ---
 DOC_ID: IS-02
 DOC_FILE: docs/design/IS-02_WEBSOCKET_RPC_FLOW.txt
-DOC_REV: 18
+DOC_REV: 19
 DOC_GIT: 0000000
 ----------------
