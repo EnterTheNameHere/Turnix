@@ -27,6 +27,7 @@ It defines:
 - SafePointWindow, ActiveWindow, and AbortedWindow semantics
 - Window identity terms
 - finalization of in-flight runtime regions
+- relationship between Window finalization, Orchestration Units, and Jobs
 - SafePointWindow creation request modes and lifecycle visibility
 - journal as non-authoritative evidence
 - trace correlation rules for finalized Windows
@@ -51,6 +52,7 @@ It does NOT define:
 - configuration-specific state, schema, or migration semantics
   (see DA-06)
 - debugger pause, breakpoint, or execution-control behavior (see DA-18)
+- Job lifecycle, Job terminal states, or Job result semantics (see DA-19)
 
 Upstream Documents:
 ------------------
@@ -65,6 +67,8 @@ Upstream Documents:
 - DA-04
 - DA-05
 - DA-06
+- DA-17
+- DA-19
 
 
 ===============================================================================
@@ -116,6 +120,14 @@ Upstream Documents:
 02.8. Historical evidence may support explanation, audit, and debugging.
 
 02.9. Historical evidence does not become a hidden correctness dependency.
+
+02.10. Job lifecycle evidence and Orchestration Unit evidence may contribute
+       to Window evidence.
+
+02.11. Job lifecycle evidence and Orchestration Unit evidence do not by
+       themselves finalize a Window.
+
+02.12. Window finalization remains owned by this document.
 
 
 ===============================================================================
@@ -223,6 +235,15 @@ Upstream Documents:
       - finalized abort boundaries
       - the current in-flight region, if one exists
 
+04.10. Window ordering is distinct from Job lifecycle ordering.
+
+04.11. Window ordering is distinct from Orchestration Unit lifecycle
+       ordering.
+
+04.12. Job and Orchestration Unit lifecycle evidence remains correlated to
+       Windows through trace and retained evidence rather than through
+       timestamp inference.
+
 
 04.1 WINDOW IDENTITY TERMS
 --------------------------
@@ -269,15 +290,17 @@ Upstream Documents:
       - revision history
       - journal material
       - additional trace evidence
+      - Job lifecycle evidence compatible with retained scope
+      - Orchestration Unit lifecycle evidence compatible with retained scope
       - other non-authoritative evidence compatible with this document
 
 05.9. Optional retained evidence does not add authority.
 
 05.10. A SafePointWindow has safePointWindowId as stable identity.
 
-05.11. Trace, journal, and revision material retained within a
-       SafePointWindow may be truncated or removed according to explicit
-       policy.
+05.11. Trace, journal, revision, Job lifecycle, and Orchestration Unit
+       lifecycle material retained within a SafePointWindow may be truncated
+       or removed according to explicit policy.
 
 05.12. Retention reduction within a SafePointWindow does not invalidate the
        retained authoritative committed-state boundary, provided enough
@@ -287,6 +310,13 @@ Upstream Documents:
 05.13. A retained SafePointWindow is not treated as complete if retained
        trace identity and scope evidence are insufficient to identify the
        Window and its committed scope.
+
+05.14. A Job reaching Succeeded does not by itself create a SafePointWindow.
+
+05.15. An Orchestration Unit reaching Completed does not by itself create a
+       SafePointWindow.
+
+05.16. A transaction commit does not by itself create a SafePointWindow.
 
 
 ===============================================================================
@@ -303,6 +333,7 @@ Upstream Documents:
       - trace events emitted after the last finalized SafePointWindow
       - journal entries produced after the last finalized SafePointWindow
       - metadata about active Orchestration Units sufficient for diagnosis
+      - metadata about active Jobs sufficient for diagnosis when Jobs exist
       - transactional staging layers and in-flight transactional state
 
 06.4. ActiveWindow is non-authoritative.
@@ -315,6 +346,8 @@ Upstream Documents:
 
 06.8. ActiveWindow does not guarantee deterministic reconstruction of:
       - in-flight activity
+      - active or pending Job execution
+      - active Orchestration Unit execution
       - external side effects
       - pre-crash execution ordering beyond what later committed boundaries
         explicitly retain
@@ -330,6 +363,14 @@ Upstream Documents:
 
 06.12. ActiveWindow does not require its own stable Window identity while it
        remains the unique mutable tail of the Window sequence.
+
+06.13. ActiveWindow may contain Jobs in Pending or Running state.
+
+06.14. ActiveWindow may contain Orchestration Units that have not yet reached
+       a terminal outcome.
+
+06.15. ActiveWindow evidence does not convert Pending or Running Jobs into
+       replayable work.
 
 
 ===============================================================================
@@ -347,6 +388,8 @@ Upstream Documents:
 
 07.3. An AbortedWindow may retain, by policy:
       - journal evidence
+      - Job lifecycle evidence compatible with retained scope
+      - Orchestration Unit lifecycle evidence compatible with retained scope
       - other non-authoritative evidence compatible with this document
 
 07.4. An AbortedWindow does not contain authoritative committed-state
@@ -387,6 +430,14 @@ Upstream Documents:
 07.13. When such removal occurs, the platform remains explicit and honest
        about the loss of that audit region.
 
+07.14. A Job reaching Failed, Cancelled, TimedOut, or Superseded does not by
+       itself create an AbortedWindow.
+
+07.15. An Orchestration Unit reaching Failed, Cancelled, or Superseded does
+       not by itself create an AbortedWindow.
+
+07.16. A transaction abort does not by itself create an AbortedWindow.
+
 
 ===============================================================================
 08. FINALIZATION RULES
@@ -423,6 +474,21 @@ Upstream Documents:
 08.9. Finalization preserves the distinction between:
       - committed authoritative outcome
       - non-authoritative retained evidence about failed or aborted work
+
+08.10. Job terminal outcome does not by itself define Window finalization.
+
+08.11. Orchestration Unit terminal outcome does not by itself define Window
+       finalization.
+
+08.12. Transaction commit or abort does not by itself define Window
+       finalization.
+
+08.13. Window finalization may include retained evidence about Job,
+       Orchestration Unit, and transaction outcomes when that evidence falls
+       within the finalized Window scope.
+
+08.14. Including such evidence does not make the evidence authoritative
+       committed state.
 
 
 ===============================================================================
@@ -473,6 +539,10 @@ Upstream Documents:
         when that loss is compatible with explicit policy and explicit trace
         visibility before the crash point when possible.
 
+09.2.7. Queued AtQuiescence does not mean queued Job execution.
+
+09.2.8. Queued AtQuiescence does not alter Job lifecycle state by itself.
+
 
 09.3 QUEUEING, TIMEOUT, AND SAFE-POINT PAUSE POLICY
 ---------------------------------------------------
@@ -502,6 +572,14 @@ Upstream Documents:
 
 09.3.9. Any user or policy decision that changes creation behavior remains
         explicit and trace-visible.
+
+09.3.10. SafePointWindow creation timeout is not Job timeout.
+
+09.3.11. SafePointWindow creation cancellation is not Job cancellation.
+
+09.3.12. If Window creation policy affects a Job or Orchestration Unit, that
+         effect remains governed by the Job, Orchestration Unit, and policy
+         documents that own those lifecycle outcomes.
 
 
 ===============================================================================
@@ -594,7 +672,11 @@ Upstream Documents:
 10.17. Lifecycle visibility remains consistent with the creation request mode
        in effect.
 
-10.18. DA-03 defines the tracing substrate used to represent
+10.18. SafePointWindow creation lifecycle trace evidence may include jobId or
+       orchestrationUnitId when Window creation is causally linked to a Job
+       or Orchestration Unit.
+
+10.19. DA-03 defines the tracing substrate used to represent
        SafePointWindow creation and ActiveWindow finalization evidence.
 
 
@@ -642,6 +724,14 @@ Upstream Documents:
 
 11.11. Trace incompleteness, pruning, corruption, or partial export remains
        explicit when it affects retained finalized evidence.
+
+11.12. Job lifecycle evidence retained inside finalized Window evidence
+       remains non-authoritative evidence unless it is also part of
+       committed state under DA-04.
+
+11.13. Orchestration Unit evidence retained inside finalized Window evidence
+       remains non-authoritative evidence unless it is also part of
+       committed state under DA-04.
 
 
 ===============================================================================
@@ -773,12 +863,15 @@ Upstream Documents:
         closure selected for the bundle from those roots
       - metadata required to interpret retained trace reasons
       - enough correlation metadata to relate retained evidence to relevant
-        appInstance, session, Orchestration Unit, Window, or export identity
+        appInstance, session, Orchestration Unit, Job, Window, or export
+        identity
 
 14.4. A Minimal Audit Bundle may additionally include:
       - selected journal entries referenced by trace evidence
       - selected committed-state excerpts as read-only evidence
       - selected revision metadata without full value payloads
+      - selected Job lifecycle evidence
+      - selected Orchestration Unit lifecycle evidence
 
 14.5. Any committed-state excerpts included in a Minimal Audit Bundle are
       labeled non-authoritative evidence excerpts.
@@ -793,6 +886,8 @@ Upstream Documents:
       - executable code
       - capability implementations
       - secrets or credentials
+      - live Job execution handles
+      - live Orchestration Unit execution handles
 
 14.8. A Minimal Audit Bundle preserves retained causal structure exactly for
       the trace evidence it includes.
@@ -888,6 +983,13 @@ Upstream Documents:
 16.8. If retained material is partial, pruned, corrupt, or unavailable,
       offline inspection reports that limitation explicitly.
 
+16.9. Offline inspection of retained Job evidence does not resume, cancel,
+      supersede, or otherwise control the original Job.
+
+16.10. Offline inspection of retained Orchestration Unit evidence does not
+       resume, cancel, supersede, or otherwise control the original
+       Orchestration Unit.
+
 
 ===============================================================================
 17. REPLAY, RESUME, AND RETRY
@@ -905,29 +1007,36 @@ Upstream Documents:
 17.4. Replay does not imply deterministic reconstruction of ActiveWindow
       activity that never became committed.
 
-17.5. Resume is an attempt to continue execution after restoring a retained
+17.5. Replay does not imply resuming retained Job execution.
+
+17.6. Resume is an attempt to continue execution after restoring a retained
       SafePointWindow.
 
-17.6. Resume may involve:
+17.7. Resume may involve:
       - re-running in-flight orchestration units
       - abandoning in-flight work
       - retrying selected external calls
       - starting new work from the restored committed boundary
 
-17.7. Resume is not deterministic in outcome.
+17.8. Resume is not deterministic in outcome.
 
-17.8. Resume is explicit and trace-visible.
+17.9. Resume is explicit and trace-visible.
 
-17.9. Retry is a new orchestration attempt for a previously failed,
-      incomplete, or intentionally retried action.
+17.10. Resume does not reuse closed Job lifecycle identity.
 
-17.10. Retry is modeled as new work.
+17.11. Retry is a new orchestration attempt for a previously failed,
+       incomplete, or intentionally retried action.
 
-17.11. Retry is trace-visible.
+17.12. Retry is modeled as new work.
 
-17.12. Retry is not implied by Replay.
+17.13. Retry is trace-visible.
 
-17.13. Replay, Resume, and Retry remain constrained by the committed-state
+17.14. Retry is not implied by Replay.
+
+17.15. Retry does not reuse the previous jobId when the retried work is
+       represented as a Job.
+
+17.16. Replay, Resume, and Retry remain constrained by the committed-state
        restoration boundary defined by [defined-in: DA-04 12].
 
 
@@ -1008,6 +1117,16 @@ Upstream Documents:
 
 18.1.10. NotComparable is not treated as NotEqual by Turnix tooling.
 
+18.1.11. EvidenceEquality may compare retained Job lifecycle evidence when
+         such evidence is included by the selected evidence closure.
+
+18.1.12. EvidenceEquality may compare retained Orchestration Unit lifecycle
+         evidence when such evidence is included by the selected evidence
+         closure.
+
+18.1.13. Equality of retained Job lifecycle evidence does not imply resumed
+         or replayable Job execution.
+
 
 ===============================================================================
 19. CROSS-SESSION AUDIT WORKFLOWS
@@ -1021,6 +1140,10 @@ Upstream Documents:
       - reconstructing retained decision chains
       - inspecting retained state evolution
       - correlating retained journal evidence with retained trace evidence
+      - correlating retained Job lifecycle evidence with retained trace
+        evidence
+      - correlating retained Orchestration Unit evidence with retained trace
+        evidence
       - comparing retained finalized artifacts across sessions
 
 19.3. Audit workflows do not mutate state.
@@ -1042,6 +1165,7 @@ Upstream Documents:
       - exact WindowExport serialization format
       - exact Minimal Audit Bundle packaging format
       - future audit-tooling user experience and visualization
+      - exact retained Job evidence presentation in audit tooling
 
 
 ===============================================================================
@@ -1058,7 +1182,14 @@ Upstream Documents:
       - AbortedWindow is a finalized non-authoritative abort region
       - finalization produces exactly one finalized outcome from
         ActiveWindow
+      - Job terminal outcome does not by itself define Window finalization
+      - Orchestration Unit terminal outcome does not by itself define Window
+        finalization
+      - transaction commit or abort does not by itself define Window
+        finalization
       - SafePointWindow creation modes and lifecycle visibility are explicit
+      - SafePointWindow creation timeout is not Job timeout
+      - SafePointWindow creation cancellation is not Job cancellation
       - SafePointWindow creation trace obligations are owned here
       - Window-domain trace reason identifiers are owned by DA-08
       - journal is non-authoritative evidence and retention loss does not
@@ -1069,6 +1200,8 @@ Upstream Documents:
         and its committed scope
       - finalized Windows are correlated to retained trace evidence through
         explicit causal identity rather than timestamps alone
+      - retained Job and Orchestration Unit evidence inside finalized Window
+        evidence remains non-authoritative unless committed under DA-04
       - WindowManifest is immutable and represents exactly one finalized
         Window
       - the default AbortedWindowManifest form includes traceRoot
@@ -1083,12 +1216,16 @@ Upstream Documents:
         orchestration logic
       - Replay, Resume, and Retry remain constrained by the restoration
         boundary defined by [defined-in: DA-04 12]
+      - Replay does not imply resuming retained Job execution
+      - Retry does not reuse previous jobId when retried work is represented
+        as a Job
       - equality modes are explicit and return ComparisonResult with exactly
         Equal, NotEqual, and NotComparable
 
 21.2. OPEN:
       - concrete packaging and serialization formats
       - future audit-tooling experience
+      - retained Job evidence presentation
 
 
 ===============================================================================
@@ -1099,6 +1236,6 @@ OFFLINE COMPARISON
 --- doc-meta ---
 DOC_ID: DA-08
 DOC_FILE: docs/design/DA-08_WINDOWS_HISTORICAL_EVIDENCE_EXPORTS_AND_OFFLINE_COMPARISON.txt
-DOC_REV: 6
-DOC_GIT: 7112ca1
+DOC_REV: 7
+DOC_GIT: 58326a1
 ----------------
