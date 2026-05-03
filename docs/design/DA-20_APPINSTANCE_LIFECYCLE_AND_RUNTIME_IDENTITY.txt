@@ -8,12 +8,13 @@ EVOLVING
 
 Description:
 ------------
-Defines AppInstance runtime identity, active-region lifecycle boundaries, and
-AppInstance-owned trace reason identifiers.
+Defines AppInstance runtime identity, AppPack and SavePack binding, active
+runtime lifecycle boundaries, adapter participation, writable SavePack
+ownership, and AppInstance-owned trace reason identifiers.
 
-This document is intentionally minimal at creation time. It exists to give
-AppInstance lifecycle semantics a proper ownership home instead of placing
-AppInstance-specific lifecycle rules in the tracing substrate.
+This document owns AppInstance lifecycle semantics. It does not own pack
+activation, SavePack storage format, workspace locking, adapter execution
+semantics, or concrete runtime host command behavior.
 
 Purpose:
 --------
@@ -22,19 +23,37 @@ for Turnix.
 
 It defines:
 - appInstanceId as runtime instance identity
-- relationship between AppInstance, AppPack, and active save context
+- AppInstance as the live runtime instance of one AppPack
+- relationship between AppInstance, AppPack, and SavePack
+- new SavePack generation as an AppInstance creation path
+- existing SavePack load as an AppInstance creation path
+- active save context and writable SavePack ownership
+- AppInstance runtime lifecycle phases
+- relationship between AppInstance lifecycle and pack activation
+- relationship between AppInstance lifecycle and execution adapters
+- relationship between AppInstance lifecycle, Views, RPC, Jobs, and Windows
 - AppInstance active-region lifecycle boundaries
-- AppInstanceActiveSpanBegin and AppInstanceActiveSpanEnd trace reasons
-- minimum trace evidence for AppInstance active-region span boundaries
+- AppInstance-domain trace reason identifiers
+- minimum trace evidence for AppInstance lifecycle and active-region events
 
 It does NOT define:
 - trace event structure, trace DAG semantics, or span mechanics (see DA-03)
 - authoritative committed state or transaction semantics (see DA-04)
+- persistent I/O authority or filesystem rules (see DA-07)
 - Window, SafePointWindow, or AbortedWindow semantics (see DA-08)
+- pack discovery, identity, dependency, or resolution semantics
+  (see DA-09, DA-10, DA-11, and DA-13)
 - pack activation semantics, onLoad(ctx), or PackContext authority
   (see DA-14)
 - service, capability, or permission semantics (see DA-16)
-- Job lifecycle or long-running work semantics (future design area)
+- user decision and remembered policy semantics (see DA-17)
+- Job lifecycle or long-running work semantics (see DA-19)
+- RPC, channel, and transport semantics (see DA-21)
+- UI, View, and frontend runtime semantics (see DA-22)
+- execution adapter boundary semantics (see DA-23)
+- concrete runtime host command behavior
+- concrete workspace locking implementation
+- concrete SavePack storage format
 
 Upstream Documents:
 ------------------
@@ -43,15 +62,37 @@ Upstream Documents:
 - CMR-03
 - CMR-04
 - CMR-05
+- DA-01
 - DA-03
 - DA-04
+- DA-07
 - DA-08
+- DA-09
+- DA-10
+- DA-11
+- DA-13
 - DA-14
 - DA-16
+- DA-17
+- DA-19
+- DA-21
+- DA-22
+- DA-23
 
 Downstream Documents:
 --------------------
-- Future Job lifecycle design area
+- DA-08
+- DA-14
+- DA-16
+- DA-17
+- DA-18
+- DA-19
+- DA-21
+- DA-22
+- DA-23
+- future runtime host design documents
+- future SavePack implementation specifications
+- future workspace ownership implementation specifications
 
 
 ===============================================================================
@@ -77,27 +118,43 @@ Downstream Documents:
 
 02.1. AppInstance lifecycle answers:
 
-          "Which running instance of an AppPack is active, which save
-           context is bound to it, and when does its runtime active region
-           begin and end?"
+          "Which live runtime instance of an AppPack is active, which
+           SavePack or save context is bound to it, which participants are
+           attached, and when does its runtime authority region begin and
+           end?"
 
-02.2. An AppInstance is a runtime instance of an AppPack.
+02.2. An AppInstance is a live runtime instance of one AppPack.
 
-02.3. An AppInstance may be associated with an active save context.
+02.3. An AppInstance may be associated with one active save context.
 
-02.4. AppInstance identity is distinct from pack identity.
+02.4. An AppInstance may be associated with one active writable SavePack
+      when durable save mutation is allowed.
 
-02.5. AppInstance identity is distinct from save identity.
+02.5. AppInstance identity is distinct from pack identity.
 
-02.6. AppInstance lifecycle is distinct from pack activation.
+02.6. AppInstance identity is distinct from SavePack identity.
 
-02.7. Pack activation occurs inside or in relation to an AppInstance active
-      region, but activation does not define the AppInstance active region
-      by itself.
+02.7. AppInstance identity is distinct from View identity.
 
-02.8. AppInstance lifecycle provides the runtime container boundary in which
-      activation, state mutation, Windows, capabilities, debugging, tracing,
-      and future Jobs may occur.
+02.8. AppInstance identity is distinct from adapter identity.
+
+02.9. AppInstance lifecycle is distinct from pack activation.
+
+02.10. AppInstance lifecycle is distinct from execution adapter lifecycle.
+
+02.11. AppInstance lifecycle is distinct from RPC transport lifecycle.
+
+02.12. AppInstance lifecycle is distinct from Job lifecycle.
+
+02.13. AppInstance lifecycle provides the runtime container boundary in
+       which activation, state mutation, Windows, capabilities, Views,
+       adapters, debugging, tracing, and Jobs may occur.
+
+02.14. Ending an AppInstance does not by itself define whether related work
+       committed, aborted, cancelled, superseded, detached, resumed, or was
+       retried.
+
+02.15. Later sections refine and apply these rules. They do not weaken them.
 
 
 ===============================================================================
@@ -118,128 +175,606 @@ Downstream Documents:
 
 03.6. appInstanceId does not identify a SavePack by itself.
 
+03.7. appInstanceId does not identify a View by itself.
 
-===============================================================================
-04. RELATION TO APPPACK AND SAVE CONTEXT
-===============================================================================
+03.8. appInstanceId does not identify an execution adapter by itself.
 
-04.1. An AppInstance has one active AppPack identity.
+03.9. appInstanceId does not identify a Job by itself.
 
-04.2. The active AppPack identity identifies the executable pack whose
-      runtime instance is represented by the AppInstance.
-
-04.3. An AppInstance may have one active save identity when running from or
-      against a save context.
-
-04.4. Absence of active save identity means no save context is bound, not
-      that the AppInstance identity is invalid.
-
-04.5. Save binding semantics remain constrained by the SavePack and Window
-      documents that own save and historical evidence behavior.
+03.10. An AppInstance record includes enough identity context, when
+       available, to relate:
+       - appInstanceId
+       - active AppPack identity
+       - active SavePack or save identity when applicable
+       - runtime host identity when such identity is defined
+       - workspace identity when such identity is defined
 
 
 ===============================================================================
-05. APPINSTANCE ACTIVE REGION
+04. RELATION TO APPPACK
 ===============================================================================
 
-05.1. An AppInstance active region is the bounded runtime interval during
+04.1. An AppInstance has exactly one active AppPack identity.
+
+04.2. The active AppPack identity identifies the executable application pack
+      whose runtime instance is represented by the AppInstance.
+
+04.3. An AppInstance is not itself a Pack.
+
+04.4. An AppInstance does not change AppPack identity during its lifetime.
+
+04.5. Loading a different AppPack creates a different AppInstance.
+
+04.6. Pack discovery and resolution choose the AppPack identity before
+      AppInstance creation.
+
+04.7. AppPack dependency resolution remains owned by the pack and
+      resolution documents.
+
+04.8. AppInstance creation does not reopen AppPack resolution silently.
+
+04.9. AppInstance runtime behavior remains constrained by the AppPack and
+      its resolved dependency graph.
+
+
+===============================================================================
+05. RELATION TO SAVEPACK AND SAVE CONTEXT
+===============================================================================
+
+05.1. SavePack stores durable executed state for an AppPack.
+
+05.2. An AppInstance may have one active SavePack identity when running from
+      or against a durable save context.
+
+05.3. Absence of active SavePack identity means no durable save context is
+      bound, not that the AppInstance identity is invalid.
+
+05.4. Active save context identifies the save scope against which committed
+      state, Windows, retained evidence, and save-local material are
+      interpreted.
+
+05.5. SavePack identity is not AppInstance identity.
+
+05.6. AppInstance identity is not SavePack identity.
+
+05.7. SavePack being bound to an AppInstance does not make adapter-executed
+      code a SavePack writer.
+
+05.8. SavePack mutation occurs only through Kernel-mediated state and
+      persistence authority.
+
+05.9. Authoritative mutation remains governed by DA-04.
+
+05.10. Persistent I/O remains governed by DA-07.
+
+05.11. Window and retained evidence behavior remains governed by DA-08.
+
+05.12. Save-local pack material remains constrained by pack and save-scope
+       documents.
+
+
+===============================================================================
+06. APPINSTANCE CREATION PATHS
+===============================================================================
+
+06.1. AppInstance creation begins only after an AppPack identity has been
+      resolved.
+
+06.2. AppInstance creation has two primary paths:
+      - new save path
+      - existing save path
+
+06.3. New save path means Turnix creates a new SavePack or save context for
+      the resolved AppPack before or as part of AppInstance creation.
+
+06.4. Existing save path means Turnix loads an existing compatible SavePack
+      or save context for the resolved AppPack before or as part of
+      AppInstance creation.
+
+06.5. New save path may invoke AppPack-defined save generation behavior when
+      such behavior is defined and authorized.
+
+06.6. Save generation behavior is AppPack-provided executable behavior and
+      remains subject to activation, adapter, capability, policy, and
+      persistence boundaries.
+
+06.7. Save generation does not bypass DA-04 committed-state rules.
+
+06.8. Save generation does not bypass DA-07 persistence authority.
+
+06.9. Existing save path validates compatibility between the resolved
+      AppPack and the selected SavePack or save context.
+
+06.10. Compatibility validation failure prevents AppInstance creation unless
+       explicit migration, override, or recovery policy permits another
+       path.
+
+06.11. Migration that changes authoritative committed state remains governed
+       by DA-04 and DA-06.
+
+06.12. AppInstance creation failure is explicit and trace-visible.
+
+06.13. AppInstance creation failure does not create a partially valid
+       AppInstance.
+
+
+===============================================================================
+07. WRITABLE SAVEPACK OWNERSHIP
+===============================================================================
+
+07.1. A writable SavePack is owned by at most one running AppInstance at a
+      time.
+
+07.2. Writable SavePack ownership prevents silent multi-writer mutation of
+      durable executed state.
+
+07.3. A second AppInstance does not silently acquire writable ownership of
+      the same SavePack.
+
+07.4. A second runtime host does not silently acquire writable ownership of
+      the same workspace or SavePack.
+
+07.5. Read-only inspection of a SavePack may be allowed by explicit tooling,
+      audit, export, or policy rules.
+
+07.6. Read-only inspection does not create writable ownership.
+
+07.7. Multi-writer SavePack behavior is not defined by this document.
+
+07.8. Any future multi-writer mode requires an explicit authoritative design
+      that defines conflict handling, transaction boundaries, persistence
+      ordering, and recovery semantics.
+
+07.9. Workspace locking and concrete writable ownership implementation
+      remain open for future root, persistence, or runtime-host documents.
+
+07.10. Absence of concrete locking implementation detail does not weaken the
+       single-writer semantic rule in this section.
+
+
+===============================================================================
+08. APPINSTANCE LIFECYCLE PHASES
+===============================================================================
+
+08.1. AppInstance lifecycle phases may include:
+      - requested
+      - creating
+      - save binding
+      - starting
+      - active
+      - stopping
+      - stopped
+      - failed
+      - crashed
+      - closed
+
+08.2. Concrete implementations may use additional internal states if those
+      states preserve the externally visible meanings defined here.
+
+08.3. requested means AppInstance creation has been requested but creation
+      has not yet begun.
+
+08.4. creating means Turnix is constructing AppInstance runtime identity and
+      validating required creation inputs.
+
+08.5. save binding means Turnix is creating, loading, validating, or binding
+      the active save context.
+
+08.6. starting means Turnix is preparing the runtime active region and may
+      begin pack activation or adapter preparation according to owning
+      documents.
+
+08.7. active means the AppInstance runtime active region exists.
+
+08.8. stopping means Turnix is intentionally ending the active runtime
+      region.
+
+08.9. stopped means the AppInstance ended through normal controlled
+      shutdown.
+
+08.10. failed means AppInstance lifecycle could not continue because an
+       error prevented valid creation, start, or controlled operation.
+
+08.11. crashed means the AppInstance active region ended because the runtime
+       failed unexpectedly or the Kernel detected loss of valid runtime
+       continuity.
+
+08.12. closed means AppInstance runtime identity has been released and is no
+       longer usable for new runtime work.
+
+08.13. Lifecycle phase names do not define Job terminal outcomes.
+
+08.14. Lifecycle phase names do not define Window finalization outcomes.
+
+08.15. Lifecycle phase names do not define adapter lifecycle outcomes.
+
+
+===============================================================================
+09. APPINSTANCE ACTIVE REGION
+===============================================================================
+
+09.1. An AppInstance active region is the bounded runtime interval during
       which an AppInstance is active.
 
-05.2. An active region begins when the AppInstance becomes active.
+09.2. An active region begins when the AppInstance becomes active.
 
-05.3. An active region ends when the AppInstance is no longer active.
+09.3. An active region ends when the AppInstance is no longer active.
 
-05.4. At most one active region exists for one AppInstance at a time.
+09.4. At most one active region exists for one AppInstance at a time.
 
-05.5. Work occurring inside an AppInstance active region remains linkable to
+09.5. Work occurring inside an AppInstance active region remains linkable to
       that AppInstance when the owning subsystem records AppInstance
       correlation evidence.
 
-05.6. Ending an AppInstance active region does not by itself define whether
-      in-flight work committed, aborted, retried, or resumed.
+09.6. Ending an AppInstance active region does not by itself define whether
+      in-flight work committed, aborted, retried, resumed, cancelled,
+      superseded, detached, or retained a result.
 
-05.7. Window finalization semantics are defined by DA-08.
+09.7. Window finalization semantics are defined by DA-08.
 
-05.8. Pack activation failure semantics are defined by DA-14.
+09.8. Pack activation failure semantics are defined by DA-14.
+
+09.9. Job lifecycle semantics are defined by DA-19.
+
+09.10. Adapter lifecycle semantics are defined by DA-23.
 
 
 ===============================================================================
-06. APPINSTANCE TRACE REASON IDENTIFIERS
+10. RELATION TO PACK ACTIVATION
 ===============================================================================
 
-06.1. DA-20 owns the AppInstance-domain trace reason identifiers used for
-      AppInstance active-region span boundaries.
+10.1. Pack activation occurs inside or in relation to an AppInstance active
+      region.
 
-06.2. The following AppInstance-domain trace reasons are defined:
+10.2. AppInstance creation does not by itself activate every pack.
 
+10.3. AppInstance activation of the AppPack and its runtime participants
+      remains governed by DA-14.
+
+10.4. AppInstance lifecycle is not pack activation lifecycle.
+
+10.5. Pack activation success does not by itself mean AppInstance shutdown
+      will succeed.
+
+10.6. Pack activation failure may cause AppInstance start failure when the
+      failed activation is required for the AppInstance to become active.
+
+10.7. NotActivatedError remains an activation-domain outcome under DA-14.
+
+10.8. AppInstance lifecycle evidence may causally link to activation trace
+      evidence when activation affects AppInstance lifecycle.
+
+
+===============================================================================
+11. RELATION TO EXECUTION ADAPTERS
+===============================================================================
+
+11.1. Execution adapters may attach to or participate in an AppInstance.
+
+11.2. Adapter participation does not make the adapter the AppInstance.
+
+11.3. Adapter identity is distinct from AppInstance identity.
+
+11.4. Adapter lifecycle is distinct from AppInstance lifecycle.
+
+11.5. Adapter readiness does not imply AppInstance readiness.
+
+11.6. AppInstance readiness does not imply that every possible adapter is
+      ready.
+
+11.7. Adapter failure does not automatically stop the AppInstance.
+
+11.8. AppInstance stop does not automatically define adapter failure.
+
+11.9. If adapter failure affects required AppInstance behavior, policy or
+      lifecycle rules define whether the AppInstance continues, stops,
+      fails, detaches the adapter, or enters another explicit outcome.
+
+11.10. Adapter-executed code does not own AppInstance state.
+
+11.11. Adapter-executed code requests AppInstance state mutation only through
+       Kernel-mediated boundaries.
+
+11.12. DA-23 owns execution adapter boundary semantics.
+
+
+===============================================================================
+12. RELATION TO VIEWS AND FRONTEND CLIENTS
+===============================================================================
+
+12.1. A View may present or control one AppInstance when the View class and
+      policy permit that relationship.
+
+12.2. View identity is distinct from AppInstance identity.
+
+12.3. Frontend client identity is distinct from AppInstance identity.
+
+12.4. A frontend client disconnect does not automatically stop an
+      AppInstance.
+
+12.5. View disconnect does not automatically stop an AppInstance.
+
+12.6. AppInstance stop does not automatically define View failure.
+
+12.7. If View lifecycle affects AppInstance lifecycle, that relationship is
+      explicit and governed by View, policy, and AppInstance lifecycle
+      rules.
+
+12.8. DA-22 owns UI, View, and frontend runtime semantics.
+
+
+===============================================================================
+13. RELATION TO RPC AND TRANSPORTS
+===============================================================================
+
+13.1. RPC messages may target or originate from participants associated with
+      an AppInstance.
+
+13.2. RPC message identity is distinct from appInstanceId.
+
+13.3. RPC channel identity is distinct from appInstanceId.
+
+13.4. Transport lifecycle is distinct from AppInstance lifecycle.
+
+13.5. Transport disconnect does not automatically stop an AppInstance.
+
+13.6. Transport timeout does not automatically fail an AppInstance.
+
+13.7. AppInstance stop does not automatically mean the transport failed.
+
+13.8. If transport lifecycle affects AppInstance lifecycle, that effect is
+      explicit and governed by policy and the owning lifecycle documents.
+
+13.9. DA-21 owns RPC, channel, transport, and message-flow semantics.
+
+
+===============================================================================
+14. RELATION TO JOBS
+===============================================================================
+
+14.1. Jobs may execute inside or in relation to an AppInstance active
+      region.
+
+14.2. jobId is distinct from appInstanceId.
+
+14.3. Job lifecycle is distinct from AppInstance lifecycle.
+
+14.4. AppInstance stop does not automatically define Job terminal outcome.
+
+14.5. Job terminal outcome does not automatically stop an AppInstance.
+
+14.6. If AppInstance lifecycle affects a Job, DA-19 governs Job terminal
+      outcome, cancellation, timeout, supersession, progress, late
+      completion, and retained result semantics.
+
+14.7. If a Job affects AppInstance lifecycle, that effect is explicit and
+      governed by the workflow or lifecycle rules that own the relationship.
+
+14.8. DA-19 owns Job lifecycle semantics.
+
+
+===============================================================================
+15. RELATION TO WINDOWS AND COMMITTED STATE
+===============================================================================
+
+15.1. Windows are associated with one AppInstance.
+
+15.2. An AppInstance active region may contain an ActiveWindow.
+
+15.3. AppInstance lifecycle does not by itself finalize a Window.
+
+15.4. AppInstance stop does not by itself create a SafePointWindow.
+
+15.5. AppInstance failure does not by itself create an AbortedWindow.
+
+15.6. Window finalization remains governed by DA-08.
+
+15.7. Authoritative committed-state mutation remains governed by DA-04.
+
+15.8. AppInstance lifecycle evidence may be retained inside Window evidence
+      according to DA-08.
+
+15.9. Retained AppInstance evidence does not become authoritative committed
+      state merely because it is retained in a Window.
+
+
+===============================================================================
+16. APPINSTANCE TRACE REASON IDENTIFIERS
+===============================================================================
+
+16.1. DA-20 owns the AppInstance-domain trace reason identifiers used for
+      AppInstance lifecycle and active-region span boundaries.
+
+16.2. The following AppInstance-domain trace reasons are defined:
+
+      - AppInstanceCreationRequested
+      - AppInstanceCreationStarted
+      - AppInstanceSaveBindingStarted
+      - AppInstanceSaveBindingSucceeded
+      - AppInstanceSaveBindingFailed
+      - AppInstanceStartStarted
       - AppInstanceActiveSpanBegin
+      - AppInstanceStopRequested
+      - AppInstanceStopStarted
       - AppInstanceActiveSpanEnd
+      - AppInstanceStopped
+      - AppInstanceFailed
+      - AppInstanceCrashed
+      - AppInstanceClosed
 
-06.3. AppInstanceActiveSpanBegin is emitted when an AppInstance becomes
+16.3. AppInstanceCreationRequested is emitted when AppInstance creation is
+      requested.
+
+16.4. AppInstanceCreationStarted is emitted when Turnix begins constructing
+      AppInstance runtime identity and validating creation inputs.
+
+16.5. AppInstanceSaveBindingStarted is emitted when Turnix begins creating,
+      loading, validating, or binding the active save context.
+
+16.6. AppInstanceSaveBindingSucceeded is emitted when active save context
+      binding succeeds.
+
+16.7. AppInstanceSaveBindingFailed is emitted when active save context
+      binding fails.
+
+16.8. AppInstanceStartStarted is emitted when Turnix begins starting the
+      AppInstance runtime active region.
+
+16.9. AppInstanceActiveSpanBegin is emitted when an AppInstance becomes
       active.
 
-06.4. AppInstanceActiveSpanBegin trace evidence records enough context to
+16.10. AppInstanceStopRequested is emitted when AppInstance stop is
+       requested.
+
+16.11. AppInstanceStopStarted is emitted when Turnix begins stopping the
+       AppInstance active region.
+
+16.12. AppInstanceActiveSpanEnd is emitted when an AppInstance is no longer
+       active.
+
+16.13. AppInstanceStopped is emitted when the AppInstance reaches controlled
+       stopped state.
+
+16.14. AppInstanceFailed is emitted when the AppInstance lifecycle cannot
+       continue because an error prevents valid creation, start, or
+       controlled operation.
+
+16.15. AppInstanceCrashed is emitted when the AppInstance active region ends
+       because runtime continuity failed unexpectedly.
+
+16.16. AppInstanceClosed is emitted when AppInstance runtime identity is
+       released and no longer usable for new runtime work.
+
+16.17. DA-03 defines the trace substrate used to represent AppInstance
+       evidence.
+
+16.18. DA-20 defines only the AppInstance-domain ownership of these trace
+       reasons and required correlation evidence.
+
+
+===============================================================================
+17. APPINSTANCE TRACE CONTEXT
+===============================================================================
+
+17.1. AppInstance trace evidence records enough context, when available, to
+      explain:
+      - appInstanceId
+      - active AppPack identity
+      - active SavePack or save identity when applicable
+      - creation request identity when applicable
+      - runtime host identity when applicable
+      - workspace identity when applicable
+      - active region span identity when applicable
+      - viewId when applicable
+      - adapter identity when applicable
+      - RPC message identity when applicable
+      - jobId when applicable
+      - failure reason category when failure occurs
+      - stop reason category when stopping occurs
+      - crash reason category when crash is detected
+
+17.2. AppInstanceActiveSpanBegin trace evidence records enough context to
       explain:
       - appInstanceId
       - spanIdentity
-      - activePackId or equivalent active pack identity
-      - activeSaveIdentity when applicable
+      - active AppPack identity
+      - active SavePack or save identity when applicable
 
-06.5. AppInstanceActiveSpanEnd is emitted when an AppInstance is no longer
-      active.
-
-06.6. AppInstanceActiveSpanEnd trace evidence records enough context to
+17.3. AppInstanceActiveSpanEnd trace evidence records enough context to
       explain:
       - appInstanceId
       - spanIdentity
       - endReasonCategory
 
-06.7. AppInstanceActiveSpanEnd endReasonCategory distinguishes:
+17.4. AppInstanceActiveSpanEnd endReasonCategory distinguishes:
       - NormalDeactivate
       - Crash
       - ForcedDeactivate
       - KernelExit
 
-06.8. DA-03 defines the trace substrate used to represent AppInstance span
+17.5. AppInstance trace evidence does not replace activation trace evidence.
+
+17.6. AppInstance trace evidence does not replace adapter trace evidence.
+
+17.7. AppInstance trace evidence does not replace RPC trace evidence.
+
+17.8. AppInstance trace evidence does not replace Job trace evidence.
+
+17.9. AppInstance trace evidence does not replace Window finalization
       evidence.
 
-06.9. DA-20 defines only the AppInstance-domain ownership of these trace
-      reasons and required correlation evidence.
+
+===============================================================================
+18. WHAT IS EXPLICITLY NOT SUPPORTED
+===============================================================================
+
+18.1. The following are not supported:
+      - treating AppInstance identity as pack identity
+      - treating AppInstance identity as SavePack identity
+      - changing AppPack identity inside one AppInstance
+      - silent writable multi-writer SavePack ownership
+      - adapter-owned AppInstance state authority
+      - frontend-owned AppInstance state authority
+      - transport disconnect silently stopping an AppInstance
+      - View disconnect silently stopping an AppInstance
+      - Job terminal outcome silently stopping an AppInstance
+      - AppInstance stop silently defining Job terminal outcome
+      - AppInstance stop silently finalizing a Window
+      - AppInstance failure silently creating an AbortedWindow
+      - AppInstance creation failure leaving a partially valid AppInstance
 
 
 ===============================================================================
-07. EXPLICITLY OPEN QUESTIONS
+19. EXPLICITLY OPEN QUESTIONS
 ===============================================================================
 
-07.1. OPEN questions include:
-      - AppInstance creation request semantics
-      - AppInstance shutdown request semantics
-      - AppInstance restart semantics
-      - relationship between AppInstance lifecycle and future Job lifecycle
+19.1. OPEN questions include:
       - exact appInstanceId representation
-
-07.2. These questions remain open because this document currently exists to
-      establish ownership boundaries needed by the DA-03 tracing migration.
+      - exact creation request representation
+      - exact runtime host identity representation
+      - exact workspace identity representation
+      - exact SavePack compatibility validation schema
+      - exact SavePack generator API
+      - exact workspace locking implementation
+      - exact runtime host command surface
+      - exact AppInstance restart semantics
+      - exact AppInstance retained-result behavior when clients disconnect
+      - exact AppInstance lifecycle API names
+      - exact implementation-specific lifecycle substate vocabulary
 
 
 ===============================================================================
-08. LOCKED SUMMARY
+20. LOCKED SUMMARY
 ===============================================================================
 
-08.1. LOCKED:
+20.1. LOCKED:
+      - AppInstance is a live runtime instance of one AppPack
       - AppInstance identity is distinct from pack identity
-      - AppInstance identity is distinct from save identity
+      - AppInstance identity is distinct from SavePack identity
+      - AppInstance identity is distinct from View identity
+      - AppInstance identity is distinct from adapter identity
+      - AppInstance identity is distinct from Job identity
       - AppInstance lifecycle is distinct from pack activation
+      - AppInstance lifecycle is distinct from execution adapter lifecycle
+      - AppInstance lifecycle is distinct from RPC transport lifecycle
+      - AppInstance lifecycle is distinct from Job lifecycle
       - appInstanceId is the runtime instance correlation identity
+      - an AppInstance has exactly one active AppPack identity
+      - an AppInstance may have one active SavePack or save context
+      - new save path and existing save path are distinct AppInstance
+        creation paths
+      - a writable SavePack is owned by at most one running AppInstance at a
+        time
       - AppInstance active regions have begin and end boundaries
-      - AppInstance-domain trace reason identifiers are owned by DA-20
-      - AppInstanceActiveSpanBegin and AppInstanceActiveSpanEnd are defined
-        here
+      - AppInstance stop does not by itself define Job terminal outcome
+      - AppInstance stop does not by itself finalize a Window
+      - adapter-executed code does not own AppInstance state
+      - DA-20 owns AppInstance-domain trace reason identifiers
       - DA-03 owns the trace substrate, not AppInstance lifecycle semantics
 
-08.2. OPEN:
-      - detailed AppInstance lifecycle workflows beyond active-region
-        identity boundaries
+20.2. OPEN:
+      - concrete identifiers, host commands, SavePack generator API,
+        workspace locking, restart, and implementation substate details
 
 
 ===============================================================================
@@ -249,6 +784,6 @@ END OF DA-20 - APPINSTANCE LIFECYCLE & RUNTIME IDENTITY
 --- doc-meta ---
 DOC_ID: DA-20
 DOC_FILE: docs/design/DA-20_APPINSTANCE_LIFECYCLE_AND_RUNTIME_IDENTITY.txt
-DOC_REV: 1
-DOC_GIT: eca25d6
+DOC_REV: 2
+DOC_GIT: 04d15d1
 ----------------
