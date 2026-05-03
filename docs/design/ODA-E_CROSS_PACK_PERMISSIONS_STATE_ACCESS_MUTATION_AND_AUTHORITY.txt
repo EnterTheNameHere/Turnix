@@ -26,12 +26,16 @@ It defines:
 - access-level concepts
 - separation between read authority and write authority
 - computed and derived-value handling
+- adapter-mediated state-access constraints
 - cross-pack intentional modification requirements
 - trace and audit expectations for state access
 
 It does NOT define:
 - filesystem access (see DA-07)
 - service or capability invocation mechanics (see DA-16)
+- execution adapter boundary semantics (see DA-23)
+- RPC, channel, or transport semantics (see DA-21)
+- AppInstance lifecycle or runtime identity semantics (see DA-20)
 - dependency resolution or visibility semantics
 - final authoritative memory, state-layer, or journaling semantics
 - final authoritative config-schema representation for access metadata
@@ -50,6 +54,9 @@ Upstream Documents:
 - DA-07
 - DA-16
 - DA-17
+- DA-20
+- DA-21
+- DA-23
 
 ===============================================================================
 01. INTERPRETATION BASIS
@@ -89,7 +96,10 @@ Upstream Documents:
       - moral or trust enforcement
 
 02.4. This document remains subordinate to higher-authority documents that
-      define the final state, memory, config, permission, and tracing model.
+      define the final state, memory, config, permission, adapter, RPC, and
+      tracing model.
+
+02.5. Adapter mediation does not change state ownership by itself.
 
 
 ===============================================================================
@@ -107,6 +117,12 @@ Upstream Documents:
       - write or mutation
       - delete
       - observation or watching
+
+03.3. This document applies equally when state access is requested by
+      adapter-executed code through Turnix-mediated surfaces.
+
+03.4. This document does not grant adapter-executed code direct state
+      authority.
 
 
 ===============================================================================
@@ -126,6 +142,12 @@ Upstream Documents:
         state-transition rule
 
 04.4. This model does not use a shared undifferentiated global key bag.
+
+04.5. Adapter identity is not state ownership identity.
+
+04.6. Frontend client identity is not state ownership identity.
+
+04.7. RPC peer identity is not state ownership identity.
 
 
 ===============================================================================
@@ -183,6 +205,9 @@ Upstream Documents:
         - per-save gameplay modifiers
         - save-specific UI overrides
 
+05.3.3. Save-bound state access remains constrained by AppInstance and
+        SavePack binding rules defined in higher-authority documents.
+
 
 05.4 COMPUTED OR EFFECTIVE LAYER
 --------------------------------
@@ -236,6 +261,8 @@ Upstream Documents:
 06.8. These access levels are intended to prevent mistakes.
       They do not claim secrecy against the local user.
 
+06.9. Adapter transport does not change access level meaning.
+
 
 ===============================================================================
 07. READ AUTHORITY VS WRITE AUTHORITY (LOCKED)
@@ -259,6 +286,9 @@ Upstream Documents:
 
 07.1.4. No silent fallback occurs.
 
+07.1.5. Adapter-mediated reads remain subject to the same read-authority
+        rules.
+
 
 07.2 WRITING AND DELETING
 -------------------------
@@ -281,6 +311,11 @@ Upstream Documents:
 07.2.7. Unauthorized mutation may trigger a user decision only where a
         higher-authority decision-handling model permits that recovery path.
 
+07.2.8. Adapter-mediated writes remain subject to the same write-authority
+        rules.
+
+07.2.9. In-process adapter calls do not bypass write authority.
+
 
 ===============================================================================
 08. MUTATION RULES (LOCKED)
@@ -298,6 +333,10 @@ Upstream Documents:
       - produce trace events
       - may produce backups
       - may trigger recovery handling when higher documents permit that
+
+08.5. Adapter-executed mutation does not become authoritative until it
+      crosses the higher-authority orchestration, transaction, and commit
+      boundaries.
 
 
 ===============================================================================
@@ -319,6 +358,9 @@ Upstream Documents:
       - remain traceable
       - avoid cycles
 
+09.4. Computed or effective values do not become authoritative stored state
+      merely because they are transported to another runtime.
+
 
 ===============================================================================
 10. REACTION AND OBSERVATION (LOCKED)
@@ -336,6 +378,8 @@ Upstream Documents:
 
 10.3. Observation remains additive rather than exclusive.
 
+10.4. Adapter-mediated observation does not grant write authority.
+
 
 ===============================================================================
 11. CROSS-PACK INTENTIONAL MODIFICATION (LOCKED)
@@ -350,6 +394,10 @@ Upstream Documents:
 
 11.2. This is explicit cooperation rather than an implicit override.
 
+11.3. If the modifying request originates from adapter-executed code, the
+      adapter remains only the execution boundary or communication
+      participant. The pack or kernel authority remains explicit.
+
 
 ===============================================================================
 12. ENUMERATION AND DISCOVERABILITY (LOCKED)
@@ -363,6 +411,9 @@ Upstream Documents:
       higher diagnostic model permits that access.
 
 12.4. Enumeration exists for tooling rather than for probing.
+
+12.5. Adapter-mediated enumeration remains governed by the same authority
+      and redaction rules.
 
 
 ===============================================================================
@@ -380,6 +431,11 @@ Upstream Documents:
 13.3. This model does not claim secrecy from the user.
       It defines leak-minimizing defaults for normal surfaces.
 
+13.4. Frontend presentation does not remove redaction requirements.
+
+13.5. Transporting a value to a frontend or remote adapter does not make it
+      public by itself.
+
 
 ===============================================================================
 14. TRACE AND AUDIT REQUIREMENTS (LOCKED)
@@ -387,6 +443,9 @@ Upstream Documents:
 
 14.1. Cross-pack state access emits trace events including:
       - caller identity
+      - adapter identity when applicable
+      - RPC message identity when applicable
+      - AppInstance identity when applicable
       - owner domain
       - key path
       - access level
@@ -396,6 +455,9 @@ Upstream Documents:
 
 14.2. Raw values are excluded or redacted according to access level and the
       governing tracing model.
+
+14.3. Adapter, RPC, and AppInstance correlation evidence remains evidence.
+      It does not redefine state authority.
 
 
 ===============================================================================
@@ -412,16 +474,25 @@ Upstream Documents:
       - explainable
       - reproducible
 
+15.3. Transport failure does not redefine denied-access meaning.
+
+15.4. Adapter failure does not redefine committed-state meaning.
+
 
 ===============================================================================
 16. RELATION TO OTHER DOCUMENTS
 ===============================================================================
 
 16.1. This document is constrained by and remains subordinate to:
+      - DA-04 for authoritative memory, state, transaction, and commit
+        semantics
       - DA-16 for services, capabilities, and permissions
       - DA-06 for configuration, schemas, and migration
       - DA-03 for tracing, diagnostics, and observability
       - DA-17 for user interaction, decision points, and policy handling
+      - DA-20 for AppInstance lifecycle and runtime identity
+      - DA-21 for RPC, channels, transports, and message flow
+      - DA-23 for execution adapter boundaries
 
 16.2. This document also remains compatible with:
       - the Core Truth Doctrine in DA-01
@@ -546,6 +617,9 @@ Upstream Documents:
       - permissive reads and guarded writes
       - non-persistent computed layers
       - IoManager-mediated or equivalent authoritative mutation
+      - adapter-mediated state access does not grant adapter state authority
+      - in-process adapter calls do not bypass write authority
+      - transported computed values do not become authoritative stored state
       - trace-first enforcement
       - leak-minimizing diagnostics
 
@@ -567,6 +641,6 @@ END OF ODA-E - CROSS-PACK PERMISSIONS, STATE ACCESS, MUTATION & AUTHORITY
 --- doc-meta ---
 DOC_ID: ODA-E
 DOC_FILE: docs/design/ODA-E_CROSS_PACK_PERMISSIONS_STATE_ACCESS_MUTATION_AND_AUTHORITY.txt
-DOC_REV: 8
-DOC_GIT: ad877cc
+DOC_REV: 9
+DOC_GIT: 0000000
 ----------------
