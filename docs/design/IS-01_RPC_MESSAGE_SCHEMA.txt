@@ -9,7 +9,7 @@ EVOLVING
 Description:
 ------------
 Defines the concrete wire-envelope schema used for RPC messages exchanged
-between Turnix frontend and backend components.
+between Turnix runtime participants.
 
 This document is an implementation specification. It does not introduce new
 system guarantees, authority semantics, or policy rules.
@@ -26,11 +26,16 @@ It defines:
 - per-type field expectations
 - helper-constructor responsibilities
 - serialization and routing expectations
+- adapter and AppInstance correlation metadata carried by the envelope
 - envelope completion-marker behavior
 
 It does NOT define:
 - new runtime authority semantics
 - new permission or policy rules
+- abstract RPC, channel, and transport semantics (see DA-21)
+- execution adapter boundary semantics (see DA-23)
+- frontend View semantics (see DA-22)
+- AppInstance lifecycle semantics (see DA-20)
 - tracing semantics beyond carrying correlation metadata
 - Job lifecycle semantics beyond carrying Job metadata (see DA-19)
 - WebSocket lifecycle behavior beyond what the message schema requires
@@ -50,6 +55,10 @@ Upstream Documents:
 - DA-16
 - DA-17
 - DA-19
+- DA-20
+- DA-21
+- DA-22
+- DA-23
 
 ===============================================================================
 01. INTERPRETATION BASIS
@@ -85,6 +94,10 @@ Upstream Documents:
 02.4. If code and this document drift, the project updates them together so
       that the implementation remains traceable to this specification.
 
+02.5. The schema may be used by WebSocket, in-process, testing, or future
+      transport implementations when those implementations carry the same
+      concrete RPCMessage envelope.
+
 
 ===============================================================================
 03. CORE WIRE MODELS
@@ -107,6 +120,9 @@ Upstream Documents:
 03.1.3. Gen is embedded in RPC envelopes where session continuity validation
         is required.
 
+03.1.4. Gen does not define AppInstance lifecycle, Job lifecycle, or adapter
+        lifecycle.
+
 
 03.2 ROUTE
 ----------
@@ -117,6 +133,9 @@ Upstream Documents:
 
 03.2.2. If the explicit lane is missing, backend logic may infer the default
         delivery lane from Route values.
+
+03.2.3. Route does not grant permission, activate packs, or authorize
+        adapter execution by itself.
 
 
 03.3 RPCMESSAGE
@@ -132,6 +151,10 @@ Upstream Documents:
           is omitted and inference is permitted
         - carrying isComplete as the final serialized top-level field for
           complete envelopes
+
+03.3.3. RPCMessage carries correlation metadata for higher-level systems.
+
+03.3.4. RPCMessage does not create authority by carrying that metadata.
 
 
 ===============================================================================
@@ -172,6 +195,11 @@ Upstream Documents:
 
 04.2.2. id uses UUIDv7.
 
+04.2.3. id identifies the RPC message only.
+
+04.2.4. id is distinct from appInstanceId, jobId, viewId, and adapter
+        identity.
+
 
 04.3 type
 ---------
@@ -195,6 +223,9 @@ Upstream Documents:
         - "cancel"
         - "error"
 
+04.3.4. type does not define capability permission, Job outcome, adapter
+        outcome, or AppInstance lifecycle by itself.
+
 
 04.4 correlatesTo
 -----------------
@@ -207,6 +238,9 @@ Upstream Documents:
         - cancels
         - error propagation
 
+04.4.3. correlatesTo is message correlation. It is not Job identity or
+        adapter identity.
+
 
 04.5 gen
 --------
@@ -214,6 +248,9 @@ Upstream Documents:
 04.5.1. gen carries the server-assigned generation.
 
 04.5.2. The client echoes gen to validate session continuity.
+
+04.5.3. Generation mismatch is session or transport continuity evidence. It
+        does not define Job cancellation or adapter failure by itself.
 
 
 04.6 ts
@@ -223,6 +260,9 @@ Upstream Documents:
 
 04.6.2. ts may represent milliseconds since process start or another
         monotonic local representation used by the implementation.
+
+04.6.3. ts is not used as the authority source for causal ordering when
+        trace or explicit correlation evidence exists.
 
 
 04.7 lane
@@ -241,6 +281,8 @@ Upstream Documents:
 04.7.4. Lanes maintain independent sequencing and flow control per logical
         stream.
 
+04.7.5. Lane selection does not grant permission or execution authority.
+
 
 04.8 budgetMs
 -------------
@@ -253,6 +295,9 @@ Upstream Documents:
 
 04.8.3. Callers may override budgetMs explicitly.
 
+04.8.4. budgetMs does not define Job timeout unless a higher-level operation
+        explicitly maps it to Job timeout semantics.
+
 
 04.9 ackOf
 ----------
@@ -260,6 +305,9 @@ Upstream Documents:
 04.9.1. ackOf is reserved for richer acknowledgement semantics.
 
 04.9.2. ackOf is currently unused.
+
+04.9.3. Acknowledgement metadata confirms message receipt or transport-level
+        handling only.
 
 
 04.10 job
@@ -275,6 +323,9 @@ Upstream Documents:
 04.10.4. DA-19 defines Job lifecycle states, terminal outcomes, progress,
          cancellation, timeout, supersession, and late completion handling.
 
+04.10.5. Presence of job metadata does not mean the current RPC message is
+         final Job success.
+
 
 04.11 idempotencyKey
 --------------------
@@ -286,6 +337,9 @@ Upstream Documents:
 
 04.11.3. Retries using the same effective idempotencyKey are naturally
          deduplicated by the backend when that behavior is enabled.
+
+04.11.4. idempotencyKey does not bypass permission checks, adapter
+         authorization, or capability mediation.
 
 
 04.12 route
@@ -304,6 +358,13 @@ Upstream Documents:
          - derive lanes
          - enforce routing and permission checks in the surrounding system
 
+04.12.5. route may identify adapter-facing or adapter-originated endpoints
+         only when the higher RPC and adapter documents define that route
+         class.
+
+04.12.6. route is carried by the envelope; authority remains defined by
+         higher DA documents.
+
 
 04.13 op
 --------
@@ -317,12 +378,17 @@ Upstream Documents:
 04.13.3. op allows handlers to multiplex multiple behaviors on the same
          route.
 
+04.13.4. op does not bypass routing, permission, adapter, or lifecycle
+         checks.
+
 
 04.14 path
 ----------
 
 04.14.1. path is an additional routing hint used by handlers to select an
          operation variant or sub-endpoint.
+
+04.14.2. path does not provide filesystem authority.
 
 
 04.15 args
@@ -343,6 +409,8 @@ Upstream Documents:
 
 04.16.2. Each lane has its own counter.
 
+04.16.3. seq is a lane-ordering field and not a committed-state revision.
+
 
 04.17 origin
 ------------
@@ -355,34 +423,59 @@ Upstream Documents:
          - trace identifiers
          - span identifiers
          - calling context
+         - appInstanceId
+         - viewId
+         - frontend client identity
+         - adapter kind
+         - adapter instance identity
+         - Job identity when available
+
+04.17.4. origin metadata is correlation evidence only.
+
+04.17.5. origin metadata does not grant authority, permission, activation,
+         adapter execution, or state mutation.
 
 
-04.17.1 TRACE CORRELATION METADATA
-----------------------------------
+04.17.1 TRACE AND RUNTIME CORRELATION METADATA
+----------------------------------------------
 
-04.17.1.1. RPC envelopes may carry trace correlation metadata in origin.
+04.17.1.1. RPC envelopes may carry trace and runtime correlation metadata in
+           origin.
 
-04.17.1.2. Trace correlation metadata may include:
+04.17.1.2. Trace and runtime correlation metadata may include:
           - trace identifiers
           - span identifiers
           - parent event identifiers
           - calling context
           - appInstanceId when available
+          - viewId when available
+          - adapter kind when available
+          - adapter instance identity when available
           - jobId when available
 
 04.17.1.3. Trace correlation metadata carried by an RPC envelope does not
            define trace semantics.
 
-04.17.1.4. DA-03 defines trace event structure, trace DAG semantics, span
+04.17.1.4. Runtime correlation metadata carried by an RPC envelope does not
+           define AppInstance, View, adapter, or Job lifecycle semantics.
+
+04.17.1.5. DA-03 defines trace event structure, trace DAG semantics, span
            mechanics, and trace-correlation meaning.
 
-04.17.1.5. RPC helpers preserve trace correlation metadata when constructing
-           replies, errors, acknowledgements, cancellation messages, and other
-           messages that causally relate to an earlier message.
+04.17.1.6. DA-20 defines AppInstance lifecycle and runtime identity.
 
-04.17.1.6. If trace correlation metadata is unavailable, the envelope remains
-           valid unless the message type or higher-level owner explicitly
-           requires that metadata.
+04.17.1.7. DA-22 defines View and frontend runtime semantics.
+
+04.17.1.8. DA-23 defines execution adapter semantics.
+
+04.17.1.9. RPC helpers preserve trace and runtime correlation metadata when
+           constructing replies, errors, acknowledgements, cancellation
+           messages, and other messages that causally relate to an earlier
+           message.
+
+04.17.1.10. If trace or runtime correlation metadata is unavailable, the
+            envelope remains valid unless the message type or higher-level
+            owner explicitly requires that metadata.
 
 
 04.18 chunkNo
@@ -394,6 +487,8 @@ Upstream Documents:
 04.18.2. chunk numbering starts at 0 or 1 depending on helper convention.
 
 04.18.3. chunkNo is monotonically increasing within the ordered series.
+
+04.18.4. chunkNo does not define Job progress by itself.
 
 
 04.19 final
@@ -413,6 +508,8 @@ Upstream Documents:
 04.19.5. A message may be complete as an individual envelope even when final
          is false or absent.
 
+04.19.6. final does not define Job terminal outcome by itself.
+
 
 04.20 payload
 -------------
@@ -425,6 +522,9 @@ Upstream Documents:
          - reply requires a result payload
          - error requires an error object
          - stateUpdate carries state deltas
+
+04.20.4. Payload content does not gain authority merely because the envelope
+         is valid.
 
 
 04.21 isComplete
@@ -473,6 +573,10 @@ Upstream Documents:
 04.21.14. A receiver accepts isComplete only after the complete JSON frame
           has parsed successfully and the top-level envelope validates.
 
+04.21.15. isComplete does not imply capability permission, Job success,
+          adapter readiness, AppInstance readiness, or committed-state
+          mutation.
+
 
 ===============================================================================
 05. HELPER CONSTRUCTORS
@@ -493,6 +597,7 @@ Upstream Documents:
       - computing lane when not provided and when inference is permitted
       - setting default budgetMs for the operation kind
       - copying idempotencyKey from the triggering message when applicable
+      - preserving trace and runtime correlation metadata when applicable
       - enforcing required fields per message type
       - setting isComplete = true only after the envelope has been fully
         constructed
@@ -516,6 +621,9 @@ Upstream Documents:
 
 05.8. Before sending, serialization verifies that the canonical serialized
       top-level envelope ends with isComplete = true.
+
+05.9. Helper constructors do not use origin metadata to skip permission,
+      adapter, activation, routing, or lifecycle checks.
 
 
 ===============================================================================
@@ -555,6 +663,9 @@ Upstream Documents:
 
 06.8. Compatibility mode may accept older envelopes without isComplete only
       when that compatibility behavior is explicit and scoped.
+
+06.9. Adapter-facing message types do not gain separate authority merely by
+      being adapter-facing.
 
 
 ===============================================================================
@@ -609,6 +720,9 @@ Upstream Documents:
 07.9. Failure of completion-marker validation is treated as malformed or
       incomplete message handling rather than as a routed workload error.
 
+07.10. Valid serialization does not imply valid authority, successful work,
+       or accepted lifecycle outcome.
+
 
 ===============================================================================
 08. RELATION TO HIGHER DOCUMENTS
@@ -620,8 +734,9 @@ Upstream Documents:
       semantics, or policy rules.
 
 08.3. Routing, visibility, activation, capability, permission,
-      decision-handling, and Job lifecycle semantics remain governed by
-      higher DA documents.
+      decision-handling, AppInstance lifecycle, View lifecycle, execution
+      adapter semantics, transport semantics, and Job lifecycle semantics
+      remain governed by higher DA documents.
 
 08.4. This document defines only the concrete wire structure used to carry
       those higher-level concepts.
@@ -629,7 +744,16 @@ Upstream Documents:
 08.5. isComplete defines a wire-envelope completion marker only.
 
 08.6. isComplete does not add authority to the payload, result, error,
-      Job snapshot, trace correlation metadata, or routed operation.
+      Job snapshot, trace correlation metadata, adapter metadata, runtime
+      correlation metadata, or routed operation.
+
+08.7. DA-21 defines RPC, channel, and transport semantics.
+
+08.8. DA-23 defines execution adapter semantics.
+
+08.9. DA-20 defines AppInstance runtime identity.
+
+08.10. DA-22 defines View and frontend runtime semantics.
 
 
 ===============================================================================
@@ -639,6 +763,6 @@ END OF IS-01 - RPC MESSAGE SCHEMA
 --- doc-meta ---
 DOC_ID: IS-01
 DOC_FILE: docs/design/IS-01_RPC_MESSAGE_SCHEMA.txt
-DOC_REV: 16
-DOC_GIT: aa72b61
+DOC_REV: 17
+DOC_GIT: 0000000
 ----------------
