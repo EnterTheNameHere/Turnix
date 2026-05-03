@@ -1,7 +1,617 @@
+===============================================================================
+DESIGN AREA DA-25 - WINDOW ARTIFACTS, EXPORTS AND AUDIT BUNDLES
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines finalized Window artifact manifests, portable Window exports,
+Minimal Audit Bundles, optional digest accelerators, and offline inspection
+boundaries for retained finalized evidence.
+
+This document owns artifact and export semantics derived from finalized
+Windows. It consumes Window semantics defined by DA-08.
+
+Purpose:
+--------
+This document defines how Turnix represents, packages, and inspects retained
+finalized Window artifacts without turning retained evidence into a hidden
+correctness dependency.
+
+It defines:
+- WindowManifest semantics
+- SafePointWindowManifest semantics
+- AbortedWindowManifest semantics
+- WindowExport semantics
+- SafePointWindowExport and AbortedWindowExport semantics
+- Minimal Audit Bundle semantics
+- optional digest support and comparison accelerators
+- offline inspection boundaries for retained artifacts
+- retained artifact authority boundaries
+- explicit missing-data handling for exported or inspected artifacts
+
+It does NOT define:
+- memory, state, transaction, or commit mechanics (see DA-04)
+- payload identity, ChunkId, or ValueRef representation contracts
+  (see DA-05)
+- concrete persistent I/O authority, Readers, Writers, or filesystem rules
+  (see DA-07)
+- Window model, SafePointWindow, ActiveWindow, AbortedWindow, or Window
+  finalization semantics (see DA-08)
+- tracing structure, trace event schema, span semantics, or trace storage
+  semantics (see DA-03)
+- Job lifecycle, Job terminal states, or Job result semantics (see DA-19)
+- Orchestration Unit lifecycle or mutation authority semantics (see DA-24)
+- equality modes, Replay, Resume, Retry, or cross-session audit workflow
+  semantics (see DA-26)
+- concrete packaging file format
+- concrete archive format
+- concrete digest algorithms
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-03
+- DA-04
+- DA-05
+- DA-07
+- DA-08
+- DA-19
+- DA-24
+
+Downstream Documents:
+--------------------
+- DA-26
+- future export implementation specifications
+- future audit tooling implementation specifications
+
+
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
+
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines Window artifact, export, Minimal Audit Bundle,
+      digest, and offline inspection semantics within that shared
+      interpretation model.
+
+
+===============================================================================
+02. CORE CONCEPT
+===============================================================================
+
+02.1. This design area answers:
+
+          "How does Turnix represent and package finalized Window evidence
+           without changing the authority boundary of committed state or
+           retained non-authoritative evidence?"
+
+02.2. Finalized Windows may be represented by immutable artifact manifests.
+
+02.3. Finalized Window artifact manifests may be exported as portable
+      immutable closures.
+
+02.4. Retained evidence may be packaged into Minimal Audit Bundles for
+      audit, explanation, and offline inspection.
+
+02.5. Artifact representation does not add authority.
+
+02.6. Exported form changes portability, not semantics.
+
+02.7. Offline inspection reads retained artifact contents. It does not run
+      Turnix orchestration logic.
+
+02.8. Missing, pruned, corrupt, partial, or unavailable retained material is
+      explicit.
+
+02.9. Later sections of this document refine and apply these rules.
+      They do not weaken them.
+
+
+===============================================================================
+03. ARTIFACT AUTHORITY BOUNDARY
+===============================================================================
+
+03.1. Authority derives from the finalized Window kind and retained roots
+      represented by the artifact.
+
+03.2. Authority does not derive from the fact that a manifest exists.
+
+03.3. Authority does not derive from the fact that an export exists.
+
+03.4. Authority does not derive from archive, packaging, digest, filename,
+      or presentation format.
+
+03.5. A SafePointWindow artifact represents an authoritative committed
+      boundary only through its retained committed-state closure.
+
+03.6. Optional retained evidence roots remain non-authoritative evidence
+      roots.
+
+03.7. AbortedWindow artifacts remain non-authoritative evidence artifacts.
+
+03.8. Minimal Audit Bundles remain non-authoritative evidence artifacts.
+
+03.9. Committed-state excerpts included in evidence artifacts remain
+      excerpts, not restoration authority.
+
+03.10. Export does not convert non-authoritative evidence into
+       authoritative state.
+
+03.11. Packaging does not hide missing data, pruning, corruption, or
+       partial-export limitations.
+
+
+===============================================================================
+04. WINDOWMANIFESTS
+===============================================================================
+
+04.1. A WindowManifest is an immutable manifest representing exactly one
+      finalized Window.
+
+04.2. Manifest immutability preserves representation stability only.
+      It does not by itself create authority.
+
+04.3. Authority derives from the Window kind and retained roots represented,
+      not from the fact that a manifest exists.
+
+04.4. A WindowManifest never represents an ActiveWindow.
+
+04.5. A WindowManifest is inspectable offline within the limits of retained
+      material and supported decoding rules.
+
+04.6. A WindowManifest is exactly one of:
+      - SafePointWindowManifest
+      - AbortedWindowManifest
+
+04.7. A WindowManifest does not preserve transactional layer contents.
+
+04.8. A WindowManifest does not preserve live execution handles.
+
+04.9. A WindowManifest does not define replay, resume, retry, or equality
+      workflow semantics by itself.
+
+
+===============================================================================
+05. SAFEPOINTWINDOWMANIFEST
+===============================================================================
+
+05.1. A SafePointWindowManifest includes:
+      - safePointWindowId
+      - windowType = SafePointWindow
+      - committedStateRoot
+
+05.2. committedStateRoot identifies the retained committed-state closure for
+      that SafePointWindow through representation contracts defined
+      elsewhere.
+
+05.3. A SafePointWindowManifest may additionally include, by policy:
+      - traceRoot
+      - journalRoot
+      - revisionRoot
+      - mabRoot
+
+05.4. Optional roots are explicitly labeled as non-authoritative evidence
+      roots.
+
+05.5. Optional roots do not add authority to the SafePointWindowManifest.
+
+05.6. mabRoot, when present, is an evidence root only and does not add
+      authority to the SafePointWindowManifest.
+
+05.7. A SafePointWindowManifest is not complete if retained identity and
+      committed scope evidence are insufficient to identify the represented
+      SafePointWindow and its committed scope.
+
+05.8. Missing optional evidence roots are explicit when the manifest claims
+      a policy or export mode that would otherwise require them.
+
+
+===============================================================================
+06. ABORTEDWINDOWMANIFEST
+===============================================================================
+
+06.1. An AbortedWindowManifest includes:
+      - abortedWindowId
+      - windowType = AbortedWindow
+
+06.2. The default AbortedWindowManifest form includes traceRoot.
+
+06.3. An AbortedWindowManifest may additionally include:
+      - journalRoot
+      - mabRoot
+
+06.4. An AbortedWindowManifest does not define committedStateRoot.
+
+06.5. If traceRoot is absent, the AbortedWindowManifest declares that
+      absence explicitly together with the reason category for that
+      absence.
+
+06.6. An AbortedWindowManifest does not become authoritative merely because
+      it is finalized and immutable.
+
+06.7. An AbortedWindowManifest represents finalized non-authoritative
+      evidence of an aborted Window region.
+
+06.8. Missing trace, journal, or audit evidence remains explicit when it
+      affects interpretation of the retained abort evidence.
+
+
+===============================================================================
+07. WINDOWEXPORTS
+===============================================================================
+
+07.1. A WindowExport is a portable immutable serialization of one
+      WindowManifest closure.
+
+07.2. A WindowExport is derived from exactly one finalized WindowManifest.
+
+07.3. A WindowExport is exactly one of:
+      - SafePointWindowExport
+      - AbortedWindowExport
+
+07.4. Export does not add authority.
+
+07.5. Export does not convert non-authoritative evidence into authoritative
+      state.
+
+07.6. Export does not preserve transactional layer contents.
+
+07.7. Exported form changes portability, not semantics.
+
+07.8. Export is self-contained with respect to retained payloads required to
+      decode the exported closure, unless explicit partial-export policy is
+      used.
+
+07.9. If partial-export policy is used, missing material is explicit.
+
+07.10. Explicit missing material affects comparison and inspection outcomes
+       where the selected workflow requires that material.
+
+07.11. Export identity is not the same concept as committed-state identity.
+
+07.12. Export closure remains compatible with payload and reachability
+       contracts defined elsewhere.
+
+07.13. A WindowExport does not imply replayability.
+
+07.14. A WindowExport does not imply resumability.
+
+07.15. A WindowExport does not imply evidence completeness.
+
+
+===============================================================================
+08. SAFEPOINTWINDOWEXPORT
+===============================================================================
+
+08.1. A SafePointWindowExport is a WindowExport derived from one
+      SafePointWindowManifest.
+
+08.2. A SafePointWindowExport includes the retained committed-state closure
+      required by the represented SafePointWindowManifest unless explicit
+      partial-export policy is used.
+
+08.3. Optional evidence roots included in a SafePointWindowExport remain
+      non-authoritative evidence roots.
+
+08.4. Missing committed-state material required for deterministic
+      restoration is explicit.
+
+08.5. A partial SafePointWindowExport that lacks required committed-state
+      material is not a deterministic restoration artifact.
+
+08.6. A SafePointWindowExport does not add authority beyond the retained
+      committed-state closure it carries.
+
+
+===============================================================================
+09. ABORTEDWINDOWEXPORT
+===============================================================================
+
+09.1. An AbortedWindowExport is a WindowExport derived from one
+      AbortedWindowManifest.
+
+09.2. An AbortedWindowExport does not include committedStateRoot.
+
+09.3. An AbortedWindowExport may carry retained trace, journal, and audit
+      evidence according to export policy.
+
+09.4. An AbortedWindowExport remains non-authoritative evidence of an abort
+      region.
+
+09.5. An AbortedWindowExport is not a restoration artifact.
+
+09.6. An AbortedWindowExport is not replay proof.
+
+
+===============================================================================
+10. MINIMAL AUDIT BUNDLE
+===============================================================================
+
+10.1. A Minimal Audit Bundle is a non-authoritative export artifact intended
+      to support audit, explanation, and offline inspection.
+
+10.2. A Minimal Audit Bundle is not:
+      - authoritative state
+      - a WindowManifest
+      - a restoration artifact
+      - a replay guarantee
+      - a completeness guarantee
+
+10.3. A Minimal Audit Bundle includes:
+      - one or more retained trace roots
+      - all retained trace events reachable within the retained trace
+        closure selected for the bundle from those roots
+      - metadata required to interpret retained trace reasons
+      - enough correlation metadata to relate retained evidence to relevant
+        AppInstance, session, Orchestration Unit, Job, Window, or export
+        identity
+
+10.4. A Minimal Audit Bundle may additionally include:
+      - selected journal entries referenced by trace evidence
+      - selected committed-state excerpts as read-only evidence
+      - selected revision metadata without full value payloads
+      - selected Job lifecycle evidence
+      - selected Orchestration Unit lifecycle evidence
+      - selected adapter lifecycle evidence
+      - selected RPC correlation evidence
+      - selected View or frontend lifecycle evidence
+
+10.5. Any committed-state excerpts included in a Minimal Audit Bundle are
+      labeled non-authoritative evidence excerpts.
+
+10.6. If journal material is included, the included journal material
+      preserves the journal metadata required to interpret that evidence
+      correctly, including retention class.
+
+10.7. A Minimal Audit Bundle does not include:
+      - transactional layers
+      - uncommitted mutations
+      - executable code
+      - capability implementations
+      - secrets or credentials
+      - live Job execution handles
+      - live Orchestration Unit execution handles
+      - live adapter execution handles
+      - live RPC channels or transports
+
+10.8. A Minimal Audit Bundle preserves retained causal structure exactly for
+      the trace evidence it includes.
+
+10.9. Missing data is explicit.
+
+10.10. Missing data, pruning, corruption, and retained gaps do not silently
+       disappear behind presentation, packaging, or export format.
+
+10.11. Absence of data in a Minimal Audit Bundle does not imply absence of
+       behavior.
+
+10.12. Minimal Audit Bundle creation failure is trace-visible.
+
+10.13. Minimal Audit Bundle creation failure does not affect runtime state.
+
+10.14. Minimal Audit Bundle creation may occur while Turnix is running.
+
+10.15. Minimal Audit Bundle creation does not pause execution by default.
+
+10.16. Minimal Audit Bundle creation does not block orchestration by
+       default.
+
+10.17. If Minimal Audit Bundle creation requires a quiescent or finalized
+       boundary, that requirement is explicit and owned by the creating
+       workflow or export policy.
+
+
+===============================================================================
+11. OPTIONAL DIGEST SUPPORT AND COMPARISON ACCELERATORS
+===============================================================================
+
+11.1. Finalized artifacts may include optional digest fields.
+
+11.2. Optional digest fields are accelerators for comparison and inspection
+      work.
+
+11.3. Optional digest fields are not identities.
+
+11.4. Optional digest fields do not add authority.
+
+11.5. A digest field is emitted only when canonical serialization rules for
+      that digest type are defined.
+
+11.6. If canonical serialization rules for a digest type are not defined,
+      that digest type is not emitted.
+
+11.7. Digest categories may include:
+      - stateDigest
+      - strictStateDigest
+      - evidenceDigest
+      - exportManifestDigest
+
+11.8. Each digest category corresponds to a distinct comparison scope.
+
+11.9. A digest category name is not reused for a different comparison scope
+      unless an explicit coordinated revision changes that meaning.
+
+11.10. Digest algorithms and canonical serialization details remain open
+       within the constraints of this document.
+
+11.11. DA-26 owns equality modes and ComparisonResult semantics.
+
+11.12. This document owns digest representation as an artifact feature, not
+       the complete comparison workflow.
+
+
+===============================================================================
+12. OFFLINE INSPECTION
+===============================================================================
+
+12.1. WindowManifests, WindowExports, and Minimal Audit Bundles are
+      inspectable offline within the limits of their retained contents.
+
+12.2. Offline inspection may resolve retained payload references and decode
+      retained value representations without running Turnix orchestration
+      logic.
+
+12.3. Offline inspection does not require capability calls.
+
+12.4. Offline inspection does not require journal completeness.
+
+12.5. Offline inspection treats retained evidence as evidence only.
+
+12.6. Offline inspection does not promote evidence roots, evidence excerpts,
+      or exported packaging into authoritative state.
+
+12.7. Lack of orchestration at inspection time does not weaken the
+      authority boundary defined by the represented artifact.
+
+12.8. If retained material is partial, pruned, corrupt, or unavailable,
+      offline inspection reports that limitation explicitly.
+
+12.9. Offline inspection of retained Job evidence does not resume, cancel,
+      supersede, or otherwise control the original Job.
+
+12.10. Offline inspection of retained Orchestration Unit evidence does not
+       resume, cancel, supersede, or otherwise control the original
+       Orchestration Unit.
+
+12.11. Offline inspection of retained adapter evidence does not resume,
+       cancel, supersede, or otherwise control the original adapter.
+
+12.12. Offline inspection of retained RPC evidence does not reconnect,
+       replay, or otherwise control the original transport or channel.
+
+12.13. Offline inspection of retained View or frontend evidence does not
+       reconnect or control the original frontend participant.
+
+
+===============================================================================
+13. PARTIAL EXPORT AND MISSING MATERIAL
+===============================================================================
+
+13.1. Partial export policy is explicit.
+
+13.2. Partial export policy is represented in the exported artifact.
+
+13.3. Missing material is represented explicitly with enough reason category
+      information to distinguish:
+      - policy pruning
+      - partial export
+      - corruption
+      - unavailable external payload
+      - unsupported format
+      - intentionally omitted sensitive material
+
+13.4. Missing material does not silently become NotEqual, Equal, complete,
+      or authoritative.
+
+13.5. Missing material affects inspection and comparison workflows according
+      to the workflow semantics defined by DA-26.
+
+13.6. Export presentation does not hide explicit missing-material markers.
+
+13.7. Export tools preserve missing-material markers when repackaging or
+      transforming retained artifacts.
+
+
+===============================================================================
+14. WHAT IS EXPLICITLY NOT SUPPORTED
+===============================================================================
+
+14.1. The following are not supported:
+      - treating manifest existence as authority
+      - treating export packaging as authority
+      - treating Minimal Audit Bundles as restoration artifacts
+      - treating optional digests as identities
+      - treating optional digests as authority
+      - hiding missing data behind export presentation
+      - promoting evidence excerpts into committed state
+      - preserving transactional layers as export authority
+      - exporting live Job handles
+      - exporting live Orchestration Unit handles
+      - exporting live adapter execution handles
+      - using offline inspection to control original runtime participants
+      - inferring replayability merely because an export exists
+      - inferring resumability merely because an export exists
+
+
+===============================================================================
+15. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+15.1. OPEN questions include:
+      - exact WindowManifest serialization format
+      - exact WindowExport serialization format
+      - exact Minimal Audit Bundle packaging format
+      - exact digest algorithms
+      - exact canonical serialization rules for digest categories
+      - exact missing-material reason taxonomy
+      - exact retained adapter evidence presentation in audit tooling
+      - exact retained RPC evidence presentation in audit tooling
+      - exact retained Job evidence presentation in audit tooling
+      - exact retained Orchestration Unit evidence presentation in audit
+        tooling
+
+
+===============================================================================
+16. LOCKED SUMMARY
+===============================================================================
+
+16.1. LOCKED:
+      - WindowManifest is immutable and represents exactly one finalized
+        Window
+      - WindowManifest never represents an ActiveWindow
+      - manifest immutability does not by itself create authority
+      - SafePointWindowManifest includes committedStateRoot
+      - AbortedWindowManifest does not define committedStateRoot
+      - the default AbortedWindowManifest form includes traceRoot
+      - WindowExport is a portable immutable closure of one finalized
+        WindowManifest
+      - exported form changes portability, not semantics
+      - export does not add authority
+      - export does not preserve transactional layer contents
+      - Minimal Audit Bundle is non-authoritative and preserves retained
+        causal structure for included evidence
+      - Minimal Audit Bundle is not a restoration artifact, replay
+        guarantee, or completeness guarantee
+      - included journal material in a Minimal Audit Bundle preserves
+        required journal metadata, including retention class
+      - optional digests are comparison accelerators rather than identities
+      - optional digests do not add authority
+      - offline inspection operates on retained contents without requiring
+        orchestration logic
+      - offline inspection does not control original Jobs, Orchestration
+        Units, adapters, RPC channels, transports, Views, or frontends
+      - missing data, pruning, corruption, and retained gaps remain explicit
+
+16.2. OPEN:
+      - concrete packaging and serialization formats
+      - concrete digest algorithms and canonical serialization rules
+      - future audit-tooling evidence presentation
+
+
+===============================================================================
+END OF DA-25 - WINDOW ARTIFACTS, EXPORTS AND AUDIT BUNDLES
+===============================================================================
 
 --- doc-meta ---
 DOC_ID: DA-25
 DOC_FILE: docs/design/DA-25_WINDOW_ARTIFACTS_EXPORTS_AND_AUDIT_BUNDLES.txt
-DOC_REV: 1
+DOC_REV: 2
 DOC_GIT: 0000000
 ----------------
