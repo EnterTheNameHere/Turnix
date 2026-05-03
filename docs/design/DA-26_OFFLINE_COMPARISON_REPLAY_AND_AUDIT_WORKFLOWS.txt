@@ -1,0 +1,698 @@
+===============================================================================
+DESIGN AREA DA-26 - OFFLINE COMPARISON, REPLAY AND AUDIT WORKFLOWS
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines offline comparison, equality modes, ComparisonResult, Replay,
+Resume, Retry, and cross-session audit workflow semantics for retained
+Window-derived artifacts.
+
+This document owns workflow semantics for using retained finalized Window
+state and evidence. It consumes Window semantics from DA-08 and artifact
+semantics from DA-25.
+
+Purpose:
+--------
+This document defines what Turnix tools and workflows may claim when they
+compare, replay, resume, retry, or audit retained finalized Window-derived
+artifacts.
+
+It defines:
+- equality modes for finalized Windows, exports, and retained evidence
+- ComparisonResult semantics
+- optional digest use inside comparison workflows
+- NotComparable semantics
+- Replay workflow boundaries
+- Resume workflow boundaries
+- Retry workflow boundaries
+- cross-session audit workflow boundaries
+- workflow relationships to retained Job and Orchestration Unit evidence
+- explicit missing-material handling in comparison and audit workflows
+
+It does NOT define:
+- memory, state, transaction, or commit mechanics (see DA-04)
+- Window model, SafePointWindow, ActiveWindow, AbortedWindow, or Window
+  finalization semantics (see DA-08)
+- WindowManifest, WindowExport, Minimal Audit Bundle, digest representation,
+  or offline inspection artifact semantics (see DA-25)
+- trace event structure, trace DAG semantics, span mechanics, or trace
+  storage semantics (see DA-03)
+- Job lifecycle, Job terminal states, or Job result semantics (see DA-19)
+- Orchestration Unit lifecycle or mutation authority semantics (see DA-24)
+- execution adapter boundary semantics (see DA-23)
+- concrete packaging file format
+- concrete digest algorithms
+- concrete replay implementation steps
+- concrete audit-tooling user interface
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-03
+- DA-04
+- DA-08
+- DA-19
+- DA-23
+- DA-24
+- DA-25
+
+Downstream Documents:
+--------------------
+- future comparison implementation specifications
+- future replay implementation specifications
+- future audit tooling implementation specifications
+
+
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
+
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines offline comparison, Replay, Resume, Retry, and
+      audit workflow semantics within that shared interpretation model.
+
+
+===============================================================================
+02. CORE CONCEPT
+===============================================================================
+
+02.1. This design area answers:
+
+          "What may Turnix claim when it compares, replays, resumes,
+           retries, or audits retained finalized Window-derived artifacts?"
+
+02.2. Finalized Windows and their exported artifacts may support comparison,
+      replay, resume, retry, and audit workflows.
+
+02.3. Those workflows operate within the retained authoritative material and
+      retained evidence available to them.
+
+02.4. Retained evidence may explain what happened, but it does not become a
+      hidden correctness dependency.
+
+02.5. Missing material, pruning, corruption, partial export, and unsupported
+      comparison scope remain explicit.
+
+02.6. Replay restores committed state only within the committed-state
+      restoration boundary defined by DA-04.
+
+02.7. Resume and Retry are new work.
+
+02.8. ComparisonResult is a semantic claim scoped by an explicit equality
+      mode.
+
+02.9. Later sections of this document refine and apply these rules.
+      They do not weaken them.
+
+
+===============================================================================
+03. WORKFLOW INPUTS AND AUTHORITY BOUNDARY
+===============================================================================
+
+03.1. Offline comparison, Replay, Resume, Retry, and audit workflows may
+      consume:
+      - retained SafePointWindow material
+      - retained AbortedWindow evidence
+      - WindowManifests
+      - WindowExports
+      - Minimal Audit Bundles
+      - retained trace evidence
+      - retained journal evidence
+      - retained revision metadata
+      - retained Job lifecycle evidence
+      - retained Orchestration Unit lifecycle evidence
+      - retained adapter, RPC, View, or frontend evidence when available
+
+03.2. Workflow input does not add authority to the material consumed.
+
+03.3. Evidence artifacts remain evidence artifacts.
+
+03.4. Export packaging remains packaging.
+
+03.5. Committed-state excerpts remain excerpts unless the governing artifact
+      is a valid retained committed-state closure.
+
+03.6. A workflow does not infer authority from filename, archive format,
+      digest presence, presentation, or transport origin.
+
+03.7. A workflow does not hide the authority class of material it consumes.
+
+
+===============================================================================
+04. COMPARISONRESULT
+===============================================================================
+
+04.1. Equality checks over finalized Windows, exports, or retained evidence
+      return ComparisonResult.
+
+04.2. ComparisonResult is an enum with exactly three values:
+      - Equal
+      - NotEqual
+      - NotComparable
+
+04.3. ComparisonResult is not represented as:
+      - boolean
+      - integer
+      - float
+      - an open-ended string set
+
+04.4. If an API language lacks enums, the API exposes either:
+      - a closed set of named constants
+      - a tagged union
+      - a sealed type
+      with exactly the three ComparisonResult values above.
+
+04.5. A convenience boolean equality API is not provided.
+
+04.6. Any user-facing presentation distinguishes NotComparable from
+      NotEqual.
+
+04.7. ComparisonResult without equality mode is incomplete.
+
+04.8. ComparisonResult does not claim more than the selected equality mode
+      supports.
+
+04.9. ComparisonResult does not imply replayability, resumability, or audit
+      completeness.
+
+
+===============================================================================
+05. EQUALITY MODES
+===============================================================================
+
+05.1. Equality checks may be performed in multiple modes.
+
+05.2. Tools state explicitly which equality mode is used.
+
+05.3. Equality mode is part of the semantic claim made by the comparison
+      result.
+
+05.4. A comparison result without its mode is incomplete.
+
+05.5. Default equality mode is StateEquality unless another mode is
+      explicitly requested.
+
+
+05.1 STATEEQUALITY
+------------------
+
+05.1.1. StateEquality compares retained committed key/value pairs only.
+
+05.1.2. StateEquality ignores revision history.
+
+05.1.3. StateEquality ignores non-authoritative trace, journal, audit, Job,
+        Orchestration Unit, adapter, RPC, View, and frontend evidence.
+
+05.1.4. StateEquality is the default equality mode.
+
+05.1.5. If required committed-state material is missing for one side, the
+        result is NotComparable rather than NotEqual.
+
+
+05.2 STRICTSTATEEQUALITY
+------------------------
+
+05.2.1. StrictStateEquality compares retained committed key/value pairs plus
+        retained revision history required by the strict mode.
+
+05.2.2. If required retained revision material is missing for one side under
+        StrictStateEquality, the result is NotComparable rather than
+        NotEqual.
+
+05.2.3. StrictStateEquality does not compare non-authoritative evidence
+        unless a strict submode explicitly includes such evidence.
+
+05.2.4. Unsupported strict submodes return NotComparable rather than
+        silently degrading to StateEquality.
+
+
+05.3 EVIDENCEEQUALITY
+---------------------
+
+05.3.1. EvidenceEquality compares retained evidence closure such as trace,
+        journal, and audit-bundle material as included.
+
+05.3.2. EvidenceEquality does not imply state equality unless state modes are
+        also satisfied.
+
+05.3.3. EvidenceEquality may compare retained Job lifecycle evidence when
+        such evidence is included by the selected evidence closure.
+
+05.3.4. EvidenceEquality may compare retained Orchestration Unit lifecycle
+        evidence when such evidence is included by the selected evidence
+        closure.
+
+05.3.5. EvidenceEquality may compare retained adapter, RPC, View, and
+        frontend evidence when such evidence is included by the selected
+        evidence closure.
+
+05.3.6. Equality of retained Job lifecycle evidence does not imply resumed
+        or replayable Job execution.
+
+05.3.7. Equality of retained Orchestration Unit evidence does not imply
+        resumed or replayable Orchestration Unit execution.
+
+05.3.8. Equality of retained adapter evidence does not imply adapter
+        replayability or resumability.
+
+
+05.4 EXPORTEQUALITY
+-------------------
+
+05.4.1. ExportEquality compares exported closure as packaged, including
+        explicit missing or partial-export flags.
+
+05.4.2. ExportEquality is intended for verifying that two exports are the
+        same packaged artifact closure.
+
+05.4.3. ExportEquality does not imply StateEquality unless state modes are
+        also satisfied or the selected export comparison explicitly includes
+        the relevant committed-state closure.
+
+05.4.4. ExportEquality does not imply EvidenceEquality unless evidence modes
+        are also satisfied or the selected export comparison explicitly
+        includes the relevant evidence closure.
+
+
+===============================================================================
+06. NOTCOMPARABLE
+===============================================================================
+
+06.1. NotComparable is returned when required retained material for the
+      selected mode is missing, unavailable, unsupported, or unusable.
+
+06.2. Causes of NotComparable may include:
+      - policy pruning
+      - partial export
+      - corruption
+      - unsupported strict submode
+      - unsupported artifact version
+      - missing digest and unavailable structural material
+      - missing committed-state material required by StateEquality
+      - missing revision material required by StrictStateEquality
+      - missing evidence closure required by EvidenceEquality
+
+06.3. NotComparable is not treated as NotEqual by Turnix tooling.
+
+06.4. NotComparable is not treated as Equal by Turnix tooling.
+
+06.5. User-facing presentation explains why the selected comparison mode is
+      not comparable when reason evidence is available.
+
+06.6. Missing reason evidence is itself surfaced explicitly.
+
+06.7. Tools do not silently retry with a weaker equality mode and present
+      the weaker result as if it answered the original comparison request.
+
+
+===============================================================================
+07. OPTIONAL DIGEST USE IN COMPARISON WORKFLOWS
+===============================================================================
+
+07.1. DA-25 defines optional digest representation as an artifact feature.
+
+07.2. This document defines how comparison workflows may use optional
+      digests.
+
+07.3. Optional digest fields are accelerators for comparison work.
+
+07.4. Optional digest fields are not identities.
+
+07.5. Optional digest fields do not add authority.
+
+07.6. If the relevant digest values match for the selected comparison mode,
+      tools may conclude Equal for that mode without deeper structural
+      comparison.
+
+07.7. If the relevant digest values differ for the selected comparison mode,
+      tools conclude NotEqual for that mode.
+
+07.8. If the relevant digest value is missing for the selected comparison
+      mode, tools either:
+      - compute the digest on demand
+      - or fall back to structural comparison
+
+07.9. If digest computation and structural comparison are both impossible
+      because required material is missing or unsupported, tools return
+      NotComparable.
+
+07.10. Digest category names are not reused for different comparison scopes
+       unless an explicit coordinated revision changes that meaning.
+
+07.11. Digest mismatch in one equality mode does not imply mismatch in every
+       equality mode.
+
+
+===============================================================================
+08. REPLAY
+===============================================================================
+
+08.1. Replay is deterministic reconstruction of a retained SafePointWindow
+      state together with the retained causal story available for that
+      Window.
+
+08.2. Replay restores committed state within the restoration boundary
+      defined by DA-04.
+
+08.3. Replay uses retained authoritative material for committed-state
+      restoration.
+
+08.4. Replay may additionally present retained evidence available for the
+      selected SafePointWindow or related artifact.
+
+08.5. Replay does not imply re-running external effects.
+
+08.6. Replay does not imply deterministic reconstruction of ActiveWindow
+      activity that never became committed.
+
+08.7. Replay does not imply resuming retained Job execution.
+
+08.8. Replay does not imply resuming retained Orchestration Unit execution.
+
+08.9. Replay does not imply restarting retained adapter execution.
+
+08.10. Replay does not imply reconnecting retained RPC channels,
+       transports, Views, or frontend participants.
+
+08.11. Replay does not require journal completeness.
+
+08.12. Replay remains explicit and trace-visible when performed by a running
+       Turnix environment.
+
+08.13. Replay from a partial SafePointWindowExport that lacks required
+       committed-state material is not deterministic restoration.
+
+08.14. Replay presentation distinguishes restored committed state from
+       retained non-authoritative causal evidence.
+
+
+===============================================================================
+09. RESUME
+===============================================================================
+
+09.1. Resume is an attempt to continue execution after restoring a retained
+      SafePointWindow.
+
+09.2. Resume may involve:
+      - re-running in-flight orchestration units
+      - abandoning in-flight work
+      - retrying selected external calls
+      - starting new work from the restored committed boundary
+
+09.3. Resume is not deterministic in outcome.
+
+09.4. Resume is explicit and trace-visible.
+
+09.5. Resume does not reuse closed Job lifecycle identity.
+
+09.6. Resume does not reuse closed Orchestration Unit lifecycle identity.
+
+09.7. Resume does not reuse closed adapter execution identity.
+
+09.8. Resume does not reuse closed RPC channel or transport identity.
+
+09.9. Resume begins new work from a restored committed boundary.
+
+09.10. Resume does not retroactively convert prior uncommitted activity into
+       committed state.
+
+09.11. Resume policy may decide whether to abandon, retry, or replace
+       previously in-flight work.
+
+09.12. Such decisions remain explicit and trace-visible when made inside a
+       running Turnix environment.
+
+
+===============================================================================
+10. RETRY
+===============================================================================
+
+10.1. Retry is a new orchestration attempt for a previously failed,
+      incomplete, superseded, cancelled, or intentionally retried action.
+
+10.2. Retry is modeled as new work.
+
+10.3. Retry is trace-visible.
+
+10.4. Retry is not implied by Replay.
+
+10.5. Retry is not implied by Resume unless the resume policy explicitly
+      selects retry for specific work.
+
+10.6. Retry does not reuse the previous jobId when the retried work is
+      represented as a Job.
+
+10.7. Retry does not reuse the previous orchestrationUnitId.
+
+10.8. Retry does not reuse the previous adapter execution identity.
+
+10.9. Retry may reference earlier retained evidence to explain why the new
+      attempt exists.
+
+10.10. Referencing earlier retained evidence does not make Retry part of the
+       earlier execution.
+
+10.11. Retry does not imply deterministic outcome equality with the earlier
+       attempt.
+
+10.12. Retry remains constrained by current policy, capability, adapter,
+       AppInstance, and state rules at the time of retry.
+
+
+===============================================================================
+11. REPLAY, RESUME, AND RETRY BOUNDARY SUMMARY
+===============================================================================
+
+11.1. Replay restores retained committed state and retained causal story
+      where available.
+
+11.2. Resume attempts to continue after restoration.
+
+11.3. Retry starts a new attempt for selected prior work or action.
+
+11.4. Replay is not Resume.
+
+11.5. Resume is not Retry unless policy explicitly chooses Retry as part of
+      Resume.
+
+11.6. Retry is not Replay.
+
+11.7. Replay, Resume, and Retry remain constrained by the committed-state
+      restoration boundary defined by DA-04.
+
+11.8. None of these workflows makes external effects reversible, replayable,
+      or reconstructible merely because committed state can be restored.
+
+11.9. None of these workflows resumes live handles from retained evidence.
+
+
+===============================================================================
+12. CROSS-SESSION AUDIT WORKFLOWS
+===============================================================================
+
+12.1. Audit workflows may operate across retained traces, retained
+      committed-state artifacts, retained revisions, retained journal
+      evidence, WindowExports, and Minimal Audit Bundles.
+
+12.2. Audit workflows may support:
+      - reconstructing retained decision chains
+      - inspecting retained state evolution
+      - correlating retained journal evidence with retained trace evidence
+      - correlating retained Job lifecycle evidence with retained trace
+        evidence
+      - correlating retained Orchestration Unit evidence with retained trace
+        evidence
+      - correlating retained adapter evidence with retained RPC evidence
+      - correlating retained View or frontend evidence with retained trace
+        evidence
+      - comparing retained finalized artifacts across sessions
+
+12.3. Audit workflows do not mutate state.
+
+12.4. Audit workflows do not require journal completeness.
+
+12.5. Audit workflows do not assume replayability.
+
+12.6. Audit workflows remain honest about retained gaps, pruned evidence,
+      and explicit incompleteness.
+
+12.7. Audit workflow output remains evidence presentation unless a higher
+      authority explicitly defines a committed-state mutation path that
+      consumes the result.
+
+12.8. Audit workflows do not control original Jobs, Orchestration Units,
+      adapters, RPC channels, transports, Views, or frontend participants.
+
+
+===============================================================================
+13. WORKFLOW TRACE VISIBILITY
+===============================================================================
+
+13.1. When performed inside a running Turnix environment, comparison,
+      Replay, Resume, Retry, and audit workflows are trace-visible.
+
+13.2. Workflow trace evidence records enough context, when available, to
+      explain:
+      - workflow kind
+      - selected artifact or Window identity
+      - selected equality mode when applicable
+      - ComparisonResult when applicable
+      - missing-material reason when applicable
+      - restored SafePointWindow identity when applicable
+      - policy decision identity when applicable
+      - new Job identity when Resume or Retry creates Job-backed work
+      - new Orchestration Unit identity when Resume or Retry creates
+        orchestrated work
+      - relation to retained evidence used as explanation
+
+13.3. Offline tool runs outside Turnix orchestration may produce external
+      reports, but those reports do not become Turnix trace evidence unless
+      imported or recorded through a defined Turnix path.
+
+13.4. DA-03 defines the trace substrate used to represent workflow trace
+      evidence.
+
+
+===============================================================================
+14. EXPLICIT MISSING-MATERIAL HANDLING
+===============================================================================
+
+14.1. Missing material is explicit in comparison, Replay, Resume, Retry, and
+      audit workflow output when the missing material affects the selected
+      workflow.
+
+14.2. Missing material may result from:
+      - policy pruning
+      - partial export
+      - corruption
+      - unavailable payload
+      - unsupported artifact version
+      - unsupported digest category
+      - unsupported comparison mode
+      - intentionally omitted sensitive material
+
+14.3. Missing material does not silently become Equal.
+
+14.4. Missing material does not silently become NotEqual.
+
+14.5. Missing material does not silently become replayable.
+
+14.6. Missing material does not silently become resumable.
+
+14.7. Missing material does not silently disappear from audit presentation.
+
+14.8. Workflow output identifies the selected workflow scope so that missing
+      material is interpreted relative to the claim being made.
+
+
+===============================================================================
+15. WHAT IS EXPLICITLY NOT SUPPORTED
+===============================================================================
+
+15.1. The following are not supported:
+      - boolean equality APIs for finalized artifacts
+      - treating NotComparable as NotEqual
+      - treating NotComparable as Equal
+      - silently weakening equality mode after comparison failure
+      - replaying external side effects by implication
+      - resuming retained Job execution identity
+      - resuming retained Orchestration Unit execution identity
+      - resuming retained adapter execution identity
+      - resuming retained RPC channels, transports, Views, or frontends
+      - treating Retry as the same execution as the earlier attempt
+      - treating audit evidence as committed state
+      - mutating state through audit workflows
+      - hiding retained gaps, pruning, corruption, or explicit
+        incompleteness
+
+
+===============================================================================
+16. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+16.1. OPEN questions include:
+      - exact comparison API shape
+      - exact strict equality submodes
+      - exact workflow trace reason identifiers
+      - exact Replay implementation workflow
+      - exact Resume policy taxonomy
+      - exact Retry policy taxonomy
+      - future audit-tooling user experience and visualization
+      - exact retained Job evidence presentation in audit tooling
+      - exact retained Orchestration Unit evidence presentation in audit
+        tooling
+      - exact retained adapter, RPC, View, and frontend evidence
+        presentation in audit tooling
+
+
+===============================================================================
+17. LOCKED SUMMARY
+===============================================================================
+
+17.1. LOCKED:
+      - equality modes are explicit
+      - comparison results return ComparisonResult with exactly Equal,
+        NotEqual, and NotComparable
+      - ComparisonResult without equality mode is incomplete
+      - convenience boolean equality API is not provided
+      - NotComparable is distinct from NotEqual
+      - StateEquality compares retained committed key/value pairs only
+      - StrictStateEquality compares retained committed key/value pairs plus
+        required retained revision history
+      - EvidenceEquality compares retained evidence closure as included
+      - ExportEquality compares exported closure as packaged
+      - optional digests may accelerate comparison but do not add authority
+      - Replay restores committed state within the DA-04 restoration
+        boundary and retained causal story where available
+      - Replay does not imply resuming retained Job execution
+      - Replay does not imply resuming retained Orchestration Unit execution
+      - Replay does not imply restarting retained adapter execution
+      - Replay does not reconnect retained RPC channels, transports, Views,
+        or frontend participants
+      - Resume is explicit, trace-visible, and not deterministic in outcome
+      - Resume does not reuse closed Job, Orchestration Unit, adapter, or RPC
+        lifecycle identity
+      - Retry is new work
+      - Retry does not reuse previous jobId when retried work is represented
+        as a Job
+      - Retry does not reuse previous orchestrationUnitId
+      - audit workflows do not mutate state
+      - audit workflows do not require journal completeness
+      - audit workflows do not assume replayability
+      - missing material, pruning, corruption, and retained gaps remain
+        explicit
+
+17.2. OPEN:
+      - concrete comparison APIs, strict equality submodes, workflow trace
+        reasons, Replay implementation workflow, Resume and Retry policies,
+        and future audit-tooling experience
+
+
+===============================================================================
+END OF DA-26 - OFFLINE COMPARISON, REPLAY AND AUDIT WORKFLOWS
+===============================================================================
+
+--- doc-meta ---
+DOC_ID: DA-26
+DOC_FILE: docs/design/DA-26_OFFLINE_COMPARISON_REPLAY_AND_AUDIT_WORKFLOWS.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
