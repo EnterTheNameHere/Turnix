@@ -27,6 +27,7 @@ It defines:
 - orchestration boundaries for state mutation
 - Orchestration Unit authority and outcome boundaries
 - relationship between Orchestration Units, Jobs, and transactions
+- adapter-executed mutation re-entry boundaries
 - state and transaction trace obligations
 - persistence as protection against loss rather than the definition of truth
 - static-data mutation intent
@@ -51,6 +52,7 @@ It does NOT define:
 - Job lifecycle, Job result, Job timeout, or Job cancellation semantics
   (see DA-19)
 - AppInstance lifecycle or runtime identity semantics (see DA-20)
+- execution adapter boundary semantics (see DA-23)
 - debugger pause, breakpoint, or execution-control behavior (see DA-18)
 
 Upstream Documents:
@@ -65,6 +67,7 @@ Upstream Documents:
 - DA-03
 - DA-19
 - DA-20
+- DA-23
 
 Downstream Documents:
 --------------------
@@ -339,6 +342,8 @@ Downstream Documents:
 06.6. Primary transaction use includes:
       - pipeline execution
       - capability calls with mutation
+      - adapter-mediated capability calls with mutation
+      - adapter-executed orchestrated mutation
       - tooling-initiated staged mutation
       - other orchestrated speculative work
 
@@ -539,6 +544,7 @@ Downstream Documents:
 07.6. Example Orchestration Units include:
       - a pipeline run, including its stage callbacks
       - a capability handler invocation
+      - an adapter-mediated capability handler invocation
       - a tooling-initiated mutation transaction
       - configuration mutation request processing
 
@@ -574,6 +580,18 @@ Downstream Documents:
 
 07.17. A transaction commit or abort does not by itself define the
        Orchestration Unit outcome.
+
+07.18. Adapter-executed code does not mutate committed state directly.
+
+07.19. Adapter-executed mutation seeking Turnix guarantees re-enters through
+       orchestration, capability, transaction, and commit boundaries before
+       becoming authoritative.
+
+07.20. Same-language or same-process execution does not bypass committed-
+       state authority.
+
+07.21. Direct in-process calls may carry a mutation request, but they do not
+       become mutation authority by themselves.
 
 
 07.1 ORCHESTRATION UNIT OUTCOMES
@@ -772,6 +790,14 @@ Downstream Documents:
 07.5.8. Turnix does not imply determinism for mutation paths that occur
         outside orchestration boundaries.
 
+07.5.9. Adapter suspension, adapter disconnect, transport behavior, or
+        frontend behavior does not authorize concurrent state-mutating
+        orchestration within the same appInstance.
+
+07.5.10. Adapter-mediated mutation follows the same single-lane
+         appInstance orchestration rule unless an explicit concurrency mode
+         defines otherwise.
+
 
 ===============================================================================
 08. PERSISTENCE AS PROTECTION, NOT TRUTH
@@ -805,6 +831,11 @@ Downstream Documents:
 
 08.11. Persistence exists to protect committed state, not to decide whether
        committed state exists.
+
+08.12. SavePack persistence does not make adapters SavePack writers.
+
+08.13. Persistence remains protection for committed state, not adapter-owned
+       authority.
 
 
 ===============================================================================
@@ -917,6 +948,12 @@ Downstream Documents:
 
 11.10. Tooling-originated mutation does not become committed truth except
        through the same commit model that governs runtime mutation.
+
+11.11. Tooling through frontend, debugger, CLI, or other adapters still
+       obeys the same transaction and commit model.
+
+11.12. Adapter-mediated tooling presentation does not grant tooling a
+       separate committed-state authority path.
 
 
 ===============================================================================
@@ -1036,7 +1073,13 @@ Downstream Documents:
         outcome, transaction outcome, or Window finalization
       - appInstance mutation follows deterministic single-lane orchestration
         unless another mode is explicitly defined elsewhere
+      - adapter-executed code does not directly mutate committed state
+      - adapter-executed mutation seeking Turnix guarantees re-enters
+        through orchestration, transaction, and commit boundaries
+      - same-language or same-process execution does not bypass committed-
+        state authority
       - persistence protects state against loss but does not define truth
+      - SavePack persistence does not make adapters SavePack writers
       - static-data mutation intent is explicit as Patch or Copy
       - revision retention is policy-driven and does not invalidate latest
         committed-state restoration
@@ -1060,6 +1103,6 @@ END OF DA-04 - MEMORY, STATE & AUTHORITATIVE COMMIT MODEL
 --- doc-meta ---
 DOC_ID: DA-04
 DOC_FILE: docs/design/DA-04_MEMORY_STATE_AND_AUTHORITATIVE_COMMIT_MODEL.txt
-DOC_REV: 23
-DOC_GIT: 80cc98a
+DOC_REV: 24
+DOC_GIT: b7469b6
 ----------------
