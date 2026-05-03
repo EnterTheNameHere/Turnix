@@ -10,20 +10,22 @@ Description:
 ------------
 Defines how code is referenced, loaded, and made available across supported
 languages, and where strict boundaries exist between resolution, importing,
-activation, and execution.
+adapter selection, execution authorization, activation, and execution.
 
 This area is intentionally strict.
 
 Importing is not resolution.
 Importing is not activation.
 Importing is not dependency declaration.
+Importing is not adapter execution authority.
 Importing does not imply permission to execute.
 
 Purpose:
 --------
 This document defines how Turnix prevents native language import systems from
 bypassing Turnix semantics such as resolution, visibility, source selection,
-activation order, and execution authority.
+adapter selection, execution authorization, activation order, and execution
+authority.
 
 It defines:
 - language-level import boundaries
@@ -31,14 +33,17 @@ It defines:
 - turnixImport selector rules and loading behavior
 - dependency consistency requirements for imports
 - the separation between module evaluation and Turnix-recognized execution
+- relationship between importing and execution adapter boundaries
+- Python pack-code import limits under the adapter model
 - canonical activation entrypoint constraints relevant to code boundaries
 
 It does NOT define:
 - generic resolution semantics (see DA-11)
-- dependency semantics and solver behavior
-- save copying, pinning, or substitution rules
-- activation lifecycle beyond the boundary rules stated here
-- capability schemas and permission prompting details
+- dependency semantics and solver behavior (see DA-13)
+- execution adapter semantics (see DA-23)
+- activation lifecycle beyond the boundary rules stated here (see DA-14)
+- capability schemas and permission prompting details (see DA-16)
+- user decision and remembered policy handling (see DA-17)
 
 Upstream Documents:
 ------------------
@@ -51,6 +56,8 @@ Upstream Documents:
 - DA-09
 - DA-10
 - DA-11
+- DA-13
+- DA-23
 
 Downstream Documents:
 --------------------
@@ -81,8 +88,8 @@ Downstream Documents:
 ===============================================================================
 
 02.1. Native language import systems do not understand Turnix pack
-      resolution, visibility, save scoping, activation boundaries, or
-      execution authority.
+      resolution, visibility, save scoping, adapter selection, execution
+      authorization, activation boundaries, or execution authority.
 
 02.2. Turnix therefore does not allow arbitrary language-native importing
       across packs.
@@ -92,11 +99,17 @@ Downstream Documents:
 02.4. Native imports remain allowed only for:
       - language internals
       - same-file or same-directory code under normal local language rules
-      - explicitly allowed Turnix core internals where such access is part of
-        the supported platform surface
+      - explicitly allowed Turnix platform surfaces where such access is
+        part of the supported execution model
 
-02.5. Any mechanism that bypasses Turnix resolution, visibility, activation,
-      or execution boundaries is forbidden.
+02.5. Any mechanism that bypasses Turnix resolution, visibility, adapter
+      selection, execution authorization, activation, or execution boundaries
+      is forbidden.
+
+02.6. Same host language does not imply same authority.
+
+02.7. Python pack code remains adapter-executed pack code and does not
+      become backend implementation code through Python import behavior.
 
 
 ===============================================================================
@@ -107,23 +120,42 @@ Downstream Documents:
 
 03.2. Importing is not resolution.
 
-03.3. Importing is not activation.
+03.3. Importing is not adapter selection.
 
-03.4. Importing is not execution authority.
+03.4. Importing is not execution authorization.
 
-03.5. Resolution answers which pack identity satisfies a request.
+03.5. Importing is not activation.
 
-03.6. Importing answers how a code artifact is obtained once Turnix rules
-      permit that step.
+03.6. Importing is not execution authority.
 
-03.7. Activation answers when Turnix intentionally starts recognized pack
-      behavior.
+03.7. Importing is not capability permission.
 
-03.8. Execution authority answers whether code may perform meaningful
-      Turnix-recognized work.
+03.8. Resolution answers which pack identity satisfies a request.
 
-03.9. This document keeps these boundaries explicit because native language
-      import systems would otherwise collapse them into one accidental path.
+03.9. Adapter selection answers which adapter kind or concrete adapter
+      provider is eligible for a declared executable artifact.
+
+03.10. Execution authorization answers whether a declared executable
+       artifact may be loaded and executed in the current pack,
+       AppInstance, SavePack, adapter, policy, and trust context.
+
+03.11. Importing answers how a code artifact is obtained once Turnix rules
+       permit that step.
+
+03.12. Activation answers when Turnix intentionally starts recognized pack
+       behavior.
+
+03.13. Execution authority answers whether code may perform meaningful
+       Turnix-recognized work.
+
+03.14. Capability permission answers whether a capability invocation is
+       allowed under the capability, policy, and decision model.
+
+03.15. This document keeps these boundaries explicit because native language
+       import systems would otherwise collapse them into one accidental path.
+
+03.16. DA-23 owns the execution adapter boundary in which importing and
+       module loading operate.
 
 
 ===============================================================================
@@ -132,30 +164,41 @@ Downstream Documents:
 
 04.1. Python pack code may use native Python imports only for local code
       under the same-file or same-directory rule and for explicitly allowed
-      Turnix core internals.
+      Turnix platform surfaces.
 
 04.2. Local Python imports include examples such as:
       - from .llamacpp_client import LlamaCppClient
       - from .config import loadConfig
 
-04.3. Explicitly allowed Turnix core internal imports include only the
+04.3. Explicitly allowed Turnix platform-surface imports include only the
       whitelisted supported surface.
 
-04.4. Cross-pack native Python imports are not allowed.
+04.4. Explicitly allowed Turnix platform-surface imports do not include raw
+      backend internals merely because the pack code is Python.
 
-04.5. Disallowed examples include:
+04.5. Cross-pack native Python imports are not allowed.
+
+04.6. Disallowed examples include:
       - from ui.controls import Button
       - from Turnix.ui.controls import Button
       - from first_party.mods.foo import bar
+      - from backend.core.kernel import Kernel
+      - from backend.persistence.io import IoManager
 
-04.6. The rationale is:
+04.7. The rationale is:
       - Python import machinery has no awareness of pack resolution
       - Python import machinery has no awareness of visibility
       - Python import machinery has no awareness of save scoping
+      - Python import machinery has no awareness of adapter selection
+      - Python import machinery has no awareness of execution authorization
       - Python import machinery has no awareness of activation boundaries
+      - Python import machinery has no awareness of capability permission
 
-04.7. Allowing native cross-pack Python imports would bypass Turnix
+04.8. Allowing native cross-pack Python imports would bypass Turnix
       guarantees.
+
+04.9. Allowing Python pack code to import backend internals as authority
+      would bypass the execution boundary defined by DA-23.
 
 
 ===============================================================================
@@ -166,7 +209,7 @@ Downstream Documents:
       mediated APIs.
 
 05.2. Supported mediated categories include:
-      - services
+      - services where allowed by DA-16
       - capabilities
       - pack metadata and activation control
 
@@ -177,10 +220,20 @@ Downstream Documents:
       - ctx.resolvePack(selector)
       - ctx.ensureActivated(selector)
 
-05.4. There is no Python equivalent of turnixImport.
+05.4. There is no Python equivalent of turnixImport as a cross-pack native
+      symbol or executable-code import mechanism.
 
 05.5. Python code does not receive executable code objects or symbols from
       other packs through native import bypass.
+
+05.6. Python pack code may still receive Turnix-created context,
+      capability, service, metadata, and activation-control surfaces when
+      those surfaces are granted by the owning documents.
+
+05.7. In-process Python access remains mediated by DA-23, DA-14, and DA-16.
+
+05.8. In-process Python access does not become backend authority merely
+      because it uses function calls instead of network transport.
 
 
 ===============================================================================
@@ -203,6 +256,9 @@ Downstream Documents:
 
 06.5. Reserved names for future refinement do not change current semantics.
 
+06.6. Browser JavaScript code remains adapter-executed frontend code under
+      DA-23 and DA-22.
+
 
 ===============================================================================
 07. TURNIXIMPORT - WHAT IT IS
@@ -224,6 +280,9 @@ Downstream Documents:
       It depends on Turnix resolution and boundary checks already defined
       elsewhere.
 
+07.4. turnixImport participates in adapter loading semantics without
+      becoming activation or execution authorization by itself.
+
 
 ===============================================================================
 08. TURNIXIMPORT - WHAT IT IS NOT
@@ -231,7 +290,10 @@ Downstream Documents:
 
 08.1. turnixImport is not:
       - a dependency declaration
+      - an adapter selection request
+      - an execution authorization request
       - an activation request
+      - a capability permission request
       - a visibility override
       - a permissive or best-effort loader
       - a version selector
@@ -240,6 +302,8 @@ Downstream Documents:
 08.2. If importing fails, the failure is explicit.
 
 08.3. turnixImport does not silently guess or broaden the requested target.
+
+08.4. turnixImport does not grant Kernel authority to imported module code.
 
 
 ===============================================================================
@@ -388,6 +452,7 @@ Downstream Documents:
 14.3. turnixImport does not:
       - activate the pack
       - grant execution authority
+      - grant capability permission
       - imply lifecycle participation
 
 14.4. Activation remains a separate Turnix-controlled action handled through
@@ -396,6 +461,9 @@ Downstream Documents:
 14.5. Module evaluation that occurs merely because the JavaScript runtime
       evaluated an imported module is not treated as Turnix-recognized pack
       execution by itself.
+
+14.6. Adapter loading or module evaluation is not activation under DA-23 and
+      DA-14.
 
 
 ===============================================================================
@@ -406,6 +474,8 @@ Downstream Documents:
       - resolves metadata only
       - performs visibility checks
       - does not load code
+      - does not select an adapter for execution
+      - does not authorize execution
       - does not activate
 
 15.2. ensureActivated(selector):
@@ -448,6 +518,9 @@ Downstream Documents:
 16.7. Meaningful Turnix-recognized execution waits for the supported
       activation entrypoint.
 
+16.8. Adapter execution that occurs outside Turnix-recognized activation or
+      orchestration remains unsupported by Turnix guarantees.
+
 
 ===============================================================================
 17. CANONICAL ENTRYPOINTS (LOCKED)
@@ -460,11 +533,14 @@ Downstream Documents:
       - is called exactly once by Turnix
       - is the only supported activation entrypoint
       - is the first moment Turnix intentionally executes pack code
+      - receives a Turnix-created PackContext
       - prepares the pack for later runtime behavior
 
 17.3. Turnix recognizes no alternative activation path.
 
-17.4. If a pack has code, Turnix activates that pack through onLoad(ctx).
+17.4. If a pack has executable code, Turnix activates that pack through
+      onLoad(ctx) using the appropriate execution adapter when the artifact
+      belongs to an adapter runtime.
 
 
 ===============================================================================
@@ -477,6 +553,7 @@ Downstream Documents:
 18.2. Only work triggered by:
       - supported activation entrypoints
       - capability calls
+      - other Turnix-defined orchestrated execution pathways
 
       is supported by Turnix guarantees.
 
@@ -486,6 +563,9 @@ Downstream Documents:
       - remains untracked
       - is not abortable by Turnix guarantees
       - is not cleaned up by Turnix guarantees
+
+18.4. Adapter implementation details do not convert unsupported background
+      work into supported Turnix execution.
 
 
 ===============================================================================
@@ -504,6 +584,10 @@ Downstream Documents:
       - include requesting pack identity
       - include target identity
       - include reason classification
+
+19.4. Import-related errors do not become capability permission failures or
+      Job terminal outcomes merely because later execution might have used
+      capabilities or Jobs.
 
 
 ===============================================================================
@@ -524,9 +608,13 @@ Downstream Documents:
 
 21.1. LOCKED:
       - no Python cross-pack native imports
+      - Python pack code is not backend implementation code
       - JavaScript cross-pack loading through turnixImport only
+      - importing does not imply adapter selection
+      - importing does not imply execution authorization
       - importing does not imply activation
       - importing does not imply execution authority
+      - importing does not imply capability permission
       - no semver in imports
       - dependency consistency is enforced
       - immediate execution, including IIFE-style patterns and top-level code,
@@ -534,6 +622,7 @@ Downstream Documents:
       - onLoad(ctx) is the only supported activation entrypoint
       - import errors are strict and visible
       - activation remains separate from import
+      - native imports do not bypass DA-23 execution boundaries
 
 21.2. OPEN:
       - naming polish
@@ -547,6 +636,6 @@ END OF DA-12 - IMPORTING, MODULE LOADING & CODE BOUNDARIES
 --- doc-meta ---
 DOC_ID: DA-12
 DOC_FILE: docs/design/DA-12_IMPORTING_MODULE_LOADING_AND_CODE_BOUNDARIES.txt
-DOC_REV: 16
-DOC_GIT: 10093de
+DOC_REV: 17
+DOC_GIT: 023e3de
 ----------------
