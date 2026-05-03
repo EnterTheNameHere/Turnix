@@ -28,7 +28,9 @@ It defines:
 - Execution Adapter, adapter kind, and adapter instance terms
 - distinction between adapter mediation and sandboxing
 - relationship between pack code and backend implementation code
-- code artifact recognition, declaration, binding, permission, and execution
+- code artifact recognition, declaration, adapter selection, execution
+  authorization, loading, activation, and runtime execution
+- distinction between execution authorization and capability permission
 - adapter lifecycle and execution-context rules
 - PackContext as a pack-facing authority context
 - Python pack code as adapter-executed pack code
@@ -39,6 +41,7 @@ It defines:
 - adapter relationship to activation, capabilities, Jobs, decisions, and
   committed state
 - adapter failure, disconnect, and trace obligations
+- adapter-domain trace reason identifiers
 - initial adapter classes and open future adapter forms
 
 It does NOT define:
@@ -163,6 +166,7 @@ Downstream Documents:
       - orchestration authority
       - authoritative state mutation authority
       - SavePack persistence authority through the owning documents
+      - execution authorization authority
       - capability routing authority
       - permission evaluation authority
       - policy and decision authority
@@ -180,7 +184,8 @@ Downstream Documents:
 03.6. An adapter does not own persistence authority.
 
 03.7. An adapter may execute code only within the authority granted through
-      Turnix-controlled lifecycle, context, and capability boundaries.
+      Turnix-controlled lifecycle, context, authorization, and capability
+      boundaries.
 
 03.8. Adapter implementation details do not redefine authority.
 
@@ -210,34 +215,43 @@ Downstream Documents:
       - future csharp
       - future containerized-python
 
-04.4. Adapter instance identifies one live adapter participant or runtime
+04.4. Adapter selection determines which adapter kind or concrete adapter
+      provider is eligible for a declared executable artifact.
+
+04.5. Adapter selection does not imply execution authorization.
+
+04.6. Adapter instance identifies one live adapter participant or runtime
       participant when such identity is needed.
 
-04.5. Adapter binding is the association between:
+04.7. Adapter binding is the association between:
       - declared code artifact
-      - adapter kind
+      - selected adapter kind or adapter provider
       - pack identity
       - AppInstance context when applicable
       - execution policy
       - requested or granted capability surface
 
-04.6. Adapter execution means code execution occurring inside or through an
-      Execution Adapter.
+04.8. Adapter binding is a relationship established by Turnix.
 
-04.7. Adapter mediation means that adapter-executed code interacts with
-      Turnix through Turnix-controlled context, RPC, capability, lifecycle,
-      and policy boundaries.
+04.9. Adapter binding does not imply activation.
 
-04.8. Adapter mediation is not sandboxing.
+04.10. Adapter execution means code execution occurring inside or through an
+       Execution Adapter.
 
-04.9. Sandbox means a security isolation mechanism that restricts what code
-      can do outside Turnix semantic boundaries.
+04.11. Adapter mediation means that adapter-executed code interacts with
+       Turnix through Turnix-controlled context, RPC, capability, lifecycle,
+       and policy boundaries.
 
-04.10. An adapter may provide sandboxing.
+04.12. Adapter mediation is not sandboxing.
 
-04.11. An adapter may run without strong sandboxing.
+04.13. Sandbox means a security isolation mechanism that restricts what code
+       can do outside Turnix semantic boundaries.
 
-04.12. Absence of sandboxing does not convert adapter-executed code into
+04.14. An adapter may provide sandboxing.
+
+04.15. An adapter may run without strong sandboxing.
+
+04.16. Absence of sandboxing does not convert adapter-executed code into
        backend implementation code.
 
 
@@ -249,8 +263,8 @@ Downstream Documents:
       artifacts:
       1) recognition
       2) declaration
-      3) binding
-      4) permission
+      3) adapter selection
+      4) execution authorization
       5) loading
       6) activation
       7) runtime execution
@@ -265,31 +279,36 @@ Downstream Documents:
 
 05.5. Declaration does not imply activation.
 
-05.6. Binding means Turnix determines which adapter kind may execute the
-      declared artifact.
+05.6. Adapter selection means Turnix determines which adapter kind or
+      concrete adapter provider is eligible for the declared artifact.
 
-05.7. Binding does not imply permission.
+05.7. Adapter selection does not imply execution authorization.
 
-05.8. Permission means Turnix determines whether execution is allowed in the
-      current pack, AppInstance, SavePack, policy, and trust context.
+05.8. Execution authorization means Turnix determines whether the declared
+      artifact may be loaded and executed in the current pack, AppInstance,
+      SavePack, adapter, policy, and trust context.
 
-05.9. Permission does not imply capability authority beyond the granted
-      context.
+05.9. Execution authorization is distinct from capability permission.
 
-05.10. Loading means an adapter obtains, imports, compiles, evaluates, or
+05.10. Capability permission remains owned by DA-16 and DA-17.
+
+05.11. Execution authorization does not imply capability authority beyond
+       the granted execution context.
+
+05.12. Loading means an adapter obtains, imports, compiles, evaluates, or
        prepares the artifact according to its runtime rules.
 
-05.11. Loading does not imply Turnix-recognized activation.
+05.13. Loading does not imply Turnix-recognized activation.
 
-05.12. Activation means Turnix intentionally invokes the supported activation
+05.14. Activation means Turnix intentionally invokes the supported activation
        entrypoint under the rules of DA-14.
 
-05.13. Runtime execution after activation occurs only through
+05.15. Runtime execution after activation occurs only through
        Turnix-orchestrated pathways.
 
-05.14. Code files are not executed merely because they exist.
+05.16. Code files are not executed merely because they exist.
 
-05.15. Turnix does not infer executable authority from file extension alone.
+05.17. Turnix does not infer executable authority from file extension alone.
 
 
 ===============================================================================
@@ -312,6 +331,7 @@ Downstream Documents:
       - dependency rules
       - visibility rules
       - import and module-loading rules
+      - execution authorization rules
       - activation rules
       - capability rules
       - policy rules
@@ -409,7 +429,8 @@ Downstream Documents:
       - explicit caller identity
       - explicit target or capability identity
       - structured request, event, or command meaning
-      - permission and policy evaluation where applicable
+      - execution authorization, capability permission, and policy
+        evaluation where applicable
       - trace correlation
       - structured result or error outcome
       - lifecycle ownership
@@ -487,22 +508,25 @@ Downstream Documents:
 
 11.5. SavePack stores durable executed state for an AppPack.
 
-11.6. Adapter-executed code does not own SavePack state.
+11.6. SavePack being the durable state container does not make adapters
+      SavePack writers.
 
-11.7. Adapter-executed code requests mutation through Kernel-mediated
+11.7. Adapter-executed code does not own SavePack state.
+
+11.8. Adapter-executed code requests mutation through Kernel-mediated
       boundaries.
 
-11.8. Authoritative mutation becomes committed state only under DA-04.
+11.9. Authoritative mutation becomes committed state only under DA-04.
 
-11.9. Persistent I/O for committed state remains mediated by DA-07.
+11.10. Persistent I/O for committed state remains mediated by DA-07.
 
-11.10. A writable SavePack is owned by at most one running AppInstance
+11.11. A writable SavePack is owned by at most one running AppInstance
        unless a later authoritative document defines a multi-writer mode.
 
-11.11. Multiple adapters may attach to or participate in one AppInstance
+11.12. Multiple adapters may attach to or participate in one AppInstance
        only under explicit lifecycle, policy, and View or runtime rules.
 
-11.12. Multiple AppInstances under one Kernel remain separate runtime
+11.13. Multiple AppInstances under one Kernel remain separate runtime
        containers unless explicit capability or orchestration rules connect
        them.
 
@@ -616,9 +640,12 @@ Downstream Documents:
 15.9. Permission decisions for adapter-executed work follow the owning
       capability, policy, and decision documents.
 
-15.10. Adapter implementations do not create hidden default policy.
+15.10. Execution authorization for a code artifact is distinct from
+       permission to invoke a capability.
 
-15.11. Adapter implementations do not auto-confirm decisions without policy
+15.11. Adapter implementations do not create hidden default policy.
+
+15.12. Adapter implementations do not auto-confirm decisions without policy
        authority.
 
 
@@ -811,57 +838,108 @@ Downstream Documents:
 21.1. Adapter lifecycle and adapter-mediated execution remain trace-visible
       where trace evidence exists.
 
-21.2. Adapter trace evidence distinguishes:
-      - adapter selected
-      - adapter created
-      - adapter connected
-      - adapter ready
-      - adapter artifact loading started
-      - adapter artifact loading failed
-      - adapter activation dispatch started
-      - adapter execution started
-      - adapter execution failed
-      - adapter disconnected
-      - adapter closed
+21.2. DA-23 owns the adapter-domain trace reason identifiers used for
+      adapter lifecycle, artifact loading, activation dispatch, execution,
+      disconnect, and closure.
 
-21.3. Adapter trace evidence records enough context, when available, to
-      explain:
-      - adapter kind
-      - adapter instance identity
-      - pack identity
-      - declared artifact identity
-      - appInstanceId when applicable
-      - active save identity when applicable
-      - transport kind when applicable
-      - channel identity when applicable
-      - RPC message identity when applicable
-      - capability identity when applicable
-      - jobId when applicable
-      - failure reason category when failure occurs
+21.3. The following adapter-domain trace reasons are defined:
 
-21.4. Adapter trace evidence does not replace activation trace evidence.
+      - AdapterSelected
+      - AdapterCreated
+      - AdapterConnected
+      - AdapterReady
+      - AdapterExecutionRejected
+      - AdapterArtifactLoadStarted
+      - AdapterArtifactLoadFailed
+      - AdapterActivationDispatchStarted
+      - AdapterExecutionStarted
+      - AdapterExecutionStopped
+      - AdapterExecutionFailed
+      - AdapterDisconnected
+      - AdapterClosed
 
-21.5. Adapter trace evidence does not replace RPC trace evidence.
+21.4. AdapterSelected is emitted when an adapter kind or concrete adapter
+      provider is selected for a declared executable artifact.
 
-21.6. Adapter trace evidence does not replace capability trace evidence.
+21.5. AdapterCreated is emitted when an adapter instance is created.
 
-21.7. Adapter trace evidence does not replace Job trace evidence.
+21.6. AdapterConnected is emitted when an adapter connection or equivalent
+      participation channel becomes available.
 
-21.8. Adapter trace evidence does not replace AppInstance trace evidence.
+21.7. AdapterReady is emitted when an adapter reports or reaches readiness
+      for the expected runtime flow.
 
-21.9. DA-03 defines the tracing substrate.
+21.8. AdapterExecutionRejected is emitted when execution authorization fails
+      before artifact loading or activation dispatch.
 
-21.10. DA-14 owns activation-domain trace obligations.
+21.9. AdapterArtifactLoadStarted is emitted when adapter loading of a
+      declared artifact begins.
 
-21.11. DA-16 owns capability-domain trace obligations.
+21.10. AdapterArtifactLoadFailed is emitted when adapter loading fails.
 
-21.12. DA-19 owns Job-domain trace obligations.
+21.11. AdapterActivationDispatchStarted is emitted when Turnix dispatches
+       an activation entrypoint through the adapter.
 
-21.13. DA-20 owns AppInstance-domain trace obligations.
+21.12. AdapterExecutionStarted is emitted when adapter-executed runtime work
+       begins after activation dispatch or another Turnix-recognized entry.
 
-21.14. DA-21 owns RPC trace correlation semantics.
+21.13. AdapterExecutionStopped is emitted when adapter-executed runtime work
+       stops without being classified as failed.
 
-21.15. DA-22 owns UI-domain trace obligations.
+21.14. AdapterExecutionFailed is emitted when adapter-executed runtime work
+       fails.
+
+21.15. AdapterDisconnected is emitted when an adapter connection or
+       equivalent participation channel becomes unavailable.
+
+21.16. AdapterClosed is emitted when an adapter instance is closed or
+       released.
+
+21.17. Adapter trace evidence records enough context, when available, to
+       explain:
+       - adapter kind
+       - adapter instance identity
+       - pack identity
+       - declared artifact identity
+       - appInstanceId when applicable
+       - active save identity when applicable
+       - transport kind when applicable
+       - channel identity when applicable
+       - RPC message identity when applicable
+       - capability identity when applicable
+       - jobId when applicable
+       - execution authorization result when applicable
+       - failure reason category when failure occurs
+
+21.18. Adapter trace evidence does not replace activation trace evidence.
+
+21.19. Adapter trace evidence does not replace RPC trace evidence.
+
+21.20. Adapter trace evidence does not replace capability trace evidence.
+
+21.21. Adapter trace evidence does not replace Job trace evidence.
+
+21.22. Adapter trace evidence does not replace AppInstance trace evidence.
+
+21.23. DA-03 defines the tracing substrate.
+
+21.24. DA-14 owns activation-domain trace obligations.
+
+21.25. DA-16 owns capability-domain trace obligations.
+
+21.26. DA-19 owns Job-domain trace obligations.
+
+21.27. DA-20 owns AppInstance-domain trace obligations.
+
+21.28. DA-21 owns RPC trace correlation semantics.
+
+21.29. DA-22 owns UI-domain trace obligations.
+
+21.30. Implementation specifications may define concrete adapter-specific
+       trace reason extensions.
+
+21.31. Implementation-specific trace reason extensions do not redefine the
+       adapter-domain reason meanings owned by this document.
 
 
 ===============================================================================
@@ -901,6 +979,9 @@ Downstream Documents:
 22.11. Workspace ownership and host locking are owned by the relevant root,
        persistence, and runtime-host documents when defined.
 
+22.12. This document defines runtime host meaning only where needed to
+       preserve adapter authority boundaries.
+
 
 ===============================================================================
 23. WHAT IS EXPLICITLY NOT SUPPORTED
@@ -912,6 +993,7 @@ Downstream Documents:
       - native language imports bypassing pack boundaries
       - adapter loading treated as activation
       - adapter execution treated as capability permission
+      - execution authorization treated as capability permission
       - transport acknowledgement treated as work success
       - direct filesystem access as a Turnix persistence authority path
       - frontend state treated as authoritative state
@@ -941,12 +1023,7 @@ Downstream Documents:
       - exact CLI adapter behavior
       - exact runtime-host command surface
       - exact workspace ownership and host locking document ownership
-      - exact relation between adapter lifecycle events and implementation
-        trace reason identifiers
-      - whether adapter-domain trace reason identifiers remain here or move
-        into implementation specifications
-      - whether DA-21 and DA-22 become indexed before or alongside this
-        document
+      - exact adapter implementation-specific trace reason extensions
 
 
 ===============================================================================
@@ -972,6 +1049,8 @@ Downstream Documents:
       - code artifact recognition does not imply execution
       - executable code artifacts are declared before Turnix-recognized
         execution
+      - adapter selection is distinct from adapter binding
+      - execution authorization is distinct from capability permission
       - adapter loading is not activation
       - activation remains owned by DA-14
       - capability invocation remains owned by DA-16
@@ -980,6 +1059,9 @@ Downstream Documents:
       - UI and View frontend semantics remain owned by DA-22
       - unsandboxed adapter execution requires explicit trust or policy
         treatment
+      - DA-23 owns abstract adapter-domain trace reason identifiers
+      - implementation-specific trace reason extensions do not redefine
+        adapter-domain reason meanings
       - adapter failure does not silently redefine AppInstance, Job, or
         committed-state meaning
 
@@ -995,6 +1077,6 @@ END OF DA-23 - EXECUTION BOUNDARIES, ADAPTERS & CODE RUNTIMES
 --- doc-meta ---
 DOC_ID: DA-23
 DOC_FILE: docs/design/DA-23_EXECUTION_BOUNDARIES_ADAPTERS_AND_CODE_RUNTIMES.txt
-DOC_REV: 1
+DOC_REV: 2
 DOC_GIT: 0000000
 ----------------
