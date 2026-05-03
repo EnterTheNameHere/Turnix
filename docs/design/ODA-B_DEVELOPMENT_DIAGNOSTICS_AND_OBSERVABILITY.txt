@@ -23,6 +23,7 @@ It defines:
 - observability principles for developer experience
 - tooling expectations for trace viewing and reporting
 - activation and resolution explanation requirements as surfaced in tooling
+- adapter, RPC, capability, and AppInstance diagnostic expectations
 - development-versus-production diagnostics behavior
 - snapshot-tooling expectations for bug reports and regression testing
 
@@ -32,6 +33,9 @@ It does NOT define:
 - debugger semantics, pause rules, or mutation safety (see DA-18)
 - authoritative state, transactions (see DA-04)
 - window semantics (see DA-08)
+- execution adapter semantics (see DA-23)
+- RPC, channel, and transport semantics (see DA-21)
+- AppInstance lifecycle semantics (see DA-20)
 - new runtime correctness guarantees or authority boundaries
 
 Upstream Documents:
@@ -45,6 +49,10 @@ Upstream Documents:
 - DA-04
 - DA-08
 - DA-18
+- DA-20
+- DA-21
+- DA-22
+- DA-23
 
 
 ===============================================================================
@@ -74,6 +82,7 @@ Upstream Documents:
       - dynamic
       - policy-driven
       - runtime-activated
+      - adapter-mediated
       - partially user-governed
 
 02.2. Without strong diagnostics, failures may become:
@@ -90,6 +99,9 @@ Upstream Documents:
 
 02.4. This area remains optional in tier, but it is strategically useful for
       development and operational trust.
+
+02.5. Diagnostic tooling consumes authority evidence. It does not become
+      authority by presenting that evidence.
 
 
 ===============================================================================
@@ -114,6 +126,8 @@ Upstream Documents:
       DA-03 defines the trace model.
       ODA-B defines how tooling should consume that evidence.
 
+03.5. Tooling distinguishes missing evidence from evidence of absence.
+
 
 ===============================================================================
 04. TRACE SYSTEM FOUNDATION (LOCKED)
@@ -133,6 +147,9 @@ Upstream Documents:
       - optional user-interface surfaces that consume trace data
       - development-mode enhancements that do not change runtime behavior
 
+04.4. Domain-specific trace reason ownership remains with the owning DA
+      document.
+
 
 ===============================================================================
 05. TRACE DOMAINS (LOCKED)
@@ -147,9 +164,16 @@ Upstream Documents:
       - capabilities
       - io
       - persistence
+      - AppInstance lifecycle
+      - RPC and transport flow
+      - frontend UI and View lifecycle
+      - execution adapter lifecycle
       - runtime errors
 
 05.2. Trace domains are additive rather than exclusive.
+
+05.3. ODA-B tooling does not invent trace-domain authority merely by showing
+      a domain filter.
 
 
 ===============================================================================
@@ -173,6 +197,10 @@ Upstream Documents:
 06.7. ODA-B tooling uses the DA-03 definitions rather than inventing new
       local ones.
 
+06.8. Adapter, RPC, UI, AppInstance, capability, and Job evidence may be
+      correlated by tooling only where retained trace evidence supports that
+      correlation.
+
 
 ===============================================================================
 07. TRACE VIEWER (OPTIONAL UI)
@@ -182,17 +210,21 @@ Upstream Documents:
       - inspect trace DAGs and spans
       - filter by domain, reason, and scope identifiers
       - collapse or expand causal branches
-      - jump to related entities such as packs, links, memory, or Jobs
+      - jump to related entities such as packs, links, memory, Jobs,
+        AppInstances, Views, RPC messages, and adapter instances
 
 07.2. The trace-viewer user interface is optional.
 
-07.3. The trace data model and reason vocabulary remain defined by DA-03.
+07.3. The trace data model and reason vocabulary remain defined by DA-03 and
+      the owning domain documents.
 
 07.4. Viewer rules:
       - the viewer does not fabricate reasons
       - the viewer does not fabricate causal links
       - if evidence incompleteness is declared under DA-03, the viewer
         surfaces that incompleteness explicitly
+      - the viewer distinguishes transport, adapter, capability, Job, View,
+        and AppInstance outcomes where evidence supports those distinctions
 
 
 ===============================================================================
@@ -234,6 +266,8 @@ Upstream Documents:
       - KernelRunSpan
       - AppInstanceActiveSpan
       - selected window
+      - selected adapter instance
+      - selected RPC correlation
       - selected time range
 
 09.3. Any such report is derived from trace evidence and registry state.
@@ -242,6 +276,9 @@ Upstream Documents:
       - not used
       from
       - not provable because of missing trace evidence
+
+09.5. Adapter-originated capability reports do not imply that the adapter
+      owned capability authority.
 
 
 ===============================================================================
@@ -253,6 +290,7 @@ Upstream Documents:
       - why pack X ran before pack Y
       - why reordering was impossible
       - where user intervention occurred
+      - which adapter participated in activation when applicable
 
 10.2. These explanations remain trace-backed as defined by DA-03 and
       constrained by DA-14.
@@ -261,6 +299,9 @@ Upstream Documents:
 
 10.4. If evidence is incomplete, tooling surfaces that incompleteness
       explicitly.
+
+10.5. Adapter loading or readiness is not presented as activation unless
+      activation evidence supports that conclusion.
 
 
 ===============================================================================
@@ -272,9 +313,15 @@ Upstream Documents:
       - timers not owned by the kernel
       - untracked async loops
       - direct filesystem access attempts
+      - native imports attempting to bypass code boundaries
+      - in-process calls attempting to bypass capability mediation
+      - frontend state presented as authoritative state
 
 11.2. These are warnings rather than correctness errors unless a higher
       document explicitly classifies the situation otherwise.
+
+11.3. Tooling warnings do not grant execution authorization, capability
+      permission, or persistence authority.
 
 
 ===============================================================================
@@ -301,6 +348,9 @@ Upstream Documents:
       - traces may still be recorded according to DA-03 policy
       - user-facing diagnostic noise is reduced
 
+12.4. Development-mode adapter diagnostics do not weaken adapter authority
+      boundaries.
+
 
 ===============================================================================
 13. ERROR, WARNING, AND INFO LEVELS (LOCKED)
@@ -319,6 +369,9 @@ Upstream Documents:
 
 13.3. Correctness errors are not silently downgraded by tooling.
 
+13.4. Tooling does not treat transport timeout, adapter failure, Job timeout,
+      and AppInstance failure as interchangeable diagnostic categories.
+
 
 ===============================================================================
 14. STATE SNAPSHOTS (OPTIONAL)
@@ -329,6 +382,10 @@ Upstream Documents:
       - dependency graph
       - activation state
       - memory layers
+      - AppInstance identity and lifecycle evidence
+      - View and frontend client evidence
+      - adapter lifecycle evidence
+      - RPC correlation evidence
 
 14.2. Snapshot tooling may be used for:
       - bug reports
@@ -336,6 +393,9 @@ Upstream Documents:
       - regression testing
 
 14.3. Snapshot tooling does not create new authority semantics by itself.
+
+14.4. Snapshot tooling distinguishes authoritative state from
+      non-authoritative evidence.
 
 
 ===============================================================================
@@ -346,6 +406,7 @@ Upstream Documents:
       - replaying activation with the same inputs
       - inspecting divergence
       - comparing traces
+      - inspecting adapter/RPC/AppInstance correlation across a failure
 
 15.2. This area remains OPEN and is not locked by this document.
 
@@ -359,6 +420,9 @@ Upstream Documents:
       - AI-driven debugging as a required feature
       - speculative corrections
       - hiding errors
+      - adapter authority
+      - RPC authority
+      - AppInstance lifecycle authority
 
 
 ===============================================================================
@@ -368,9 +432,13 @@ Upstream Documents:
 17.1. LOCKED:
       - observability remains a first-class development concern
       - tooling consumes DA-03 trace evidence without redefining it
+      - domain-specific trace reason ownership remains with owning
+        documents
       - resolver explanations remain trace-backed
       - capability-usage reporting distinguishes absence from missing proof
       - activation diagnostics remain trace-backed
+      - adapter/RPC/AppInstance diagnostics consume evidence without
+        creating authority
       - development and production diagnostics remain distinct
 
 17.2. OPTIONAL OR OPEN:
@@ -386,6 +454,6 @@ END OF ODA-B - DEVELOPMENT, DIAGNOSTICS & OBSERVABILITY
 --- doc-meta ---
 DOC_ID: ODA-B
 DOC_FILE: docs/design/ODA-B_DEVELOPMENT_DIAGNOSTICS_AND_OBSERVABILITY.txt
-DOC_REV: 11
-DOC_GIT: ad877cc
+DOC_REV: 12
+DOC_GIT: fd499bd
 ----------------
