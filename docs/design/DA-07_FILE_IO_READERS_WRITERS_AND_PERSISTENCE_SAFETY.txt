@@ -25,6 +25,7 @@ It defines:
 - Reader / Writer provider model
 - raw access containment rules
 - root read/write permissions
+- adapter-executed code persistence boundaries
 - persistence safety requirements
 - backup, snapshot, and rollback boundaries
 - error classification and recovery boundaries
@@ -35,6 +36,8 @@ It does NOT define:
 - activation and lifecycle semantics (see DA-14)
 - dependency resolution semantics (see DA-13)
 - capability schemas and permission prompting (see DA-16)
+- AppInstance lifecycle or runtime identity semantics (see DA-20)
+- execution adapter boundary semantics (see DA-23)
 - tracing schema or trace storage semantics (see DA-03)
 - pack discovery rules beyond save scanning implications (see DA-09)
 
@@ -51,12 +54,16 @@ Upstream Documents:
 - DA-04
 - DA-09
 - DA-14
+- DA-20
+- DA-23
 
 Downstream Documents:
 --------------------
 - DA-06
 - DA-16
 - DA-17
+- DA-20
+- DA-23
 
 
 ===============================================================================
@@ -83,8 +90,9 @@ Downstream Documents:
 
 02.1. Persistent I/O in Turnix routes through a centralized I/O authority.
 
-02.2. Packs, tools inside runtime orchestration, and runtime components do
-      not read or write persistent data by bypassing that authority.
+02.2. Packs, tools inside runtime orchestration, adapter-executed code, and
+      runtime components do not read or write persistent data by bypassing
+      that authority.
 
 02.3. This applies to:
       - configuration
@@ -106,6 +114,12 @@ Downstream Documents:
       already constrained by [constrained-by: DA-04 03],
       [constrained-by: DA-04 09], and
       [constrained-by: DA-04 19].
+
+02.6. Same-language or same-process execution does not create persistence
+      authority.
+
+02.7. Python pack code, in-process adapter code, frontend adapter code, and
+      other adapter-executed code remain subject to IoManager mediation.
 
 
 ===============================================================================
@@ -129,6 +143,9 @@ Downstream Documents:
 
 03.4. IoManager does not replace the DA-04 state model. IoManager enforces
       how persistence occurs for state and other persisted artifacts.
+
+03.5. IoManager authority does not transfer to adapters, packs, services,
+      Views, or transports merely because they can request persistence.
 
 
 ===============================================================================
@@ -155,6 +172,9 @@ Downstream Documents:
 04.6. Reader / Writer providers refine persistence mechanics. They do not
       redefine platform persistence authority.
 
+04.7. Reader / Writer providers do not become general backend authority
+      surfaces for adapter-executed code.
+
 
 ===============================================================================
 05. RAW ACCESS BOUNDARY (LOCKED)
@@ -171,13 +191,16 @@ Downstream Documents:
 
 05.4. Packs do not receive filesystem handles or unrestricted path APIs.
 
-05.5. Readers return loaded data or streaming views when explicit streaming
+05.5. Adapter-executed code does not receive filesystem handles or
+      unrestricted path APIs as a Turnix persistence authority path.
+
+05.6. Readers return loaded data or streaming views when explicit streaming
       mode allows it.
 
-05.6. Writers accept data or explicit streams to persist under IoManager
+05.7. Writers accept data or explicit streams to persist under IoManager
       control.
 
-05.7. The raw filesystem remains an internal implementation detail of
+05.8. The raw filesystem remains an internal implementation detail of
       IoManager and its providers.
 
 
@@ -209,6 +232,9 @@ Downstream Documents:
       read or write operation.
 
 06.7. Early phases use only built-in providers.
+
+06.8. Provider registration through adapter-executed code remains governed
+      by activation, adapter, capability, policy, and IoManager boundaries.
 
 
 ===============================================================================
@@ -254,6 +280,12 @@ Downstream Documents:
 08.6. Root writability does not by itself authorize state mutation.
       State-mutation authority remains constrained by the relevant higher
       design areas.
+
+08.7. Adapter-executed code does not gain write authority merely because a
+      root is writable.
+
+08.8. SavePack write ownership remains constrained by AppInstance and
+      SavePack lifecycle rules.
 
 
 ===============================================================================
@@ -333,6 +365,10 @@ Downstream Documents:
 11.3. This document defines the persistence-side obligation to surface I/O
       outcomes to trace. It does not define the full tracing taxonomy.
 
+11.4. Trace-visible I/O outcomes may include adapter, AppInstance, RPC,
+      capability, or Job correlation where the persistence request came
+      through those mediated surfaces.
+
 
 ===============================================================================
 12. SAVE DATA HANDLING (LOCKED)
@@ -351,6 +387,9 @@ Downstream Documents:
 
 12.4. Save-local visibility remains save-local unless some other
       authoritative document explicitly states otherwise.
+
+12.5. Writable SavePack access remains constrained by AppInstance ownership
+      and persistence authority rules.
 
 
 ===============================================================================
@@ -520,6 +559,19 @@ Downstream Documents:
 
 18.4. Persistent I/O authority remains centralized.
 
+18.5. Adapter-executed code does not bypass IoManager.
+
+18.6. Same-language execution does not bypass IoManager.
+
+18.7. Same-process execution does not bypass IoManager.
+
+18.8. Native filesystem APIs are not a Turnix persistence authority path for
+      pack-provided code or adapter-executed code.
+
+18.9. Services, capabilities, Views, RPC handlers, Jobs, and tools do not
+      acquire persistence authority merely because they can request
+      persistence-related work.
+
 
 ===============================================================================
 19. EXPLICITLY OPEN QUESTIONS
@@ -532,6 +584,8 @@ Downstream Documents:
       - encrypted storage backends
       - the future boundary between logical addressing and physical storage
         mapping
+      - concrete workspace locking and writable SavePack ownership
+        implementation details
 
 
 ===============================================================================
@@ -543,6 +597,10 @@ Downstream Documents:
       - Reader / Writer provider abstraction
       - controlled raw-access boundary
       - strict runtime root permissions
+      - adapter-executed code does not bypass IoManager
+      - same-language or same-process execution does not bypass IoManager
+      - native filesystem APIs are not a Turnix persistence authority path
+        for pack-provided or adapter-executed code
       - trace-visible I/O outcomes
       - rollback points before identity-bearing mutations
       - UI-mediated recovery
@@ -554,6 +612,7 @@ Downstream Documents:
       - performance refinements
       - future storage backends
       - future logical-addressing / physical-mapping refinement
+      - concrete workspace locking and writable ownership implementation
 
 
 ===============================================================================
@@ -563,6 +622,6 @@ END OF DA-07 - FILE I/O, READERS / WRITERS & PERSISTENCE SAFETY
 --- doc-meta ---
 DOC_ID: DA-07
 DOC_FILE: docs/design/DA-07_FILE_IO_READERS_WRITERS_AND_PERSISTENCE_SAFETY.txt
-DOC_REV: 15
-DOC_GIT: 10093de
+DOC_REV: 16
+DOC_GIT: 023e3de
 ----------------
