@@ -16,8 +16,8 @@ implementation layers.
 Purpose:
 --------
 This document defines how Turnix remains one platform even when its current
-implementation stack, host-language realizations, or first-party modular
-components change over time.
+implementation stack, host-language realizations, execution adapters,
+transports, or first-party modular components change over time.
 
 It defines:
 - platform identity and architectural scope
@@ -25,6 +25,7 @@ It defines:
 - contract boundaries
 - first-party modularity
 - adapter boundaries and host-language realization
+- execution adapter authority boundaries
 - interoperability envelope role
 - implementation independence and replaceability
 
@@ -34,6 +35,7 @@ It does NOT define:
 - concrete frontend rendering rules
 - concrete language adapter internals
 - pack loading or activation mechanics in detail
+- concrete execution adapter protocols
 
 Upstream Documents:
 ------------------
@@ -42,6 +44,7 @@ Upstream Documents:
 - CMR-03
 - CMR-04
 - CMR-05
+- DA-01
 
 
 ===============================================================================
@@ -73,8 +76,9 @@ Upstream Documents:
 02.2. The current implementation stack is a realization of Turnix rather
       than the identity of Turnix.
 
-02.3. Backend language, frontend technology, adapter strategy, or current
-      implementation vehicle do not by themselves define what Turnix is.
+02.3. Backend language, frontend technology, adapter strategy, transport,
+      or current implementation vehicle do not by themselves define what
+      Turnix is.
 
 02.4. Turnix remains one platform even when different technical layers are
       implemented in different languages.
@@ -84,10 +88,24 @@ Upstream Documents:
       - contract boundaries
       - first-party modular components
       - host-language adapters
+      - execution adapters
       - interoperability envelopes
 
-02.6. Architectural scope in this document excludes concrete schema and
-      transport details. Those details belong in later DA or IS documents.
+02.6. Architectural scope in this document excludes concrete schema,
+      adapter-protocol, and transport details. Those details belong in
+      later DA or IS documents.
+
+02.7. Runtime authority follows the project-level ordering defined by
+      DA-01:
+      - Kernel owns authority
+      - adapters execute declared pack code
+      - transports carry messages
+      - RPC defines the logical communication boundary
+      - capabilities define what code may do
+      - SavePack stores durable executed state
+
+02.8. This ordering is architectural and survives implementation
+      replacement.
 
 
 ===============================================================================
@@ -110,11 +128,18 @@ Upstream Documents:
       required to preserve platform truth rather than merely to realize it
       in one implementation environment.
 
-03.5. Adapters, envelopes, and host-language realizations do not redefine
-      the meaning established by the platform core.
+03.5. Adapters, envelopes, transports, and host-language realizations do not
+      redefine the meaning established by the platform core.
 
 03.6. If platform guarantee meaning changes, the change is architectural
       rather than a mere implementation refactor.
+
+03.7. The Kernel is the runtime authority owner within the runtime
+      architecture defined by later design areas.
+
+03.8. Kernel authority may be realized by replaceable implementation code,
+      but the authority meaning is platform-semantic rather than accidental
+      implementation privilege.
 
 
 ===============================================================================
@@ -143,6 +168,12 @@ Upstream Documents:
 04.6. Contract boundaries are part of platform architecture. They are not
       decorative documentation.
 
+04.7. Same-language or same-process implementation does not erase a
+      contract boundary.
+
+04.8. In-process calls may realize a boundary only when they preserve the
+      same contract meaning that an explicit boundary would have provided.
+
 
 ===============================================================================
 05. FIRST-PARTY MODULARITY
@@ -169,6 +200,9 @@ Upstream Documents:
 
 05.6. Replaceable first-party realization does not imply replaceable
       platform meaning.
+
+05.7. A first-party module that executes pack code remains constrained by
+      execution-boundary semantics rather than by implementation proximity.
 
 
 ===============================================================================
@@ -201,14 +235,24 @@ Upstream Documents:
 06.7. Creator-facing cross-language coherence is constrained further by
       Design Doctrine documents that define language-facing doctrine.
 
+06.8. Same host language does not imply same authority.
+
+06.9. Pack-provided code is not platform core implementation code merely
+      because it is written in the same language as the platform core.
+
+06.10. Execution adapter semantics are defined by DA-23.
+
+06.11. Host-language adaptation does not bypass execution adapter,
+       activation, capability, persistence, or AppInstance boundaries.
+
 
 ===============================================================================
 07. INTEROPERABILITY ENVELOPE ROLE
 ===============================================================================
 
 07.1. Turnix requires interoperability mechanisms for communication across
-      execution domains, host-language boundaries, or architectural
-      layers.
+      execution domains, host-language boundaries, adapter boundaries, or
+      architectural layers.
 
 07.2. An interoperability envelope carries structured interaction across
       such boundaries.
@@ -223,10 +267,16 @@ Upstream Documents:
 07.4. The interoperability envelope is an architectural boundary rather
       than incidental transport plumbing.
 
-07.5. Concrete message schemas, transport protocols, and wire details are
+07.5. RPC is the design-area realization of the logical communication
+      boundary in the current runtime architecture.
+
+07.6. Transport is the concrete carrier of messages and does not define the
+      authority meaning of the envelope.
+
+07.7. Concrete message schemas, transport protocols, and wire details are
       not defined in this document.
 
-07.6. Later DA and IS documents may define those concrete details, but the
+07.8. Later DA and IS documents may define those concrete details, but the
       architectural role of the envelope remains constrained by this
       design area.
 
@@ -249,13 +299,16 @@ Upstream Documents:
 08.5. Adapter replacement does not change Turnix identity when boundary
       semantics and contract truth remain preserved.
 
-08.6. A replaceable implementation layer does not by itself possess
+08.6. Transport replacement does not change Turnix identity when logical
+      boundary semantics and contract truth remain preserved.
+
+08.7. A replaceable implementation layer does not by itself possess
       authority to redefine platform meaning.
 
-08.7. Implementation independence is not an aesthetic goal. It is a
+08.8. Implementation independence is not an aesthetic goal. It is a
       consequence of contract primacy and architectural truth.
 
-08.8. If platform truth does not survive implementation replacement, the
+08.9. If platform truth does not survive implementation replacement, the
       architecture relied too heavily on implementation accident.
 
 
@@ -280,6 +333,13 @@ Upstream Documents:
 
 09.6. This design area does not define exact loader, adapter, protocol, or
       transport mechanics.
+
+09.7. This design area does not treat FastAPI, WebSocket, browser
+      JavaScript, Python, CLI, subprocesses, containers, or network
+      topology as platform identity.
+
+09.8. This design area does not treat direct calls as authority-valid merely
+      because they are convenient.
 
 
 ===============================================================================
@@ -312,6 +372,6 @@ IMPLEMENTATION INDEPENDENCE
 --- doc-meta ---
 DOC_ID: DA-02
 DOC_FILE: docs/design/DA-02_PLATFORM_CORE_CONTRACT_BOUNDARIES_AND_IMPLEMENTATION_INDEPENDENCE.txt
-DOC_REV: 2
-DOC_GIT: d94f3f1
+DOC_REV: 3
+DOC_GIT: 0000000
 ----------------
