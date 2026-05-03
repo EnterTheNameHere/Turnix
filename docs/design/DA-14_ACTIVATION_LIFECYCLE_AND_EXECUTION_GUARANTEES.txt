@@ -8,9 +8,9 @@ EVOLVING
 
 Description:
 ------------
-Defines when pack code is permitted to execute, under whose authority
-execution occurs, and which execution behaviors Turnix explicitly guarantees
-or does not guarantee.
+Defines when pack code is permitted to execute under Turnix-recognized
+activation, under whose authority execution occurs, and which execution
+behaviors Turnix explicitly guarantees or does not guarantee.
 
 Activation is the sole mechanism that transitions a pack from inert metadata
 to an executable participant under Turnix control.
@@ -24,7 +24,8 @@ It defines:
 - lifecycle phase ordering and the activation boundary
 - the meaning of Activated state and PackContext authority
 - pack-level activation semantics and the canonical entrypoint
-- the separation between activation and execution
+- relationship between activation and execution adapters
+- the separation between activation and later runtime execution
 - rules for immediate execution and import-time side effects
 - JavaScript runtime entry semantics relevant to activation
 - orchestrated execution pathways and guarantees
@@ -35,8 +36,10 @@ It does NOT define:
 - generic resolution mechanics (see DA-11)
 - dependency semantics and source selection (see DA-13)
 - importing and module-loading boundaries (see DA-12)
+- execution adapter boundary semantics (see DA-23)
 - tracing schema and storage (see DA-03)
-- capability schemas and permission prompts
+- capability schemas and permission prompting details (see DA-16)
+- user decision and remembered policy handling (see DA-17)
 
 Upstream Documents:
 ------------------
@@ -50,6 +53,7 @@ Upstream Documents:
 - DA-12
 - DA-13
 - DA-15
+- DA-23
 
 Downstream Documents:
 --------------------
@@ -80,28 +84,38 @@ Downstream Documents:
 
 02.1. Activation answers exactly one question:
 
-          "Is this pack permitted to execute code under Turnix orchestration?"
+          "Has Turnix intentionally brought this pack into recognized
+           executable participation under Turnix orchestration?"
 
 02.2. Activation is a controlled, explicit, one-time state transition.
 
 02.3. Before activation:
       - a pack exists only as metadata
       - its code has no execution authority under Turnix
+      - adapter loading or native module evaluation does not make it active
 
 02.4. After activation:
       - the pack may participate in runtime behavior
       - execution is allowed only through Turnix-controlled orchestration
         pathways
+      - PackContext defines the pack-facing authority context
 
 02.5. Activation is not:
       - discovery
       - indexing
       - dependency resolution
       - importing
+      - adapter selection
+      - execution authorization
+      - adapter loading
       - visibility granting
+      - capability permission
 
 02.6. Those earlier phases may occur before activation, but none of them
       implies activation.
+
+02.7. DA-23 owns the execution adapter boundary in which adapter-mediated
+      activation occurs.
 
 
 ===============================================================================
@@ -113,17 +127,24 @@ Downstream Documents:
       1) Discovery
       2) Indexing
       3) Resolution
-      4) Activation
-      5) Running or Finalized
+      4) Execution adapter preparation where applicable
+      5) Activation
+      6) Running or Finalized
 
 03.2. Activation is the first moment Turnix may intentionally execute pack
-      code.
+      code with PackContext authority.
 
-03.3. After activation, pack code may execute during Running only through
+03.3. Execution adapter preparation may include adapter selection,
+      execution authorization, adapter creation, adapter readiness, and
+      artifact loading.
+
+03.4. Execution adapter preparation is not activation.
+
+03.5. After activation, pack code may execute during Running only through
       Turnix-orchestrated execution pathways defined by this document and
       related higher documents.
 
-03.4. Code that executes outside Turnix orchestration remains outside Turnix
+03.6. Code that executes outside Turnix orchestration remains outside Turnix
       guarantees.
 
 
@@ -133,19 +154,25 @@ Downstream Documents:
 
 04.1. When a pack is activated:
       - Turnix creates a PackContext for that pack instance
-      - the pack's activation entrypoint is invoked
+      - Turnix dispatches the pack's activation entrypoint
       - the pack may participate in Turnix-managed runtime behavior
 
-04.2. Activated packs may, for example:
+04.2. When the activated pack's executable artifact belongs to an adapter
+      runtime, activation dispatch occurs through the appropriate execution
+      adapter under DA-23.
+
+04.3. Activated packs may, for example:
       - register services
       - register capabilities
       - subscribe to Turnix events
       - allocate runtime resources
       - participate in Turnix-managed orchestration
 
-04.3. Before activation:
+04.4. Before activation:
       - pack metadata may be resolved
       - the pack may appear in graphs
+      - adapter selection may have occurred
+      - artifact loading may have occurred
       - pack code must not execute under Turnix authority
 
 
@@ -160,18 +187,22 @@ Downstream Documents:
       - individual modules
       - individual imports
       - individual capabilities
+      - individual adapter-loaded artifacts
 
 05.3. A pack is either activated or not activated.
 
 05.4. Partial, staged, deferred, or per-file activation is not defined by
       this document.
 
+05.5. Adapter loading does not create partial activation.
+
 
 ===============================================================================
 06. PACKCONTEXT (ctx) - EXECUTION AUTHORITY (LOCKED)
 ===============================================================================
 
-06.1. Turnix provides exactly one execution-authority object to pack code:
+06.1. Turnix provides exactly one pack-facing execution-authority context to
+      pack code:
       PackContext (ctx).
 
 06.2. PackContext is created only by Turnix.
@@ -180,14 +211,29 @@ Downstream Documents:
 
 06.4. PackContext represents execution authority on behalf of that pack.
 
-06.5. Code executing with a PackContext:
+06.5. PackContext is not a raw backend service object exposed to pack code.
+
+06.6. PackContext is not unrestricted access to Kernel internals.
+
+06.7. PackContext operations route through Kernel-owned boundaries.
+
+06.8. Code executing with a PackContext:
       - executes under the authority of that pack
       - is subject to that pack's visibility, permissions, and policy
+      - remains constrained by capability, transaction, persistence, trace,
+        adapter, and lifecycle rules
 
-06.6. Passing ctx to other code is an explicit delegation of authority.
+06.9. PackContext may be represented differently in different adapters.
 
-06.7. The delegating pack remains fully responsible for actions performed
-      using its ctx.
+06.10. Representation difference does not change authority meaning.
+
+06.11. In-process PackContext calls do not bypass capability mediation,
+       policy, transaction, trace, persistence, or lifecycle rules.
+
+06.12. Passing ctx to other code is an explicit delegation of authority.
+
+06.13. The delegating pack remains fully responsible for actions performed
+       using its ctx.
 
 
 ===============================================================================
@@ -205,7 +251,10 @@ Downstream Documents:
 
 07.3. No other function, construct, or mechanism activates a pack.
 
-07.4. Future activation entrypoints, if introduced, follow the same rules
+07.4. Adapter implementations do not introduce alternate activation
+      entrypoints by themselves.
+
+07.5. Future activation entrypoints, if introduced, follow the same rules
       and are explicitly defined by Turnix.
 
 
@@ -219,15 +268,19 @@ Downstream Documents:
       - is a one-time state transition
       - establishes PackContext authority
       - occurs exclusively through onLoad(ctx)
+      - may dispatch through an execution adapter when applicable
 
 08.3. Execution:
-      - occurs only after activation
+      - occurs only after activation when Turnix-recognized
       - may happen multiple times
       - occurs only when invoked by Turnix orchestration
 
 08.4. No execution mechanism activates a pack.
 
 08.5. No execution mechanism substitutes for onLoad(ctx).
+
+08.6. Adapter execution without PackContext authority is not
+      Turnix-recognized activated execution.
 
 
 ===============================================================================
@@ -263,6 +316,10 @@ Downstream Documents:
       - JavaScript
       - future supported languages
 
+09.10. Same-language execution does not make immediate execution supported.
+
+09.11. Adapter loading does not make immediate execution supported.
+
 
 ===============================================================================
 10. RUNTIME ENTRIES - JAVASCRIPT SEMANTICS (LOCKED)
@@ -275,13 +332,17 @@ Downstream Documents:
 10.2. runtimes.javascript.entry:
       - is imported by Turnix during activation
       - provides the module from which onLoad(ctx) is invoked
+      - may be loaded through the browser JavaScript adapter
       - successful completion marks JavaScript activation success
 
 10.3. runtimes.javascript.entries:
-      - are never imported automatically by Turnix
+      - are never imported automatically by Turnix as activation entries
       - never receive ctx automatically
       - never have onLoad(ctx) invoked
       - are treated strictly as library modules
+
+10.4. DA-23 owns the general adapter boundary that applies to JavaScript
+      runtime entries.
 
 
 ===============================================================================
@@ -299,6 +360,8 @@ Downstream Documents:
 11.3. If only runtimes.javascript.entries exist:
       - the pack is treated as a library-only pack
       - all such modules remain activation-independent
+
+11.4. Library-only module loading remains distinct from activation.
 
 
 ===============================================================================
@@ -321,6 +384,9 @@ Downstream Documents:
 12.4. If code requires activation-specific state of its own pack, that code
       is initialized from that pack's activation entry.
 
+12.5. Passing PackContext into activation-independent code does not change
+      the provider pack's activation state.
+
 
 ===============================================================================
 13. ACTIVATION ORDER (LOCKED RESPONSIBILITY)
@@ -338,6 +404,10 @@ Downstream Documents:
       - services exist unless explicitly requested
       - capabilities are available unless explicitly granted
 
+13.3. Adapter readiness does not define activation order.
+
+13.4. Adapter loading does not define activation order.
+
 
 ===============================================================================
 14. RESOLVEPACK VS ENSUREACTIVATED (LOCKED)
@@ -346,7 +416,9 @@ Downstream Documents:
 14.1. resolvePack(selector):
       - resolves metadata
       - performs visibility checks
-      - does not execute code
+      - does not select an adapter for execution
+      - does not authorize execution
+      - does not load code
       - does not activate packs
 
 14.2. ensureActivated(selector):
@@ -356,6 +428,11 @@ Downstream Documents:
       - activation metadata is immutable and diagnostic
       - does not return code or symbols
       - may raise NotActivatedError
+
+14.3. ensureActivated may cause adapter-mediated activation when the target
+      pack's executable artifact belongs to an adapter runtime.
+
+14.4. ensureActivated does not expose adapter internals.
 
 
 ===============================================================================
@@ -380,6 +457,12 @@ Downstream Documents:
       - no lifecycle control
       - no cleanup guarantees
 
+15.5. Adapter-mediated execution has Turnix guarantees only when it is
+      invoked and tracked through Turnix orchestration.
+
+15.6. In-process execution has no extra guarantees merely because it runs in
+      the same process as the backend implementation.
+
 
 15.1 ACTIVATION TRACE OBLIGATIONS
 ---------------------------------
@@ -389,6 +472,7 @@ Downstream Documents:
 15.1.2. Activation trace evidence distinguishes:
         - activation start
         - dependency activation ordering
+        - adapter-mediated activation dispatch when applicable
         - activation entrypoint invocation
         - service registration during activation
         - capability registration during activation
@@ -398,6 +482,8 @@ Downstream Documents:
 15.1.3. Activation trace evidence records enough context to explain:
         - which pack instance was activated
         - which activation entrypoint was invoked
+        - which adapter kind or adapter instance was involved when
+          applicable
         - which dependency or ordering condition caused activation to wait,
           proceed, or fail
         - which service or capability registration occurred during activation
@@ -407,7 +493,8 @@ Downstream Documents:
         scope boundaries.
 
 15.1.5. Activation trace evidence does not redefine import, dependency
-        resolution, capability permission, or Job lifecycle semantics.
+        resolution, adapter lifecycle, capability permission, or Job
+        lifecycle semantics.
 
 15.1.6. DA-03 defines the tracing substrate used to represent activation
         trace evidence.
@@ -453,6 +540,9 @@ Downstream Documents:
 15.1.16. NotActivated is emitted when a Turnix-mediated action is refused
          because the target pack is not activated.
 
+15.1.17. DA-23 owns adapter-domain trace evidence that may causally relate
+         to activation dispatch.
+
 
 ===============================================================================
 16. ACTIVATION FAILURE AND NOTACTIVATEDERROR (LOCKED)
@@ -462,6 +552,8 @@ Downstream Documents:
       - unresolved dependency
       - policy violation
       - visibility violation
+      - execution authorization failure
+      - adapter loading failure
       - activation entry failure
 
 16.2. Locked consequences:
@@ -473,6 +565,9 @@ Downstream Documents:
 16.3. NotActivatedError must not be swallowed by pack code.
 
 16.4. Swallowing NotActivatedError hides orchestration failure.
+
+16.5. Activation failure is not a Job terminal outcome merely because the
+      activation path used adapter-executed code.
 
 
 ===============================================================================
@@ -488,6 +583,7 @@ Downstream Documents:
       - executable code
       - module namespaces
       - runtime symbols
+      - adapter internals
 
 
 ===============================================================================
@@ -498,6 +594,7 @@ Downstream Documents:
       - category-based activation ordering
       - staged or phased activation
       - activation retry semantics
+      - exact adapter-mediated activation diagnostics
 
 
 ===============================================================================
@@ -507,19 +604,26 @@ Downstream Documents:
 19.1. LOCKED:
       - activation is explicit and pack-level
       - onLoad(ctx) is the only activation entrypoint
-      - activation establishes execution authority
-      - execution is allowed only after activation
+      - activation establishes PackContext authority
+      - PackContext is a pack-facing authority context, not raw backend
+        internals
+      - execution is allowed only after activation when Turnix-recognized
+      - adapter selection, execution authorization, adapter readiness, and
+        adapter loading do not imply activation
       - immediate execution, including IIFE-style patterns and top-level
         code, is unsupported
       - execution requires Turnix orchestration
-      - PackContext defines authority
-      - activation is distinct from import and resolution
+      - adapter-mediated execution has guarantees only when invoked and
+        tracked through Turnix orchestration
+      - activation is distinct from import, resolution, and adapter lifecycle
       - activation lifecycle outcomes remain trace-visible
       - activation-domain trace reason identifiers are owned by DA-14
+      - adapter-domain trace evidence remains owned by DA-23
       - failures are visible and abort activation
 
 19.2. OPEN:
-      - ordering refinements only
+      - ordering refinements
+      - adapter-mediated activation diagnostics
 
 
 ===============================================================================
@@ -529,6 +633,6 @@ END OF DA-14 - ACTIVATION, LIFECYCLE & EXECUTION GUARANTEES
 --- doc-meta ---
 DOC_ID: DA-14
 DOC_FILE: docs/design/DA-14_ACTIVATION_LIFECYCLE_AND_EXECUTION_GUARANTEES.txt
-DOC_REV: 15
-DOC_GIT: 023e3de
+DOC_REV: 16
+DOC_GIT: 0000000
 ----------------
