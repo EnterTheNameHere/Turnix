@@ -18,7 +18,8 @@ concrete WebSocket flow remain implementation specifications.
 Purpose:
 --------
 This document defines the Turnix model for RPC communication between runtime
-participants, frontend surfaces, tools, and kernel-mediated execution paths.
+participants, execution adapters, frontend surfaces, tools, and
+kernel-mediated execution paths.
 
 It defines:
 - RPC as a logical communication boundary
@@ -29,6 +30,7 @@ It defines:
 - request, emit, subscribe, cancel, reply, error, and acknowledgement
   meaning
 - routing boundaries for object and capability messages
+- relationship between RPC and execution adapters
 - separation between RPC transport lifecycle and Job lifecycle
 - relationship between RPC requests and Job-backed work
 - transport timeout and disconnect semantics at the abstract level
@@ -43,7 +45,8 @@ It does NOT define:
 - user decision and remembered policy semantics (see DA-17)
 - Job lifecycle, Job terminal outcomes, or Job result semantics (see DA-19)
 - AppInstance lifecycle or runtime identity semantics (see DA-20)
-- frontend UI layout or presentation behavior
+- execution adapter boundary semantics (see DA-23)
+- frontend UI layout or presentation behavior (see DA-22)
 
 Upstream Documents:
 ------------------
@@ -60,9 +63,12 @@ Upstream Documents:
 - DA-17
 - DA-19
 - DA-20
+- DA-23
 
 Downstream Documents:
 --------------------
+- DA-22
+- DA-23
 - IS-01
 - IS-02
 - future transport implementation specifications
@@ -105,21 +111,29 @@ Downstream Documents:
 
 02.6. RPC is not capability authority by itself.
 
-02.7. RPC is not Job lifecycle by itself.
+02.7. RPC is not adapter authority by itself.
 
-02.8. A transport carries RPC messages.
+02.8. RPC is not Job lifecycle by itself.
 
-02.9. A channel provides the transport-neutral interface through which RPC
-      messages are received and sent.
+02.9. A transport carries RPC messages.
 
-02.10. Message delivery, message acknowledgement, request acceptance,
+02.10. A channel provides the transport-neutral interface through which RPC
+       messages are received and sent.
+
+02.11. Message delivery, message acknowledgement, request acceptance,
        handler execution, Job creation, and Job terminal outcome are
        distinct events.
 
-02.11. Turnix does not treat successful message delivery as successful work
+02.12. Turnix does not treat successful message delivery as successful work
        completion.
 
-02.12. Turnix does not treat transport failure as Job failure.
+02.13. Turnix does not treat transport failure as Job failure.
+
+02.14. Adapter-executed code may communicate through RPC-shaped boundaries
+       under DA-23.
+
+02.15. RPC carries adapter-originated or adapter-targeted messages without
+       making the transport or channel an authority owner.
 
 
 ===============================================================================
@@ -159,6 +173,9 @@ Downstream Documents:
 
 03.11. A transport adapter must not smuggle transport-specific authority,
        fallback, or policy into RPC semantics.
+
+03.12. A transport adapter is distinct from an Execution Adapter under
+       DA-23, even when one implementation object performs both roles.
 
 
 ===============================================================================
@@ -203,11 +220,13 @@ Downstream Documents:
 
 04.12. Acknowledgement does not imply capability execution.
 
-04.13. Acknowledgement does not imply Job creation.
+04.13. Acknowledgement does not imply adapter execution.
 
-04.14. Acknowledgement does not imply Job success.
+04.14. Acknowledgement does not imply Job creation.
 
-04.15. Concrete message type names and concrete field layout belong to
+04.15. Acknowledgement does not imply Job success.
+
+04.16. Concrete message type names and concrete field layout belong to
        IS-01 or another implementation specification.
 
 
@@ -220,6 +239,7 @@ Downstream Documents:
 05.2. RPC routes may target:
       - objects
       - capabilities
+      - adapter-facing endpoints
       - control endpoints
       - subscription endpoints
 
@@ -227,16 +247,20 @@ Downstream Documents:
 
 05.4. RPC routing does not activate packs.
 
-05.5. RPC routing does not bypass capability mediation.
+05.5. RPC routing does not select or authorize an execution adapter.
 
-05.6. A capability-routed RPC message remains subject to DA-16.
+05.6. RPC routing does not bypass capability mediation.
 
-05.7. If routing fails before capability execution or Job creation, the
-      failure remains an RPC routing or dispatch failure rather than a Job
-      terminal outcome.
+05.7. A capability-routed RPC message remains subject to DA-16.
 
-05.8. If routing succeeds and a capability accepts Job-backed work, later
-      Job lifecycle semantics are owned by DA-19.
+05.8. An adapter-facing RPC message remains subject to DA-23.
+
+05.9. If routing fails before capability execution, adapter execution, or
+      Job creation, the failure remains an RPC routing or dispatch failure
+      rather than a Job terminal outcome.
+
+05.10. If routing succeeds and a capability accepts Job-backed work, later
+       Job lifecycle semantics are owned by DA-19.
 
 
 ===============================================================================
@@ -247,6 +271,7 @@ Downstream Documents:
       - immediate reply
       - structured error
       - accepted Job-backed work
+      - accepted adapter-mediated work
       - rejected-before-Job outcome
 
 06.2. Request acceptance means the request crossed the RPC dispatch boundary
@@ -258,23 +283,37 @@ Downstream Documents:
 06.4. A request accepted as Job-backed work creates or exposes Job lifecycle
       correlation.
 
-06.5. Once Job-backed work exists, DA-19 owns Job lifecycle semantics.
+06.5. A request accepted as adapter-mediated work may create or expose
+      adapter lifecycle correlation.
 
-06.6. A request rejected before Job-backed work exists does not produce a
+06.6. Adapter lifecycle semantics remain owned by DA-23.
+
+06.7. Once Job-backed work exists, DA-19 owns Job lifecycle semantics.
+
+06.8. A request rejected before Job-backed work exists does not produce a
       Job terminal outcome.
 
-06.7. A request rejected before Job-backed work exists may still produce RPC
-      trace evidence and a structured error envelope.
+06.9. A request rejected before adapter-mediated work exists does not
+      produce adapter execution failure unless DA-23 classifies that
+      relationship explicitly.
 
-06.8. RPC request identity and jobId remain distinct.
+06.10. A request rejected before Job-backed work exists may still produce
+       RPC trace evidence and a structured error envelope.
 
-06.9. RPC correlation may link request identity to jobId when a Job exists.
+06.11. RPC request identity and jobId remain distinct.
 
-06.10. A request accepted as Job-backed work may return a Job handle,
+06.12. RPC request identity and adapter instance identity remain distinct.
+
+06.13. RPC correlation may link request identity to jobId when a Job exists.
+
+06.14. RPC correlation may link request identity to adapter identity when
+       adapter-mediated work exists.
+
+06.15. A request accepted as Job-backed work may return a Job handle,
        immediate accepted-work response, subscription relationship, or other
        operation-defined lifecycle surface.
 
-06.11. The exact concrete envelope shape for Job-backed request acceptance
+06.16. The exact concrete envelope shape for Job-backed request acceptance
        remains owned by IS-01, IS-02, or a future implementation
        specification constrained by DA-19.
 
@@ -295,18 +334,25 @@ Downstream Documents:
       subscription ends, fails, disconnects, or is cancelled.
 
 07.5. Subscription delivery may carry state updates, event updates, Job
-      progress, or other operation-defined update material.
+      progress, adapter lifecycle updates, or other operation-defined update
+      material.
 
 07.6. Subscription delivery does not by itself define Job lifecycle state.
 
-07.7. If subscription delivery reports Job progress or terminal outcome,
+07.7. Subscription delivery does not by itself define adapter lifecycle
+      state unless it carries adapter-domain evidence owned by DA-23.
+
+07.8. If subscription delivery reports Job progress or terminal outcome,
       the reported Job meaning remains owned by DA-19.
 
-07.8. Unsubscribe withdraws interest in future subscription delivery.
+07.9. If subscription delivery reports adapter lifecycle state, the reported
+      adapter meaning remains owned by DA-23.
 
-07.9. Unsubscribe does not by itself cancel the underlying work unless the
-      operation contract or policy explicitly connects unsubscribe to
-      cancellation.
+07.10. Unsubscribe withdraws interest in future subscription delivery.
+
+07.11. Unsubscribe does not by itself cancel the underlying work unless the
+       operation contract or policy explicitly connects unsubscribe to
+       cancellation.
 
 
 ===============================================================================
@@ -317,40 +363,56 @@ Downstream Documents:
 
 08.2. Job timeout is a Job lifecycle concern.
 
-08.3. Transport timeout does not automatically transition a Job to TimedOut.
+08.3. Adapter timeout, if defined, is an adapter lifecycle concern.
 
-08.4. Job timeout does not mean the transport failed.
+08.4. Transport timeout does not automatically transition a Job to TimedOut.
 
-08.5. Transport disconnect means the communication carrier became
+08.5. Transport timeout does not automatically fail an adapter instance.
+
+08.6. Job timeout does not mean the transport failed.
+
+08.7. Adapter failure does not mean the transport failed.
+
+08.8. Transport disconnect means the communication carrier became
       unavailable or closed.
 
-08.6. Transport disconnect does not automatically cancel a Job.
+08.9. Transport disconnect does not automatically cancel a Job.
 
-08.7. Transport disconnect does not automatically supersede a Job.
+08.10. Transport disconnect does not automatically supersede a Job.
 
-08.8. Transport disconnect does not automatically discard a Job result.
+08.11. Transport disconnect does not automatically discard a Job result.
 
-08.9. If accepted or in-flight work exists when transport disconnect occurs,
-      policy may decide whether work continues, cancels, supersedes,
-      detaches, retains result, or discards result.
+08.12. Transport disconnect does not automatically close or fail an
+       execution adapter.
 
-08.10. DA-17 owns decision and policy handling.
+08.13. If accepted or in-flight work exists when transport disconnect occurs,
+       policy may decide whether work continues, cancels, supersedes,
+       detaches, retains result, or discards result.
 
-08.11. DA-19 owns Job terminal outcomes when a policy outcome affects a Job.
+08.14. DA-17 owns decision and policy handling.
 
-08.12. RPC cancellation messages are requests.
+08.15. DA-19 owns Job terminal outcomes when a policy outcome affects a Job.
 
-08.13. RPC cancellation messages do not directly kill arbitrary execution.
+08.16. DA-23 owns adapter lifecycle outcomes when a policy outcome affects
+       adapter execution.
 
-08.14. When cancellation targets Job-backed work, the cancellation request is
+08.17. RPC cancellation messages are requests.
+
+08.18. RPC cancellation messages do not directly kill arbitrary execution.
+
+08.19. When cancellation targets Job-backed work, the cancellation request is
        translated into Job lifecycle handling under DA-19.
 
-08.15. When cancellation targets a subscription, cancellation may withdraw
+08.20. When cancellation targets adapter-mediated work, the cancellation
+       request is translated into adapter and work lifecycle handling under
+       DA-23 and owning workflow documents.
+
+08.21. When cancellation targets a subscription, cancellation may withdraw
        delivery interest without ending the underlying work.
 
-08.16. When cancellation targets transport-local pending work, cancellation
-       may resolve or reject local waiting state without defining a Job
-       outcome.
+08.22. When cancellation targets transport-local pending work, cancellation
+       may resolve or reject local waiting state without defining a Job or
+       adapter outcome.
 
 
 ===============================================================================
@@ -380,16 +442,21 @@ Downstream Documents:
 
 09.9. RPCChannel does not define Job semantics.
 
-09.10. Concrete channel implementations adapt concrete transports into this
+09.10. RPCChannel does not define adapter lifecycle semantics.
+
+09.11. Concrete channel implementations adapt concrete transports into this
        abstract interface.
 
-09.11. A channel implementation preserves peer identity and connection
+09.12. A channel implementation preserves peer identity and connection
        context when the transport provides them.
 
-09.12. A channel implementation reports loss of connection explicitly.
+09.13. A channel implementation reports loss of connection explicitly.
 
-09.13. A channel implementation does not silently transform disconnect into
+09.14. A channel implementation does not silently transform disconnect into
        work cancellation.
+
+09.15. A channel implementation does not silently transform disconnect into
+       adapter failure.
 
 
 ===============================================================================
@@ -404,6 +471,7 @@ Downstream Documents:
       - routing or dispatch
       - rejection before accepted work exists
       - request accepted as Job-backed work
+      - request accepted as adapter-mediated work
       - reply sent
       - delivery failure
       - cancellation requested
@@ -422,6 +490,8 @@ Downstream Documents:
       - channel identity
       - transport kind
       - appInstanceId
+      - adapter kind when applicable
+      - adapter instance identity when applicable
       - capability identifier when applicable
       - jobId when applicable
       - timeout category when applicable
@@ -435,14 +505,17 @@ Downstream Documents:
 
 10.7. DA-19 owns Job-domain trace reasons.
 
-10.8. IS-02 owns concrete WebSocket RPC transport trace reasons unless this
+10.8. DA-23 owns adapter-domain trace reasons.
+
+10.9. IS-02 owns concrete WebSocket RPC transport trace reasons unless this
       document later promotes those reason identifiers into the abstract RPC
       domain.
 
-10.9. RPC observability does not replace trace evidence owned by capability,
-      decision, Job, debugger, AppInstance, or Window documents.
+10.10. RPC observability does not replace trace evidence owned by
+       capability, decision, Job, debugger, AppInstance, adapter, or Window
+       documents.
 
-10.10. RPC observability preserves causal links between RPC messages and
+10.11. RPC observability preserves causal links between RPC messages and
        higher-domain events when those events exist.
 
 
@@ -461,11 +534,13 @@ Downstream Documents:
        - handshake sequence
        - serialization checks
        - concrete transport reason identifiers
+       - concrete adapter metadata fields when constrained by DA-23
 
 11.4. IS documents do not redefine:
        - RPC as a logical boundary
        - channel and transport separation
        - capability authority
+       - adapter authority
        - Job lifecycle
        - decision and policy semantics
 
@@ -476,6 +551,9 @@ Downstream Documents:
        this document.
 
 11.7. A future RPC schema revision remains constrained by this document.
+
+11.8. A future adapter transport specification remains constrained by this
+       document and DA-23.
 
 
 ===============================================================================
@@ -492,6 +570,7 @@ Downstream Documents:
       - exact relationship between RPC request promises and Job handles
       - exact channel identity representation
       - exact peer identity representation beyond concrete transport context
+      - exact adapter metadata representation in RPC envelopes
 
 
 ===============================================================================
@@ -505,27 +584,37 @@ Downstream Documents:
       - WebSocket is one concrete transport, not the RPC model itself
       - JSON envelope shape belongs to IS-01
       - concrete WebSocket flow belongs to IS-02
+      - RPC is not adapter authority by itself
       - acknowledgement means transport or message handling, not work
         success
+      - acknowledgement does not imply adapter execution
       - request acceptance is distinct from final result
       - request accepted as Job-backed work is distinct from Job success
+      - request accepted as adapter-mediated work is distinct from adapter
+        success
       - request rejected before Job-backed work exists has no Job terminal
         outcome
+      - request rejected before adapter-mediated work exists has no adapter
+        lifecycle outcome unless DA-23 defines that relation explicitly
       - emit acknowledgement does not imply downstream work completion
       - unsubscribe does not by itself cancel underlying work
       - transport timeout is not Job timeout
+      - transport timeout is not adapter timeout
       - transport disconnect is not Job cancellation
+      - transport disconnect is not adapter failure
       - RPC cancellation is a request, not direct execution kill
       - capability-routed RPC remains capability-mediated under DA-16
+      - adapter-facing RPC remains adapter-mediated under DA-23
       - Job lifecycle remains owned by DA-19
+      - adapter lifecycle remains owned by DA-23
       - policy handling remains owned by DA-17
-      - RPC trace evidence preserves correlation across message, capability,
-        AppInstance, and Job identity where available
+      - RPC trace evidence preserves correlation across message, adapter,
+        capability, AppInstance, and Job identity where available
 
 13.2. OPEN:
       - trace reason ownership refinement
       - transport implementation expansion
-      - subscription and Job-result retrieval details
+      - subscription, Job-result retrieval, and adapter metadata details
 
 
 ===============================================================================
@@ -535,6 +624,6 @@ END OF DA-21 - RPC, CHANNELS, TRANSPORTS & MESSAGE FLOW
 --- doc-meta ---
 DOC_ID: DA-21
 DOC_FILE: docs/design/DA-21_RPC_CHANNELS_TRANSPORTS_AND_MESSAGE_FLOW.txt
-DOC_REV: 2
-DOC_GIT: 968d182
+DOC_REV: 3
+DOC_GIT: 04d15d1
 ----------------
