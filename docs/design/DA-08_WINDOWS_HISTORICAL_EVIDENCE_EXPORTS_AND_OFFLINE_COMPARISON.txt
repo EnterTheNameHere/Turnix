@@ -1,6 +1,5 @@
 ===============================================================================
-DESIGN AREA DA-08 - WINDOWS, HISTORICAL EVIDENCE, EXPORTS &
-OFFLINE COMPARISON
+DESIGN AREA DA-08 - WINDOWS AND FINALIZED RUNTIME HISTORY
 ===============================================================================
 
 Status:
@@ -9,18 +8,19 @@ EVOLVING
 
 Description:
 ------------
-Defines how Turnix groups runtime history into bounded Windows, how finalized
-Windows preserve committed boundaries and non-authoritative evidence, and how
-portable exports and offline comparison operate without turning retained
-history into a hidden correctness dependency.
+Defines how Turnix groups runtime history into bounded Windows, how
+SafePointWindow, ActiveWindow, and AbortedWindow regions behave, and how
+Window finalization preserves committed boundaries and non-authoritative
+evidence without turning retained history into a hidden correctness
+dependency.
 
-This document defines finalized evidence and artifact boundaries around
-committed state. It does not redefine the committed-state model itself.
+This document defines Window and finalization semantics around committed
+state. It does not redefine the committed-state model itself.
 
 Purpose:
 --------
-This document defines the Turnix model for Windows, historical evidence,
-portable finalized artifacts, and offline comparison.
+This document defines the Turnix model for Windows and finalized runtime
+history.
 
 It defines:
 - what Windows mean in Turnix
@@ -31,15 +31,6 @@ It defines:
 - SafePointWindow creation request modes and lifecycle visibility
 - journal as non-authoritative evidence
 - trace correlation rules for finalized Windows
-- WindowManifest semantics
-- WindowExport semantics
-- Minimal Audit Bundle (MAB) semantics
-- optional digest support for comparison acceleration
-- offline inspection boundaries
-- equality modes for finalized artifacts
-- ComparisonResult semantics
-- Replay, Resume, and Retry workflow boundaries as they relate to finalized
-  Windows and retained evidence
 
 It does NOT define:
 - the general memory and authoritative-state model (see DA-04)
@@ -53,6 +44,11 @@ It does NOT define:
   (see DA-06)
 - debugger pause, breakpoint, or execution-control behavior (see DA-18)
 - Job lifecycle, Job terminal states, or Job result semantics (see DA-19)
+- Orchestration Unit lifecycle or mutation authority semantics (see DA-24)
+- WindowManifest, WindowExport, Minimal Audit Bundle, digest, or offline
+  inspection artifact semantics (see DA-25)
+- equality modes, ComparisonResult, Replay, Resume, Retry, or
+  cross-session audit workflow semantics (see DA-26)
 
 Upstream Documents:
 ------------------
@@ -69,6 +65,13 @@ Upstream Documents:
 - DA-06
 - DA-17
 - DA-19
+- DA-24
+
+Downstream Documents:
+--------------------
+- DA-25
+- DA-26
+- future Window implementation specifications
 
 
 ===============================================================================
@@ -84,8 +87,8 @@ Upstream Documents:
 01.3. The CORE META-RULES documents define the general rule language and
       interpretation model used by this document.
 
-01.4. This document defines Window, evidence, export, and offline
-      comparison semantics within that shared interpretation model.
+01.4. This document defines Window and finalized runtime history semantics
+      within that shared interpretation model.
 
 
 ===============================================================================
@@ -101,7 +104,7 @@ Upstream Documents:
 02.2. Turnix groups runtime history into bounded Windows.
 
 02.3. A Window is a bounded region of runtime history and retained evidence
-      associated with one appInstance.
+      associated with one AppInstance.
 
 02.4. Windows distinguish:
       - authoritative committed boundaries
@@ -114,8 +117,8 @@ Upstream Documents:
 
 02.6. This document does not redefine authoritative state.
 
-02.7. This document defines how finalized Windows and their portable
-      derivatives relate to authoritative state and retained evidence.
+02.7. This document defines how finalized Windows relate to authoritative
+      state and retained evidence.
 
 02.8. Historical evidence may support explanation, audit, and debugging.
 
@@ -128,6 +131,9 @@ Upstream Documents:
        themselves finalize a Window.
 
 02.12. Window finalization remains owned by this document.
+
+02.13. Window-derived artifact, export, offline comparison, Replay, Resume,
+       Retry, and audit workflow semantics are defined by DA-25 and DA-26.
 
 
 ===============================================================================
@@ -207,7 +213,7 @@ Upstream Documents:
 04. WINDOW MODEL
 ===============================================================================
 
-04.1. An appInstance maintains one explicit ordered Window sequence.
+04.1. An AppInstance maintains one explicit ordered Window sequence.
 
 04.2. Every Window in that sequence is exactly one of:
       - SafePointWindow
@@ -217,7 +223,7 @@ Upstream Documents:
 04.3. No other Window kind is part of this model unless a later
       authoritative revision defines it explicitly.
 
-04.4. At most one ActiveWindow exists for one appInstance at a time.
+04.4. At most one ActiveWindow exists for one AppInstance at a time.
 
 04.5. If an ActiveWindow exists, it is the unique mutable tail of the
       Window sequence.
@@ -317,6 +323,9 @@ Upstream Documents:
        SafePointWindow.
 
 05.16. A transaction commit does not by itself create a SafePointWindow.
+
+05.17. SafePointWindow artifact and export representation is defined by
+       DA-25.
 
 
 ===============================================================================
@@ -438,6 +447,9 @@ Upstream Documents:
 
 07.16. A transaction abort does not by itself create an AbortedWindow.
 
+07.17. AbortedWindow artifact and export representation is defined by
+       DA-25.
+
 
 ===============================================================================
 08. FINALIZATION RULES
@@ -523,7 +535,7 @@ Upstream Documents:
 -----------------
 
 09.2.1. AtQuiescence means that SafePointWindow creation is attempted only
-        when no Orchestration Unit is active for the target appInstance.
+        when no Orchestration Unit is active for the target AppInstance.
 
 09.2.2. If AtQuiescence is requested while an Orchestration Unit is active,
         Turnix may queue the request until quiescence is reached.
@@ -720,7 +732,8 @@ Upstream Documents:
       corresponding span begin event is also included.
 
 11.10. Evidence carry-forward may reference older retained trace material
-       only to preserve internal consistency of the retained evidence closure.
+       only to preserve internal consistency of the retained evidence
+       closure.
 
 11.11. Trace incompleteness, pruning, corruption, or partial export remains
        explicit when it affects retained finalized evidence.
@@ -735,444 +748,48 @@ Upstream Documents:
 
 
 ===============================================================================
-12. WINDOWMANIFESTS
+12. RELATION TO WINDOW ARTIFACTS AND WORKFLOWS
 ===============================================================================
 
-12.1. A WindowManifest is an immutable manifest representing exactly one
-      finalized Window.
+12.1. DA-25 defines WindowManifest, WindowExport, Minimal Audit Bundle,
+      optional digest representation, partial export, missing material, and
+      offline inspection artifact semantics.
 
-12.2. Manifest immutability preserves representation stability only. It does
-      not by itself create authority.
+12.2. DA-26 defines equality modes, ComparisonResult, Replay, Resume, Retry,
+      and cross-session audit workflow semantics.
 
-12.3. Authority derives from the Window kind and retained roots represented,
-      not from the fact that a manifest exists.
+12.3. A Window finalization outcome does not by itself create a WindowExport.
 
-12.4. A WindowManifest never represents an ActiveWindow.
+12.4. A Window finalization outcome does not by itself create a Minimal
+      Audit Bundle.
 
-12.5. A WindowManifest is inspectable offline.
+12.5. A Window finalization outcome does not by itself perform comparison,
+      Replay, Resume, Retry, or audit workflow work.
 
-12.6. A WindowManifest is exactly one of:
-      - SafePointWindowManifest
-      - AbortedWindowManifest
+12.6. Artifact and workflow documents consume Window finalization semantics.
+      They do not redefine Window finalization.
 
-
-12.1 SAFEPOINTWINDOWMANIFEST
-----------------------------
-
-12.1.1. A SafePointWindowManifest includes:
-        - safePointWindowId
-        - windowType = SafePointWindow
-        - committedStateRoot
-
-12.1.2. committedStateRoot identifies the retained committed-state closure
-        for that SafePointWindow through the representation contracts
-        defined elsewhere.
-
-12.1.3. A SafePointWindowManifest may additionally include, by policy:
-        - traceRoot
-        - journalRoot
-        - revisionRoot
-        - mabRoot
-
-12.1.4. Optional roots are explicitly labeled as non-authoritative evidence
-        roots.
-
-12.1.5. Optional roots do not add authority to the SafePointWindowManifest.
-
-12.1.6. mabRoot, when present, is an evidence root only and does not add
-        authority to the SafePointWindowManifest.
-
-
-12.2 ABORTEDWINDOWMANIFEST
---------------------------
-
-12.2.1. An AbortedWindowManifest includes:
-        - abortedWindowId
-        - windowType = AbortedWindow
-
-12.2.2. The default AbortedWindowManifest form includes traceRoot.
-
-12.2.3. An AbortedWindowManifest may additionally include:
-        - journalRoot
-        - mabRoot
-
-12.2.4. An AbortedWindowManifest does not define committedStateRoot.
-
-12.2.5. If traceRoot is absent, the AbortedWindowManifest declares that
-        absence explicitly together with the reason category for that
-        absence.
-
-12.2.6. An AbortedWindowManifest does not become authoritative merely
-        because it is finalized and immutable.
+12.7. This document remains the authority for Window kind, Window ordering,
+      Window finalization, and Window-domain trace reason ownership.
 
 
 ===============================================================================
-13. WINDOWEXPORTS
+13. EXPLICITLY OPEN QUESTIONS
 ===============================================================================
 
-13.1. A WindowExport is a portable immutable serialization of one
-      WindowManifest closure.
-
-13.2. A WindowExport is derived from exactly one finalized WindowManifest.
-
-13.3. A WindowExport is exactly one of:
-      - SafePointWindowExport
-      - AbortedWindowExport
-
-13.4. Export does not add authority.
-
-13.5. Export does not convert non-authoritative evidence into authoritative
-      state.
-
-13.6. Export does not preserve transactional layer contents.
-
-13.7. Exported form changes portability, not semantics.
-
-13.8. Export is self-contained with respect to retained payloads required to
-      decode the exported closure, unless explicit partial-export policy is
-      used.
-
-13.9. If partial-export policy is used, missing material is explicit.
-
-13.10. Explicit missing material affects comparison outcomes where the
-       selected comparison mode requires that material.
-
-13.11. Export identity is not the same concept as committed-state identity.
-
-13.12. Export closure remains compatible with the payload and reachability
-       contracts defined elsewhere.
+13.1. OPEN questions include:
+      - exact Window finalization request API shape
+      - exact ActiveWindow retention policy shape
+      - exact finalized Window retention policy shape
+      - exact Window sequence storage representation
+      - exact Window-domain trace payload taxonomy
 
 
 ===============================================================================
-14. MINIMAL AUDIT BUNDLE (MAB)
+14. LOCKED SUMMARY
 ===============================================================================
 
-14.1. A Minimal Audit Bundle is a non-authoritative export artifact intended
-      to support audit, explanation, and offline inspection.
-
-14.2. A Minimal Audit Bundle is not:
-      - authoritative state
-      - a WindowManifest
-      - a restoration artifact
-      - a replay guarantee
-      - a completeness guarantee
-
-14.3. A Minimal Audit Bundle includes:
-      - one or more retained trace roots
-      - all retained trace events reachable within the retained trace
-        closure selected for the bundle from those roots
-      - metadata required to interpret retained trace reasons
-      - enough correlation metadata to relate retained evidence to relevant
-        appInstance, session, Orchestration Unit, Job, Window, or export
-        identity
-
-14.4. A Minimal Audit Bundle may additionally include:
-      - selected journal entries referenced by trace evidence
-      - selected committed-state excerpts as read-only evidence
-      - selected revision metadata without full value payloads
-      - selected Job lifecycle evidence
-      - selected Orchestration Unit lifecycle evidence
-
-14.5. Any committed-state excerpts included in a Minimal Audit Bundle are
-      labeled non-authoritative evidence excerpts.
-
-14.6. If journal material is included, the included journal material
-      preserves the journal metadata required to interpret that evidence
-      correctly, including retention class.
-
-14.7. A Minimal Audit Bundle does not include:
-      - transactional layers
-      - uncommitted mutations
-      - executable code
-      - capability implementations
-      - secrets or credentials
-      - live Job execution handles
-      - live Orchestration Unit execution handles
-
-14.8. A Minimal Audit Bundle preserves retained causal structure exactly for
-      the trace evidence it includes.
-
-14.9. Missing data is explicit.
-
-14.10. Missing data, pruning, corruption, and retained gaps do not silently
-       disappear behind presentation, packaging, or export format.
-
-14.11. Absence of data in a Minimal Audit Bundle does not imply absence of
-       behavior.
-
-14.12. Minimal Audit Bundle creation failure is trace-visible.
-
-14.13. Minimal Audit Bundle creation failure does not affect runtime state.
-
-14.14. Minimal Audit Bundle creation may occur while Turnix is running.
-
-14.15. Minimal Audit Bundle creation does not pause execution by default.
-
-14.16. Minimal Audit Bundle creation does not block orchestration by
-       default.
-
-
-===============================================================================
-15. OPTIONAL DIGEST SUPPORT AND COMPARISON ACCELERATORS
-===============================================================================
-
-15.1. Finalized artifacts may include optional digest fields.
-
-15.2. Optional digest fields are accelerators for comparison work.
-
-15.3. Optional digest fields are not identities.
-
-15.4. Optional digest fields do not add authority.
-
-15.5. A digest field is emitted only when canonical serialization rules for
-      that digest type are defined.
-
-15.6. If canonical serialization rules for a digest type are not defined,
-      that digest type is not emitted.
-
-15.7. If the relevant digest values match for the selected comparison mode,
-      tools may conclude Equal for that mode without deeper structural
-      comparison.
-
-15.8. If the relevant digest values differ for the selected comparison mode,
-      tools conclude NotEqual for that mode.
-
-15.9. If the relevant digest value is missing for the selected comparison
-      mode, tools either:
-      - compute the digest on demand
-      - or fall back to structural comparison
-
-15.10. Digest categories may include:
-       - stateDigest
-       - strictStateDigest
-       - evidenceDigest
-       - exportManifestDigest
-
-15.11. Each digest category corresponds to a distinct comparison scope.
-
-15.12. A digest category name is not reused for a different comparison
-       scope unless an explicit coordinated revision changes that meaning.
-
-15.13. Digest algorithms and canonical serialization details remain open
-       within the constraints of this document.
-
-
-===============================================================================
-16. OFFLINE INSPECTION
-===============================================================================
-
-16.1. WindowManifests, WindowExports, and Minimal Audit Bundles are
-      inspectable offline within the limits of their retained contents.
-
-16.2. Offline inspection may resolve retained payload references and decode
-      retained value representations without running Turnix orchestration
-      logic.
-
-16.3. Offline inspection does not require capability calls.
-
-16.4. Offline inspection does not require journal completeness.
-
-16.5. Offline inspection treats retained evidence as evidence only.
-
-16.6. Offline inspection does not promote evidence roots, evidence excerpts,
-      or exported packaging into authoritative state.
-
-16.7. Lack of orchestration at inspection time does not weaken the authority
-      boundary defined by the represented artifact.
-
-16.8. If retained material is partial, pruned, corrupt, or unavailable,
-      offline inspection reports that limitation explicitly.
-
-16.9. Offline inspection of retained Job evidence does not resume, cancel,
-      supersede, or otherwise control the original Job.
-
-16.10. Offline inspection of retained Orchestration Unit evidence does not
-       resume, cancel, supersede, or otherwise control the original
-       Orchestration Unit.
-
-
-===============================================================================
-17. REPLAY, RESUME, AND RETRY
-===============================================================================
-
-17.1. Replay is deterministic reconstruction of a retained SafePointWindow
-      state together with the retained causal story available for that
-      Window.
-
-17.2. Replay restores committed state within the restoration boundary
-      defined by [defined-in: DA-04 12].
-
-17.3. Replay does not imply re-running external effects.
-
-17.4. Replay does not imply deterministic reconstruction of ActiveWindow
-      activity that never became committed.
-
-17.5. Replay does not imply resuming retained Job execution.
-
-17.6. Resume is an attempt to continue execution after restoring a retained
-      SafePointWindow.
-
-17.7. Resume may involve:
-      - re-running in-flight orchestration units
-      - abandoning in-flight work
-      - retrying selected external calls
-      - starting new work from the restored committed boundary
-
-17.8. Resume is not deterministic in outcome.
-
-17.9. Resume is explicit and trace-visible.
-
-17.10. Resume does not reuse closed Job lifecycle identity.
-
-17.11. Retry is a new orchestration attempt for a previously failed,
-       incomplete, or intentionally retried action.
-
-17.12. Retry is modeled as new work.
-
-17.13. Retry is trace-visible.
-
-17.14. Retry is not implied by Replay.
-
-17.15. Retry does not reuse the previous jobId when the retried work is
-       represented as a Job.
-
-17.16. Replay, Resume, and Retry remain constrained by the committed-state
-       restoration boundary defined by [defined-in: DA-04 12].
-
-
-===============================================================================
-18. EQUALITY MODES AND COMPARISONRESULT
-===============================================================================
-
-18.1. Equality checks over finalized Windows, exports, or retained evidence
-      return ComparisonResult.
-
-18.2. ComparisonResult is an enum with exactly three values:
-      - Equal
-      - NotEqual
-      - NotComparable
-
-18.3. ComparisonResult is not represented as:
-      - boolean
-      - integer
-      - float
-      - an open-ended string set
-
-18.4. If an API language lacks enums, the API exposes either:
-      - a closed set of named constants
-      - a tagged union
-      - a sealed type
-      with exactly the three ComparisonResult values above
-
-18.5. A convenience boolean equality API is not provided.
-
-18.6. Any user-facing presentation distinguishes NotComparable from
-      NotEqual.
-
-18.7. Equality checks may be performed in multiple modes.
-
-18.8. Tools state explicitly which equality mode is used.
-
-18.8.1. Equality mode is part of the semantic claim made by the comparison
-        result.
-
-18.8.2. A comparison result without its mode is incomplete.
-
-18.9. Default equality mode is StateEquality unless another mode is
-      explicitly requested.
-
-
-18.1 EQUALITY MODES
--------------------
-
-18.1.1. StateEquality compares retained committed key/value pairs only.
-
-18.1.2. StateEquality ignores revision history.
-
-18.1.3. StrictStateEquality compares retained committed key/value pairs plus
-        retained revision history required by the strict mode.
-
-18.1.4. If required retained revision material is missing for one side
-        under StrictStateEquality, the result is NotComparable rather than
-        NotEqual.
-
-18.1.5. EvidenceEquality compares retained evidence closure such as trace,
-        journal, and audit-bundle material as included.
-
-18.1.6. EvidenceEquality does not imply state equality unless state modes
-        are also satisfied.
-
-18.1.7. ExportEquality compares exported closure as packaged, including
-        explicit missing or partial-export flags.
-
-18.1.8. ExportEquality is intended for verifying that two exports are the
-        same packaged artifact closure.
-
-18.1.9. NotComparable is returned when required retained material for the
-        selected mode is missing due to causes such as:
-        - policy pruning
-        - partial export
-        - corruption
-        - unsupported strict submode
-
-18.1.10. NotComparable is not treated as NotEqual by Turnix tooling.
-
-18.1.11. EvidenceEquality may compare retained Job lifecycle evidence when
-         such evidence is included by the selected evidence closure.
-
-18.1.12. EvidenceEquality may compare retained Orchestration Unit lifecycle
-         evidence when such evidence is included by the selected evidence
-         closure.
-
-18.1.13. Equality of retained Job lifecycle evidence does not imply resumed
-         or replayable Job execution.
-
-
-===============================================================================
-19. CROSS-SESSION AUDIT WORKFLOWS
-===============================================================================
-
-19.1. Audit workflows may operate across retained traces, retained
-      committed-state artifacts, retained revisions, and retained journal
-      evidence.
-
-19.2. Audit workflows may support:
-      - reconstructing retained decision chains
-      - inspecting retained state evolution
-      - correlating retained journal evidence with retained trace evidence
-      - correlating retained Job lifecycle evidence with retained trace
-        evidence
-      - correlating retained Orchestration Unit evidence with retained trace
-        evidence
-      - comparing retained finalized artifacts across sessions
-
-19.3. Audit workflows do not mutate state.
-
-19.4. Audit workflows do not require journal completeness.
-
-19.5. Audit workflows do not assume replayability.
-
-19.6. Audit workflows remain honest about retained gaps, pruned evidence,
-      and explicit incompleteness.
-
-
-===============================================================================
-20. EXPLICITLY OPEN QUESTIONS
-===============================================================================
-
-20.1. OPEN questions include:
-      - exact WindowManifest serialization format
-      - exact WindowExport serialization format
-      - exact Minimal Audit Bundle packaging format
-      - future audit-tooling user experience and visualization
-      - exact retained Job evidence presentation in audit tooling
-
-
-===============================================================================
-21. LOCKED SUMMARY
-===============================================================================
-
-21.1. LOCKED:
+14.1. LOCKED:
       - runtime history is grouped into ordered Windows
       - Windows are SafePointWindow, AbortedWindow, and ActiveWindow
       - safePointWindowId and abortedWindowId are shared Window identity
@@ -1202,40 +819,27 @@ Upstream Documents:
         explicit causal identity rather than timestamps alone
       - retained Job and Orchestration Unit evidence inside finalized Window
         evidence remains non-authoritative unless committed under DA-04
-      - WindowManifest is immutable and represents exactly one finalized
-        Window
-      - the default AbortedWindowManifest form includes traceRoot
-      - WindowExport is a portable immutable closure of one finalized
-        WindowManifest
-      - Minimal Audit Bundle is non-authoritative and preserves retained
-        causal structure for included evidence
-      - included journal material in a Minimal Audit Bundle preserves
-        required journal metadata, including retention class
-      - optional digests are comparison accelerators rather than identities
-      - offline inspection operates on retained contents without requiring
-        orchestration logic
-      - Replay, Resume, and Retry remain constrained by the restoration
-        boundary defined by [defined-in: DA-04 12]
-      - Replay does not imply resuming retained Job execution
-      - Retry does not reuse previous jobId when retried work is represented
-        as a Job
-      - equality modes are explicit and return ComparisonResult with exactly
-        Equal, NotEqual, and NotComparable
+      - DA-25 owns Window artifact, export, Minimal Audit Bundle, digest, and
+        offline inspection artifact semantics
+      - DA-26 owns equality, ComparisonResult, Replay, Resume, Retry, and
+        cross-session audit workflow semantics
+      - artifact and workflow documents consume Window finalization
+        semantics; they do not redefine Window finalization
 
-21.2. OPEN:
-      - concrete packaging and serialization formats
-      - future audit-tooling experience
-      - retained Job evidence presentation
+14.2. OPEN:
+      - exact Window finalization request API
+      - exact ActiveWindow and finalized Window retention policy shape
+      - exact Window sequence storage representation
+      - exact Window-domain trace payload taxonomy
 
 
 ===============================================================================
-END OF DA-08 - WINDOWS, HISTORICAL EVIDENCE, EXPORTS &
-OFFLINE COMPARISON
+END OF DA-08 - WINDOWS AND FINALIZED RUNTIME HISTORY
 ===============================================================================
 
 --- doc-meta ---
 DOC_ID: DA-08
 DOC_FILE: docs/design/DA-08_WINDOWS_HISTORICAL_EVIDENCE_EXPORTS_AND_OFFLINE_COMPARISON.txt
-DOC_REV: 7
-DOC_GIT: 58326a1
+DOC_REV: 8
+DOC_GIT: 68f7647
 ----------------
