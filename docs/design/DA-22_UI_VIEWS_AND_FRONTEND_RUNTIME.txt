@@ -10,8 +10,8 @@ Description:
 ------------
 Defines Turnix UI and View semantics as presentation, interaction, and
 frontend runtime surfaces that remain subordinate to kernel authority,
-RPC/channel boundaries, capability mediation, decision handling, and
-committed-state rules.
+execution adapter boundaries, RPC/channel boundaries, capability mediation,
+decision handling, and committed-state rules.
 
 This document owns the abstract UI/View model. Concrete browser assets,
 component layouts, JavaScript framework choices, and WebSocket frame flow
@@ -29,6 +29,7 @@ It defines:
 - View identity and lifecycle boundaries
 - relationship between Views, AppInstances, and frontend clients
 - frontend runtime authority boundaries
+- frontend runtime as a frontend adapter family under DA-23
 - UI pack and view pack participation boundaries
 - UI state, presentation state, and authoritative state separation
 - frontend event and command flow through RPC
@@ -41,6 +42,7 @@ It does NOT define:
 - concrete RPC envelope fields (see IS-01)
 - concrete WebSocket flow (see IS-02)
 - abstract RPC, channel, and transport semantics (see DA-21)
+- execution adapter boundary semantics (see DA-23)
 - trace event structure, trace DAG semantics, or span mechanics (see DA-03)
 - authoritative committed state or transaction semantics (see DA-04)
 - importing and module-loading boundaries (see DA-12)
@@ -70,6 +72,7 @@ Upstream Documents:
 - DA-19
 - DA-20
 - DA-21
+- DA-23
 - IS-01
 - IS-02
 
@@ -132,6 +135,10 @@ Downstream Documents:
 02.11. User interaction becomes meaningful only when the kernel accepts the
        corresponding command, decision, capability call, or RPC message.
 
+02.12. Frontend runtime code is adapter-executed frontend code under DA-23.
+
+02.13. Frontend adapter execution does not grant authority by itself.
+
 
 ===============================================================================
 03. UI, VIEW, AND FRONTEND CLIENT TERMS
@@ -146,29 +153,40 @@ Downstream Documents:
       browser tab, embedded frontend, developer tool, or future frontend
       host.
 
-03.4. One frontend client may bind to one View.
+03.4. Frontend runtime means the client-side execution environment that
+      presents a View and processes frontend interaction.
 
-03.5. Multiple frontend clients may bind to one View only when the View
+03.5. Frontend adapter means an Execution Adapter under DA-23 whose purpose
+      is presentation, interaction, or frontend runtime participation.
+
+03.6. Browser JavaScript frontend runtime is one frontend adapter family.
+
+03.7. One frontend client may bind to one View.
+
+03.8. Multiple frontend clients may bind to one View only when the View
       binding model and policy permit that behavior.
 
-03.6. One AppInstance may have zero, one, or multiple Views depending on the
+03.9. One AppInstance may have zero, one, or multiple Views depending on the
       runtime and policy model.
 
-03.7. A View may exist for a non-AppInstance surface such as:
-      - launcher
-      - pack manager
-      - configuration editor
-      - debugger
-      - audit viewer
-      - future management surface
+03.10. A View may exist for a non-AppInstance surface such as:
+       - launcher
+       - pack manager
+       - configuration editor
+       - debugger
+       - audit viewer
+       - future management surface
 
-03.8. View identity is distinct from AppInstance identity.
+03.11. View identity is distinct from AppInstance identity.
 
-03.9. View identity is distinct from frontend client identity.
+03.12. View identity is distinct from frontend client identity.
 
-03.10. Frontend client identity is distinct from user identity.
+03.13. Frontend client identity is distinct from user identity.
 
-03.11. Concrete cookie, token, and bootstrap details belong to
+03.14. Frontend adapter identity is distinct from View identity and frontend
+       client identity.
+
+03.15. Concrete cookie, token, and bootstrap details belong to
        implementation specifications.
 
 
@@ -202,20 +220,28 @@ Downstream Documents:
 
 04.8. View readiness does not imply pack activation success.
 
-04.9. View disconnect is a frontend or transport condition.
+04.9. View readiness does not imply frontend adapter execution success
+      beyond the View readiness condition itself.
 
-04.10. View disconnect does not automatically cancel Jobs.
+04.10. View disconnect is a frontend or transport condition.
 
-04.11. View disconnect does not automatically deactivate the AppInstance.
+04.11. View disconnect does not automatically cancel Jobs.
 
-04.12. View disconnect does not automatically discard authoritative state.
+04.12. View disconnect does not automatically fail a frontend adapter.
 
-04.13. If View disconnect affects accepted or in-flight work, DA-17 and
+04.13. View disconnect does not automatically deactivate the AppInstance.
+
+04.14. View disconnect does not automatically discard authoritative state.
+
+04.15. If View disconnect affects accepted or in-flight work, DA-17 and
        DA-19 govern policy and Job lifecycle outcomes.
 
-04.14. View closure releases the View runtime surface.
+04.16. If View disconnect affects frontend adapter lifecycle, DA-23 governs
+       adapter lifecycle classification.
 
-04.15. View closure does not by itself define whether AppInstance work
+04.17. View closure releases the View runtime surface.
+
+04.18. View closure does not by itself define whether AppInstance work
        committed, aborted, continued, detached, or was retried.
 
 
@@ -225,32 +251,37 @@ Downstream Documents:
 
 05.1. Frontend runtime code executes as presentation and interaction logic.
 
-05.2. Frontend runtime code does not gain direct authority over committed
+05.2. Frontend runtime code is adapter-executed code under DA-23.
+
+05.3. Frontend runtime code does not gain direct authority over committed
       state.
 
-05.3. Frontend runtime code does not mutate files directly as a Turnix
+05.4. Frontend runtime code does not mutate files directly as a Turnix
       authority path.
 
-05.4. Frontend runtime code does not bypass RPC, capability, policy,
-      transaction, or persistence boundaries.
+05.5. Frontend runtime code does not bypass execution adapter, RPC,
+      capability, policy, transaction, or persistence boundaries.
 
-05.5. Frontend runtime code sends requests, emits events, subscribes to
+05.6. Frontend runtime code sends requests, emits events, subscribes to
       updates, and presents received state through DA-21 RPC semantics.
 
-05.6. Kernel-side handlers decide whether a frontend request is valid.
+05.7. Kernel-side handlers decide whether a frontend request is valid.
 
-05.7. Kernel-side handlers decide whether a frontend request crosses a
-      capability, policy, persistence, or mutation boundary.
+05.8. Kernel-side handlers decide whether a frontend request crosses a
+      capability, policy, persistence, adapter, or mutation boundary.
 
-05.8. A frontend command is not authoritative merely because the user
+05.9. A frontend command is not authoritative merely because the user
       clicked, typed, dragged, confirmed, or otherwise interacted with the
       UI.
 
-05.9. Frontend code may hold presentation-local state.
+05.10. Frontend code may hold presentation-local state.
 
-05.10. Presentation-local state does not become committed state unless a
+05.11. Presentation-local state does not become committed state unless a
        kernel-mediated mutation commits it under DA-04 and related
        documents.
+
+05.12. Frontend adapter execution authorization is distinct from capability
+       permission for frontend-originated requests.
 
 
 ===============================================================================
@@ -263,7 +294,8 @@ Downstream Documents:
 06.2. View packs remain packs.
 
 06.3. View packs remain subject to discovery, identity, resolution,
-      dependency, import, activation, visibility, and capability rules.
+      dependency, import, adapter selection, execution authorization,
+      activation, visibility, and capability rules.
 
 06.4. A View pack does not gain authority merely because it renders visible
       UI.
@@ -275,15 +307,17 @@ Downstream Documents:
 
 06.7. View pack activation remains constrained by DA-14.
 
-06.8. View pack interaction with backend behavior remains mediated through
+06.8. View pack execution remains constrained by DA-23.
+
+06.9. View pack interaction with backend behavior remains mediated through
       RPC, services, capabilities, or other Turnix-defined surfaces.
 
-06.9. View pack code must not assume another pack is activated merely
-      because that pack appears in the UI.
+06.10. View pack code must not assume another pack is activated merely
+       because that pack appears in the UI.
 
-06.10. UI extension points are explicit.
+06.11. UI extension points are explicit.
 
-06.11. UI extension points do not imply arbitrary mutation authority.
+06.12. UI extension points do not imply arbitrary mutation authority.
 
 
 ===============================================================================
@@ -324,6 +358,9 @@ Downstream Documents:
 
 07.11. Frontend-side validation does not replace kernel validation.
 
+07.12. Frontend-side validation does not replace capability permission,
+       execution authorization, or policy evaluation.
+
 
 ===============================================================================
 08. FRONTEND EVENT AND COMMAND FLOW
@@ -350,24 +387,27 @@ Downstream Documents:
 08.5. If the interaction invokes a capability, DA-16 governs capability
       mediation and permission semantics.
 
-08.6. If the interaction answers a decision point, DA-17 governs decision
+08.6. If the interaction crosses an adapter boundary, DA-23 governs adapter
+      boundary semantics.
+
+08.7. If the interaction answers a decision point, DA-17 governs decision
       handling.
 
-08.7. If the interaction controls a Job, DA-19 governs Job lifecycle
+08.8. If the interaction controls a Job, DA-19 governs Job lifecycle
       semantics.
 
-08.8. If the interaction controls debugger behavior, DA-18 governs debugger
+08.9. If the interaction controls debugger behavior, DA-18 governs debugger
       semantics.
 
-08.9. If the interaction mutates committed state, DA-04 governs commit
-      semantics.
+08.10. If the interaction mutates committed state, DA-04 governs commit
+       semantics.
 
-08.10. If the interaction persists configuration, DA-06 and DA-17 govern
+08.11. If the interaction persists configuration, DA-06 and DA-17 govern
        configuration and policy scope behavior.
 
-08.11. UI event order does not by itself define committed-state order.
+08.12. UI event order does not by itself define committed-state order.
 
-08.12. Committed-state order is defined by the relevant kernel-owned commit
+08.13. Committed-state order is defined by the relevant kernel-owned commit
        and orchestration boundaries.
 
 
@@ -395,8 +435,10 @@ Downstream Documents:
       - allow and deny
       - for-this-run and remember
       - soft and hard decisions
+      - execution authorization and capability permission
       - capability permission decisions and work-lifecycle policy decisions
       - transport timeout and Job timeout
+      - transport disconnect and adapter failure
       - cancellation and supersession
       - failure and Superseded
 
@@ -428,12 +470,15 @@ Downstream Documents:
 
 10.7. Debugger UI does not bypass policy decisions when policy is required.
 
-10.8. Debugger UI distinguishes staged, committed, unavailable, and
+10.8. Debugger UI does not bypass adapter boundaries when debugger UI code
+      is frontend adapter code.
+
+10.9. Debugger UI distinguishes staged, committed, unavailable, and
       unresolved state when those distinctions are surfaced.
 
-10.9. Debugger UI does not present paused-at-safe-point Jobs as terminal.
+10.10. Debugger UI does not present paused-at-safe-point Jobs as terminal.
 
-10.10. Debugger UI does not present Superseded as failure.
+10.11. Debugger UI does not present Superseded as failure.
 
 
 ===============================================================================
@@ -449,7 +494,7 @@ Downstream Documents:
       themselves.
 
 11.4. Presentation transforms do not change capability, permission,
-      decision, Job, or debugging semantics.
+      decision, Job, adapter, or debugging semantics.
 
 11.5. If a presentation transform is persisted as user preference, that
       persistence follows configuration and policy rules defined elsewhere.
@@ -487,7 +532,9 @@ Downstream Documents:
 12.9. View disconnect does not silently cancel, supersede, detach, retain,
       or discard accepted work.
 
-12.10. Those outcomes require policy or lifecycle authority defined in the
+12.10. View disconnect does not silently fail frontend adapter execution.
+
+12.11. Those outcomes require policy or lifecycle authority defined in the
        owning documents.
 
 
@@ -515,6 +562,7 @@ Downstream Documents:
 13.3. UI trace evidence records enough context, when available, to explain:
       - viewId
       - frontend client identity
+      - frontend adapter identity when applicable
       - appInstanceId when applicable
       - active pack identity when applicable
       - active save identity when applicable
@@ -527,22 +575,26 @@ Downstream Documents:
 
 13.4. UI trace evidence does not replace RPC trace evidence.
 
-13.5. UI trace evidence does not replace decision trace evidence.
+13.5. UI trace evidence does not replace adapter trace evidence.
 
-13.6. UI trace evidence does not replace capability, Job, debugger, or
+13.6. UI trace evidence does not replace decision trace evidence.
+
+13.7. UI trace evidence does not replace capability, Job, debugger, or
       AppInstance trace evidence.
 
-13.7. DA-03 defines the tracing substrate.
+13.8. DA-03 defines the tracing substrate.
 
-13.8. DA-21 defines RPC trace correlation semantics.
+13.9. DA-21 defines RPC trace correlation semantics.
 
-13.9. DA-17 defines decision trace obligations.
+13.10. DA-23 defines adapter-domain trace obligations.
 
-13.10. DA-18 defines debugger trace obligations.
+13.11. DA-17 defines decision trace obligations.
 
-13.11. DA-19 defines Job lifecycle trace obligations.
+13.12. DA-18 defines debugger trace obligations.
 
-13.12. DA-20 defines AppInstance trace obligations.
+13.13. DA-19 defines Job lifecycle trace obligations.
+
+13.14. DA-20 defines AppInstance trace obligations.
 
 
 ===============================================================================
@@ -606,8 +658,8 @@ Downstream Documents:
 14.15. UI-domain trace reasons describe UI/View behavior only.
 
 14.16. UI-domain trace reasons do not define capability outcome, Job
-       terminal outcome, decision outcome, debugger outcome, or committed-
-       state mutation outcome.
+       terminal outcome, decision outcome, debugger outcome, adapter outcome,
+       or committed-state mutation outcome.
 
 
 ===============================================================================
@@ -617,6 +669,7 @@ Downstream Documents:
 15.1. Implementation specifications may define:
        - concrete browser bootstrap flow
        - concrete View registry behavior
+       - concrete frontend adapter binding
        - concrete frontend asset loading
        - concrete component mounting
        - concrete frontend state synchronization
@@ -626,9 +679,11 @@ Downstream Documents:
 
 15.2. Implementation specifications do not redefine:
        - UI as non-authoritative presentation
+       - frontend runtime as adapter-executed frontend code
        - View identity and lifecycle meaning
        - kernel ownership of decisions
-       - RPC, capability, Job, debugger, and committed-state boundaries
+       - RPC, adapter, capability, Job, debugger, and committed-state
+         boundaries
 
 15.3. If a frontend implementation requires a semantic rule not defined
       here, this document is updated first or alongside that implementation
@@ -641,6 +696,8 @@ Downstream Documents:
 
 16.1. The following are not supported:
       - frontend-only authoritative mutation
+      - frontend adapter execution treated as authority by itself
+      - UI-controlled bypass of execution adapter boundaries
       - UI-controlled bypass of capability mediation
       - UI-controlled bypass of decision handling
       - UI-controlled bypass of persistence authority
@@ -649,6 +706,8 @@ Downstream Documents:
       - UI-created hidden activation or pack-loading behavior
       - presenting transport timeout as Job timeout
       - presenting Job timeout as transport timeout
+      - presenting transport disconnect as adapter failure
+      - presenting adapter failure as transport disconnect
       - presenting Superseded as failure
       - treating visible state as authoritative merely because it is visible
 
@@ -660,9 +719,11 @@ Downstream Documents:
 17.1. OPEN questions include:
       - exact viewId representation
       - exact frontend client identity representation
+      - exact frontend adapter identity representation
       - exact View registry implementation contract
       - exact View lifecycle event envelope
       - exact browser bootstrap implementation specification
+      - exact frontend adapter binding implementation
       - exact frontend state synchronization strategy
       - exact UI extension-point catalog
       - exact multi-client View behavior
@@ -677,29 +738,34 @@ Downstream Documents:
 18.1. LOCKED:
       - UI is presentation and interaction, not authority by itself
       - View is a kernel-bound frontend runtime surface
+      - frontend runtime code is adapter-executed frontend code under DA-23
       - View identity is distinct from AppInstance identity
       - View identity is distinct from frontend client identity
+      - frontend adapter identity is distinct from View identity and frontend
+        client identity
       - frontend runtime code does not directly mutate committed state
-      - frontend runtime code does not bypass RPC, capability, policy,
-        transaction, or persistence boundaries
-      - View packs remain subject to normal pack, import, activation,
-        visibility, and capability rules
+      - frontend runtime code does not bypass execution adapter, RPC,
+        capability, policy, transaction, or persistence boundaries
+      - View packs remain subject to normal pack, import, adapter selection,
+        execution authorization, activation, visibility, and capability rules
       - presentation state is non-authoritative unless explicitly persisted
         through Turnix-managed state or configuration
       - frontend-side validation does not replace kernel validation
+      - frontend-side validation does not replace execution authorization,
+        capability permission, or policy evaluation
       - decision presentation is not decision ownership
       - debugger UI does not own debugger semantics
       - accessibility and presentation transforms do not mutate
         authoritative state by themselves
       - View disconnect does not silently cancel, supersede, detach, retain,
-        or discard accepted work
+        discard accepted work, or fail frontend adapter execution
       - UI-domain trace reason identifiers are owned by DA-22
-      - UI trace evidence does not replace RPC, decision, capability, Job,
-        debugger, or AppInstance trace evidence
+      - UI trace evidence does not replace RPC, adapter, decision,
+        capability, Job, debugger, or AppInstance trace evidence
 
 18.2. OPEN:
-      - concrete View registry, frontend bootstrap, state sync, UI extension,
-        and component implementation details
+      - concrete View registry, frontend bootstrap, frontend adapter binding,
+        state sync, UI extension, and component implementation details
 
 
 ===============================================================================
@@ -709,6 +775,6 @@ END OF DA-22 - UI, VIEWS & FRONTEND RUNTIME
 --- doc-meta ---
 DOC_ID: DA-22
 DOC_FILE: docs/design/DA-22_UI_VIEWS_AND_FRONTEND_RUNTIME.txt
-DOC_REV: 2
+DOC_REV: 3
 DOC_GIT: 0000000
 ----------------
