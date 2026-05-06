@@ -27,6 +27,154 @@ Authority and priority
 5. AI helper files define reusable operational guidance only.
 6. If this file conflicts with indexed documents, indexed documents win.
 
+Repository connector retrieval safety
+-------------------------------------
+GitHub connector operations that return repository text can return truncated,
+malformed, incomplete, stale, or not-provably-complete content.
+
+This applies to any long repository text returned by the connector, including
+files, blobs, diffs, patches, previews, issue bodies, pull request bodies,
+comments, review comments, commit messages, and similar text sources.
+
+This also applies to this bootstrap file itself while it is being loaded. The
+assistant must not assume that AI_WORKFLOW_BOOTSTRAP was fully read merely
+because the visible response begins with this file or includes these retrieval-
+safety rules.
+
+At minimum, GitHub connector fetch and fetch_file operations are known to be
+capable of returning truncated file previews.
+
+Some connector responses include a Resource uri. A Resource uri is a handle for
+resource-range loading through the resource read API.
+
+When fetch_file returns a Resource uri and the visible file preview is
+truncated, the assistant SHOULD use the resource read API to retrieve the full
+file content by line ranges before classifying the source as failed.
+
+If resource-range reads retrieve the full requested file, the file identity
+matches the requested file, expected closing content or structured boundaries
+are present, and no more lines remain, the retrieval may be classified COMPLETE
+via resource read.
+
+If a requested file was already fetched earlier in the same task and a previous
+Resource uri is available, the assistant SHOULD prefer reading that previous
+Resource uri again before issuing another fetch_file request.
+
+However, Resource uri content is not trusted merely because the uri string
+matches a previously seen uri.
+
+Every resource read must be identity-checked against the requested source.
+Identity checks include, when applicable:
+- expected document title
+- expected DOC_ID
+- expected DOC_FILE
+- expected closing marker
+- expected sha or revision identity
+- expected file format or structured boundary
+
+If a reused Resource uri returns content that does not match the requested
+file, the assistant MUST treat that resource read as stale or aliased content.
+
+The assistant MUST NOT replace the requested file content with mismatched
+resource content.
+
+When stale or aliased content is detected, the assistant retries the source
+path by calling fetch_file again, locating the new Resource uri, and attempting
+resource-range loading from that new uri.
+
+If the new Resource uri cannot be read, returns no content, returns unrelated
+content, or still cannot prove the requested file complete, the source is
+classified STALE.
+
+Every GitHub connector retrieval used for document, code, audit, review, patch
+planning, or repository write work is classified as exactly one of:
+
+- COMPLETE
+- TRUNCATED
+- MALFORMED
+- MISSING
+- STALE
+- NOT PROVEN COMPLETE
+
+COMPLETE means the connector returned the full requested source content, no
+truncation marker or partial-line report is present, expected closing content
+or structured boundaries are present, and any required revision identity came
+from the same successful connector response.
+
+COMPLETE via resource read means the connector returned a Resource uri and
+resource-range loading retrieved the full requested source content, proved the
+source identity, reached the expected end or structured boundary, and reported
+that no more lines remain.
+
+TRUNCATED means the connector reports fewer shown lines than total lines, emits
+a truncation marker, or visibly ends before the requested source is complete.
+
+MALFORMED means the structured response is incomplete, invalid, internally
+inconsistent, missing expected fields, or missing expected closing boundaries.
+
+MISSING means the connector reports that the requested source does not exist or
+cannot be found.
+
+STALE means a Resource uri is unreadable, expired, aliased, resolves to
+unrelated content, resolves to content whose identity cannot be matched to the
+requested source, or cannot be used to prove the requested file complete after
+the retry path has been attempted.
+
+NOT PROVEN COMPLETE means the connector returned content but did not expose
+enough information to prove that the returned content is complete.
+
+Only COMPLETE permits authoritative read use.
+
+Only COMPLETE with the required connector update sha or equivalent revision
+identity permits repository file write use.
+
+If a retrieval is TRUNCATED and a Resource uri is available, the assistant
+tries resource-range loading before stopping.
+
+If a retrieval is MALFORMED, MISSING, STALE, or NOT PROVEN COMPLETE, or remains
+TRUNCATED after resource loading is attempted, the assistant treats the
+affected source as not loaded for authoritative document, code, audit, review,
+patch planning, or repository write work.
+
+The assistant does not treat partial snippets, search results, rendered
+previews, web copies, local memory, cached memory, inferred reconstruction,
+or user-independent reconstruction as authoritative source text.
+
+The assistant does not use unrelated workaround retrieval for the affected
+source.
+
+Permitted completion retrieval includes resource-range reads from the Resource
+uri returned by the connector response, provided the requested source identity
+is verified.
+
+Forbidden workaround retrieval includes repository search results, web
+retrieval, rendered previews, excerpts, snippets, cached memory, inferred
+reconstruction, mismatched Resource uri content, stale Resource uri content, or
+any sha, revision identity, or update token obtained outside the same COMPLETE
+connector response or verified COMPLETE resource-read path that supplied the
+authoritative content.
+
+For repository file edits, complete authoritative file state requires complete
+file content and the connector update sha or equivalent revision identity from
+the same COMPLETE connector response or verified COMPLETE resource-read path.
+
+If complete authoritative content or the connector update sha is unavailable,
+the assistant stops the repository write path for that source, informs the user
+that the GitHub connector did not provide complete authoritative source state,
+and asks the user to provide the full source content or perform the edit
+manually.
+
+If the source is classified STALE, the assistant stops, tells the user that the
+resource handle could not be trusted or could not be matched to the requested
+source, and asks the user to provide the full source content manually.
+
+When prepared changes cannot be committed because complete authoritative source
+state or the connector update sha is unavailable, the assistant prints the
+updated file content or patch for manual user application.
+
+When the assistant stops for this failure, the user performs any commit
+manually.
+
 Default loading rules
 ---------------------
 For any Turnix documentation or code task, first read:
@@ -167,82 +315,6 @@ If a referenced DOC_ID or authority source cannot be resolved through CMR-04:
 - do not substitute a similar document
 - ask for clarification or report that the reference is missing
 
-Repository connector retrieval failures
----------------------------------------
-GitHub connector operations that return repository text can return truncated,
-malformed, incomplete, or not-provably-complete content.
-
-This applies to any long repository text returned by the connector, including
-files, blobs, diffs, patches, previews, issue bodies, pull request bodies,
-comments, review comments, commit messages, and similar text sources.
-
-At minimum, GitHub connector fetch and fetch_file operations are known to be
-capable of returning truncated file content.
-
-Every GitHub connector retrieval used for document, code, audit, review, patch
-planning, or repository write work is classified as exactly one of:
-
-- COMPLETE
-- TRUNCATED
-- MALFORMED
-- MISSING
-- NOT PROVEN COMPLETE
-
-COMPLETE means the connector returned the full requested source content, no
-truncation marker or partial-line report is present, expected closing content
-or structured boundaries are present, and any required revision identity came
-from the same successful connector response.
-
-TRUNCATED means the connector reports fewer shown lines than total lines, emits
-a truncation marker, or visibly ends before the requested source is complete.
-
-MALFORMED means the structured response is incomplete, invalid, internally
-inconsistent, missing expected fields, or missing expected closing boundaries.
-
-MISSING means the connector reports that the requested source does not exist or
-cannot be found.
-
-NOT PROVEN COMPLETE means the connector returned content but did not expose
-enough information to prove that the returned content is complete.
-
-Only COMPLETE permits authoritative read use.
-
-Only COMPLETE with the required connector update sha or equivalent revision
-identity permits repository file write use.
-
-If a retrieval is TRUNCATED, MALFORMED, MISSING, or NOT PROVEN COMPLETE, the
-assistant treats the affected source as not loaded for authoritative document,
-code, audit, review, patch planning, or repository write work.
-
-The assistant does not treat partial snippets, search results, rendered
-previews, web copies, local memory, cached memory, inferred reconstruction, 
-or user-independent reconstruction as authoritative source text.
-
-The assistant does not use workaround retrieval for the affected source.
-
-Forbidden workaround retrieval includes repository search results, web
-retrieval, rendered previews, excerpts, snippets, cached memory, inferred
-reconstruction, resource-range reads from a truncated response, or any sha,
-revision identity, or update token obtained outside the same COMPLETE connector
-response that supplied the authoritative content.
-
-For repository file edits, complete authoritative file state requires complete
-file content and the connector update sha or equivalent revision identity from
-the same COMPLETE connector response.
-
-If complete authoritative content or the connector update sha is unavailable,
-the assistant stops the repository write path for that source, informs the user
-that the GitHub connector did not provide complete authoritative source state,
-and asks the user to provide the full source content or perform the edit
-manually.
-
-When prepared changes cannot be committed because complete authoritative source
-state or the connector update sha is unavailable, the assistant prints the
-updated file content or patch for manual user application.
-
-When the assistant stops for this failure, the user performs any commit
-manually.
-
 Working behavior
 ----------------
 Maintain a distinction between:
@@ -315,6 +387,6 @@ It does not define Turnix semantics.
 DOC_ID: AI_WORKFLOW_BOOTSTRAP
 DOC_FILE: docs/AI_WORKFLOW_BOOTSTRAP.txt
 DOC_REV: 5
-DOC_GIT: dbefd27
+DOC_GIT: e89c73a
 DOC_STATUS: STABLE
 ----------------------
