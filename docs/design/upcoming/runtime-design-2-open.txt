@@ -3,106 +3,181 @@ Runtime design 2 open question map
 
 Purpose
 -------
-This file captures open questions identified during the runtime design 2
-conversation pass.
+This file captures open questions and follow-up areas identified during the
+runtime design 2 conversation pass.
 
 This file is a planning artifact only. It is not an authoritative Turnix
 specification document and does not override indexed CMR, DD, DA, ODA, or IS
 documents.
 
-Loaded context used for this pass
----------------------------------
-- AI_WORKFLOW_BOOTSTRAP
-- CMR-04
+Status of this planning map
+---------------------------
+This file has been updated after promotion of the first runtime-host documents.
+
+Promoted or created during this pass:
+- DA-28 Runtime Host, Workspace Ownership and Command Surface
+- IS-03 Workspace Ownership and Host Locking
+- IS-04 Runtime Host Command Surface
+- IS-05 Runtime Host Startup Modes
+- IS-06 Runtime Host LAN and Client Connections
+
+Updated for alignment during this pass:
+- CMR-04 Canonical Index - Turnix Specification
+- DA-01 Project Invariants & Philosophy
+- DA-02 Platform Core, Contract Boundaries & Implementation Independence
 - DA-20 AppInstance Lifecycle & Runtime Identity
 - DA-21 RPC, Channels, Transports & Message Flow
 - DA-22 UI, Views & Frontend Runtime
 - DA-23 Execution Boundaries, Adapters and Code Runtimes
+- DA-24 Orchestration Units and Mutation Authority
 - DA-27 Adapter Lifecycle, Trust and Traceability
 
-Primary gap categories
-----------------------
+Resolved or promoted categories
+-------------------------------
 
 01. Runtime host ownership
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
-Open questions:
-- Which document owns the full Runtime Host model?
-- What is runtime host identity?
-- What is workspace identity?
-- What is the relationship between Kernel, runtime host, workspace, and process?
-- Does one runtime host own exactly one workspace?
-- Can one process host multiple runtime hosts?
-- Can one runtime host own multiple workspaces?
-- What startup modes exist?
-- What does no-argument startup do?
-- What is interactive mode?
-- What is one-shot command mode?
-- What is serve mode?
-- What is connect mode?
-- What is dev mode, if any?
-- What is runtime host shutdown behavior?
-- What is runtime host restart behavior?
-- What trace reason identifiers are owned by runtime host lifecycle?
-- Does runtime host lifecycle have its own DA or an IS constrained by DA-20,
-  DA-21, DA-23, and DA-27?
+Promoted owner:
+- DA-28 Runtime Host, Workspace Ownership and Command Surface
 
-Likely owner:
-- Future Runtime Host / Workspace Ownership DA or IS.
+Resolved direction:
+- RuntimeHost is the running Turnix host boundary.
+- RuntimeHost identity is distinct from Kernel, workspace, AppInstance,
+  SavePack, View, adapter, RPC, Job, Orchestration Unit, transaction, and
+  decision identity.
+- RuntimeHost does not replace Kernel authority.
+- RuntimeHost binds workspace or runtime scope and exposes controlled entry
+  surfaces.
+- RuntimeHost lifecycle and RuntimeHost-domain trace reason ownership belong
+  to DA-28.
+
+Remaining follow-up:
+- exact runtimeHostId representation
+- exact workspace identity representation
+- exact process identity representation
+- exact KernelContext identity representation
+- exact host shutdown policy for active AppInstances
+- exact retained work behavior after host stop, disconnect, or crash
+- exact service, daemon, container, or virtual-machine wrapper behavior
 
 02. Runtime host command surface
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Open questions:
-- What is the exact CLI command surface?
-- Is `turnix` with no arguments an interactive shell?
-- Does `turnix run <appPack>` start a local runtime host when none exists?
-- Does `turnix run <appPack>` connect to an existing host when one owns the
-  workspace?
-- What does `turnix serve` mean?
-- What does `turnix connect <address>` mean?
-- What does `turnix list` list by default?
-- What commands list AppPacks?
-- What commands list SavePacks?
-- What commands list running AppInstances?
-- What commands inspect runtime host state?
-- What commands inspect trace evidence?
-- What commands expose policy decisions?
-- Which commands are one-shot and exit?
-- Which commands keep a runtime host alive?
-- Which commands are clients into an existing host?
-- How does a CLI command fail when a workspace is already owned but the host is
-  unreachable?
-- Does CLI command syntax belong to an implementation specification or a future
-  runtime-host design area?
+Promoted owners:
+- DA-28 Runtime Host, Workspace Ownership and Command Surface
+- IS-04 Runtime Host Command Surface
 
-Likely owner:
-- Future Runtime Host command surface IS, constrained by DA-27.
+Resolved direction:
+- Command surfaces are entry surfaces and are not Kernel authority by
+  themselves.
+- Command receipt, classification, acceptance, dispatch, completion, failure,
+  and cancellation are distinct.
+- Command categories are semantic categories, not final CLI syntax.
+- Command handling uses shared Kernel-mediated runtime operations.
+
+Remaining follow-up:
+- exact CLI syntax
+- exact parser shape
+- exact commandId representation
+- exact runtimeOperationId representation
+- exact command result JSON schema
+- exact terminal output format
+- exact script-stable output mode, including possible JSON output
+- exact command extension mechanism
+- exact command-to-Job handle surface
+- exact command-to-subscription surface
+- exact retained command result behavior
 
 03. Workspace ownership and locking
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Open questions:
-- Which document owns workspace locking?
-- Which document owns writable SavePack lock implementation?
-- Is workspace locking owned by root system, persistence, runtime host, or a
-  separate implementation specification?
-- What file, socket, process, or host marker represents workspace ownership?
-- What happens when a second runtime host starts against an owned workspace?
-- What happens when an existing owner crashed and left stale lock evidence?
-- How is stale lock recovery authorized?
-- How is stale lock recovery traced?
-- How is workspace ownership represented when Kernel runs on a LAN machine?
-- How is workspace ownership represented for containerized or virtual-machine
-  deployment?
-- Can a workspace be opened read-only by another host?
-- Can a SavePack be inspected read-only while another AppInstance owns it
-  writable?
-- Can multiple SavePacks in one workspace be owned by different AppInstances?
-- Can multiple runtime hosts share one workspace when they own disjoint
-  SavePacks, or is that explicitly unsupported?
+Promoted owners:
+- DA-28 Runtime Host, Workspace Ownership and Command Surface
+- IS-03 Workspace Ownership and Host Locking
 
-Likely owner:
-- Future Workspace Ownership / Host Locking IS, constrained by DA-07 and DA-20.
+Resolved direction:
+- Writable workspace ownership is RuntimeHost-level ownership.
+- A writable workspace is owned by at most one RuntimeHost at a time unless a
+  later authoritative multi-host design defines another mode.
+- Initial ownership record path is:
+  .turnix/runtime-host/owner.json
+- Existing ownership evidence is not silently overwritten.
+- Stale-owner recovery is explicit, policy-governed, and trace-visible.
+- Read-only inspection does not create writable workspace ownership.
 
-04. SavePack generator API
+Remaining follow-up:
+- exact workspaceId representation
+- exact runtimeHostId representation
+- exact hostMachineId representation
+- exact userId representation
+- exact heartbeat interval
+- exact heartbeat stale threshold
+- exact process liveness behavior per operating system
+- exact stale-owner recovery prompt text
+- exact ownership record migration behavior
+- exact optional read-only inspection output location
+- exact ownership JSON schema publication format
+
+04. Runtime host startup modes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Promoted owners:
+- DA-28 Runtime Host, Workspace Ownership and Command Surface
+- IS-05 Runtime Host Startup Modes
+
+Resolved direction:
+- Startup modes are entry workflows over shared Kernel-mediated runtime
+  operations.
+- Startup mode selection does not define independent runtime semantics.
+- Defined startup mode categories are interactiveHost, oneShotCommand, serve,
+  connect, test, and launcher.
+- Startup modes that require writable workspace ownership use IS-03.
+- Startup modes that receive or dispatch commands use IS-04.
+
+Remaining follow-up:
+- exact startupRequestId representation
+- exact startup result JSON schema
+- exact mapping from CLI syntax to startupMode
+- exact desktop launcher startup request representation
+- exact service or daemon wrapper startup request representation
+- exact process exit code mapping for startup results
+- exact detached work behavior for oneShotCommand mode
+- exact serve mode local bind defaults
+- exact connect mode host discovery behavior
+- exact startup-mode extension mechanism
+
+05. Runtime host LAN and client connections
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Promoted owners:
+- DA-28 Runtime Host, Workspace Ownership and Command Surface
+- IS-06 Runtime Host LAN and Client Connections
+
+Resolved direction:
+- LAN exposure is explicit and policy-governed.
+- localOnly is the default bind scope unless a later implementation
+  specification defines a different default without weakening DA-28.
+- lanExplicit is never selected silently.
+- remoteExplicit is not enabled by IS-06.
+- Client connection is not command acceptance, capability permission, user
+  identity, or state authority.
+- Pairing and authentication are distinct.
+
+Remaining follow-up:
+- exact clientConnectionId representation
+- exact entry surface identity representation
+- exact local bind behavior
+- exact LAN bind behavior
+- exact remote endpoint summary format
+- exact pairing flow
+- exact authentication flow
+- exact token or certificate format
+- exact client reconnect flow
+- exact retained result retrieval after reconnect
+- exact browser bootstrap interaction
+- exact firewall guidance
+- exact transport-specific connection schema
+
+Active open categories
+----------------------
+
+06. SavePack generator API
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 Open questions:
 - How does an AppPack declare SavePack generation behavior?
@@ -129,7 +204,7 @@ Likely owner:
 - Future SavePack Generator API IS, constrained by DA-20, DA-23, DA-14, DA-04,
   DA-06, and DA-07.
 
-05. SavePack compatibility validation
+07. SavePack compatibility validation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Open questions:
 - What schema records AppPack compatibility in a SavePack?
@@ -150,7 +225,7 @@ Likely owner:
 - Future SavePack compatibility IS, constrained by DA-20, DA-04, DA-06, DA-09,
   DA-10, DA-11, and DA-13.
 
-06. Executable artifact declaration schema
+08. Executable artifact declaration schema
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Open questions:
 - What manifest field declares executable artifacts?
@@ -172,10 +247,10 @@ Open questions:
 - How does declaration relate to DA-14 activation lifecycle?
 
 Likely owner:
-- Future pack manifest / executable artifact IS, constrained by DA-12, DA-14,
-  DA-23, and DA-27.
+- Future executable artifact declaration IS or pack manifest IS, constrained by
+  DA-12, DA-14, DA-23, and DA-27.
 
-07. Adapter binding schema
+09. Adapter binding schema
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 Open questions:
 - Does a pack declare `adapter`, `runtime`, `environment`, or another binding
@@ -196,7 +271,7 @@ Open questions:
 Likely owner:
 - Future adapter binding IS, constrained by DA-23 and DA-27.
 
-08. PackContext API
+10. PackContext API
 ~~~~~~~~~~~~~~~~~~~
 Open questions:
 - What is the concrete PackContext API shape?
@@ -225,7 +300,7 @@ Likely owner:
 - Future PackContext API IS, constrained by DA-23, DA-21, DA-16, DA-19, DA-20,
   DA-22, DA-24, and DA-27.
 
-09. Direct-call and in-process RPC optimization
+11. Direct-call and in-process RPC optimization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Open questions:
 - What is an in-process RPC channel?
@@ -246,9 +321,10 @@ Open questions:
 - What makes a direct call invalid as pack-code authority?
 
 Likely owner:
-- Future in-process RPC / direct-call flow IS, constrained by DA-21 and DA-23.
+- Future in-process RPC / direct-call flow IS, constrained by DA-21, DA-23,
+  DA-24, and DA-27.
 
-10. Python adapter contracts
+12. Python adapter contracts
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Open questions:
 - What is the exact PythonInProcessAdapter API?
@@ -278,7 +354,7 @@ Likely owner:
 - Future Python adapter implementation specification, possibly split into
   PythonInProcessAdapter and PythonSubprocessAdapter IS documents.
 
-11. Containerized and VM adapter contracts
+13. Containerized and VM adapter contracts
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Open questions:
 - What is the minimum contract for a containerized adapter?
@@ -298,7 +374,7 @@ Likely owner:
 - Future containerized adapter / external worker IS, constrained by DA-23 and
   DA-27.
 
-12. Browser frontend bootstrap
+14. Browser frontend bootstrap
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Open questions:
 - How is the browser shell served?
@@ -325,7 +401,7 @@ Likely owner:
 - Future browser frontend bootstrap IS, constrained by DA-22, DA-23, DA-21,
   IS-01, and IS-02.
 
-13. View registry and multi-client behavior
+15. View registry and multi-client behavior
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Open questions:
 - What is the exact View registry contract?
@@ -344,9 +420,9 @@ Open questions:
 
 Likely owner:
 - Future View registry / frontend synchronization IS, constrained by DA-22,
-  DA-21, DA-17, and DA-23.
+  DA-21, DA-17, DA-23, and IS-06.
 
-14. RPC schema and WebSocket flow alignment
+16. RPC schema and WebSocket flow alignment
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Open questions:
 - Does IS-01 include adapter metadata fields?
@@ -364,11 +440,13 @@ Open questions:
 - Does IS-02 distinguish transport timeout from Job timeout?
 - Does IS-02 handle generation/session mismatch without redefining higher
   lifecycle semantics?
+- Does IS-02 need to reference RuntimeHost and IS-06 client-connection
+  behavior explicitly?
 
 Likely owner:
-- Review/update IS-01 and IS-02 against DA-21, DA-23, and DA-27.
+- Review/update IS-01 and IS-02 against DA-21, DA-23, DA-27, DA-28, and IS-06.
 
-15. Adapter identity representation
+17. Adapter identity representation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Open questions:
 - What is adapterKind?
@@ -381,6 +459,7 @@ Open questions:
 - How does adapter identity relate to rpcMessageId?
 - How does adapter identity relate to jobId?
 - How does adapter identity relate to orchestrationUnitId?
+- How does adapter identity relate to runtimeHostId?
 - How does adapter identity appear in trace evidence?
 - Is adapter identity stable across reconnect?
 - Is adapter identity stable across artifact activation?
@@ -389,7 +468,7 @@ Open questions:
 Likely owner:
 - DA-27-constrained adapter identity IS.
 
-16. Trust and isolation vocabulary
+18. Trust and isolation vocabulary
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Open questions:
 - What exact trust classification vocabulary should Turnix use?
@@ -400,8 +479,7 @@ Open questions:
 - How are trust and isolation classes recorded in trace evidence?
 - How are trust and isolation classes presented in UI decisions?
 - How are remembered trust decisions scoped?
-- Does approving PythonInProcessAdapter for one pack approve it for child
-  packs?
+- Does approving PythonInProcessAdapter for one pack approve it for child packs?
 - Does approving PythonInProcessAdapter approve PythonSubprocessAdapter?
 - Does approving a pack for execution grant any capabilities?
 - How are unsafe adapter choices hidden, warned, blocked, or allowed by policy?
@@ -409,7 +487,7 @@ Open questions:
 Likely owner:
 - DA-27 trust/isolation taxonomy update or child IS, constrained by DA-17.
 
-17. CLI adapter behavior
+19. CLI adapter behavior
 ~~~~~~~~~~~~~~~~~~~~~~~~
 Open questions:
 - Is CLI a frontend adapter, control adapter, or both?
@@ -427,10 +505,10 @@ Open questions:
 - Does CLI have a JSON output mode?
 
 Likely owner:
-- Future CLI adapter / runtime-host command IS, constrained by DA-21, DA-22,
-  DA-23, DA-27, and DA-19.
+- Future CLI adapter IS, constrained by DA-21, DA-22, DA-23, DA-27, DA-19,
+  IS-04, IS-05, and IS-06.
 
-18. TestAdapter behavior
+20. TestAdapter behavior
 ~~~~~~~~~~~~~~~~~~~~~~~~
 Open questions:
 - Can TestAdapter run AppPacks?
@@ -449,10 +527,10 @@ Open questions:
 - Is the Turnix test suite itself an AppPack using TestAdapter surfaces?
 
 Likely owner:
-- Future TestAdapter IS, constrained by DA-20, DA-21, DA-23, DA-27, DA-17, and
-  DA-19.
+- Future TestAdapter IS, constrained by DA-20, DA-21, DA-23, DA-27, DA-17,
+  DA-19, IS-04, and IS-05.
 
-19. AppInstance restart, reconnect, retained-result behavior
+21. AppInstance restart, reconnect, retained-result behavior
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Open questions:
 - What is AppInstance restart?
@@ -472,9 +550,10 @@ Open questions:
 - What command retrieves retained results?
 
 Likely owner:
-- DA-20 update plus DA-19/DA-21 constrained implementation specifications.
+- DA-20 update plus DA-19/DA-21/DA-28 constrained implementation
+  specifications.
 
-20. Adapter lifecycle state machine
+22. Adapter lifecycle state machine
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Open questions:
 - What transitions are allowed between adapter lifecycle states?
@@ -494,7 +573,7 @@ Open questions:
 Likely owner:
 - DA-27 update or adapter lifecycle IS.
 
-21. Trace reason ownership and concrete trace extensions
+23. Trace reason ownership and concrete trace extensions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Open questions:
 - What concrete RPC trace reason identifiers exist?
@@ -510,43 +589,55 @@ Open questions:
 - How are malformed envelopes traced?
 - How are generation mismatches traced?
 - How are direct-call optimized paths traced?
+- Do IS-03, IS-04, IS-05, and IS-06 need a shared RuntimeHost trace field
+  schema?
 
 Likely owner:
-- DA-21 refinement, DA-27 refinement, IS-01/IS-02 updates, and future runtime-host
-  trace specification.
+- Future runtime-host trace schema IS plus DA-21/DA-27 refinement and
+  IS-01/IS-02 updates.
 
-22. Document ownership map
+24. Document ownership map
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 Open questions:
 - Which future documents should be DA documents?
 - Which future documents should be IS documents?
 - Which future documents should remain upcoming/planning files?
-- Should runtime host be DA-28?
-- Should workspace ownership be part of runtime host or persistence?
-- Should executable artifact schema live in pack manifest specification?
+- Should SavePack generation and compatibility be one IS or separate IS files?
+- Should executable artifact declaration and adapter binding be one IS or
+  separate IS files?
 - Should PackContext API have one IS or language-specific IS documents?
 - Should PythonInProcessAdapter and PythonSubprocessAdapter be separate IS
   documents?
 - Should browser frontend bootstrap extend IS-02 or become its own IS?
-- Should CLI adapter and runtime-host command surface be one document or two?
+- Should CLI adapter and RuntimeHost command surface remain separate documents?
 - Should TestAdapter be an IS or an ODA/tooling document?
 
-Possible future document map:
+Current promoted document map:
 - DA-28 Runtime Host, Workspace Ownership and Command Surface
-- IS-03 Executable Artifact Declaration and Adapter Binding Schema
-- IS-04 PackContext API
-- IS-05 Python Execution Adapter Contract
-- IS-06 Browser Frontend Bootstrap and View Binding Flow
-- IS-07 In-Process RPC and Direct-Call Flow
-- IS-08 Runtime Host CLI and Control Surface
-- IS-09 TestAdapter Contract
-- IS-10 Workspace Locking and Writable Ownership Enforcement
+- IS-03 Workspace Ownership and Host Locking
+- IS-04 Runtime Host Command Surface
+- IS-05 Runtime Host Startup Modes
+- IS-06 Runtime Host LAN and Client Connections
 
-Immediate recommended next step
--------------------------------
-Create a narrow ownership plan before drafting new authoritative semantics.
+Possible next document map:
+- IS-07 RuntimeHost Trace Schema
+- IS-08 SavePack Generator API
+- IS-09 SavePack Compatibility Validation
+- IS-10 Executable Artifact Declaration Schema
+- IS-11 Adapter Binding Schema
+- IS-12 PackContext API
+- IS-13 In-Process RPC and Direct-Call Flow
+- IS-14 PythonInProcessAdapter Contract
+- IS-15 PythonSubprocessAdapter Contract
+- IS-16 Browser Frontend Bootstrap and View Binding Flow
+- IS-17 CLI Adapter Behavior
+- IS-18 TestAdapter Contract
 
-The first promoted document is likely a Runtime Host / Workspace Ownership
-design area because multiple existing open questions point there, and DA-27
-currently defines runtime-host meaning only where needed to preserve adapter
-authority boundaries.
+Immediate recommended next steps
+--------------------------------
+1. Review IS-03, IS-04, IS-05, and IS-06 together when connector retrieval or
+   manual full-source review permits it.
+2. Decide whether IS-07 RuntimeHost Trace Schema should be created now or after
+   IS-03..IS-06 review.
+3. Consider SavePack Generator API and SavePack Compatibility Validation as the
+   next runtime-adjacent specification area after RuntimeHost trace work.
