@@ -47,6 +47,8 @@ It does NOT define:
 - AppInstance lifecycle or runtime identity semantics (see DA-20)
 - execution adapter boundary semantics (see DA-23)
 - frontend UI layout or presentation behavior (see DA-22)
+- RuntimeHost identity, workspace ownership, startup modes, entry surfaces, or
+  command-surface semantics (see DA-28)
 
 Upstream Documents:
 ------------------
@@ -69,6 +71,7 @@ Downstream Documents:
 --------------------
 - DA-22
 - DA-23
+- DA-28
 - IS-01
 - IS-02
 - future transport implementation specifications
@@ -135,6 +138,15 @@ Downstream Documents:
 02.15. RPC carries adapter-originated or adapter-targeted messages without
        making the transport or channel an authority owner.
 
+02.16. RuntimeHost entry surfaces and command surfaces may use RPC to
+       communicate with Kernel-mediated runtime paths.
+
+02.17. RPC use by a RuntimeHost entry surface does not make RPC the
+       RuntimeHost authority owner.
+
+02.18. RuntimeHost entry-surface, command-surface, startup-mode, workspace
+       ownership, and host lifecycle semantics remain owned by DA-28.
+
 
 ===============================================================================
 03. RPC, CHANNEL, AND TRANSPORT TERMS
@@ -176,6 +188,9 @@ Downstream Documents:
 
 03.12. A transport adapter is distinct from an Execution Adapter under
        DA-23, even when one implementation object performs both roles.
+
+03.13. A transport adapter is distinct from a RuntimeHost entry surface under
+       DA-28, even when one implementation object participates in both roles.
 
 
 ===============================================================================
@@ -255,11 +270,16 @@ Downstream Documents:
 
 05.8. An adapter-facing RPC message remains subject to DA-23.
 
-05.9. If routing fails before capability execution, adapter execution, or
-      Job creation, the failure remains an RPC routing or dispatch failure
-      rather than a Job terminal outcome.
+05.9. A RuntimeHost control-surface RPC message remains subject to DA-28.
 
-05.10. If routing succeeds and a capability accepts Job-backed work, later
+05.10. RuntimeHost control-surface routing does not grant workspace ownership,
+       command acceptance, AppInstance creation, or LAN exposure by itself.
+
+05.11. If routing fails before capability execution, adapter execution,
+       RuntimeHost command acceptance, or Job creation, the failure remains an
+       RPC routing or dispatch failure rather than a Job terminal outcome.
+
+05.12. If routing succeeds and a capability accepts Job-backed work, later
        Job lifecycle semantics are owned by DA-19.
 
 
@@ -272,6 +292,7 @@ Downstream Documents:
       - structured error
       - accepted Job-backed work
       - accepted adapter-mediated work
+      - accepted RuntimeHost operation
       - rejected-before-Job outcome
 
 06.2. Request acceptance means the request crossed the RPC dispatch boundary
@@ -286,36 +307,55 @@ Downstream Documents:
 06.5. A request accepted as adapter-mediated work may create or expose
       adapter lifecycle correlation.
 
-06.6. Adapter lifecycle semantics remain owned by DA-23.
+06.6. A request accepted as RuntimeHost operation may create or expose
+      runtime-host operation correlation.
 
-06.7. Once Job-backed work exists, DA-19 owns Job lifecycle semantics.
+06.7. Adapter lifecycle semantics remain owned by DA-23.
 
-06.8. A request rejected before Job-backed work exists does not produce a
-      Job terminal outcome.
+06.8. RuntimeHost operation, command-surface, and entry-surface semantics
+      remain owned by DA-28.
 
-06.9. A request rejected before adapter-mediated work exists does not
-      produce adapter execution failure unless DA-23 classifies that
-      relationship explicitly.
+06.9. Once Job-backed work exists, DA-19 owns Job lifecycle semantics.
 
-06.10. A request rejected before Job-backed work exists may still produce
+06.10. A request rejected before Job-backed work exists does not produce a
+       Job terminal outcome.
+
+06.11. A request rejected before adapter-mediated work exists does not
+       produce adapter execution failure unless DA-23 classifies that
+       relationship explicitly.
+
+06.12. A request rejected before RuntimeHost command acceptance does not
+       produce RuntimeHost operation completion or failure unless DA-28
+       classifies that relationship explicitly.
+
+06.13. A request rejected before Job-backed work exists may still produce
        RPC trace evidence and a structured error envelope.
 
-06.11. RPC request identity and jobId remain distinct.
+06.14. RPC request identity and jobId remain distinct.
 
-06.12. RPC request identity and adapter instance identity remain distinct.
+06.15. RPC request identity and adapter instance identity remain distinct.
 
-06.13. RPC correlation may link request identity to jobId when a Job exists.
+06.16. RPC request identity and runtimeHostId remain distinct.
 
-06.14. RPC correlation may link request identity to adapter identity when
+06.17. RPC correlation may link request identity to jobId when a Job exists.
+
+06.18. RPC correlation may link request identity to adapter identity when
        adapter-mediated work exists.
 
-06.15. A request accepted as Job-backed work may return a Job handle,
+06.19. RPC correlation may link request identity to runtimeHostId and
+       RuntimeHost operation identity when host-level work exists.
+
+06.20. A request accepted as Job-backed work may return a Job handle,
        immediate accepted-work response, subscription relationship, or other
        operation-defined lifecycle surface.
 
-06.16. The exact concrete envelope shape for Job-backed request acceptance
+06.21. The exact concrete envelope shape for Job-backed request acceptance
        remains owned by IS-01, IS-02, or a future implementation
        specification constrained by DA-19.
+
+06.22. The exact concrete envelope shape for RuntimeHost-operation acceptance
+       remains owned by IS-01, IS-02, or a future implementation
+       specification constrained by DA-28.
 
 
 ===============================================================================
@@ -334,23 +374,30 @@ Downstream Documents:
       subscription ends, fails, disconnects, or is cancelled.
 
 07.5. Subscription delivery may carry state updates, event updates, Job
-      progress, adapter lifecycle updates, or other operation-defined update
-      material.
+      progress, adapter lifecycle updates, RuntimeHost operation updates, or
+      other operation-defined update material.
 
 07.6. Subscription delivery does not by itself define Job lifecycle state.
 
 07.7. Subscription delivery does not by itself define adapter lifecycle
       state unless it carries adapter-domain evidence owned by DA-23.
 
-07.8. If subscription delivery reports Job progress or terminal outcome,
+07.8. Subscription delivery does not by itself define RuntimeHost lifecycle or
+      command outcome unless it carries RuntimeHost-domain evidence owned by
+      DA-28.
+
+07.9. If subscription delivery reports Job progress or terminal outcome,
       the reported Job meaning remains owned by DA-19.
 
-07.9. If subscription delivery reports adapter lifecycle state, the reported
-      adapter meaning remains owned by DA-23.
+07.10. If subscription delivery reports adapter lifecycle state, the reported
+       adapter meaning remains owned by DA-23.
 
-07.10. Unsubscribe withdraws interest in future subscription delivery.
+07.11. If subscription delivery reports RuntimeHost lifecycle or operation
+       state, the reported RuntimeHost meaning remains owned by DA-28.
 
-07.11. Unsubscribe does not by itself cancel the underlying work unless the
+07.12. Unsubscribe withdraws interest in future subscription delivery.
+
+07.13. Unsubscribe does not by itself cancel the underlying work unless the
        operation contract or policy explicitly connects unsubscribe to
        cancellation.
 
@@ -365,54 +412,71 @@ Downstream Documents:
 
 08.3. Adapter timeout, if defined, is an adapter lifecycle concern.
 
-08.4. Transport timeout does not automatically transition a Job to TimedOut.
+08.4. RuntimeHost timeout, if defined, is a RuntimeHost lifecycle or operation
+      concern under DA-28.
 
-08.5. Transport timeout does not automatically fail an adapter instance.
+08.5. Transport timeout does not automatically transition a Job to TimedOut.
 
-08.6. Job timeout does not mean the transport failed.
+08.6. Transport timeout does not automatically fail an adapter instance.
 
-08.7. Adapter failure does not mean the transport failed.
+08.7. Transport timeout does not automatically fail a RuntimeHost.
 
-08.8. Transport disconnect means the communication carrier became
-      unavailable or closed.
+08.8. Job timeout does not mean the transport failed.
 
-08.9. Transport disconnect does not automatically cancel a Job.
+08.9. Adapter failure does not mean the transport failed.
 
-08.10. Transport disconnect does not automatically supersede a Job.
+08.10. RuntimeHost failure does not mean the transport failed.
 
-08.11. Transport disconnect does not automatically discard a Job result.
+08.11. Transport disconnect means the communication carrier became
+       unavailable or closed.
 
-08.12. Transport disconnect does not automatically close or fail an
-       execution adapter.
+08.12. Transport disconnect does not automatically cancel a Job.
 
-08.13. If accepted or in-flight work exists when transport disconnect occurs,
+08.13. Transport disconnect does not automatically supersede a Job.
+
+08.14. Transport disconnect does not automatically discard a Job result.
+
+08.15. Transport disconnect does not automatically close or fail an execution
+       adapter.
+
+08.16. Transport disconnect does not automatically stop, fail, or close a
+       RuntimeHost.
+
+08.17. If accepted or in-flight work exists when transport disconnect occurs,
        policy may decide whether work continues, cancels, supersedes,
        detaches, retains result, or discards result.
 
-08.14. DA-17 owns decision and policy handling.
+08.18. DA-17 owns decision and policy handling.
 
-08.15. DA-19 owns Job terminal outcomes when a policy outcome affects a Job.
+08.19. DA-19 owns Job terminal outcomes when a policy outcome affects a Job.
 
-08.16. DA-23 owns adapter lifecycle outcomes when a policy outcome affects
+08.20. DA-23 owns adapter lifecycle outcomes when a policy outcome affects
        adapter execution.
 
-08.17. RPC cancellation messages are requests.
+08.21. DA-28 owns RuntimeHost lifecycle or host-operation outcomes when a
+       policy outcome affects RuntimeHost behavior.
 
-08.18. RPC cancellation messages do not directly kill arbitrary execution.
+08.22. RPC cancellation messages are requests.
 
-08.19. When cancellation targets Job-backed work, the cancellation request is
+08.23. RPC cancellation messages do not directly kill arbitrary execution.
+
+08.24. When cancellation targets Job-backed work, the cancellation request is
        translated into Job lifecycle handling under DA-19.
 
-08.20. When cancellation targets adapter-mediated work, the cancellation
+08.25. When cancellation targets adapter-mediated work, the cancellation
        request is translated into adapter and work lifecycle handling under
        DA-23 and owning workflow documents.
 
-08.21. When cancellation targets a subscription, cancellation may withdraw
+08.26. When cancellation targets a RuntimeHost operation, the cancellation
+       request is translated into RuntimeHost operation handling under DA-28
+       and owning workflow documents.
+
+08.27. When cancellation targets a subscription, cancellation may withdraw
        delivery interest without ending the underlying work.
 
-08.22. When cancellation targets transport-local pending work, cancellation
-       may resolve or reject local waiting state without defining a Job or
-       adapter outcome.
+08.28. When cancellation targets transport-local pending work, cancellation
+       may resolve or reject local waiting state without defining a Job,
+       adapter, or RuntimeHost outcome.
 
 
 ===============================================================================
@@ -444,19 +508,25 @@ Downstream Documents:
 
 09.10. RPCChannel does not define adapter lifecycle semantics.
 
-09.11. Concrete channel implementations adapt concrete transports into this
+09.11. RPCChannel does not define RuntimeHost lifecycle or command-surface
+       semantics.
+
+09.12. Concrete channel implementations adapt concrete transports into this
        abstract interface.
 
-09.12. A channel implementation preserves peer identity and connection
+09.13. A channel implementation preserves peer identity and connection
        context when the transport provides them.
 
-09.13. A channel implementation reports loss of connection explicitly.
-
-09.14. A channel implementation does not silently transform disconnect into
-       work cancellation.
+09.14. A channel implementation reports loss of connection explicitly.
 
 09.15. A channel implementation does not silently transform disconnect into
+       work cancellation.
+
+09.16. A channel implementation does not silently transform disconnect into
        adapter failure.
+
+09.17. A channel implementation does not silently transform disconnect into
+       RuntimeHost stop, failure, or command cancellation.
 
 
 ===============================================================================
@@ -472,6 +542,7 @@ Downstream Documents:
       - rejection before accepted work exists
       - request accepted as Job-backed work
       - request accepted as adapter-mediated work
+      - request accepted as RuntimeHost operation
       - reply sent
       - delivery failure
       - cancellation requested
@@ -489,6 +560,8 @@ Downstream Documents:
       - peer identity
       - channel identity
       - transport kind
+      - runtimeHostId when applicable
+      - RuntimeHost operation identity when applicable
       - appInstanceId
       - adapter kind when applicable
       - adapter instance identity when applicable
@@ -507,15 +580,17 @@ Downstream Documents:
 
 10.8. DA-23 owns adapter-domain trace reasons.
 
-10.9. IS-02 owns concrete WebSocket RPC transport trace reasons unless this
-      document later promotes those reason identifiers into the abstract RPC
-      domain.
+10.9. DA-28 owns RuntimeHost-domain trace reasons.
 
-10.10. RPC observability does not replace trace evidence owned by
-       capability, decision, Job, debugger, AppInstance, adapter, or Window
-       documents.
+10.10. IS-02 owns concrete WebSocket RPC transport trace reasons unless this
+       document later promotes those reason identifiers into the abstract RPC
+       domain.
 
-10.11. RPC observability preserves causal links between RPC messages and
+10.11. RPC observability does not replace trace evidence owned by
+       capability, decision, Job, debugger, AppInstance, adapter,
+       RuntimeHost, or Window documents.
+
+10.12. RPC observability preserves causal links between RPC messages and
        higher-domain events when those events exist.
 
 
@@ -535,12 +610,14 @@ Downstream Documents:
        - serialization checks
        - concrete transport reason identifiers
        - concrete adapter metadata fields when constrained by DA-23
+       - concrete RuntimeHost metadata fields when constrained by DA-28
 
 11.4. IS documents do not redefine:
        - RPC as a logical boundary
        - channel and transport separation
        - capability authority
        - adapter authority
+       - RuntimeHost authority boundaries
        - Job lifecycle
        - decision and policy semantics
 
@@ -554,6 +631,9 @@ Downstream Documents:
 
 11.8. A future adapter transport specification remains constrained by this
        document and DA-23.
+
+11.9. A future RuntimeHost control-surface or LAN-client transport
+      specification remains constrained by this document and DA-28.
 
 
 ===============================================================================
@@ -571,6 +651,11 @@ Downstream Documents:
       - exact channel identity representation
       - exact peer identity representation beyond concrete transport context
       - exact adapter metadata representation in RPC envelopes
+      - exact RuntimeHost metadata representation in RPC envelopes
+
+12.2. RuntimeHost identity, entry-surface semantics, command-surface
+      semantics, startup-mode semantics, workspace ownership, and
+      RuntimeHost-domain trace reason ownership are defined by DA-28.
 
 
 ===============================================================================
@@ -585,36 +670,49 @@ Downstream Documents:
       - JSON envelope shape belongs to IS-01
       - concrete WebSocket flow belongs to IS-02
       - RPC is not adapter authority by itself
+      - RPC is not RuntimeHost authority by itself
       - acknowledgement means transport or message handling, not work
         success
       - acknowledgement does not imply adapter execution
+      - acknowledgement does not imply RuntimeHost operation completion
       - request acceptance is distinct from final result
       - request accepted as Job-backed work is distinct from Job success
       - request accepted as adapter-mediated work is distinct from adapter
         success
+      - request accepted as RuntimeHost operation is distinct from
+        RuntimeHost operation success
       - request rejected before Job-backed work exists has no Job terminal
         outcome
       - request rejected before adapter-mediated work exists has no adapter
         lifecycle outcome unless DA-23 defines that relation explicitly
+      - request rejected before RuntimeHost command acceptance has no
+        RuntimeHost operation outcome unless DA-28 defines that relation
+        explicitly
       - emit acknowledgement does not imply downstream work completion
       - unsubscribe does not by itself cancel underlying work
       - transport timeout is not Job timeout
       - transport timeout is not adapter timeout
+      - transport timeout is not RuntimeHost timeout
       - transport disconnect is not Job cancellation
       - transport disconnect is not adapter failure
+      - transport disconnect is not RuntimeHost stop or failure
       - RPC cancellation is a request, not direct execution kill
       - capability-routed RPC remains capability-mediated under DA-16
       - adapter-facing RPC remains adapter-mediated under DA-23
+      - RuntimeHost control-surface RPC remains constrained by DA-28
       - Job lifecycle remains owned by DA-19
       - adapter lifecycle remains owned by DA-23
+      - RuntimeHost lifecycle and command-surface semantics remain owned by
+        DA-28
       - policy handling remains owned by DA-17
       - RPC trace evidence preserves correlation across message, adapter,
-        capability, AppInstance, and Job identity where available
+        capability, RuntimeHost, AppInstance, and Job identity where available
 
 13.2. OPEN:
       - trace reason ownership refinement
       - transport implementation expansion
-      - subscription, Job-result retrieval, and adapter metadata details
+      - subscription, Job-result retrieval, RuntimeHost metadata, and adapter
+        metadata details
 
 
 ===============================================================================
@@ -624,6 +722,6 @@ END OF DA-21 - RPC, CHANNELS, TRANSPORTS & MESSAGE FLOW
 --- doc-meta ---
 DOC_ID: DA-21
 DOC_FILE: docs/design/DA-21_RPC_CHANNELS_TRANSPORTS_AND_MESSAGE_FLOW.txt
-DOC_REV: 3
-DOC_GIT: 04d15d1
+DOC_REV: 4
+DOC_GIT: 0000000
 ----------------
