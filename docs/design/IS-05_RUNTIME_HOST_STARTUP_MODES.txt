@@ -1,0 +1,758 @@
+===============================================================================
+IMPLEMENTATION SPECIFICATION IS-05 - RUNTIME HOST STARTUP MODES
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines concrete RuntimeHost startup-mode classification, startup-mode entry
+flow, startup-mode operation composition, startup-mode result surfaces, and
+trace mapping for interactive host mode, one-shot command mode, serve mode,
+connect mode, test mode, and launcher mode.
+
+This document implements the startup-mode semantics defined by DA-28. It uses
+IS-03 for workspace ownership and host locking, and IS-04 for command-surface
+handling.
+
+Purpose:
+--------
+This document defines how Turnix enters RuntimeHost execution through different
+startup modes without creating separate AppInstance, SavePack, adapter, RPC,
+capability, policy, persistence, Orchestration Unit, Job, View, or trace
+semantics for each mode.
+
+It defines:
+- startupMode identity and classification
+- startup request normalization
+- startup-mode selection flow
+- interactive host mode flow
+- one-shot command mode flow
+- serve mode flow
+- connect mode flow
+- test mode flow
+- launcher mode flow
+- startup-mode relationship to workspace ownership
+- startup-mode relationship to command surfaces
+- startup-mode result envelope
+- startup-mode trace mapping to DA-28 trace reasons
+- startup-mode error categories
+
+It does NOT define:
+- RuntimeHost semantics (see DA-28)
+- Kernel authority ordering (see DA-01 and DA-02)
+- committed-state or transaction semantics (see DA-04)
+- persistent I/O safety semantics (see DA-07)
+- AppInstance lifecycle or runtime identity semantics (see DA-20)
+- RPC, channel, or transport semantics (see DA-21)
+- UI, View, or frontend runtime semantics (see DA-22)
+- execution adapter authority boundaries (see DA-23)
+- Orchestration Unit mutation authority semantics (see DA-24)
+- adapter lifecycle, trust, and trace semantics (see DA-27)
+- workspace ownership and host-lock record mechanics (see IS-03)
+- RuntimeHost command-surface flow or command result envelope (see IS-04)
+- concrete shell syntax, service wrapper syntax, desktop launcher behavior, or
+  terminal rendering
+- concrete LAN pairing or authentication
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-02
+- DA-03
+- DA-04
+- DA-07
+- DA-16
+- DA-17
+- DA-19
+- DA-20
+- DA-21
+- DA-22
+- DA-23
+- DA-24
+- DA-27
+- DA-28
+- IS-03
+- IS-04
+
+Downstream Documents:
+--------------------
+- future CLI adapter implementation specifications
+- future launcher implementation specifications
+- future service or daemon wrapper implementation specifications
+- future LAN and remote-client implementation specifications
+- future RuntimeHost trace schema implementation specifications
+
+
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
+
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines implementation-level RuntimeHost startup-mode
+      behavior within that shared interpretation model.
+
+01.5. This implementation specification does not create new authority
+      semantics. It implements DA-28 startup-mode rules.
+
+
+===============================================================================
+02. CORE CONCEPT
+===============================================================================
+
+02.1. RuntimeHost startup-mode behavior answers:
+
+          "How does Turnix choose and enter a RuntimeHost workflow while
+           preserving the same Kernel-mediated runtime operations and
+           authority boundaries across CLI, launcher, server, connect, test,
+           and one-shot entry shapes?"
+
+02.2. Startup mode selection determines how Turnix is entered.
+
+02.3. Startup mode selection does not define separate runtime semantics.
+
+02.4. Startup modes are entry workflows over shared Kernel-mediated runtime
+      operations.
+
+02.5. A startup mode may create or connect to a RuntimeHost.
+
+02.6. A startup mode may create, bind, or use a command surface.
+
+02.7. A startup mode may request workspace ownership.
+
+02.8. A startup mode may avoid workspace ownership when it only connects to an
+      existing RuntimeHost or performs explicitly read-only behavior.
+
+02.9. A startup mode is not authority by itself.
+
+02.10. Startup mode success is not AppInstance success, Job success, adapter
+       success, or Orchestration Unit completion by default.
+
+
+===============================================================================
+03. STARTUP MODE IDENTITY AND CLASSIFICATION
+===============================================================================
+
+03.1. startupRequestId identifies one startup request.
+
+03.2. startupRequestId is distinct from:
+      - runtimeHostId
+      - commandId
+      - runtimeOperationId
+      - workspace identity
+      - appInstanceId
+      - jobId
+      - orchestrationUnitId
+      - viewId
+      - adapter identity
+      - RPC message identity
+      - transport identity
+      - decision identity
+
+03.3. startupMode is one of:
+      - interactiveHost
+      - oneShotCommand
+      - serve
+      - connect
+      - test
+      - launcher
+
+03.4. startupMode values define semantic categories, not final CLI names,
+      flags, desktop launcher actions, or service wrapper names.
+
+03.5. Startup mode classification occurs before mode-specific flow begins.
+
+03.6. Startup mode classification emits RuntimeHostStartupModeSelected when a
+      startup mode is selected.
+
+03.7. Startup mode rejection emits RuntimeHostStartupModeRejected.
+
+03.8. Unknown or unsupported startup mode input is rejected before RuntimeHost
+      ownership acquisition.
+
+03.9. Unknown or unsupported startup mode input does not create a partial
+      RuntimeHost.
+
+
+===============================================================================
+04. STARTUP REQUEST NORMALIZATION
+===============================================================================
+
+04.1. Startup request normalization prepares startup input for classification.
+
+04.2. Normalization may include:
+      - executable invocation context capture
+      - entry surface kind capture
+      - command-line argument parsing
+      - environment input capture
+      - current working directory capture
+      - requested workspace path capture
+      - requested startup mode capture
+      - requested command capture
+      - requested local bind behavior capture
+      - requested LAN exposure capture
+      - test harness context capture
+
+04.3. Normalization does not grant authority.
+
+04.4. Normalization does not acquire workspace ownership.
+
+04.5. Normalization does not create a RuntimeHost.
+
+04.6. Normalization does not create an AppInstance.
+
+04.7. Normalization failure rejects the startup request.
+
+04.8. Concrete parsing syntax belongs to implementation code or a later CLI,
+      launcher, or service-wrapper implementation specification.
+
+
+===============================================================================
+05. SHARED STARTUP OPERATION ORDER
+===============================================================================
+
+05.1. Startup modes compose shared RuntimeHost operations rather than defining
+      independent runtime semantics.
+
+05.2. Shared startup operations may include:
+      - NormalizeStartupRequest
+      - ClassifyStartupMode
+      - ResolveWorkspace
+      - DiscoverExistingRuntimeHost
+      - ConnectRuntimeHost
+      - BindWorkspace
+      - AcquireWorkspaceOwnership
+      - StartRuntimeHost
+      - CreateEntrySurface
+      - CreateCommandSurface
+      - DispatchInitialCommand
+      - StartFrontendSurface
+      - ExposeLanSurface
+      - RunTestHarness
+      - StopRuntimeHost
+      - ReleaseWorkspaceOwnership
+
+05.3. Operation names in this section define semantic categories, not final
+      API names.
+
+05.4. A startup mode may use a subset of shared operations.
+
+05.5. A startup mode may skip an operation when the mode does not require it.
+
+05.6. Skipping an operation does not redefine the skipped operation's meaning.
+
+05.7. A startup mode that mutates Turnix-managed state enters the same DA-24
+      Orchestration Unit boundaries as other mutation-bearing work.
+
+05.8. A startup mode that requires writable workspace ownership uses IS-03.
+
+05.9. A startup mode that dispatches a command uses IS-04.
+
+05.10. A startup mode that creates or starts an AppInstance uses DA-20.
+
+05.11. A startup mode that creates or binds a View uses DA-22.
+
+05.12. A startup mode that selects or starts adapter execution uses DA-23 and
+       DA-27.
+
+05.13. A startup mode that communicates through RPC uses DA-21.
+
+
+===============================================================================
+06. INTERACTIVE HOST MODE
+===============================================================================
+
+06.1. interactiveHost mode enters a command-accepting host or host-connected
+      control surface.
+
+06.2. interactiveHost mode normally requests or connects to a RuntimeHost and
+      creates a command surface.
+
+06.3. interactiveHost mode may acquire writable workspace ownership when it
+      starts a new writable RuntimeHost.
+
+06.4. interactiveHost mode may connect to an existing RuntimeHost when policy
+      and connection rules permit that path.
+
+06.5. interactiveHost mode does not silently choose between new host and
+      existing host when that choice affects ownership or authority.
+
+06.6. interactiveHost mode emits RuntimeHostInteractiveModeStarted when the
+      mode flow begins.
+
+06.7. interactiveHost readiness does not imply command success.
+
+06.8. interactiveHost readiness does not imply AppInstance readiness.
+
+06.9. interactiveHost readiness does not imply adapter readiness.
+
+06.10. Commands entered after interactiveHost readiness follow IS-04.
+
+
+===============================================================================
+07. ONE-SHOT COMMAND MODE
+===============================================================================
+
+07.1. oneShotCommand mode performs a bounded requested command and exits after
+      the command reaches its operation-defined result or error surface.
+
+07.2. oneShotCommand mode uses IS-04 for command handling.
+
+07.3. oneShotCommand mode may start a temporary RuntimeHost when the requested
+      command requires host ownership or host-local runtime services.
+
+07.4. oneShotCommand mode may connect to an existing RuntimeHost when the
+      command is a client or control operation and policy permits that path.
+
+07.5. oneShotCommand mode may perform read-only inspection without writable
+      workspace ownership when the command explicitly requests read-only
+      inspection.
+
+07.6. oneShotCommand mode does not silently downgrade writable behavior to
+      read-only inspection.
+
+07.7. oneShotCommand mode emits RuntimeHostOneShotCommandStarted when the mode
+      flow begins.
+
+07.8. oneShotCommand process exit behavior reflects the command result surface,
+      not hidden downstream work outcome.
+
+07.9. If oneShotCommand mode detaches from Job-backed or retained work, the
+      result surface reports detachment or retention explicitly.
+
+07.10. oneShotCommand exit does not silently cancel detached work unless the
+       owning workflow maps process exit to cancellation explicitly.
+
+
+===============================================================================
+08. SERVE MODE
+===============================================================================
+
+08.1. serve mode starts or keeps a RuntimeHost available for explicitly
+      selected entry surfaces.
+
+08.2. serve mode normally requests writable workspace ownership when writable
+      host behavior is requested.
+
+08.3. serve mode may expose local-only entry surfaces.
+
+08.4. serve mode may expose LAN entry surfaces only when explicit policy or
+      configuration permits LAN exposure.
+
+08.5. serve mode never silently exposes internet-accessible runtime control
+      surfaces.
+
+08.6. serve mode emits RuntimeHostServeModeStarted when the mode flow begins.
+
+08.7. serve mode readiness does not imply AppInstance readiness.
+
+08.8. serve mode readiness does not imply command success.
+
+08.9. serve mode readiness does not imply adapter readiness.
+
+08.10. serve mode stop uses RuntimeHost lifecycle and workspace ownership
+       release behavior under DA-28 and IS-03.
+
+
+===============================================================================
+09. CONNECT MODE
+===============================================================================
+
+09.1. connect mode connects a command or client to an existing RuntimeHost.
+
+09.2. connect mode does not acquire writable workspace ownership for a new
+      RuntimeHost.
+
+09.3. connect mode may read workspace ownership evidence to discover or
+      verify an existing RuntimeHost.
+
+09.4. connect mode may fail when no compatible existing RuntimeHost is found.
+
+09.5. connect mode may fail when policy denies connection.
+
+09.6. connect mode may fail when the existing RuntimeHost is unreachable.
+
+09.7. connect mode does not silently start a new writable RuntimeHost unless
+      the startup request explicitly permits fallback to a new host.
+
+09.8. connect mode does not silently take over stale ownership evidence.
+
+09.9. connect mode emits RuntimeHostConnectModeStarted when the mode flow
+      begins.
+
+09.10. Commands sent after successful connection follow IS-04 and any
+       transport-specific implementation specification.
+
+
+===============================================================================
+10. TEST MODE
+===============================================================================
+
+10.1. test mode uses controlled test surfaces without weakening runtime,
+      adapter, AppInstance, SavePack, orchestration, capability, policy,
+      persistence, or trace boundaries.
+
+10.2. test mode may use TestAdapter or test-specific entry surfaces.
+
+10.3. test mode may use temporary workspaces when the test explicitly defines
+      temporary workspace behavior.
+
+10.4. test mode may bypass human prompts only when the test harness supplies
+      explicit policy or decision fixtures.
+
+10.5. Test fixtures do not become production defaults.
+
+10.6. test mode does not silently ignore persistence failures.
+
+10.7. test mode does not silently ignore trace obligations.
+
+10.8. test mode emits RuntimeHostTestModeStarted when the mode flow begins.
+
+10.9. test mode result surfaces distinguish test harness failure, RuntimeHost
+      failure, command failure, Job failure, adapter failure, and assertion
+      failure when those distinctions are available.
+
+
+===============================================================================
+11. LAUNCHER MODE
+===============================================================================
+
+11.1. launcher mode uses a user-facing launcher surface to select or request
+      runtime operations.
+
+11.2. launcher mode may start a RuntimeHost to present launcher UI.
+
+11.3. launcher mode may connect to an existing RuntimeHost when policy and
+      connection rules permit that path.
+
+11.4. launcher mode may create Views or frontend entry surfaces under DA-22.
+
+11.5. launcher mode does not create AppInstance or SavePack semantics separate
+      from DA-20 and DA-28.
+
+11.6. launcher mode does not make browser frontend state authoritative.
+
+11.7. launcher mode emits RuntimeHostLauncherModeStarted when the mode flow
+      begins.
+
+11.8. Commands or interactions submitted by launcher surfaces follow IS-04,
+      DA-22, and DA-21 as applicable.
+
+
+===============================================================================
+12. STARTUP MODE RESULT ENVELOPE
+===============================================================================
+
+12.1. A startup mode result envelope represents startup-mode handling outcome.
+
+12.2. A startup mode result envelope contains:
+      - schemaVersion
+      - startupRequestId
+      - startupMode
+      - startupStatus
+      - runtimeHostId when applicable
+      - workspace identity when applicable
+      - commandId when applicable
+      - runtimeOperationId when applicable
+      - appInstanceId when applicable
+      - viewId when applicable
+      - jobId when applicable
+      - errorCategory when applicable
+      - message
+      - details
+      - traceCorrelation when available
+
+12.3. startupStatus is one of:
+      - selected
+      - rejected
+      - started
+      - connected
+      - ready
+      - completed
+      - failed
+      - cancelled
+      - detached
+
+12.4. selected means the startup mode was classified.
+
+12.5. rejected means startup handling rejected the request before valid mode
+      entry.
+
+12.6. started means startup mode flow began.
+
+12.7. connected means startup mode connected to an existing RuntimeHost.
+
+12.8. ready means the startup mode reached its mode-defined ready surface.
+
+12.9. completed means the startup mode reached its mode-defined completed
+      surface.
+
+12.10. failed means startup mode handling reached its mode-defined failed
+       surface.
+
+12.11. cancelled means startup mode handling was cancelled at startup level.
+
+12.12. detached means startup mode handling detached from the waiting entry
+       surface while owning workflow rules define continued work or retained
+       result behavior.
+
+12.13. startupStatus does not redefine RuntimeHost lifecycle outcome.
+
+12.14. startupStatus does not redefine command status under IS-04.
+
+12.15. startupStatus does not redefine Job terminal outcome.
+
+12.16. startupStatus does not redefine Orchestration Unit terminal outcome.
+
+12.17. startupStatus does not redefine AppInstance lifecycle outcome.
+
+
+===============================================================================
+13. RELATION TO WORKSPACE OWNERSHIP
+===============================================================================
+
+13.1. Startup modes that require writable workspace ownership use IS-03.
+
+13.2. Startup modes that only connect to an existing RuntimeHost do not
+      acquire new writable workspace ownership.
+
+13.3. Startup modes that perform explicit read-only inspection do not acquire
+      writable workspace ownership.
+
+13.4. Startup mode selection does not itself acquire workspace ownership.
+
+13.5. Workspace ownership acquisition does not itself mean startup mode
+      completion.
+
+13.6. Workspace ownership failure may cause startup mode failure when the mode
+      requires writable ownership.
+
+13.7. Existing ownership evidence may cause startup mode to offer explicit
+      alternatives when the entry surface supports alternatives.
+
+13.8. Startup mode handling does not select those alternatives silently.
+
+
+===============================================================================
+14. RELATION TO COMMAND SURFACES
+===============================================================================
+
+14.1. Startup modes that receive or dispatch commands use IS-04.
+
+14.2. Startup mode selection does not itself accept a command.
+
+14.3. Command acceptance does not itself mean startup mode success.
+
+14.4. Startup mode readiness does not imply command success.
+
+14.5. oneShotCommand mode may map command result to startup result according
+      to its operation contract.
+
+14.6. interactiveHost, serve, and launcher modes may remain ready while later
+      commands succeed, fail, or remain pending independently.
+
+14.7. connect mode may pass commands to an existing RuntimeHost after
+      connection succeeds.
+
+14.8. test mode may dispatch commands through test-controlled command surfaces
+      without weakening IS-04 command-surface boundaries.
+
+
+===============================================================================
+15. TRACE MAPPING
+===============================================================================
+
+15.1. IS-05 maps implementation behavior to DA-28 RuntimeHost startup-mode
+      trace reasons.
+
+15.2. Startup mode classification maps to:
+      - RuntimeHostStartupModeSelected
+      - RuntimeHostStartupModeRejected
+
+15.3. interactiveHost mode entry maps to RuntimeHostInteractiveModeStarted.
+
+15.4. oneShotCommand mode entry maps to RuntimeHostOneShotCommandStarted.
+
+15.5. serve mode entry maps to RuntimeHostServeModeStarted.
+
+15.6. connect mode entry maps to RuntimeHostConnectModeStarted.
+
+15.7. test mode entry maps to RuntimeHostTestModeStarted.
+
+15.8. launcher mode entry maps to RuntimeHostLauncherModeStarted.
+
+15.9. Startup mode handling may also produce RuntimeHost lifecycle trace
+      reasons when it starts, connects to, stops, fails, or closes a
+      RuntimeHost.
+
+15.10. Startup mode handling may produce workspace ownership trace reasons
+       under IS-03.
+
+15.11. Startup mode handling may produce command trace reasons under IS-04.
+
+15.12. Trace evidence includes enough context, when available, to identify:
+       - startupRequestId
+       - startupMode
+       - runtimeHostId
+       - workspace identity
+       - entry surface identity
+       - commandId
+       - runtimeOperationId
+       - appInstanceId
+       - viewId
+       - jobId
+       - orchestrationUnitId
+       - policy decision identity
+       - error category
+
+15.13. Startup mode trace evidence does not replace RuntimeHost lifecycle
+       trace evidence.
+
+15.14. Startup mode trace evidence does not replace workspace ownership trace
+       evidence.
+
+15.15. Startup mode trace evidence does not replace command trace evidence.
+
+15.16. Startup mode trace evidence does not replace AppInstance, Job,
+       adapter, RPC, UI, Orchestration Unit, transaction, or Window evidence.
+
+
+===============================================================================
+16. ERROR CATEGORIES
+===============================================================================
+
+16.1. RuntimeHost startup-mode error categories include:
+      - StartupModeUnknown
+      - StartupModeUnsupported
+      - StartupModeInvalidForEntrySurface
+      - StartupRequestMalformed
+      - StartupWorkspaceRequired
+      - StartupWorkspaceOwnershipFailed
+      - StartupExistingHostNotFound
+      - StartupExistingHostUnreachable
+      - StartupExistingHostRejected
+      - StartupPolicyDenied
+      - StartupPermissionDenied
+      - StartupCommandRejected
+      - StartupCommandFailed
+      - StartupRuntimeHostStartFailed
+      - StartupRuntimeHostConnectFailed
+      - StartupEntrySurfaceFailed
+      - StartupLanExposureDenied
+      - StartupImplementationFeatureUnavailable
+
+16.2. Error category names in this section define semantic categories, not
+      final exception class names.
+
+16.3. Concrete exception class names belong to implementation code or a later
+      error-schema specification.
+
+16.4. Error reporting preserves distinctions between startup classification,
+      workspace ownership, host discovery, host connection, command handling,
+      policy denial, permission denial, entry-surface failure, and missing
+      implementation feature.
+
+16.5. Error reporting does not collapse all startup failure into generic host
+      failure when the implementation can distinguish the cause.
+
+
+===============================================================================
+17. WHAT IS EXPLICITLY NOT SUPPORTED
+===============================================================================
+
+17.1. The following are not supported:
+      - treating startup mode as independent runtime semantics
+      - treating startup mode selection as authority
+      - treating startup mode selection as workspace ownership acquisition
+      - treating startup mode success as AppInstance success by default
+      - treating startup mode success as Job success by default
+      - treating startup mode failure as Job failure by default
+      - treating startup mode failure as Orchestration Unit failure by default
+      - silently choosing between new host and existing host when ownership or
+        authority would change
+      - silently falling back from connect mode to new writable host
+      - silently downgrading writable startup behavior to read-only inspection
+      - silently exposing LAN surfaces in serve mode
+      - test mode bypassing persistence, trace, policy, capability,
+        Orchestration Unit, transaction, adapter, AppInstance, or RuntimeHost
+        boundaries
+      - launcher mode creating separate SavePack or AppInstance semantics
+      - one-shot process exit silently cancelling detached work by default
+
+
+===============================================================================
+18. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+18.1. OPEN questions include:
+      - exact startupRequestId representation
+      - exact startup result JSON schema
+      - exact mapping from CLI syntax to startupMode
+      - exact desktop launcher startup request representation
+      - exact service or daemon wrapper startup request representation
+      - exact process exit code mapping for startup results
+      - exact detached work behavior for oneShotCommand mode
+      - exact serve mode local bind defaults
+      - exact connect mode host discovery behavior
+      - exact startup-mode extension mechanism
+      - exact error class names
+
+
+===============================================================================
+19. LOCKED SUMMARY
+===============================================================================
+
+19.1. LOCKED:
+      - IS-05 implements DA-28 RuntimeHost startup-mode semantics.
+      - Startup mode selection determines how Turnix is entered.
+      - Startup mode selection does not define separate runtime semantics.
+      - Startup modes are entry workflows over shared Kernel-mediated runtime
+        operations.
+      - startupRequestId is distinct from runtimeHostId, commandId,
+        runtimeOperationId, appInstanceId, jobId, orchestrationUnitId, viewId,
+        adapter identity, RPC message identity, and decision identity.
+      - Startup mode values define semantic categories, not final CLI names,
+        flags, desktop launcher actions, or service wrapper names.
+      - Startup modes that require writable workspace ownership use IS-03.
+      - Startup modes that receive or dispatch commands use IS-04.
+      - Startup mode success is not AppInstance success, Job success, adapter
+        success, or Orchestration Unit completion by default.
+      - connect mode does not silently start a new writable RuntimeHost.
+      - serve mode does not silently expose LAN or internet control surfaces.
+      - test mode does not weaken runtime authority boundaries.
+      - launcher mode does not create separate AppInstance or SavePack
+        semantics.
+      - Startup mode classification and mode entry are trace-visible.
+
+19.2. OPEN:
+      - concrete startup identifiers, result schema, CLI/launcher/service
+        request mapping, process exit codes, detached work behavior, bind
+        defaults, host discovery behavior, extension mechanism, and error
+        classes.
+
+
+===============================================================================
+END OF IS-05 - RUNTIME HOST STARTUP MODES
+===============================================================================
+
+--- doc-meta ---
+DOC_ID: IS-05
+DOC_FILE: docs/design/IS-05_RUNTIME_HOST_STARTUP_MODES.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
