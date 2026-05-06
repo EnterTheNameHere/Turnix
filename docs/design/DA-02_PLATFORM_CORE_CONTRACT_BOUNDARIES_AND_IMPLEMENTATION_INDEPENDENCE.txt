@@ -10,20 +10,22 @@ EVOLVING
 Description:
 ------------
 Defines the architectural relationship between Turnix platform truth,
-platform core, adapters, interoperability envelopes, and replaceable
-implementation layers.
+platform core, RuntimeHost boundaries, adapters, interoperability envelopes,
+and replaceable implementation layers.
 
 Purpose:
 --------
 This document defines how Turnix remains one platform even when its current
-implementation stack, host-language realizations, execution adapters,
-transports, or first-party modular components change over time.
+implementation stack, host-language realizations, RuntimeHost realization,
+execution adapters, transports, or first-party modular components change over
+time.
 
 It defines:
 - platform identity and architectural scope
 - platform core and guarantee source
 - contract boundaries
 - first-party modularity
+- RuntimeHost boundary position
 - adapter boundaries and host-language realization
 - execution adapter authority boundaries
 - interoperability envelope role
@@ -36,6 +38,8 @@ It does NOT define:
 - concrete language adapter internals
 - pack loading or activation mechanics in detail
 - concrete execution adapter protocols
+- concrete RuntimeHost commands, workspace ownership mechanics, or entry-
+  surface implementation details
 
 Upstream Documents:
 ------------------
@@ -76,9 +80,9 @@ Upstream Documents:
 02.2. The current implementation stack is a realization of Turnix rather
       than the identity of Turnix.
 
-02.3. Backend language, frontend technology, adapter strategy, transport,
-      or current implementation vehicle do not by themselves define what
-      Turnix is.
+02.3. Backend language, frontend technology, RuntimeHost realization,
+      adapter strategy, transport, or current implementation vehicle do not
+      by themselves define what Turnix is.
 
 02.4. Turnix remains one platform even when different technical layers are
       implemented in different languages.
@@ -87,17 +91,20 @@ Upstream Documents:
       - platform core
       - contract boundaries
       - first-party modular components
+      - RuntimeHost boundary position
       - host-language adapters
       - execution adapters
       - interoperability envelopes
 
 02.6. Architectural scope in this document excludes concrete schema,
-      adapter-protocol, and transport details. Those details belong in
-      later DA or IS documents.
+      adapter-protocol, RuntimeHost command, workspace ownership, entry-
+      surface, and transport details. Those details belong in later DA or IS
+      documents.
 
 02.7. Runtime authority follows the project-level ordering defined by
       DA-01:
       - Kernel owns authority
+      - RuntimeHost exposes controlled entry surfaces
       - adapters execute declared pack code
       - transports carry messages
       - RPC defines the logical communication boundary
@@ -106,6 +113,9 @@ Upstream Documents:
 
 02.8. This ordering is architectural and survives implementation
       replacement.
+
+02.9. RuntimeHost is a running host boundary in this ordering, not the
+      Kernel authority owner.
 
 
 ===============================================================================
@@ -128,8 +138,9 @@ Upstream Documents:
       required to preserve platform truth rather than merely to realize it
       in one implementation environment.
 
-03.5. Adapters, envelopes, transports, and host-language realizations do not
-      redefine the meaning established by the platform core.
+03.5. RuntimeHost realizations, adapters, envelopes, transports, and host-
+      language realizations do not redefine the meaning established by the
+      platform core.
 
 03.6. If platform guarantee meaning changes, the change is architectural
       rather than a mere implementation refactor.
@@ -140,6 +151,9 @@ Upstream Documents:
 03.8. Kernel authority may be realized by replaceable implementation code,
       but the authority meaning is platform-semantic rather than accidental
       implementation privilege.
+
+03.9. RuntimeHost may expose, bind, or host controlled entry surfaces, but
+      RuntimeHost realization does not replace Kernel authority.
 
 
 ===============================================================================
@@ -174,6 +188,10 @@ Upstream Documents:
 04.8. In-process calls may realize a boundary only when they preserve the
       same contract meaning that an explicit boundary would have provided.
 
+04.9. RuntimeHost entry-surface, command-surface, and workspace ownership
+      boundaries remain contract boundaries even when realized inside the
+      same process or host-language runtime.
+
 
 ===============================================================================
 05. FIRST-PARTY MODULARITY
@@ -188,6 +206,7 @@ Upstream Documents:
       - TTS
       - LLM-facing components
       - adapters
+      - RuntimeHost-facing tools or surfaces
       - other platform-realized subsystems
 
 05.3. Modularity does not remove the existence of a platform core.
@@ -203,6 +222,10 @@ Upstream Documents:
 
 05.7. A first-party module that executes pack code remains constrained by
       execution-boundary semantics rather than by implementation proximity.
+
+05.8. A first-party module that exposes RuntimeHost control remains
+      constrained by RuntimeHost boundary semantics rather than by
+      implementation proximity.
 
 
 ===============================================================================
@@ -242,8 +265,11 @@ Upstream Documents:
 
 06.10. Execution adapter semantics are defined by DA-23.
 
-06.11. Host-language adaptation does not bypass execution adapter,
-       activation, capability, persistence, or AppInstance boundaries.
+06.11. RuntimeHost semantics are defined by DA-28.
+
+06.12. Host-language adaptation does not bypass execution adapter,
+       activation, capability, persistence, AppInstance, RuntimeHost,
+       workspace ownership, or command-surface boundaries.
 
 
 ===============================================================================
@@ -251,8 +277,8 @@ Upstream Documents:
 ===============================================================================
 
 07.1. Turnix requires interoperability mechanisms for communication across
-      execution domains, host-language boundaries, adapter boundaries, or
-      architectural layers.
+      execution domains, host-language boundaries, adapter boundaries,
+      RuntimeHost entry-surface boundaries, or architectural layers.
 
 07.2. An interoperability envelope carries structured interaction across
       such boundaries.
@@ -273,10 +299,13 @@ Upstream Documents:
 07.6. Transport is the concrete carrier of messages and does not define the
       authority meaning of the envelope.
 
-07.7. Concrete message schemas, transport protocols, and wire details are
+07.7. RuntimeHost command-surface messages may use interoperability
+      envelopes, but the envelope does not define RuntimeHost authority.
+
+07.8. Concrete message schemas, transport protocols, and wire details are
       not defined in this document.
 
-07.8. Later DA and IS documents may define those concrete details, but the
+07.9. Later DA and IS documents may define those concrete details, but the
       architectural role of the envelope remains constrained by this
       design area.
 
@@ -296,20 +325,24 @@ Upstream Documents:
 08.4. Frontend replacement does not change Turnix identity when creator-
       facing contract meaning and platform guarantees remain preserved.
 
-08.5. Adapter replacement does not change Turnix identity when boundary
+08.5. RuntimeHost realization replacement does not change Turnix identity
+      when workspace ownership, entry-surface, command-surface, lifecycle,
+      trace, and authority boundary semantics remain preserved.
+
+08.6. Adapter replacement does not change Turnix identity when boundary
       semantics and contract truth remain preserved.
 
-08.6. Transport replacement does not change Turnix identity when logical
+08.7. Transport replacement does not change Turnix identity when logical
       boundary semantics and contract truth remain preserved.
 
-08.7. A replaceable implementation layer does not by itself possess
+08.8. A replaceable implementation layer does not by itself possess
       authority to redefine platform meaning.
 
-08.8. Implementation independence is not an aesthetic goal. It is a
+08.9. Implementation independence is not an aesthetic goal. It is a
       consequence of contract primacy and architectural truth.
 
-08.9. If platform truth does not survive implementation replacement, the
-      architecture relied too heavily on implementation accident.
+08.10. If platform truth does not survive implementation replacement, the
+       architecture relied too heavily on implementation accident.
 
 
 ===============================================================================
@@ -331,15 +364,19 @@ Upstream Documents:
 09.5. This design area does not treat modularity as permission to weaken
       platform guarantees or boundary discipline.
 
-09.6. This design area does not define exact loader, adapter, protocol, or
-      transport mechanics.
+09.6. This design area does not define exact loader, adapter, protocol,
+      RuntimeHost, workspace ownership, command-surface, or transport
+      mechanics.
 
 09.7. This design area does not treat FastAPI, WebSocket, browser
-      JavaScript, Python, CLI, subprocesses, containers, or network
-      topology as platform identity.
+      JavaScript, Python, CLI, subprocesses, containers, network topology,
+      launcher surfaces, or LAN clients as platform identity.
 
 09.8. This design area does not treat direct calls as authority-valid merely
       because they are convenient.
+
+09.9. This design area does not treat RuntimeHost realization as Kernel
+      authority by itself.
 
 
 ===============================================================================
@@ -355,6 +392,7 @@ Upstream Documents:
 
 10.3. Without this area, later specifications also risk weakening:
       - contract truth
+      - RuntimeHost boundary meaning
       - adapter accountability
       - interoperability boundary meaning
       - first-party modularity discipline
@@ -372,6 +410,6 @@ IMPLEMENTATION INDEPENDENCE
 --- doc-meta ---
 DOC_ID: DA-02
 DOC_FILE: docs/design/DA-02_PLATFORM_CORE_CONTRACT_BOUNDARIES_AND_IMPLEMENTATION_INDEPENDENCE.txt
-DOC_REV: 3
-DOC_GIT: 36385fe
+DOC_REV: 4
+DOC_GIT: 0000000
 ----------------
