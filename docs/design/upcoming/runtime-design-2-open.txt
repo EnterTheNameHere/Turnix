@@ -1,0 +1,552 @@
+Runtime design 2 open question map
+===================================
+
+Purpose
+-------
+This file captures open questions identified during the runtime design 2
+conversation pass.
+
+This file is a planning artifact only. It is not an authoritative Turnix
+specification document and does not override indexed CMR, DD, DA, ODA, or IS
+documents.
+
+Loaded context used for this pass
+---------------------------------
+- AI_WORKFLOW_BOOTSTRAP
+- CMR-04
+- DA-20 AppInstance Lifecycle & Runtime Identity
+- DA-21 RPC, Channels, Transports & Message Flow
+- DA-22 UI, Views & Frontend Runtime
+- DA-23 Execution Boundaries, Adapters and Code Runtimes
+- DA-27 Adapter Lifecycle, Trust and Traceability
+
+Primary gap categories
+----------------------
+
+01. Runtime host ownership
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- Which document owns the full Runtime Host model?
+- What is runtime host identity?
+- What is workspace identity?
+- What is the relationship between Kernel, runtime host, workspace, and process?
+- Does one runtime host own exactly one workspace?
+- Can one process host multiple runtime hosts?
+- Can one runtime host own multiple workspaces?
+- What startup modes exist?
+- What does no-argument startup do?
+- What is interactive mode?
+- What is one-shot command mode?
+- What is serve mode?
+- What is connect mode?
+- What is dev mode, if any?
+- What is runtime host shutdown behavior?
+- What is runtime host restart behavior?
+- What trace reason identifiers are owned by runtime host lifecycle?
+- Does runtime host lifecycle have its own DA or an IS constrained by DA-20,
+  DA-21, DA-23, and DA-27?
+
+Likely owner:
+- Future Runtime Host / Workspace Ownership DA or IS.
+
+02. Runtime host command surface
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- What is the exact CLI command surface?
+- Is `turnix` with no arguments an interactive shell?
+- Does `turnix run <appPack>` start a local runtime host when none exists?
+- Does `turnix run <appPack>` connect to an existing host when one owns the
+  workspace?
+- What does `turnix serve` mean?
+- What does `turnix connect <address>` mean?
+- What does `turnix list` list by default?
+- What commands list AppPacks?
+- What commands list SavePacks?
+- What commands list running AppInstances?
+- What commands inspect runtime host state?
+- What commands inspect trace evidence?
+- What commands expose policy decisions?
+- Which commands are one-shot and exit?
+- Which commands keep a runtime host alive?
+- Which commands are clients into an existing host?
+- How does a CLI command fail when a workspace is already owned but the host is
+  unreachable?
+- Does CLI command syntax belong to an implementation specification or a future
+  runtime-host design area?
+
+Likely owner:
+- Future Runtime Host command surface IS, constrained by DA-27.
+
+03. Workspace ownership and locking
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- Which document owns workspace locking?
+- Which document owns writable SavePack lock implementation?
+- Is workspace locking owned by root system, persistence, runtime host, or a
+  separate implementation specification?
+- What file, socket, process, or host marker represents workspace ownership?
+- What happens when a second runtime host starts against an owned workspace?
+- What happens when an existing owner crashed and left stale lock evidence?
+- How is stale lock recovery authorized?
+- How is stale lock recovery traced?
+- How is workspace ownership represented when Kernel runs on a LAN machine?
+- How is workspace ownership represented for containerized or virtual-machine
+  deployment?
+- Can a workspace be opened read-only by another host?
+- Can a SavePack be inspected read-only while another AppInstance owns it
+  writable?
+- Can multiple SavePacks in one workspace be owned by different AppInstances?
+- Can multiple runtime hosts share one workspace when they own disjoint
+  SavePacks, or is that explicitly unsupported?
+
+Likely owner:
+- Future Workspace Ownership / Host Locking IS, constrained by DA-07 and DA-20.
+
+04. SavePack generator API
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- How does an AppPack declare SavePack generation behavior?
+- Is SavePack generation an executable artifact declaration?
+- Which adapter executes SavePack generator code?
+- What lifecycle role name identifies SavePack generation?
+- What PackContext does SavePack generation receive?
+- Can SavePack generation request capabilities?
+- Can SavePack generation request user decisions?
+- Can SavePack generation be Job-backed?
+- Can SavePack generation create or enter an Orchestration Unit?
+- What state surfaces can SavePack generation write?
+- What persistence surfaces can SavePack generation use?
+- What happens if generation fails before any durable write?
+- What happens if generation fails after staged writes exist?
+- What trace reason identifiers represent generation start, success, failure,
+  cancellation, or rollback?
+- How is partial SavePack generation prevented from creating a valid SavePack?
+- How is generator compatibility with AppPack version recorded?
+- Does SavePack generation belong to DA-20, DA-23, DA-14, DA-04, or a dedicated
+  IS?
+
+Likely owner:
+- Future SavePack Generator API IS, constrained by DA-20, DA-23, DA-14, DA-04,
+  DA-06, and DA-07.
+
+05. SavePack compatibility validation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- What schema records AppPack compatibility in a SavePack?
+- What identifies the AppPack that created the SavePack?
+- What identifies the AppPack version last used to open the SavePack?
+- What identifies state schema version?
+- What identifies resolved dependency graph or dependency lock state?
+- What compatibility failure categories exist?
+- What migration paths are allowed?
+- What override paths are allowed?
+- What recovery paths are allowed?
+- What user decisions are required for compatibility override?
+- What trace evidence records compatibility validation?
+- Does compatibility validation run before AppInstance creation or during save
+  binding phase?
+
+Likely owner:
+- Future SavePack compatibility IS, constrained by DA-20, DA-04, DA-06, DA-09,
+  DA-10, DA-11, and DA-13.
+
+06. Executable artifact declaration schema
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- What manifest field declares executable artifacts?
+- What field names identify artifact path, artifact id, adapter kind, runtime
+  requirement, lifecycle role, entrypoint, requested capabilities, and trust
+  requirements?
+- Is declaration stored under `code`, `entrypoints`, `activation`, `views`,
+  `app`, or another field?
+- How are child-pack executable artifacts declared?
+- How are optional executable artifacts declared?
+- How are generated executable artifacts represented, if allowed?
+- How are artifact identities scoped inside pack hierarchy?
+- What lifecycle role vocabulary is valid?
+- What entrypoint syntax is valid for Python?
+- What entrypoint syntax is valid for JavaScript?
+- How are requested capabilities represented?
+- How are trust or policy requirements represented?
+- How does declaration relate to DA-12 importing/module-loading rules?
+- How does declaration relate to DA-14 activation lifecycle?
+
+Likely owner:
+- Future pack manifest / executable artifact IS, constrained by DA-12, DA-14,
+  DA-23, and DA-27.
+
+07. Adapter binding schema
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- Does a pack declare `adapter`, `runtime`, `environment`, or another binding
+  field?
+- Can multiple adapters satisfy one runtime requirement?
+- Can the Kernel choose between PythonInProcessAdapter and
+  PythonSubprocessAdapter?
+- Can policy force a safer adapter than the pack requested?
+- Can a user override adapter binding?
+- Can adapter binding depend on trust class?
+- Can adapter binding depend on deployment topology?
+- Can adapter binding depend on AppInstance or SavePack policy?
+- What happens when no adapter supports a declared artifact?
+- Are adapters built-in only at first?
+- Can adapters later be supplied by privileged AdapterPacks?
+- What authority level is required for pack-provided adapter implementations?
+
+Likely owner:
+- Future adapter binding IS, constrained by DA-23 and DA-27.
+
+08. PackContext API
+~~~~~~~~~~~~~~~~~~~
+Open questions:
+- What is the concrete PackContext API shape?
+- What is the Python PackContext representation?
+- What is the JavaScript PackContext representation?
+- Are PackContext operations async-only?
+- Are any PackContext operations synchronous?
+- What is the capability call API?
+- What is the request API?
+- What is the emit API?
+- What is the subscribe API?
+- What is the cancellation API?
+- What is the trace helper API?
+- What is the state read helper API?
+- What is the state mutation helper API?
+- What is the lifecycle helper API?
+- What error types are exposed to pack code?
+- How is PackContext invalidated after lifecycle end?
+- Are retained handles allowed?
+- If retained handles are allowed, who owns their lifecycle?
+- How does PackContext map to RPC envelopes?
+- How does PackContext preserve appInstanceId, viewId, adapter identity,
+  capability identity, jobId, and trace context?
+
+Likely owner:
+- Future PackContext API IS, constrained by DA-23, DA-21, DA-16, DA-19, DA-20,
+  DA-22, DA-24, and DA-27.
+
+09. Direct-call and in-process RPC optimization
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- What is an in-process RPC channel?
+- Does in-process RPC use the same logical envelope as WebSocket RPC?
+- Does in-process RPC allocate rpcMessageId?
+- Does in-process RPC record acknowledgement evidence?
+- Does in-process RPC distinguish message delivery, request acceptance, and
+  final result?
+- How does in-process RPC preserve cancellation semantics?
+- How does in-process RPC preserve trace evidence equivalent to message flow?
+- How does direct-call optimization preserve route or capability target
+  identity?
+- How does direct-call optimization preserve permission checks?
+- How does direct-call optimization preserve lifecycle ownership?
+- How does direct-call optimization preserve Orchestration Unit boundaries?
+- How does direct-call optimization preserve transaction and commit boundaries?
+- How does PythonInProcessAdapter prevent accidental backend import bypass?
+- What makes a direct call invalid as pack-code authority?
+
+Likely owner:
+- Future in-process RPC / direct-call flow IS, constrained by DA-21 and DA-23.
+
+10. Python adapter contracts
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- What is the exact PythonInProcessAdapter API?
+- What is the exact PythonSubprocessAdapter protocol?
+- How is Python pack code loaded?
+- How are Python entrypoints discovered?
+- How is Python module import behavior restricted?
+- How are backend-internal imports blocked or diagnosed?
+- How is Python async event-loop ownership handled?
+- Does PythonInProcessAdapter share the Kernel event loop?
+- Does PythonSubprocessAdapter use stdio, local socket, named pipe, or another
+  transport?
+- What is the worker startup handshake?
+- How are stdout and stderr handled?
+- How is worker crash classified?
+- How is adapter disconnect classified?
+- How are environment variables handled?
+- How are Python dependencies handled?
+- Are per-pack virtual environments supported?
+- Is filesystem access restricted?
+- How is cancellation requested?
+- How are timeouts represented?
+- How is trace context propagated into Python pack code?
+- How are Python exceptions converted into structured Turnix errors?
+
+Likely owner:
+- Future Python adapter implementation specification, possibly split into
+  PythonInProcessAdapter and PythonSubprocessAdapter IS documents.
+
+11. Containerized and VM adapter contracts
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- What is the minimum contract for a containerized adapter?
+- What isolation guarantees may Turnix claim for containerized execution?
+- What isolation guarantees must Turnix avoid claiming?
+- What filesystem mounts are allowed?
+- How is SavePack state exposed or withheld?
+- How is PackContext delivered into a containerized adapter?
+- What transport connects containerized adapter to Kernel?
+- How are container crashes classified?
+- How are container images resolved or built?
+- What is the minimum contract for VM-backed adapter execution?
+- Does remote execution count as VM-like isolation, remote client execution, or
+  a separate adapter class?
+
+Likely owner:
+- Future containerized adapter / external worker IS, constrained by DA-23 and
+  DA-27.
+
+12. Browser frontend bootstrap
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- How is the browser shell served?
+- Is FastAPI only an asset/transport implementation detail?
+- How is View identity created?
+- How is frontend client identity created?
+- How is a frontend client bound to a View?
+- How is frontend adapter identity represented?
+- How does BrowserJSAdapter report readiness?
+- How is the initial state snapshot delivered?
+- How are generation mismatches handled?
+- How does reconnect receive fresh snapshot, generation update, retained update
+  state, or another recovery surface?
+- How does F5/browser reload invalidate frontend-local state?
+- How are JavaScript modules loaded?
+- How does browser bootstrap integrate with turnixImport?
+- How does browser bootstrap integrate with adapter binding?
+- What is the relationship between View pack activation and BrowserJSAdapter
+  artifact loading?
+- Which concrete behavior belongs to IS-02 and which belongs to a future
+  browser frontend IS?
+
+Likely owner:
+- Future browser frontend bootstrap IS, constrained by DA-22, DA-23, DA-21,
+  IS-01, and IS-02.
+
+13. View registry and multi-client behavior
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- What is the exact View registry contract?
+- Can two browser tabs bind to the same View?
+- Can multiple frontend clients control the same View?
+- Is one frontend client primary and others read-only?
+- How are conflicting frontend commands ordered?
+- Can multiple frontend clients present the same decision point?
+- How does Kernel choose the accepted decision response?
+- How are stale decision prompts dismissed or marked inactive?
+- Can a View be shared over LAN?
+- Does one frontend disconnect close the View?
+- Does View closure detach frontend clients or close them explicitly?
+- What retained update behavior exists after reconnect?
+- What trace evidence records multi-client conflicts?
+
+Likely owner:
+- Future View registry / frontend synchronization IS, constrained by DA-22,
+  DA-21, DA-17, and DA-23.
+
+14. RPC schema and WebSocket flow alignment
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- Does IS-01 include adapter metadata fields?
+- Does IS-01 include appInstanceId, viewId, adapter kind, adapter instance id,
+  jobId, capability id, and trace context where needed?
+- Does IS-01 distinguish acknowledgement, request acceptance, immediate reply,
+  accepted Job-backed work, accepted adapter-mediated work, and final result?
+- Does IS-01 represent cancellation as a request rather than direct execution
+  kill?
+- Does IS-01 support retained Job result retrieval?
+- Does IS-01 support adapter-mediated work handles?
+- Does IS-02 correctly treat WebSocket as one transport rather than the RPC
+  model itself?
+- Does IS-02 distinguish transport disconnect from adapter failure?
+- Does IS-02 distinguish transport timeout from Job timeout?
+- Does IS-02 handle generation/session mismatch without redefining higher
+  lifecycle semantics?
+
+Likely owner:
+- Review/update IS-01 and IS-02 against DA-21, DA-23, and DA-27.
+
+15. Adapter identity representation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- What is adapterKind?
+- What is adapterInstanceId?
+- Is there an adapterProviderId?
+- Is there an adapter run/session id distinct from adapterInstanceId?
+- Is there an artifact execution id?
+- How does adapter identity relate to appInstanceId?
+- How does adapter identity relate to viewId?
+- How does adapter identity relate to rpcMessageId?
+- How does adapter identity relate to jobId?
+- How does adapter identity relate to orchestrationUnitId?
+- How does adapter identity appear in trace evidence?
+- Is adapter identity stable across reconnect?
+- Is adapter identity stable across artifact activation?
+- Is adapter identity stable across AppInstance restart?
+
+Likely owner:
+- DA-27-constrained adapter identity IS.
+
+16. Trust and isolation vocabulary
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- What exact trust classification vocabulary should Turnix use?
+- What exact isolation classification vocabulary should Turnix use?
+- Does trust class classify pack source, adapter class, user decision, or all
+  three separately?
+- Does isolation class classify actual mechanism or intended mechanism?
+- How are trust and isolation classes recorded in trace evidence?
+- How are trust and isolation classes presented in UI decisions?
+- How are remembered trust decisions scoped?
+- Does approving PythonInProcessAdapter for one pack approve it for child
+  packs?
+- Does approving PythonInProcessAdapter approve PythonSubprocessAdapter?
+- Does approving a pack for execution grant any capabilities?
+- How are unsafe adapter choices hidden, warned, blocked, or allowed by policy?
+
+Likely owner:
+- DA-27 trust/isolation taxonomy update or child IS, constrained by DA-17.
+
+17. CLI adapter behavior
+~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- Is CLI a frontend adapter, control adapter, or both?
+- Can CLI execute pack-provided CLI views?
+- Can CLI present an AppInstance as an interactive frontend?
+- Can CLI present Kernel management surfaces?
+- Can CLI connect to LAN host?
+- How does CLI authenticate or pair with a LAN host?
+- How are decisions presented in CLI?
+- How does CLI handle long-running Jobs?
+- How does CLI subscribe to updates?
+- How does CLI detach from work without cancelling it?
+- How does CLI reconnect to retained results?
+- What command output format is stable enough for scripts?
+- Does CLI have a JSON output mode?
+
+Likely owner:
+- Future CLI adapter / runtime-host command IS, constrained by DA-21, DA-22,
+  DA-23, DA-27, and DA-19.
+
+18. TestAdapter behavior
+~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- Can TestAdapter run AppPacks?
+- Can TestAdapter create temporary SavePacks?
+- Does TestAdapter run isolated by default?
+- How does TestAdapter avoid weakening authority boundaries?
+- How does TestAdapter assert trace evidence?
+- How does TestAdapter inspect AppInstance lifecycle?
+- Can TestAdapter simulate transport disconnect?
+- Can TestAdapter simulate adapter failure?
+- Can TestAdapter simulate View disconnect?
+- Can TestAdapter simulate user decisions?
+- Can TestAdapter provide policy answers without creating hidden defaults?
+- Can TestAdapter run deterministic replay?
+- How are test results persisted?
+- Is the Turnix test suite itself an AppPack using TestAdapter surfaces?
+
+Likely owner:
+- Future TestAdapter IS, constrained by DA-20, DA-21, DA-23, DA-27, DA-17, and
+  DA-19.
+
+19. AppInstance restart, reconnect, retained-result behavior
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- What is AppInstance restart?
+- How is AppInstance restart different from loading an existing SavePack?
+- How is AppInstance restart different from View reconnect?
+- How is AppInstance restart different from adapter reconnect?
+- How is AppInstance restart different from retrieving retained Job results?
+- Can an AppInstance restart preserve appInstanceId?
+- If appInstanceId cannot be preserved, what correlation links old and new
+  instances?
+- Can Jobs survive AppInstance restart?
+- Can adapter-mediated work survive AppInstance restart?
+- Can Views survive AppInstance restart?
+- How are detached Jobs retained when frontend disconnects?
+- How are late Job results retained, discarded, or surfaced?
+- What policy controls retained result storage?
+- What command retrieves retained results?
+
+Likely owner:
+- DA-20 update plus DA-19/DA-21 constrained implementation specifications.
+
+20. Adapter lifecycle state machine
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- What transitions are allowed between adapter lifecycle states?
+- Which states are terminal?
+- Which failures are recoverable?
+- What is the difference between disconnected and failed?
+- Can an adapter move from disconnected back to ready?
+- Can an adapter lose readiness without disconnecting?
+- What happens if adapter closes while work is active?
+- What happens if adapter fails during artifact loading?
+- What happens if adapter fails during activation dispatch?
+- What happens if adapter fails during running execution?
+- What happens if adapter is stopped intentionally?
+- How are adapter stop, close, disconnect, and failure distinguished in trace?
+- Does each adapter class refine the common state machine?
+
+Likely owner:
+- DA-27 update or adapter lifecycle IS.
+
+21. Trace reason ownership and concrete trace extensions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- What concrete RPC trace reason identifiers exist?
+- Which trace reasons are abstract DA-21-owned RPC reasons?
+- Which trace reasons are IS-02-owned WebSocket transport reasons?
+- What adapter implementation-specific trace extensions are allowed?
+- How are implementation-specific trace extensions named?
+- What fields are mandatory for RPC trace evidence?
+- What fields are mandatory for adapter trace evidence?
+- What fields are mandatory for runtime-host trace evidence?
+- How does trace correlation cross RPC -> adapter -> activation -> AppInstance
+  -> Job -> Window?
+- How are malformed envelopes traced?
+- How are generation mismatches traced?
+- How are direct-call optimized paths traced?
+
+Likely owner:
+- DA-21 refinement, DA-27 refinement, IS-01/IS-02 updates, and future runtime-host
+  trace specification.
+
+22. Document ownership map
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+Open questions:
+- Which future documents should be DA documents?
+- Which future documents should be IS documents?
+- Which future documents should remain upcoming/planning files?
+- Should runtime host be DA-28?
+- Should workspace ownership be part of runtime host or persistence?
+- Should executable artifact schema live in pack manifest specification?
+- Should PackContext API have one IS or language-specific IS documents?
+- Should PythonInProcessAdapter and PythonSubprocessAdapter be separate IS
+  documents?
+- Should browser frontend bootstrap extend IS-02 or become its own IS?
+- Should CLI adapter and runtime-host command surface be one document or two?
+- Should TestAdapter be an IS or an ODA/tooling document?
+
+Possible future document map:
+- DA-28 Runtime Host, Workspace Ownership and Command Surface
+- IS-03 Executable Artifact Declaration and Adapter Binding Schema
+- IS-04 PackContext API
+- IS-05 Python Execution Adapter Contract
+- IS-06 Browser Frontend Bootstrap and View Binding Flow
+- IS-07 In-Process RPC and Direct-Call Flow
+- IS-08 Runtime Host CLI and Control Surface
+- IS-09 TestAdapter Contract
+- IS-10 Workspace Locking and Writable Ownership Enforcement
+
+Immediate recommended next step
+-------------------------------
+Create a narrow ownership plan before drafting new authoritative semantics.
+
+The first promoted document is likely a Runtime Host / Workspace Ownership
+design area because multiple existing open questions point there, and DA-27
+currently defines runtime-host meaning only where needed to preserve adapter
+authority boundaries.
