@@ -14,15 +14,17 @@ phases, PackContext authority, and the RPC-shaped boundary through which
 adapter-executed code participates in an AppInstance.
 
 This document owns the abstract execution-boundary authority model. Adapter
-lifecycle, trust, isolation, concrete adapter classes, adapter-domain trace
-reason identifiers, and runtime-host deployment semantics are defined by
-DA-27.
+lifecycle, trust, isolation, concrete adapter classes, and adapter-domain trace
+reason identifiers are defined by DA-27. RuntimeHost identity, workspace
+ownership, startup modes, entry surfaces, and command-surface semantics are
+defined by DA-28.
 
 Purpose:
 --------
 This document defines how Turnix treats executable pack code across host
-languages and runtime environments without allowing host-language convenience
-to bypass Kernel authority.
+languages and runtime environments without allowing host-language convenience,
+process location, runtime host entry surfaces, or deployment shape to bypass
+Kernel authority.
 
 It defines:
 - Kernel authority over adapter-executed code participation
@@ -36,7 +38,7 @@ It defines:
 - relationship between adapters and transports
 - relationship to AppPack, SavePack, and AppInstance
 - relationship to activation, imports, capabilities, decisions, Jobs,
-  Views, Orchestration Units, and runtime state
+  Views, Orchestration Units, RuntimeHost, and runtime state
 - direct-call transport optimization boundaries
 
 It does NOT define:
@@ -51,8 +53,10 @@ It does NOT define:
 - UI, View, and frontend runtime presentation semantics (see DA-22)
 - Orchestration Unit lifecycle or mutation authority semantics (see DA-24)
 - adapter lifecycle, adapter trust and isolation, concrete adapter classes,
-  adapter-domain trace reason identifiers, or runtime-host deployment
-  semantics (see DA-27)
+  or adapter-domain trace reason identifiers (see DA-27)
+- RuntimeHost identity, workspace ownership, startup modes, entry surfaces,
+  command-surface semantics, or runtime-host trace reason identifiers
+  (see DA-28)
 - concrete RPC message schema (see IS-01)
 - concrete WebSocket flow (see IS-02)
 - concrete Python adapter implementation
@@ -81,6 +85,7 @@ Upstream Documents:
 - DA-21
 - DA-22
 - DA-24
+- DA-28
 
 Downstream Documents:
 --------------------
@@ -94,6 +99,7 @@ Downstream Documents:
 - DA-22
 - DA-24
 - DA-27
+- DA-28
 - IS-01
 - IS-02
 - future adapter implementation specifications
@@ -124,8 +130,8 @@ Downstream Documents:
 02.1. This design area answers:
 
           "How does Turnix execute declared pack code without allowing host
-           language, process location, transport choice, or frontend
-           convenience to bypass Kernel authority?"
+           language, process location, transport choice, runtime host entry
+           surface, or frontend convenience to bypass Kernel authority?"
 
 02.2. Kernel owns authority.
 
@@ -140,23 +146,29 @@ Downstream Documents:
 02.7. SavePack stores durable executed state under Kernel-owned persistence
       rules.
 
-02.8. The host language used by pack code does not grant backend authority.
+02.8. RuntimeHost exposes controlled entry surfaces under DA-28.
 
-02.9. Pack-provided Python is not backend implementation code merely because
-      Turnix backend implementation is Python.
+02.9. The host language used by pack code does not grant backend authority.
 
-02.10. Pack-provided JavaScript is not frontend authority merely because it
+02.10. Pack-provided Python is not backend implementation code merely because
+       Turnix backend implementation is Python.
+
+02.11. Pack-provided JavaScript is not frontend authority merely because it
        runs in a browser.
 
-02.11. Pack code participates in an AppInstance only through Turnix-managed
+02.12. Pack code participates in an AppInstance only through Turnix-managed
        context, capability, RPC-shaped, lifecycle, policy, trace, and state
        boundaries.
 
-02.12. Direct calls may be used as a transport optimization.
+02.13. Pack code does not acquire RuntimeHost control authority merely because
+       a RuntimeHost entry surface, CLI surface, frontend surface, or LAN
+       surface exists.
 
-02.13. Direct backend authority is not a valid authority path for pack code.
+02.14. Direct calls may be used as a transport optimization.
 
-02.14. Later sections refine and apply these rules. They do not weaken them.
+02.15. Direct backend authority is not a valid authority path for pack code.
+
+02.16. Later sections refine and apply these rules. They do not weaken them.
 
 
 ===============================================================================
@@ -189,13 +201,17 @@ Downstream Documents:
 03.6. Kernel authority is not delegated merely because a frontend can send a
       message.
 
-03.7. Kernel authority is not delegated merely because a pack declares code.
+03.7. Kernel authority is not delegated merely because a RuntimeHost entry
+      surface can send a command.
 
-03.8. Kernel may expose authority through capabilities, policies, and
+03.8. Kernel authority is not delegated merely because a pack declares code.
+
+03.9. Kernel may expose authority through capabilities, policies, and
       Turnix-controlled contexts.
 
-03.9. Exposed authority remains scoped by the capability, policy, context,
-      AppInstance, SavePack, and lifecycle boundaries that grant it.
+03.10. Exposed authority remains scoped by the capability, policy, context,
+       AppInstance, SavePack, RuntimeHost, and lifecycle boundaries that grant
+       it.
 
 
 ===============================================================================
@@ -219,12 +235,17 @@ Downstream Documents:
 
 04.4. Execution location does not define authority.
 
-04.5. Adapter mediation does not imply sandboxing.
+04.5. RuntimeHost deployment location does not define adapter authority.
 
-04.6. Adapter sandboxing, trust classification, lifecycle, concrete adapter
+04.6. Adapter mediation does not imply sandboxing.
+
+04.7. Adapter sandboxing, trust classification, lifecycle, concrete adapter
       classes, and adapter trace reason ownership are defined by DA-27.
 
-04.7. The minimum abstract adapter role is to:
+04.8. RuntimeHost identity, workspace ownership, startup modes, entry
+      surfaces, and command-surface semantics are defined by DA-28.
+
+04.9. The minimum abstract adapter role is to:
       - load declared executable artifacts
       - execute code through declared lifecycle entrypoints
       - provide a Turnix-controlled context to pack code
@@ -233,15 +254,18 @@ Downstream Documents:
       - preserve trace correlation metadata where available
       - remain subordinate to capability and permission boundaries
 
-04.8. An adapter does not own authoritative persistent state unless a later
-      authoritative document defines an explicit delegated state authority.
+04.10. An adapter does not own authoritative persistent state unless a later
+       authoritative document defines an explicit delegated state authority.
 
-04.9. An adapter does not become Kernel authority because it is trusted.
+04.11. An adapter does not become Kernel authority because it is trusted.
 
-04.10. An adapter does not become Kernel authority because it is in-process.
+04.12. An adapter does not become Kernel authority because it is in-process.
 
-04.11. An adapter does not become Kernel authority because its transport is
+04.13. An adapter does not become Kernel authority because its transport is
        direct.
+
+04.14. An adapter does not become RuntimeHost authority because it is attached
+       to a RuntimeHost-owned AppInstance or entry surface.
 
 
 ===============================================================================
@@ -291,6 +315,9 @@ Downstream Documents:
 
 05.15. Execution success does not imply committed-state mutation.
 
+05.16. Execution success does not imply RuntimeHost command acceptance,
+       RuntimeHost operation success, or workspace ownership change.
+
 
 ===============================================================================
 06. DECLARED EXECUTABLE ARTIFACTS
@@ -327,6 +354,9 @@ Downstream Documents:
 06.10. A declaration does not grant committed-state mutation authority by
        itself.
 
+06.11. A declaration does not grant RuntimeHost command-surface authority by
+       itself.
+
 
 ===============================================================================
 07. PACK CODE VERSUS BACKEND IMPLEMENTATION CODE
@@ -345,24 +375,31 @@ Downstream Documents:
 07.5. Pack-provided code is not frontend authority merely because it runs in
       the browser.
 
-07.6. Pack-provided code receives controlled participation through
+07.6. Pack-provided code is not RuntimeHost authority merely because it runs
+      inside a RuntimeHost-owned process or entry surface.
+
+07.7. Pack-provided code receives controlled participation through
       PackContext, capability calls, RPC-shaped messages, and declared
       lifecycle entrypoints.
 
-07.7. Pack-provided code does not import backend internals as an authority
+07.8. Pack-provided code does not import backend internals as an authority
       path.
 
-07.8. Pack-provided code does not directly mutate Kernel-owned authoritative
+07.9. Pack-provided code does not directly mutate Kernel-owned authoritative
       state.
 
-07.9. Pack-provided code does not directly write SavePack state as an
-      authority path.
+07.10. Pack-provided code does not directly write SavePack state as an
+       authority path.
 
-07.10. Pack-provided code does not bypass tracing, policy, capability,
+07.11. Pack-provided code does not bypass tracing, policy, capability,
        permission, lifecycle, or transaction boundaries through native
        language convenience.
 
-07.11. Any allowed same-process or same-language integration remains a
+07.12. Pack-provided code does not bypass RuntimeHost workspace ownership,
+       startup-mode, entry-surface, or command-surface boundaries through
+       native language convenience.
+
+07.13. Any allowed same-process or same-language integration remains a
        Turnix-controlled boundary, not a backend authority grant.
 
 
@@ -379,6 +416,7 @@ Downstream Documents:
       - pack identity
       - AppInstance identity when applicable
       - View identity when applicable
+      - RuntimeHost identity when applicable and permitted
       - capability call surfaces
       - event or request surfaces
       - state access surfaces when allowed
@@ -393,16 +431,18 @@ Downstream Documents:
 
 08.7. PackContext does not expose unrestricted capability invocation.
 
-08.8. PackContext is scoped to the pack, adapter, AppInstance, lifecycle,
-      permission, and policy context that created it.
+08.8. PackContext does not expose unrestricted RuntimeHost control authority.
 
-08.9. PackContext authority does not outlive the lifecycle boundary that
-      created it unless an explicit retained handle model is defined.
+08.9. PackContext is scoped to the pack, adapter, AppInstance, RuntimeHost,
+      lifecycle, permission, and policy context that created it.
 
-08.10. PackContext may be represented differently across languages and
+08.10. PackContext authority does not outlive the lifecycle boundary that
+       created it unless an explicit retained handle model is defined.
+
+08.11. PackContext may be represented differently across languages and
        adapters.
 
-08.11. Host-language representation differences do not change PackContext
+08.12. Host-language representation differences do not change PackContext
        authority meaning.
 
 
@@ -421,6 +461,8 @@ Downstream Documents:
       - trace correlation
       - structured result, error, cancellation, and readiness reporting
       - AppInstance and SavePack state authority boundaries
+      - RuntimeHost entry-surface and command-surface authority boundaries when
+        host-level behavior is targeted
 
 09.3. RPC-shaped boundary is not equivalent to WebSocket.
 
@@ -443,17 +485,19 @@ Downstream Documents:
 
 09.8. Direct in-process calls do not bypass capability routing, permission
       checks, lifecycle ownership, trace correlation, structured error
-      handling, Orchestration Unit boundaries, transaction boundaries, or
-      AppInstance state authority.
+      handling, Orchestration Unit boundaries, transaction boundaries,
+      AppInstance state authority, or RuntimeHost authority boundaries.
 
 09.9. A call that bypasses those boundaries is not treated as valid pack
       execution authority merely because it works technically.
 
 09.10. DA-21 owns abstract RPC, channel, and transport semantics.
 
-09.11. IS-01 owns concrete RPC message schema.
+09.11. DA-28 owns RuntimeHost entry-surface and command-surface semantics.
 
-09.12. IS-02 owns concrete WebSocket flow.
+09.12. IS-01 owns concrete RPC message schema.
+
+09.13. IS-02 owns concrete WebSocket flow.
 
 
 ===============================================================================
@@ -474,23 +518,28 @@ Downstream Documents:
 
 10.6. Transport does not define AppInstance lifecycle.
 
-10.7. Transport does not define Job lifecycle.
+10.7. Transport does not define RuntimeHost lifecycle.
 
-10.8. Transport failure does not by itself define adapter failure.
+10.8. Transport does not define Job lifecycle.
 
-10.9. Adapter failure does not by itself define transport failure.
+10.9. Transport failure does not by itself define adapter failure.
 
-10.10. Transport timeout does not by itself define Job timeout or adapter
-       timeout.
+10.10. Adapter failure does not by itself define transport failure.
 
-10.11. DA-21 defines the abstract separation between RPC, channels, and
+10.11. Transport timeout does not by itself define Job timeout, adapter
+       timeout, or RuntimeHost timeout.
+
+10.12. DA-21 defines the abstract separation between RPC, channels, and
        transports.
 
-10.12. DA-27 defines adapter lifecycle and adapter failure semantics.
+10.13. DA-27 defines adapter lifecycle and adapter failure semantics.
+
+10.14. DA-28 defines RuntimeHost lifecycle, entry-surface, and command-
+       surface semantics.
 
 
 ===============================================================================
-11. RELATION TO APPPACK, SAVEPACK, AND APPINSTANCE
+11. RELATION TO APPPACK, SAVEPACK, APPINSTANCE, AND RUNTIMEHOST
 ===============================================================================
 
 11.1. AppPack defines executable application behavior and entrypoints.
@@ -500,27 +549,35 @@ Downstream Documents:
 11.3. AppInstance is the live runtime identity created by loading an AppPack
       with a SavePack.
 
-11.4. Kernel load formula is:
+11.4. RuntimeHost is the running Turnix host boundary defined by DA-28.
+
+11.5. Kernel load formula is:
 
           AppPack + SavePack + RuntimeContext -> AppInstance
 
-11.5. Adapter-executed code participates in an AppInstance through the
+11.6. Adapter-executed code participates in an AppInstance through the
       Kernel-owned authority model.
 
-11.6. Adapter-executed code does not own the AppInstance merely because it
+11.7. Adapter-executed code does not own the AppInstance merely because it
       runs application logic.
 
-11.7. Adapter-executed code does not own the SavePack merely because its
+11.8. Adapter-executed code does not own the SavePack merely because its
       work affects persisted state.
 
-11.8. SavePack persistence remains under Kernel-owned persistence authority.
+11.9. Adapter-executed code does not own the RuntimeHost merely because it
+      runs inside a RuntimeHost-bound process, adapter, View, or entry surface.
 
-11.9. A writable SavePack is not written through adapter-owned state
-      authority.
+11.10. SavePack persistence remains under Kernel-owned persistence authority.
 
-11.10. AppInstance lifecycle and runtime identity are defined by DA-20.
+11.11. A writable SavePack is not written through adapter-owned state
+       authority.
 
-11.11. SavePack persistence safety is constrained by DA-04 and DA-07.
+11.12. AppInstance lifecycle and runtime identity are defined by DA-20.
+
+11.13. RuntimeHost identity, workspace ownership, startup modes, and command
+       surfaces are defined by DA-28.
+
+11.14. SavePack persistence safety is constrained by DA-04 and DA-07.
 
 
 ===============================================================================
@@ -541,11 +598,14 @@ Downstream Documents:
 
 12.7. Activation success does not imply unrestricted capability permission.
 
-12.8. This document constrains activation only where activation crosses the
+12.8. Activation success does not imply RuntimeHost command acceptance or
+      RuntimeHost operation success.
+
+12.9. This document constrains activation only where activation crosses the
       execution adapter boundary.
 
-12.9. DA-27 defines adapter lifecycle states and adapter-domain trace
-      reason identifiers used around adapter loading and dispatch.
+12.10. DA-27 defines adapter lifecycle states and adapter-domain trace
+       reason identifiers used around adapter loading and dispatch.
 
 
 ===============================================================================
@@ -570,7 +630,8 @@ Downstream Documents:
       allowed by DA-12 and this document.
 
 13.7. A successful native import does not imply Turnix permission,
-      activation, state authority, or capability permission.
+      activation, state authority, capability permission, or RuntimeHost
+      command authority.
 
 
 ===============================================================================
@@ -595,10 +656,15 @@ Downstream Documents:
 
 14.8. Transport identity does not grant permission by itself.
 
-14.9. Capability invocation that mutates state remains constrained by DA-04
-      and DA-24.
+14.9. RuntimeHost identity does not grant permission by itself.
 
-14.10. Capability invocation through RPC remains constrained by DA-21.
+14.10. Capability invocation that mutates state remains constrained by DA-04
+       and DA-24.
+
+14.11. Capability invocation through RPC remains constrained by DA-21.
+
+14.12. Capability invocation that targets RuntimeHost behavior remains
+       constrained by DA-28.
 
 
 ===============================================================================
@@ -616,13 +682,16 @@ Downstream Documents:
 15.4. A policy decision authorizes only the scope it states.
 
 15.5. A remembered policy decision does not silently broaden itself to new
-      adapter kinds, new packs, new capabilities, new SavePacks, or new
-      trust classes.
+      adapter kinds, new packs, new capabilities, new SavePacks, new
+      RuntimeHost entry surfaces, or new trust classes.
 
 15.6. Policy decision storage does not become pack authority.
 
 15.7. DA-27 defines adapter trust and isolation classification semantics
       consumed by policy decisions.
+
+15.8. DA-28 defines RuntimeHost entry-surface, workspace-ownership, LAN
+      exposure, and command-surface semantics consumed by policy decisions.
 
 
 ===============================================================================
@@ -648,10 +717,15 @@ Downstream Documents:
 
 16.8. Adapter execution failure is not Orchestration Unit failure by default.
 
-16.9. Job and Orchestration Unit relationships to adapter-executed work are
-      explicit and trace-visible when they exist.
+16.9. Adapter execution acceptance is not RuntimeHost operation success.
 
-16.10. Adapter lifecycle and trace semantics are defined by DA-27.
+16.10. RuntimeHost operation success is not adapter execution success by
+       default.
+
+16.11. Job and Orchestration Unit relationships to adapter-executed work are
+       explicit and trace-visible when they exist.
+
+16.12. Adapter lifecycle and trace semantics are defined by DA-27.
 
 
 ===============================================================================
@@ -677,12 +751,15 @@ Downstream Documents:
 
 17.6. Frontend adapters do not own authoritative AppInstance state.
 
-17.7. Frontend adapter participation remains constrained by DA-22, DA-23,
-      DA-27, DA-21, IS-01, and IS-02.
+17.7. Frontend adapters do not own RuntimeHost authority merely because they
+      render a launcher, management, CLI-like, or RuntimeHost control surface.
+
+17.8. Frontend adapter participation remains constrained by DA-22, DA-23,
+      DA-27, DA-21, DA-28, IS-01, and IS-02.
 
 
 ===============================================================================
-18. RELATION TO DA-27
+18. RELATION TO DA-27 AND DA-28
 ===============================================================================
 
 18.1. DA-23 owns the abstract execution adapter authority boundary.
@@ -703,17 +780,36 @@ Downstream Documents:
       - adapter failure and disconnect meaning
       - adapter-domain trace reason identifiers
       - adapter trace context
-      - runtime-host and local-first deployment interpretation
 
-18.4. DA-27 does not weaken DA-23 authority boundaries.
+18.4. DA-28 owns:
+      - RuntimeHost identity
+      - workspace ownership at runtime-host level
+      - startup modes
+      - entry surfaces
+      - command-surface semantics
+      - local-first and LAN exposure semantics
+      - RuntimeHost-domain trace reason identifiers
+      - runtime-host trace context
 
-18.5. DA-23 does not define concrete adapter lifecycle state machines.
+18.5. DA-27 does not weaken DA-23 authority boundaries.
 
-18.6. DA-23 does not define concrete adapter trust or isolation taxonomy.
+18.6. DA-28 does not weaken DA-23 authority boundaries.
 
-18.7. If DA-23 and DA-27 appear to conflict, the interpretation that
-      preserves Kernel authority, capability mediation, and the RPC-shaped
-      execution boundary is used until the documents are corrected.
+18.7. DA-23 does not define concrete adapter lifecycle state machines.
+
+18.8. DA-23 does not define concrete adapter trust or isolation taxonomy.
+
+18.9. DA-23 does not define RuntimeHost lifecycle, workspace ownership,
+      startup-mode, entry-surface, or command-surface semantics.
+
+18.10. If DA-23 and DA-27 appear to conflict, the interpretation that
+       preserves Kernel authority, capability mediation, and the RPC-shaped
+       execution boundary is used until the documents are corrected.
+
+18.11. If DA-23 and DA-28 appear to conflict, the interpretation that
+       preserves Kernel authority, capability mediation, workspace ownership,
+       and the RPC-shaped execution boundary is used until the documents are
+       corrected.
 
 
 ===============================================================================
@@ -736,6 +832,7 @@ Downstream Documents:
         is involved
       - transaction and commit boundaries when state mutation occurs
       - AppInstance and SavePack state authority
+      - RuntimeHost authority boundaries when host-level behavior is involved
 
 19.4. A direct call that bypasses those requirements is backend
       implementation behavior, not pack-code authority.
@@ -765,9 +862,12 @@ Downstream Documents:
       - treating adapter execution authorization as capability permission
       - treating pack code as a SavePack writer
       - treating PackContext as general backend access
+      - treating RuntimeHost identity as permission by itself
+      - treating RuntimeHost entry surface as authority by itself
+      - treating RuntimeHost deployment location as authority
       - bypassing tracing, lifecycle, permission, policy, capability,
-        Orchestration Unit, transaction, or commit boundaries through native
-        language convenience
+        RuntimeHost, Orchestration Unit, transaction, or commit boundaries
+        through native language convenience
 
 
 ===============================================================================
@@ -785,8 +885,12 @@ Downstream Documents:
       - exact implementation split between DA-23 and future language-runtime
         implementation specifications
 
-21.2. Adapter lifecycle, trust, isolation, trace, runtime-host, and adapter
-      class open questions are owned by DA-27.
+21.2. Adapter lifecycle, trust, isolation, trace, and adapter class open
+      questions are owned by DA-27.
+
+21.3. RuntimeHost identity, workspace ownership, startup-mode, entry-surface,
+      command-surface, LAN exposure, and RuntimeHost trace open questions are
+      owned by DA-28.
 
 
 ===============================================================================
@@ -800,26 +904,30 @@ Downstream Documents:
       - RPC defines the logical communication boundary
       - capabilities define what adapter-executed code may do
       - SavePack stores durable executed state under Kernel authority
+      - RuntimeHost exposes controlled entry surfaces under DA-28
       - host language does not grant backend authority
       - pack-provided Python is not backend implementation code
       - recognizing a file as code is not permission to execute it
       - executable artifacts are declared explicitly
-      - declaration does not grant capability permission or state mutation
-        authority
+      - declaration does not grant capability permission, state mutation
+        authority, or RuntimeHost command authority
       - PackContext exposes scoped participation, not general backend access
       - adapter-executed code communicates with Kernel authority through an
         RPC-shaped boundary
       - direct in-process calls may implement a transport optimization but
         do not bypass capability routing, permission checks, lifecycle,
-        trace correlation, Orchestration Unit boundaries, transaction
-        boundaries, or AppInstance state authority
+        trace correlation, RuntimeHost boundaries, Orchestration Unit
+        boundaries, transaction boundaries, or AppInstance state authority
       - transport choice does not define authority
       - adapter-executed code does not own AppInstance or SavePack state
+      - adapter-executed code does not own RuntimeHost authority
       - browser state is not authoritative AppInstance state
       - native language imports cannot bypass Turnix semantics
       - DA-27 owns adapter lifecycle, trust, isolation, adapter-domain trace
-        reason ownership, adapter classes, and runtime-host deployment
-        interpretation
+        reason ownership, and adapter classes
+      - DA-28 owns RuntimeHost identity, workspace ownership, startup modes,
+        entry surfaces, command-surface semantics, local-first/LAN exposure,
+        and RuntimeHost-domain trace reason ownership
 
 22.2. OPEN:
       - exact executable artifact declaration schema
@@ -836,6 +944,6 @@ END OF DA-23 - EXECUTION BOUNDARIES, ADAPTERS AND CODE RUNTIMES
 --- doc-meta ---
 DOC_ID: DA-23
 DOC_FILE: docs/design/DA-23_EXECUTION_BOUNDARIES_ADAPTERS_AND_CODE_RUNTIMES.txt
-DOC_REV: 3
-DOC_GIT: 04d15d1
+DOC_REV: 4
+DOC_GIT: 0000000
 ----------------
