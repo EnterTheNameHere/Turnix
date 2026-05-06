@@ -1,0 +1,1123 @@
+===============================================================================
+DESIGN AREA DA-28 - RUNTIME HOST, WORKSPACE OWNERSHIP AND COMMAND SURFACE
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines RuntimeHost identity, workspace ownership semantics, host lifecycle,
+entry surfaces, startup-mode meaning, command-surface authority boundaries,
+local-first deployment interpretation, runtime-host trace reason ownership, and
+shared runtime operation composition.
+
+This document owns runtime-host semantics. It consumes Kernel authority ordering,
+AppInstance lifecycle, RPC, UI/View, adapter, Orchestration Unit, persistence,
+capability, Job, and policy semantics defined by earlier design areas.
+
+Purpose:
+--------
+This document defines what Turnix is when it is running as a host.
+
+It defines:
+- RuntimeHost as the running Turnix host boundary
+- runtimeHostId as runtime host correlation identity
+- relationship between RuntimeHost, Kernel, workspace, AppInstance, SavePack,
+  View, adapter, RPC, Job, Orchestration Unit, and command surfaces
+- workspace ownership at runtime-host level
+- local-first deployment interpretation for same-machine and LAN use
+- startup mode meaning
+- shared runtime operation composition across startup modes
+- entry surface and command surface boundaries
+- second-host and already-owned workspace behavior
+- runtime-host lifecycle phases
+- runtime-host-domain trace reason identifiers
+- minimum runtime-host trace context
+- explicitly unsupported runtime-host behaviors
+
+It does NOT define:
+- Kernel authority ordering or platform philosophy (see DA-01 and DA-02)
+- trace event structure, trace DAG semantics, or span mechanics (see DA-03)
+- authoritative committed state or transaction semantics (see DA-04)
+- persistent I/O authority or concrete filesystem rules (see DA-07)
+- Window, SafePointWindow, or AbortedWindow semantics (see DA-08)
+- service, capability, or permission semantics (see DA-16)
+- user decision and remembered policy semantics (see DA-17)
+- Job lifecycle, timeout, cancellation, progress, or result semantics
+  (see DA-19)
+- AppInstance lifecycle or runtime identity semantics (see DA-20)
+- RPC, channel, and transport semantics (see DA-21)
+- UI, View, and frontend runtime semantics (see DA-22)
+- execution adapter authority boundaries (see DA-23)
+- Orchestration Unit lifecycle, terminal outcomes, mutation authority, or
+  single-lane AppInstance mutation semantics (see DA-24)
+- adapter lifecycle, trust, isolation, concrete adapter classes, or adapter-
+  domain trace reason identifiers (see DA-27)
+- concrete CLI command syntax
+- concrete workspace lock implementation
+- concrete process, socket, service, FastAPI, WebSocket, browser bootstrap,
+  container, or virtual-machine implementation
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-02
+- DA-03
+- DA-04
+- DA-07
+- DA-08
+- DA-16
+- DA-17
+- DA-19
+- DA-20
+- DA-21
+- DA-22
+- DA-23
+- DA-24
+- DA-27
+
+Downstream Documents:
+--------------------
+- future runtime-host implementation specifications
+- future workspace ownership implementation specifications
+- future command-surface implementation specifications
+- future CLI adapter implementation specifications
+- future LAN pairing and remote-client implementation specifications
+- future runtime-host trace implementation specifications
+
+
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
+
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines runtime-host, workspace ownership, startup-mode,
+      entry-surface, command-surface, and runtime-host trace semantics within
+      that shared interpretation model.
+
+
+===============================================================================
+02. CORE CONCEPT
+===============================================================================
+
+02.1. RuntimeHost semantics answer:
+
+          "What owns Turnix host execution while Turnix is running, which
+           workspace or runtime scope is bound, and how do entry surfaces reach
+           Kernel-owned authority without becoming authority themselves?"
+
+02.2. A RuntimeHost is the running Turnix host boundary that binds a runtime
+      workspace or runtime scope, exposes controlled entry surfaces, and
+      coordinates access to Kernel-owned authority.
+
+02.3. DA-01 defines the highest-level runtime authority ordering.
+
+02.4. DA-02 defines Kernel as the runtime authority owner within the runtime
+      architecture.
+
+02.5. DA-23 defines execution-boundary consequences of Kernel authority for
+      adapter-executed pack code.
+
+02.6. RuntimeHost does not replace Kernel authority.
+
+02.7. RuntimeHost does not grant authority by deployment shape, process
+      location, command syntax, network exposure, or implementation framework.
+
+02.8. RuntimeHost is not an AppInstance.
+
+02.9. RuntimeHost is not a SavePack.
+
+02.10. RuntimeHost is not a View.
+
+02.11. RuntimeHost is not an execution adapter.
+
+02.12. RuntimeHost is not a transport.
+
+02.13. RuntimeHost is not a CLI command.
+
+02.14. RuntimeHost is not a Job.
+
+02.15. RuntimeHost is not an Orchestration Unit.
+
+02.16. RuntimeHost provides the host-level boundary in which Kernel-owned
+       workspace binding, AppInstance loading, View exposure, adapter
+       participation, RPC communication, Jobs, decisions, orchestration,
+       tracing, and persistence may occur under their owning documents.
+
+02.17. Later sections refine and apply these rules. They do not weaken them.
+
+
+===============================================================================
+03. RUNTIMEHOST IDENTITY
+===============================================================================
+
+03.1. runtimeHostId identifies one RuntimeHost.
+
+03.2. runtimeHostId is stable for the lifetime of that RuntimeHost.
+
+03.3. runtimeHostId is not reused for a different RuntimeHost during the same
+      kernel run or host identity scope.
+
+03.4. runtimeHostId is the correlation identity used by RuntimeHost-owned
+      trace evidence.
+
+03.5. runtimeHostId is distinct from:
+      - workspace identity
+      - process identity
+      - AppPack identity
+      - SavePack identity
+      - appInstanceId
+      - viewId
+      - frontend client identity
+      - adapter identity
+      - RPC message identity
+      - channel identity
+      - transport identity
+      - capability identity
+      - jobId
+      - orchestrationUnitId
+      - transactionId
+      - decision identity
+
+03.6. A RuntimeHost record includes enough identity context, when available,
+      to relate:
+      - runtimeHostId
+      - workspace identity
+      - process identity when available
+      - active Kernel or KernelContext identity when such identity is defined
+      - active entry surface identities when applicable
+      - active AppInstance identities when applicable
+      - active View identities when applicable
+      - active adapter identities when applicable
+
+03.7. Exact runtimeHostId representation remains open for an implementation
+      specification.
+
+
+===============================================================================
+04. RELATION TO KERNEL
+===============================================================================
+
+04.1. Kernel owns runtime authority.
+
+04.2. RuntimeHost owns the running host boundary through which Kernel authority
+      is started, exposed, coordinated, and eventually closed for a workspace or
+      runtime scope.
+
+04.3. RuntimeHost does not make non-Kernel code Kernel authority.
+
+04.4. RuntimeHost does not let command surfaces, adapters, transports,
+      frontend clients, or LAN clients bypass Kernel-owned authority paths.
+
+04.5. RuntimeHost may create, bind, expose, or close Kernel-facing surfaces
+      only through rules defined by this document and by the owning documents
+      for the affected domain.
+
+04.6. RuntimeHost implementation code that performs platform work remains
+      constrained by Kernel authority, orchestration, persistence, trace,
+      capability, and policy boundaries.
+
+04.7. RuntimeHost implementation convenience does not override platform truth.
+
+04.8. Replacing FastAPI, WebSocket, browser JavaScript, CLI implementation,
+      process layout, service wrapper, container wrapper, or deployment vehicle
+      does not redefine RuntimeHost semantics.
+
+
+===============================================================================
+05. WORKSPACE OWNERSHIP
+===============================================================================
+
+05.1. A RuntimeHost may bind a workspace or runtime scope.
+
+05.2. A RuntimeHost that owns a writable workspace is the host-level owner of
+      that workspace while the ownership remains valid.
+
+05.3. A writable workspace is owned by at most one RuntimeHost at a time unless
+      a later authoritative multi-host design defines another mode.
+
+05.4. RuntimeHost workspace ownership prevents silent multi-host mutation of
+      durable Turnix-managed state.
+
+05.5. A second RuntimeHost does not silently acquire writable ownership of the
+      same workspace.
+
+05.6. A second RuntimeHost does not silently downgrade to read-only behavior
+      unless an explicit policy or tooling mode defines and reports that
+      behavior.
+
+05.7. A RuntimeHost does not silently ignore existing workspace ownership
+      evidence.
+
+05.8. A RuntimeHost does not silently treat stale ownership evidence as safe to
+      overwrite.
+
+05.9. Stale ownership recovery is explicit, policy-governed, and trace-visible.
+
+05.10. Read-only inspection of a workspace or SavePack may be allowed by
+       explicit tooling, audit, export, or policy rules.
+
+05.11. Read-only inspection does not create writable workspace ownership.
+
+05.12. Workspace ownership does not grant adapters direct SavePack write
+       authority.
+
+05.13. Workspace ownership does not bypass AppInstance writable SavePack
+       ownership rules under DA-20.
+
+05.14. Workspace ownership does not bypass persistent I/O authority under
+       DA-07.
+
+05.15. Workspace ownership does not bypass committed-state rules under DA-04.
+
+05.16. Concrete lock files, sockets, process markers, ownership records,
+       stale-owner checks, and recovery implementation details belong to later
+       implementation specifications.
+
+
+===============================================================================
+06. RELATION TO APPINSTANCES AND SAVEPACKS
+===============================================================================
+
+06.1. RuntimeHost may load zero, one, or multiple AppInstances according to
+      policy and implementation support.
+
+06.2. Loading an AppInstance does not make runtimeHostId equal to
+      appInstanceId.
+
+06.3. A RuntimeHost operation that requests AppInstance creation follows
+      DA-20 AppInstance creation semantics.
+
+06.4. A RuntimeHost operation that creates a new save context follows the
+      DA-20 new save path and the owning SavePack generation rules when such
+      rules are defined.
+
+06.5. A RuntimeHost operation that loads an existing save context follows the
+      DA-20 existing save path and compatibility validation rules.
+
+06.6. All entry surfaces that create a new SavePack or save context use the
+      same Kernel-mediated new save path.
+
+06.7. All entry surfaces that resume existing state use the same Kernel-
+      mediated existing save path and compatibility validation path.
+
+06.8. Save creation is not owned by CLI.
+
+06.9. Save loading is not owned by CLI.
+
+06.10. Save creation is not owned by browser launcher behavior.
+
+06.11. Save loading is not owned by browser launcher behavior.
+
+06.12. Save creation and loading remain Kernel-mediated runtime operations
+       even when requested through a command surface, View, frontend client,
+       test surface, or remote client.
+
+06.13. A writable SavePack remains owned by at most one running AppInstance at
+       a time under DA-20.
+
+06.14. RuntimeHost workspace ownership does not make RuntimeHost the SavePack
+       writer.
+
+06.15. RuntimeHost workspace ownership does not make adapter-executed code a
+       SavePack writer.
+
+
+===============================================================================
+07. SHARED RUNTIME OPERATION COMPOSITION
+===============================================================================
+
+07.1. Startup modes are entry workflows over shared Kernel-mediated runtime
+      operations.
+
+07.2. Startup modes do not define independent AppInstance, SavePack, adapter,
+      RPC, capability, policy, persistence, Orchestration Unit, Job, View, or
+      trace semantics.
+
+07.3. A command surface may select, compose, or request runtime operations.
+
+07.4. A command surface does not redefine the runtime operations it requests.
+
+07.5. A frontend, launcher, test surface, or remote client may select,
+      compose, or request runtime operations.
+
+07.6. A frontend, launcher, test surface, or remote client does not redefine
+      the runtime operations it requests.
+
+07.7. Runtime operations may include:
+      - ResolveWorkspace
+      - BindWorkspace
+      - AcquireWorkspaceOwnership
+      - ReleaseWorkspaceOwnership
+      - StartRuntimeHost
+      - StopRuntimeHost
+      - ConnectRuntimeHost
+      - ResolveAppPack
+      - CreateSavePack
+      - LoadSavePack
+      - ValidateSavePackCompatibility
+      - BindSaveContext
+      - CreateAppInstance
+      - StartAppInstance
+      - StopAppInstance
+      - CreateView
+      - BindFrontendClient
+      - SelectAdapter
+      - ActivateDeclaredArtifact
+      - ClassifyCommand
+      - DispatchCommand
+
+07.8. Runtime operation names in this section define semantic categories, not
+      final API names.
+
+07.9. Concrete API names and command syntax belong to implementation
+      specifications.
+
+07.10. RuntimeHost startup modes, command surfaces, launcher flows, browser
+       flows, test flows, and remote-client flows do not create independent
+       mutation paths.
+
+07.11. When a runtime operation creates, loads, binds, migrates, starts, stops,
+       recovers, or otherwise mutates Turnix-managed state, it enters the same
+       Kernel-mediated orchestration, capability, policy, transaction,
+       persistence, and trace boundaries as other mutation-bearing Turnix
+       operations.
+
+07.12. A RuntimeHost operation is a host-level requested action.
+
+07.13. An Orchestration Unit is the Kernel-tracked execution-authority unit
+       used when that action performs or may perform orchestrated mutation.
+
+07.14. RuntimeHost operations and Orchestration Units remain distinct.
+
+07.15. A RuntimeHost operation may have a parent, cause, or correlation
+       relationship to an Orchestration Unit.
+
+07.16. That relationship does not collapse runtimeHostId, runtime operation
+       identity, or orchestrationUnitId into one identity.
+
+07.17. AppInstance mutation follows deterministic single-lane orchestration
+       under DA-24 unless another authoritative concurrency mode explicitly
+       defines different behavior.
+
+
+===============================================================================
+08. STARTUP MODES
+===============================================================================
+
+08.1. Startup mode selection determines how Turnix is entered.
+
+08.2. Startup mode selection does not determine separate runtime semantics.
+
+08.3. Startup modes may include:
+      - interactive host mode
+      - one-shot command mode
+      - serve mode
+      - connect mode
+      - test mode
+      - launcher mode
+
+08.4. Interactive host mode means Turnix enters a command-accepting host or
+      host-connected control surface.
+
+08.5. One-shot command mode means Turnix performs a bounded requested command
+      and exits after the command reaches the operation-defined result or error
+      surface.
+
+08.6. Serve mode means Turnix starts or keeps a RuntimeHost available for
+      explicitly selected entry surfaces.
+
+08.7. Connect mode means the command or client connects to an existing
+      RuntimeHost instead of acquiring writable workspace ownership for a new
+      host.
+
+08.8. Test mode means Turnix uses controlled test surfaces without weakening
+      runtime, adapter, AppInstance, SavePack, orchestration, capability,
+      policy, persistence, or trace boundaries.
+
+08.9. Launcher mode means Turnix uses a user-facing launcher surface to select
+      or request runtime operations.
+
+08.10. A startup mode may start a RuntimeHost when the mode is defined to own
+       or acquire the workspace.
+
+08.11. A startup mode may connect to an existing RuntimeHost when the mode is
+       defined as a client or control surface.
+
+08.12. A startup mode may fail when required workspace ownership, host
+       connection, policy, adapter, RPC, persistence, or AppInstance conditions
+       are not satisfied.
+
+08.13. Startup mode failure is explicit and trace-visible.
+
+08.14. Concrete command names, flags, environment variables, process behavior,
+       and shell behavior belong to implementation specifications.
+
+
+===============================================================================
+09. ENTRY SURFACES AND COMMAND SURFACES
+===============================================================================
+
+09.1. An entry surface is a controlled way to enter, observe, control, or
+      interact with a RuntimeHost.
+
+09.2. Entry surfaces may include:
+      - CLI control surface
+      - browser frontend surface
+      - remote client surface
+      - test surface
+      - launcher surface
+      - future management surface
+
+09.3. An entry surface is not authority by itself.
+
+09.4. A command surface is an entry surface that receives, classifies, and
+      dispatches user, tool, script, or client commands.
+
+09.5. A command surface is not Kernel authority by itself.
+
+09.6. CLI is a command surface or adapter into the RuntimeHost.
+
+09.7. CLI is not Kernel by itself.
+
+09.8. Browser frontend is a frontend surface or frontend adapter into the
+      RuntimeHost.
+
+09.9. Browser frontend does not own authoritative state.
+
+09.10. A remote client is a client surface into a RuntimeHost.
+
+09.11. A remote client does not own state authority.
+
+09.12. A test surface provides controlled test entry and observation behavior.
+
+09.13. A test surface does not weaken runtime authority boundaries merely
+       because it exists for testing.
+
+09.14. Entry surfaces submit commands, requests, decisions, interactions,
+       subscriptions, cancellations, or connection attempts through Turnix-
+       mediated boundaries.
+
+09.15. Entry-surface input becomes meaningful only when Kernel-owned authority
+       accepts the corresponding command, request, decision, capability call,
+       RPC message, runtime operation, or policy path.
+
+09.16. Entry surface readiness does not imply RuntimeHost readiness.
+
+09.17. RuntimeHost readiness does not imply AppInstance readiness.
+
+09.18. RuntimeHost readiness does not imply adapter readiness.
+
+09.19. RuntimeHost readiness does not imply Job success.
+
+09.20. RuntimeHost readiness does not imply command success.
+
+
+===============================================================================
+10. COMMAND SURFACE MEANING
+===============================================================================
+
+10.1. RuntimeHost command categories may include:
+      - start host
+      - stop host
+      - connect to host
+      - run AppPack
+      - create SavePack
+      - load SavePack
+      - list packs
+      - list AppPacks
+      - list SavePacks
+      - list AppInstances
+      - inspect host
+      - inspect trace evidence
+      - inspect policy decisions
+      - serve frontend
+      - expose LAN surface
+      - close entry surface
+
+10.2. Command categories in this section define semantic categories, not final
+      CLI syntax.
+
+10.3. Command receipt is not command acceptance.
+
+10.4. Command acceptance is not command completion.
+
+10.5. Command completion is not Job success unless the command contract defines
+      that relationship through the owning Job workflow.
+
+10.6. A command that requests AppInstance creation follows DA-20.
+
+10.7. A command that communicates through RPC follows DA-21.
+
+10.8. A command that affects UI or View behavior follows DA-22.
+
+10.9. A command that starts adapter execution follows DA-23 and DA-27.
+
+10.10. A command that mutates Turnix-managed state follows DA-04 and DA-24.
+
+10.11. A command that performs persistent I/O follows DA-07.
+
+10.12. A command that invokes a capability follows DA-16.
+
+10.13. A command that requires policy or user decision follows DA-17.
+
+10.14. A command that creates, observes, cancels, or retrieves Job-backed work
+       follows DA-19.
+
+10.15. A command that is rejected before AppInstance creation does not create
+       a partial AppInstance.
+
+10.16. A command that is rejected before Job-backed work exists does not
+       create a Job terminal outcome.
+
+10.17. A command that is rejected before adapter-mediated work exists does not
+       create adapter failure.
+
+10.18. A command that is rejected before an Orchestration Unit exists does not
+       create an Orchestration Unit terminal outcome.
+
+
+===============================================================================
+11. SECOND HOST AND EXISTING HOST BEHAVIOR
+===============================================================================
+
+11.1. If a workspace is already owned, a new RuntimeHost does not silently take
+      writable ownership.
+
+11.2. A command may connect to the existing RuntimeHost when the command is a
+      client or control operation and policy permits that path.
+
+11.3. A command may fail with explicit ownership evidence when the workspace is
+      already owned.
+
+11.4. A command may request stale-owner recovery only through explicit policy
+      or tooling rules.
+
+11.5. A command may open read-only inspection only through explicit tooling or
+      policy rules.
+
+11.6. A second RuntimeHost does not silently discard another RuntimeHost's
+      ownership evidence.
+
+11.7. A second RuntimeHost does not silently supersede another RuntimeHost.
+
+11.8. A second RuntimeHost does not silently detach work from another
+      RuntimeHost.
+
+11.9. A second RuntimeHost does not silently claim results, Jobs, Views,
+      adapters, or AppInstances owned by another RuntimeHost.
+
+11.10. Existing-host discovery, host connection, host unreachable handling,
+       stale-owner recovery, and host handoff implementation details belong to
+       later implementation specifications.
+
+
+===============================================================================
+12. LOCAL-FIRST AND LAN EXPOSURE
+===============================================================================
+
+12.1. Local-first does not require same-machine execution.
+
+12.2. Local-first means the authoritative runtime and state remain under user-
+      controlled local infrastructure.
+
+12.3. Valid local-first forms include:
+      - same-machine RuntimeHost and frontend
+      - LAN machine hosting RuntimeHost with another machine as frontend
+      - home server hosting RuntimeHost and SavePack state
+      - powerful local AI machine hosting RuntimeHost-adjacent execution with a
+        lighter client presentation surface
+
+12.4. LAN exposure is explicit and policy-governed.
+
+12.5. RuntimeHost does not silently expose itself to LAN clients.
+
+12.6. RuntimeHost does not silently expose itself to internet clients.
+
+12.7. Default local bind behavior remains implementation-specific but does not
+      silently expose runtime control surfaces beyond the configured local
+      boundary.
+
+12.8. LAN or remote access does not imply remote state authority.
+
+12.9. LAN or remote access does not imply adapter execution authority.
+
+12.10. LAN or remote access does not imply capability permission.
+
+12.11. LAN or remote access does not imply user identity.
+
+12.12. Pairing, authentication, token, certificate, local-network discovery,
+       firewall, and concrete bind behavior belong to implementation
+       specifications or security policy documents.
+
+
+===============================================================================
+13. RUNTIMEHOST LIFECYCLE
+===============================================================================
+
+13.1. RuntimeHost lifecycle phases may include:
+      - requested
+      - starting
+      - workspace binding
+      - ownership acquired
+      - active
+      - stopping
+      - stopped
+      - failed
+      - crashed
+      - closed
+
+13.2. Concrete implementations may use additional internal states if those
+      states preserve the externally visible meanings defined here.
+
+13.3. requested means RuntimeHost start or connection work has been requested
+      but host startup or connection has not yet begun.
+
+13.4. starting means Turnix is preparing RuntimeHost identity, configuration,
+      Kernel access, and required runtime inputs.
+
+13.5. workspace binding means Turnix is resolving, validating, creating,
+      loading, or binding the workspace or runtime scope.
+
+13.6. ownership acquired means RuntimeHost has acquired the workspace or
+      runtime ownership needed for its requested writable behavior.
+
+13.7. active means the RuntimeHost active region exists and entry surfaces may
+      operate according to policy and implementation support.
+
+13.8. stopping means Turnix is intentionally ending the RuntimeHost active
+      region.
+
+13.9. stopped means RuntimeHost ended through normal controlled shutdown.
+
+13.10. failed means RuntimeHost lifecycle could not continue because an error
+       prevented valid start, workspace binding, ownership acquisition, or
+       controlled operation.
+
+13.11. crashed means the RuntimeHost active region ended because runtime
+       continuity failed unexpectedly.
+
+13.12. closed means RuntimeHost identity has been released and is no longer
+       usable for new runtime work.
+
+13.13. RuntimeHost lifecycle is distinct from AppInstance lifecycle.
+
+13.14. RuntimeHost lifecycle is distinct from View lifecycle.
+
+13.15. RuntimeHost lifecycle is distinct from adapter lifecycle.
+
+13.16. RuntimeHost lifecycle is distinct from RPC transport lifecycle.
+
+13.17. RuntimeHost lifecycle is distinct from Job lifecycle.
+
+13.18. RuntimeHost lifecycle is distinct from Orchestration Unit lifecycle.
+
+13.19. RuntimeHost stop does not by itself define Job terminal outcome.
+
+13.20. RuntimeHost stop does not by itself define Orchestration Unit terminal
+       outcome.
+
+13.21. RuntimeHost stop does not by itself finalize a Window.
+
+13.22. RuntimeHost failure does not by itself create an AbortedWindow.
+
+13.23. RuntimeHost crash does not silently redefine committed-state meaning.
+
+13.24. If RuntimeHost lifecycle affects AppInstances, Jobs, Views, adapters,
+       Orchestration Units, decisions, or Windows, the relationship is explicit,
+       policy-governed where applicable, and trace-visible.
+
+
+===============================================================================
+14. RUNTIMEHOST TRACE REASON IDENTIFIERS
+===============================================================================
+
+14.1. DA-28 owns the RuntimeHost-domain trace reason identifiers used for
+      RuntimeHost lifecycle, workspace ownership, entry surface, LAN exposure,
+      command surface, startup mode, and host-level operation evidence.
+
+14.2. The following RuntimeHost lifecycle trace reasons are defined:
+      - RuntimeHostStartRequested
+      - RuntimeHostStartStarted
+      - RuntimeHostWorkspaceBindingStarted
+      - RuntimeHostWorkspaceBindingSucceeded
+      - RuntimeHostWorkspaceBindingFailed
+      - RuntimeHostActiveSpanBegin
+      - RuntimeHostStopRequested
+      - RuntimeHostStopStarted
+      - RuntimeHostActiveSpanEnd
+      - RuntimeHostStopped
+      - RuntimeHostFailed
+      - RuntimeHostCrashed
+      - RuntimeHostClosed
+
+14.3. The following workspace ownership trace reasons are defined:
+      - RuntimeHostWorkspaceOwnershipRequested
+      - RuntimeHostWorkspaceOwnershipGranted
+      - RuntimeHostWorkspaceOwnershipRejected
+      - RuntimeHostWorkspaceOwnershipReleased
+      - RuntimeHostWorkspaceOwnershipReleaseFailed
+      - RuntimeHostWorkspaceAlreadyOwned
+      - RuntimeHostSecondOwnerRejected
+      - RuntimeHostStaleOwnerDetected
+      - RuntimeHostStaleOwnerRecoveryRequested
+      - RuntimeHostStaleOwnerRecoveryAccepted
+      - RuntimeHostStaleOwnerRecoveryRejected
+      - RuntimeHostStaleOwnerRecoveryFailed
+
+14.4. The following entry surface trace reasons are defined:
+      - RuntimeHostEntrySurfaceRequested
+      - RuntimeHostEntrySurfaceCreated
+      - RuntimeHostEntrySurfaceReady
+      - RuntimeHostEntrySurfaceRejected
+      - RuntimeHostEntrySurfaceClosed
+      - RuntimeHostClientAccepted
+      - RuntimeHostClientRejected
+      - RuntimeHostClientDisconnected
+      - RuntimeHostClientReconnected
+
+14.5. The following LAN and remote exposure trace reasons are defined:
+      - RuntimeHostLanExposureRequested
+      - RuntimeHostLanExposureEnabled
+      - RuntimeHostLanExposureRejected
+      - RuntimeHostLanExposureDisabled
+      - RuntimeHostRemoteClientConnectionRequested
+      - RuntimeHostRemoteClientConnectionAccepted
+      - RuntimeHostRemoteClientConnectionRejected
+      - RuntimeHostRemoteClientDisconnected
+
+14.6. The following command surface trace reasons are defined:
+      - RuntimeHostCommandReceived
+      - RuntimeHostCommandClassified
+      - RuntimeHostCommandAccepted
+      - RuntimeHostCommandRejected
+      - RuntimeHostCommandDispatched
+      - RuntimeHostCommandCompleted
+      - RuntimeHostCommandFailed
+      - RuntimeHostCommandCancelled
+
+14.7. The following startup mode trace reasons are defined:
+      - RuntimeHostStartupModeSelected
+      - RuntimeHostInteractiveModeStarted
+      - RuntimeHostOneShotCommandStarted
+      - RuntimeHostServeModeStarted
+      - RuntimeHostConnectModeStarted
+      - RuntimeHostTestModeStarted
+      - RuntimeHostLauncherModeStarted
+      - RuntimeHostStartupModeRejected
+
+14.8. The following host-level runtime operation trace reasons are defined:
+      - RuntimeHostOperationRequested
+      - RuntimeHostOperationClassified
+      - RuntimeHostOperationAccepted
+      - RuntimeHostOperationRejected
+      - RuntimeHostOperationDispatched
+      - RuntimeHostOperationCompleted
+      - RuntimeHostOperationFailed
+      - RuntimeHostOperationCancelled
+      - RuntimeHostOperationSuperseded
+      - RuntimeHostOperationDetached
+      - RuntimeHostOperationRetained
+
+14.9. RuntimeHostOperationSuperseded records host-operation supersession where
+      the owning workflow maps newer work, newer accepted input, or higher-
+      priority work to host-operation supersession.
+
+14.10. RuntimeHostOperationSuperseded does not redefine Orchestration Unit
+       Superseded semantics under DA-24.
+
+14.11. RuntimeHostOperationDetached records that the host-level operation
+       detached from a waiting entry surface while owning workflow rules define
+       continued work or retained result behavior.
+
+14.12. RuntimeHostOperationRetained records that the host-level operation
+       retained result or evidence for later retrieval under owning workflow
+       rules.
+
+14.13. DA-03 defines the tracing substrate used to represent RuntimeHost trace
+       evidence.
+
+14.14. DA-28 defines only the RuntimeHost-domain ownership of these trace
+       reasons and required correlation evidence.
+
+
+===============================================================================
+15. RUNTIMEHOST TRACE CONTEXT
+===============================================================================
+
+15.1. RuntimeHost trace evidence records enough context, when available, to
+      explain:
+      - runtimeHostId
+      - workspace identity
+      - process identity when available
+      - host start request identity when applicable
+      - startup mode when applicable
+      - command identity when applicable
+      - command category when applicable
+      - runtime operation identity when applicable
+      - runtime operation category when applicable
+      - entry surface kind when applicable
+      - entry surface identity when applicable
+      - client identity when applicable
+      - LAN or remote exposure scope when applicable
+      - appInstanceId when applicable
+      - active AppPack identity when applicable
+      - active SavePack identity when applicable
+      - viewId when applicable
+      - adapter kind when applicable
+      - adapter instance identity when applicable
+      - RPC message identity when applicable
+      - channel identity when applicable
+      - transport kind when applicable
+      - capability identity when applicable
+      - jobId when applicable
+      - orchestrationUnitId when applicable
+      - transactionId when applicable
+      - policy decision identity when applicable
+      - failure reason category when failure occurs
+      - stop reason category when stopping occurs
+      - crash reason category when crash is detected
+      - workspace ownership reason category when ownership is rejected or
+        recovered
+
+15.2. RuntimeHostActiveSpanBegin trace evidence records enough context, when
+      available, to explain:
+      - runtimeHostId
+      - span identity
+      - workspace identity when applicable
+      - ownership state when applicable
+      - startup mode when applicable
+
+15.3. RuntimeHostActiveSpanEnd trace evidence records enough context, when
+      available, to explain:
+      - runtimeHostId
+      - span identity
+      - end reason category
+
+15.4. RuntimeHostActiveSpanEnd end reason category distinguishes:
+      - NormalStop
+      - StartupFailure
+      - WorkspaceOwnershipLost
+      - Crash
+      - ForcedStop
+      - KernelExit
+
+15.5. Workspace ownership trace evidence records enough context, when
+      available, to explain:
+      - runtimeHostId
+      - workspace identity
+      - requested ownership mode
+      - ownership result
+      - existing owner identity when available
+      - stale owner evidence when applicable
+      - policy decision identity when applicable
+      - recovery result when applicable
+
+15.6. RuntimeHost trace evidence does not replace AppInstance trace evidence.
+
+15.7. RuntimeHost trace evidence does not replace adapter trace evidence.
+
+15.8. RuntimeHost trace evidence does not replace RPC trace evidence.
+
+15.9. RuntimeHost trace evidence does not replace UI-domain trace evidence.
+
+15.10. RuntimeHost trace evidence does not replace Job trace evidence.
+
+15.11. RuntimeHost trace evidence does not replace Orchestration Unit trace
+       evidence.
+
+15.12. RuntimeHost trace evidence does not replace Window finalization
+       evidence.
+
+15.13. RuntimeHost trace evidence does not replace committed-state or
+       transaction evidence.
+
+
+===============================================================================
+16. RELATION TO IMPLEMENTATION SPECIFICATIONS
+===============================================================================
+
+16.1. Implementation specifications may define:
+       - concrete runtimeHostId representation
+       - concrete workspace identity representation
+       - concrete runtime host command syntax
+       - concrete command result envelopes
+       - concrete local bind defaults
+       - concrete LAN pairing and authentication flow
+       - concrete stale ownership recovery flow
+       - concrete host discovery flow
+       - concrete host shutdown policy for active AppInstances
+       - concrete retained work behavior after host stop or disconnect
+       - concrete workspace lock implementation
+       - concrete runtime-host trace field schema
+       - concrete CLI adapter behavior
+       - concrete service, daemon, container, or virtual-machine wrappers
+
+16.2. Implementation specifications do not redefine:
+       - Kernel authority ordering
+       - RuntimeHost as running host boundary
+       - workspace ownership as explicit writable ownership
+       - startup modes as shared runtime operation compositions
+       - entry surfaces as non-authority surfaces
+       - LAN exposure as explicit and policy-governed
+       - AppInstance lifecycle
+       - adapter execution authority
+       - RPC, transport, capability, policy, Job, Orchestration Unit, Window,
+         persistence, or committed-state semantics
+
+16.3. If a runtime-host implementation requires a semantic rule not defined
+      here, this document is updated first or alongside that implementation
+      specification.
+
+
+===============================================================================
+17. WHAT IS EXPLICITLY NOT SUPPORTED
+===============================================================================
+
+17.1. The following are not supported:
+      - treating RuntimeHost as Kernel authority replacement
+      - treating RuntimeHost identity as AppInstance identity
+      - treating RuntimeHost identity as workspace identity
+      - treating RuntimeHost identity as SavePack identity
+      - treating RuntimeHost identity as adapter identity
+      - treating RuntimeHost identity as RPC message identity
+      - treating RuntimeHost identity as Job identity
+      - treating RuntimeHost identity as Orchestration Unit identity
+      - treating CLI as Kernel authority by itself
+      - treating browser frontend as RuntimeHost authority by itself
+      - treating remote client as state authority
+      - treating test surface as authority bypass
+      - treating startup mode as independent runtime semantics
+      - treating command syntax as authority
+      - treating command acceptance as work completion
+      - treating command failure as Job terminal outcome by default
+      - treating RuntimeHost stop as Job terminal outcome by default
+      - treating RuntimeHost stop as Orchestration Unit terminal outcome by
+        default
+      - treating RuntimeHost failure as AbortedWindow creation by default
+      - treating RuntimeHost crash as committed-state meaning by default
+      - treating deployment shape as authority
+      - treating FastAPI, WebSocket, browser JavaScript, Python, CLI, local
+        sockets, subprocesses, containers, virtual machines, or service wrappers
+        as platform identity
+      - silently exposing runtime to LAN clients
+      - silently exposing runtime to internet clients
+      - silently starting a second writable RuntimeHost for the same workspace
+      - silently taking over stale workspace ownership
+      - silently downgrading to read-only workspace behavior without explicit
+        policy or tooling mode
+      - silently creating a separate SavePack creation path for a specific
+        startup mode
+      - silently creating a separate SavePack loading path for a specific
+        startup mode
+      - silently creating a separate AppInstance creation path for a specific
+        startup mode
+      - mutation-bearing host operations bypassing Orchestration Unit,
+        transaction, capability, policy, persistence, or trace boundaries
+
+
+===============================================================================
+18. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+18.1. OPEN questions include:
+      - exact runtimeHostId representation
+      - exact workspace identity representation
+      - exact process identity representation
+      - exact KernelContext identity representation
+      - exact host start request representation
+      - exact runtime operation identity representation
+      - exact host lock implementation
+      - exact CLI command syntax
+      - exact command result envelope
+      - exact local bind default
+      - exact LAN pairing and authentication flow
+      - exact stale ownership recovery flow
+      - exact host discovery flow
+      - exact host unreachable behavior
+      - exact host shutdown policy for active AppInstances
+      - exact retained work behavior after host stop, disconnect, or crash
+      - exact runtime-host trace field schema
+      - exact service or daemon wrapper behavior
+      - exact container or virtual-machine wrapper behavior
+      - exact relationship between runtime-host operations and future concrete
+        Orchestration Unit classes
+      - exact ownership split between runtime-host, workspace-locking, CLI, and
+        LAN implementation specifications
+
+
+===============================================================================
+19. LOCKED SUMMARY
+===============================================================================
+
+19.1. LOCKED:
+      - RuntimeHost is the running Turnix host boundary.
+      - RuntimeHost binds a workspace or runtime scope and exposes controlled
+        entry surfaces.
+      - RuntimeHost is distinct from Kernel, workspace, AppInstance, SavePack,
+        View, adapter, transport, RPC message, Job, Orchestration Unit,
+        transaction, and decision identity.
+      - Kernel owns authority.
+      - RuntimeHost does not replace Kernel authority.
+      - RuntimeHost deployment shape does not redefine Kernel authority.
+      - CLI is a command surface or adapter into RuntimeHost, not Kernel
+        authority by itself.
+      - Browser frontend is a frontend surface, not authoritative state.
+      - Remote client is a client surface, not state authority.
+      - Test surface does not weaken runtime authority boundaries.
+      - Runtime startup modes are entry workflows over shared Kernel-mediated
+        runtime operations.
+      - Startup modes do not define independent SavePack, AppInstance, adapter,
+        RPC, capability, policy, persistence, Orchestration Unit, Job, View, or
+        trace semantics.
+      - SavePack creation and SavePack loading use the same Kernel-mediated
+        paths regardless of entry surface.
+      - A writable workspace is owned by at most one RuntimeHost at a time
+        unless a later authoritative multi-host design defines another mode.
+      - A second RuntimeHost does not silently acquire writable workspace
+        ownership.
+      - Stale ownership recovery is explicit, policy-governed, and trace-
+        visible.
+      - Local-first does not require same-machine execution.
+      - LAN exposure is explicit and policy-governed.
+      - RuntimeHost lifecycle is distinct from AppInstance, View, adapter, RPC
+        transport, Job, and Orchestration Unit lifecycle.
+      - RuntimeHost stop or crash does not by itself define committed-state,
+        Job, Window, adapter, AppInstance, or Orchestration Unit outcome.
+      - Mutation-bearing runtime-host operations enter Kernel-mediated
+        orchestration, capability, policy, transaction, persistence, and trace
+        boundaries.
+      - DA-28 owns RuntimeHost-domain trace reason identifiers.
+      - DA-03 owns the trace substrate, not RuntimeHost lifecycle semantics.
+
+19.2. OPEN:
+      - concrete identifiers, command syntax, workspace locking, LAN pairing,
+        host discovery, retained work, service/container wrappers, and
+        implementation-specific trace field details.
+
+
+===============================================================================
+END OF DA-28 - RUNTIME HOST, WORKSPACE OWNERSHIP AND COMMAND SURFACE
+===============================================================================
+
+--- doc-meta ---
+DOC_ID: DA-28
+DOC_FILE: docs/design/DA-28_RUNTIME_HOST_WORKSPACE_OWNERSHIP_AND_COMMAND_SURFACE.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
