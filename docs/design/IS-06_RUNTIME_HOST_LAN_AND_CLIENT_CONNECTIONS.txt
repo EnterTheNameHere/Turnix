@@ -1,0 +1,663 @@
+===============================================================================
+IMPLEMENTATION SPECIFICATION IS-06 - RUNTIME HOST LAN AND CLIENT CONNECTIONS
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines concrete RuntimeHost local bind behavior, LAN exposure flow, client
+connection classification, remote-client connection flow, connection acceptance
+and rejection behavior, connection relationship to startup modes and command
+surfaces, and trace mapping for local and LAN RuntimeHost clients.
+
+This document implements the LAN exposure and client-connection semantics
+defined by DA-28. It uses IS-05 for startup modes and IS-04 for command-surface
+handling.
+
+Purpose:
+--------
+This document defines how RuntimeHost entry surfaces are exposed locally or on
+LAN, how clients connect to RuntimeHost, and how Turnix preserves the boundary
+between connection, authentication, command acceptance, and authority.
+
+It defines:
+- bind scope categories
+- local-only exposure behavior
+- LAN exposure request flow
+- remote-client connection identity and classification
+- client connection acceptance and rejection flow
+- client disconnect and reconnect flow
+- relationship to startup modes
+- relationship to command surfaces
+- relationship to RPC transports
+- trace mapping to DA-28 trace reasons
+- connection error categories
+
+It does NOT define:
+- RuntimeHost semantics (see DA-28)
+- Kernel authority ordering (see DA-01 and DA-02)
+- committed-state or transaction semantics (see DA-04)
+- persistent I/O safety semantics (see DA-07)
+- AppInstance lifecycle or runtime identity semantics (see DA-20)
+- abstract RPC, channel, or transport semantics (see DA-21)
+- UI, View, or frontend runtime semantics (see DA-22)
+- execution adapter authority boundaries (see DA-23)
+- Orchestration Unit mutation authority semantics (see DA-24)
+- adapter lifecycle, trust, and trace semantics (see DA-27)
+- workspace ownership and host-lock record mechanics (see IS-03)
+- RuntimeHost command-surface flow or command result envelope (see IS-04)
+- RuntimeHost startup-mode flow (see IS-05)
+- concrete cryptographic protocol
+- concrete authentication token format
+- concrete certificate format
+- concrete firewall configuration
+- concrete WebSocket frame flow
+- concrete browser bootstrap flow
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-02
+- DA-03
+- DA-04
+- DA-07
+- DA-16
+- DA-17
+- DA-19
+- DA-20
+- DA-21
+- DA-22
+- DA-23
+- DA-24
+- DA-27
+- DA-28
+- IS-03
+- IS-04
+- IS-05
+
+Downstream Documents:
+--------------------
+- future LAN pairing implementation specifications
+- future RuntimeHost authentication implementation specifications
+- future remote-client implementation specifications
+- future WebSocket or non-WebSocket transport implementation specifications
+- future RuntimeHost trace schema implementation specifications
+
+
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
+
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and
+      document context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines implementation-level RuntimeHost LAN exposure and
+      client-connection behavior within that shared interpretation model.
+
+01.5. This implementation specification does not create new authority
+      semantics. It implements DA-28 LAN exposure and client-connection rules.
+
+
+===============================================================================
+02. CORE CONCEPT
+===============================================================================
+
+02.1. RuntimeHost LAN and client-connection behavior answers:
+
+          "How does a RuntimeHost expose entry surfaces locally or on LAN,
+           accept or reject clients, and preserve the distinction between
+           connection, authentication, command acceptance, and authority?"
+
+02.2. A bind scope defines where a RuntimeHost entry surface is reachable.
+
+02.3. Client connection means a client reached a RuntimeHost entry surface and
+      entered connection classification.
+
+02.4. Client connection is not command acceptance.
+
+02.5. Client connection is not capability permission.
+
+02.6. Client connection is not user identity by itself.
+
+02.7. Client connection is not state authority.
+
+02.8. LAN exposure is explicit and policy-governed.
+
+02.9. RuntimeHost does not silently expose itself to LAN clients.
+
+02.10. RuntimeHost does not silently expose itself to internet clients.
+
+02.11. Concrete pairing and authentication mechanisms belong to later
+       implementation or security specifications.
+
+
+===============================================================================
+03. BIND SCOPE CATEGORIES
+===============================================================================
+
+03.1. bindScope identifies the reachability scope requested for an entry
+      surface.
+
+03.2. bindScope values are:
+      - localOnly
+      - lanExplicit
+      - remoteExplicit
+      - disabled
+
+03.3. localOnly means the entry surface is reachable only through local
+      machine boundaries defined by the implementation.
+
+03.4. lanExplicit means the entry surface may be reachable by LAN clients
+      after explicit policy or configuration permits that exposure.
+
+03.5. remoteExplicit means the entry surface may be reachable beyond LAN only
+      when a later authoritative security and deployment design defines that
+      mode.
+
+03.6. disabled means the entry surface is not exposed.
+
+03.7. localOnly is the default bind scope unless a later implementation
+      specification defines a different default without weakening DA-28 LAN
+      exposure semantics.
+
+03.8. lanExplicit is never selected silently.
+
+03.9. remoteExplicit is not enabled by this document.
+
+03.10. Bind scope selection does not grant command authority.
+
+03.11. Bind scope selection does not grant capability permission.
+
+
+===============================================================================
+04. LOCAL-ONLY EXPOSURE FLOW
+===============================================================================
+
+04.1. Local-only exposure creates or enables an entry surface reachable through
+      local machine boundaries.
+
+04.2. Local-only exposure may be used by interactive host mode, one-shot
+      command mode, serve mode, connect mode, test mode, or launcher mode when
+      the mode requests or requires a local entry surface.
+
+04.3. Local-only exposure does not imply LAN exposure.
+
+04.4. Local-only exposure does not imply internet exposure.
+
+04.5. Local-only exposure does not imply command success.
+
+04.6. Local-only exposure does not imply AppInstance readiness.
+
+04.7. Local-only exposure does not imply adapter readiness.
+
+04.8. Local-only exposure may produce RuntimeHostEntrySurfaceCreated and
+      RuntimeHostEntrySurfaceReady trace evidence.
+
+04.9. Failure to create local-only exposure is explicit and trace-visible.
+
+
+===============================================================================
+05. LAN EXPOSURE REQUEST FLOW
+===============================================================================
+
+05.1. LAN exposure begins with an explicit request.
+
+05.2. LAN exposure request emits RuntimeHostLanExposureRequested.
+
+05.3. LAN exposure requires policy or configuration that permits LAN exposure.
+
+05.4. If LAN exposure is denied, Turnix emits RuntimeHostLanExposureRejected.
+
+05.5. If LAN exposure is enabled, Turnix emits RuntimeHostLanExposureEnabled.
+
+05.6. LAN exposure enabled means the entry surface is reachable according to
+      the concrete bind behavior selected by implementation.
+
+05.7. LAN exposure enabled does not imply client authentication success.
+
+05.8. LAN exposure enabled does not imply command acceptance.
+
+05.9. LAN exposure enabled does not imply capability permission.
+
+05.10. LAN exposure enabled does not imply AppInstance readiness.
+
+05.11. LAN exposure disabled emits RuntimeHostLanExposureDisabled.
+
+05.12. LAN exposure failure preserves the distinction between policy denial,
+       bind failure, missing implementation feature, and authentication
+       configuration failure when the implementation can distinguish them.
+
+
+===============================================================================
+06. REMOTE CLIENT IDENTITY AND CLASSIFICATION
+===============================================================================
+
+06.1. clientConnectionId identifies one client connection attempt or accepted
+      client connection.
+
+06.2. clientConnectionId is distinct from:
+      - runtimeHostId
+      - entry surface identity
+      - frontend client identity
+      - user identity
+      - RPC message identity
+      - channel identity
+      - transport identity
+      - commandId
+      - jobId
+      - orchestrationUnitId
+
+06.3. A client connection record includes enough context, when available, to
+      relate:
+      - clientConnectionId
+      - runtimeHostId
+      - entry surface identity
+      - bindScope
+      - transport kind
+      - channel identity
+      - remote endpoint summary
+      - pairing identity when applicable
+      - authenticated principal when applicable
+      - frontend client identity when applicable
+      - commandId when applicable
+
+06.4. Client classification distinguishes:
+      - local client
+      - LAN client
+      - remote client
+      - test client
+      - unknown client
+
+06.5. Client classification does not grant authority.
+
+06.6. Client classification does not authenticate the client by itself.
+
+06.7. Client classification does not define user identity by itself.
+
+
+===============================================================================
+07. CLIENT CONNECTION ACCEPTANCE AND REJECTION
+===============================================================================
+
+07.1. Client connection begins when a client attempts to connect to a
+      RuntimeHost entry surface.
+
+07.2. Remote or LAN client connection attempt emits
+      RuntimeHostRemoteClientConnectionRequested when remote or LAN connection
+      handling is entered.
+
+07.3. Client connection handling checks bind scope, policy, and available
+      pairing or authentication requirements before accepting the client.
+
+07.4. Accepted RuntimeHost client connection emits RuntimeHostClientAccepted.
+
+07.5. Accepted remote or LAN client connection emits
+      RuntimeHostRemoteClientConnectionAccepted.
+
+07.6. Rejected RuntimeHost client connection emits RuntimeHostClientRejected.
+
+07.7. Rejected remote or LAN client connection emits
+      RuntimeHostRemoteClientConnectionRejected.
+
+07.8. Connection acceptance does not imply command acceptance.
+
+07.9. Connection acceptance does not imply capability permission.
+
+07.10. Connection acceptance does not imply state authority.
+
+07.11. Connection acceptance does not imply AppInstance readiness.
+
+07.12. Connection rejection before command handling exists does not produce a
+       command outcome under IS-04.
+
+07.13. Connection rejection before Job-backed work exists does not produce Job
+       terminal outcome.
+
+07.14. Connection rejection before Orchestration Unit creation does not produce
+       Orchestration Unit terminal outcome.
+
+
+===============================================================================
+08. PAIRING AND AUTHENTICATION PLACEHOLDERS
+===============================================================================
+
+08.1. Pairing means a policy-governed process that authorizes a client or
+      client device to connect to a RuntimeHost entry surface.
+
+08.2. Authentication means verification of a client, user, device, token,
+      certificate, or other principal according to a concrete implementation
+      specification.
+
+08.3. Pairing is distinct from authentication.
+
+08.4. Authentication is distinct from capability permission.
+
+08.5. Pairing success does not grant capability permission by itself.
+
+08.6. Authentication success does not grant capability permission by itself.
+
+08.7. Pairing success does not grant committed-state mutation authority.
+
+08.8. Authentication success does not grant committed-state mutation
+      authority.
+
+08.9. Concrete pairing prompts, token formats, certificate formats, key
+      exchange, revocation, trust storage, and authentication protocols belong
+      to later implementation or security specifications.
+
+08.10. Until such specifications exist, LAN exposure remains explicit and
+       policy-governed, and implementations preserve conservative defaults.
+
+
+===============================================================================
+09. CLIENT DISCONNECT AND RECONNECT
+===============================================================================
+
+09.1. Client disconnect is explicit when detected.
+
+09.2. RuntimeHost client disconnect emits RuntimeHostClientDisconnected.
+
+09.3. Remote or LAN client disconnect emits RuntimeHostRemoteClientDisconnected
+      when remote or LAN connection classification applies.
+
+09.4. Client disconnect does not automatically stop RuntimeHost.
+
+09.5. Client disconnect does not automatically cancel Jobs.
+
+09.6. Client disconnect does not automatically fail an Orchestration Unit.
+
+09.7. Client disconnect does not automatically fail an adapter.
+
+09.8. Client disconnect does not automatically discard command results.
+
+09.9. Client reconnect emits RuntimeHostClientReconnected when reconnection to
+      an existing client or entry-surface relationship is accepted.
+
+09.10. Reconnect does not imply replay of all missed client-local events.
+
+09.11. Reconnect may receive a fresh snapshot, retained result surface,
+       generation update, or implementation-defined recovery surface.
+
+09.12. Concrete reconnect flow belongs to later implementation specifications.
+
+
+===============================================================================
+10. RELATION TO STARTUP MODES
+===============================================================================
+
+10.1. Startup modes that expose entry surfaces use IS-05 startup-mode behavior.
+
+10.2. serve mode may expose localOnly or lanExplicit entry surfaces according
+      to explicit policy and configuration.
+
+10.3. connect mode may connect to existing localOnly or lanExplicit entry
+      surfaces when the client can reach them and policy permits connection.
+
+10.4. launcher mode may create browser or frontend entry surfaces under DA-22
+      and IS-05.
+
+10.5. test mode may create test clients or test entry surfaces without
+      weakening connection authority boundaries.
+
+10.6. oneShotCommand mode may connect to an existing RuntimeHost when the
+      requested command is a client operation.
+
+10.7. Startup mode selection does not by itself expose LAN surfaces.
+
+10.8. Startup mode selection does not by itself accept clients.
+
+
+===============================================================================
+11. RELATION TO COMMAND SURFACES
+===============================================================================
+
+11.1. A connected client may submit commands only through a command surface or
+      operation surface that accepts such input.
+
+11.2. Client connection acceptance is not command receipt.
+
+11.3. Command receipt, classification, acceptance, dispatch, completion,
+      failure, and cancellation are defined by IS-04.
+
+11.4. A client may be accepted but later have a command rejected.
+
+11.5. A command may be accepted only after command handling applies the
+      command-surface rules in IS-04.
+
+11.6. Client disconnect may detach a command from the waiting client only when
+      the owning command workflow defines detachment or retained result
+      behavior.
+
+11.7. Client disconnect does not silently convert command outcome to failure.
+
+
+===============================================================================
+12. RELATION TO RPC AND TRANSPORTS
+===============================================================================
+
+12.1. Client connections may use RPC over concrete transports.
+
+12.2. DA-21 defines abstract RPC, channel, and transport semantics.
+
+12.3. IS-02 defines concrete WebSocket RPC flow when WebSocket is used.
+
+12.4. A transport connection is not RuntimeHost authority by itself.
+
+12.5. A transport disconnect is not RuntimeHost failure by itself.
+
+12.6. A transport timeout is not Job timeout by itself.
+
+12.7. RPC acknowledgement is not command success.
+
+12.8. RPC acknowledgement is not capability permission.
+
+12.9. Concrete transport framing, retry, buffering, and reconnect details
+      belong to transport-specific implementation specifications.
+
+
+===============================================================================
+13. TRACE MAPPING
+===============================================================================
+
+13.1. IS-06 maps implementation behavior to DA-28 RuntimeHost entry-surface,
+      LAN exposure, and remote-client trace reasons.
+
+13.2. Entry surface request, creation, readiness, rejection, and closure map
+      to:
+      - RuntimeHostEntrySurfaceRequested
+      - RuntimeHostEntrySurfaceCreated
+      - RuntimeHostEntrySurfaceReady
+      - RuntimeHostEntrySurfaceRejected
+      - RuntimeHostEntrySurfaceClosed
+
+13.3. LAN exposure maps to:
+      - RuntimeHostLanExposureRequested
+      - RuntimeHostLanExposureEnabled
+      - RuntimeHostLanExposureRejected
+      - RuntimeHostLanExposureDisabled
+
+13.4. Client connection maps to:
+      - RuntimeHostClientAccepted
+      - RuntimeHostClientRejected
+      - RuntimeHostClientDisconnected
+      - RuntimeHostClientReconnected
+
+13.5. Remote or LAN client connection maps to:
+      - RuntimeHostRemoteClientConnectionRequested
+      - RuntimeHostRemoteClientConnectionAccepted
+      - RuntimeHostRemoteClientConnectionRejected
+      - RuntimeHostRemoteClientDisconnected
+
+13.6. Trace evidence includes enough context, when available, to identify:
+      - runtimeHostId
+      - bindScope
+      - entry surface identity
+      - clientConnectionId
+      - client classification
+      - transport kind
+      - channel identity
+      - remote endpoint summary
+      - pairing identity when applicable
+      - authenticated principal when applicable
+      - commandId when applicable
+      - policy decision identity when applicable
+      - error category
+
+13.7. Client connection trace evidence does not replace RuntimeHost lifecycle
+      trace evidence.
+
+13.8. Client connection trace evidence does not replace RPC trace evidence.
+
+13.9. Client connection trace evidence does not replace UI-domain trace
+      evidence.
+
+13.10. Client connection trace evidence does not replace command trace evidence
+       under IS-04.
+
+13.11. Client connection trace evidence does not replace Job, Orchestration
+       Unit, adapter, AppInstance, transaction, or Window evidence.
+
+
+===============================================================================
+14. ERROR CATEGORIES
+===============================================================================
+
+14.1. RuntimeHost LAN and client-connection error categories include:
+      - BindScopeUnsupported
+      - LocalBindFailed
+      - LanExposurePolicyDenied
+      - LanExposureConfigurationInvalid
+      - LanBindFailed
+      - InternetExposureUnsupported
+      - ClientConnectionMalformed
+      - ClientConnectionRejected
+      - ClientAuthenticationRequired
+      - ClientAuthenticationFailed
+      - ClientPairingRequired
+      - ClientPairingRejected
+      - ClientTransportUnsupported
+      - ClientTransportFailed
+      - ClientRuntimeHostUnavailable
+      - ClientReconnectUnsupported
+      - ClientReconnectRejected
+      - ConnectionImplementationFeatureUnavailable
+
+14.2. Error category names in this section define semantic categories, not
+      final exception class names.
+
+14.3. Concrete exception class names belong to implementation code or a later
+      error-schema specification.
+
+14.4. Error reporting preserves distinctions between bind failure, policy
+      denial, authentication requirement, authentication failure, pairing
+      requirement, pairing rejection, unsupported transport, transport failure,
+      and missing implementation feature.
+
+14.5. Error reporting does not collapse all client connection failure into
+      generic network failure when the implementation can distinguish the
+      cause.
+
+
+===============================================================================
+15. WHAT IS EXPLICITLY NOT SUPPORTED
+===============================================================================
+
+15.1. The following are not supported:
+      - silently exposing RuntimeHost to LAN clients
+      - silently exposing RuntimeHost to internet clients
+      - treating bind scope selection as command authority
+      - treating client connection as command acceptance
+      - treating client connection as capability permission
+      - treating client connection as user identity by itself
+      - treating client connection as state authority
+      - treating pairing success as capability permission by itself
+      - treating authentication success as capability permission by itself
+      - treating transport connection as RuntimeHost authority
+      - treating transport disconnect as RuntimeHost failure by itself
+      - treating client disconnect as Job cancellation by default
+      - treating client disconnect as command failure by default
+      - connect mode silently starting a new writable RuntimeHost
+      - serve mode silently enabling LAN exposure
+      - remoteExplicit exposure without a later authoritative security and
+        deployment design
+
+
+===============================================================================
+16. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+16.1. OPEN questions include:
+      - exact clientConnectionId representation
+      - exact entry surface identity representation
+      - exact local bind behavior
+      - exact LAN bind behavior
+      - exact remote endpoint summary format
+      - exact pairing flow
+      - exact authentication flow
+      - exact token or certificate format
+      - exact client reconnect flow
+      - exact retained result retrieval after reconnect
+      - exact browser bootstrap interaction
+      - exact firewall guidance
+      - exact error class names
+      - exact transport-specific connection schema
+
+
+===============================================================================
+17. LOCKED SUMMARY
+===============================================================================
+
+17.1. LOCKED:
+      - IS-06 implements DA-28 LAN exposure and client-connection semantics.
+      - LAN exposure is explicit and policy-governed.
+      - RuntimeHost does not silently expose itself to LAN clients.
+      - RuntimeHost does not silently expose itself to internet clients.
+      - localOnly is the default bind scope unless a later implementation
+        specification defines a different default without weakening DA-28.
+      - lanExplicit is never selected silently.
+      - remoteExplicit is not enabled by this document.
+      - Client connection is not command acceptance.
+      - Client connection is not capability permission.
+      - Client connection is not user identity by itself.
+      - Client connection is not state authority.
+      - Pairing and authentication are distinct.
+      - Pairing and authentication do not grant capability permission by
+        themselves.
+      - Client disconnect does not automatically stop RuntimeHost, cancel Jobs,
+        fail Orchestration Units, fail adapters, or discard command results.
+      - Startup modes that expose entry surfaces use IS-05.
+      - Connected clients that submit commands use IS-04.
+      - RPC and transport behavior remains governed by DA-21 and relevant IS
+        documents.
+      - LAN exposure and client connection behavior are trace-visible.
+
+17.2. OPEN:
+      - concrete client identifiers, bind behavior, pairing, authentication,
+        reconnect, retained result retrieval, browser bootstrap interaction,
+        firewall guidance, error classes, and transport-specific schemas.
+
+
+===============================================================================
+END OF IS-06 - RUNTIME HOST LAN AND CLIENT CONNECTIONS
+===============================================================================
+
+--- doc-meta ---
+DOC_ID: IS-06
+DOC_FILE: docs/design/IS-06_RUNTIME_HOST_LAN_AND_CLIENT_CONNECTIONS.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
