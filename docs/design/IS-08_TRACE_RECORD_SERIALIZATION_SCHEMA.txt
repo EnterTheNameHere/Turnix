@@ -1,0 +1,1010 @@
+===============================================================================
+IMPLEMENTATION SPECIFICATION IS-08 - TRACE RECORD SERIALIZATION SCHEMA
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines the concrete serialized trace record envelope used to represent the
+DA-03 trace event model, including substrate field mapping, attribute payload
+layout, domain attribute namespaces, parent/cause correlation fields,
+redaction markers, extension fields, and validation rules.
+
+This document bridges DA-03 trace semantics with implementation-level trace
+records and provides the serialization placement for domain field vocabularies
+such as IS-07 RuntimeHost trace fields.
+
+Purpose:
+--------
+This document defines how Turnix serializes trace event evidence without
+changing trace semantics.
+
+It defines:
+- serialized trace record envelope shape
+- mapping from DA-03 trace event fields to serialized fields
+- placement of domain-specific attributes
+- placement of RuntimeHost-domain IS-07 fields
+- parent and causal correlation representation
+- span reference representation
+- timestamp and level serialization conventions
+- reason and domain serialization conventions
+- redaction and unavailable-value markers
+- extension field rules
+- validation categories for serialized trace records
+
+It does NOT define:
+- trace meaning, trace event semantics, trace DAG semantics, span semantics,
+  trace access semantics, or loss evidence semantics (see DA-03)
+- RuntimeHost trace reason identifiers or RuntimeHost trace semantics
+  (see DA-28)
+- RuntimeHost-domain field vocabulary (see IS-07)
+- AppInstance-domain trace reason identifiers (see DA-20)
+- RPC trace correlation semantics (see DA-21)
+- UI-domain trace reason identifiers (see DA-22)
+- Orchestration Unit trace reason identifiers (see DA-24)
+- adapter-domain trace reason identifiers (see DA-27)
+- concrete trace store file layout
+- concrete trace index format
+- concrete trace query language
+- concrete UI rendering of trace records
+- concrete export bundle format
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-03
+- DA-20
+- DA-21
+- DA-22
+- DA-24
+- DA-27
+- DA-28
+- IS-07
+
+Downstream Documents:
+--------------------
+- future trace store implementation specifications
+- future trace index implementation specifications
+- future trace export implementation specifications
+- future audit bundle implementation specifications
+- future trace viewer implementation specifications
+- future domain-specific trace schema implementation specifications
+
+
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
+
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and document
+      context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines implementation-level serialized trace record shape
+      within that shared interpretation model.
+
+01.5. This implementation specification does not create new trace semantics. It
+      serializes the DA-03 trace event model.
+
+
+===============================================================================
+02. CORE CONCEPT
+===============================================================================
+
+02.1. Trace record serialization answers:
+
+          "How is DA-03 trace event evidence represented as concrete data
+           while preserving domain ownership of trace meanings and field
+           vocabularies?"
+
+02.2. A serialized trace record is a concrete representation of one trace event
+      or one trace event projection.
+
+02.3. A serialized trace record is not the trace event meaning itself.
+
+02.4. DA-03 owns trace event semantics.
+
+02.5. IS-08 owns the concrete serialized envelope described here.
+
+02.6. Domain documents own their domain trace reason identifiers and domain
+      trace-context meanings.
+
+02.7. Domain-specific implementation specifications may define field
+      vocabularies placed inside the serialized trace record attributes.
+
+02.8. IS-07 defines RuntimeHost-domain field vocabulary and uses the placement
+      rules defined by this document.
+
+02.9. Serialization does not transfer semantic authority from the owning domain
+      document to the trace record format.
+
+02.10. A trace consumer may read a serialized trace record without loading every
+       domain document, but authority interpretation remains traceable to the
+       owning DA or IS documents.
+
+
+===============================================================================
+03. SERIALIZED TRACE RECORD ENVELOPE
+===============================================================================
+
+03.1. A serialized trace record is a UTF-8 JSON object unless a later trace
+      store implementation specification defines another concrete encoding.
+
+03.2. The default serialized trace record envelope contains:
+      - schemaVersion
+      - eventId
+      - timestamp
+      - level
+      - domain
+      - reason
+      - message
+      - attributes
+      - parentEventIds
+      - span
+      - correlation
+      - serialization
+      - extensions
+
+03.3. schemaVersion identifies the IS-08 serialized trace record schema
+      version.
+
+03.4. eventId serializes the DA-03 trace event identity.
+
+03.5. timestamp serializes the DA-03 trace event timestamp.
+
+03.6. level serializes the DA-03 trace event level.
+
+03.7. domain serializes the DA-03 trace event domain.
+
+03.8. reason serializes the DA-03 trace event reason.
+
+03.9. message serializes the DA-03 trace event message.
+
+03.10. attributes contains domain-specific, implementation-specific, and
+       event-specific structured data.
+
+03.11. parentEventIds serializes DA-03 parent trace event references when
+       available.
+
+03.12. span contains span reference information when the trace event is related
+       to a span.
+
+03.13. correlation contains causal or navigational correlation references that
+       are not parentEventIds.
+
+03.14. serialization contains serialization metadata that does not belong to the
+       trace event meaning.
+
+03.15. extensions contains namespaced extensions defined by later
+       implementation specifications.
+
+03.16. A serialized trace record may omit optional fields when the omission is
+       allowed by this document or a later compatible trace store
+       specification.
+
+
+===============================================================================
+04. DA-03 FIELD MAPPING
+===============================================================================
+
+04.1. IS-08 maps DA-03 trace event model fields to serialized fields.
+
+04.2. DA-03-owned trace event fields include:
+      - eventId
+      - timestamp
+      - level
+      - domain
+      - message
+      - reason
+      - attributes
+      - parentEventIds
+
+04.3. The serialized eventId field preserves DA-03 event identity meaning.
+
+04.4. The serialized timestamp field preserves DA-03 timestamp meaning.
+
+04.5. The serialized level field preserves DA-03 level meaning.
+
+04.6. The serialized domain field preserves DA-03 domain meaning.
+
+04.7. The serialized message field preserves DA-03 message meaning.
+
+04.8. The serialized reason field preserves DA-03 reason meaning.
+
+04.9. The serialized attributes field preserves DA-03 attribute payload meaning.
+
+04.10. The serialized parentEventIds field preserves DA-03 parent event
+       reference meaning.
+
+04.11. IS-08 does not redefine any DA-03-owned field meaning.
+
+04.12. A later trace store implementation specification may rename serialized
+       fields only if it also defines a lossless mapping back to the IS-08
+       envelope.
+
+04.13. A trace export intended for portable Turnix interpretation uses the
+       field names defined in this section unless a later authoritative export
+       specification defines a compatible mapping.
+
+
+===============================================================================
+05. ATTRIBUTE PAYLOAD LAYOUT
+===============================================================================
+
+05.1. attributes is a JSON object.
+
+05.2. attributes contains structured event-specific data that is not one of the
+      top-level DA-03 substrate fields.
+
+05.3. attributes may contain domain namespaces.
+
+05.4. Default domain namespaces include:
+      - runtimeHost
+      - appInstance
+      - rpc
+      - ui
+      - adapter
+      - orchestrationUnit
+      - job
+      - capability
+      - decision
+      - transaction
+      - window
+      - persistence
+      - implementation
+
+05.5. Domain namespace names are serialization placement names, not authority
+      owners by themselves.
+
+05.6. Domain namespace content remains governed by the owning domain document
+      or implementation specification.
+
+05.7. A domain namespace may be omitted when the trace event has no attributes
+      for that domain.
+
+05.8. Attributes that are not domain-specific may be placed under
+      attributes.implementation when their meaning is implementation-local.
+
+05.9. Attribute values may be scalar values, arrays, objects, null, redaction
+      markers, or unavailable-value markers according to this document.
+
+05.10. Attribute payloads do not replace domain-owned trace evidence.
+
+05.11. Attribute payloads do not create authority.
+
+
+===============================================================================
+06. RUNTIMEHOST ATTRIBUTE PLACEMENT
+===============================================================================
+
+06.1. IS-07 RuntimeHost-domain fields are serialized under
+      attributes.runtimeHost unless a later trace store specification defines a
+      compatible direct field mapping.
+
+06.2. attributes.runtimeHost is a JSON object.
+
+06.3. attributes.runtimeHost may contain IS-07 fields such as:
+      - runtimeHostId
+      - workspaceId
+      - ownershipMode
+      - accessMode
+      - commandId
+      - startupRequestId
+      - runtimeOperationId
+      - entrySurfaceId
+      - clientConnectionId
+      - bindScope
+      - transportKind
+      - channelId
+      - appInstanceId
+      - viewId
+      - adapterInstanceId
+      - jobId
+      - orchestrationUnitId
+      - transactionId
+      - decisionId
+      - errorCategory
+      - failureReasonCategory
+      - stopReasonCategory
+      - crashReasonCategory
+      - endReasonCategory
+      - outcome
+
+06.4. IS-07 owns the RuntimeHost-domain field vocabulary.
+
+06.5. IS-08 owns only the placement of IS-07 fields in the serialized trace
+      record envelope.
+
+06.6. RuntimeHost-domain fields may be promoted to top-level serialized fields
+      only by a later trace store or export specification that preserves the
+      IS-07 field meanings and DA-03 substrate mapping.
+
+06.7. RuntimeHost-domain fields remain RuntimeHost-domain attributes even when
+      a storage backend indexes them separately.
+
+06.8. Indexed copies do not replace the canonical serialized record.
+
+
+===============================================================================
+07. DOMAIN ATTRIBUTE NAMESPACES
+===============================================================================
+
+07.1. appInstance attributes are placed under attributes.appInstance unless a
+      later AppInstance trace schema defines another compatible placement.
+
+07.2. rpc attributes are placed under attributes.rpc unless a later RPC trace
+      schema defines another compatible placement.
+
+07.3. ui attributes are placed under attributes.ui unless a later UI trace
+      schema defines another compatible placement.
+
+07.4. adapter attributes are placed under attributes.adapter unless a later
+      adapter trace schema defines another compatible placement.
+
+07.5. orchestrationUnit attributes are placed under
+      attributes.orchestrationUnit unless a later Orchestration Unit trace
+      schema defines another compatible placement.
+
+07.6. job attributes are placed under attributes.job unless a later Job trace
+      schema defines another compatible placement.
+
+07.7. capability attributes are placed under attributes.capability unless a
+      later capability trace schema defines another compatible placement.
+
+07.8. decision attributes are placed under attributes.decision unless a later
+      decision trace schema defines another compatible placement.
+
+07.9. transaction attributes are placed under attributes.transaction unless a
+      later transaction trace schema defines another compatible placement.
+
+07.10. window attributes are placed under attributes.window unless a later
+       Window trace schema defines another compatible placement.
+
+07.11. persistence attributes are placed under attributes.persistence unless a
+       later persistence trace schema defines another compatible placement.
+
+07.12. implementation-local attributes are placed under
+       attributes.implementation.
+
+07.13. Domain attribute namespaces do not redefine domain ownership.
+
+07.14. Domain attribute namespaces do not transfer authority.
+
+
+===============================================================================
+08. REASON SERIALIZATION
+===============================================================================
+
+08.1. reason is a string.
+
+08.2. reason contains the trace reason identifier owned by the relevant domain
+      document or implementation specification.
+
+08.3. RuntimeHost-domain trace records use DA-28 RuntimeHost-domain trace
+      reason identifiers or implementation-specific extensions permitted by the
+      RuntimeHost trace schema.
+
+08.4. AppInstance-domain trace records use DA-20 AppInstance-domain trace
+      reason identifiers or permitted implementation-specific extensions.
+
+08.5. UI-domain trace records use DA-22 UI-domain trace reason identifiers or
+      permitted implementation-specific extensions.
+
+08.6. adapter-domain trace records use DA-27 adapter-domain trace reason
+      identifiers or permitted implementation-specific extensions.
+
+08.7. Orchestration Unit trace records use DA-24 Orchestration Unit trace
+      reason identifiers or permitted implementation-specific extensions.
+
+08.8. Reason serialization does not define reason meaning.
+
+08.9. Reason meaning remains owned by the document that owns the reason
+      identifier.
+
+08.10. Unknown reason identifiers are not silently treated as known reasons.
+
+08.11. Unknown reason identifiers may be preserved for forward-compatible
+       storage and displayed as unknown when interpreted by older tooling.
+
+
+===============================================================================
+09. DOMAIN SERIALIZATION
+===============================================================================
+
+09.1. domain is a string.
+
+09.2. domain identifies the trace domain that owns the primary trace reason.
+
+09.3. Initial domain values include:
+      - RuntimeHost
+      - AppInstance
+      - RPC
+      - UI
+      - Adapter
+      - OrchestrationUnit
+      - Job
+      - Capability
+      - Decision
+      - Transaction
+      - Window
+      - Persistence
+      - Implementation
+
+09.4. RuntimeHost-domain trace records use domain RuntimeHost.
+
+09.5. Domain serialization does not transfer ownership of correlated fields.
+
+09.6. A RuntimeHost-domain trace record may include AppInstance, RPC, adapter,
+      Job, or Orchestration Unit correlation fields while retaining domain
+      RuntimeHost when RuntimeHost owns the primary reason.
+
+09.7. A trace record does not use multiple primary domain values.
+
+09.8. Multi-domain correlation is represented through attributes and
+      correlation fields, not through multiple primary domain values.
+
+
+===============================================================================
+10. TIMESTAMP SERIALIZATION
+===============================================================================
+
+10.1. timestamp is serialized as an ISO 8601 UTC timestamp string unless a
+      later trace store specification defines a compatible alternative.
+
+10.2. UTC timestamp strings use a visible UTC indicator.
+
+10.3. timestamp records when trace evidence was emitted or accepted by the
+      trace substrate according to DA-03 semantics.
+
+10.4. timestamp does not imply deterministic execution ordering by itself.
+
+10.5. Ordering-sensitive consumers use trace ordering, parent links, span
+      links, or explicit sequence fields when such fields are available.
+
+10.6. A later trace store implementation specification may add monotonic or
+      sequence fields under serialization or extensions.
+
+
+===============================================================================
+11. LEVEL SERIALIZATION
+===============================================================================
+
+11.1. level is serialized as a string.
+
+11.2. Initial level values include:
+      - trace
+      - debug
+      - info
+      - warning
+      - error
+      - critical
+
+11.3. level controls presentation or severity classification.
+
+11.4. level does not define domain outcome.
+
+11.5. An error level does not by itself define Job failure, AppInstance failure,
+      adapter failure, Orchestration Unit failure, RuntimeHost failure, or
+      Window finalization.
+
+11.6. A warning level does not by itself define recoverability.
+
+11.7. A later trace implementation specification may refine level vocabulary if
+      it preserves existing meaning or defines migration.
+
+
+===============================================================================
+12. PARENT AND CAUSAL LINKS
+===============================================================================
+
+12.1. parentEventIds is an array of eventId strings.
+
+12.2. parentEventIds records parent trace event references according to DA-03
+      trace DAG semantics.
+
+12.3. correlation.causeEventIds records causal events that are relevant but are
+      not parent events in the trace DAG.
+
+12.4. correlation.sourceEventIds records source events that supplied input,
+      request, or context when available.
+
+12.5. correlation.relatedEventIds records related events that are useful for
+      navigation but do not imply parent or cause relation.
+
+12.6. parentEventIds are stronger structural evidence than relatedEventIds.
+
+12.7. relatedEventIds do not imply causality.
+
+12.8. Missing parentEventIds do not imply absence of causality unless the
+      emitting workflow guarantees parent recording.
+
+12.9. Trace consumers do not invent parentEventIds from timestamps alone.
+
+
+===============================================================================
+13. SPAN SERIALIZATION
+===============================================================================
+
+13.1. span is a JSON object when span context is available.
+
+13.2. span may contain:
+      - spanId
+      - parentSpanId
+      - spanKind
+      - spanStatus
+      - spanStartEventId
+      - spanEndEventId
+
+13.3. spanId identifies the related span.
+
+13.4. parentSpanId identifies the parent span when available.
+
+13.5. spanKind records implementation-defined or domain-defined span kind when
+      available.
+
+13.6. spanStatus records span status when available.
+
+13.7. spanStartEventId identifies the event that began the span when available.
+
+13.8. spanEndEventId identifies the event that ended the span when available.
+
+13.9. DA-03 owns span semantics.
+
+13.10. IS-08 serializes span references only.
+
+13.11. Span status does not redefine domain outcome unless the owning domain
+       explicitly maps that relation.
+
+
+===============================================================================
+14. CORRELATION SERIALIZATION
+===============================================================================
+
+14.1. correlation is a JSON object.
+
+14.2. correlation may contain:
+      - traceCorrelationId
+      - causeEventIds
+      - sourceEventIds
+      - relatedEventIds
+      - requestId
+      - operationId
+      - externalCorrelationId
+
+14.3. traceCorrelationId identifies a correlation group when available.
+
+14.4. causeEventIds records causal event references when available.
+
+14.5. sourceEventIds records source event references when available.
+
+14.6. relatedEventIds records navigational related event references when
+      available.
+
+14.7. requestId records an implementation-defined request identity when useful
+      for cross-record navigation.
+
+14.8. operationId records an implementation-defined operation identity when the
+      trace record is part of a larger operation.
+
+14.9. externalCorrelationId records an external correlation value when one is
+      imported from another system.
+
+14.10. externalCorrelationId does not become Turnix authority by being stored.
+
+14.11. Correlation fields do not replace domain-owned identity fields.
+
+
+===============================================================================
+15. SERIALIZATION METADATA
+===============================================================================
+
+15.1. serialization is a JSON object.
+
+15.2. serialization contains metadata about the serialized representation, not
+      domain event meaning.
+
+15.3. serialization may contain:
+      - writerName
+      - writerVersion
+      - writtenAtUtc
+      - serializationFormat
+      - serializationProfile
+      - redactionProfile
+      - sourceFile
+      - sourceOffset
+
+15.4. writerName identifies the implementation component that wrote the record
+      when available.
+
+15.5. writerVersion identifies the writer version when available.
+
+15.6. writtenAtUtc records when the serialized record was written when that
+      differs from the trace timestamp.
+
+15.7. serializationFormat identifies the concrete encoding or container format.
+
+15.8. serializationProfile identifies a named serialization profile when one is
+      used.
+
+15.9. redactionProfile identifies the redaction policy or profile applied when
+      available.
+
+15.10. sourceFile and sourceOffset identify storage location when the record is
+       read from a trace file or export and such metadata is useful.
+
+15.11. Serialization metadata is not used to redefine trace event meaning.
+
+
+===============================================================================
+16. REDACTION AND UNAVAILABLE VALUES
+===============================================================================
+
+16.1. Trace serialization preserves the distinction between absent, unknown,
+      unavailable, and redacted values.
+
+16.2. A missing field means the field was not serialized.
+
+16.3. A null value means the field was explicitly serialized with no value when
+      the field allows null.
+
+16.4. An unknown marker means the value is not known to the emitting workflow.
+
+16.5. An unavailable marker means the value exists or may exist but was not
+      available to the emitter.
+
+16.6. A redacted marker means the value was intentionally withheld.
+
+16.7. Redaction markers are JSON objects.
+
+16.8. A redaction marker contains:
+      - marker
+      - reasonCategory
+
+16.9. marker is Redacted for redaction markers.
+
+16.10. reasonCategory records why the value was redacted when available.
+
+16.11. Unknown and unavailable markers use the same object shape with marker
+       Unknown or Unavailable.
+
+16.12. Redaction does not imply the original value was absent.
+
+16.13. Unknown does not imply redaction.
+
+16.14. Unavailable does not imply denial.
+
+16.15. Trace consumers do not infer concrete values from redacted, unknown, or
+       unavailable markers.
+
+
+===============================================================================
+17. EXTENSION FIELDS
+===============================================================================
+
+17.1. extensions is a JSON object.
+
+17.2. extensions contains namespaced extension payloads.
+
+17.3. Extension namespaces use stable names that do not collide with IS-08
+      top-level fields or domain namespace names.
+
+17.4. Extension fields do not redefine DA-03 trace semantics.
+
+17.5. Extension fields do not redefine domain-owned trace reason meanings.
+
+17.6. Extension fields do not redefine IS-08 top-level field meanings.
+
+17.7. Extension fields may be ignored by consumers that do not understand the
+      extension namespace.
+
+17.8. Ignoring an extension field must not change the meaning of base fields.
+
+17.9. Portable Turnix trace interpretation does not require implementation-
+      local extension fields unless a later authoritative specification
+      promotes those fields.
+
+
+===============================================================================
+18. VALIDATION CATEGORIES
+===============================================================================
+
+18.1. Serialized trace record validation classifies records before portable
+      interpretation.
+
+18.2. Validation categories include:
+      - ValidTraceRecord
+      - MissingRequiredTraceField
+      - InvalidTraceSchemaVersion
+      - InvalidEventId
+      - InvalidTimestamp
+      - InvalidLevel
+      - InvalidDomain
+      - InvalidReason
+      - InvalidAttributes
+      - InvalidParentEventReference
+      - InvalidSpanReference
+      - InvalidCorrelationReference
+      - InvalidRedactionMarker
+      - UnknownDomain
+      - UnknownReason
+      - UnsupportedExtension
+      - MalformedTraceRecord
+
+18.3. ValidTraceRecord means the serialized record satisfies the required
+      structural rules for the consumer's supported schema version.
+
+18.4. MissingRequiredTraceField means a required field is absent.
+
+18.5. InvalidTraceSchemaVersion means schemaVersion is missing, malformed, or
+      unsupported.
+
+18.6. InvalidEventId means eventId is missing or malformed where required.
+
+18.7. InvalidTimestamp means timestamp cannot be interpreted according to the
+      supported timestamp format.
+
+18.8. InvalidLevel means level is not recognized by the supported schema.
+
+18.9. InvalidDomain means domain is malformed or invalid.
+
+18.10. InvalidReason means reason is malformed or invalid.
+
+18.11. InvalidAttributes means attributes is not a valid attributes object.
+
+18.12. InvalidParentEventReference means parentEventIds contains malformed
+       references.
+
+18.13. InvalidSpanReference means span contains malformed span references.
+
+18.14. InvalidCorrelationReference means correlation contains malformed
+       references.
+
+18.15. InvalidRedactionMarker means a marker object is malformed.
+
+18.16. UnknownDomain means the domain is structurally valid but unknown to the
+       consumer.
+
+18.17. UnknownReason means the reason is structurally valid but unknown to the
+       consumer.
+
+18.18. UnsupportedExtension means an extension is structurally present but not
+       supported by the consumer.
+
+18.19. MalformedTraceRecord means the record cannot be parsed or interpreted as
+       a trace record.
+
+18.20. UnknownDomain and UnknownReason do not require discarding the record when
+       the record is otherwise structurally valid.
+
+18.21. MalformedTraceRecord prevents authoritative interpretation of that
+       record.
+
+
+===============================================================================
+19. MINIMUM PORTABLE TRACE RECORD
+===============================================================================
+
+19.1. A minimum portable serialized trace record contains:
+      - schemaVersion
+      - eventId
+      - timestamp
+      - level
+      - domain
+      - reason
+      - message
+      - attributes
+
+19.2. parentEventIds is included when parent evidence exists.
+
+19.3. span is included when span context exists.
+
+19.4. correlation is included when correlation context exists outside parent
+      references.
+
+19.5. serialization is included when serialization metadata is available.
+
+19.6. extensions is included when extension payloads exist.
+
+19.7. A trace store may require additional fields for its own storage, but
+      portable interpretation uses the minimum portable fields defined here.
+
+19.8. A trace export that omits a required portable field is incomplete for
+      portable Turnix trace interpretation.
+
+
+===============================================================================
+20. TRACE RECORD PROFILES
+===============================================================================
+
+20.1. A trace record profile is a named subset or projection of the serialized
+      trace record envelope.
+
+20.2. Profiles may exist for:
+      - full internal storage
+      - compact runtime logs
+      - user-facing diagnostics
+      - audit exports
+      - privacy-redacted exports
+      - test assertions
+
+20.3. A profile does not redefine field meanings.
+
+20.4. A profile may omit fields only when the profile explicitly defines that
+      omission.
+
+20.5. A privacy-redacted profile records redaction markers rather than silently
+      replacing sensitive values with absent fields when the distinction is
+      meaningful.
+
+20.6. Audit profiles preserve enough fields to support the audit purpose
+      defined by the owning audit/export specification.
+
+20.7. Test assertion profiles preserve enough fields for deterministic test
+      interpretation.
+
+20.8. Profile definitions belong to later trace store, export, audit, or test
+      implementation specifications.
+
+
+===============================================================================
+21. RELATION TO TRACE STORES AND EXPORTS
+===============================================================================
+
+21.1. IS-08 defines serialized record shape, not trace store layout.
+
+21.2. A trace store may store records in files, databases, chunks, indexed
+      streams, or another implementation-defined structure.
+
+21.3. A trace store may index selected fields for query performance.
+
+21.4. Indexing a field does not move semantic ownership from the serialized
+      record to the index.
+
+21.5. A trace export may contain serialized records using the IS-08 envelope.
+
+21.6. A trace export may include additional export metadata outside individual
+      trace records.
+
+21.7. Export metadata does not redefine individual trace record semantics.
+
+21.8. Future trace store and export specifications remain constrained by DA-03
+      and by this document's serialization mapping unless they update this
+      document or define a compatible profile.
+
+
+===============================================================================
+22. RELATION TO DOMAIN TRACE SCHEMAS
+===============================================================================
+
+22.1. Domain trace schemas define domain-specific field vocabularies.
+
+22.2. IS-07 is the RuntimeHost-domain trace schema.
+
+22.3. Future domain trace schemas may define AppInstance, RPC, UI, adapter,
+      Orchestration Unit, Job, capability, decision, transaction, Window, or
+      persistence field vocabularies.
+
+22.4. Domain trace schemas place their fields under the matching attributes
+      namespace unless a later trace serialization specification defines a
+      compatible direct field mapping.
+
+22.5. Domain trace schemas do not redefine the IS-08 top-level envelope.
+
+22.6. IS-08 does not redefine domain trace field meanings.
+
+22.7. When a domain trace schema and IS-08 appear to conflict, the
+      interpretation preserving DA-03 substrate semantics and domain ownership
+      is used until documents are corrected.
+
+
+===============================================================================
+23. WHAT IS EXPLICITLY NOT SUPPORTED
+===============================================================================
+
+23.1. The following are not supported:
+      - treating serialized trace records as the source of trace semantics
+      - treating IS-08 as redefining DA-03 trace event meaning
+      - treating IS-08 as redefining domain trace reason meanings
+      - treating attributes as authority grants
+      - treating indexed field copies as canonical trace records
+      - treating unknown reason identifiers as known reasons
+      - inferring parentEventIds from timestamps alone
+      - treating relatedEventIds as causality
+      - treating level error as Job failure, AppInstance failure, adapter
+        failure, Orchestration Unit failure, RuntimeHost failure, or Window
+        finalization by itself
+      - treating redacted values as absent values
+      - treating unknown values as redacted values
+      - extension fields redefining IS-08 top-level fields
+      - domain attribute namespaces transferring authority between domains
+      - trace profiles silently omitting fields without profile definition
+
+
+===============================================================================
+24. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+24.1. OPEN questions include:
+      - exact schemaVersion value format
+      - exact eventId representation
+      - exact timestamp fractional precision
+      - exact level vocabulary finalization
+      - exact domain vocabulary finalization
+      - exact reason identifier string grammar
+      - exact attribute namespace extension convention
+      - exact redaction marker schema
+      - exact unavailable marker schema
+      - exact unknown marker schema
+      - exact trace store file layout
+      - exact trace index format
+      - exact compact runtime log profile
+      - exact audit export profile
+      - exact privacy-redacted export profile
+      - exact test assertion profile
+      - exact JSON Schema publication format
+      - exact migration behavior between schema versions
+      - exact binary or chunked serialization alternatives
+
+
+===============================================================================
+25. LOCKED SUMMARY
+===============================================================================
+
+25.1. LOCKED:
+      - IS-08 serializes the DA-03 trace event model.
+      - IS-08 does not create new trace semantics.
+      - DA-03 owns trace event meaning, trace DAG semantics, span semantics,
+        trace access semantics, and loss evidence semantics.
+      - Domain documents own their trace reason identifiers and domain trace
+        meanings.
+      - IS-08 owns the serialized trace record envelope defined here.
+      - The default serialized trace record is a UTF-8 JSON object.
+      - The default envelope contains schemaVersion, eventId, timestamp, level,
+        domain, reason, message, attributes, parentEventIds, span,
+        correlation, serialization, and extensions.
+      - DA-03 fields retain DA-03 meaning when serialized.
+      - attributes contains domain-specific, implementation-specific, and
+        event-specific structured data.
+      - IS-07 RuntimeHost-domain fields are serialized under
+        attributes.runtimeHost unless a later compatible direct field mapping
+        is defined.
+      - Domain attribute namespaces do not transfer authority.
+      - reason serialization does not define reason meaning.
+      - domain identifies the primary trace reason domain.
+      - parentEventIds record DA-03 parent references.
+      - relatedEventIds do not imply causality.
+      - span serialization records span references only.
+      - serialization metadata is not domain event meaning.
+      - Redacted, unknown, unavailable, absent, and null remain distinct.
+      - Extension fields do not redefine DA-03 semantics, domain reason
+        meanings, or IS-08 top-level field meanings.
+      - Trace store layout and trace indexes are outside IS-08.
+
+25.2. OPEN:
+      - concrete identifier formats, timestamp precision, finalized
+        vocabularies, marker schemas, trace store layout, profile definitions,
+        JSON Schema publication, version migration, and binary/chunked
+        alternatives.
+
+
+===============================================================================
+END OF IS-08 - TRACE RECORD SERIALIZATION SCHEMA
+===============================================================================
+
+--- doc-meta ---
+DOC_ID: IS-08
+DOC_FILE: docs/design/IS-08_TRACE_RECORD_SERIALIZATION_SCHEMA.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
