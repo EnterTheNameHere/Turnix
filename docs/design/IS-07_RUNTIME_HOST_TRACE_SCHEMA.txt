@@ -1,0 +1,972 @@
+===============================================================================
+IMPLEMENTATION SPECIFICATION IS-07 - RUNTIME HOST TRACE SCHEMA
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines the concrete RuntimeHost-domain trace field schema used by RuntimeHost
+lifecycle, workspace ownership, command surface, startup mode, LAN exposure,
+client connection, and RuntimeHost operation trace evidence.
+
+This document implements the RuntimeHost trace-context obligations defined by
+DA-28 and provides shared field naming for IS-03, IS-04, IS-05, and IS-06.
+
+Purpose:
+--------
+This document defines the concrete field vocabulary for RuntimeHost-domain
+trace evidence so RuntimeHost-adjacent implementation specifications do not
+invent incompatible trace payload shapes.
+
+It defines:
+- RuntimeHost trace record field vocabulary
+- common RuntimeHost trace context fields
+- identity field names and meaning
+- workspace ownership trace fields
+- command trace fields
+- startup-mode trace fields
+- entry-surface and client-connection trace fields
+- LAN exposure trace fields
+- RuntimeHost operation trace fields
+- error, reason, and outcome field conventions
+- trace correlation field conventions
+- schema extension rules
+
+It does NOT define:
+- trace event structure, trace DAG semantics, span mechanics, storage, or query
+  behavior (see DA-03)
+- RuntimeHost semantics or RuntimeHost trace reason ownership (see DA-28)
+- workspace ownership and host-lock behavior (see IS-03)
+- command-surface behavior or command result envelope behavior (see IS-04)
+- startup-mode behavior or startup result envelope behavior (see IS-05)
+- LAN exposure and client-connection behavior (see IS-06)
+- AppInstance trace reason ownership (see DA-20)
+- RPC trace correlation semantics (see DA-21)
+- UI-domain trace reason ownership (see DA-22)
+- adapter-domain trace reason ownership (see DA-27)
+- Orchestration Unit trace reason ownership (see DA-24)
+- concrete JSON serialization format for the full trace store
+- concrete trace file layout
+- concrete UI display of trace records
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-03
+- DA-20
+- DA-21
+- DA-22
+- DA-24
+- DA-27
+- DA-28
+- IS-03
+- IS-04
+- IS-05
+- IS-06
+
+Downstream Documents:
+--------------------
+- future RuntimeHost trace store implementation specifications
+- future RuntimeHost audit/export implementation specifications
+- future CLI trace inspection implementation specifications
+- future browser trace viewer implementation specifications
+- future LAN/client diagnostic implementation specifications
+
+
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
+
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and document
+      context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines implementation-level RuntimeHost-domain trace field
+      schema within that shared interpretation model.
+
+01.5. This implementation specification does not create new trace substrate
+      semantics. It implements DA-28 trace context obligations.
+
+
+===============================================================================
+02. CORE CONCEPT
+===============================================================================
+
+02.1. RuntimeHost trace schema answers:
+
+          "Which concrete fields identify RuntimeHost-domain trace evidence
+           across host lifecycle, workspace ownership, commands, startup modes,
+           clients, LAN exposure, and host-level operations?"
+
+02.2. RuntimeHost trace schema provides field vocabulary.
+
+02.3. RuntimeHost trace schema does not own trace event storage.
+
+02.4. RuntimeHost trace schema does not own trace DAG semantics.
+
+02.5. RuntimeHost trace schema does not own span mechanics.
+
+02.6. RuntimeHost trace schema does not own trace reason meanings.
+
+02.7. DA-03 owns the trace substrate.
+
+02.8. DA-28 owns RuntimeHost-domain trace reason identifiers and their
+      semantic meaning.
+
+02.9. IS-07 defines concrete RuntimeHost-domain trace fields used by
+      RuntimeHost implementation specifications.
+
+02.10. Field presence depends on event kind, available context, and owning
+       workflow.
+
+02.11. Absence of a field does not imply absence of the represented domain
+       fact unless the emitting schema or workflow requires that field.
+
+
+===============================================================================
+03. RUNTIMEHOST TRACE FIELD GROUPS
+===============================================================================
+
+03.1. RuntimeHost-domain trace fields are grouped by purpose.
+
+03.2. Field groups include:
+      - base trace fields
+      - RuntimeHost identity fields
+      - workspace fields
+      - ownership fields
+      - startup-mode fields
+      - command fields
+      - RuntimeHost operation fields
+      - entry-surface fields
+      - client-connection fields
+      - LAN and exposure fields
+      - transport and channel fields
+      - cross-domain correlation fields
+      - error, reason, and outcome fields
+      - extension fields
+
+03.3. Field grouping is for schema organization and implementation clarity.
+
+03.4. Field grouping does not create separate trace event classes by itself.
+
+03.5. One RuntimeHost-domain trace record may contain fields from multiple
+      groups when the event crosses multiple domains.
+
+03.6. Fields from another domain may appear only as correlation fields unless
+      the owning domain document permits more detailed inclusion.
+
+
+===============================================================================
+04. BASE TRACE FIELDS
+===============================================================================
+
+04.1. A RuntimeHost-domain trace record contains base trace fields supplied by
+      the trace substrate or by the RuntimeHost trace emission layer.
+
+04.2. Base trace fields include:
+      - schemaVersion
+      - traceRecordId
+      - traceReason
+      - timestampUtc
+      - traceLevel
+      - sourceDomain
+      - message
+      - details
+
+04.3. schemaVersion identifies the RuntimeHost trace field schema version.
+
+04.4. traceRecordId identifies one trace record when the trace substrate exposes
+      record identity.
+
+04.5. traceReason contains the RuntimeHost-domain trace reason identifier or a
+      permitted implementation-specific trace reason extension.
+
+04.6. timestampUtc records when the trace evidence was emitted or accepted by
+      the trace substrate.
+
+04.7. traceLevel classifies severity or presentation level when such
+      classification is supported.
+
+04.8. sourceDomain is RuntimeHost for RuntimeHost-domain trace records.
+
+04.9. message contains a human-facing summary when available.
+
+04.10. details contains structured event-specific data when available.
+
+04.11. Concrete trace substrate fields remain governed by DA-03.
+
+04.12. IS-07 defines only the RuntimeHost-domain field vocabulary layered onto
+       the substrate.
+
+
+===============================================================================
+05. RUNTIMEHOST IDENTITY FIELDS
+===============================================================================
+
+05.1. RuntimeHost identity fields identify the host-level context.
+
+05.2. RuntimeHost identity fields include:
+      - runtimeHostId
+      - runtimeHostLifecyclePhase
+      - runtimeHostActiveSpanId
+      - runtimeHostStartRequestId
+      - kernelContextId
+      - processId
+      - processIdentity
+
+05.3. runtimeHostId identifies the RuntimeHost.
+
+05.4. runtimeHostLifecyclePhase records the RuntimeHost lifecycle phase when
+      the emitting workflow exposes it.
+
+05.5. runtimeHostActiveSpanId identifies the RuntimeHost active-region span
+      when applicable.
+
+05.6. runtimeHostStartRequestId identifies the request that caused RuntimeHost
+      startup when applicable.
+
+05.7. kernelContextId identifies the active Kernel or KernelContext when such
+      identity is defined.
+
+05.8. processId records the operating-system process identifier when available.
+
+05.9. processIdentity records implementation-defined process identity context
+      when processId alone is insufficient.
+
+05.10. runtimeHostId remains distinct from all other identity fields.
+
+
+===============================================================================
+06. WORKSPACE FIELDS
+===============================================================================
+
+06.1. Workspace fields identify the workspace or runtime scope bound to the
+      RuntimeHost.
+
+06.2. Workspace fields include:
+      - workspaceId
+      - workspacePath
+      - workspaceIdentitySource
+      - workspaceBindingStatus
+      - workspaceBindingErrorCategory
+
+06.3. workspaceId identifies the workspace when a stable workspace identity is
+      available.
+
+06.4. workspacePath records the path or path summary when safe and available.
+
+06.5. workspaceIdentitySource records how workspace identity was derived when
+      the implementation distinguishes identity sources.
+
+06.6. workspaceBindingStatus records binding status when the trace record is
+      about workspace binding.
+
+06.7. workspaceBindingErrorCategory records a binding-specific error category
+      when workspace binding fails.
+
+06.8. workspacePath is not a substitute for workspaceId when workspaceId is
+      defined.
+
+06.9. workspaceId is not runtimeHostId.
+
+
+===============================================================================
+07. OWNERSHIP FIELDS
+===============================================================================
+
+07.1. Ownership fields describe workspace ownership evidence under IS-03.
+
+07.2. Ownership fields include:
+      - ownershipMode
+      - accessMode
+      - ownershipStatus
+      - ownerRuntimeHostId
+      - existingOwnerRuntimeHostId
+      - ownerNonce
+      - lockState
+      - hostMachineId
+      - userId
+      - startedAtUtc
+      - heartbeatAtUtc
+      - requestedOwnershipMode
+      - ownershipResult
+      - staleOwnerEvidenceCategory
+      - recoveryResult
+
+07.3. ownershipMode records writable ownership mode when writable ownership
+      exists.
+
+07.4. accessMode records access behavior such as read-only inspection when no
+      writable ownership is created.
+
+07.5. ownershipStatus records the current ownership interpretation for the
+      event.
+
+07.6. ownerRuntimeHostId records the RuntimeHost claiming ownership in the
+      ownership record.
+
+07.7. existingOwnerRuntimeHostId records an already-present owner when a second
+      owner is rejected or recovery is considered.
+
+07.8. ownerNonce records the ownership nonce when available.
+
+07.9. lockState records the ownership record lock state under IS-03.
+
+07.10. hostMachineId records the owner machine identity when available.
+
+07.11. userId records the owner user identity when available.
+
+07.12. startedAtUtc records when the ownership claim began.
+
+07.13. heartbeatAtUtc records the latest heartbeat time observed or written.
+
+07.14. requestedOwnershipMode records the requested ownership mode.
+
+07.15. ownershipResult records the result of an ownership attempt or ownership
+       recovery attempt.
+
+07.16. staleOwnerEvidenceCategory classifies stale owner evidence when
+       available.
+
+07.17. recoveryResult records stale-owner recovery outcome when available.
+
+07.18. read-only inspection uses accessMode rather than ownershipMode.
+
+
+===============================================================================
+08. STARTUP-MODE FIELDS
+===============================================================================
+
+08.1. Startup-mode fields describe IS-05 startup mode handling.
+
+08.2. Startup-mode fields include:
+      - startupRequestId
+      - startupMode
+      - startupStatus
+      - startupInputSource
+      - startupFailureCategory
+      - startupProjectionSource
+
+08.3. startupRequestId identifies one startup request.
+
+08.4. startupMode records the startup mode category.
+
+08.5. startupStatus records startup-mode result status when applicable.
+
+08.6. startupInputSource records the entry source for startup input when
+      available.
+
+08.7. startupFailureCategory records startup-mode failure category when
+      applicable.
+
+08.8. startupProjectionSource records whether startup result status was
+      projected from another result surface, such as command result, when that
+      projection is explicit.
+
+08.9. startupRequestId is not commandId.
+
+08.10. startupStatus does not redefine commandStatus, Job terminal outcome,
+       AppInstance lifecycle outcome, or Orchestration Unit terminal outcome.
+
+
+===============================================================================
+09. COMMAND FIELDS
+===============================================================================
+
+09.1. Command fields describe IS-04 command-surface handling.
+
+09.2. Command fields include:
+      - commandId
+      - commandCategory
+      - commandStatus
+      - commandInputSource
+      - commandSourceIdentity
+      - commandProjectionSource
+      - commandErrorCategory
+      - commandResultReference
+
+09.3. commandId identifies one received command.
+
+09.4. commandCategory records the semantic command category.
+
+09.5. commandStatus records command handling status when applicable.
+
+09.6. commandInputSource records whether the command originated from CLI,
+      frontend, RPC, remote client, test harness, launcher, or another known
+      source.
+
+09.7. commandSourceIdentity records implementation-defined source identity
+      when available.
+
+09.8. commandProjectionSource records whether command result status was
+      projected from another result surface, such as RuntimeHost operation
+      result, when that projection is explicit.
+
+09.9. commandErrorCategory records command error category when applicable.
+
+09.10. commandResultReference identifies a retained command result when a
+       retained result surface exists.
+
+09.11. commandStatus does not redefine RuntimeHost operation outcome, Job
+       terminal outcome, AppInstance lifecycle outcome, adapter lifecycle
+       outcome, or Orchestration Unit terminal outcome.
+
+
+===============================================================================
+10. RUNTIMEHOST OPERATION FIELDS
+===============================================================================
+
+10.1. RuntimeHost operation fields describe host-level operations under DA-28
+      and command/startup implementation documents.
+
+10.2. RuntimeHost operation fields include:
+      - runtimeOperationId
+      - runtimeOperationCategory
+      - runtimeOperationStatus
+      - runtimeOperationSource
+      - runtimeOperationParentId
+      - runtimeOperationResultReference
+      - runtimeOperationErrorCategory
+      - runtimeOperationSupersessionSource
+      - runtimeOperationDetachReason
+      - runtimeOperationRetentionReason
+
+10.3. runtimeOperationId identifies one RuntimeHost operation.
+
+10.4. runtimeOperationCategory records the semantic operation category.
+
+10.5. runtimeOperationStatus records operation status when applicable.
+
+10.6. runtimeOperationSource records the source surface or workflow that
+      requested the operation when available.
+
+10.7. runtimeOperationParentId records parent operation identity when an
+      operation is decomposed into child operations.
+
+10.8. runtimeOperationResultReference identifies retained operation result
+      evidence when such a surface exists.
+
+10.9. runtimeOperationErrorCategory records operation failure category when
+      applicable.
+
+10.10. runtimeOperationSupersessionSource records what newer work, newer
+       accepted input, or higher-priority work superseded the operation when
+       applicable.
+
+10.11. runtimeOperationDetachReason records why an operation detached from a
+       waiting entry surface when applicable.
+
+10.12. runtimeOperationRetentionReason records why operation result or evidence
+       was retained when applicable.
+
+10.13. runtimeOperationStatus does not redefine commandStatus, startupStatus,
+       Job terminal outcome, AppInstance lifecycle outcome, adapter lifecycle
+       outcome, or Orchestration Unit terminal outcome.
+
+
+===============================================================================
+11. ENTRY-SURFACE FIELDS
+===============================================================================
+
+11.1. Entry-surface fields identify RuntimeHost entry surfaces.
+
+11.2. Entry-surface fields include:
+      - entrySurfaceId
+      - entrySurfaceKind
+      - entrySurfaceStatus
+      - entrySurfaceSource
+      - entrySurfaceErrorCategory
+
+11.3. entrySurfaceId identifies one entry surface when the implementation
+      exposes entry-surface identity.
+
+11.4. entrySurfaceKind records the kind of entry surface.
+
+11.5. entrySurfaceStatus records entry-surface status when applicable.
+
+11.6. entrySurfaceSource records the source that requested or created the entry
+      surface when available.
+
+11.7. entrySurfaceErrorCategory records entry-surface error category when
+      applicable.
+
+11.8. entrySurfaceId is not runtimeHostId.
+
+11.9. entrySurfaceId is not viewId unless a later implementation specification
+      defines an explicit mapping.
+
+
+===============================================================================
+12. CLIENT-CONNECTION FIELDS
+===============================================================================
+
+12.1. Client-connection fields describe IS-06 client connection handling.
+
+12.2. Client-connection fields include:
+      - clientConnectionId
+      - clientClassification
+      - clientConnectionStatus
+      - clientConnectionErrorCategory
+      - frontendClientId
+      - remoteEndpointSummary
+      - pairingId
+      - authenticatedPrincipalId
+      - reconnectSourceConnectionId
+      - reconnectResult
+
+12.3. clientConnectionId identifies one client connection attempt or accepted
+      client connection.
+
+12.4. clientClassification records local client, LAN client, remote client,
+      test client, unknown client, or another explicitly defined client class.
+
+12.5. clientConnectionStatus records client connection status when applicable.
+
+12.6. clientConnectionErrorCategory records client connection error category
+      when applicable.
+
+12.7. frontendClientId identifies a frontend client when available.
+
+12.8. remoteEndpointSummary records a safe implementation-defined summary of
+      the remote endpoint when available.
+
+12.9. pairingId records pairing identity when applicable.
+
+12.10. authenticatedPrincipalId records authenticated principal identity when
+       applicable.
+
+12.11. reconnectSourceConnectionId records the prior connection identity used
+       for reconnect when available.
+
+12.12. reconnectResult records reconnect outcome when applicable.
+
+12.13. clientConnectionId is not user identity.
+
+12.14. authenticatedPrincipalId does not grant capability permission by itself.
+
+
+===============================================================================
+13. LAN AND EXPOSURE FIELDS
+===============================================================================
+
+13.1. LAN and exposure fields describe bind scope and exposure behavior under
+      IS-06.
+
+13.2. LAN and exposure fields include:
+      - bindScope
+      - exposureStatus
+      - exposureScope
+      - localBindAddressSummary
+      - lanBindAddressSummary
+      - exposurePolicyDecisionId
+      - exposureErrorCategory
+
+13.3. bindScope records localOnly, lanExplicit, remoteExplicit, disabled, or
+      another explicitly defined bind scope.
+
+13.4. exposureStatus records exposure handling status when applicable.
+
+13.5. exposureScope records the practical exposure scope selected or reached by
+      the implementation when available.
+
+13.6. localBindAddressSummary records local bind information when safe and
+      available.
+
+13.7. lanBindAddressSummary records LAN bind information when safe and
+      available.
+
+13.8. exposurePolicyDecisionId records the policy decision related to exposure
+      when applicable.
+
+13.9. exposureErrorCategory records exposure-specific error category when
+      applicable.
+
+13.10. remoteExplicit is a reserved bind scope unless a later authoritative
+       security and deployment design enables it.
+
+13.11. bindScope does not grant command authority or capability permission.
+
+
+===============================================================================
+14. TRANSPORT AND CHANNEL FIELDS
+===============================================================================
+
+14.1. Transport and channel fields correlate RuntimeHost-domain evidence with
+      RPC transport evidence when available.
+
+14.2. Transport and channel fields include:
+      - transportKind
+      - channelId
+      - rpcMessageId
+      - rpcCorrelationId
+      - disconnectCategory
+      - timeoutCategory
+
+14.3. transportKind records the concrete transport kind when applicable.
+
+14.4. channelId identifies the RPC channel when available.
+
+14.5. rpcMessageId identifies the related RPC message when available.
+
+14.6. rpcCorrelationId identifies the related RPC correlation identity when
+      available.
+
+14.7. disconnectCategory records disconnect classification when applicable.
+
+14.8. timeoutCategory records timeout classification when applicable.
+
+14.9. Transport and channel fields are correlation fields in RuntimeHost-domain
+      trace evidence.
+
+14.10. Transport and channel fields do not redefine DA-21 RPC, channel, or
+       transport semantics.
+
+
+===============================================================================
+15. CROSS-DOMAIN CORRELATION FIELDS
+===============================================================================
+
+15.1. Cross-domain correlation fields link RuntimeHost-domain events to other
+      Turnix domains.
+
+15.2. Cross-domain correlation fields include:
+      - appInstanceId
+      - activeAppPackId
+      - activeSavePackId
+      - viewId
+      - adapterKind
+      - adapterInstanceId
+      - capabilityId
+      - jobId
+      - orchestrationUnitId
+      - transactionId
+      - decisionId
+      - windowId
+      - safePointWindowId
+      - abortedWindowId
+
+15.3. appInstanceId identifies the related AppInstance when applicable.
+
+15.4. activeAppPackId identifies the active AppPack when applicable.
+
+15.5. activeSavePackId identifies the active SavePack when applicable.
+
+15.6. viewId identifies the related View when applicable.
+
+15.7. adapterKind identifies adapter kind when applicable.
+
+15.8. adapterInstanceId identifies adapter instance when applicable.
+
+15.9. capabilityId identifies related capability when applicable.
+
+15.10. jobId identifies related Job when applicable.
+
+15.11. orchestrationUnitId identifies related Orchestration Unit when
+       applicable.
+
+15.12. transactionId identifies related transaction when applicable.
+
+15.13. decisionId identifies related decision point or policy decision when
+       applicable.
+
+15.14. windowId identifies related Window evidence when applicable.
+
+15.15. safePointWindowId identifies related SafePointWindow evidence when
+       applicable.
+
+15.16. abortedWindowId identifies related AbortedWindow evidence when
+       applicable.
+
+15.17. Cross-domain correlation fields do not transfer authority or semantic
+       ownership into RuntimeHost trace evidence.
+
+15.18. Cross-domain correlation fields do not replace trace evidence owned by
+       the referenced domain.
+
+
+===============================================================================
+16. ERROR, REASON, AND OUTCOME FIELDS
+===============================================================================
+
+16.1. Error, reason, and outcome fields classify why a RuntimeHost-domain event
+      occurred or how it ended.
+
+16.2. Error, reason, and outcome fields include:
+      - errorCategory
+      - failureReasonCategory
+      - stopReasonCategory
+      - crashReasonCategory
+      - endReasonCategory
+      - rejectionReasonCategory
+      - cancellationReasonCategory
+      - supersessionSource
+      - detachReason
+      - retentionReason
+      - outcome
+
+16.3. errorCategory records a domain-specific error category when applicable.
+
+16.4. failureReasonCategory records failure classification when applicable.
+
+16.5. stopReasonCategory records stop classification when applicable.
+
+16.6. crashReasonCategory records crash classification when applicable.
+
+16.7. endReasonCategory records active-span end classification when applicable.
+
+16.8. rejectionReasonCategory records rejection classification when applicable.
+
+16.9. cancellationReasonCategory records cancellation classification when
+      applicable.
+
+16.10. supersessionSource records the source of host-operation supersession
+       when applicable.
+
+16.11. detachReason records detachment classification when applicable.
+
+16.12. retentionReason records retention classification when applicable.
+
+16.13. outcome records a concise outcome label when the emitting workflow
+       exposes one.
+
+16.14. These fields classify RuntimeHost-domain evidence only.
+
+16.15. These fields do not redefine Job terminal outcome, AppInstance lifecycle
+       outcome, adapter lifecycle outcome, Orchestration Unit terminal outcome,
+       or Window finalization outcome.
+
+
+===============================================================================
+17. TRACE CORRELATION FIELDS
+===============================================================================
+
+17.1. Trace correlation fields preserve causal and navigational links.
+
+17.2. Trace correlation fields include:
+      - traceCorrelationId
+      - parentTraceRecordId
+      - causeTraceRecordId
+      - sourceTraceRecordId
+      - relatedTraceRecordIds
+      - spanId
+      - parentSpanId
+
+17.3. traceCorrelationId identifies a correlation group when available.
+
+17.4. parentTraceRecordId identifies parent trace evidence when available.
+
+17.5. causeTraceRecordId identifies cause evidence when available.
+
+17.6. sourceTraceRecordId identifies source evidence when available.
+
+17.7. relatedTraceRecordIds identifies additional related trace evidence when
+      available.
+
+17.8. spanId identifies the related span when available.
+
+17.9. parentSpanId identifies the parent span when available.
+
+17.10. DA-03 owns trace DAG and span semantics.
+
+17.11. IS-07 only defines RuntimeHost-domain field names used to store or refer
+       to correlation values.
+
+
+===============================================================================
+18. FIELD PRESENCE RULES
+===============================================================================
+
+18.1. RuntimeHost-domain trace records include runtimeHostId when the event is
+      associated with an existing RuntimeHost identity.
+
+18.2. RuntimeHost-domain trace records may omit runtimeHostId when the event
+      occurs before RuntimeHost identity exists.
+
+18.3. Startup classification records include startupRequestId when a startup
+      request identity exists.
+
+18.4. Command records include commandId when command identity exists.
+
+18.5. Workspace ownership records include workspaceId when workspace identity
+      exists.
+
+18.6. Workspace ownership records include ownershipMode when writable
+      ownership exists.
+
+18.7. Read-only inspection records include accessMode when access mode is
+      recorded.
+
+18.8. Client connection records include clientConnectionId when client
+      connection identity exists.
+
+18.9. LAN exposure records include bindScope when exposure or bind scope is
+      being classified.
+
+18.10. RuntimeHost operation records include runtimeOperationId when operation
+       identity exists.
+
+18.11. Error records include the most specific available errorCategory or
+       reason category.
+
+18.12. Records do not invent unknown identities merely to fill optional fields.
+
+18.13. Records do not copy stale or inferred identities into fields as if they
+       were confirmed.
+
+18.14. Records may include unavailable, unknown, or redacted markers only when
+       the concrete trace schema defines those markers.
+
+
+===============================================================================
+19. EXTENSION FIELDS
+===============================================================================
+
+19.1. RuntimeHost-domain trace records may include extension fields when a
+      later implementation specification defines them.
+
+19.2. Extension fields do not redefine fields defined by this document.
+
+19.3. Extension fields do not redefine DA-28 trace reason meanings.
+
+19.4. Extension fields do not redefine DA-03 trace substrate semantics.
+
+19.5. Extension field names are namespaced or otherwise made distinguishable
+      from base IS-07 fields.
+
+19.6. Implementation-specific extension fields are not required for portable
+      RuntimeHost trace interpretation unless a later specification promotes
+      them into this document.
+
+
+===============================================================================
+20. RELATION TO IMPLEMENTATION SPECIFICATIONS
+===============================================================================
+
+20.1. IS-03 uses IS-07 ownership and workspace fields when emitting workspace
+      ownership trace evidence.
+
+20.2. IS-04 uses IS-07 command and RuntimeHost operation fields when emitting
+      command-surface trace evidence.
+
+20.3. IS-05 uses IS-07 startup-mode fields when emitting startup-mode trace
+      evidence.
+
+20.4. IS-06 uses IS-07 entry-surface, client-connection, LAN exposure,
+      transport, and channel fields when emitting LAN and client trace
+      evidence.
+
+20.5. Future RuntimeHost implementation specifications use IS-07 field names
+      unless they define and justify a compatible extension.
+
+20.6. Future trace-store implementation specifications may define concrete
+      serialization, storage, indexing, and query behavior while preserving the
+      field meanings defined here.
+
+
+===============================================================================
+21. WHAT IS EXPLICITLY NOT SUPPORTED
+===============================================================================
+
+21.1. The following are not supported:
+      - using IS-07 to redefine DA-03 trace substrate semantics
+      - using IS-07 to redefine DA-28 RuntimeHost trace reason meanings
+      - using RuntimeHost trace fields as authority grants
+      - treating cross-domain correlation fields as ownership transfer
+      - treating commandStatus as Job terminal outcome
+      - treating startupStatus as commandStatus replacement by default
+      - treating runtimeOperationStatus as commandStatus replacement by default
+      - treating ownershipMode as read-only inspection mode
+      - treating accessMode as writable ownership
+      - treating bindScope as command authority
+      - treating clientConnectionId as user identity
+      - treating authenticatedPrincipalId as capability permission
+      - treating transport fields as RPC semantic ownership
+      - extension fields redefining IS-07 base fields
+      - implementation-specific trace extensions replacing domain-owned trace
+        evidence
+
+
+===============================================================================
+22. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+22.1. OPEN questions include:
+      - exact traceRecordId representation
+      - exact schemaVersion value format
+      - exact traceLevel vocabulary
+      - exact runtimeHostId representation
+      - exact workspaceId representation
+      - exact commandId representation
+      - exact startupRequestId representation
+      - exact runtimeOperationId representation
+      - exact entrySurfaceId representation
+      - exact clientConnectionId representation
+      - exact accessMode vocabulary
+      - exact ownershipStatus vocabulary
+      - exact commandStatus serialization
+      - exact startupStatus serialization
+      - exact runtimeOperationStatus serialization
+      - exact clientConnectionStatus vocabulary
+      - exact exposureStatus vocabulary
+      - exact extension field namespace convention
+      - exact JSON schema publication format
+      - exact trace-store serialization format
+      - exact redaction rules for paths, endpoints, user ids, and principals
+
+
+===============================================================================
+23. LOCKED SUMMARY
+===============================================================================
+
+23.1. LOCKED:
+      - IS-07 implements DA-28 RuntimeHost trace context obligations.
+      - IS-07 defines RuntimeHost-domain trace field vocabulary.
+      - IS-07 does not define trace substrate semantics.
+      - DA-03 owns trace substrate, trace DAG, and span semantics.
+      - DA-28 owns RuntimeHost-domain trace reason identifiers and their
+        semantic meaning.
+      - RuntimeHost trace records use sourceDomain RuntimeHost.
+      - runtimeHostId is distinct from workspaceId, commandId,
+        startupRequestId, runtimeOperationId, clientConnectionId,
+        appInstanceId, jobId, orchestrationUnitId, viewId, adapter identity,
+        RPC message identity, transactionId, and decisionId.
+      - read-only inspection uses accessMode rather than ownershipMode.
+      - commandStatus, startupStatus, and runtimeOperationStatus remain
+        distinct.
+      - cross-domain correlation fields do not transfer authority or semantic
+        ownership into RuntimeHost trace evidence.
+      - transport and channel fields are correlation fields and do not redefine
+        DA-21 semantics.
+      - extension fields do not redefine IS-07 base fields, DA-28 trace reason
+        meanings, or DA-03 trace substrate semantics.
+      - IS-03, IS-04, IS-05, and IS-06 use IS-07 field names for RuntimeHost-
+        domain trace evidence.
+
+23.2. OPEN:
+      - concrete identifier representations, status vocabularies, accessMode
+        vocabulary, extension namespace convention, JSON schema publication,
+        trace-store serialization, and redaction rules.
+
+
+===============================================================================
+END OF IS-07 - RUNTIME HOST TRACE SCHEMA
+===============================================================================
+
+--- doc-meta ---
+DOC_ID: IS-07
+DOC_FILE: docs/design/IS-07_RUNTIME_HOST_TRACE_SCHEMA.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
