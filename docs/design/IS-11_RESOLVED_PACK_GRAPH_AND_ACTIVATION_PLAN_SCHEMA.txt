@@ -1,0 +1,1439 @@
+===============================================================================
+IMPLEMENTATION SPECIFICATION IS-11 - RESOLVED PACK GRAPH AND ACTIVATION PLAN SCHEMA
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines concrete selected graph and activation-plan record shapes used to hand
+PackManager graph preparation results to activation and runtime workflows,
+including selected pack entries, dependency edges, provider-role choices,
+advisory evidence, accepted overrides, SavePack graph evidence, source
+references, ordering groups, and failure categories.
+
+This document implements the graph handoff concepts described by DA-29 and
+remains constrained by DA-10, DA-11, DA-13, and DA-14.
+
+Purpose:
+--------
+This document defines the concrete records that say what Turnix intends to use
+when a pack graph has been selected and, when needed, how that selected graph
+is prepared for activation.
+
+It defines:
+- ResolvedPackGraph record shape
+- ActivationPlan record shape
+- graph identity and graph purpose fields
+- graph context fields
+- selected pack entry fields
+- dependency edge fields
+- provider-role choice fields
+- advisory evidence fields
+- accepted override fields
+- SavePack graph reference fields
+- source and provenance fields
+- activation ordering fields
+- graph validation status fields
+- graph and activation-plan failure categories
+- trace correlation fields
+
+It does NOT define:
+- root discovery boundaries or filesystem scanning rules (see DA-09)
+- pack identity, hierarchy, visibility, or SavePack visibility semantics
+  (see DA-10)
+- generic PackRequest resolution mechanics (see DA-11)
+- importing or module-loading behavior (see DA-12)
+- dependency, provider-role, pinned, copied, or advisory-relation semantics
+  (see DA-13)
+- activation lifecycle, onLoad(ctx), or PackContext authority (see DA-14)
+- service, capability, permission, or Job-backed capability semantics
+  (see DA-16)
+- user decision or remembered policy semantics (see DA-17)
+- Job lifecycle, timeout, cancellation, progress, or result semantics
+  (see DA-19)
+- AppInstance lifecycle or SavePack binding behavior (see DA-20)
+- RPC, channel, or transport semantics (see DA-21)
+- UI, View, or frontend runtime semantics (see DA-22)
+- execution adapter authority or adapter lifecycle semantics (see DA-23 and
+  DA-27)
+- RuntimeHost lifecycle, workspace ownership, startup mode, or command-surface
+  semantics (see DA-28)
+- PackManager semantic boundaries (see DA-29)
+- concrete pack listing operation envelopes (see IS-09)
+- Default Launcher behavior or ToolStateContext semantics (see IS-10)
+- concrete activation executor implementation
+- concrete package install/update/remove protocol
+- concrete JSON Schema publication format
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-03
+- DA-09
+- DA-10
+- DA-11
+- DA-12
+- DA-13
+- DA-14
+- DA-16
+- DA-17
+- DA-19
+- DA-20
+- DA-21
+- DA-22
+- DA-23
+- DA-27
+- DA-28
+- DA-29
+- IS-08
+- IS-09
+- IS-10
+
+Downstream Documents:
+--------------------
+- future activation executor implementation specifications
+- future PackManager command and RPC implementation specifications
+- future SavePack graph storage implementation specifications
+- future package source, install, update, and verification implementation
+  specifications
+- future SavePack export and pack-bundling implementation specifications
+
+
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
+
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and document
+      context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines implementation-level selected graph and activation-
+      plan records within that shared interpretation model.
+
+
+===============================================================================
+02. CORE CONCEPT
+===============================================================================
+
+02.1. A ResolvedPackGraph answers:
+
+          "Which concrete pack entries and graph decisions has Turnix accepted
+           for this graph purpose and context?"
+
+02.2. An ActivationPlan answers:
+
+          "In what accepted activation order and readiness grouping should the
+           selected graph be handed to activation?"
+
+02.3. ResolvedPackGraph is selected graph intent.
+
+02.4. ActivationPlan is selected graph intent refined for activation ordering.
+
+02.5. ResolvedPackGraph is not discovery.
+
+02.6. ResolvedPackGraph is not generic resolution.
+
+02.7. ResolvedPackGraph is not importing.
+
+02.8. ResolvedPackGraph is not activation.
+
+02.9. ActivationPlan is not activation.
+
+02.10. ActivationPlan does not call onLoad(ctx).
+
+02.11. ActivationPlan does not create PackContext authority.
+
+02.12. Mechanical loaders, importers, adapter artifact loaders, and activation
+       executors consume or reference these records only through their own
+       authority boundaries.
+
+02.13. These records are evidence and intent records. They do not grant
+       permission or authority by themselves.
+
+
+===============================================================================
+03. RECORD TYPES
+===============================================================================
+
+03.1. The primary record types are:
+      - ResolvedPackGraph
+      - ActivationPlan
+
+03.2. ResolvedPackGraph records selected graph intent.
+
+03.3. ActivationPlan records activation ordering and activation readiness
+      derived from one ResolvedPackGraph.
+
+03.4. One ResolvedPackGraph may have zero, one, or multiple ActivationPlan
+      records over time when later workflows prepare activation for different
+      contexts.
+
+03.5. An ActivationPlan references exactly one ResolvedPackGraph.
+
+03.6. A ResolvedPackGraph may be stored as SavePack graph evidence when a
+      SavePack workflow owns that storage.
+
+03.7. A ResolvedPackGraph may be transient when used only for current runtime
+      preparation.
+
+03.8. Persistence of these records remains governed by the owning workflow and
+      persistence documents.
+
+
+===============================================================================
+04. RESOLVEDPACKGRAPH TOP-LEVEL FIELDS
+===============================================================================
+
+04.1. A ResolvedPackGraph contains:
+      - schemaVersion
+      - graphId
+      - graphPurpose
+      - graphStatus
+      - createdAt
+      - createdBy
+      - graphContext
+      - selectedPacks
+      - dependencyEdges
+      - providerRoleChoices
+      - advisoryEvidence
+      - acceptedOverrides
+      - savePackGraphReferences
+      - sourceEvidence
+      - validation
+      - trace
+      - extensions
+
+04.2. schemaVersion identifies the schema version of this record.
+
+04.3. graphId identifies this selected graph record.
+
+04.4. graphPurpose explains why the graph was prepared.
+
+04.5. graphStatus records whether graph preparation completed, completed with
+      warnings, failed, or remains partial under an explicit allowed profile.
+
+04.6. createdAt records graph record creation time when persisted or emitted.
+
+04.7. createdBy records the operation, surface, user decision, policy, or tool
+      that created the graph when available.
+
+04.8. graphContext records the RuntimeHost, workspace, AppPack, SavePack,
+      AppInstance, and tooling context.
+
+04.9. selectedPacks records concrete selected pack entries.
+
+04.10. dependencyEdges records dependency relationships that affected graph
+       preparation.
+
+04.11. providerRoleChoices records selected provider-role outcomes.
+
+04.12. advisoryEvidence records supported, conflicting, and recommended pack
+       evidence considered during graph preparation.
+
+04.13. acceptedOverrides records explicit user or policy decisions that affect
+       the selected graph.
+
+04.14. savePackGraphReferences records SavePack-specific copied, pinned,
+       last-used, or last-known-good graph evidence.
+
+04.15. sourceEvidence records root, package source, provenance, or content
+       evidence when available and permitted.
+
+04.16. validation records graph validation state.
+
+04.17. trace records trace correlation references.
+
+04.18. extensions is reserved for implementation-defined fields that do not
+       redefine this schema.
+
+
+===============================================================================
+05. GRAPH PURPOSE
+===============================================================================
+
+05.1. graphPurpose is one of:
+      - RuntimeLaunch
+      - NewSaveCreation
+      - ExistingSaveLoad
+      - SaveCompatibilityCheck
+      - SaveRepair
+      - SaveExport
+      - ToolingInspection
+      - TestRun
+      - DevelopmentDiagnostics
+      - FutureActivation
+
+05.2. RuntimeLaunch means the graph was prepared for launching an AppPack or
+      runtime participant.
+
+05.3. NewSaveCreation means the graph was prepared for a new SavePack or save
+      context.
+
+05.4. ExistingSaveLoad means the graph was prepared for loading existing save
+      state.
+
+05.5. SaveCompatibilityCheck means the graph was prepared to inspect SavePack
+      compatibility.
+
+05.6. SaveRepair means the graph was prepared to suggest or apply SavePack
+      graph repair.
+
+05.7. SaveExport means the graph was prepared for SavePack export or bundle
+      analysis.
+
+05.8. ToolingInspection means the graph was prepared for read-only tooling,
+      diagnostics, audit, or presentation.
+
+05.9. TestRun means the graph was prepared for controlled test behavior.
+
+05.10. DevelopmentDiagnostics means the graph was prepared for development-time
+       diagnostics.
+
+05.11. FutureActivation means the graph was prepared for a future activation
+       rather than immediate activation.
+
+05.12. graphPurpose does not grant authority.
+
+05.13. graphPurpose does not define activation outcome.
+
+
+===============================================================================
+06. GRAPH STATUS
+===============================================================================
+
+06.1. graphStatus is one of:
+      - Prepared
+      - PreparedWithWarnings
+      - Partial
+      - Failed
+      - Superseded
+
+06.2. Prepared means graph preparation completed without graph-level warnings.
+
+06.3. PreparedWithWarnings means graph preparation completed and warnings are
+      present.
+
+06.4. Partial means graph preparation produced partial graph evidence only
+      under an explicit operation profile that permits partial output.
+
+06.5. Failed means graph preparation failed and the graph is not accepted for
+      activation or runtime use.
+
+06.6. Superseded means a newer graph, newer accepted input, or higher-priority
+      graph replaced this graph record.
+
+06.7. Superseded graph status is not Orchestration Unit Superseded by itself.
+
+06.8. graphStatus is not activation outcome.
+
+06.9. graphStatus is not Job terminal outcome.
+
+06.10. graphStatus is not AppInstance lifecycle outcome.
+
+
+===============================================================================
+07. GRAPH CONTEXT
+===============================================================================
+
+07.1. graphContext is a JSON object.
+
+07.2. graphContext may contain:
+      - runtimeHostId
+      - workspaceId
+      - appPackId
+      - savePackId
+      - appInstanceId
+      - viewId
+      - requestingPackId
+      - requestingSurfaceKind
+      - packManagerScope
+      - accessMode
+      - sourceCatalogId
+      - catalogSnapshotId
+
+07.3. runtimeHostId identifies the RuntimeHost context when applicable.
+
+07.4. workspaceId identifies the workspace context when applicable.
+
+07.5. appPackId identifies the AppPack context when applicable.
+
+07.6. savePackId identifies the SavePack context when applicable.
+
+07.7. appInstanceId identifies the AppInstance context when applicable.
+
+07.8. viewId identifies the View context when applicable.
+
+07.9. requestingPackId identifies the pack that requested graph preparation
+      when applicable.
+
+07.10. requestingSurfaceKind identifies CLI, Launcher, PackManager View,
+       application View, remote client, AI buddy, test, or another surface.
+
+07.11. packManagerScope uses the scope vocabulary defined by DA-29 and IS-09.
+
+07.12. accessMode uses the accessMode vocabulary defined by IS-09 when
+       applicable.
+
+07.13. sourceCatalogId identifies the catalog used when such identity exists.
+
+07.14. catalogSnapshotId identifies the catalog snapshot used when such
+       identity exists.
+
+07.15. graphContext does not grant authority by itself.
+
+
+===============================================================================
+08. SELECTED PACK ENTRY
+===============================================================================
+
+08.1. selectedPacks is an array of selected pack entries.
+
+08.2. Each selected pack entry contains:
+      - graphEntryId
+      - packIdentity
+      - kind
+      - selectionRole
+      - selectionSource
+      - source
+      - visibility
+      - dependencyState
+      - activationState
+      - adapterRequirement
+      - warnings
+      - diagnostics
+      - trace
+
+08.3. graphEntryId identifies the selected pack entry inside this graph.
+
+08.4. packIdentity serializes author, packTreeId, version, canonicalPackId, and
+      fingerprint when available.
+
+08.5. kind serializes the pack kind.
+
+08.6. selectionRole explains why the pack appears in the graph.
+
+08.7. selectionSource explains which source model or graph operation selected
+      the entry.
+
+08.8. source records root, SavePack, copied, pinned, package source, or other
+      provenance evidence when available and permitted.
+
+08.9. visibility records visibility summary evidence when applicable.
+
+08.10. dependencyState records dependency satisfaction summary for this entry.
+
+08.11. activationState records activation-preparation summary for this entry.
+
+08.12. adapterRequirement records adapter requirement summary when the pack has
+       executable artifacts requiring adapter execution.
+
+08.13. warnings records entry-level warnings.
+
+08.14. diagnostics records entry-level diagnostics.
+
+08.15. trace records trace correlation references.
+
+08.16. A selected pack entry is not a manifest.
+
+08.17. A selected pack entry is not executable code.
+
+08.18. A selected pack entry does not activate the pack.
+
+
+===============================================================================
+09. SELECTION ROLE
+===============================================================================
+
+09.1. selectionRole is one of:
+      - RootAppPack
+      - RequiredDependency
+      - ProviderRoleSelection
+      - UserSelected
+      - SaveCopiedPack
+      - SavePinnedPack
+      - ToolingSelected
+      - TestSelected
+      - LauncherSelected
+      - FutureActivationSelected
+
+09.2. RootAppPack means the pack is the root AppPack or primary pack for the
+      graph purpose.
+
+09.3. RequiredDependency means the pack satisfied a hard dependency.
+
+09.4. ProviderRoleSelection means the pack was selected as provider for a
+      required role.
+
+09.5. UserSelected means the user explicitly selected the pack.
+
+09.6. SaveCopiedPack means the pack is copied into a SavePack context.
+
+09.7. SavePinnedPack means the pack is selected because SavePack metadata pins
+      that concrete identity.
+
+09.8. ToolingSelected means a tooling workflow selected the pack.
+
+09.9. TestSelected means a test workflow selected the pack.
+
+09.10. LauncherSelected means a launcher workflow selected the pack.
+
+09.11. FutureActivationSelected means the pack was selected for a future
+       activation plan.
+
+09.12. selectionRole is explanatory evidence.
+
+09.13. selectionRole does not grant activation or capability authority.
+
+
+===============================================================================
+10. SELECTION SOURCE
+===============================================================================
+
+10.1. selectionSource is one of:
+       - DirectRequest
+       - DependencyResolution
+       - SaveOnly
+       - GlobalPinned
+       - GlobalNormal
+       - ProviderRoleResolution
+       - UserDecision
+       - PolicyDecision
+       - LastKnownGoodFallback
+       - ToolingProfile
+       - TestProfile
+
+10.2. DirectRequest means the selected pack was directly requested by the
+       graph-preparation operation.
+
+10.3. DependencyResolution means the selected pack came from DA-13 dependency
+       resolution.
+
+10.4. SaveOnly, GlobalPinned, and GlobalNormal correspond to DA-13 dependency-
+       resolution source models.
+
+10.5. ProviderRoleResolution means the selected pack was chosen as provider for
+       a role.
+
+10.6. UserDecision means an explicit user decision selected or accepted this
+       entry.
+
+10.7. PolicyDecision means policy selected or accepted this entry.
+
+10.8. LastKnownGoodFallback means the entry came from last-known-good fallback
+       handling after activation failure.
+
+10.9. ToolingProfile means a tooling profile selected this entry.
+
+10.10. TestProfile means a test profile selected this entry.
+
+10.11. selectionSource does not redefine DA-13 source semantics.
+
+
+===============================================================================
+11. DEPENDENCY EDGE
+===============================================================================
+
+11.1. dependencyEdges is an array of dependency edge records.
+
+11.2. Each dependency edge contains:
+       - edgeId
+       - fromGraphEntryId
+       - toGraphEntryId
+       - packRequest
+       - dependencySource
+       - dependencyStatus
+       - acceptedEntry
+       - failureCategory
+       - trace
+
+11.3. edgeId identifies the dependency edge inside this graph.
+
+11.4. fromGraphEntryId identifies the requesting graph entry.
+
+11.5. toGraphEntryId identifies the selected satisfying graph entry when one
+       exists.
+
+11.6. packRequest serializes the PackRequest or dependency reference used.
+
+11.7. dependencySource records SaveOnly, GlobalPinned, or GlobalNormal when
+       applicable.
+
+11.8. dependencyStatus is one of:
+       - Satisfied
+       - Unsatisfied
+       - Ambiguous
+       - Overridden
+       - NotEvaluated
+
+11.9. acceptedEntry records accepted-entry normalization evidence when
+       available.
+
+11.10. failureCategory records classified dependency failure when the edge is
+       not satisfied.
+
+11.11. trace records related resolution or dependency trace references.
+
+11.12. dependencyEdges record evidence.
+
+11.13. dependencyEdges do not perform resolution by themselves.
+
+
+===============================================================================
+12. PROVIDER ROLE CHOICE
+===============================================================================
+
+12.1. providerRoleChoices is an array of provider-role choice records.
+
+12.2. Each provider-role choice contains:
+       - providerChoiceId
+       - requiredByGraphEntryId
+       - roleName
+       - selectedProviderGraphEntryId
+       - providerStatus
+       - selectionSource
+       - failureCategory
+       - trace
+
+12.3. providerChoiceId identifies the provider choice inside this graph.
+
+12.4. requiredByGraphEntryId identifies the graph entry that required the role.
+
+12.5. roleName records the required role name.
+
+12.6. selectedProviderGraphEntryId identifies the selected provider entry when
+       one exists.
+
+12.7. providerStatus is one of:
+       - Selected
+       - Missing
+       - Ambiguous
+       - Overridden
+       - NotEvaluated
+
+12.8. selectionSource records how the provider was selected.
+
+12.9. failureCategory records provider-role failure category when applicable.
+
+12.10. trace records related trace references.
+
+12.11. Provider-role semantics remain owned by DA-13.
+
+
+===============================================================================
+13. ADVISORY EVIDENCE
+===============================================================================
+
+13.1. advisoryEvidence is an array of advisory evidence records.
+
+13.2. Each advisory evidence record contains:
+       - advisoryEvidenceId
+       - sourceGraphEntryId
+       - targetGraphEntryId
+       - advisoryKind
+       - packSpecifier
+       - advisoryStatus
+       - severity
+       - message
+       - acceptedOverrideId
+       - trace
+
+13.3. advisoryKind is one of:
+       - Supported
+       - Conflicting
+       - Recommended
+
+13.4. advisoryStatus is one of:
+       - Applies
+       - DoesNotApply
+       - TargetMissing
+       - Overridden
+       - NotEvaluated
+
+13.5. sourceGraphEntryId identifies the pack that declared or contributed the
+       advisory relation when available.
+
+13.6. targetGraphEntryId identifies the target selected pack entry when
+       available.
+
+13.7. packSpecifier records the advisory pack specifier when available.
+
+13.8. severity records presentation severity.
+
+13.9. message records human-readable explanation when available.
+
+13.10. acceptedOverrideId references an override decision when the advisory
+       evidence was explicitly accepted or overridden.
+
+13.11. trace records related trace references.
+
+13.12. Advisory evidence does not create hard dependency semantics.
+
+13.13. Advisory evidence does not create activation failure by itself.
+
+
+===============================================================================
+14. ACCEPTED OVERRIDE
+===============================================================================
+
+14.1. acceptedOverrides is an array of accepted override records.
+
+14.2. Each accepted override contains:
+       - overrideId
+       - overrideKind
+       - decisionId
+       - decisionScope
+       - acceptedBy
+       - acceptedAt
+       - affectedGraphEntryIds
+       - affectedEdgeIds
+       - affectedAdvisoryEvidenceIds
+       - reasonCategory
+       - message
+       - expiresAt
+       - trace
+
+14.3. overrideKind is one of:
+       - AdvisoryConflictAccepted
+       - RiskAccepted
+       - AmbiguityResolved
+       - HardDependencyResolved
+       - SourceTrustAccepted
+       - UnsafeOperationAccepted
+       - TestOverride
+
+14.4. decisionId identifies the DA-17 decision when available.
+
+14.5. decisionScope records run, save, global, graph, test, or another defined
+       scope when available.
+
+14.6. acceptedBy records user, policy, test, tooling, or system actor category
+       when available.
+
+14.7. acceptedAt records acceptance time when available.
+
+14.8. affectedGraphEntryIds identifies affected selected pack entries.
+
+14.9. affectedEdgeIds identifies affected dependency edges.
+
+14.10. affectedAdvisoryEvidenceIds identifies affected advisory evidence.
+
+14.11. reasonCategory classifies why the override exists.
+
+14.12. message records human-readable explanation when available.
+
+14.13. expiresAt records expiration time when applicable.
+
+14.14. trace records decision and PackManager trace references.
+
+14.15. An accepted override does not make a risky graph safe.
+
+14.16. An accepted override does not grant capability permission unless DA-16
+       and DA-17 explicitly define that effect.
+
+14.17. An accepted override does not grant adapter execution authorization.
+
+14.18. HardDependencyResolved is used only when the governing dependency and
+       policy rules allow explicit resolution of that hard failure.
+
+
+===============================================================================
+15. SAVEPACK GRAPH REFERENCES
+===============================================================================
+
+15.1. savePackGraphReferences is a JSON object.
+
+15.2. savePackGraphReferences may contain:
+       - savePackId
+       - lastUsedGraphId
+       - lastKnownGoodGraphId
+       - copiedPackReferences
+       - pinnedPackReferences
+       - saveLocalGraphId
+       - compatibilityCheckId
+       - repairSuggestionIds
+
+15.3. savePackId identifies the SavePack context when applicable.
+
+15.4. lastUsedGraphId references last-used graph evidence when available.
+
+15.5. lastKnownGoodGraphId references last-known-good graph evidence when
+       available.
+
+15.6. copiedPackReferences records copied pack references when available.
+
+15.7. pinnedPackReferences records pinned pack references when available.
+
+15.8. saveLocalGraphId references save-local graph evidence when available.
+
+15.9. compatibilityCheckId references SavePack compatibility check evidence
+       when available.
+
+15.10. repairSuggestionIds references SavePack graph repair suggestions when
+       available.
+
+15.11. SavePack graph references do not load or bind a SavePack.
+
+15.12. SavePack graph references do not mutate SavePack state by themselves.
+
+
+===============================================================================
+16. SOURCE EVIDENCE
+===============================================================================
+
+16.1. sourceEvidence is an array of source evidence records.
+
+16.2. Each source evidence record contains:
+       - sourceEvidenceId
+       - graphEntryId
+       - rootId
+       - rootClass
+       - sourceKind
+       - sourcePath
+       - packageSourceId
+       - sourceTrustClass
+       - fingerprint
+       - provenanceSummary
+       - trace
+
+16.3. rootId identifies the root when available.
+
+16.4. rootClass identifies the root class when available.
+
+16.5. sourceKind records installed content, save-local content, copied content,
+       pinned global content, package index, generated metadata, or another
+       defined source kind.
+
+16.6. sourcePath records path only when path exposure is permitted.
+
+16.7. packageSourceId identifies package source when available.
+
+16.8. sourceTrustClass records source trust classification when available.
+
+16.9. fingerprint records content fingerprint when available and permitted.
+
+16.10. provenanceSummary records human-readable or machine-readable provenance
+       summary when available.
+
+16.11. trace records related trace references.
+
+16.12. Source evidence does not prove authenticity by itself.
+
+16.13. Source evidence does not grant authority.
+
+
+===============================================================================
+17. VALIDATION
+===============================================================================
+
+17.1. validation is a JSON object.
+
+17.2. validation contains:
+       - validationStatus
+       - validationProfile
+       - warnings
+       - failures
+       - expectedBreakEvidence
+
+17.3. validationStatus is one of:
+       - Valid
+       - ValidWithWarnings
+       - Invalid
+       - Partial
+       - NotEvaluated
+
+17.4. validationProfile identifies the validation profile used.
+
+17.5. warnings records warning evidence.
+
+17.6. failures records failure evidence.
+
+17.7. expectedBreakEvidence records accepted risky graph evidence when present.
+
+17.8. validationStatus does not guarantee activation success.
+
+17.9. Valid means the graph record satisfies the validation profile that was
+      applied.
+
+17.10. Valid does not mean the packs will activate successfully.
+
+17.11. ValidWithWarnings means warnings exist and the graph remains accepted
+       under the applied validation profile.
+
+17.12. Invalid means the graph is not accepted under the applied validation
+       profile.
+
+17.13. Partial means only partial validation evidence exists under an explicit
+       profile allowing partial output.
+
+17.14. NotEvaluated means validation was not performed.
+
+
+===============================================================================
+18. ACTIVATIONPLAN TOP-LEVEL FIELDS
+===============================================================================
+
+18.1. An ActivationPlan contains:
+       - schemaVersion
+       - activationPlanId
+       - graphId
+       - activationPlanStatus
+       - createdAt
+       - createdBy
+       - activationContext
+       - activationEntries
+       - activationOrder
+       - readiness
+       - warnings
+       - diagnostics
+       - trace
+       - extensions
+
+18.2. schemaVersion identifies the schema version.
+
+18.3. activationPlanId identifies the activation plan.
+
+18.4. graphId references the ResolvedPackGraph from which the plan was
+       prepared.
+
+18.5. activationPlanStatus records plan preparation status.
+
+18.6. createdAt records creation time when available.
+
+18.7. createdBy records the operation, surface, policy, or tool that created
+       the plan when available.
+
+18.8. activationContext records the RuntimeHost, AppInstance, AppPack,
+       SavePack, workspace, and adapter context when available.
+
+18.9. activationEntries records pack activation entries.
+
+18.10. activationOrder records deterministic activation ordering.
+
+18.11. readiness records readiness checks and blockers.
+
+18.12. warnings records activation-plan warnings.
+
+18.13. diagnostics records activation-plan diagnostics.
+
+18.14. trace records trace correlation references.
+
+18.15. extensions is reserved for implementation-defined fields that do not
+       redefine this schema.
+
+
+===============================================================================
+19. ACTIVATION PLAN STATUS
+===============================================================================
+
+19.1. activationPlanStatus is one of:
+       - Prepared
+       - PreparedWithWarnings
+       - Blocked
+       - Partial
+       - Failed
+       - Superseded
+
+19.2. Prepared means the activation plan was prepared without warnings.
+
+19.3. PreparedWithWarnings means the activation plan was prepared and warnings
+       exist.
+
+19.4. Blocked means activation plan preparation reached a known blocker.
+
+19.5. Partial means the plan contains partial activation evidence under an
+       explicit operation profile that permits partial output.
+
+19.6. Failed means activation plan preparation failed.
+
+19.7. Superseded means another activation plan replaced this activation plan.
+
+19.8. activationPlanStatus is not activation outcome.
+
+19.9. activationPlanStatus is not Job terminal outcome.
+
+
+===============================================================================
+20. ACTIVATION ENTRY
+===============================================================================
+
+20.1. activationEntries is an array of activation entry records.
+
+20.2. Each activation entry contains:
+       - activationEntryId
+       - graphEntryId
+       - packIdentity
+       - activationRole
+       - adapterRequirement
+       - prerequisiteEntryIds
+       - blockerIds
+       - activationReadinessStatus
+       - warnings
+       - diagnostics
+       - trace
+
+20.3. activationEntryId identifies the activation entry inside the plan.
+
+20.4. graphEntryId references the selected pack entry.
+
+20.5. packIdentity repeats pack identity for local readability and validation.
+
+20.6. activationRole explains the entry's role in activation.
+
+20.7. adapterRequirement records required adapter information when available.
+
+20.8. prerequisiteEntryIds records activation entries that precede this entry.
+
+20.9. blockerIds records blockers preventing this entry from being ready.
+
+20.10. activationReadinessStatus records readiness for this entry.
+
+20.11. warnings records entry warnings.
+
+20.12. diagnostics records entry diagnostics.
+
+20.13. trace records related trace references.
+
+20.14. An activation entry does not activate the pack.
+
+
+===============================================================================
+21. ACTIVATION ROLE
+===============================================================================
+
+21.1. activationRole is one of:
+       - AppRoot
+       - Dependency
+       - Provider
+       - ViewParticipant
+       - ToolParticipant
+       - SaveLocalParticipant
+       - OptionalParticipant
+       - TestParticipant
+
+21.2. AppRoot means the AppPack or primary pack that roots the activation plan.
+
+21.3. Dependency means a required dependency participant.
+
+21.4. Provider means a provider-role participant.
+
+21.5. ViewParticipant means a View or UI participant.
+
+21.6. ToolParticipant means a tooling participant.
+
+21.7. SaveLocalParticipant means a save-local copied or pinned participant.
+
+21.8. OptionalParticipant means an explicitly selected optional participant.
+
+21.9. TestParticipant means a test participant.
+
+21.10. activationRole is explanatory and ordering-related.
+
+21.11. activationRole does not grant PackContext authority.
+
+
+===============================================================================
+22. ACTIVATION ORDER
+===============================================================================
+
+22.1. activationOrder is a JSON object.
+
+22.2. activationOrder contains:
+       - orderModel
+       - orderedEntryIds
+       - groups
+       - orderingEvidence
+
+22.3. orderModel identifies the ordering model used.
+
+22.4. Defined orderModel values are:
+       - StrictSequence
+       - GroupedSequence
+       - Deferred
+
+22.5. StrictSequence means orderedEntryIds defines the full deterministic
+       activation order.
+
+22.6. GroupedSequence means groups define deterministic groups and each group
+       defines its own internal order or readiness boundary.
+
+22.7. Deferred means activation order is not fully prepared yet and further
+       accepted input is required before activation.
+
+22.8. orderedEntryIds records activation entry identifiers in deterministic
+       order when orderModel permits it.
+
+22.9. groups records grouped activation order when applicable.
+
+22.10. orderingEvidence records why the order was chosen.
+
+22.11. Activation order preparation does not activate packs.
+
+22.12. Activation order remains constrained by DA-14.
+
+
+===============================================================================
+23. ACTIVATION ORDER GROUP
+===============================================================================
+
+23.1. An activation order group contains:
+       - groupId
+       - groupKind
+       - entryIds
+       - groupReadinessStatus
+       - orderingEvidence
+
+23.2. groupId identifies the group.
+
+23.3. groupKind is one of:
+       - DependencyGroup
+       - ProviderGroup
+       - ViewGroup
+       - ToolGroup
+       - DeferredGroup
+       - TestGroup
+
+23.4. entryIds records activation entries in this group.
+
+23.5. groupReadinessStatus records readiness for the group.
+
+23.6. orderingEvidence records why this group exists.
+
+23.7. Groups do not imply concurrent activation unless a future authoritative
+      concurrency mode defines that behavior.
+
+23.8. Groups are ordering and readability structures by default.
+
+
+===============================================================================
+24. READINESS
+===============================================================================
+
+24.1. readiness is a JSON object.
+
+24.2. readiness contains:
+       - readinessStatus
+       - blockers
+       - warnings
+
+24.3. readinessStatus is one of:
+       - Ready
+       - ReadyWithWarnings
+       - Blocked
+       - Deferred
+       - NotEvaluated
+
+24.4. Ready means the plan is ready for activation under the applied readiness
+       profile.
+
+24.5. ReadyWithWarnings means the plan is ready and warnings exist.
+
+24.6. Blocked means one or more blockers prevent activation.
+
+24.7. Deferred means more input is required before activation readiness can be
+       decided.
+
+24.8. NotEvaluated means readiness was not evaluated.
+
+24.9. blockers records blocker objects.
+
+24.10. warnings records readiness warnings.
+
+24.11. Ready does not guarantee activation success.
+
+
+===============================================================================
+25. BLOCKER
+===============================================================================
+
+25.1. A blocker contains:
+       - blockerId
+       - blockerCategory
+       - relatedGraphEntryIds
+       - relatedActivationEntryIds
+       - relatedDecisionId
+       - message
+       - trace
+
+25.2. blockerCategory is one of:
+       - MissingDependency
+       - VersionMismatch
+       - VisibilityDenied
+       - ProviderRoleMissing
+       - ProviderRoleAmbiguous
+       - PolicyDecisionRequired
+       - PermissionDenied
+       - AdapterUnavailable
+       - ExecutionAuthorizationDenied
+       - SourceUnavailable
+       - SavePackGraphMismatch
+       - Unknown
+
+25.3. relatedGraphEntryIds identifies related selected graph entries.
+
+25.4. relatedActivationEntryIds identifies related activation entries.
+
+25.5. relatedDecisionId identifies a required decision when available.
+
+25.6. message records human-readable explanation when available.
+
+25.7. trace records related trace references.
+
+25.8. Blockers do not perform decision handling by themselves.
+
+25.9. Blockers do not become activation failure unless activation is attempted
+      or the owning workflow classifies the plan as failed.
+
+
+===============================================================================
+26. FAILURE CATEGORIES
+===============================================================================
+
+26.1. Graph failure categories include:
+       - InvalidGraphRequest
+       - CatalogUnavailable
+       - PackResolutionFailed
+       - DependencyUnsatisfied
+       - ProviderRoleUnsatisfied
+       - VisibilityDenied
+       - PolicyDenied
+       - UserDecisionUnavailable
+       - SourceUnavailable
+       - SavePackGraphMismatch
+       - MalformedGraphRecord
+       - GraphSuperseded
+       - InternalGraphError
+
+26.2. Activation-plan failure categories include:
+       - InvalidActivationPlanRequest
+       - GraphUnavailable
+       - GraphInvalid
+       - ActivationOrderingFailed
+       - ActivationReadinessBlocked
+       - AdapterUnavailable
+       - ExecutionAuthorizationDenied
+       - PolicyDenied
+       - MalformedActivationPlanRecord
+       - ActivationPlanSuperseded
+       - InternalActivationPlanError
+
+26.3. Failure categories classify graph or plan preparation failures.
+
+26.4. Failure categories do not replace DA-11 resolution errors, DA-13
+      dependency failures, DA-14 activation failures, DA-16 capability
+      failures, or DA-19 Job terminal outcomes.
+
+
+===============================================================================
+27. TRACE AND OBSERVABILITY
+===============================================================================
+
+27.1. ResolvedPackGraph and ActivationPlan creation remain trace-visible.
+
+27.2. Graph preparation uses PackManager-domain trace reasons owned by DA-29.
+
+27.3. Activation-plan preparation may use PackManager-domain trace reasons and
+      activation-domain ordering evidence where appropriate.
+
+27.4. Serialized trace records use IS-08 when written through the shared trace
+      record envelope.
+
+27.5. Graph records include trace references sufficient to link to:
+       - catalog listing evidence
+       - resolution evidence
+       - dependency evidence
+       - advisory evidence
+       - decision evidence
+       - policy evidence
+       - SavePack graph evidence
+       - RuntimeHost operation evidence
+       - AppInstance operation evidence when applicable
+
+27.6. ActivationPlan records include trace references sufficient to link to:
+       - ResolvedPackGraph evidence
+       - activation ordering evidence
+       - adapter readiness or authorization evidence when available
+       - blocker evidence
+       - decision evidence when applicable
+
+27.7. Graph and activation-plan trace references do not replace the underlying
+      trace records.
+
+
+===============================================================================
+28. RELATION TO SAVEPACK STORAGE
+===============================================================================
+
+28.1. SavePack workflows may store ResolvedPackGraph references or graph
+      records as last-used graph evidence.
+
+28.2. SavePack workflows may store ResolvedPackGraph references or graph
+      records as last-known-good graph evidence.
+
+28.3. This document defines the graph record shape but does not define the
+      SavePack storage layout.
+
+28.4. Last-known-good fallback remains governed by DA-13 and activation
+      behavior.
+
+28.5. A stored graph record does not guarantee that the same pack material is
+      currently available.
+
+28.6. A stored graph record does not bypass fresh dependency resolution where
+      DA-13 requires fresh resolution.
+
+28.7. A stored graph record may be used as evidence for compatibility checks,
+      repair suggestions, fallback handling, export, and audit.
+
+
+===============================================================================
+29. RELATION TO IMPLEMENTATION SPECIFICATIONS
+===============================================================================
+
+29.1. Future implementation specifications may define:
+       - concrete JSON Schema for ResolvedPackGraph
+       - concrete JSON Schema for ActivationPlan
+       - concrete identifier formats
+       - concrete graph storage layout
+       - concrete graph hashing or fingerprinting rules
+       - concrete activation executor input envelope
+       - concrete SavePack graph storage layout
+       - concrete export/bundling representation
+       - concrete PackManager command and RPC envelopes
+
+29.2. Future implementation specifications do not redefine:
+       - graph records as intent/evidence rather than activation
+       - activation plans as ordering/readiness rather than activation
+       - dependency semantics
+       - advisory relation semantics
+       - resolution semantics
+       - activation lifecycle
+       - capability permission
+       - persistence authority
+
+29.3. If an implementation requires a semantic rule not defined here, this
+      document is updated first or alongside that implementation specification.
+
+
+===============================================================================
+30. WHAT IS EXPLICITLY NOT SUPPORTED
+===============================================================================
+
+30.1. The following are not supported:
+      - treating ResolvedPackGraph as discovery
+      - treating ResolvedPackGraph as generic resolution
+      - treating ResolvedPackGraph as importing
+      - treating ResolvedPackGraph as activation
+      - treating ResolvedPackGraph as capability permission
+      - treating ResolvedPackGraph as execution authorization
+      - treating ActivationPlan as activation
+      - treating ActivationPlan as onLoad(ctx) invocation
+      - treating activation entries as PackContext authority
+      - using graph records to bypass visibility
+      - using graph records to bypass dependency rules
+      - using graph records to bypass policy decisions
+      - using graph records to bypass adapter authorization
+      - using graph records to bypass persistence authority
+      - treating Valid graph validation as guaranteed activation success
+      - treating Ready activation plan as guaranteed activation success
+      - treating advisory evidence as hard dependency semantics
+      - treating accepted risk as safety
+      - treating stored SavePack graph evidence as proof that current pack
+        material exists
+      - treating stored graph evidence as silent fallback during dependency
+        resolution
+      - treating activation order groups as concurrency permission
+
+
+===============================================================================
+31. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+31.1. OPEN questions include:
+      - exact graphId representation
+      - exact activationPlanId representation
+      - exact graphEntryId representation
+      - exact edgeId representation
+      - exact providerChoiceId representation
+      - exact advisoryEvidenceId representation
+      - exact overrideId representation
+      - exact sourceEvidenceId representation
+      - exact catalogSnapshotId representation
+      - exact graph hashing or fingerprinting rules
+      - exact JSON Schema publication format
+      - exact graph storage layout
+      - exact SavePack graph storage layout
+      - exact activation executor input envelope
+      - exact graph validation profile vocabulary
+      - exact activation readiness profile vocabulary
+      - exact ordering evidence vocabulary
+      - exact warning and diagnostic category vocabularies
+      - exact export and bundling representation
+
+
+===============================================================================
+32. LOCKED SUMMARY
+===============================================================================
+
+32.1. LOCKED:
+      - ResolvedPackGraph records selected graph intent.
+      - ActivationPlan records activation ordering and readiness derived from
+        one ResolvedPackGraph.
+      - ResolvedPackGraph is not discovery, generic resolution, importing,
+        activation, capability permission, execution authorization, or
+        persistence authority.
+      - ActivationPlan is not activation and does not call onLoad(ctx).
+      - ActivationPlan does not create PackContext authority.
+      - An ActivationPlan references exactly one ResolvedPackGraph.
+      - ResolvedPackGraph records graph purpose, graph context, selected packs,
+        dependency edges, provider-role choices, advisory evidence, accepted
+        overrides, SavePack graph references, source evidence, validation, and
+        trace references.
+      - ActivationPlan records activation entries, activation order, readiness,
+        blockers, warnings, diagnostics, and trace references.
+      - Selected pack entries are listing/graph projections, not manifests or
+        executable code.
+      - Dependency edges record evidence and do not perform resolution.
+      - Advisory evidence does not create hard dependency semantics or
+        activation failure by itself.
+      - Accepted overrides do not make risky graphs safe.
+      - Accepted overrides do not grant capability permission or adapter
+        execution authorization.
+      - Valid graph validation does not guarantee activation success.
+      - Ready activation plan readiness does not guarantee activation success.
+      - SavePack graph references do not load, bind, or mutate SavePacks by
+        themselves.
+      - Stored graph evidence does not bypass fresh dependency resolution where
+        DA-13 requires fresh resolution.
+      - Activation order groups do not imply concurrent activation.
+      - Graph and activation-plan records remain trace-visible and use IS-08
+        serialization when serialized through the shared trace record envelope.
+
+32.2. OPEN:
+      - concrete identifier formats, graph hashing, JSON Schema publication,
+        storage layouts, activation executor envelopes, validation/readiness
+        vocabularies, ordering evidence, warning/diagnostic vocabularies, and
+        export/bundling representation.
+
+
+===============================================================================
+END OF IS-11 - RESOLVED PACK GRAPH AND ACTIVATION PLAN SCHEMA
+===============================================================================
+
+--- doc-meta ---
+DOC_ID: IS-11
+DOC_FILE: docs/design/IS-11_RESOLVED_PACK_GRAPH_AND_ACTIVATION_PLAN_SCHEMA.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
