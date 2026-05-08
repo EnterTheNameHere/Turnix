@@ -1,0 +1,819 @@
+===============================================================================
+IMPLEMENTATION SPECIFICATION IS-10 - DEFAULT LAUNCHER APPPACK AND TOOL STATE CONTEXT
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines the concrete default launcher startup flow, the replaceable Turnix
+Default Launcher AppPack role, launcher AppInstance creation, Launcher Main
+Menu behavior, ToolStateContext placement under userdata, temporary tool-state
+fallback, launcher use of RuntimeHost and PackManager operations, and launcher
+exit versus RuntimeHost shutdown behavior.
+
+This document implements the launcher-facing runtime flow described by DA-20,
+DA-22, DA-28, DA-29, and IS-09.
+
+Purpose:
+--------
+This document defines the default launcher as an ordinary replaceable AppPack
+that presents startup interaction without becoming Kernel, RuntimeHost,
+PackManager, catalog, SavePack, or AppInstance authority.
+
+It defines:
+- Turnix Default Launcher as the default first-party launcher AppPack
+- launcher AppInstance creation
+- Launcher Main Menu screen meaning
+- New, Load, Settings, and Exit launcher actions
+- launcher use of ListPacks and PackManager operations
+- ToolStateContext as launcher/tool state stored under userdata
+- persistent and temporary ToolStateContext behavior
+- launcher state placement rules
+- launcher exit versus RuntimeHost shutdown behavior
+- launcher trace reason usage
+
+It does NOT define:
+- root discovery boundaries or root semantics (see DA-09)
+- pack identity, hierarchy, or visibility semantics (see DA-10)
+- generic resolution mechanics (see DA-11)
+- importing or module-loading behavior (see DA-12)
+- dependency and advisory relation semantics (see DA-13)
+- activation lifecycle or PackContext authority (see DA-14)
+- service, capability, permission, or Job-backed capability semantics
+  (see DA-16)
+- user decision or remembered policy semantics (see DA-17)
+- Job lifecycle, timeout, cancellation, progress, or result semantics
+  (see DA-19)
+- AppInstance lifecycle or runtime identity semantics (see DA-20)
+- RPC, channel, or transport semantics (see DA-21)
+- UI, View, or frontend runtime semantics (see DA-22)
+- execution adapter authority or adapter lifecycle semantics (see DA-23 and
+  DA-27)
+- RuntimeHost lifecycle, workspace ownership, startup mode, or command-surface
+  semantics (see DA-28)
+- PackManager semantics (see DA-29)
+- concrete pack listing operation envelopes (see IS-09)
+- concrete browser layout, component implementation, CSS, or JavaScript module
+  syntax
+- concrete CLI syntax
+- concrete JSON-RPC or WebSocket envelope fields
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-03
+- DA-04
+- DA-06
+- DA-07
+- DA-09
+- DA-10
+- DA-11
+- DA-12
+- DA-13
+- DA-14
+- DA-16
+- DA-17
+- DA-19
+- DA-20
+- DA-21
+- DA-22
+- DA-23
+- DA-27
+- DA-28
+- DA-29
+- IS-08
+- IS-09
+
+Downstream Documents:
+--------------------
+- future launcher view implementation specifications
+- future ToolStateContext schema specifications
+- future settings operation implementation specifications
+- future PackManager view implementation specifications
+- future resolved graph and activation-plan implementation specifications
+
+
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
+
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and document
+      context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines implementation-level default launcher and
+      ToolStateContext contracts within that shared interpretation model.
+
+
+===============================================================================
+02. CORE CONCEPT
+===============================================================================
+
+02.1. Default launcher behavior answers:
+
+          "How does Turnix present a default New, Load, Settings, and Exit
+           surface without making the launcher special runtime authority?"
+
+02.2. Turnix Default Launcher is a first-party launcher AppPack.
+
+02.3. Turnix Default Launcher is replaceable by configuration, policy, or
+      later launcher-selection rules.
+
+02.4. Turnix Default Launcher is not Kernel.
+
+02.5. Turnix Default Launcher is not RuntimeHost.
+
+02.6. Turnix Default Launcher is not PackManager.
+
+02.7. Turnix Default Launcher is not a pack catalog.
+
+02.8. Turnix Default Launcher is not a SavePack manager by itself.
+
+02.9. Turnix Default Launcher runs as an AppInstance when launched.
+
+02.10. Launcher UI is presentation and interaction.
+
+02.11. Launcher actions request RuntimeHost, PackManager, catalog, settings, or
+       AppInstance operations through Turnix-mediated boundaries.
+
+02.12. The launcher does not own the operations it presents.
+
+
+===============================================================================
+03. LAUNCHER IDENTITY
+===============================================================================
+
+03.1. The default first-party launcher name is:
+      Turnix Default Launcher
+
+03.2. The default launcher is identified as an AppPack by normal pack identity
+      rules.
+
+03.3. The exact default launcher pack identity remains implementation-defined
+      until locked by a manifest or implementation specification.
+
+03.4. The user-facing name Turnix Default Launcher is not a stable pack
+      identity by itself.
+
+03.5. Replacing the default launcher changes which AppPack is requested for
+      launcher startup.
+
+03.6. Replacing the default launcher does not redefine RuntimeHost, catalog,
+      PackManager, SavePack, AppInstance, or activation semantics.
+
+03.7. A replacement launcher receives no authority merely because it is the
+      configured launcher.
+
+03.8. A replacement launcher remains subject to pack, activation, adapter,
+      capability, policy, UI, and persistence boundaries.
+
+
+===============================================================================
+04. LAUNCHER STARTUP FLOW
+===============================================================================
+
+04.1. A RuntimeHost startup workflow may request the default launcher after
+      the RuntimeHost reaches the required startup state.
+
+04.2. Launcher startup uses normal RuntimeHost operation composition.
+
+04.3. Launcher startup normally performs:
+      1) resolve configured launcher AppPack
+      2) create or load ToolStateContext
+      3) create Launcher AppInstance
+      4) start Launcher AppInstance
+      5) create launcher View
+      6) bind frontend client when a frontend surface is used
+
+04.4. Launcher startup does not create a user AppInstance.
+
+04.5. Launcher startup does not create a normal user SavePack.
+
+04.6. Launcher startup does not list packs by itself unless the launcher
+      requests a catalog operation for presentation.
+
+04.7. Launcher startup failure is explicit and trace-visible.
+
+04.8. If the launcher AppPack cannot be resolved, launcher startup fails unless
+      an explicit fallback launcher or recovery policy is defined and accepted.
+
+04.9. Fallback launcher selection is explicit and trace-visible.
+
+04.10. Silent fallback to another launcher is not supported.
+
+
+===============================================================================
+05. LAUNCHER APPINSTANCE
+===============================================================================
+
+05.1. The launcher runs as an AppInstance.
+
+05.2. Launcher AppInstance identity is distinct from RuntimeHost identity.
+
+05.3. Launcher AppInstance identity is distinct from ToolStateContext identity.
+
+05.4. Launcher AppInstance identity is distinct from View identity.
+
+05.5. Launcher AppInstance creation follows DA-20.
+
+05.6. Launcher activation follows DA-14.
+
+05.7. Launcher frontend runtime follows DA-22, DA-23, and DA-27.
+
+05.8. Launcher AppInstance may coexist with user AppInstances when RuntimeHost
+      policy and implementation support multiple AppInstances.
+
+05.9. Launching a user AppInstance does not require stopping the launcher
+      AppInstance unless the startup workflow, launcher policy, or user command
+      explicitly requests that outcome.
+
+05.10. Launcher AppInstance stop does not by itself stop RuntimeHost unless the
+       RuntimeHost startup workflow defines the launcher as the bounded reason
+       for the RuntimeHost to exist.
+
+
+===============================================================================
+06. TOOLSTATECONTEXT
+===============================================================================
+
+06.1. ToolStateContext stores durable or temporary state for Turnix tool
+      AppInstances.
+
+06.2. Turnix Default Launcher uses a ToolStateContext by default.
+
+06.3. ToolStateContext is a save context for AppInstance lifecycle purposes.
+
+06.4. ToolStateContext is not a normal user SavePack.
+
+06.5. ToolStateContext is not listed by normal ListSavePacks results.
+
+06.6. ToolStateContext may be listed only by explicit tooling, diagnostics,
+      audit, or tool-state operations when such operations are defined and
+      permitted.
+
+06.7. ToolStateContext may store:
+      - launcher UI preferences
+      - recent AppPack references
+      - recent SavePack references
+      - last selected workspace reference
+      - launcher layout state
+      - launcher filter or sort preferences
+      - dismissed launcher hints
+      - tool-local cache metadata
+
+06.8. ToolStateContext does not store normal user application executed state.
+
+06.9. ToolStateContext does not replace configuration state owned by DA-06.
+
+06.10. ToolStateContext does not replace remembered policy decisions owned by
+       DA-17.
+
+06.11. ToolStateContext does not grant PackManager authority.
+
+
+===============================================================================
+07. TOOLSTATECONTEXT PLACEMENT
+===============================================================================
+
+07.1. Persistent ToolStateContext is stored under userdata.
+
+07.2. Persistent ToolStateContext is not stored under the launcher AppPack
+      content directory.
+
+07.3. Persistent ToolStateContext is not stored under first-party,
+      third-party, or custom content roots as pack content.
+
+07.4. Persistent ToolStateContext is not stored under normal saves.
+
+07.5. A recommended abstract location form is:
+      userdata/tool-state/<packIdentity>/
+
+07.6. The exact path encoding for <packIdentity> remains implementation-defined.
+
+07.7. Pack identity path encoding must avoid ambiguity, unsafe path characters,
+      and filesystem-dependent identity interpretation.
+
+07.8. ToolStateContext writes follow Kernel-mediated persistence and
+      configuration/state authority.
+
+07.9. ToolStateContext placement does not make userdata a content root.
+
+07.10. ToolStateContext placement does not make the launcher AppPack writable
+       by runtime execution.
+
+
+===============================================================================
+08. PERSISTENT AND TEMPORARY TOOL STATE
+===============================================================================
+
+08.1. ToolStateContext may be persistent or temporary.
+
+08.2. Persistent ToolStateContext writes durable tool state under userdata.
+
+08.3. Temporary ToolStateContext stores tool state only for the current runtime
+      lifetime.
+
+08.4. Temporary ToolStateContext may be used when:
+      - userdata is unavailable
+      - persistence fails and the launcher permits temporary fallback
+      - safe mode is active
+      - recovery mode is active
+      - test mode requests temporary state
+      - read-only inspection mode requests no persisted launcher state
+
+08.5. Temporary ToolStateContext use is explicit and trace-visible.
+
+08.6. Temporary ToolStateContext is not silently presented as persistent state.
+
+08.7. Launcher UI presents that launcher state is temporary when that
+      information is relevant to user expectations.
+
+08.8. A launcher may declare persistent tool state required when such a
+      declaration mechanism is defined.
+
+08.9. If persistent tool state is required and unavailable, launcher startup
+      fails explicitly unless policy selects another valid launcher path.
+
+08.10. Turnix Default Launcher should be able to run with temporary
+       ToolStateContext when normal persistence is unavailable and no hard
+       policy forbids that mode.
+
+
+===============================================================================
+09. LAUNCHER MAIN MENU
+===============================================================================
+
+09.1. Launcher Main Menu is the default primary View state of Turnix Default
+      Launcher.
+
+09.2. Launcher Main Menu presents:
+      - New
+      - Load
+      - Settings
+      - Exit
+
+09.3. These labels are user-facing presentation labels.
+
+09.4. The labels do not define authority by themselves.
+
+09.5. Launcher Main Menu may present additional diagnostics, warnings,
+      temporary-state notices, current workspace information, or active-host
+      information when available.
+
+09.6. Launcher Main Menu presentation does not mutate state by itself.
+
+09.7. User interaction becomes meaningful only when Turnix accepts the
+      corresponding command, capability request, RPC message, decision, or
+      RuntimeHost operation.
+
+
+===============================================================================
+10. NEW ACTION
+===============================================================================
+
+10.1. New presents or requests creation of a new user AppInstance path.
+
+10.2. New normally requests AppPack listing by using ListPacks with AppPack
+      kind filtering under IS-09.
+
+10.3. New does not own AppPack listing semantics.
+
+10.4. New does not own SavePack creation semantics.
+
+10.5. New does not own AppInstance creation semantics.
+
+10.6. Selecting an AppPack for New does not create a SavePack until the
+      corresponding create-new operation is accepted.
+
+10.7. Create-new operation composition may include:
+      - ResolveAppPack
+      - CreateSavePack or create save context
+      - ValidateSavePackCompatibility
+      - BindSaveContext
+      - CreateAppInstance
+      - StartAppInstance
+      - CreateView when applicable
+
+10.8. Those operation categories remain owned by RuntimeHost, AppInstance,
+      SavePack, persistence, PackManager, activation, and UI documents.
+
+10.9. New cannot silently create a separate SavePack creation path for the
+      launcher.
+
+10.10. New uses the same Kernel-mediated new save path as other entry surfaces.
+
+
+===============================================================================
+11. LOAD ACTION
+===============================================================================
+
+11.1. Load presents or requests loading of an existing user SavePack or save
+      context.
+
+11.2. Load normally requests SavePack listing by using ListPacks with SavePack
+      kind filtering under IS-09.
+
+11.3. Load does not own SavePack listing semantics.
+
+11.4. Load does not load a SavePack merely by listing SavePacks.
+
+11.5. Selecting a SavePack does not bind or migrate the SavePack until the
+      corresponding load operation is accepted.
+
+11.6. Load operation composition may include:
+      - ListPacks filtered to SavePack
+      - ResolveAppPack associated with the selected SavePack
+      - LoadSavePack
+      - ValidateSavePackCompatibility
+      - Check last-used or last-known-good graph evidence
+      - BindSaveContext
+      - CreateAppInstance
+      - StartAppInstance
+      - CreateView when applicable
+
+11.7. SavePack compatibility and graph checks may use PackManager behavior
+      defined by DA-29 and later implementation specifications.
+
+11.8. Load cannot silently create a separate SavePack loading path for the
+      launcher.
+
+11.9. Load uses the same Kernel-mediated existing save path as other entry
+      surfaces.
+
+
+===============================================================================
+12. SETTINGS ACTION
+===============================================================================
+
+12.1. Settings presents or requests settings inspection or mutation surfaces.
+
+12.2. Settings may include categories such as:
+      - Turnix
+      - Workspace
+      - Launcher
+      - PackManager
+      - Adapters
+      - Policy
+      - Paths and roots
+
+12.3. Settings listing is read-only unless the user submits a concrete change.
+
+12.4. Launcher-local settings may be persisted in ToolStateContext.
+
+12.5. RuntimeHost or workspace settings remain governed by configuration,
+      persistence, policy, and RuntimeHost documents.
+
+12.6. Remembered decisions remain governed by DA-17.
+
+12.7. Settings UI distinguishes temporary, launcher-local, workspace, global,
+      save-scoped, and policy-scoped persistence when such distinctions are
+      available.
+
+12.8. Frontend-side settings drafts are presentation state until accepted by a
+      Kernel-mediated mutation path.
+
+12.9. Settings does not mutate configuration merely by being opened.
+
+
+===============================================================================
+13. EXIT ACTION
+===============================================================================
+
+13.1. Exit requests ending the current launcher interaction or launcher
+      AppInstance according to the active startup workflow.
+
+13.2. Exit does not always mean RuntimeHost shutdown.
+
+13.3. Exit stops the launcher AppInstance when accepted as launcher exit.
+
+13.4. RuntimeHost shutdown requires either:
+      - a startup workflow where the launcher is the bounded reason for the
+        RuntimeHost to exist
+      - an explicit host-stop, quit, shutdown, or equivalent accepted command
+      - a policy-defined shutdown path
+
+13.5. In bounded launcher startup, Exit may stop the launcher AppInstance and
+      then stop RuntimeHost when no retained work, active AppInstances,
+      required entry surfaces, or host policy requires RuntimeHost to remain
+      active.
+
+13.6. In serve mode or persistent RuntimeHost mode, Exit stops or closes the
+      launcher surface without stopping RuntimeHost unless an explicit
+      RuntimeHost shutdown command is accepted.
+
+13.7. In one-shot run or load mode, RuntimeHost may stop after the requested
+      work finishes and no further work remains, independent of launcher Exit.
+
+13.8. If other AppInstances or Jobs are active, Exit does not silently stop
+      them.
+
+13.9. If Exit would affect active AppInstances, Jobs, Views, adapters,
+      Orchestration Units, or retained work, policy or user decision governs
+      the outcome.
+
+13.10. The UI may present separate labels such as Close Launcher and Quit
+       Turnix when both meanings are available.
+
+13.11. Presentation labels do not collapse launcher exit and RuntimeHost
+       shutdown semantics.
+
+
+===============================================================================
+14. LAUNCHER USE OF PACKMANAGER AND CATALOG OPERATIONS
+===============================================================================
+
+14.1. Launcher uses PackManager and catalog operations as a client surface.
+
+14.2. Launcher does not own PackManager semantics.
+
+14.3. Launcher does not own ListPacks semantics.
+
+14.4. Launcher does not own graph preparation semantics.
+
+14.5. Launcher does not own package install, update, remove, search, or source
+      management semantics.
+
+14.6. Launcher may display PackManager Views or PackManager UI fragments.
+
+14.7. Displaying PackManager UI does not grant PackManager authority to the
+      launcher AppPack.
+
+14.8. Launcher requests PackManager operations through RuntimeHost, capability,
+      RPC, command, or equivalent mediated surfaces.
+
+14.9. PackManager operations that modify packs, roots, selected graphs,
+      SavePacks, configuration, or policy remain subject to DA-29 and owning
+      authority documents.
+
+
+===============================================================================
+15. LAUNCHER ACCESS AND PERMISSION BOUNDARY
+===============================================================================
+
+15.1. Launcher AppPack authority is ordinary AppPack authority.
+
+15.2. Launcher AppPack authority does not include raw Kernel internals.
+
+15.3. Launcher AppPack authority does not include unrestricted filesystem
+      access.
+
+15.4. Launcher AppPack authority does not include unrestricted PackManager
+      operations.
+
+15.5. Launcher AppPack authority does not include unrestricted SavePack
+      mutation.
+
+15.6. Launcher frontend runtime does not directly mutate committed state,
+      ToolStateContext, configuration, roots, packs, SavePacks, or selected
+      graphs.
+
+15.7. Launcher operations that require authority are mediated by Kernel-owned
+      command, capability, policy, persistence, transaction, and trace
+      boundaries.
+
+15.8. Replacement launchers follow the same rules.
+
+
+===============================================================================
+16. TRACE AND OBSERVABILITY
+===============================================================================
+
+16.1. Launcher startup, ToolStateContext handling, launcher actions, and
+      launcher exit remain trace-visible.
+
+16.2. Launcher flow may use RuntimeHost-domain trace reasons owned by DA-28.
+
+16.3. Launcher UI and View behavior may use UI-domain trace reasons owned by
+      DA-22.
+
+16.4. Launcher AppInstance lifecycle uses AppInstance-domain trace reasons
+      owned by DA-20.
+
+16.5. Launcher activation uses activation-domain trace reasons owned by DA-14.
+
+16.6. Launcher PackManager/catalog requests use PackManager-domain trace
+      reasons owned by DA-29 and listing operation behavior from IS-09.
+
+16.7. Launcher trace evidence records enough context, when available, to
+      explain:
+      - runtimeHostId
+      - launcher AppPack identity
+      - launcher appInstanceId
+      - ToolStateContext identity or temporary-state marker
+      - viewId when applicable
+      - frontend client identity when applicable
+      - startup mode
+      - launcher action
+      - requested operation identity when applicable
+      - selected AppPack identity when applicable
+      - selected SavePack identity when applicable
+      - policy decision identity when applicable
+      - failure reason category when failure occurs
+
+16.8. Serialized trace records use IS-08 when written through the shared trace
+      record envelope.
+
+16.9. Launcher trace evidence does not replace RuntimeHost, AppInstance, UI,
+      activation, PackManager, catalog, decision, persistence, or capability
+      trace evidence.
+
+
+===============================================================================
+17. FAILURE CATEGORIES
+===============================================================================
+
+17.1. Launcher failure categories include:
+      - LauncherAppPackResolutionFailed
+      - LauncherActivationFailed
+      - LauncherViewCreationFailed
+      - ToolStateContextCreateFailed
+      - ToolStateContextLoadFailed
+      - ToolStateContextPersistenceUnavailable
+      - TemporaryToolStateContextRejected
+      - LauncherActionRejected
+      - LauncherActionFailed
+      - LauncherExitDenied
+      - RuntimeHostShutdownDenied
+
+17.2. LauncherAppPackResolutionFailed means the configured launcher AppPack
+      could not be resolved.
+
+17.3. LauncherActivationFailed means launcher AppPack activation failed.
+
+17.4. LauncherViewCreationFailed means the launcher View could not be created
+      or bound.
+
+17.5. ToolStateContextCreateFailed means persistent ToolStateContext creation
+      failed.
+
+17.6. ToolStateContextLoadFailed means persistent ToolStateContext loading
+      failed.
+
+17.7. ToolStateContextPersistenceUnavailable means persistence required for
+      persistent ToolStateContext was unavailable.
+
+17.8. TemporaryToolStateContextRejected means temporary fallback was not
+      allowed.
+
+17.9. LauncherActionRejected means a launcher action was rejected before the
+      requested operation was accepted.
+
+17.10. LauncherActionFailed means an accepted launcher action failed.
+
+17.11. LauncherExitDenied means launcher exit was denied by policy, active
+       work, or lifecycle handling.
+
+17.12. RuntimeHostShutdownDenied means a requested RuntimeHost shutdown was
+       denied.
+
+17.13. Launcher failure categories are not Job terminal outcomes unless a
+       Job-owning workflow explicitly maps them under DA-19.
+
+17.14. Launcher failure categories are not activation outcomes except where
+       DA-14 activation failure actually occurred.
+
+
+===============================================================================
+18. RELATION TO IMPLEMENTATION SPECIFICATIONS
+===============================================================================
+
+18.1. Future implementation specifications may define:
+       - concrete default launcher pack identity
+       - concrete launcher manifest fields
+       - concrete ToolStateContext schema
+       - concrete ToolStateContext path encoding
+       - concrete launcher View layout
+       - concrete launcher command identifiers
+       - concrete settings operation envelopes
+       - concrete PackManager View embedding behavior
+       - concrete launcher trace field schema
+
+18.2. Future implementation specifications do not redefine:
+       - launcher as replaceable AppPack
+       - launcher AppInstance lifecycle
+       - ToolStateContext placement under userdata
+       - ToolStateContext not being a normal SavePack
+       - launcher not owning PackManager/catalog/settings/AppInstance semantics
+       - Exit not always meaning RuntimeHost shutdown
+
+18.3. If a launcher implementation requires a semantic rule not defined here,
+      this document is updated first or alongside that implementation
+      specification.
+
+
+===============================================================================
+19. WHAT IS EXPLICITLY NOT SUPPORTED
+===============================================================================
+
+19.1. The following are not supported:
+      - treating Turnix Default Launcher as Kernel
+      - treating Turnix Default Launcher as RuntimeHost
+      - treating Turnix Default Launcher as PackManager
+      - treating launcher View as authority by itself
+      - treating replacement launcher status as extra authority
+      - storing launcher runtime state under the launcher AppPack content
+        directory
+      - storing launcher runtime state under normal saves by default
+      - listing ToolStateContext through normal ListSavePacks
+      - silently creating a normal user SavePack for launcher state
+      - silently falling back to another launcher
+      - silently treating temporary ToolStateContext as persistent
+      - launcher-owned ListPacks semantics
+      - launcher-owned SavePack creation semantics
+      - launcher-owned SavePack loading semantics
+      - launcher-owned AppInstance creation semantics
+      - launcher-owned PackManager semantics
+      - opening Settings mutating configuration by itself
+      - Exit always meaning RuntimeHost shutdown
+      - RuntimeHost shutdown occurring silently because launcher AppInstance
+        stopped
+      - stopping active AppInstances, Jobs, adapters, Views, or retained work
+        silently from launcher Exit
+
+
+===============================================================================
+20. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+20.1. OPEN questions include:
+      - exact default launcher pack identity
+      - exact launcher manifest declaration shape
+      - exact ToolStateContext schema
+      - exact ToolStateContext identity representation
+      - exact ToolStateContext path encoding
+      - exact launcher View layout
+      - exact launcher frontend component structure
+      - exact settings operation envelopes
+      - exact launcher action identifiers
+      - exact bounded launcher startup policy
+      - exact multi-AppInstance launcher coexistence policy
+      - exact PackManager View embedding model
+      - exact launcher trace field schema
+
+
+===============================================================================
+21. LOCKED SUMMARY
+===============================================================================
+
+21.1. LOCKED:
+      - Turnix Default Launcher is a first-party launcher AppPack.
+      - Turnix Default Launcher is replaceable.
+      - Launcher status does not grant special Kernel, RuntimeHost,
+        PackManager, SavePack, AppInstance, catalog, or persistence authority.
+      - Launcher runs as an AppInstance.
+      - Launcher startup resolves launcher AppPack, creates or loads
+        ToolStateContext, creates Launcher AppInstance, starts it, and creates
+        a launcher View when applicable.
+      - ToolStateContext stores launcher/tool state.
+      - ToolStateContext is a save context for AppInstance lifecycle purposes.
+      - ToolStateContext is not a normal user SavePack.
+      - ToolStateContext is stored under userdata when persistent.
+      - ToolStateContext is not stored under the AppPack content directory.
+      - ToolStateContext is not listed by normal ListSavePacks.
+      - Temporary ToolStateContext use is explicit and trace-visible.
+      - Launcher Main Menu presents New, Load, Settings, and Exit.
+      - New uses AppPack listing and Kernel-mediated new save/AppInstance
+        paths.
+      - Load uses SavePack listing and Kernel-mediated existing save/AppInstance
+        paths.
+      - Settings does not mutate configuration merely by being opened.
+      - Exit stops launcher interaction or launcher AppInstance according to the
+        active startup workflow.
+      - Exit does not always mean RuntimeHost shutdown.
+      - Launcher uses PackManager and catalog operations as a client surface.
+      - Launcher does not own PackManager or ListPacks semantics.
+      - Launcher operations that require authority are mediated by Kernel-owned
+        command, capability, policy, persistence, transaction, and trace
+        boundaries.
+      - Launcher flow remains trace-visible and uses IS-08 serialization when
+        trace records are serialized.
+
+21.2. OPEN:
+      - concrete launcher identity, manifest shape, ToolStateContext schema,
+        path encoding, View layout, settings envelopes, action identifiers,
+        bounded startup policy, multi-AppInstance coexistence, PackManager View
+        embedding, and launcher trace fields.
+
+
+===============================================================================
+END OF IS-10 - DEFAULT LAUNCHER APPPACK AND TOOL STATE CONTEXT
+===============================================================================
+
+--- doc-meta ---
+DOC_ID: IS-10
+DOC_FILE: docs/design/IS-10_DEFAULT_LAUNCHER_APPPACK_AND_TOOL_STATE_CONTEXT.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
