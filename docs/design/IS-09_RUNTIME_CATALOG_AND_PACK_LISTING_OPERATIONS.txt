@@ -1,0 +1,1323 @@
+===============================================================================
+IMPLEMENTATION SPECIFICATION IS-09 - RUNTIME CATALOG AND PACK LISTING OPERATIONS
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines concrete RuntimeHost and PackManager catalog/listing operations for
+packs, including ListPacks as the shared primitive, pack-kind filters for
+AppPack and SavePack listings, catalog context, filter envelopes, result item
+fields, visibility and compatibility summaries, pagination, sorting, and
+operation failure categories.
+
+This document implements the catalog/listing surface described by DA-29. It is
+used by command surfaces, Launcher Views, PackManager Views, remote clients,
+tests, and future tooling without making any of those surfaces own pack catalog
+semantics.
+
+Purpose:
+--------
+This document defines concrete pack listing operation contracts.
+
+It defines:
+- ListPacks as the concrete shared listing operation
+- ListAppPacks, ListSavePacks, ListViewPacks, ListContentPacks, and
+  ListModPacks as filtered forms of ListPacks
+- catalog request envelope
+- catalog context fields
+- filter fields
+- sorting and pagination fields
+- pack catalog result envelope
+- pack catalog item fields
+- visibility summary fields
+- compatibility summary fields
+- SavePack listing fields
+- operation result and failure categories
+- command, RPC, View, Launcher, and test usage boundaries
+- trace reason usage for catalog listing
+
+It does NOT define:
+- root discovery boundaries or filesystem scanning rules (see DA-09)
+- pack identity, hierarchy, visibility, or SavePack visibility semantics
+  (see DA-10)
+- generic PackRequest resolution mechanics (see DA-11)
+- importing or module-loading behavior (see DA-12)
+- dependency, provider-role, pinned, copied, or advisory-relation semantics
+  (see DA-13)
+- activation lifecycle or activation ordering (see DA-14)
+- service, capability, permission, or Job-backed execution semantics
+  (see DA-16)
+- user decision or remembered policy semantics (see DA-17)
+- AppInstance lifecycle or SavePack binding behavior (see DA-20)
+- RPC, channel, or transport semantics (see DA-21)
+- UI, View, or frontend runtime semantics (see DA-22)
+- RuntimeHost command-surface semantics (see DA-28)
+- PackManager semantic boundaries (see DA-29)
+- resolved pack graph schema
+- activation-plan schema
+- package search, install, update, delete, or verification protocols
+- concrete CLI syntax
+- concrete JSON-RPC or WebSocket envelope fields
+- concrete browser component layout
+
+Upstream Documents:
+------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-03
+- DA-09
+- DA-10
+- DA-11
+- DA-12
+- DA-13
+- DA-14
+- DA-16
+- DA-17
+- DA-20
+- DA-21
+- DA-22
+- DA-28
+- DA-29
+- IS-08
+
+Downstream Documents:
+--------------------
+- future resolved pack graph implementation specifications
+- future activation-plan implementation specifications
+- future PackManager command and RPC implementation specifications
+- future Default Launcher implementation specifications
+- future package source, search, install, update, and remove implementation
+  specifications
+- future SavePack export and pack-bundling implementation specifications
+
+
+===============================================================================
+01. INTERPRETATION BASIS
+===============================================================================
+
+01.1. This document expresses normative meaning through explicit,
+      deterministic prose.
+
+01.2. Normative meaning in Turnix derives from sentence structure and document
+      context rather than from RFC-style keywords.
+
+01.3. The CORE META-RULES documents define the general rule language and
+      interpretation model used by this document.
+
+01.4. This document defines implementation-level pack catalog and listing
+      operation contracts within that shared interpretation model.
+
+
+===============================================================================
+02. CORE CONCEPT
+===============================================================================
+
+02.1. Runtime catalog listing answers:
+
+          "Which discovered and indexed pack descriptors are visible to this
+           catalog operation under this explicit catalog context and filter?"
+
+02.2. ListPacks is the shared concrete listing primitive.
+
+02.3. Pack-kind-specific listing operations are filtered forms of ListPacks.
+
+02.4. Listing is read-only catalog access.
+
+02.5. Listing does not perform discovery by itself.
+
+02.6. Listing does not perform generic PackRequest resolution by itself.
+
+02.7. Listing does not select a pack graph.
+
+02.8. Listing does not create an activation plan.
+
+02.9. Listing does not import pack code.
+
+02.10. Listing does not activate packs.
+
+02.11. Listing does not grant visibility, permission, capability authority,
+       execution authorization, or persistence authority.
+
+02.12. Listing may expose visibility, compatibility, dependency, advisory,
+       source, and state summaries when those summaries are available and
+       permitted by the catalog context.
+
+02.13. Listing summaries are presentation and operation results. They do not
+       replace the owning design semantics.
+
+
+===============================================================================
+03. OPERATION NAMES
+===============================================================================
+
+03.1. The concrete shared listing operation is:
+      ListPacks
+
+03.2. The following pack-kind-specific operations are filtered forms of
+      ListPacks:
+      - ListAppPacks
+      - ListSavePacks
+      - ListViewPacks
+      - ListContentPacks
+      - ListModPacks
+
+03.3. ListAppPacks is equivalent to ListPacks with kindFilter containing
+      AppPack.
+
+03.4. ListSavePacks is equivalent to ListPacks with kindFilter containing
+      SavePack.
+
+03.5. ListViewPacks is equivalent to ListPacks with kindFilter containing
+      ViewPack.
+
+03.6. ListContentPacks is equivalent to ListPacks with kindFilter containing
+      ContentPack.
+
+03.7. ListModPacks is equivalent to ListPacks with kindFilter containing
+      ModPack.
+
+03.8. Implementations may expose command aliases or UI labels for these
+      operations.
+
+03.9. Aliases and UI labels do not create separate catalog semantics.
+
+
+===============================================================================
+04. REQUEST ENVELOPE
+===============================================================================
+
+04.1. A ListPacks request contains:
+      - requestId
+      - operation
+      - catalogContext
+      - filters
+      - sort
+      - page
+      - projection
+      - options
+
+04.2. requestId identifies the listing request for correlation.
+
+04.3. operation identifies the requested listing operation.
+
+04.4. catalogContext identifies the context from which the catalog is viewed.
+
+04.5. filters restrict which pack descriptors are included in the result.
+
+04.6. sort controls deterministic result ordering.
+
+04.7. page controls pagination.
+
+04.8. projection controls which optional fields are included.
+
+04.9. options controls operation behavior that does not change catalog
+      semantics.
+
+04.10. A request envelope does not authorize access by itself.
+
+04.11. The entry surface that submits the request remains subject to
+       RuntimeHost, capability, RPC, policy, and permission rules where
+       applicable.
+
+
+===============================================================================
+05. CATALOG CONTEXT
+===============================================================================
+
+05.1. catalogContext is a JSON object.
+
+05.2. catalogContext contains enough context to decide which catalog view is
+      being requested.
+
+05.3. catalogContext may contain:
+      - scope
+      - runtimeHostId
+      - workspaceId
+      - appPackId
+      - savePackId
+      - appInstanceId
+      - viewId
+      - requestingPackId
+      - requestingSurfaceKind
+      - accessMode
+
+05.4. scope identifies the PackManager scope for this operation.
+
+05.5. Defined scope values are:
+      - runtimeHost
+      - workspace
+      - appPack
+      - savePack
+      - appInstance
+      - tooling
+      - test
+
+05.6. runtimeHostId identifies the RuntimeHost context when applicable.
+
+05.7. workspaceId identifies the workspace context when applicable.
+
+05.8. appPackId identifies the AppPack context when applicable.
+
+05.9. savePackId identifies the SavePack context when applicable.
+
+05.10. appInstanceId identifies the AppInstance context when applicable.
+
+05.11. viewId identifies the View context when applicable.
+
+05.12. requestingPackId identifies the pack whose authority or visibility
+       context is used when applicable.
+
+05.13. requestingSurfaceKind identifies whether the request came from CLI,
+       Launcher, PackManager View, application View, remote client, AI buddy,
+       test, or another surface.
+
+05.14. accessMode identifies the requested access form.
+
+05.15. Defined accessMode values are:
+       - readOnlyInspection
+       - runtimeSelection
+       - graphPreparation
+       - saveCompatibilityCheck
+       - toolingInspection
+       - testInspection
+
+05.16. readOnlyInspection means the request lists catalog material for viewing
+       without selecting or mutating graph state.
+
+05.17. runtimeSelection means the request lists catalog material for a possible
+       runtime selection, such as selecting an AppPack to start.
+
+05.18. graphPreparation means the request supports selected graph preparation.
+
+05.19. saveCompatibilityCheck means the request supports SavePack compatibility
+       or repair inspection.
+
+05.20. toolingInspection means the request supports development, diagnostics,
+       audit, or maintenance behavior.
+
+05.21. testInspection means the request supports controlled test behavior.
+
+05.22. accessMode does not grant authority by itself.
+
+05.23. The operation owner still enforces policy, permission, visibility, and
+       access boundaries.
+
+
+===============================================================================
+06. FILTERS
+===============================================================================
+
+06.1. filters is a JSON object.
+
+06.2. filters may contain:
+      - kindFilter
+      - rootFilter
+      - sourceFilter
+      - authorFilter
+      - packTreeIdFilter
+      - versionFilter
+      - visibilityFilter
+      - compatibilityFilter
+      - selectedStateFilter
+      - textSearch
+      - includeShadowed
+      - includeInvalid
+      - includeSaveLocal
+      - includeCopied
+      - includePinned
+
+06.3. kindFilter is an array of pack kind names.
+
+06.4. Defined pack kind names are:
+      - AppPack
+      - ModPack
+      - ViewPack
+      - ContentPack
+      - SavePack
+
+06.5. rootFilter restricts results to one or more root identities or root
+      classes.
+
+06.6. sourceFilter restricts results by installation or source classification
+      when such classification is available.
+
+06.7. authorFilter restricts results by author identity.
+
+06.8. packTreeIdFilter restricts results by packTreeId or packTreeId prefix
+      according to operation-defined matching mode.
+
+06.9. versionFilter restricts results by exact version or version range.
+
+06.10. visibilityFilter restricts results by visibility summary.
+
+06.11. compatibilityFilter restricts results by compatibility summary.
+
+06.12. selectedStateFilter restricts results by selected graph state when that
+       state is available.
+
+06.13. textSearch restricts results by human-readable search over permitted
+       metadata fields.
+
+06.14. includeShadowed controls whether shadowed candidates may be included.
+
+06.15. includeInvalid controls whether invalid or rejected pack descriptors may
+       be included for diagnostics.
+
+06.16. includeSaveLocal controls whether save-local packs are included when the
+       catalog context permits them.
+
+06.17. includeCopied controls whether copied SavePack packs are included when
+       the catalog context permits them.
+
+06.18. includePinned controls whether pinned dependency references are included
+       or surfaced when the catalog context permits them.
+
+06.19. A filter does not change pack identity or visibility meaning.
+
+06.20. A filter cannot make an invisible pack visible unless the catalog
+       context and policy already permit diagnostic visibility.
+
+
+===============================================================================
+07. SORTING
+===============================================================================
+
+07.1. sort is a JSON object.
+
+07.2. sort contains:
+      - keys
+      - direction
+
+07.3. keys is an ordered array of sort key names.
+
+07.4. direction is ascending or descending.
+
+07.5. Defined sort keys include:
+      - displayName
+      - packTreeId
+      - author
+      - version
+      - kind
+      - rootPrecedence
+      - updatedAt
+      - compatibilityStatus
+      - selectedState
+
+07.6. Sorting is deterministic.
+
+07.7. If no sort is provided, the default sort keys are:
+      - kind
+      - displayName
+      - author
+      - packTreeId
+      - version
+
+07.8. A final deterministic tie-break uses canonical pack identity and source
+      identity when available.
+
+07.9. Sorting does not select a graph.
+
+07.10. Sorting does not imply resolution winner selection.
+
+
+===============================================================================
+08. PAGINATION
+===============================================================================
+
+08.1. page is a JSON object.
+
+08.2. page may contain:
+      - offset
+      - limit
+      - cursor
+
+08.3. offset is a zero-based result offset.
+
+08.4. limit is the maximum number of items to return.
+
+08.5. cursor is an implementation-defined continuation token.
+
+08.6. Implementations may support offset pagination, cursor pagination, or both.
+
+08.7. Pagination does not change the total ordered result set.
+
+08.8. Pagination metadata in the response records whether more results exist.
+
+08.9. A cursor does not grant access to records outside the original permitted
+      catalog context.
+
+
+===============================================================================
+09. PROJECTION
+===============================================================================
+
+09.1. projection is a JSON object.
+
+09.2. projection controls optional field inclusion.
+
+09.3. projection may contain:
+      - includeDescriptions
+      - includePaths
+      - includeSourceDetails
+      - includeVisibilitySummary
+      - includeCompatibilitySummary
+      - includeDependencySummary
+      - includeAdvisorySummary
+      - includeSavePackSummary
+      - includeTraceLinks
+      - includeDiagnostics
+
+09.4. includeDescriptions allows human-readable descriptions when available.
+
+09.5. includePaths allows source path or root-relative path fields when policy
+      permits path exposure.
+
+09.6. includeSourceDetails allows package source or installation provenance
+      details when available and permitted.
+
+09.7. includeVisibilitySummary allows visibility summary fields.
+
+09.8. includeCompatibilitySummary allows compatibility summary fields.
+
+09.9. includeDependencySummary allows dependency summary fields.
+
+09.10. includeAdvisorySummary allows advisory relation summary fields.
+
+09.11. includeSavePackSummary allows SavePack-specific listing fields.
+
+09.12. includeTraceLinks allows trace correlation fields when available.
+
+09.13. includeDiagnostics allows diagnostic details for invalid, shadowed,
+       rejected, or incomplete records.
+
+09.14. Projection controls result verbosity only.
+
+09.15. Projection does not change listing semantics.
+
+
+===============================================================================
+10. OPTIONS
+===============================================================================
+
+10.1. options is a JSON object.
+
+10.2. options may contain:
+      - allowStaleCache
+      - requireFreshCatalog
+      - explainFilters
+      - explainOmissions
+      - includeCountsOnly
+
+10.3. allowStaleCache permits a cached catalog view only when the cache is
+      valid under the owning cache policy.
+
+10.4. requireFreshCatalog requires the operation to use a current catalog view
+      or fail explicitly.
+
+10.5. requireFreshCatalog does not imply filesystem rescan unless an explicit
+      rescan operation has been requested and accepted.
+
+10.6. explainFilters requests response evidence for filters that affected
+      result inclusion.
+
+10.7. explainOmissions requests response evidence for omitted categories when
+      such evidence is available and permitted.
+
+10.8. includeCountsOnly requests counts instead of item payloads.
+
+10.9. Options do not bypass authority, policy, or visibility boundaries.
+
+
+===============================================================================
+11. RESPONSE ENVELOPE
+===============================================================================
+
+11.1. A ListPacks response contains:
+       - requestId
+       - operation
+       - resultStatus
+       - catalogContext
+       - items
+       - counts
+       - page
+       - appliedFilters
+       - warnings
+       - diagnostics
+       - trace
+
+11.2. requestId matches the request when available.
+
+11.3. operation identifies the operation that produced the response.
+
+11.4. resultStatus classifies the operation result.
+
+11.5. catalogContext records the effective catalog context used.
+
+11.6. items contains pack catalog items.
+
+11.7. counts contains result counts.
+
+11.8. page contains pagination metadata.
+
+11.9. appliedFilters records filters applied by the operation.
+
+11.10. warnings contains non-fatal warning summaries.
+
+11.11. diagnostics contains diagnostic information when requested and
+       permitted.
+
+11.12. trace contains trace correlation references when available.
+
+11.13. The response envelope does not grant runtime authority.
+
+
+===============================================================================
+12. RESULT STATUS
+===============================================================================
+
+12.1. resultStatus is one of:
+       - Completed
+       - CompletedWithWarnings
+       - Failed
+       - Denied
+       - NotAvailable
+       - Partial
+
+12.2. Completed means the requested listing operation completed without
+       operation-level warnings.
+
+12.3. CompletedWithWarnings means the listing operation completed and warning
+       evidence exists.
+
+12.4. Failed means the listing operation could not produce a valid response.
+
+12.5. Denied means the request was refused by permission, policy, visibility,
+       or authority boundary before listing completed.
+
+12.6. NotAvailable means the requested catalog context or required catalog view
+       is unavailable.
+
+12.7. Partial means the operation produced a partial response under an explicit
+       profile or failure mode that permits partial listing.
+
+12.8. Partial listing does not silently become complete listing.
+
+12.9. A partial response records the reason it is partial.
+
+12.10. resultStatus is not Job terminal outcome.
+
+12.11. resultStatus is not AppInstance lifecycle outcome.
+
+12.12. resultStatus is not activation outcome.
+
+
+===============================================================================
+13. PACK CATALOG ITEM
+===============================================================================
+
+13.1. A pack catalog item contains:
+       - catalogItemId
+       - packIdentity
+       - kind
+       - display
+       - source
+       - visibility
+       - compatibility
+       - dependencySummary
+       - advisorySummary
+       - savePackSummary
+       - selectedState
+       - diagnostics
+       - trace
+
+13.2. catalogItemId identifies this listing item within the response.
+
+13.3. packIdentity contains identity fields for the pack descriptor.
+
+13.4. kind contains the pack kind.
+
+13.5. display contains human-readable presentation fields.
+
+13.6. source contains source, root, or provenance fields when included and
+       permitted.
+
+13.7. visibility contains visibility summary fields when included and
+       permitted.
+
+13.8. compatibility contains compatibility summary fields when included and
+       available.
+
+13.9. dependencySummary contains dependency summary fields when included and
+       available.
+
+13.10. advisorySummary contains advisory relation summary fields when included
+       and available.
+
+13.11. savePackSummary contains SavePack-specific fields when included and
+       applicable.
+
+13.12. selectedState contains selected graph state when included and available.
+
+13.13. diagnostics contains item-level diagnostic fields when included and
+       permitted.
+
+13.14. trace contains trace correlation references when available.
+
+13.15. A pack catalog item is a listing projection, not a pack definition.
+
+13.16. A pack catalog item does not replace the manifest, discovery record,
+       resolution candidate, selected graph record, or activation record.
+
+
+===============================================================================
+14. PACK IDENTITY FIELDS
+===============================================================================
+
+14.1. packIdentity is a JSON object.
+
+14.2. packIdentity contains:
+       - author
+       - packTreeId
+       - version
+       - canonicalPackId
+       - fingerprint
+
+14.3. author serializes the effective author identity when available.
+
+14.4. packTreeId serializes the computed packTreeId.
+
+14.5. version serializes the parsed version identity when available.
+
+14.6. canonicalPackId serializes the canonical pack identity when available.
+
+14.7. fingerprint serializes the pack fingerprint when available and permitted.
+
+14.8. Missing fingerprint means no fingerprint was included in this response.
+
+14.9. Missing fingerprint does not imply no fingerprint exists.
+
+14.10. Pack identity meaning remains owned by DA-10.
+
+
+===============================================================================
+15. DISPLAY FIELDS
+===============================================================================
+
+15.1. display is a JSON object.
+
+15.2. display may contain:
+       - displayName
+       - title
+       - description
+       - summary
+       - iconRef
+       - tags
+
+15.3. displayName is the preferred short human-readable name when available.
+
+15.4. title is a longer human-readable title when available.
+
+15.5. description is a human-readable description when requested and available.
+
+15.6. summary is a short human-readable summary when available.
+
+15.7. iconRef references an icon or presentation asset when available.
+
+15.8. tags contain human-readable or tooling-oriented tags when available.
+
+15.9. Display fields are not identity fields.
+
+15.10. Display fields are not used as canonical retrieval identifiers.
+
+
+===============================================================================
+16. SOURCE FIELDS
+===============================================================================
+
+16.1. source is a JSON object.
+
+16.2. source may contain:
+       - rootId
+       - rootClass
+       - rootPrecedence
+       - sourcePath
+       - sourceKind
+       - installedBy
+       - sourceTrustClass
+       - packageSourceId
+
+16.3. rootId identifies the root that supplied the pack descriptor when
+       available.
+
+16.4. rootClass identifies the root class, such as custom, first-party,
+       third-party, userdata, or saves, when applicable.
+
+16.5. rootPrecedence records root precedence evidence when applicable.
+
+16.6. sourcePath records a path only when path exposure is permitted.
+
+16.7. sourceKind records whether the descriptor came from installed content,
+       save-local content, copied save content, generated metadata, or another
+       defined source.
+
+16.8. installedBy records package-management provenance when available.
+
+16.9. sourceTrustClass records source trust classification when available.
+
+16.10. packageSourceId records package-source identity when available.
+
+16.11. Source fields do not prove authenticity by themselves.
+
+16.12. Source fields do not grant authority.
+
+
+===============================================================================
+17. VISIBILITY SUMMARY
+===============================================================================
+
+17.1. visibility is a JSON object.
+
+17.2. visibility may contain:
+       - visibilityStatus
+       - localVisibility
+       - globalVisibility
+       - visibleFromRequestingContext
+       - visibilityReasonCategory
+
+17.3. visibilityStatus is one of:
+       - Visible
+       - Hidden
+       - NotEvaluated
+       - Denied
+       - Unknown
+
+17.4. localVisibility records local visibility when available.
+
+17.5. globalVisibility records computed global visibility when available.
+
+17.6. visibleFromRequestingContext records whether the pack is visible from the
+       supplied catalog context when evaluated.
+
+17.7. visibilityReasonCategory records why visibility was allowed, denied, not
+       evaluated, or unknown when available.
+
+17.8. Visibility summary does not grant visibility.
+
+17.9. Visibility meaning remains owned by DA-10.
+
+
+===============================================================================
+18. COMPATIBILITY SUMMARY
+===============================================================================
+
+18.1. compatibility is a JSON object.
+
+18.2. compatibility may contain:
+       - compatibilityStatus
+       - compatibilityContext
+       - compatibilityReasonCategory
+       - compatibleAppPackId
+       - compatibleSavePackId
+       - warnings
+
+18.3. compatibilityStatus is one of:
+       - Compatible
+       - Incompatible
+       - Warning
+       - NotEvaluated
+       - Unknown
+
+18.4. compatibilityContext records which AppPack, SavePack, AppInstance,
+       workspace, or graph context was used for compatibility evaluation.
+
+18.5. compatibilityReasonCategory records the reason category for the status
+       when available.
+
+18.6. compatibleAppPackId records the AppPack identity used for compatibility
+       checking when applicable.
+
+18.7. compatibleSavePackId records the SavePack identity used for
+       compatibility checking when applicable.
+
+18.8. warnings contains compatibility warning summaries when available.
+
+18.9. Compatibility summary is advisory unless the owning operation or policy
+       turns it into a graph-selection decision.
+
+18.10. Compatibility summary does not replace dependency resolution,
+       activation, or policy semantics.
+
+
+===============================================================================
+19. DEPENDENCY SUMMARY
+===============================================================================
+
+19.1. dependencySummary is a JSON object.
+
+19.2. dependencySummary may contain:
+       - hardDependencyStatus
+       - missingDependencyCount
+       - versionMismatchCount
+       - pinnedDependencyCount
+       - copiedDependencyCount
+       - providerRoleStatus
+       - warnings
+
+19.3. hardDependencyStatus is one of:
+       - Satisfied
+       - Unsatisfied
+       - NotEvaluated
+       - Unknown
+
+19.4. missingDependencyCount records missing hard dependency count when
+       evaluated.
+
+19.5. versionMismatchCount records version mismatch count when evaluated.
+
+19.6. pinnedDependencyCount records pinned dependency count when applicable.
+
+19.7. copiedDependencyCount records copied dependency count when applicable.
+
+19.8. providerRoleStatus records provider-role availability summary when
+       evaluated.
+
+19.9. warnings contains dependency warning summaries when available.
+
+19.10. Dependency summary is not dependency resolution.
+
+19.11. Dependency semantics remain owned by DA-13.
+
+
+===============================================================================
+20. ADVISORY SUMMARY
+===============================================================================
+
+20.1. advisorySummary is a JSON object.
+
+20.2. advisorySummary may contain:
+       - supportedCount
+       - conflictingCount
+       - recommendedCount
+       - advisoryStatus
+       - warnings
+
+20.3. supportedCount records supportedPacks relation count when available.
+
+20.4. conflictingCount records conflictingPacks relation count when available.
+
+20.5. recommendedCount records recommendedPacks relation count when available.
+
+20.6. advisoryStatus is one of:
+       - NoAdvisoryWarnings
+       - HasRecommendations
+       - HasConflicts
+       - NotEvaluated
+       - Unknown
+
+20.7. warnings contains advisory warning summaries when available.
+
+20.8. Advisory summary does not create hard dependency semantics.
+
+20.9. Advisory relation meaning remains owned by DA-13 and PackManager handling
+      remains constrained by DA-29.
+
+
+===============================================================================
+21. SAVEPACK SUMMARY
+===============================================================================
+
+21.1. savePackSummary is a JSON object.
+
+21.2. savePackSummary appears for SavePack items when requested and available.
+
+21.3. savePackSummary may contain:
+       - savePackId
+       - associatedAppPackId
+       - displaySaveName
+       - lastPlayedAt
+       - lastModifiedAt
+       - saveSchemaVersion
+       - lastKnownGoodGraphId
+       - lastUsedGraphId
+       - copiedPackCount
+       - pinnedDependencyCount
+       - compatibilityStatus
+       - repairStatus
+
+21.4. savePackId identifies the SavePack or save identity when available.
+
+21.5. associatedAppPackId identifies the AppPack associated with the SavePack
+       when available.
+
+21.6. displaySaveName is a human-readable save name.
+
+21.7. lastPlayedAt records last played time when available.
+
+21.8. lastModifiedAt records last modified time when available.
+
+21.9. saveSchemaVersion records the SavePack schema version when available.
+
+21.10. lastKnownGoodGraphId references last-known-good graph evidence when
+       available.
+
+21.11. lastUsedGraphId references last-used graph evidence when available.
+
+21.12. copiedPackCount records copied pack count when available.
+
+21.13. pinnedDependencyCount records pinned dependency count when available.
+
+21.14. compatibilityStatus summarizes compatibility against the current catalog
+       context when evaluated.
+
+21.15. repairStatus summarizes whether repair may be needed or available when
+       evaluated.
+
+21.16. savePackSummary does not load the SavePack.
+
+21.17. savePackSummary does not bind a SavePack to an AppInstance.
+
+21.18. savePackSummary does not perform migration.
+
+
+===============================================================================
+22. SELECTED STATE SUMMARY
+===============================================================================
+
+22.1. selectedState is a JSON object.
+
+22.2. selectedState may contain:
+       - selectedStatus
+       - selectedGraphId
+       - activeInAppInstanceId
+       - pendingChangeStatus
+
+22.3. selectedStatus is one of:
+       - NotSelected
+       - Selected
+       - Active
+       - Pending
+       - NotEvaluated
+       - Unknown
+
+22.4. selectedGraphId references the selected graph when available.
+
+22.5. activeInAppInstanceId identifies an AppInstance using the pack when
+       available.
+
+22.6. pendingChangeStatus records whether changes are pending for a future
+       graph or activation plan when available.
+
+22.7. selectedState is catalog evidence.
+
+22.8. selectedState does not mutate selected graph state.
+
+
+===============================================================================
+23. WARNINGS AND DIAGNOSTICS
+===============================================================================
+
+23.1. warnings is an array of warning objects.
+
+23.2. diagnostics is an array or object containing diagnostic evidence.
+
+23.3. Warning objects may contain:
+       - warningCategory
+       - message
+       - relatedPackIdentity
+       - relatedField
+       - severity
+
+23.4. Diagnostic objects may contain:
+       - diagnosticCategory
+       - message
+       - sourceReference
+       - traceEventId
+       - relatedPackIdentity
+       - relatedOperation
+
+23.5. Warning and diagnostic messages are presentation fields.
+
+23.6. Warning and diagnostic categories are machine-readable fields.
+
+23.7. Warnings do not become hard failures unless the owning operation or policy
+      defines that handling.
+
+23.8. Diagnostics do not replace trace evidence.
+
+
+===============================================================================
+24. COUNTS
+===============================================================================
+
+24.1. counts is a JSON object.
+
+24.2. counts may contain:
+       - total
+       - returned
+       - byKind
+       - byRootClass
+       - byCompatibilityStatus
+       - byVisibilityStatus
+       - bySelectedStatus
+       - omitted
+
+24.3. total records total matching items before pagination when available.
+
+24.4. returned records item count returned in this response.
+
+24.5. byKind records counts grouped by pack kind when available.
+
+24.6. byRootClass records counts grouped by root class when available.
+
+24.7. byCompatibilityStatus records counts grouped by compatibility status when
+       available.
+
+24.8. byVisibilityStatus records counts grouped by visibility status when
+       available.
+
+24.9. bySelectedStatus records counts grouped by selected status when
+       available.
+
+24.10. omitted records counts of omitted categories when available and
+       permitted.
+
+24.11. Counts are summaries of the catalog operation result.
+
+24.12. Counts do not replace item records when item records are required.
+
+
+===============================================================================
+25. FAILURE CATEGORIES
+===============================================================================
+
+25.1. Listing failure categories include:
+       - InvalidCatalogRequest
+       - InvalidCatalogContext
+       - UnsupportedScope
+       - UnsupportedFilter
+       - UnsupportedProjection
+       - CatalogUnavailable
+       - CatalogStale
+       - PermissionDenied
+       - VisibilityDenied
+       - PolicyDenied
+       - SourceUnavailable
+       - MalformedCatalogRecord
+       - InternalCatalogError
+
+25.2. InvalidCatalogRequest means the request envelope is malformed or missing
+       required fields.
+
+25.3. InvalidCatalogContext means catalogContext is malformed or inconsistent.
+
+25.4. UnsupportedScope means the requested scope is not supported by this
+       operation.
+
+25.5. UnsupportedFilter means a supplied filter is not supported.
+
+25.6. UnsupportedProjection means a requested projection is not supported.
+
+25.7. CatalogUnavailable means no usable catalog view exists for the request.
+
+25.8. CatalogStale means the available catalog view cannot satisfy the request's
+       freshness requirement.
+
+25.9. PermissionDenied means the request is denied by permission handling.
+
+25.10. VisibilityDenied means requested visibility is not permitted.
+
+25.11. PolicyDenied means policy refuses the listing request.
+
+25.12. SourceUnavailable means a required source for this catalog view is
+       unavailable.
+
+25.13. MalformedCatalogRecord means a catalog record cannot be represented as a
+       valid catalog item.
+
+25.14. InternalCatalogError means an implementation error prevented listing.
+
+25.15. Failure categories are operation errors, not activation outcomes, Job
+       terminal outcomes, or AppInstance lifecycle outcomes.
+
+
+===============================================================================
+26. ENTRY SURFACE USAGE
+===============================================================================
+
+26.1. CLI, RuntimeHost command, Launcher, PackManager View, remote client,
+      application View, AI buddy surface, and test surface usage all route to
+      the same ListPacks operation semantics.
+
+26.2. CLI syntax does not define separate listing semantics.
+
+26.3. Launcher UI does not define separate listing semantics.
+
+26.4. PackManager View layout does not define separate listing semantics.
+
+26.5. Remote client transport does not define separate listing semantics.
+
+26.6. Test harness access does not weaken listing boundaries.
+
+26.7. Entry surfaces may use different projections or presentation formats.
+
+26.8. Different projections do not create different catalog truth.
+
+
+===============================================================================
+27. TRACE AND OBSERVABILITY
+===============================================================================
+
+27.1. ListPacks operations remain trace-visible.
+
+27.2. Listing uses PackManager-domain trace reasons owned by DA-29.
+
+27.3. ListPacks normally emits or contributes to:
+       - PackCatalogListRequested
+       - PackCatalogListStarted
+       - PackCatalogFilterApplied
+       - PackCatalogVisibilityEvaluated
+       - PackCatalogListCompleted
+       - PackCatalogListFailed
+
+27.4. Trace evidence records enough context, when available, to explain:
+       - requestId
+       - operation
+       - catalogContext
+       - filters
+       - sort
+       - page
+       - projection
+       - resultStatus
+       - returned count
+       - omitted count when available
+       - failure category when failure occurs
+       - runtimeHostId when applicable
+       - workspaceId when applicable
+       - appPackId when applicable
+       - savePackId when applicable
+       - appInstanceId when applicable
+       - viewId when applicable
+       - requesting surface kind when applicable
+       - requesting pack identity when applicable
+
+27.5. Trace records use IS-08 trace serialization when serialized through the
+      shared trace record envelope.
+
+27.6. Listing trace evidence does not replace discovery, resolution,
+      dependency, activation, capability, RuntimeHost, AppInstance, or
+      persistence trace evidence.
+
+
+===============================================================================
+28. WHAT IS EXPLICITLY NOT SUPPORTED
+===============================================================================
+
+28.1. The following are not supported:
+      - treating ListPacks as discovery
+      - treating ListPacks as filesystem rescan
+      - treating ListPacks as generic PackRequest resolution
+      - treating ListPacks as dependency satisfaction
+      - treating ListPacks as selected graph creation
+      - treating ListPacks as activation-plan creation
+      - treating ListPacks as importing
+      - treating ListPacks as activation
+      - treating ListPacks as capability permission
+      - treating listed packs as automatically selected
+      - treating listed packs as automatically activated
+      - treating SavePack listing as SavePack loading
+      - treating SavePack listing as SavePack migration
+      - treating compatibility summary as activation success
+      - treating advisory summary as hard dependency semantics
+      - launcher-owned listing semantics
+      - CLI-owned listing semantics
+      - remote-client-owned listing semantics
+      - test-owned listing semantics
+      - filters bypassing visibility or policy
+      - projection bypassing visibility or policy
+      - partial listing presented as complete listing
+
+
+===============================================================================
+29. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+29.1. OPEN questions include:
+      - exact requestId representation
+      - exact workspaceId representation
+      - exact catalogItemId representation
+      - exact canonicalPackId representation
+      - exact source identity representation
+      - exact version range filter representation
+      - exact text search matching rules
+      - exact cursor format
+      - exact default page size
+      - exact maximum page size
+      - exact rootFilter representation
+      - exact sourceFilter representation
+      - exact compatibility reason vocabulary
+      - exact visibility reason vocabulary
+      - exact warning category vocabulary
+      - exact diagnostic category vocabulary
+      - exact CLI command syntax
+      - exact RPC envelope mapping
+      - exact JSON Schema publication format
+
+
+===============================================================================
+30. LOCKED SUMMARY
+===============================================================================
+
+30.1. LOCKED:
+      - ListPacks is the shared concrete listing primitive.
+      - ListAppPacks, ListSavePacks, ListViewPacks, ListContentPacks, and
+        ListModPacks are filtered forms of ListPacks.
+      - Listing is read-only catalog access.
+      - Listing does not perform discovery, resolution, graph selection,
+        activation-plan creation, importing, activation, capability permission,
+        execution authorization, or persistence authority.
+      - A ListPacks request contains requestId, operation, catalogContext,
+        filters, sort, page, projection, and options.
+      - catalogContext identifies scope, runtimeHostId, workspaceId,
+        appPackId, savePackId, appInstanceId, viewId, requestingPackId,
+        requestingSurfaceKind, and accessMode when applicable.
+      - accessMode is explicit and does not grant authority by itself.
+      - filters restrict catalog results without redefining pack identity,
+        visibility, or authority.
+      - sorting is deterministic.
+      - pagination does not change the total ordered result set.
+      - projection controls result verbosity only.
+      - response envelopes distinguish result status, items, counts,
+        warnings, diagnostics, and trace references.
+      - pack catalog items are listing projections, not pack definitions.
+      - SavePack listing does not load, bind, or migrate a SavePack.
+      - compatibility, dependency, and advisory summaries do not replace their
+        owning semantics.
+      - CLI, RuntimeHost command, Launcher, PackManager View, remote client,
+        application View, AI buddy surface, and test surface usage route to the
+        same ListPacks operation semantics.
+      - ListPacks operations remain trace-visible using DA-29 PackManager-domain
+        trace reasons and IS-08 serialization when serialized.
+
+30.2. OPEN:
+      - concrete identifier formats, filter encodings, cursor format, page
+        sizes, reason vocabularies, warning/diagnostic vocabularies, CLI
+        syntax, RPC envelope mapping, and JSON Schema publication.
+
+
+===============================================================================
+END OF IS-09 - RUNTIME CATALOG AND PACK LISTING OPERATIONS
+===============================================================================
+
+--- doc-meta ---
+DOC_ID: IS-09
+DOC_FILE: docs/design/IS-09_RUNTIME_CATALOG_AND_PACK_LISTING_OPERATIONS.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
