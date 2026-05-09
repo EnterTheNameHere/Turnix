@@ -30,7 +30,7 @@ Authority and priority
 Repository connector retrieval safety
 -------------------------------------
 GitHub connector operations that return repository text can return truncated,
-malformed, incomplete, stale, or not-provably-complete content.
+malformed, incomplete, stale, aliased, or not-provably-complete content.
 
 This applies to any long repository text returned by the connector, including
 files, blobs, diffs, patches, previews, issue bodies, pull request bodies,
@@ -44,12 +44,27 @@ safety rules.
 At minimum, GitHub connector fetch and fetch_file operations are known to be
 capable of returning truncated file previews.
 
-Some connector responses include a Resource uri. A Resource uri is a handle for
-resource-range loading through the resource read API.
+The assistant always begins authoritative repository file loading with
+fetch_file for the requested repository, path, ref, and encoding.
+
+The assistant does not use repository search, web retrieval, rendered previews,
+branch search, commit search, local memory, cached memory, inferred
+reconstruction, or a similar workaround to complete missing file content or to
+obtain a file update sha.
+
+After fetch_file returns, the assistant classifies the response shape before
+using the content.
+
+Recognized fetch_file response shapes are:
+- a Resource uri response
+- a structured full-entry response
+
+A Resource uri response includes a Resource uri that can be used for resource-
+range loading through the resource read API.
 
 When fetch_file returns a Resource uri and the visible file preview is
-truncated, the assistant SHOULD use the resource read API to retrieve the full
-file content by line ranges before classifying the source as failed.
+truncated, the assistant uses the resource read API to retrieve the full file
+content by line ranges before classifying the source as COMPLETE.
 
 If resource-range reads retrieve the full requested file, the file identity
 matches the requested file, expected closing content or structured boundaries
@@ -57,8 +72,8 @@ are present, and no more lines remain, the retrieval may be classified COMPLETE
 via resource read.
 
 If a requested file was already fetched earlier in the same task and a previous
-Resource uri is available, the assistant SHOULD prefer reading that previous
-Resource uri again before issuing another fetch_file request.
+Resource uri is available, the assistant may read that previous Resource uri
+again before issuing another fetch_file request.
 
 However, Resource uri content is not trusted merely because the uri string
 matches a previously seen uri.
@@ -73,18 +88,50 @@ Identity checks include, when applicable:
 - expected file format or structured boundary
 
 If a reused Resource uri returns content that does not match the requested
-file, the assistant MUST treat that resource read as stale or aliased content.
+file, the assistant treats that resource read as stale or aliased content.
 
-The assistant MUST NOT replace the requested file content with mismatched
+The assistant does not replace the requested file content with mismatched
 resource content.
 
 When stale or aliased content is detected, the assistant retries the source
-path by calling fetch_file again, locating the new Resource uri, and attempting
-resource-range loading from that new uri.
+path by calling fetch_file again, locating the new Resource uri or structured
+full-entry response, and attempting completion through the matching response
+shape.
 
 If the new Resource uri cannot be read, returns no content, returns unrelated
 content, or still cannot prove the requested file complete, the source is
 classified STALE.
+
+A structured full-entry response contains file content and file metadata in the
+same connector response object.
+
+For a structured full-entry response to be classified COMPLETE, all of the
+following must hold:
+- content is present
+- encoding is present and matches the requested encoding
+- the file identity matches the requested file
+- expected closing content or structured boundaries are present
+- no truncation marker, partial-line report, malformed boundary, or visible
+  incomplete ending is present
+
+For repository file write use, a structured full-entry response must also
+contain the connector update sha in the same fetch_file response object.
+
+The update sha is valid only when it is a full 40-character hexadecimal string
+returned by fetch_file for the same requested repository, path, and ref used to
+obtain the authoritative file content.
+
+If fetch_file does not return a valid update sha, the assistant does not try to
+obtain one through search, branch lookup, commit lookup, web retrieval, local
+memory, cached memory, inferred reconstruction, or any other route.
+
+A sha, revision identity, or update token obtained from any route other than
+the same fetch_file response for the requested source is not valid for
+repository file write use.
+
+The assistant may use a Resource uri returned by fetch_file to prove full file
+content, but repository write authority still requires the update sha from the
+same fetch_file response that produced that Resource uri.
 
 Every GitHub connector retrieval used for document, code, audit, review, patch
 planning, or repository write work is classified as exactly one of:
@@ -98,8 +145,9 @@ planning, or repository write work is classified as exactly one of:
 
 COMPLETE means the connector returned the full requested source content, no
 truncation marker or partial-line report is present, expected closing content
-or structured boundaries are present, and any required revision identity came
-from the same successful connector response.
+or structured boundaries are present, the requested source identity was proved,
+and any required revision identity came from the same successful fetch_file
+response.
 
 COMPLETE via resource read means the connector returned a Resource uri and
 resource-range loading retrieved the full requested source content, proved the
@@ -107,10 +155,12 @@ source identity, reached the expected end or structured boundary, and reported
 that no more lines remain.
 
 TRUNCATED means the connector reports fewer shown lines than total lines, emits
-a truncation marker, or visibly ends before the requested source is complete.
+a truncation marker, emits a partial-line report, or visibly ends before the
+requested source is complete.
 
 MALFORMED means the structured response is incomplete, invalid, internally
-inconsistent, missing expected fields, or missing expected closing boundaries.
+inconsistent, missing expected fields, missing expected closing boundaries, or
+cannot be parsed according to the response shape it appears to use.
 
 MISSING means the connector reports that the requested source does not exist or
 cannot be found.
@@ -125,8 +175,8 @@ enough information to prove that the returned content is complete.
 
 Only COMPLETE permits authoritative read use.
 
-Only COMPLETE with the required connector update sha or equivalent revision
-identity permits repository file write use.
+Only COMPLETE with the required connector update sha from the same fetch_file
+response permits repository file write use.
 
 If a retrieval is TRUNCATED and a Resource uri is available, the assistant
 tries resource-range loading before stopping.
@@ -147,16 +197,16 @@ Permitted completion retrieval includes resource-range reads from the Resource
 uri returned by the connector response, provided the requested source identity
 is verified.
 
-Forbidden workaround retrieval includes repository search results, web
-retrieval, rendered previews, excerpts, snippets, cached memory, inferred
-reconstruction, mismatched Resource uri content, stale Resource uri content, or
-any sha, revision identity, or update token obtained outside the same COMPLETE
-connector response or verified COMPLETE resource-read path that supplied the
-authoritative content.
+Forbidden workaround retrieval includes repository search results, branch
+search results, commit search results, web retrieval, rendered previews,
+excerpts, snippets, cached memory, inferred reconstruction, mismatched Resource
+uri content, stale Resource uri content, or any sha, revision identity, or
+update token obtained outside the same COMPLETE fetch_file response that
+supplied or anchored the authoritative content.
 
 For repository file edits, complete authoritative file state requires complete
-file content and the connector update sha or equivalent revision identity from
-the same COMPLETE connector response or verified COMPLETE resource-read path.
+file content and the connector update sha from the same COMPLETE fetch_file
+response.
 
 If complete authoritative content or the connector update sha is unavailable,
 the assistant stops the repository write path for that source, informs the user
@@ -386,7 +436,7 @@ It does not define Turnix semantics.
 --- bootstrap-meta ---
 DOC_ID: AI_WORKFLOW_BOOTSTRAP
 DOC_FILE: docs/AI_WORKFLOW_BOOTSTRAP.txt
-DOC_REV: 5
-DOC_GIT: e89c73a
+DOC_REV: 6
+DOC_GIT: 0000000
 DOC_STATUS: STABLE
 ----------------------
