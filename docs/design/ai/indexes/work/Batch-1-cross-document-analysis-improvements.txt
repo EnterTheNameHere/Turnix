@@ -1,0 +1,474 @@
+Batch 1 cross-document analysis improvements
+============================================
+
+Purpose
+-------
+This file records supervisor-facing review notes for the first Assistant
+Semantic Index extraction batch.
+
+It is non-authoritative review guidance. It does not define Turnix semantics.
+Read the canonical source documents for normative meaning.
+
+Reviewed scope
+--------------
+Source documents reviewed together:
+- DA-01
+- DA-02
+- DA-03
+- DA-04
+- DA-21
+- IS-01
+- ODA-B
+
+Extraction records reviewed:
+- docs/design/ai/indexes/work/extracts/DA-01.extract.txt
+- docs/design/ai/indexes/work/extracts/DA-02.extract.txt
+- docs/design/ai/indexes/work/extracts/DA-03.extract.txt
+- docs/design/ai/indexes/work/extracts/DA-04.extract.txt
+- docs/design/ai/indexes/work/extracts/DA-21.extract.txt
+- docs/design/ai/indexes/work/extracts/IS-01.extract.txt
+- docs/design/ai/indexes/work/extracts/ODA-B.extract.txt
+
+Overall review
+--------------
+The Batch 1 extraction records are broadly good.
+
+They preserve the main authority split:
+- DA-01 owns foundational invariants and CT-D.
+- DA-02 owns platform truth, contract boundaries, and implementation
+  independence.
+- DA-03 owns the trace substrate.
+- DA-04 owns committed state, transactions, and authoritative mutation.
+- DA-21 owns abstract RPC semantics and message-flow boundaries.
+- IS-01 owns concrete RPC message-envelope schema.
+- ODA-B owns optional developer diagnostics and tooling presentation that
+  consume evidence.
+
+The main weakness is not factual correctness. The main weakness is
+cross-document retrieval sharpness. Several documents intentionally overlap in
+terms such as trace, state, RPC, authority, diagnostics, correlation, evidence,
+lifecycle, success, timeout, and disconnect. The extraction records should make
+those boundaries more visible to fresh assistant threads.
+
+Recommended batch-level improvement
+-----------------------------------
+Create a shared authority-boundary cluster for the final index layer.
+
+Suggested cluster:
+
+- valid envelope != successful work
+- acknowledgement != request success
+- acknowledgement != Job success
+- trace evidence != committed state
+- diagnostic presentation != authority
+- persistence != truth
+- runtime memory != committed state
+- RPC stateUpdate != committed authoritative state mutation
+- transport timeout != Job timeout
+- transport disconnect != Job cancellation
+- transport disconnect != adapter failure
+- transport disconnect != RuntimeHost failure
+
+Suggested authority ladder:
+
+- DA-01: project invariant anchor
+- DA-02: architectural contract-boundary anchor
+- DA-03: trace evidence substrate
+- DA-04: authoritative committed-state boundary
+- DA-21: abstract RPC and message-flow boundary
+- IS-01: concrete RPC envelope schema
+- ODA-B: optional tooling presentation and diagnostics consumer
+
+Suggested cross-layer routing rule:
+
+When a question combines RPC, trace evidence, state, and success/failure,
+resolve the layer first:
+- DA-21 for abstract RPC delivery, acknowledgement, request acceptance,
+  routing, subscription, cancellation, timeout, and disconnect meaning.
+- IS-01 for concrete envelope fields, message type names, serialization,
+  isComplete, final, origin, route, lane, payload, and job metadata carriage.
+- DA-03 for trace semantics, retained evidence, causal links, trace loss, and
+  correlation meaning.
+- DA-04 for whether anything became committed authoritative state.
+- DA-19 for Job lifecycle and terminal outcomes once Job-backed work exists.
+- DA-23 for adapter lifecycle and execution-boundary outcomes.
+- DA-28 for RuntimeHost lifecycle, command-surface, entry-surface, workspace,
+  startup, LAN, and host-operation outcomes.
+- ODA-B for how optional developer tooling should display, report, filter, or
+  explain retained evidence.
+
+Common retrieval traps
+----------------------
+Add explicit do-not-answer-from-this-document-alone guidance for common trap
+questions.
+
+Question: Did this RPC succeed?
+Recommended load:
+- DA-21 first.
+- IS-01 if envelope fields or message type names matter.
+- DA-19 if the work is Job-backed.
+- DA-23 if the work is adapter-mediated.
+- DA-28 if the work is a RuntimeHost operation.
+Do not answer from IS-01 alone.
+
+Question: Is this state authoritative?
+Recommended load:
+- DA-04 first.
+- DA-03 only if trace/evidence/correlation is involved.
+- ODA-B only if diagnostic presentation is involved.
+Do not answer from DA-03 or ODA-B alone.
+
+Question: What does this trace prove?
+Recommended load:
+- DA-03 first.
+- DA-04 if the question asks whether trace evidence proves committed state.
+- ODA-B if the question asks how tooling should display it.
+
+Question: Does stateUpdate mean committed state changed?
+Recommended load:
+- IS-01 for the concrete stateUpdate message type.
+- DA-21 for abstract update/subscription flow.
+- DA-04 for authoritative committed-state mutation.
+Do not infer committed-state mutation from the message name.
+
+Question: Does isComplete mean the operation completed?
+Recommended load:
+- IS-01 for isComplete as envelope completion marker.
+- DA-21 for message handling, request acceptance, and final work outcome
+  distinctions.
+- Owning lifecycle document if the operation is Job-backed, adapter-mediated,
+  or RuntimeHost-owned.
+
+Per-extraction improvement notes
+--------------------------------
+
+DA-01.extract.txt
+~~~~~~~~~~~~~~~~~
+Status: good foundation extraction.
+
+Recommended improvements:
+
+1. Add clarification that runtime authority ordering is not a call chain,
+   lifecycle sequence, or data-flow diagram. It is an architectural authority
+   precedence anchor.
+
+Suggested text:
+
+  Runtime authority ordering is not a call chain, lifecycle sequence, or
+  data-flow diagram. It is an architectural authority precedence anchor.
+
+2. Add ODA-B to LOAD_WITH for tooling and explanation surfaces.
+
+Suggested text:
+
+  - ODA-B when the topic is developer-facing diagnostic tooling, explanation
+    surfaces, trace viewers, safety warnings, or optional observability UI.
+
+3. Keep INVARIANTS as primary family alias, but consider adding FOUNDATION as a
+   secondary alias because DA-01 is the practical Batch 1 root.
+
+DA-02.extract.txt
+~~~~~~~~~~~~~~~~~
+Status: strong, especially on platform truth versus implementation stack.
+
+Recommended improvements:
+
+1. Add a canonical routing chain for interoperability-envelope questions:
+
+  DA-02 -> DA-21 -> IS-01
+  architectural envelope role -> abstract RPC semantics -> concrete RPC
+  envelope fields
+
+2. Add a high-value term for implementation-optimized boundaries.
+
+Suggested term:
+
+  TERM: boundary survives implementation optimization
+  KIND: architectural boundary rule
+  SOURCE_SECTION_HINT: 04.7-04.9, 06.8-06.12
+  AUTHORITY_OWNER: DA-02
+  CONFIDENCE: explicit
+  ALIASES: same-process boundary preservation; direct-call boundary preservation
+  RELATED_TERMS: contract boundary, same host language, direct calls,
+    implementation convenience
+  LOAD_WHEN_SEEN: Load DA-02 when someone proposes replacing RPC, envelopes,
+    adapters, or contract surfaces with direct calls or same-process shortcuts.
+
+3. Add DA-04 as a narrow LOAD_WITH target when boundary proximity involves
+   authoritative state mutation.
+
+Suggested text:
+
+  - DA-04 when implementation proximity, direct calls, or adapter/runtime
+    boundaries involve authoritative state mutation.
+
+DA-03.extract.txt
+~~~~~~~~~~~~~~~~~
+Status: very strong.
+
+Recommended improvements:
+
+1. Add a confusable pair distinguishing DA-03 diagnostics from ODA-B
+   diagnostics.
+
+Suggested text:
+
+  TERM_A: DA-03 diagnostics
+  TERM_B: ODA-B diagnostics
+  DISTINCTION: DA-03 owns trace/evidence substrate semantics and user-facing
+  diagnostic constraints; ODA-B owns optional developer-facing tooling
+  expectations that consume that evidence.
+
+2. Add non-ownership for ODA-B tooling severity vocabulary.
+
+Suggested text:
+
+  - Does not own ODA-B diagnostic severity vocabulary such as ERROR, WARNING,
+    and INFO for tooling presentation.
+
+3. Add a relation to IS-01 origin metadata.
+
+Suggested text:
+
+  - SOURCE: IS-01 origin metadata
+    RELATION: carries-correlation-for
+    TARGET: DA-03 trace semantics
+    NOTE: IS-01 may carry trace and span identifiers in RPC envelopes; DA-03
+    owns their trace meaning.
+
+DA-04.extract.txt
+~~~~~~~~~~~~~~~~~
+Status: strong and precise.
+
+Recommended improvements:
+
+1. Add ODA-B and DA-22 as narrow LOAD_WITH targets for frontend/tooling state
+   authority confusion.
+
+Suggested text:
+
+  - ODA-B and DA-22 when a diagnostics surface or frontend presents local/view
+    state as authoritative state.
+
+2. Add a confusable pair for RPC stateUpdate versus committed state mutation.
+
+Suggested text:
+
+  TERM_A: RPC stateUpdate
+  TERM_B: committed state mutation
+  DISTINCTION: A stateUpdate message carries update material through RPC; it
+  does not by itself define authoritative committed-state mutation. Load IS-01
+  and DA-21 for message meaning, and DA-04 for committed-state authority.
+
+3. Add a high-value term for authoritative-state equality.
+
+Suggested term:
+
+  TERM: authoritative-state equality
+  KIND: comparison/restoration concept
+  SOURCE_SECTION_HINT: 03.1.9, 03.2.1-03.2.6, 12
+  AUTHORITY_OWNER: DA-04
+  CONFIDENCE: explicit
+  ALIASES: committed-state equality; deterministic state comparison
+  RELATED_TERMS: deterministic restoration, non-authoritative material, trace
+    completeness, journal completeness
+  LOAD_WHEN_SEEN: Load DA-04 when comparing whether two states are the same
+  despite trace, log, journal, or diagnostic evidence differences.
+
+DA-21.extract.txt
+~~~~~~~~~~~~~~~~~
+Status: strong, but one authority-owner pattern should be revised.
+
+Recommended improvements:
+
+1. Revise AUTHORITY_OWNER for cross-domain relation terms.
+
+Current pattern is too compressed for:
+- Job-backed work
+- adapter-mediated work
+- RuntimeHost operation
+
+Recommended wording:
+
+  TERM: Job-backed work
+  AUTHORITY_OWNER: DA-21 for RPC acceptance/correlation relation; DA-19 for
+  Job lifecycle and terminal outcome
+
+  TERM: adapter-mediated work
+  AUTHORITY_OWNER: DA-21 for RPC acceptance/correlation relation; DA-23 for
+  adapter lifecycle and execution-boundary outcome
+
+  TERM: RuntimeHost operation
+  AUTHORITY_OWNER: DA-21 for RPC acceptance/correlation relation; DA-28 for
+  RuntimeHost operation, lifecycle, command-surface, and entry-surface outcome
+
+This avoids making DA-19, DA-23, or DA-28 appear to own DA-21's RPC acceptance
+and correlation relation.
+
+2. Add a confusable pair for isComplete versus request/work completion.
+
+Suggested text:
+
+  TERM_A: request completion / work completion
+  TERM_B: IS-01 isComplete
+  DISTINCTION: isComplete marks complete envelope construction; DA-21 separates
+  message handling, request acceptance, and final work outcome.
+
+3. Add a high-value term for abstract state/update messages.
+
+Suggested term:
+
+  TERM: state or update messages
+  KIND: message-flow category
+  SOURCE_SECTION_HINT: 04.1, 04.9, 07.5-07.11
+  AUTHORITY_OWNER: DA-21 for abstract delivery meaning
+  CONFIDENCE: explicit
+  ALIASES: update messages, state/update flow, subscription update delivery
+  RELATED_TERMS: stateUpdate, subscription delivery, committed state, View
+    update
+  LOAD_WHEN_SEEN: Load DA-21 for update flow; add IS-01 for concrete
+  stateUpdate envelope; add DA-04 only if authoritative committed state is in
+  question.
+
+IS-01.extract.txt
+~~~~~~~~~~~~~~~~~
+Status: good, but a few exact field and message type terms should be added.
+
+Recommended improvements:
+
+1. Add high-value term for type.
+
+Suggested term:
+
+  TERM: type
+  KIND: RPC envelope field
+  SOURCE_SECTION_HINT: 04.3
+  AUTHORITY_OWNER: IS-01
+  CONFIDENCE: explicit
+  ALIASES: message type; RPC message category field
+  RELATED_TERMS: hello, welcome, clientReady, heartbeat, ack, request, emit,
+    reply, subscribe, stateUpdate, unsubscribe, cancel, error
+  LOAD_WHEN_SEEN: Load IS-01 when concrete RPC message type names are in
+  question; load DA-21 for abstract category semantics.
+
+2. Add high-value term for budgetMs.
+
+Suggested term:
+
+  TERM: budgetMs
+  KIND: RPC envelope field
+  SOURCE_SECTION_HINT: 04.8
+  AUTHORITY_OWNER: IS-01 for field shape; DA-21 and DA-19 for timeout
+    interpretation
+  CONFIDENCE: explicit
+  ALIASES: operation budget; RPC operation budget
+  RELATED_TERMS: Job timeout, transport timeout, budget, request
+  LOAD_WHEN_SEEN: Load IS-01 for the field; load DA-21 and DA-19 if someone
+  asks whether it creates Job timeout semantics.
+
+3. Add exact message type values to retrieval hints or high-value terms:
+
+  hello, welcome, clientReady, heartbeat, ack, request, emit, reply,
+  subscribe, stateUpdate, unsubscribe, cancel, error
+
+4. Add high-value term for stateUpdate.
+
+Suggested term:
+
+  TERM: stateUpdate
+  KIND: concrete RPC message type
+  SOURCE_SECTION_HINT: 04.3, 06.5, 07.4-07.5
+  AUTHORITY_OWNER: IS-01 for message type and envelope expectations; DA-21 for
+    abstract update flow; DA-04 for authoritative committed state
+  CONFIDENCE: explicit
+  ALIASES: state update message; update message
+  RELATED_TERMS: payload, subscription delivery, committed state, View update
+  LOAD_WHEN_SEEN: Load IS-01 when the concrete message type is involved; do
+  not infer committed-state mutation from the name.
+
+5. Add DA-04 as a narrow LOAD_WITH target.
+
+Suggested text:
+
+  - DA-04 when RPC payloads, stateUpdate messages, or envelope-carried data are
+    being confused with committed authoritative state.
+
+ODA-B.extract.txt
+~~~~~~~~~~~~~~~~~
+Status: good. It correctly avoids making tooling authoritative.
+
+Recommended improvements:
+
+1. Revise trace domains authority ownership.
+
+Current extraction risks implying DA-03 owns ODA-B's tooling domain list as a
+canonical global domain taxonomy. DA-03 owns trace domain field mechanics;
+subject-owning documents own domain-specific trace obligations; ODA-B owns
+optional tooling/filter presentation.
+
+Suggested wording:
+
+  TERM: trace domains
+  KIND: trace classification surface
+  SOURCE_SECTION_HINT: 05, 06.6-06.7
+  AUTHORITY_OWNER: DA-03 for trace domain field mechanics; subject-owning
+    documents for domain-specific trace obligations; ODA-B for optional
+    tooling/filter presentation
+  CONFIDENCE: explicit for ODA-B tooling list, not global authority
+
+2. Add IS-01 as a narrow LOAD_WITH target for concrete RPC diagnostic fields.
+
+Suggested text:
+
+  - IS-01 when diagnostic tooling displays concrete RPC message fields such as
+    id, type, lane, route, origin, job, final, or isComplete.
+
+3. Add a confusable pair for ODA-B diagnostic severity versus DA-03 trace event
+   level.
+
+Suggested text:
+
+  TERM_A: ODA-B ERROR/WARNING/INFO
+  TERM_B: DA-03 trace event level
+  DISTINCTION: ODA-B defines tooling diagnostic severity vocabulary; DA-03
+  defines trace event level field mechanics. Do not assume they are the same
+  taxonomy unless a later document maps them.
+
+4. Add non-ownership for Replay, Resume, Retry, comparison, and audit workflow
+   semantics.
+
+Suggested text:
+
+  - Does not own Replay, Resume, Retry, comparison, or audit workflow
+    semantics; load DA-26 when those semantics are needed, and DA-04 for
+    committed-state restoration boundaries.
+
+Most important revision candidates
+----------------------------------
+If only a small revision pass is done, prioritize these:
+
+1. DA-21.extract.txt: revise AUTHORITY_OWNER for Job-backed work,
+   adapter-mediated work, and RuntimeHost operation so DA-21 owns the RPC
+   acceptance/correlation relation while DA-19, DA-23, and DA-28 own lifecycle
+   and outcome semantics.
+
+2. ODA-B.extract.txt: revise trace domains ownership so ODA-B's tooling domain
+   list is not treated as a canonical global trace-domain taxonomy.
+
+3. IS-01.extract.txt: add high-value terms for type, budgetMs, stateUpdate, and
+   exact message type values.
+
+4. DA-04.extract.txt, DA-21.extract.txt, and IS-01.extract.txt: add the shared
+   trap that RPC stateUpdate/update delivery/envelope payload does not imply
+   committed authoritative state mutation.
+
+5. DA-03.extract.txt and ODA-B.extract.txt: add a direct distinction between
+   DA-03 diagnostics as trace/evidence substrate constraints and ODA-B
+   diagnostics as optional developer-facing tooling.
+
+6. Final ASI indexes: add the shared authority-boundary cluster listed near the
+   top of this file.
+
+End
+---
+These notes are supervisor-facing extraction-review guidance only.
