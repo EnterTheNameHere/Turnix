@@ -1,0 +1,357 @@
+Turnix Assistant Semantic Index workflow rehydration
+====================================================
+
+Purpose
+-------
+This file preserves the working rules for the Assistant Semantic Index
+extraction project.
+
+It is intended to be loaded by supervisor, worker, and test threads that work
+on assistant-facing index material for Turnix documentation.
+
+This file is non-authoritative. It does not define Turnix semantics. It does
+not override CMR, DD, DA, ODA, IS, or AI_WORKFLOW_BOOTSTRAP documents.
+
+Active branch
+-------------
+CHATGPT_EXTRACT_INDEX
+
+Project goal
+------------
+Create assistant-facing retrieval metadata that helps language model assistants
+choose which Turnix documents to load for a topic, term, domain, or boundary
+question.
+
+The index layer helps with:
+- document routing
+- semantic family aliases
+- domain discovery
+- term discovery
+- ownership and non-ownership hints
+- relation hints
+- load-when guidance
+- fresh-context testing
+
+The index layer does not replace authoritative documents.
+
+Authority rule
+--------------
+Assistant index files may guide loading.
+Assistant index files may not define Turnix semantics.
+For authoritative meaning, load the referenced canonical source document.
+
+Canonical identity rule
+-----------------------
+Phase 1 keeps canonical DOC_ID values unchanged.
+
+Examples:
+- DA-03 remains DA-03
+- TRACE may be an assistant semantic family alias for DA-03
+- IS-01 remains IS-01
+- RPC-SCHEMA may be an assistant semantic family alias for IS-01
+
+Aliases are retrieval aids, not replacement DOC_ID values.
+
+Forbidden in Phase 1
+--------------------
+Do not:
+- rename canonical DOC_ID values
+- move canonical documents
+- split authoritative documents
+- rewrite canonical documents as part of extraction
+- treat assistant indexes as authority
+- copy large normative sections into index files
+- infer definitions without a source pointer
+- use incomplete connector output as authoritative source text
+- obtain update sha values through workaround routes
+
+Thread roles
+------------
+Supervisor thread:
+- designs the extraction workflow
+- reviews extracted records
+- changes extraction schema when needed
+- decides when temporary work becomes final index material
+- preserves design intent
+
+Worker thread:
+- performs bounded extraction tasks
+- loads required workflow files
+- fetches assigned source documents
+- verifies retrieval completeness
+- writes or updates extraction records
+- updates the status ledger
+- does not redesign workflow unless explicitly assigned
+
+Test thread:
+- validates ASI usability from fresh context
+- loads only assigned ASI files first
+- answers routing questions by using the index
+- reports ambiguity, missing terms, wrong routing, or excessive loading
+- does not rely on prior supervisor-thread memory
+
+Required loading for worker threads
+-----------------------------------
+A worker thread begins by loading:
+- docs/AI_WORKFLOW_BOOTSTRAP.txt
+- docs/CMR-04_CANONICAL_INDEX_TURNIX_SPECIFICATION.txt
+- docs/design/ai/indexes/work/ASI-WORKFLOW_REHYDRATION.txt
+- docs/design/ai/indexes/work/ASI-WORKFLOW_STATUS_LEDGER.txt
+- docs/design/ai/indexes/work/ASI-WORKER_THREAD_PROMPT.txt
+
+If any required file cannot be classified COMPLETE, the worker stops and
+reports the failure.
+
+Required loading for test threads
+---------------------------------
+A test thread begins by loading:
+- docs/AI_WORKFLOW_BOOTSTRAP.txt
+- docs/design/ai/indexes/work/ASI-TEST_THREAD_PROMPT.txt
+- the ASI files named by the test assignment
+
+If an assigned ASI file cannot be classified COMPLETE, the test thread stops
+and reports the failure.
+
+Connector retrieval rule
+------------------------
+Follow AI_WORKFLOW_BOOTSTRAP for repository connector safety.
+
+For authoritative repository file work, begin with fetch_file for the exact
+repository, path, ref, and encoding.
+
+Classify each retrieval before use. Only COMPLETE permits authoritative read
+use.
+
+Repository write work requires complete authoritative file content and the
+connector update sha from the same COMPLETE fetch_file response for the same
+requested source.
+
+Extraction record location
+--------------------------
+Temporary per-document extraction records live under:
+
+docs/design/ai/indexes/work/extracts/
+
+Suggested file name:
+
+<DOC_ID>.extract.txt
+
+Example:
+
+docs/design/ai/indexes/work/extracts/DA-03.extract.txt
+
+Final or semi-final index location
+----------------------------------
+Assistant-facing index files live under:
+
+docs/design/ai/indexes/
+
+Initial final index candidates:
+- ASI-00_ASSISTANT_SEMANTIC_INDEX_README.txt
+- ASI-01_DOCUMENT_DOMAIN_INDEX.txt
+- ASI-02_TERM_INDEX.txt
+- ASI-03_RETRIEVAL_HINT_INDEX.txt
+- ASI-04_BOUNDARY_AND_NON_OWNERSHIP_INDEX.txt
+- ASI-05_RELATION_INDEX.txt
+
+Do not create all final index files by default. Create them when the supervisor
+thread assigns that work or accepts a stable format.
+
+Extraction record format
+------------------------
+Use this structure unless the supervisor thread updates the workflow:
+
+ASSISTANT SEMANTIC EXTRACTION RECORD
+====================================
+
+SOURCE
+------
+DOC_ID:
+DOC_TITLE:
+DOC_FILE:
+DOC_TIER:
+DOC_AUTHORITATIVE_STATUS:
+DOC_REV:
+DOC_GIT:
+FETCH_REF:
+FETCH_SHA:
+RETRIEVAL_STATUS:
+EXTRACTION_REV:
+
+AUTHORITY WARNING
+-----------------
+This file is non-authoritative extraction metadata.
+Read the source document for normative meaning.
+
+FAMILY
+------
+PRIMARY_FAMILY_ALIAS:
+SECONDARY_FAMILY_ALIASES:
+ALIAS_STATUS:
+
+PRIMARY_DOMAINS
+---------------
+-
+
+OWNERSHIP_HINTS
+---------------
+-
+
+NON_OWNERSHIP_HINTS
+-------------------
+-
+
+SEMANTIC_ANCHORS
+----------------
+-
+
+HIGH_VALUE_TERMS
+----------------
+- TERM:
+  KIND:
+  SOURCE_SECTION_HINT:
+  AUTHORITY_OWNER:
+  CONFIDENCE:
+  ALIASES:
+  RELATED_TERMS:
+  LOAD_WHEN_SEEN:
+
+CONFUSABLE_TERMS
+----------------
+- TERM_A:
+  TERM_B:
+  DISTINCTION:
+
+RELATION_HINTS
+--------------
+- SOURCE:
+  RELATION:
+  TARGET:
+  NOTE:
+
+LOAD_WITH
+---------
+-
+
+DO_NOT_AUTO_LOAD
+----------------
+-
+
+RETRIEVAL_HINTS
+---------------
+-
+
+OPEN_EXTRACTION_QUESTIONS
+-------------------------
+-
+
+END
+---
+
+Extraction rules
+----------------
+Extract routing and indexing metadata only.
+
+Prefer compact hints over copied prose.
+
+Do not copy full "It defines" or "It does NOT define" blocks. Convert them into
+short OWNERSHIP_HINTS and NON_OWNERSHIP_HINTS.
+
+Every high-value term should point to a source document and, when practical, a
+source section hint.
+
+Use confidence values:
+- explicit
+- assistant-assigned
+- inferred
+- needs-review
+
+Use assistant-assigned for semantic family aliases created by this project.
+
+Status ledger rule
+------------------
+After creating or updating an extraction record, update:
+
+docs/design/ai/indexes/work/ASI-WORKFLOW_STATUS_LEDGER.txt
+
+The ledger records:
+- DOC_ID
+- canonical file
+- workflow status
+- extraction file
+- source revision identity
+- extraction revision
+- review state
+- notes
+
+Batch strategy
+--------------
+Batch 1 foundation:
+- DA-01
+- DA-02
+- DA-03
+- DA-04
+- DA-21
+- IS-01
+- ODA-B
+
+Batch 2 runtime execution:
+- DA-14
+- DA-16
+- DA-17
+- DA-19
+- DA-20
+- DA-23
+- DA-24
+- DA-28
+
+Batch 3 pack and resolution:
+- DA-09
+- DA-10
+- DA-11
+- DA-12
+- DA-13
+- DA-15
+- DA-29
+- ODA-D
+- ODA-E
+
+Batch 4 persistence, windows, and audit:
+- DA-05
+- DA-06
+- DA-07
+- DA-08
+- DA-25
+- DA-26
+- IS-07
+- IS-08
+
+Batch 5 remaining UI, tooling, doctrine, implementation, and meta-rules:
+- DA-18
+- DA-22
+- DA-27
+- ODA-A
+- ODA-C
+- remaining IS documents
+- DD documents
+- DD-MN documents
+- CMR documents
+
+Field testing rule
+------------------
+After a small set of extraction records exists, create or update ASI indexes and
+test them in a fresh test thread.
+
+Example test questions:
+- Where should I load for TraceSpan?
+- Is trace evidence authoritative state?
+- What owns isComplete?
+- Does RPC acknowledgement mean Job success?
+- What owns committed state mutation?
+- Does ODA-B define trace reason vocabulary?
+- What should I load for transport disconnect?
+- What should I load for AppInstance identity?
+
+End
+---
+This file preserves workflow rules for the assistant indexing project only.
