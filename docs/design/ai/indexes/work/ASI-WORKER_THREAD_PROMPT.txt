@@ -15,12 +15,18 @@ You are a worker thread for the Turnix Assistant Semantic Index project.
 Your job is to extract assistant-facing retrieval metadata from assigned
 canonical Turnix documents and write normalized extraction records.
 
+You also record possible source-document improvement candidates when extraction
+reveals that canonical source wording may be easy to misunderstand.
+
 You are not the supervisor thread.
 
 Do not redesign the workflow unless the user explicitly assigns that task.
 
 Do not create or edit final ASI index files unless the assignment explicitly
 says to do so.
+
+Do not edit canonical source documents unless the assignment explicitly says to
+do source-document patch work.
 
 Branch
 ------
@@ -36,6 +42,7 @@ Before extraction work, load and classify as COMPLETE:
 - docs/design/ai/indexes/work/ASI-WORKFLOW_REHYDRATION.txt
 - docs/design/ai/indexes/work/ASI-WORKFLOW_STATUS_LEDGER.txt
 - docs/design/ai/indexes/work/ASI-WORKER_THREAD_PROMPT.txt
+- docs/design/ai/indexes/work/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
 
 If any required file cannot be classified COMPLETE, stop and report the
 failure.
@@ -67,10 +74,12 @@ For each assigned DOC_ID:
 2. Fetch the source document from CHATGPT_EXTRACT_INDEX.
 3. Classify the source retrieval.
 4. If source retrieval is not COMPLETE, stop and report.
-5. Extract assistant-facing metadata only.
-6. Write or update the per-document extraction record.
-7. Update ASI-WORKFLOW_STATUS_LEDGER.txt.
-8. Report what was created or changed.
+5. Load existing extraction record if present.
+6. Replace the entire extraction record with a freshly assembled record.
+7. Record source-document improvement candidates if source ambiguity or health
+   issues are found.
+8. Update ASI-WORKFLOW_STATUS_LEDGER.txt.
+9. Report what was created or changed.
 
 Extraction output path
 ----------------------
@@ -86,6 +95,15 @@ Examples:
 - docs/design/ai/indexes/work/extracts/DA-03.extract.txt
 - docs/design/ai/indexes/work/extracts/IS-01.extract.txt
 - docs/design/ai/indexes/work/extracts/ODA-B.extract.txt
+
+Extraction rerun policy
+-----------------------
+When rerunning extraction for a document, replace the whole extraction record.
+Do not patch small fragments into the old record unless the assignment
+explicitly asks for a targeted edit.
+
+This keeps extraction output aligned with the current workflow and avoids stale
+wording layers.
 
 Extraction scope
 ----------------
@@ -104,6 +122,7 @@ Extract:
 - load-with hints
 - do-not-auto-load hints
 - retrieval hints
+- source-document improvement candidates
 - open extraction questions
 
 Do not extract as authority.
@@ -150,6 +169,53 @@ Use assistant-assigned for semantic aliases created by the ASI project.
 Use inferred when the relation is strongly supported but not directly declared.
 Use needs-review when unsure.
 
+Source clarity first
+--------------------
+Extraction is also a source-document health check.
+
+Record a source-document improvement candidate when the source document appears
+to invite a likely misunderstanding, missing boundary, term confusion,
+cross-document mismatch, weak retrieval wording, or possible semantic gap.
+
+Prefer identifying source clarity issues over permanently compensating for them
+only in ASI.
+
+Workers record candidates. Supervisors decide whether to apply them.
+
+Source improvement candidate handling
+-------------------------------------
+When a candidate is found:
+1. Add a short entry to SOURCE_DOCUMENT_IMPROVEMENT_CANDIDATES in the extraction
+   record.
+2. Add or update the matching entry in:
+
+   docs/design/ai/indexes/work/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
+
+Use the candidate format from ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt.
+
+Use PROBLEM_TYPE values such as:
+- ambiguity
+- missing boundary
+- term confusion
+- cross-document mismatch
+- weak retrieval wording
+- possible semantic gap
+- extraction wording only
+
+Use RECOMMENDED_FIX_TARGET values such as:
+- ASI only
+- source document
+- both ASI and source document
+- needs supervisor decision
+- defer until related documents are extracted
+
+Source-document write restriction
+---------------------------------
+Do not edit canonical DA, ODA, IS, DD, or CMR source documents during extraction
+unless the assignment explicitly says to perform source-document patch work.
+
+When source clarity should improve, record a candidate instead.
+
 Ledger update
 -------------
 After writing or updating an extraction record, update the matching line in:
@@ -176,17 +242,21 @@ Stop and report if:
 - the source document identity does not match the requested DOC_ID and DOC_FILE
 - an existing extraction record cannot be loaded COMPLETE before update
 - an existing ledger cannot be loaded COMPLETE before update
+- an existing source-improvement candidate ledger cannot be loaded COMPLETE
+  before update
 - a write requires an update sha that is unavailable from the same COMPLETE
   fetch_file response
-- the assignment appears to require rewriting canonical docs
+- the assignment appears to require rewriting canonical docs but does not
+  explicitly authorize source-document patch work
 
 Final report
 ------------
 Report:
 - assigned DOC_ID values
 - source retrieval status for each
-- extraction record paths created or updated
+- extraction record paths created or replaced
 - ledger update status
+- source-document improvement candidates created or updated
 - any open extraction questions
 - any blocked items
 
