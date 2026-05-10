@@ -6,8 +6,8 @@ Purpose
 This file preserves the working rules for the Assistant Semantic Index
 extraction project.
 
-It is intended to be loaded by supervisor, worker, and test threads that work
-on assistant-facing index material for Turnix documentation.
+It is intended to be loaded by supervisor, worker, audit, and test threads that
+work on assistant-facing index material for Turnix documentation.
 
 This file is non-authoritative. It does not define Turnix semantics. It does
 not override CMR, DD, DA, ODA, IS, or AI_WORKFLOW_BOOTSTRAP documents.
@@ -72,6 +72,7 @@ The supervisor thread may directly edit workflow/control files, such as:
 - ASI-WORKFLOW_REHYDRATION.txt
 - ASI-WORKFLOW_STATUS_LEDGER.txt
 - ASI-WORKER_THREAD_PROMPT.txt
+- ASI-AUDIT_THREAD_PROMPT.txt
 - ASI-TEST_THREAD_PROMPT.txt
 - ASI-SUPERVISOR_THREAD_PROMPT.txt
 - ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
@@ -104,6 +105,24 @@ supersedes, rejects, defers, or source-applies them.
 
 The previous extraction record may be used as reference material, but it is not
 the source of truth for accepted review requirements.
+
+Batch execution pattern
+-----------------------
+Preferred batch extraction pattern:
+- one bounded worker thread per source document
+- one audit thread for the whole batch
+- supervisor thread reviews the audit report and decides next actions
+
+For Batch 1 this means:
+- 7 document worker threads
+- 1 audit thread
+
+Document workers focus on local extraction correctness for their assigned
+source. They should not attempt to globally redesign cross-document consistency
+unless an accepted review requirement already applies.
+
+Audit threads check batch-level consistency, accepted-review preservation,
+ledger sanity, source-candidate consistency, and index-readiness.
 
 Canonical identity rule
 -----------------------
@@ -138,11 +157,12 @@ Thread roles
 ------------
 Supervisor thread:
 - designs the extraction workflow
-- reviews extracted records
+- reviews extracted records and audit reports
 - changes extraction schema when needed
 - reviews source-document improvement candidates
 - records accepted review requirements
 - assigns worker threads for generated output changes
+- assigns audit threads for batch-level checks
 - decides when temporary work becomes final index material
 - preserves design intent
 
@@ -157,6 +177,15 @@ Worker thread:
 - records source-document improvement candidates when found
 - does not redesign workflow unless explicitly assigned
 - does not edit canonical source documents unless explicitly assigned
+
+Audit thread:
+- validates a batch of generated extraction records
+- checks ledger consistency, schema conformance, authority boundaries, accepted
+  review preservation, source-candidate consistency, and index-readiness
+- writes an audit report when assigned
+- does not edit extraction records, final/semi-final ASI indexes, accepted
+  review notes, source-candidate ledgers, workflow prompts, or canonical source
+  documents
 
 Test thread:
 - validates ASI usability from fresh context
@@ -187,6 +216,21 @@ A worker thread begins by loading:
 - docs/design/ai/indexes/work/ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt
 
 If any required file cannot be classified COMPLETE, the worker stops and
+reports the failure.
+
+Required loading for audit threads
+----------------------------------
+An audit thread begins by loading:
+- docs/AI_WORKFLOW_BOOTSTRAP.txt
+- docs/design/ai/indexes/work/ASI-WORKFLOW_REHYDRATION.txt
+- docs/design/ai/indexes/work/ASI-AUDIT_THREAD_PROMPT.txt
+- docs/design/ai/indexes/work/ASI-WORKFLOW_STATUS_LEDGER.txt
+- docs/design/ai/indexes/work/ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt
+- docs/design/ai/indexes/work/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
+
+If the audit assignment names a batch-specific review file, load it too.
+
+If any required file cannot be classified COMPLETE, the audit thread stops and
 reports the failure.
 
 Required loading for test threads
