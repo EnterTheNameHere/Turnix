@@ -64,6 +64,47 @@ Source-document improvement candidates are recorded in:
 
 docs/design/ai/indexes/work/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
 
+Supervisor/worker output boundary
+---------------------------------
+The supervisor thread designs and governs the workflow.
+
+The supervisor thread may directly edit workflow/control files, such as:
+- ASI-WORKFLOW_REHYDRATION.txt
+- ASI-WORKFLOW_STATUS_LEDGER.txt
+- ASI-WORKER_THREAD_PROMPT.txt
+- ASI-TEST_THREAD_PROMPT.txt
+- ASI-SUPERVISOR_THREAD_PROMPT.txt
+- ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
+- ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt
+- Batch-*-cross-document-analysis-improvements.txt
+
+The supervisor thread must not directly refine generated extraction records or
+final/semi-final ASI index files. If generated output needs refinement, the
+supervisor records the requirement in workflow/control files and assigns a
+worker thread to regenerate or update the generated output.
+
+Generated files include:
+- docs/design/ai/indexes/work/extracts/*.extract.txt
+- docs/design/ai/indexes/ASI-*.txt once created as final or semi-final index
+  files
+
+Accepted review notes
+---------------------
+Extraction records are disposable generated artifacts. They may be replaced on
+worker rerun.
+
+Accepted review findings that must survive regeneration are stored in:
+
+docs/design/ai/indexes/work/ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt
+
+Workers must load that file before regenerating extraction records or ASI index
+files. When accepted requirements apply to an assigned document, batch, or
+output file, the worker must preserve them unless the supervisor explicitly
+supersedes, rejects, defers, or source-applies them.
+
+The previous extraction record may be used as reference material, but it is not
+the source of truth for accepted review requirements.
+
 Canonical identity rule
 -----------------------
 Phase 1 keeps canonical DOC_ID values unchanged.
@@ -89,6 +130,9 @@ Do not:
 - use incomplete connector output as authoritative source text
 - obtain update sha values through workaround routes
 - edit source documents while performing extraction unless explicitly assigned
+- let accepted review findings live only inside generated extraction records
+- have supervisor threads directly patch generated extraction/index output
+  content for refinement
 
 Thread roles
 ------------
@@ -97,6 +141,8 @@ Supervisor thread:
 - reviews extracted records
 - changes extraction schema when needed
 - reviews source-document improvement candidates
+- records accepted review requirements
+- assigns worker threads for generated output changes
 - decides when temporary work becomes final index material
 - preserves design intent
 
@@ -105,6 +151,7 @@ Worker thread:
 - loads required workflow files
 - fetches assigned source documents
 - verifies retrieval completeness
+- loads and applies accepted review requirements
 - replaces per-document extraction records on rerun
 - updates the status ledger
 - records source-document improvement candidates when found
@@ -118,6 +165,16 @@ Test thread:
 - reports ambiguity, missing terms, wrong routing, or excessive loading
 - does not rely on prior supervisor-thread memory
 
+Required loading for supervisor threads
+---------------------------------------
+A supervisor thread begins by loading:
+- docs/AI_WORKFLOW_BOOTSTRAP.txt
+- docs/design/ai/indexes/work/ASI-WORKFLOW_REHYDRATION.txt
+- docs/design/ai/indexes/work/ASI-SUPERVISOR_THREAD_PROMPT.txt
+- docs/design/ai/indexes/work/ASI-WORKFLOW_STATUS_LEDGER.txt
+- docs/design/ai/indexes/work/ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt
+- docs/design/ai/indexes/work/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
+
 Required loading for worker threads
 -----------------------------------
 A worker thread begins by loading:
@@ -127,6 +184,7 @@ A worker thread begins by loading:
 - docs/design/ai/indexes/work/ASI-WORKFLOW_STATUS_LEDGER.txt
 - docs/design/ai/indexes/work/ASI-WORKER_THREAD_PROMPT.txt
 - docs/design/ai/indexes/work/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
+- docs/design/ai/indexes/work/ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt
 
 If any required file cannot be classified COMPLETE, the worker stops and
 reports the failure.
@@ -179,7 +237,7 @@ The worker does not patch small fragments into old extraction records unless the
 assignment explicitly asks for a targeted edit.
 
 This prevents stale extraction wording from accumulating underneath newer
-workflow rules.
+workflow rules while accepted review notes preserve approved refinements.
 
 Final or semi-final index location
 ----------------------------------
