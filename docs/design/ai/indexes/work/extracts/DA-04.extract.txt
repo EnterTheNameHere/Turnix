@@ -13,7 +13,7 @@ DOC_GIT: b7469b6
 FETCH_REF: CHATGPT_EXTRACT_INDEX
 FETCH_SHA: 629956eb4b3e3ee0ed5ce1216e32fba04c2b2d76
 RETRIEVAL_STATUS: COMPLETE
-EXTRACTION_REV: 1
+EXTRACTION_REV: 2
 
 AUTHORITY WARNING
 -----------------
@@ -29,10 +29,12 @@ ALIAS_STATUS: assistant-assigned
 PRIMARY_DOMAINS
 ---------------
 - runtime memory versus committed state
+- authoritative versus non-authoritative material
 - authoritative state mutation
 - transaction staging, commit, and abort
+- nested transaction propagation
 - committed layer conflict detection
-- state revision identity
+- committed state revision identity
 - deterministic committed-state restoration
 - persistence as state protection
 - static-data mutation intent
@@ -41,11 +43,12 @@ PRIMARY_DOMAINS
 
 OWNERSHIP_HINTS
 ---------------
-- Owns Turnix meaning of memory, state, authoritative state, and non-authoritative material.
-- Owns the commit boundary that makes staged memory become committed authoritative state.
+- Owns Turnix meaning of memory, state, committed state, and non-authoritative material.
+- Owns the authority boundary that makes staged memory become committed authoritative state.
+- Owns the separation between observation, traces, journals, staging artifacts, and committed truth.
 - Owns transaction staging rules, commit and abort atomicity, and nested transaction propagation rules.
 - Owns commit conflict detection for authoritative mutation into committed layers.
-- Owns revisionId and baseRevisionId meaning for committed layer keys.
+- Owns revisionId, baseRevisionId, and absent sentinel meaning for committed layer keys.
 - Owns the restoration boundary for deterministic restoration of committed state.
 - Owns state-model meaning of persistence as protection rather than truth.
 - Owns static-data mutation intent modes Patch and Copy at the state-model level.
@@ -56,12 +59,12 @@ NON_OWNERSHIP_HINTS
 -------------------
 - Does not own tracing structure, trace event schema, or trace storage semantics; load DA-03.
 - Does not own payload identity, ChunkId, or ValueRef representation contracts; load DA-05.
-- Does not own persistent I/O authority, Readers, Writers, or filesystem rules; load DA-07.
-- Does not own configuration scope, schema, or migration semantics generally; load DA-06.
+- Does not own concrete persistent I/O authority, Readers, Writers, or filesystem rules; load DA-07.
+- Does not own configuration-specific scope, schema, and migration semantics; load DA-06.
 - Does not own windows, manifests, exports, replay workflows, or audit bundles; load DA-08, DA-25, and DA-26.
-- Does not own pack activation or PackContext authority; load DA-14.
+- Does not own pack activation semantics or PackContext authority; load DA-14.
 - Does not own service, capability, or permission semantics; load DA-16.
-- Does not own Job lifecycle, result, timeout, or cancellation semantics; load DA-19.
+- Does not own Job lifecycle, Job result, Job timeout, or Job cancellation semantics; load DA-19.
 - Does not own AppInstance lifecycle or runtime identity semantics; load DA-20.
 - Does not own execution adapter boundary semantics; load DA-23.
 - Does not own Orchestration Unit lifecycle, mutation-authority ownership, terminal outcomes, single-lane AppInstance orchestration, or Orchestration Unit trace reason ownership; load DA-24.
@@ -71,12 +74,17 @@ SEMANTIC_ANCHORS
 ----------------
 - Runtime memory is not authoritative merely because it is resident, visible, active, or in use.
 - Only committed state is authoritative.
-- Observation explains but does not define committed truth.
+- Observation may explain what happened, but observation does not define committed truth.
 - Authoritative and non-authoritative material remain separate.
+- Traces, journals, transactional layers, and debugger artifacts are not required for committed-state correctness.
 - Transactions stage speculative mutation until commit or abort.
 - Commit and abort are atomic outcomes; partial propagation does not occur.
 - Nested child transactions propagate into parent transactions, not directly into committed layers.
 - Commit conflict detection rejects stale committed-layer base revisions deterministically.
+- Silent merge, last-write-wins behavior, and heuristic reconciliation do not occur for conflicting authoritative mutation.
+- Transaction commit does not directly finalize a SafePointWindow.
+- Transaction abort does not directly finalize an AbortedWindow.
+- Orchestration Unit existence or terminal outcome does not by itself define transaction outcome.
 - Persistence protects committed state but does not define state truth.
 - Static data is read-only by default; mutation intent is explicit as Patch or Copy.
 - Tooling-originated mutation obeys the same transaction and commit model.
@@ -111,13 +119,22 @@ HIGH_VALUE_TERMS
   RELATED_TERMS: commit boundary, restoration, persistence
   LOAD_WHEN_SEEN: Load DA-04 when a question involves committed truth, restoration, or deterministic comparison.
 
+- TERM: authoritative material
+  KIND: authority-class term
+  SOURCE_SECTION_HINT: 03.1.1-03.1.5
+  AUTHORITY_OWNER: DA-04
+  CONFIDENCE: explicit
+  ALIASES: authoritative state material
+  RELATED_TERMS: committed memory layers, committed configuration, SafePointWindow, committed state
+  LOAD_WHEN_SEEN: Load DA-04 when a question asks what defines current system truth.
+
 - TERM: non-authoritative material
   KIND: authority-class term
   SOURCE_SECTION_HINT: 03.1.6-03.2.6
   AUTHORITY_OWNER: DA-04
   CONFIDENCE: explicit
   ALIASES: observational material, explanatory material
-  RELATED_TERMS: traces, journals, debugger staging artifacts
+  RELATED_TERMS: traces, journals, debugger staging artifacts, transactional staging layers
   LOAD_WHEN_SEEN: Load DA-04 when traces, journals, or staging artifacts are confused with committed state.
 
 - TERM: revisionId
@@ -210,6 +227,15 @@ HIGH_VALUE_TERMS
   RELATED_TERMS: DA-03, transactionId, orchestrationUnitId, jobId
   LOAD_WHEN_SEEN: Load DA-04 with DA-03 when asking what state mutation must expose to trace.
 
+- TERM: Orchestration Unit relation to transactions
+  KIND: cross-document boundary term
+  SOURCE_SECTION_HINT: 07.1-07.10
+  AUTHORITY_OWNER: DA-04 for transaction boundary consumed by Orchestration Units; DA-24 for Orchestration Unit lifecycle and outcomes
+  CONFIDENCE: explicit
+  ALIASES: OU transaction boundary
+  RELATED_TERMS: Orchestration Unit, transaction outcome, mutation authority, DA-24
+  LOAD_WHEN_SEEN: Load DA-04 with DA-24 when Orchestration Unit activity and transaction commit/abort may be confused.
+
 - TERM: persistence
   KIND: state protection term
   SOURCE_SECTION_HINT: 08.1-08.13
@@ -270,6 +296,10 @@ CONFUSABLE_TERMS
   TERM_B: state
   DISTINCTION: Memory is runtime representation and mutable; state is the authoritative outcome of committed memory.
 
+- TERM_A: authoritative material
+  TERM_B: non-authoritative material
+  DISTINCTION: Authoritative material defines current system truth; non-authoritative material supports explanation, audit, debugging, or diagnosis.
+
 - TERM_A: committed state
   TERM_B: persisted state
   DISTINCTION: Committed state becomes truth by commit boundary; persistence protects against loss but does not define truth.
@@ -293,6 +323,10 @@ CONFUSABLE_TERMS
 - TERM_A: child transaction commit
   TERM_B: committed-layer mutation
   DISTINCTION: Child transaction commit propagates to the parent transaction while an enclosing transaction exists; only the outermost commit mutates committed layers.
+
+- TERM_A: silent merge
+  TERM_B: explicit override
+  DISTINCTION: DA-04 rejects silent merge, last-write-wins, and heuristic reconciliation; override requires explicit user decision or explicit policy elsewhere.
 
 - TERM_A: Patch mode
   TERM_B: Copy mode
@@ -326,6 +360,31 @@ RELATION_HINTS
   NOTE: Commit/abort do not directly finalize SafePointWindow or AbortedWindow.
 
 - SOURCE: DA-04
+  RELATION: excludes pack activation and PackContext authority owned by
+  TARGET: DA-14
+  NOTE: DA-04 does not define pack activation semantics even when activated work mutates state.
+
+- SOURCE: DA-04
+  RELATION: excludes service, capability, and permission semantics owned by
+  TARGET: DA-16
+  NOTE: DA-04 may be needed when capability calls mutate state, but DA-16 owns permission semantics.
+
+- SOURCE: DA-04
+  RELATION: distinguishes Job references from Job lifecycle owned by
+  TARGET: DA-19
+  NOTE: jobId may appear in state trace evidence, but DA-19 owns Job semantics.
+
+- SOURCE: DA-04
+  RELATION: excludes AppInstance lifecycle and runtime identity owned by
+  TARGET: DA-20
+  NOTE: appInstanceId may appear in trace evidence, but DA-20 owns AppInstance identity semantics.
+
+- SOURCE: DA-04
+  RELATION: excludes adapter boundary semantics owned by
+  TARGET: DA-23
+  NOTE: DA-04 constrains adapter-executed mutation only when it seeks committed-state guarantees.
+
+- SOURCE: DA-04
   RELATION: provides transaction and restoration boundaries consumed by
   TARGET: DA-24
   NOTE: Orchestration Units consume DA-04 commit boundaries but do not make staged mutation authoritative by existing.
@@ -334,11 +393,6 @@ RELATION_HINTS
   RELATION: constrains Replay, Resume, Retry, comparison, and audit semantics in
   TARGET: DA-26
   NOTE: DA-04 restoration boundary limits what later workflow concepts can claim.
-
-- SOURCE: DA-04
-  RELATION: distinguishes Job references from Job lifecycle owned by
-  TARGET: DA-19
-  NOTE: jobId may appear in state trace evidence, but DA-19 owns Job semantics.
 
 - SOURCE: DA-04
   RELATION: distinguishes tooling state edits from debugger behavior owned by
@@ -351,10 +405,15 @@ LOAD_WITH
 - DA-05 when questions involve committed value representation, ChunkId, or ValueRef.
 - DA-06 when questions involve configuration migration or schema-specific migration behavior.
 - DA-07 when questions involve concrete persistence I/O, Readers, Writers, filesystem safety, or SavePack write authority.
-- DA-08 when questions involve SafePointWindow or AbortedWindow finalization.
+- DA-08 when questions involve SafePointWindow, AbortedWindow, window finalization, manifests, or window history.
+- DA-14 when questions involve activation, lifecycle, or PackContext authority around state mutation.
+- DA-16 when questions involve capability calls, services, permissions, or authority to request mutation.
 - DA-18 when questions involve debugger pause, breakpoint, or execution-control behavior.
 - DA-19 when questions involve Job lifecycle, result, timeout, cancellation, or Job authority.
+- DA-20 when questions involve AppInstance lifecycle or runtime identity.
+- DA-23 when questions involve execution adapter boundaries around same-process or same-language mutation.
 - DA-24 when questions involve Orchestration Unit lifecycle, mutation authority ownership, terminal outcomes, or single-lane AppInstance orchestration.
+- DA-25 when questions involve window artifacts, exports, or audit bundles containing committed state.
 - DA-26 when questions involve Replay, Resume, Retry, offline comparison, or audit workflows.
 
 DO_NOT_AUTO_LOAD
@@ -362,8 +421,10 @@ DO_NOT_AUTO_LOAD
 - Do not auto-load DA-04 merely for any use of the generic word "state" outside Turnix state authority, commit, restoration, transaction, or mutation context.
 - Do not auto-load DA-04 for trace schema details alone; route to DA-03 unless state mutation authority is also involved.
 - Do not auto-load DA-04 for filesystem persistence mechanics alone; route to DA-07 unless committed-state truth is involved.
+- Do not auto-load DA-04 for configuration schema questions alone; route to DA-06 unless authoritative migration mutation is involved.
 - Do not auto-load DA-04 for RPC message state fields alone; route to IS-01 or DA-21 unless authoritative state mutation is involved.
 - Do not auto-load DA-04 for debugger stepping/breakpoint behavior alone; route to DA-18 unless tooling mutation of state is involved.
+- Do not auto-load DA-04 for Orchestration Unit lifecycle questions alone; route to DA-24 unless transaction commit/abort or committed-state mutation is involved.
 
 RETRIEVAL_HINTS
 ---------------
@@ -377,6 +438,12 @@ RETRIEVAL_HINTS
 - Load DA-04 for questions involving silent merge, last-write-wins, fallback reconciliation, or conflicting authoritative mutation.
 - Load DA-04 when Patch versus Copy is asked in static-data mutation context.
 - Load DA-04 when migration abort safety or atomic migration state mutation is asked.
+- Load DA-04 when observation, logs, traces, or journals are being treated as if they define committed truth.
+- Load DA-04 when same-language, same-process, adapter-executed, or tooling-originated mutation might appear to bypass Turnix authority boundaries.
+
+SOURCE_DOCUMENT_IMPROVEMENT_CANDIDATES
+--------------------------------------
+-
 
 OPEN_EXTRACTION_QUESTIONS
 -------------------------
