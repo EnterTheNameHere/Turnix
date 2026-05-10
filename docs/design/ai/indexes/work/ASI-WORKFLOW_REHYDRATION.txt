@@ -40,6 +40,30 @@ Assistant index files may guide loading.
 Assistant index files may not define Turnix semantics.
 For authoritative meaning, load the referenced canonical source document.
 
+Source clarity first
+--------------------
+The extraction process is also a source-document health check.
+
+If extraction reveals that a canonical document can easily be misunderstood,
+record the finding as a source-document improvement candidate.
+
+The supervisor decides whether the issue is:
+- source-document clarity problem
+- ASI routing problem
+- extraction wording problem
+- real semantic gap
+- deferred until related documents are extracted
+
+If a source document can be clarified without changing intended semantics,
+prefer clarifying the source over compensating only in ASI.
+
+Workers do not edit canonical source documents during extraction unless the
+assignment explicitly instructs them to do source-document patch work.
+
+Source-document improvement candidates are recorded in:
+
+docs/design/ai/indexes/work/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
+
 Canonical identity rule
 -----------------------
 Phase 1 keeps canonical DOC_ID values unchanged.
@@ -64,6 +88,7 @@ Do not:
 - infer definitions without a source pointer
 - use incomplete connector output as authoritative source text
 - obtain update sha values through workaround routes
+- edit source documents while performing extraction unless explicitly assigned
 
 Thread roles
 ------------
@@ -71,6 +96,7 @@ Supervisor thread:
 - designs the extraction workflow
 - reviews extracted records
 - changes extraction schema when needed
+- reviews source-document improvement candidates
 - decides when temporary work becomes final index material
 - preserves design intent
 
@@ -79,9 +105,11 @@ Worker thread:
 - loads required workflow files
 - fetches assigned source documents
 - verifies retrieval completeness
-- writes or updates extraction records
+- replaces per-document extraction records on rerun
 - updates the status ledger
+- records source-document improvement candidates when found
 - does not redesign workflow unless explicitly assigned
+- does not edit canonical source documents unless explicitly assigned
 
 Test thread:
 - validates ASI usability from fresh context
@@ -98,6 +126,7 @@ A worker thread begins by loading:
 - docs/design/ai/indexes/work/ASI-WORKFLOW_REHYDRATION.txt
 - docs/design/ai/indexes/work/ASI-WORKFLOW_STATUS_LEDGER.txt
 - docs/design/ai/indexes/work/ASI-WORKER_THREAD_PROMPT.txt
+- docs/design/ai/indexes/work/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
 
 If any required file cannot be classified COMPLETE, the worker stops and
 reports the failure.
@@ -139,6 +168,18 @@ Suggested file name:
 Example:
 
 docs/design/ai/indexes/work/extracts/DA-03.extract.txt
+
+Extraction rerun policy
+-----------------------
+When a worker reruns extraction for a document, it loads the existing extraction
+record if present, but replaces the entire extraction record with a freshly
+assembled record.
+
+The worker does not patch small fragments into old extraction records unless the
+assignment explicitly asks for a targeted edit.
+
+This prevents stale extraction wording from accumulating underneath newer
+workflow rules.
 
 Final or semi-final index location
 ----------------------------------
@@ -241,6 +282,17 @@ RETRIEVAL_HINTS
 ---------------
 -
 
+SOURCE_DOCUMENT_IMPROVEMENT_CANDIDATES
+--------------------------------------
+- ISSUE:
+  SOURCE_LOCATION_HINT:
+  PROBLEM_TYPE:
+  RISK:
+  RECOMMENDED_FIX_TARGET:
+  SUGGESTED_SOURCE_FIX:
+  SUGGESTED_ASI_FIX:
+  CANDIDATE_LEDGER_ID:
+
 OPEN_EXTRACTION_QUESTIONS
 -------------------------
 -
@@ -268,9 +320,33 @@ Use confidence values:
 
 Use assistant-assigned for semantic family aliases created by this project.
 
+Source improvement candidate rules
+----------------------------------
+Record a source-document improvement candidate when extraction reveals any of:
+- ambiguity
+- missing boundary
+- term confusion
+- cross-document mismatch
+- weak retrieval wording in the source
+- possible semantic gap
+
+Classify the proposed fix target as one of:
+- ASI only
+- source document
+- both ASI and source document
+- needs supervisor decision
+- defer until related documents are extracted
+
+If a candidate is recorded in an extraction record, also add it to:
+
+docs/design/ai/indexes/work/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
+
+Workers may record candidates but do not approve or apply source-document
+changes.
+
 Status ledger rule
 ------------------
-After creating or updating an extraction record, update:
+After creating or replacing an extraction record, update:
 
 docs/design/ai/indexes/work/ASI-WORKFLOW_STATUS_LEDGER.txt
 
