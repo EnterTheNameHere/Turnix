@@ -13,7 +13,7 @@ DOC_GIT: 59104b5
 FETCH_REF: CHATGPT_EXTRACT_INDEX
 FETCH_SHA: 00f31c5f489042a5b18db7c8c085d950338f2d47
 RETRIEVAL_STATUS: COMPLETE
-EXTRACTION_REV: 3
+EXTRACTION_REV: 4
 
 AUTHORITY WARNING
 -----------------
@@ -23,7 +23,7 @@ Read the source document for normative meaning.
 FAMILY
 ------
 PRIMARY_FAMILY_ALIAS: RPC
-SECONDARY_FAMILY_ALIASES: CHANNELS, TRANSPORTS, MESSAGE-FLOW
+SECONDARY_FAMILY_ALIASES: CHANNELS, TRANSPORTS, MESSAGE-FLOW, RPC-CHANNEL
 ALIAS_STATUS: assistant-assigned
 
 PRIMARY_DOMAINS
@@ -32,10 +32,11 @@ PRIMARY_DOMAINS
 - Transport-neutral channel boundaries.
 - Logical request, reply, emit, subscribe, cancel, error, update, and acknowledgement flow.
 - Distinction between message delivery, acknowledgement, request acceptance, handler execution, Job creation,
-  Job lifecycle, adapter lifecycle, RuntimeHost operation lifecycle, and final work outcome.
+  lifecycle ownership, and final work outcome.
 - Routing boundaries for object, capability, adapter-facing, control, and subscription messages.
 - Transport timeout, disconnect, and cancellation semantics at the RPC layer.
 - RPC correlation and trace-observability obligations.
+- Relationship between DA-level RPC semantics and concrete implementation specifications.
 
 OWNERSHIP_HINTS
 ---------------
@@ -45,19 +46,20 @@ OWNERSHIP_HINTS
 - Owns abstract RPC message categories and their high-level meanings.
 - Owns abstract request acceptance, acknowledgement, routing, subscribe, unsubscribe, cancellation, timeout, and disconnect distinctions.
 - Owns RPC acceptance/correlation relationships for Job-backed, adapter-mediated, and RuntimeHost-owned work without owning those lifecycle domains.
+- Owns the boundary that transport delivery, acknowledgement, request acceptance, handler execution, Job creation, and final work outcome are distinct.
 
 NON_OWNERSHIP_HINTS
 -------------------
 - Does not own concrete JSON envelope fields; load IS-01.
 - Does not own concrete WebSocket handshake, frame flow, or concrete transport trace reasons; load IS-02.
-- Does not own trace substrate, trace DAG semantics, or span mechanics; load DA-03.
+- Does not own trace event structure, trace DAG semantics, trace substrate, or span mechanics; load DA-03.
 - Does not own capability permission semantics; load DA-16.
 - Does not own decision or remembered policy semantics; load DA-17.
-- Does not own Job lifecycle, Job terminal outcomes, or Job result semantics; load DA-19.
+- Does not own Job lifecycle, Job terminal outcomes, Job timeout, Job result semantics, or Job success; load DA-19.
 - Does not own AppInstance lifecycle or runtime identity semantics; load DA-20.
-- Does not own execution adapter boundary or lifecycle semantics; load DA-23.
+- Does not own execution adapter boundary, adapter lifecycle, adapter timeout, or adapter success/failure semantics; load DA-23.
 - Does not own frontend UI layout or presentation behavior; load DA-22.
-- Does not own RuntimeHost identity, workspace ownership, startup modes, entry surfaces, command surface, LAN exposure, or host lifecycle semantics; load DA-28.
+- Does not own RuntimeHost identity, workspace ownership, startup modes, entry surfaces, command surface, LAN exposure, host lifecycle, or RuntimeHost operation outcome semantics; load DA-28.
 - Does not own committed authoritative state mutation; load DA-04.
 
 SEMANTIC_ANCHORS
@@ -68,12 +70,14 @@ SEMANTIC_ANCHORS
 - Message delivery, acknowledgement, request acceptance, handler execution, Job creation, and Job terminal outcome are distinct events.
 - Acknowledgement means receipt or transport/RPC handling only, not request success, capability execution, adapter execution, RuntimeHost operation completion, Job creation, or Job success.
 - Request acceptance is distinct from final operation success unless an operation contract explicitly defines acceptance as the result.
-- Routing identifies a logical target but does not grant permission, activate packs, select adapters, or bypass capability mediation.
-- State or update delivery does not by itself define committed authoritative state mutation; DA-04 owns committed-state authority.
+- Routing identifies a logical target but does not grant permission, activate packs, select adapters, authorize adapters, or bypass capability mediation.
+- State or update delivery and concrete stateUpdate messages do not by themselves define committed authoritative state mutation; DA-04 owns committed-state authority.
+- Job-backed work, adapter-mediated work, and RuntimeHost operations use DA-21 for RPC acceptance/correlation only; lifecycle and terminal outcome semantics remain with their owning documents.
 - Transport timeout and disconnect are RPC/channel/transport concerns, not Job, adapter, or RuntimeHost terminal outcomes by themselves.
 - RPC cancellation is a request, not a direct execution kill.
 - Subscription delivery may carry progress or state, but the meaning of Job, adapter, RuntimeHost, View, or committed-state evidence remains owned by the corresponding domain.
 - RPC trace evidence preserves correlation between messages and higher-domain events where those events exist.
+- Concrete envelope construction details, including IS-01 isComplete, remain schema concerns and must not be read as semantic work completion.
 
 HIGH_VALUE_TERMS
 ----------------
@@ -95,6 +99,24 @@ HIGH_VALUE_TERMS
   RELATED_TERMS: transport, transport adapter, peer context, connection state, text payload, binary payload, disconnect
   LOAD_WHEN_SEEN: Load DA-21 when asking about the abstract channel consumed by the RPC host or equivalent runtime owner.
 
+- TERM: transport
+  KIND: carrier concept
+  SOURCE_SECTION_HINT: 03, 08, 09
+  AUTHORITY_OWNER: DA-21 for abstract transport separation
+  CONFIDENCE: explicit
+  ALIASES: concrete carrier, WebSocket, local in-process channel, testing channel, IPC transport, stdio transport
+  RELATED_TERMS: RPCChannel, transport adapter, transport timeout, transport disconnect, WebSocket
+  LOAD_WHEN_SEEN: Load DA-21 when asking whether the carrier defines RPC meaning, authority, lifecycle, or work outcomes.
+
+- TERM: transport adapter
+  KIND: boundary adapter
+  SOURCE_SECTION_HINT: 03
+  AUTHORITY_OWNER: DA-21 for transport-to-RPCChannel translation boundary
+  CONFIDENCE: explicit
+  ALIASES: concrete transport adapter, channel implementation
+  RELATED_TERMS: execution adapter, RuntimeHost entry surface, RPCChannel, transport-specific events
+  LOAD_WHEN_SEEN: Load DA-21 when asking how concrete transport events become RPCChannel events or whether a transport adapter gains authority.
+
 - TERM: acknowledgement
   KIND: message-flow category
   SOURCE_SECTION_HINT: 04, 13
@@ -109,7 +131,7 @@ HIGH_VALUE_TERMS
   SOURCE_SECTION_HINT: 06
   AUTHORITY_OWNER: DA-21
   CONFIDENCE: explicit
-  ALIASES: accepted request, accepted work response
+  ALIASES: accepted request, accepted work response, accepted operation
   RELATED_TERMS: immediate reply, structured error, Job-backed work, adapter-mediated work, RuntimeHost operation, rejected-before-Job outcome
   LOAD_WHEN_SEEN: Load DA-21 when asking what it means for an RPC request to be accepted and how that differs from final success.
 
@@ -118,7 +140,7 @@ HIGH_VALUE_TERMS
   SOURCE_SECTION_HINT: 06, 08
   AUTHORITY_OWNER: DA-21 for RPC acceptance/correlation relation; DA-19 for Job lifecycle and terminal outcome
   CONFIDENCE: explicit
-  ALIASES: job-correlated request, accepted Job-backed request
+  ALIASES: job-correlated request, accepted Job-backed request, Job handle response
   RELATED_TERMS: jobId, request identity, Job handle, retained result, cancellation, timeout
   LOAD_WHEN_SEEN: Load DA-21 with DA-19 when RPC requests create or expose Job lifecycle correlation.
 
@@ -129,15 +151,15 @@ HIGH_VALUE_TERMS
   CONFIDENCE: explicit
   ALIASES: adapter-facing RPC, adapter-correlated request
   RELATED_TERMS: adapter lifecycle, adapter instance identity, execution adapter, cancellation, timeout
-  LOAD_WHEN_SEEN: Load DA-21 with DA-23 when RPC carries adapter-originated or adapter-targeted messages.
+  LOAD_WHEN_SEEN: Load DA-21 with DA-23 when RPC carries adapter-originated or adapter-targeted messages or exposes adapter correlation.
 
 - TERM: RuntimeHost operation
   KIND: cross-domain relation
   SOURCE_SECTION_HINT: 05, 06, 08, 10
   AUTHORITY_OWNER: DA-21 for RPC acceptance/correlation relation; DA-28 for RuntimeHost operation, lifecycle, command-surface, and entry-surface outcome
   CONFIDENCE: explicit
-  ALIASES: host operation, RuntimeHost control-surface operation
-  RELATED_TERMS: runtimeHostId, command surface, entry surface, workspace ownership, LAN exposure
+  ALIASES: host operation, RuntimeHost control-surface operation, host-level work
+  RELATED_TERMS: runtimeHostId, RuntimeHost operation identity, command surface, entry surface, workspace ownership, LAN exposure
   LOAD_WHEN_SEEN: Load DA-21 with DA-28 when RPC is used by RuntimeHost entry or command surfaces.
 
 - TERM: state or update messages
@@ -146,8 +168,26 @@ HIGH_VALUE_TERMS
   AUTHORITY_OWNER: DA-21 for abstract delivery meaning
   CONFIDENCE: explicit
   ALIASES: update messages, state/update flow, subscription update delivery
-  RELATED_TERMS: stateUpdate, subscription delivery, committed state, View update
-  LOAD_WHEN_SEEN: Load DA-21 for update flow; add IS-01 for concrete stateUpdate envelope; add DA-04 only if authoritative committed state is in question.
+  RELATED_TERMS: stateUpdate, subscription delivery, committed state, View update, state snapshot, state delta
+  LOAD_WHEN_SEEN: Load DA-21 for update flow; add IS-01 for concrete stateUpdate envelope; add DA-04 when authoritative committed state is in question.
+
+- TERM: subscribe
+  KIND: message-flow category
+  SOURCE_SECTION_HINT: 07
+  AUTHORITY_OWNER: DA-21
+  CONFIDENCE: explicit
+  ALIASES: subscription flow, continuing delivery, update subscription
+  RELATED_TERMS: update flow, unsubscribe, cancellation, Job progress, adapter lifecycle updates, RuntimeHost operation updates
+  LOAD_WHEN_SEEN: Load DA-21 when asking how continuing update delivery is established or why delivery does not itself own reported domain meaning.
+
+- TERM: unsubscribe
+  KIND: message-flow category
+  SOURCE_SECTION_HINT: 07
+  AUTHORITY_OWNER: DA-21
+  CONFIDENCE: explicit
+  ALIASES: withdraw delivery interest, end subscription delivery
+  RELATED_TERMS: cancellation, underlying work, policy, subscription delivery
+  LOAD_WHEN_SEEN: Load DA-21 when asking whether ending a subscription cancels the underlying work.
 
 - TERM: transport timeout
   KIND: failure/availability condition
@@ -172,8 +212,8 @@ HIGH_VALUE_TERMS
   SOURCE_SECTION_HINT: 08
   AUTHORITY_OWNER: DA-21
   CONFIDENCE: explicit
-  ALIASES: cancellation message, cancellation request
-  RELATED_TERMS: Job cancellation, adapter-mediated cancellation, RuntimeHost operation cancellation, subscription cancellation
+  ALIASES: cancellation message, cancellation request, cancel message
+  RELATED_TERMS: Job cancellation, adapter-mediated cancellation, RuntimeHost operation cancellation, subscription cancellation, local pending work
   LOAD_WHEN_SEEN: Load DA-21 when asking what an RPC cancellation message means before applying the owning lifecycle domain.
 
 - TERM: RPC trace evidence
@@ -181,9 +221,18 @@ HIGH_VALUE_TERMS
   SOURCE_SECTION_HINT: 10
   AUTHORITY_OWNER: DA-21
   CONFIDENCE: explicit
-  ALIASES: RPC observability, message-flow trace evidence
+  ALIASES: RPC observability, message-flow trace evidence, RPC correlation evidence
   RELATED_TERMS: message receipt, acknowledgement, routing, dispatch, rejection, delivery failure, channel disconnect, correlation identity
   LOAD_WHEN_SEEN: Load DA-21 with DA-03 when asking what RPC-level events should be visible in traces.
+
+- TERM: isComplete
+  KIND: concrete schema trap
+  SOURCE_SECTION_HINT: Accepted review requirement B1-REQ-003; source boundary via 04, 06, 11
+  AUTHORITY_OWNER: IS-01 for concrete field meaning; DA-21 for message-handling versus work-outcome boundary
+  CONFIDENCE: inferred
+  ALIASES: envelope complete, envelope construction completion
+  RELATED_TERMS: request completion, work completion, operation completion, Job success, semantic correctness
+  LOAD_WHEN_SEEN: Load IS-01 for concrete isComplete meaning and DA-21 for why envelope/message completion is not operation success or work completion.
 
 CONFUSABLE_TERMS
 ----------------
@@ -195,6 +244,14 @@ CONFUSABLE_TERMS
   TERM_B: JSON envelope
   DISTINCTION: DA-21 owns abstract RPC semantics; concrete JSON envelope fields belong to IS-01.
 
+- TERM_A: RPCChannel
+  TERM_B: transport
+  DISTINCTION: RPCChannel is the transport-neutral interface; transport is the concrete carrier adapted into that interface.
+
+- TERM_A: transport adapter
+  TERM_B: execution adapter
+  DISTINCTION: Transport adapters translate concrete transport events into RPCChannel events; execution adapter boundary semantics belong to DA-23.
+
 - TERM_A: acknowledgement
   TERM_B: request success
   DISTINCTION: Acknowledgement confirms receipt or transport/RPC handling only; request success depends on the operation contract.
@@ -203,11 +260,15 @@ CONFUSABLE_TERMS
   TERM_B: Job success
   DISTINCTION: Acknowledgement does not imply Job creation or Job terminal success.
 
+- TERM_A: request acceptance
+  TERM_B: final operation success
+  DISTINCTION: Acceptance means crossing the RPC dispatch boundary and target acceptance, not final success unless the operation contract defines that result.
+
 - TERM_A: request completion / work completion
   TERM_B: IS-01 isComplete
   DISTINCTION: isComplete marks complete envelope construction; DA-21 separates message handling, request acceptance, and final work outcome.
 
-- TERM_A: state or update messages
+- TERM_A: state or update messages / stateUpdate
   TERM_B: committed state mutation
   DISTINCTION: State/update delivery through RPC does not by itself define authoritative committed-state mutation; load IS-01 for concrete stateUpdate fields, DA-21 for delivery flow, and DA-04 for committed-state authority.
 
@@ -218,6 +279,10 @@ CONFUSABLE_TERMS
 - TERM_A: transport disconnect
   TERM_B: Job cancellation
   DISTINCTION: Disconnect does not automatically cancel, supersede, discard, or fail Job-backed work.
+
+- TERM_A: transport disconnect
+  TERM_B: adapter failure / RuntimeHost failure
+  DISTINCTION: Disconnect does not automatically fail an adapter or stop/fail a RuntimeHost; DA-23 or DA-28 owns those lifecycle outcomes.
 
 - TERM_A: unsubscribe
   TERM_B: cancellation of underlying work
@@ -258,12 +323,32 @@ RELATION_HINTS
 - SOURCE: DA-21 state or update messages
   RELATION: not-authority-for
   TARGET: DA-04 committed authoritative state mutation
-  NOTE: RPC delivery of update material does not by itself prove committed-state mutation.
+  NOTE: RPC delivery of update material and concrete stateUpdate messages do not by themselves prove committed-state mutation.
+
+- SOURCE: DA-21 request acceptance/correlation
+  RELATION: not-authority-for
+  TARGET: DA-19 Job lifecycle and terminal outcomes
+  NOTE: DA-21 owns acceptance/correlation relations; DA-19 owns Job lifecycle meaning and final Job outcome.
+
+- SOURCE: DA-21 request acceptance/correlation
+  RELATION: not-authority-for
+  TARGET: DA-23 adapter lifecycle and execution outcomes
+  NOTE: DA-21 owns acceptance/correlation relations; DA-23 owns adapter lifecycle and execution-boundary outcomes.
+
+- SOURCE: DA-21 request acceptance/correlation
+  RELATION: not-authority-for
+  TARGET: DA-28 RuntimeHost operation and lifecycle outcomes
+  NOTE: DA-21 owns acceptance/correlation relations; DA-28 owns RuntimeHost command, operation, entry-surface, workspace, and lifecycle outcomes.
 
 - SOURCE: IS-01
   RELATION: constrained-by
   TARGET: DA-21
   NOTE: IS-01 defines concrete RPC message envelope schema under DA-21 semantics.
+
+- SOURCE: IS-02
+  RELATION: constrained-by
+  TARGET: DA-21
+  NOTE: IS-02 defines concrete WebSocket RPC flow under DA-21 transport-independent RPC semantics.
 
 LOAD_WITH
 ---------
@@ -274,16 +359,18 @@ LOAD_WITH
 - DA-20 when the question concerns AppInstance identity carried in RPC correlation or trace context.
 - DA-23 when the question concerns adapter-facing RPC, adapter-mediated work, adapter lifecycle, or execution adapter boundaries.
 - DA-28 when the question concerns RuntimeHost operations, command surface, entry surface, workspace ownership, LAN/client connections, startup modes, or host lifecycle.
-- IS-01 when concrete message envelope fields, JSON representation, stateUpdate, or schema names are needed.
+- IS-01 when concrete message envelope fields, JSON representation, type values, stateUpdate, isComplete, or schema names are needed.
 - IS-02 when concrete WebSocket handshake, frames, reconnect behavior, or WebSocket transport trace reason identifiers are needed.
 - DA-04 when RPC state/update delivery, stateUpdate, payloads, or update material are being confused with committed authoritative state mutation.
 
 DO_NOT_AUTO_LOAD
 ----------------
-- Do not auto-load IS-01 for abstract RPC meaning unless concrete envelope fields or schema details are requested.
+- Do not auto-load IS-01 for abstract RPC meaning unless concrete envelope fields, concrete message type names, or schema details are requested.
+- Do not auto-load IS-02 for abstract transport independence unless concrete WebSocket flow, frames, handshake, reconnect behavior, or concrete transport trace reasons are requested.
 - Do not auto-load DA-19 merely because an RPC request exists; load DA-19 when Job-backed work, jobId, Job lifecycle, or Job outcome is involved.
 - Do not treat DA-21 as the owner of permissions, policy, Job outcomes, adapter outcomes, RuntimeHost outcomes, concrete schemas, concrete WebSocket flow, or committed-state authority.
 - Do not infer committed authoritative state mutation from state/update delivery or from the name stateUpdate.
+- Do not infer operation completion, work completion, Job success, or semantic correctness from IS-01 isComplete.
 
 RETRIEVAL_HINTS
 ---------------
@@ -294,11 +381,14 @@ RETRIEVAL_HINTS
 - For "Does stateUpdate mean committed state changed?" load IS-01, DA-21, and DA-04; do not infer committed mutation from the message name.
 - For "Can RPC bypass permissions?" load DA-21 plus DA-16.
 - For "Is transport timeout the same as Job timeout?" load DA-21 plus DA-19 if Job lifecycle details are needed.
+- For "Does isComplete mean the request/work/job completed?" load IS-01 and DA-21; add DA-19 only for Job lifecycle outcome questions.
+- For RuntimeHost operation terms such as command acceptance, LAN exposure, entry surface, workspace ownership, or startup mode, load DA-28 with DA-21 only when RPC delivery, acceptance, or correlation is involved.
+- For adapter-mediated work terms such as adapter instance identity, adapter lifecycle, or adapter failure, load DA-23 with DA-21 only when RPC delivery, acceptance, or correlation is involved.
 
 SOURCE_DOCUMENT_IMPROVEMENT_CANDIDATES
 --------------------------------------
 - ISSUE: RPC stateUpdate or abstract state/update delivery can be mistaken for committed authoritative state mutation.
-  SOURCE_LOCATION_HINT: DA-21 sections 04 and 07; IS-01 sections 04.3, 06, and 07.
+  SOURCE_LOCATION_HINT: DA-21 sections 04 and 07; IS-01 sections 04.3, 06, and 07; DA-04 committed-state boundary sections.
   PROBLEM_TYPE: missing boundary; term confusion; cross-document mismatch
   RISK: A fresh assistant or implementer may infer committed-state mutation from an RPC message name or update delivery flow.
   RECOMMENDED_FIX_TARGET: both ASI and source document
@@ -312,6 +402,7 @@ OPEN_EXTRACTION_QUESTIONS
 - DA-21 leaves non-WebSocket transport implementation specifications open.
 - DA-21 leaves whether subscription flow becomes its own design area open.
 - DA-21 leaves retained-result retrieval flow for Job-backed RPC open.
+- DA-21 leaves exact relationship between RPC request promises and Job handles open.
 - DA-21 leaves exact channel identity and peer identity representation open.
 - DA-21 leaves exact adapter metadata and RuntimeHost metadata representation in RPC envelopes open.
 
