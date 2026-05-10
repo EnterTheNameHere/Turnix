@@ -13,7 +13,7 @@ DOC_GIT: 6eea5bd
 FETCH_REF: CHATGPT_EXTRACT_INDEX
 FETCH_SHA: 7285600da2d0ae8dfcbc86c0a88c51fcd3bf5591
 RETRIEVAL_STATUS: COMPLETE
-EXTRACTION_REV: 2
+EXTRACTION_REV: 3
 
 AUTHORITY WARNING
 -----------------
@@ -28,19 +28,21 @@ ALIAS_STATUS: assistant-assigned
 
 PRIMARY_DOMAINS
 ---------------
-- RPC wire-envelope schema
-- RPC message field definitions
-- RPC helper-constructor expectations
-- RPC serialization and logging flow
-- RPC routing payload shape
-- RPC correlation metadata carriage
-- envelope completion-marker behavior
+- RPC wire-envelope schema.
+- RPC message field definitions.
+- Concrete RPC message type names.
+- RPC helper-constructor expectations.
+- RPC serialization and logging flow.
+- RPC routing payload shape.
+- RPC correlation metadata carriage.
+- Envelope completion-marker behavior.
 
 OWNERSHIP_HINTS
 ---------------
 - Owns the concrete RPCMessage wire envelope used between runtime participants.
 - Owns Gen, Route, and RPCMessage as core RPC wire models.
 - Owns top-level RPC envelope field meanings and per-message-type field expectations.
+- Owns concrete message type values such as hello, welcome, request, stateUpdate, cancel, and error.
 - Owns helper-constructor expectations for validated envelope construction.
 - Owns canonical serializer field-order expectations for isComplete as tail sentinel.
 - Owns receiver-side incomplete-envelope rejection before routing.
@@ -55,20 +57,19 @@ NON_OWNERSHIP_HINTS
 - Does not define View or frontend runtime semantics; load DA-22.
 - Does not define execution adapter boundary semantics; load DA-23.
 - Does not define trace semantics beyond carrying correlation metadata; load DA-03.
-- Does not define higher-level routing, visibility, activation, or capability semantics.
-- Does not make valid serialization evidence of successful work, authority, or lifecycle acceptance.
+- Does not define committed authoritative state mutation; load DA-04.
+- Does not make valid serialization evidence of successful work, authority, lifecycle acceptance, or committed-state mutation.
 
 SEMANTIC_ANCHORS
 ----------------
-- concrete wire structure, not authority semantics
-- envelope validity precedes routing
-- isComplete is envelope construction completion, not semantic correctness
-- correlation metadata is evidence only, not authority
-- message id is distinct from appInstanceId, jobId, viewId, and adapter identity
-- lane and route support routing but do not grant permission
-- final marks a streamed or ordered series, not single-envelope completion
-- job metadata is not final Job success
-- valid serialization does not imply successful work
+- IS-01 defines concrete wire structure, not authority semantics.
+- Envelope validity precedes routing but does not imply successful work.
+- isComplete is envelope construction completion, not semantic correctness and not operation completion.
+- final marks a streamed or ordered series, not single-envelope completion.
+- stateUpdate is a concrete RPC message type; it does not by itself prove committed-state mutation.
+- job metadata is not final Job success.
+- route and lane support routing but do not grant permission.
+- origin metadata is correlation evidence only, not authority.
 
 HIGH_VALUE_TERMS
 ----------------
@@ -79,25 +80,25 @@ HIGH_VALUE_TERMS
   CONFIDENCE: explicit
   ALIASES: RPC envelope, wire envelope, message envelope
   RELATED_TERMS: Gen, Route, isComplete, type, lane, route, payload
-  LOAD_WHEN_SEEN: Load IS-01 when the task concerns concrete RPC envelope shape, fields, validation, or serialization.
+  LOAD_WHEN_SEEN: Load IS-01 when concrete RPC envelope shape, fields, validation, or serialization are involved.
 
-- TERM: Gen
-  KIND: wire model / generation marker
-  SOURCE_SECTION_HINT: 03.1, 04.5
-  AUTHORITY_OWNER: IS-01 for envelope carriage; DA-21 for transport/session semantics
+- TERM: type
+  KIND: RPC envelope field
+  SOURCE_SECTION_HINT: 04.3
+  AUTHORITY_OWNER: IS-01
   CONFIDENCE: explicit
-  ALIASES: generation, connection generation
-  RELATED_TERMS: gen, welcome, hello, stale traffic, session continuity
-  LOAD_WHEN_SEEN: Load IS-01 for message field shape; load DA-21 when interpreting transport continuity behavior.
+  ALIASES: message type, RPC message category field
+  RELATED_TERMS: hello, welcome, clientReady, heartbeat, ack, request, emit, reply, subscribe, stateUpdate, unsubscribe, cancel, error
+  LOAD_WHEN_SEEN: Load IS-01 when concrete RPC message type names are in question; load DA-21 for abstract category semantics.
 
-- TERM: Route
-  KIND: wire model / routing target descriptor
-  SOURCE_SECTION_HINT: 03.2, 04.12
-  AUTHORITY_OWNER: IS-01 for envelope shape; DA-16/DA-21 for surrounding authority and routing semantics
+- TERM: message type values
+  KIND: concrete RPC vocabulary
+  SOURCE_SECTION_HINT: 04.3
+  AUTHORITY_OWNER: IS-01
   CONFIDENCE: explicit
-  ALIASES: route field, capability route, object route
-  RELATED_TERMS: lane, capability, object, request, emit
-  LOAD_WHEN_SEEN: Load IS-01 for route field requirements; load DA-16 or DA-21 for permission and routing semantics.
+  ALIASES: concrete RPC message types
+  RELATED_TERMS: hello, welcome, clientReady, heartbeat, ack, request, emit, reply, subscribe, stateUpdate, unsubscribe, cancel, error
+  LOAD_WHEN_SEEN: Load IS-01 when exact wire message type strings are needed.
 
 - TERM: isComplete
   KIND: envelope completion marker
@@ -117,6 +118,33 @@ HIGH_VALUE_TERMS
   RELATED_TERMS: chunkNo, isComplete, payload, streaming
   LOAD_WHEN_SEEN: Load IS-01 to distinguish series finality from envelope completeness.
 
+- TERM: stateUpdate
+  KIND: concrete RPC message type
+  SOURCE_SECTION_HINT: 04.3, 06.5, 07.4-07.5
+  AUTHORITY_OWNER: IS-01 for message type and envelope expectations; DA-21 for abstract update flow; DA-04 for authoritative committed state
+  CONFIDENCE: explicit
+  ALIASES: state update message, update message
+  RELATED_TERMS: payload, subscription delivery, committed state, View update
+  LOAD_WHEN_SEEN: Load IS-01 when the concrete message type is involved; do not infer committed-state mutation from the name.
+
+- TERM: budgetMs
+  KIND: RPC envelope field
+  SOURCE_SECTION_HINT: 04.8
+  AUTHORITY_OWNER: IS-01 for field shape; DA-21 and DA-19 for timeout interpretation
+  CONFIDENCE: explicit
+  ALIASES: operation budget, RPC operation budget
+  RELATED_TERMS: Job timeout, transport timeout, request, budget
+  LOAD_WHEN_SEEN: Load IS-01 for the field; load DA-21 and DA-19 if someone asks whether it creates Job timeout semantics.
+
+- TERM: origin
+  KIND: opaque correlation metadata field
+  SOURCE_SECTION_HINT: 04.17, 04.17.1
+  AUTHORITY_OWNER: IS-01 for carriage; DA-03/DA-20/DA-22/DA-23/DA-19 for semantic meaning
+  CONFIDENCE: explicit
+  ALIASES: correlation metadata, runtime correlation metadata, trace metadata carrier
+  RELATED_TERMS: traceId, spanId, appInstanceId, viewId, adapter kind, jobId
+  LOAD_WHEN_SEEN: Load IS-01 when origin metadata is carried by RPC envelopes; load owners for semantic interpretation.
+
 - TERM: lane
   KIND: delivery-lane field
   SOURCE_SECTION_HINT: 04.7
@@ -134,33 +162,6 @@ HIGH_VALUE_TERMS
   ALIASES: sequence number, lane sequence
   RELATED_TERMS: lane, flow control, ordering
   LOAD_WHEN_SEEN: Load IS-01 when seq is discussed as an envelope field or confused with state revision.
-
-- TERM: correlatesTo
-  KIND: message correlation field
-  SOURCE_SECTION_HINT: 04.4, 05, 06
-  AUTHORITY_OWNER: IS-01
-  CONFIDENCE: explicit
-  ALIASES: parent message correlation, reply correlation
-  RELATED_TERMS: id, ack, reply, cancel, error
-  LOAD_WHEN_SEEN: Load IS-01 for reply/ack/cancel/error correlation through parent message id.
-
-- TERM: idempotencyKey
-  KIND: deduplication field
-  SOURCE_SECTION_HINT: 04.11, 05
-  AUTHORITY_OWNER: IS-01 for envelope field and helper default; higher documents for operation semantics
-  CONFIDENCE: explicit
-  ALIASES: dedupe key, retry key
-  RELATED_TERMS: request, emit, cached reply, message id
-  LOAD_WHEN_SEEN: Load IS-01 for idempotencyKey field behavior and helper defaults.
-
-- TERM: origin
-  KIND: opaque correlation metadata field
-  SOURCE_SECTION_HINT: 04.17, 04.17.1
-  AUTHORITY_OWNER: IS-01 for carriage; DA-03/DA-20/DA-22/DA-23/DA-19 for semantic meaning
-  CONFIDENCE: explicit
-  ALIASES: correlation metadata, runtime correlation metadata, trace metadata carrier
-  RELATED_TERMS: traceId, spanId, appInstanceId, viewId, adapter kind, jobId
-  LOAD_WHEN_SEEN: Load IS-01 when origin metadata is carried by RPC envelopes; load owners for semantic interpretation.
 
 - TERM: job
   KIND: Job metadata field
@@ -180,51 +181,6 @@ HIGH_VALUE_TERMS
   RELATED_TERMS: args, reply, error, stateUpdate
   LOAD_WHEN_SEEN: Load IS-01 for message-type payload expectations.
 
-- TERM: helper constructors
-  KIND: construction discipline
-  SOURCE_SECTION_HINT: 05
-  AUTHORITY_OWNER: IS-01
-  CONFIDENCE: explicit
-  ALIASES: RPC helpers, RpcClient helpers, backend helper functions
-  RELATED_TERMS: RPCMessage, isComplete, Gen, lane, idempotencyKey, origin
-  LOAD_WHEN_SEEN: Load IS-01 when constructing RPC envelopes or avoiding hand-built RPC messages.
-
-- TERM: canonical serializer field order
-  KIND: serialization constraint
-  SOURCE_SECTION_HINT: 04.3-04.6, 05.3, 05.8, 07.1-07.2
-  AUTHORITY_OWNER: IS-01
-  CONFIDENCE: explicit
-  ALIASES: serializer field order, envelope field order, isComplete tail order
-  RELATED_TERMS: isComplete, safeJsonDumps, RPCMessage, envelope tail sentinel
-  LOAD_WHEN_SEEN: Load IS-01 when field order matters for serialized RPC envelope completion checking.
-
-- TERM: safeJsonDumps
-  KIND: serialization helper example
-  SOURCE_SECTION_HINT: 07.1
-  AUTHORITY_OWNER: IS-01 for expected serialization flow reference
-  CONFIDENCE: explicit
-  ALIASES: JSON serialization helper
-  RELATED_TERMS: isComplete, canonical serializer field order, RPC logging-decision engine
-  LOAD_WHEN_SEEN: Load IS-01 for RPC send serialization flow and completion-marker verification.
-
-- TERM: ackOf
-  KIND: reserved acknowledgement field
-  SOURCE_SECTION_HINT: 04.9
-  AUTHORITY_OWNER: IS-01
-  CONFIDENCE: explicit
-  ALIASES: acknowledgement metadata
-  RELATED_TERMS: ack, correlatesTo, receipt
-  LOAD_WHEN_SEEN: Load IS-01 when ackOf or acknowledgement metadata field status is questioned.
-
-- TERM: chunkNo
-  KIND: ordered-series chunk field
-  SOURCE_SECTION_HINT: 04.18
-  AUTHORITY_OWNER: IS-01
-  CONFIDENCE: explicit
-  ALIASES: chunk index, stream chunk number
-  RELATED_TERMS: final, payload, streaming
-  LOAD_WHEN_SEEN: Load IS-01 for chunk numbering as an RPC envelope field.
-
 CONFUSABLE_TERMS
 ----------------
 - TERM_A: isComplete
@@ -232,8 +188,16 @@ CONFUSABLE_TERMS
   DISTINCTION: isComplete marks intentional completion of one top-level RPC envelope; final marks the final item in a streamed or ordered message series.
 
 - TERM_A: isComplete
-  TERM_B: semantic correctness
-  DISTINCTION: isComplete proves neither correctness nor authority; it only marks complete envelope construction after parsing and validation.
+  TERM_B: operation completion / work completion
+  DISTINCTION: isComplete proves neither correctness nor operation completion; it only marks complete envelope construction after parsing and validation.
+
+- TERM_A: stateUpdate
+  TERM_B: committed state mutation
+  DISTINCTION: stateUpdate is a concrete RPC message type carrying update material; it does not by itself define authoritative committed-state mutation.
+
+- TERM_A: budgetMs
+  TERM_B: Job timeout
+  DISTINCTION: budgetMs is an envelope field; it does not define Job timeout unless a higher-level operation maps it to Job semantics.
 
 - TERM_A: ack / acknowledgement metadata
   TERM_B: Job success
@@ -251,59 +215,27 @@ CONFUSABLE_TERMS
   TERM_B: committed-state revision
   DISTINCTION: seq orders messages within a lane; it is not a committed-state revision.
 
-- TERM_A: correlatesTo
-  TERM_B: jobId / adapter identity
-  DISTINCTION: correlatesTo links messages to parent messages; Job and adapter identities are separate metadata concepts.
-
-- TERM_A: valid serialization
-  TERM_B: successful work
-  DISTINCTION: valid serialization only means the envelope can be interpreted; it does not mean the operation succeeded.
-
-- TERM_A: payload validity
-  TERM_B: payload authority
-  DISTINCTION: payload content does not gain authority merely because the envelope is valid.
-
 RELATION_HINTS
 --------------
-- SOURCE: IS-01
-  RELATION: constrained-by
-  TARGET: CMR-01, CMR-02, CMR-03, CMR-04, CMR-05
-  NOTE: Core meta-rules define document interpretation, format, indexing, and retrieval rules.
-
 - SOURCE: IS-01
   RELATION: constrained-by
   TARGET: DA-21
   NOTE: DA-21 owns abstract RPC, channel, transport, and message-flow semantics.
 
-- SOURCE: IS-01
-  RELATION: carries-correlation-for
-  TARGET: DA-03
-  NOTE: IS-01 carries trace and span identifiers; DA-03 owns trace semantics.
+- SOURCE: IS-01 stateUpdate
+  RELATION: not-authority-for
+  TARGET: DA-04 committed authoritative state mutation
+  NOTE: The concrete stateUpdate message type does not by itself prove committed-state mutation.
 
-- SOURCE: IS-01
+- SOURCE: IS-01 origin metadata
   RELATION: carries-correlation-for
-  TARGET: DA-20
-  NOTE: IS-01 may carry appInstanceId; DA-20 owns AppInstance lifecycle and identity semantics.
-
-- SOURCE: IS-01
-  RELATION: carries-correlation-for
-  TARGET: DA-22
-  NOTE: IS-01 may carry viewId and frontend client identity; DA-22 owns View/frontend semantics.
-
-- SOURCE: IS-01
-  RELATION: carries-correlation-for
-  TARGET: DA-23
-  NOTE: IS-01 may carry adapter metadata; DA-23 owns execution adapter boundary semantics.
+  TARGET: DA-03 trace semantics
+  NOTE: IS-01 may carry trace and span identifiers in RPC envelopes; DA-03 owns their trace meaning.
 
 - SOURCE: IS-01
   RELATION: carries-metadata-for
   TARGET: DA-19
   NOTE: IS-01 carries Job metadata; DA-19 owns lifecycle, terminal outcomes, cancellation, timeout, and late completion.
-
-- SOURCE: IS-01
-  RELATION: constrained-by
-  TARGET: DA-16, DA-17
-  NOTE: Capability permission, policy, and decision-handling semantics remain outside IS-01.
 
 - SOURCE: IS-01
   RELATION: code-location
@@ -318,43 +250,49 @@ RELATION_HINTS
 LOAD_WITH
 ---------
 - DA-21 when interpreting RPC channels, transport, stale traffic, message flow, or disconnect behavior.
+- DA-04 when RPC payloads, stateUpdate messages, or envelope-carried data are being confused with committed authoritative state.
 - DA-16 when route, capability, permission, or authorization questions appear.
 - DA-17 when user decision points or policy handling are involved.
 - DA-19 when job, jobId, cancellation, timeout, progress, or outcome semantics appear.
-- DA-20 when appInstanceId or AppInstance lifecycle identity appears.
-- DA-22 when View, frontend runtime, or client identity appears.
-- DA-23 when adapter kind, adapter instance identity, adapter-facing routes, or execution boundary semantics appear.
-- DA-03 when traceId, spanId, trace correlation, or tracing semantics appear.
+- DA-20, DA-22, DA-23, and DA-03 when origin carries identifiers whose semantic ownership is elsewhere.
 - IS-02 when WebSocket RPC flow or WebSocket lifecycle behavior is the focus.
 
 DO_NOT_AUTO_LOAD
 ----------------
-- Do not auto-load IS-01 for general RPC architecture unless a concrete message schema, field, or envelope behavior is involved.
-- Do not auto-load IS-01 merely because a task mentions permissions; prefer DA-16 and DA-17 first.
-- Do not auto-load IS-01 merely because a task mentions Jobs; prefer DA-19 unless RPC-carried Job metadata is in scope.
-- Do not auto-load IS-01 merely because a task mentions AppInstance, View, adapter, or trace semantics without envelope-field questions.
-- Do not treat IS-01 as authority for success, lifecycle, permission, activation, or committed state mutation.
+- Do not auto-load IS-01 for general RPC architecture unless a concrete message schema, field, message type, or envelope behavior is involved.
+- Do not auto-load IS-01 merely because a task mentions permissions, Jobs, AppInstance, View, adapter, or trace semantics without envelope-field questions.
+- Do not treat IS-01 as authority for success, lifecycle, permission, activation, committed state mutation, or payload authority.
+- Do not infer committed-state mutation from stateUpdate.
 
 RETRIEVAL_HINTS
 ---------------
-- Query IS-01 for: RPCMessage, Gen, Route, isComplete, completion marker, envelope tail sentinel, canonical RPC envelope, RPC message fields, lane, seq, correlatesTo, idempotencyKey, origin metadata, chunkNo, final, payload.
+- Query IS-01 for: RPCMessage, Gen, Route, type, message type, isComplete, completion marker, envelope tail sentinel, lane, seq, correlatesTo, idempotencyKey, origin metadata, chunkNo, final, payload, budgetMs, stateUpdate.
+- Query IS-01 for concrete message type values: hello, welcome, clientReady, heartbeat, ack, request, emit, reply, subscribe, stateUpdate, unsubscribe, cancel, error.
 - Query IS-01 for helper-constructor behavior around required fields, copying correlation metadata, setting isComplete, and avoiding hand-built envelopes.
 - Query IS-01 when diagnosing malformed or incomplete RPC messages before routing.
-- Query IS-01 when distinguishing envelope completion from stream finality or Job success.
-- Query IS-01 with DA-21 for session generation, lane flow, or transport continuity questions.
-- Query IS-01 with DA-19 for RPC-carried Job metadata and whether a message means Job success.
-- Query IS-01 with DA-03/DA-20/DA-22/DA-23 when origin carries trace/runtime/adapter identifiers but semantic ownership is elsewhere.
+- Query IS-01 when distinguishing envelope completion from stream finality, operation completion, committed-state mutation, or Job success.
+- Query IS-01 with DA-21 for session generation, lane flow, update delivery, or transport continuity questions.
+- Query IS-01 with DA-04 and DA-21 for "Does stateUpdate mean committed state changed?"
 
 SOURCE_DOCUMENT_IMPROVEMENT_CANDIDATES
 --------------------------------------
-- ISSUE: none identified during extraction refresh
-  SOURCE_LOCATION_HINT: -
-  PROBLEM_TYPE: -
-  RISK: -
-  RECOMMENDED_FIX_TARGET: -
-  SUGGESTED_SOURCE_FIX: -
-  SUGGESTED_ASI_FIX: -
-  CANDIDATE_LEDGER_ID: -
+- ISSUE: RPC stateUpdate or abstract state/update delivery can be mistaken for committed authoritative state mutation.
+  SOURCE_LOCATION_HINT: IS-01 sections 04.3, 06, and 07; DA-21 sections 04 and 07.
+  PROBLEM_TYPE: missing boundary; term confusion; cross-document mismatch
+  RISK: A fresh assistant or implementer may infer committed-state mutation from an RPC message name or update delivery flow.
+  RECOMMENDED_FIX_TARGET: both ASI and source document
+  SUGGESTED_SOURCE_FIX: Add an explicit boundary sentence to DA-21 and/or IS-01 stating that state/update delivery and stateUpdate messages do not by themselves define committed authoritative state mutation, which is owned by DA-04.
+  SUGGESTED_ASI_FIX: Add shared trap guidance to DA-04, DA-21, IS-01, and final ASI boundary/retrieval indexes.
+  CANDIDATE_LEDGER_ID: B1-SRC-001
+
+- ISSUE: isComplete can be mistaken for operation, request, or work completion.
+  SOURCE_LOCATION_HINT: IS-01 section 04.21; DA-21 request acceptance and final outcome sections.
+  PROBLEM_TYPE: term confusion
+  RISK: A fresh assistant or implementer may read envelope completion as operation success despite existing boundary text.
+  RECOMMENDED_FIX_TARGET: ASI only
+  SUGGESTED_SOURCE_FIX: None unless later testing shows the source remains easy to misread.
+  SUGGESTED_ASI_FIX: Keep explicit trap guidance in IS-01, DA-21, and final ASI boundary/retrieval indexes.
+  CANDIDATE_LEDGER_ID: B1-SRC-004
 
 OPEN_EXTRACTION_QUESTIONS
 -------------------------
