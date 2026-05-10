@@ -29,6 +29,7 @@ OWNS: Turnix identity, CT-D, reproducibility/reversibility/explicit uncertainty,
 DOES_NOT_OWN: concrete pack formats, RPC schema, transport behavior, storage layout, persistence formats, UI behavior, adapter mechanics, RuntimeHost mechanics
 LOAD_WHEN: CT-D, project invariants, platform truth, local-first, silent fallback, best-guess behavior, no guarantees outside orchestration, implementation proximity versus authority
 LOAD_WITH: DA-02 for platform core boundaries; DA-03/DA-04 for trace/state authority; DA-21/IS-01 for RPC; DA-28 for RuntimeHost; concrete DA/IS documents for details
+TRAPS: runtime authority ordering is not a call chain, lifecycle sequence, or data-flow diagram; open questions are not accepted permissions
 
 DOC_ID: DA-02
 FILE: docs/design/DA-02_PLATFORM_CORE_CONTRACT_BOUNDARIES_AND_IMPLEMENTATION_INDEPENDENCE.txt
@@ -38,7 +39,8 @@ DOMAINS: platform identity; platform core; implementation independence; contract
 OWNS: platform truth versus implementation realization, contract-boundary semantics, first-party modularity limits, same-language/direct-call boundary preservation, interoperability-envelope role, implementation-replacement criteria
 DOES_NOT_OWN: concrete RPC schemas, WebSocket flow, frontend rendering, execution adapter protocols, pack loading/activation/dependencies/visibility, RuntimeHost commands/workspace mechanics
 LOAD_WHEN: platform truth, implementation independence, implementation replacement, contract boundary, direct call, same host language, RuntimeHost boundary position, interoperability envelope
-LOAD_WITH: DA-01 for foundational ordering; DA-21/IS-01 for concrete RPC; DA-23 for execution adapters; DA-28 and IS-03..IS-06 for RuntimeHost; DA-22 for frontend runtime
+LOAD_WITH: DA-01 for foundational ordering; DA-21/IS-01 for concrete RPC; DA-04 when direct calls/boundary proximity involve committed-state mutation; DA-23 for execution adapters; DA-28 and IS-03..IS-06 for RuntimeHost; DA-22 for frontend runtime
+TRAPS: same language/process/direct call does not erase a boundary; interoperability-envelope routing chain is DA-02 -> DA-21 -> IS-01 when moving from architectural role to abstract RPC to concrete fields
 
 DOC_ID: DA-03
 FILE: docs/design/DA-03_TRACING_DIAGNOSTICS_AND_OBSERVABILITY.txt
@@ -48,8 +50,8 @@ DOMAINS: tracing substrate; trace evidence; trace event structure; trace DAG cau
 OWNS: trace evidence mechanics, trace event fields, explicit causal DAG links, span/root/span-stratification mechanics, trace reason/attribute field mechanics, trace loss/incompleteness representation, trace correlation for surfaced errors
 DOES_NOT_OWN: committed state, transactions, rollback, restoration, replay, domain-specific trace obligations, concrete serialization formats, ODA-B tooling severity, optional developer tooling UX
 LOAD_WHEN: trace evidence, what happened/why, trace DAG, parentEventIds, trace span, reason field, attributes, trace loss, TraceEvidenceDeclaredIncomplete, trace correlation, timestamp-versus-causality
-LOAD_WITH: DA-04 when trace evidence is compared with committed state; ODA-B for diagnostic tooling presentation; IS-08/IS-07 for trace serialization/schema; subject-owning DA/IS documents for domain trace obligations
-TRAPS: trace evidence is not committed state; absence of failure evidence is not proof of success; timestamp order is not causality; ODA-B trace filters are not canonical trace-domain authority
+LOAD_WITH: DA-04 when trace evidence is compared with committed state; ODA-B for diagnostic tooling presentation; IS-01 when RPC origin metadata carries trace/span identifiers; IS-08/IS-07 for trace serialization/schema; subject-owning DA/IS documents for domain trace obligations
+TRAPS: trace evidence is not committed state; absence of failure evidence is not proof of success; timestamp order is not causality; ODA-B trace filters are not canonical trace-domain authority; DA-03 trace event level is not automatically ODA-B ERROR/WARNING/INFO
 
 DOC_ID: DA-04
 FILE: docs/design/DA-04_MEMORY_STATE_AND_AUTHORITATIVE_COMMIT_MODEL.txt
@@ -59,8 +61,8 @@ DOMAINS: runtime memory versus committed state; authoritative material; transact
 OWNS: committed-state authority, explicit commit boundary, non-authoritative material distinction, transaction atomicity, nested transaction propagation, revisionId/baseRevisionId/absent sentinel, committed-state equality, restoration boundary, migration commit behavior
 DOES_NOT_OWN: trace schema/storage, payload identity, configuration schemas, concrete file I/O, window finalization, replay/audit workflows, RPC schema/update delivery, Job/AppInstance/adapter/RuntimeHost lifecycle
 LOAD_WHEN: committed state, authoritative state, memory versus state, transaction, commit, abort, conflict detection, baseRevisionId, revisionId, persistence is not truth, restoration, static-data mutation intent, tooling-initiated mutation
-LOAD_WITH: DA-03 for mutation trace evidence; DA-21/IS-01 for stateUpdate/update delivery; DA-07 for persistence I/O; DA-08/DA-25/DA-26 for windows/exports/audit/replay; DA-24 for Orchestration Unit mutation authority
-TRAPS: runtime memory is not authoritative because visible/resident; persistence protects truth but does not define it; stateUpdate/update delivery is not committed mutation; child transaction commit does not directly mutate committed layers while enclosed
+LOAD_WITH: DA-03 for mutation trace evidence; DA-21/IS-01 for stateUpdate/update delivery; DA-07 for persistence I/O; DA-08/DA-25/DA-26 for windows/exports/audit/replay; DA-24 for Orchestration Unit mutation authority; ODA-B/DA-22 when diagnostics or frontend surfaces present local/view state as authoritative
+TRAPS: runtime memory is not authoritative because visible/resident; persistence protects truth but does not define it; stateUpdate/update delivery is not committed mutation; child transaction commit does not directly mutate committed layers while enclosed; committed-state equality ignores non-authoritative evidence differences
 
 DOC_ID: DA-21
 FILE: docs/design/DA-21_RPC_CHANNELS_TRANSPORTS_AND_MESSAGE_FLOW.txt
@@ -71,7 +73,7 @@ OWNS: RPC as logical communication boundary, abstract transport/channel separati
 DOES_NOT_OWN: concrete JSON envelope fields, WebSocket flow, trace substrate, permissions, policy, Job lifecycle/outcomes, AppInstance lifecycle, adapter lifecycle/outcomes, RuntimeHost operation/lifecycle outcomes, committed state mutation
 LOAD_WHEN: RPC, RPCChannel, transport, ack, acknowledgement, request acceptance, request success distinction, subscription/update flow, cancellation message, transport timeout, transport disconnect, message flow correlation
 LOAD_WITH: IS-01 for concrete envelope fields and type values; IS-02 for concrete WebSocket flow; DA-04 for committed state questions; DA-19 for Job lifecycle; DA-23 for adapters; DA-28 for RuntimeHost operations; DA-16/DA-17 for permissions/policy
-TRAPS: ack is not success; request acceptance is not final success; transport disconnect is not Job cancellation; state/update delivery is not committed mutation; DA-21 correlation does not own lifecycle outcomes
+TRAPS: ack is not success; request acceptance is not final success; message delivery is not handler execution; transport disconnect is not Job cancellation; state/update delivery is not committed mutation; DA-21 correlation does not own lifecycle outcomes; transport timeout is not Job timeout
 
 DOC_ID: IS-01
 FILE: docs/design/IS-01_RPC_MESSAGE_SCHEMA.txt
@@ -81,8 +83,8 @@ DOMAINS: concrete RPC wire-envelope schema; RPCMessage; Gen; Route; envelope fie
 OWNS: concrete RPCMessage envelope shape, Gen/Route/RPCMessage wire models, top-level envelope fields, concrete type values, helper-constructor expectations, isComplete as envelope tail sentinel, schema-level malformed/incomplete handling, concrete metadata carriage
 DOES_NOT_OWN: abstract RPC/message-flow semantics, committed state mutation, permissions/policy, Job lifecycle/outcomes, AppInstance lifecycle, View/frontend semantics, adapter boundary semantics, trace semantics, WebSocket lifecycle behavior
 LOAD_WHEN: RPCMessage, Gen, Route, type, message type values, isComplete, final, lane, seq, correlatesTo, idempotencyKey, origin, budgetMs, payload, stateUpdate, helper constructors, malformed/incomplete envelopes
-LOAD_WITH: DA-21 for abstract RPC flow; DA-04 for stateUpdate/committed-state trap; DA-19 for Job metadata/outcome questions; DA-03 for trace/span metadata meaning; IS-02 for WebSocket flow
-TRAPS: isComplete is envelope completion only; final is series finality not envelope completion; stateUpdate is not committed mutation; ack/job metadata/final/valid reply do not prove Job success
+LOAD_WITH: DA-21 for abstract RPC flow; DA-04 for stateUpdate/committed-state trap; DA-19 for Job metadata/outcome questions; DA-03 for trace/span metadata meaning; DA-20/DA-22/DA-23 for AppInstance/View/adapter metadata meaning; IS-02 for WebSocket flow
+TRAPS: isComplete is envelope completion only; final is series finality not envelope completion; stateUpdate is not committed mutation; ack/job metadata/final/valid reply do not prove Job success; route/lane/origin/seq do not grant authority or state revision meaning
 MESSAGE_TYPES: hello; welcome; clientReady; heartbeat; ack; request; emit; reply; subscribe; stateUpdate; unsubscribe; cancel; error
 FIELDS: id; type; gen; correlatesTo; route; op; lane; budgetMs; ackOf; job; idempotencyKey; seq; origin; chunkNo; final; payload; isComplete
 
@@ -95,7 +97,7 @@ OWNS: optional tooling expectations for exposing/reporting evidence, developer-f
 DOES_NOT_OWN: trace schemas/reasons/spans/retention/loss evidence, canonical trace-domain taxonomy, committed state, mutation authority, window/replay/audit semantics, pack resolution semantics, activation lifecycle, capability authority, debugger semantics, RPC schemas, UI/View lifecycle, adapter authority, runtime correctness
 LOAD_WHEN: diagnostic tooling, observability UI, trace viewer UI, report presentation, missing evidence, evidence of absence, why-not-chosen view, capability reports, activation diagnostics, runtime safety warnings, development/production diagnostic presentation, ERROR/WARNING/INFO tooling severity
 LOAD_WITH: DA-03 for trace model/evidence mechanics; IS-01 when displaying concrete RPC fields; DA-11 for resolver explanations; DA-14 for activation semantics; DA-16 for capability authority; DA-04 for authoritative state in snapshots; DA-21 for RPC evidence; DA-26 for replay/audit workflows
-TRAPS: tooling presentation does not become authority; ODA-B trace-domain filters are presentation only; ODA-B ERROR/WARNING/INFO is not automatically DA-03 trace event level; missing evidence is not evidence of absence
+TRAPS: tooling presentation does not become authority; ODA-B trace-domain filters are presentation only; ODA-B ERROR/WARNING/INFO is not automatically DA-03 trace event level; missing evidence is not evidence of absence; replay/post-mortem direction is not DA-26 replay semantics
 
 Cross-document trap routing
 ---------------------------
@@ -111,6 +113,11 @@ QUERY: Does isComplete mean request/work/Job completion?
 LOAD: IS-01; DA-21
 OPTIONAL_LOAD: DA-19 if Job lifecycle outcome is the actual question
 NOTE: isComplete is a concrete envelope completion marker only.
+
+QUERY: Does final mean the operation succeeded?
+LOAD: IS-01
+OPTIONAL_LOAD: DA-21 for message flow; DA-19 for Job outcome; DA-23 for adapter outcome; DA-28 for RuntimeHost outcome
+NOTE: final is a concrete ordered-series marker, not lifecycle success.
 
 QUERY: Does ack mean success?
 LOAD: DA-21; IS-01
@@ -144,6 +151,11 @@ LOAD: DA-04
 OPTIONAL_LOAD: DA-16, DA-18, DA-23, DA-24, or DA-22 depending on the initiating surface
 NOTE: tooling or adapter origin does not bypass transaction and commit boundaries.
 
+QUERY: Does diagnostics/tooling output define truth?
+LOAD: ODA-B
+OPTIONAL_LOAD: DA-03 for trace evidence; DA-04 for committed state
+NOTE: tooling consumes and presents evidence; it does not become authority.
+
 Current limitations
 -------------------
 This first-pass domain index covers Batch 1 only.
@@ -153,13 +165,13 @@ audit workflows, UI runtime, adapters, RuntimeHost, or remaining implementation
 specifications, use this file only as a partial routing aid and load the
 canonical owner document when known.
 
-Known workflow warning
-----------------------
-The current Batch 1 audit report identified an invalid confidence label in
-ODA-B.extract.txt. This index preserves accepted routing requirements and
-intended boundary traps, but the workflow ledger should not mark Batch 1 fully
-INDEXED until that extraction record is corrected or the supervisor explicitly
-accepts indexing despite the warning.
+Current generation note
+-----------------------
+This ASI update uses Batch 1 extraction records, accepted review requirements,
+and the Batch 1 cross-document review guidance.
+
+The generated-index ledger should mark this file as needing a fresh ASI-only
+retest after this update.
 
 End
 ---
