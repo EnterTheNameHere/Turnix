@@ -13,7 +13,7 @@ DOC_GIT: 59104b5
 FETCH_REF: CHATGPT_EXTRACT_INDEX
 FETCH_SHA: 00f31c5f489042a5b18db7c8c085d950338f2d47
 RETRIEVAL_STATUS: COMPLETE
-EXTRACTION_REV: 1
+EXTRACTION_REV: 2
 
 AUTHORITY WARNING
 -----------------
@@ -32,8 +32,11 @@ PRIMARY_DOMAINS
 - Transport-neutral channel boundaries.
 - Logical request, reply, emit, subscribe, cancel, error, update, and
   acknowledgement flow.
-- Distinction between message delivery, request acceptance, Job lifecycle,
-  adapter lifecycle, RuntimeHost operation lifecycle, and final work outcome.
+- Distinction between message delivery, message acknowledgement, request
+  acceptance, handler execution, Job creation, Job lifecycle, adapter lifecycle,
+  RuntimeHost operation lifecycle, and final work outcome.
+- Routing boundaries for object, capability, adapter-facing, control, and
+  subscription messages.
 - Transport timeout, disconnect, and cancellation semantics at the RPC layer.
 - RPC correlation and trace-observability obligations.
 
@@ -69,13 +72,15 @@ NON_OWNERSHIP_HINTS
 SEMANTIC_ANCHORS
 ----------------
 - RPC is a logical boundary, not WebSocket, JSON, a transport, capability
-  authority, adapter authority, or Job lifecycle.
+  authority, adapter authority, RuntimeHost authority, or Job lifecycle.
 - Transport carries RPC messages but does not define RPC semantics.
 - RPCChannel is the transport-neutral surface consumed by the RPC host or
   equivalent runtime owner.
+- Message delivery, acknowledgement, request acceptance, handler execution, Job
+  creation, and Job terminal outcome are distinct events.
 - Acknowledgement means receipt or transport/RPC handling only, not request
-  success, capability execution, adapter execution, Job creation, or Job
-  success.
+  success, capability execution, adapter execution, RuntimeHost operation
+  completion, Job creation, or Job success.
 - Request acceptance is distinct from final operation success unless an
   operation contract explicitly defines acceptance as the result.
 - Routing identifies a logical target but does not grant permission, activate
@@ -141,9 +146,20 @@ HIGH_VALUE_TERMS
   CONFIDENCE: explicit
   ALIASES: ack, message acknowledgement, receipt acknowledgement
   RELATED_TERMS: request success, Job success, capability execution, adapter
-    execution, message delivery
+    execution, RuntimeHost operation completion, message delivery
   LOAD_WHEN_SEEN: Load DA-21 when asking whether ack means success, accepted
-    work, Job creation, or completed work.
+    work, Job creation, RuntimeHost operation completion, or completed work.
+
+- TERM: message delivery
+  KIND: message-flow state
+  SOURCE_SECTION_HINT: 02, 04
+  AUTHORITY_OWNER: DA-21
+  CONFIDENCE: explicit
+  ALIASES: delivery, received message, transported message
+  RELATED_TERMS: acknowledgement, request acceptance, handler execution, Job
+    creation, final outcome
+  LOAD_WHEN_SEEN: Load DA-21 when asking whether delivery or receipt implies
+    acceptance, execution, or work completion.
 
 - TERM: request acceptance
   KIND: message-flow state
@@ -155,6 +171,17 @@ HIGH_VALUE_TERMS
     adapter-mediated work, RuntimeHost operation, rejected-before-Job outcome
   LOAD_WHEN_SEEN: Load DA-21 when asking what it means for an RPC request to be
     accepted and how that differs from final success.
+
+- TERM: rejected-before-Job outcome
+  KIND: message-flow state
+  SOURCE_SECTION_HINT: 05, 06
+  AUTHORITY_OWNER: DA-21
+  CONFIDENCE: explicit
+  ALIASES: pre-Job rejection, dispatch rejection, routing failure before Job
+  RELATED_TERMS: structured error, routing failure, Job terminal outcome,
+    adapter execution failure, RuntimeHost operation completion
+  LOAD_WHEN_SEEN: Load DA-21 when asking whether failed RPC dispatch or routing
+    creates Job, adapter, or RuntimeHost lifecycle outcomes.
 
 - TERM: Job-backed work
   KIND: cross-domain relation
@@ -308,6 +335,11 @@ CONFUSABLE_TERMS
   DISTINCTION: Acknowledgement does not imply Job creation or Job terminal
     success.
 
+- TERM_A: acknowledgement
+  TERM_B: RuntimeHost operation completion
+  DISTINCTION: Acknowledgement does not imply RuntimeHost command acceptance or
+    operation completion.
+
 - TERM_A: request acceptance
   TERM_B: final operation success
   DISTINCTION: Acceptance means the request crossed the dispatch boundary and
@@ -323,6 +355,11 @@ CONFUSABLE_TERMS
   TERM_B: Job cancellation
   DISTINCTION: Disconnect does not automatically cancel, supersede, discard, or
     fail Job-backed work.
+
+- TERM_A: transport disconnect
+  TERM_B: RuntimeHost failure
+  DISTINCTION: Disconnect does not automatically stop, fail, or close a
+    RuntimeHost; RuntimeHost semantics belong to DA-28.
 
 - TERM_A: unsubscribe
   TERM_B: cancellation of underlying work
@@ -432,10 +469,10 @@ RETRIEVAL_HINTS
 ---------------
 - Query DA-21 for: RPC, channel, RPCChannel, transport, transport adapter,
   WebSocket is not RPC, JSON is not RPC, acknowledgement, ack, request
-  acceptance, request success, Job-backed request, accepted work, routing,
-  dispatch, subscribe, unsubscribe, update flow, cancellation message,
-  transport timeout, transport disconnect, channel disconnect, correlation,
-  message flow, RPC trace evidence.
+  acceptance, request success, message delivery, Job-backed request, accepted
+  work, rejected-before-Job, routing, dispatch, subscribe, unsubscribe, update
+  flow, cancellation message, transport timeout, transport disconnect, channel
+  disconnect, correlation, message flow, RPC trace evidence.
 - For "Does ack mean success?" load DA-21 first; add DA-19 only if the question
   specifically asks about Job success or terminal outcome.
 - For "What should happen to a Job on disconnect?" load DA-21 plus DA-17 and
@@ -453,6 +490,13 @@ RETRIEVAL_HINTS
   Job lifecycle details are needed.
 - For "Can a transport adapter decide authority?" load DA-21; add DA-23 only if
   execution adapter semantics are also being discussed.
+- For "Does RPC control a RuntimeHost?" load DA-21 for the RPC boundary and
+  DA-28 for RuntimeHost command-surface, entry-surface, workspace, LAN, and
+  lifecycle authority.
+
+SOURCE_DOCUMENT_IMPROVEMENT_CANDIDATES
+--------------------------------------
+-
 
 OPEN_EXTRACTION_QUESTIONS
 -------------------------
