@@ -43,6 +43,7 @@ Before extraction work, load and classify as COMPLETE:
 - docs/design/ai/indexes/work/ASI-WORKFLOW_STATUS_LEDGER.txt
 - docs/design/ai/indexes/work/ASI-WORKER_THREAD_PROMPT.txt
 - docs/design/ai/indexes/work/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
+- docs/design/ai/indexes/work/ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt
 
 If any required file cannot be classified COMPLETE, stop and report the
 failure.
@@ -75,11 +76,12 @@ For each assigned DOC_ID:
 3. Classify the source retrieval.
 4. If source retrieval is not COMPLETE, stop and report.
 5. Load existing extraction record if present.
-6. Replace the entire extraction record with a freshly assembled record.
-7. Record source-document improvement candidates if source ambiguity or health
+6. Load and apply relevant accepted review requirements.
+7. Replace the entire extraction record with a freshly assembled record.
+8. Record source-document improvement candidates if source ambiguity or health
    issues are found.
-8. Update ASI-WORKFLOW_STATUS_LEDGER.txt.
-9. Report what was created or changed.
+9. Update ASI-WORKFLOW_STATUS_LEDGER.txt.
+10. Report what was created or changed.
 
 Extraction output path
 ----------------------
@@ -102,8 +104,19 @@ When rerunning extraction for a document, replace the whole extraction record.
 Do not patch small fragments into the old record unless the assignment
 explicitly asks for a targeted edit.
 
+The previous extraction record is reference material only. It is not the source
+of truth for accepted review findings.
+
+Accepted review findings live in:
+
+docs/design/ai/indexes/work/ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt
+
+When accepted review notes apply to an assigned DOC_ID, preserve those
+requirements in the regenerated output unless the assignment explicitly
+supersedes them.
+
 This keeps extraction output aligned with the current workflow and avoids stale
-wording layers.
+wording layers without losing accepted review improvements.
 
 Extraction scope
 ----------------
@@ -168,6 +181,22 @@ Use explicit only when the source directly defines or names the item.
 Use assistant-assigned for semantic aliases created by the ASI project.
 Use inferred when the relation is strongly supported but not directly declared.
 Use needs-review when unsure.
+
+Accepted review note handling
+-----------------------------
+Before regenerating an extraction record or final/semi-final ASI index, inspect
+ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt for requirements whose SCOPE or
+TARGET_OUTPUTS mention the assigned document, batch, or output file.
+
+A worker must preserve ACCEPTED requirements unless the supervisor assignment
+explicitly says they are superseded, rejected, deferred, or source-applied.
+
+If a requirement cannot be preserved because the source document appears to
+contradict it, stop and report the conflict instead of silently dropping it.
+
+If preserving an accepted requirement requires a source-document clarification,
+record or update a source-improvement candidate rather than editing the source
+document during extraction.
 
 Source clarity first
 --------------------
@@ -244,6 +273,9 @@ Stop and report if:
 - an existing ledger cannot be loaded COMPLETE before update
 - an existing source-improvement candidate ledger cannot be loaded COMPLETE
   before update
+- accepted review notes cannot be loaded COMPLETE before regeneration
+- an accepted review requirement applies but cannot be reconciled with source
+  and assignment
 - a write requires an update sha that is unavailable from the same COMPLETE
   fetch_file response
 - the assignment appears to require rewriting canonical docs but does not
@@ -256,6 +288,7 @@ Report:
 - source retrieval status for each
 - extraction record paths created or replaced
 - ledger update status
+- accepted review requirements applied
 - source-document improvement candidates created or updated
 - any open extraction questions
 - any blocked items
