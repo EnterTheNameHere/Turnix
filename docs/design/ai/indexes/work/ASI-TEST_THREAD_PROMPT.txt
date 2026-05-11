@@ -87,7 +87,8 @@ A successful test does not answer a normative Turnix question directly from ASI
 metadata when authoritative meaning is required.
 
 A successful test identifies:
-- which canonical source document should be loaded first
+- which canonical source document is directly indexed as the primary owner
+- which canonical document is only inferred as a candidate from references
 - which related documents may be needed
 - which documents should not be treated as authority for the topic
 - whether the ASI entry was clear, vague, missing, or misleading
@@ -146,11 +147,17 @@ ASI FILES USED:
 
 ROUTING RESULT:
 - LOAD_FIRST:
-  - DOC_ID: <DOC_ID>
+  - DOC_ID: <DOC_ID or NONE_FOUND>
     ROLE: <short reason this document should be loaded first>
+    BASIS: <direct-index-match | inferred-from-reference | not-found>
+- CANDIDATE_LOAD:
+  - DOC_ID: <DOC_ID>
+    ROLE: <short reason this document might be the right authority>
+    BASIS: <why this is only a candidate>
 - LOAD_IF_NEEDED:
   - DOC_ID: <DOC_ID>
-    ROLE: <short reason this document may be needed>
+    ROLE: <short reason this supporting document may be needed>
+    BASIS: <direct-index-match | inferred-from-reference | related-support>
 - DO_NOT_TREAT_AS_AUTHORITY:
   - DOC_ID_OR_SOURCE: <DOC_ID, ASI file, or category>
     ROLE: <what this item does not own/prove>
@@ -175,9 +182,39 @@ AUTHORITATIVE_ANSWER_ALLOWED_FROM_ASI:
 
 NOTES:
 
+Routing categories
+------------------
+Use LOAD_FIRST only when the assigned ASI files directly identify a document as
+the primary owner or best first load for the queried term/domain.
+
+If the assigned ASI files do not directly identify a primary owner, write:
+
+LOAD_FIRST:
+  - DOC_ID: NONE_FOUND
+    ROLE: not clearly routed by assigned ASI files
+    BASIS: not-found
+
+Use CANDIDATE_LOAD when a document appears likely only because another indexed
+entry mentions it as load-with, related owner, non-owner boundary, or future
+batch target.
+
+Example:
+
+CANDIDATE_LOAD:
+  - DOC_ID: DA-20
+    ROLE: possible AppInstance identity/lifecycle authority
+    BASIS: inferred from Batch 1 references; DA-20 is not directly indexed in assigned ASI files
+
+Use LOAD_IF_NEEDED for supporting documents once a primary or candidate route is
+known.
+
+Use DO_NOT_TREAT_AS_AUTHORITY for documents, ASI files, or categories that may
+appear nearby but do not own/prove the queried meaning.
+
 Routing role comments
 ---------------------
-Every LOAD_FIRST and LOAD_IF_NEEDED entry should include a short role comment.
+Every LOAD_FIRST, CANDIDATE_LOAD, and LOAD_IF_NEEDED entry should include a
+short role comment.
 
 Use this style:
 - DA-21 for abstract RPC message flow and acknowledgement semantics
@@ -199,6 +236,7 @@ Do not silently use unstated project memory.
 Do not assume a document was checked unless it was actually loaded in the test
 thread.
 Do not use repository search to compensate for weak ASI routing.
+Do not promote an inferred candidate to LOAD_FIRST without marking its basis.
 
 When a question cannot be routed from the assigned ASI files, say so and mark
 INDEX QUALITY as missing or ambiguous.
@@ -227,10 +265,12 @@ After all test questions, summarize:
 - routing successes
 - routing failures
 - missing terms
+- candidate-only routes that need future indexing
 - confusing aliases
 - excessive or insufficient load suggestions
 - cases where the model attempted or wanted to use repository search
 - whether role comments were consistently present in routing output
+- whether inferred candidates were kept separate from direct primary routes
 - whether a milestone result file was created or updated
 - whether ledger test status was updated
 - recommended ASI changes
