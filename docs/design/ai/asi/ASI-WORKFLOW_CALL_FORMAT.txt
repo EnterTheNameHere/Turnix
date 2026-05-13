@@ -21,7 +21,8 @@ General rules
 1. Use one field per line.
 2. Use FIELD: value syntax for parameter lines.
 3. Use explicit BEGIN/END style marker names without Markdown fences.
-4. Use repeated field lines for repeated values.
+4. Use repeated field lines only for fields declared repeatable by the active
+   block format or resolved workflow registry entry.
 5. Do not use Markdown tables for invocation blocks.
 6. Do not use Markdown lists as semantic structure inside invocation blocks.
 7. If an invocation block is ambiguous, stop and ask for clarification.
@@ -62,9 +63,19 @@ WORKFLOW_ID:
 Identifies the workflow contract to run.
 
 BRANCH:
-Git branch to use for repository loads and writes. If omitted, the workflow
-runner uses the branch declared by its active task context. If no active task
-branch is known, stop and ask.
+Git branch to use for repository loads and writes.
+
+BRANCH is required for current_thread execution of any workflow that may write
+repository files.
+
+For new_thread_launch_prompt and dry_run_plan, the runner may use the active
+task branch only when it is already unambiguous.
+
+For current_thread read-only execution, the runner may use the active task
+branch only when the resolved workflow has no MAY_WRITE entries and the active
+branch is already unambiguous.
+
+If no branch is supplied and no active task branch is unambiguous, stop and ask.
 
 DOC_ID:
 Canonical Turnix document identifier when the workflow targets one document.
@@ -91,6 +102,18 @@ for a fresh thread.
 dry_run_plan means the assistant resolves the workflow and reports what would be
 loaded, read, written, and blocked, without performing the workflow body.
 
+Workflow repeated fields
+------------------------
+Repeated ASI_WORKFLOW_CALL fields are valid only when the resolved workflow
+registry entry declares the field with REPEATABLE_PARAM.
+
+If a non-repeatable workflow field appears more than once with different values,
+the invocation is malformed.
+
+If a non-repeatable workflow field appears more than once with the same value,
+the assistant may ignore the duplicate only after reporting that a duplicate was
+present.
+
 Load query block
 ----------------
 Use ASI_LOAD_QUERY when the user or assistant wants to ask ASI indexes what
@@ -105,9 +128,11 @@ TASK_CONTEXT: implementing trace serialization
 CURRENT_FILE: backend/tracing/trace_span.py
 END_ASI_LOAD_QUERY
 
-Repeated values
----------------
-Use repeated field lines for repeated values.
+Load query repeated fields
+--------------------------
+ASI_LOAD_QUERY allows repeated values for:
+- QUERY
+- ASI_FILE
 
 Example:
 
@@ -126,6 +151,7 @@ An invocation is malformed when:
 - the end marker is missing
 - required fields for the resolved workflow are missing
 - a field appears with contradictory values where only one value is allowed
+- a field is repeated but not allowed by the block format or workflow registry
 - the WORKFLOW_ID is unknown
 - the BATCH_ID is unknown when a batch is required
 - the DOC_ID cannot be resolved when canonical loading is required
@@ -153,7 +179,7 @@ This file defines ASI invocation formats only.
 --- file-meta ---
 DOC_ID: ASI-WORKFLOW_CALL_FORMAT
 DOC_FILE: docs/design/ai/asi/ASI-WORKFLOW_CALL_FORMAT.txt
-DOC_REV: 2
-DOC_GIT: 7e1f196
+DOC_REV: 3
+DOC_GIT: 0000000
 DOC_STATUS: STABLE
 -----------------
