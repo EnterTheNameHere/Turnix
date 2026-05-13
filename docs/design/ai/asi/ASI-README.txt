@@ -61,7 +61,7 @@ Example:
 
 ASI_WORKFLOW_CALL
 WORKFLOW_ID: asi.document.extract
-BRANCH: CHATGPT_ASI_WORKFLOW_RESTRUCTURE
+BRANCH: CHATGPT_EXTRACT_INDEX
 DOC_ID: DA-03
 BATCH_ID: Batch 1 foundation
 EXECUTION_TARGET: new_thread_launch_prompt
@@ -127,7 +127,7 @@ This file is ASI orientation only.
 --- file-meta ---
 DOC_ID: ASI-README
 DOC_FILE: docs/design/ai/asi/ASI-README.txt
-DOC_REV: 2
-DOC_GIT: 7d1750f
+DOC_REV: 3
+DOC_GIT: fff4fe0
 DOC_STATUS: STABLE
 -----------------
