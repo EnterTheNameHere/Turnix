@@ -1,8 +1,171 @@
+Turnix Assistant Semantic Index run workflow entrypoint
+=======================================================
+
+Purpose
+-------
+This file is the human-facing entrypoint for running or preparing Assistant
+Semantic Index workflows.
+
+This file is non-authoritative workflow guidance. It does not define Turnix
+semantics.
+
+Use this file when
+------------------
+Use this file when the user provides an ASI_WORKFLOW_CALL block or otherwise
+asks to run, prepare, inspect, or dry-run an ASI workflow.
+
+Do not use this file to answer ordinary Turnix semantic questions.
+
+Do not use this file to ask ASI indexes what canonical material should be
+loaded for a topic. Use ASI-ASK_INDEX_FOR_LOADS.txt for that.
+
+Runner role
+-----------
+The workflow runner resolves workflow calls into bounded work.
+
+The runner may:
+- read ASI workflow registries
+- read ASI load groups
+- read ASI batch registry entries
+- read ASI file index entries
+- load the workflow prompt declared by the resolved workflow
+- prepare a launch prompt for a fresh thread
+- perform a dry-run plan
+- run a workflow in the current thread when allowed by the workflow contract and
+  explicit user instruction
+
+The runner must not:
+- invent workflow IDs
+- silently fill missing required parameters
+- treat ASI metadata as Turnix authority
+- run generated-output workflows unless the workflow registry declares them
+- write files outside the resolved workflow contract
+- continue through workflow contract conflicts
+- use repository search to replace required exact file loading
+
+Required initial loads
+----------------------
+Before resolving an ASI_WORKFLOW_CALL, load and classify as COMPLETE:
+- docs/AI_WORKFLOW_BOOTSTRAP.txt
+- docs/design/ai/asi/ASI-RUN_WORKFLOW.txt
+- docs/design/ai/asi/ASI-WORKFLOW_CALL_FORMAT.txt
+- docs/design/ai/asi/registry/ASI-FILE_INDEX.txt
+- docs/design/ai/asi/registry/ASI-WORKFLOW_REGISTRY.txt
+- docs/design/ai/asi/registry/ASI-LOAD_GROUPS.txt
+
+Load this when BATCH_ID is present or when the workflow registry declares a
+batch-aware workflow:
+- docs/design/ai/asi/registry/ASI-BATCH_REGISTRY.txt
+
+Load CMR-04 when the workflow requires canonical DOC_ID resolution:
+- docs/CMR-04_CANONICAL_INDEX_TURNIX_SPECIFICATION.txt
+
+If any required file cannot be classified COMPLETE, stop and report the
+failure.
+
+Invocation format
+-----------------
+ASI_WORKFLOW_CALL syntax is defined in:
+
+docs/design/ai/asi/ASI-WORKFLOW_CALL_FORMAT.txt
+
+Example:
+
+ASI_WORKFLOW_CALL
+WORKFLOW_ID: asi.document.extract
+BRANCH: CHATGPT_ASI_WORKFLOW_RESTRUCTURE
+DOC_ID: DA-03
+BATCH_ID: Batch 1 foundation
+EXECUTION_TARGET: new_thread_launch_prompt
+END_ASI_WORKFLOW_CALL
+
+Resolution steps
+----------------
+For each ASI_WORKFLOW_CALL:
+
+1. Parse the invocation block.
+2. Verify WORKFLOW_ID is present.
+3. Resolve WORKFLOW_ID through ASI-WORKFLOW_REGISTRY.txt.
+4. Verify required parameters are present.
+5. Resolve BATCH_ID through ASI-BATCH_REGISTRY.txt when required or supplied.
+6. Resolve DOC_ID through CMR-04 when required.
+7. Resolve declared load groups through ASI-LOAD_GROUPS.txt.
+8. Load the workflow prompt declared by the registry entry.
+9. Check for contract conflicts between the registry, load groups, and workflow
+   prompt.
+10. Apply the requested EXECUTION_TARGET.
+
+Contract conflict rule
+----------------------
+If loaded workflow/control files disagree about required loads, allowed writes,
+forbidden writes, role authority, generated-output boundaries, execution target
+support, or required parameters, stop and report a workflow contract conflict.
+
+Do not silently choose the stricter or looser rule.
+
+The assistant may describe the stricter behavior as the temporary safe
+interpretation, but it must not execute the workflow until the conflict is
+resolved by explicit user or supervisor instruction.
+
+Execution targets
+-----------------
+current_thread:
+Run the workflow in this conversation only if the workflow registry and workflow
+prompt allow current-thread execution and the user clearly requested it.
+
+new_thread_launch_prompt:
+Prepare a copy-paste first message for a fresh thread. The launch prompt must
+include required loads, role declaration, assigned parameters, task statement,
+and boundary rules.
+
+dry_run_plan:
+Report resolved workflow ID, prompt file, required files, required parameters,
+read permissions, write permissions, forbidden writes, expected outputs, and
+blocking issues. Do not run the workflow body.
+
+Write boundary
+--------------
+The runner itself does not create generated ASI output unless the resolved
+workflow is explicitly an output-writing workflow and EXECUTION_TARGET is
+current_thread.
+
+When preparing a launch prompt, the runner writes no repository files.
+
+When producing a dry-run plan, the runner writes no repository files.
+
+When running a workflow in the current thread, writes are limited to the MAY_WRITE
+entries declared by the resolved registry entry and any stricter workflow prompt
+rule.
+
+Repository write authority still requires complete source state and update SHA
+handling as defined by AI_WORKFLOW_BOOTSTRAP.
+
+Final report
+------------
+For dry-run or current-thread execution, report:
+- WORKFLOW_ID
+- resolved workflow prompt
+- resolved branch
+- required parameters
+- resolved DOC_ID and source path when applicable
+- resolved BATCH_ID when applicable
+- required load groups
+- files loaded and retrieval classification
+- allowed writes
+- forbidden writes
+- execution target
+- blocked items or contract conflicts
+
+For launch-prompt output, print the complete launch prompt in a text code block.
+
+END
+---
+This file defines the ASI workflow runner entrypoint only.
 
 --- file-meta ---
 DOC_ID: ASI-RUN_WORKFLOW
 DOC_FILE: docs/design/ai/asi/ASI-RUN_WORKFLOW.txt
-DOC_REV: 1
-DOC_GIT: 0000000
+DOC_REV: 2
+DOC_GIT: 7d1750f
 DOC_STATUS: STABLE
 -----------------
