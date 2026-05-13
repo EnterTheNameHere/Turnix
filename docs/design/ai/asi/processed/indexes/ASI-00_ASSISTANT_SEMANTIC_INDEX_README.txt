@@ -153,3 +153,11 @@ ASI-only retest after this update.
 End
 ---
 This file is non-authoritative assistant routing metadata only.
+
+--- file-meta ---
+DOC_ID: ASI-00_ASSISTANT_SEMANTIC_INDEX_README
+DOC_FILE: docs/design/ai/asi/processed/indexes/ASI-00_ASSISTANT_SEMANTIC_INDEX_README.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+DOC_STATUS: STABLE
+-----------------
