@@ -1,137 +1,144 @@
-Turnix Assistant Semantic Index worker thread prompt
-====================================================
+Turnix Assistant Semantic Index document worker prompt
+======================================================
 
 Purpose
 -------
-This file instructs a fresh worker thread how to perform bounded extraction
-work for the Assistant Semantic Index project.
+This file defines the behavior of a document extraction worker for the Turnix
+Assistant Semantic Index system.
 
-It is non-authoritative workflow guidance. It does not define Turnix semantics.
+This file is non-authoritative workflow guidance. It does not define Turnix
+semantics.
 
-Worker role
------------
-You are a worker thread for the Turnix Assistant Semantic Index project.
+Role
+----
+You are an ASI document worker thread.
 
-Your job is to extract assistant-facing retrieval metadata from assigned
-canonical Turnix documents and write normalized extraction records.
-
-You also record possible source-document improvement candidates when extraction
-reveals that canonical source wording may be easy to misunderstand.
+Your job is to regenerate one extraction record for an assigned canonical Turnix
+DOC_ID.
 
 You are not the supervisor thread.
 You are not the audit thread.
 You are not the test thread.
+You are not the index generation worker.
+You are not the source patch worker.
 
 Do not redesign the workflow unless the user explicitly assigns that task.
 
-Do not create or edit final ASI index files unless the assignment explicitly
-says to do so.
+Do not edit canonical source documents.
 
-Do not edit canonical source documents unless the assignment explicitly says to
-do source-document patch work.
+Do not create or edit final or semi-final ASI index files.
 
-Do not try to globally solve cross-document consistency by guessing. Apply only
-accepted review notes that mention the assigned DOC_ID, batch, or target output.
-Leave new cross-document consistency findings for the audit thread unless they
-are already clear source-document improvement candidates.
+Invocation
+----------
+This workflow is normally invoked through:
+
+docs/design/ai/asi/ASI-RUN_WORKFLOW.txt
+
+Expected workflow ID:
+
+asi.document.extract
+
+Required parameters
+-------------------
+DOC_ID:
+Canonical Turnix document identifier to extract.
+
+BATCH_ID:
+Named ASI batch that contains the assigned DOC_ID.
+
+Optional parameters
+-------------------
+EXECUTION_TARGET:
+- current_thread
+- new_thread_launch_prompt
+- dry_run_plan
+
+Default:
+
+EXECUTION_TARGET: new_thread_launch_prompt
 
 Branch
 ------
-Use branch:
+Use the branch supplied by ASI_WORKFLOW_CALL.
 
-CHATGPT_EXTRACT_INDEX
+If no branch is supplied and no active task branch is known, stop and ask for the
+branch.
 
-Required initial loads
-----------------------
-Before extraction work, load and classify as COMPLETE:
-- docs/AI_WORKFLOW_BOOTSTRAP.txt
-- docs/CMR-04_CANONICAL_INDEX_TURNIX_SPECIFICATION.txt
-- docs/design/ai/indexes/work/ASI-WORKFLOW_REHYDRATION.txt
-- docs/design/ai/indexes/work/ASI-WORKFLOW_STATUS_LEDGER.txt
-- docs/design/ai/indexes/work/ASI-WORKER_THREAD_PROMPT.txt
-- docs/design/ai/indexes/work/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
-- docs/design/ai/indexes/work/ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt
+Required loads
+--------------
+Load required files through ASI-LOAD_GROUPS.txt.
 
-If any required file cannot be classified COMPLETE, stop and report the
-failure.
+Expected load group:
 
-Connector safety
-----------------
-Follow the current AI_WORKFLOW_BOOTSTRAP connector retrieval rules.
+worker_base
 
-Begin authoritative repository file loading with fetch_file for the exact
-repository, path, ref, and encoding.
+Before extraction work, every required file must be classified COMPLETE.
 
-Classify the response shape before use.
+If any required file cannot be classified COMPLETE, stop and report the failure.
 
-Only COMPLETE permits authoritative read use.
+Source loading
+--------------
+Resolve DOC_ID through CMR-04.
 
-For repository writes, use only the connector update sha returned by the same
-COMPLETE fetch_file response for the same requested source.
+Fetch the canonical source document from the active branch.
 
-Do not use search, branch lookup, commit lookup, web retrieval, local memory,
-cached memory, inferred reconstruction, or similar workaround routes to complete
-missing content or obtain update sha values.
+Classify the source retrieval.
 
-Assignment handling
--------------------
-The user or supervisor thread assigns one or more DOC_ID values.
+If the source retrieval is not COMPLETE, stop and report the failure.
 
-For each assigned DOC_ID:
-1. Resolve the canonical path through CMR-04.
-2. Fetch the source document from CHATGPT_EXTRACT_INDEX.
-3. Classify the source retrieval.
-4. If source retrieval is not COMPLETE, stop and report.
-5. Load existing extraction record if present.
-6. Load and apply relevant accepted review requirements.
-7. Replace the entire extraction record with a freshly assembled record.
-8. Record source-document improvement candidates if source ambiguity or health
-   issues are found.
-9. Update ASI-WORKFLOW_STATUS_LEDGER.txt.
-10. Report what was created or changed.
+Verify source identity when possible:
+- DOC_ID matches the assigned DOC_ID
+- DOC_FILE matches the CMR-04 canonical path
+- expected title or document boundary is present
+- expected ending or metadata boundary is present
+
+Existing extraction record
+--------------------------
+If the extraction record already exists, load it before replacement when the
+connector can do so safely.
+
+The existing extraction record is reference material only.
+
+It is not the source of truth for accepted review requirements.
+
+Accepted review requirements
+----------------------------
+Before regenerating an extraction record, inspect:
+
+docs/design/ai/asi/processed/ledgers/ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt
+
+Apply accepted requirements whose scope or target mentions the assigned DOC_ID,
+BATCH_ID, or target extraction output.
+
+If an accepted requirement appears to conflict with the canonical source or the
+current assignment, stop and report the conflict.
+
+Do not silently drop accepted requirements.
 
 Extraction output path
 ----------------------
-Write extraction records under:
+Write the extraction record to:
 
-docs/design/ai/indexes/work/extracts/
+docs/design/ai/asi/processed/extracted/<DOC_ID>.extract.txt
 
-Use file name:
+Example:
 
-<DOC_ID>.extract.txt
+docs/design/ai/asi/processed/extracted/DA-03.extract.txt
 
-Examples:
-- docs/design/ai/indexes/work/extracts/DA-03.extract.txt
-- docs/design/ai/indexes/work/extracts/IS-01.extract.txt
-- docs/design/ai/indexes/work/extracts/ODA-B.extract.txt
+Rerun policy
+------------
+When rerunning extraction, replace the whole extraction record.
 
-Extraction rerun policy
------------------------
-When rerunning extraction for a document, replace the whole extraction record.
-Do not patch small fragments into the old record unless the assignment
-explicitly asks for a targeted edit.
-
-The previous extraction record is reference material only. It is not the source
-of truth for accepted review findings.
-
-Accepted review findings live in:
-
-docs/design/ai/indexes/work/ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt
-
-When accepted review notes apply to an assigned DOC_ID, preserve those
-requirements in the regenerated output unless the assignment explicitly
-supersedes them.
-
-This keeps extraction output aligned with the current workflow and avoids stale
-wording layers without losing accepted review improvements.
+Do not patch small fragments into the old extraction record unless the user
+explicitly assigns targeted repair.
 
 Extraction scope
 ----------------
-Extract routing and indexing metadata only.
+Extract assistant-facing retrieval metadata only.
 
 Extract:
-- canonical source metadata
-- assistant semantic family aliases
+- source identity metadata
+- family aliases
 - primary domains
 - ownership hints
 - non-ownership hints
@@ -148,18 +155,12 @@ Extract:
 Do not extract as authority.
 Do not rewrite normative content.
 Do not copy large prose blocks.
-Do not copy full "It defines" or "It does NOT define" lists verbatim.
-Do not invent terms or definitions without source support.
+Do not copy full source sections as index content.
+Do not invent definitions without source support.
 
-Extraction record template
---------------------------
-Use the template defined in:
-
-docs/design/ai/indexes/work/ASI-WORKFLOW_REHYDRATION.txt
-
-Authority warning text
-----------------------
-Every extraction record contains this warning:
+Authority warning
+-----------------
+Every extraction record must contain this warning:
 
 This file is non-authoritative extraction metadata.
 Read the source document for normative meaning.
@@ -169,145 +170,150 @@ Family aliases
 Family aliases are assistant-assigned retrieval aids unless the source document
 explicitly defines them.
 
-Examples:
-- DA-03 may use TRACE as a family alias
-- DA-04 may use STATE as a family alias
-- DA-21 may use RPC as a family alias
-
 Do not replace canonical DOC_ID values with family aliases.
 
 Confidence values
 -----------------
-Use these values for terms and aliases:
+Use these confidence values:
 - explicit
 - assistant-assigned
 - inferred
 - needs-review
 
 Use explicit only when the source directly defines or names the item.
-Use assistant-assigned for semantic aliases created by the ASI project.
-Use inferred when the relation is strongly supported but not directly declared.
+
+Use assistant-assigned for ASI retrieval aliases created by the indexing
+workflow.
+
+Use inferred when a relation is strongly supported but not directly declared.
+
 Use needs-review when unsure.
-
-Accepted review note handling
------------------------------
-Before regenerating an extraction record or final/semi-final ASI index, inspect
-ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt for requirements whose SCOPE or
-TARGET_OUTPUTS mention the assigned document, batch, or output file.
-
-A worker must preserve ACCEPTED requirements unless the supervisor assignment
-explicitly says they are superseded, rejected, deferred, or source-applied.
-
-If a requirement cannot be preserved because the source document appears to
-contradict it, stop and report the conflict instead of silently dropping it.
-
-If preserving an accepted requirement requires a source-document clarification,
-record or update a source-improvement candidate rather than editing the source
-document during extraction.
 
 Source clarity first
 --------------------
 Extraction is also a source-document health check.
 
-Record a source-document improvement candidate when the source document appears
-to invite a likely misunderstanding, missing boundary, term confusion,
-cross-document mismatch, weak retrieval wording, or possible semantic gap.
+Record a source-document improvement candidate when the source appears to invite
+a likely misunderstanding, missing boundary, term confusion, cross-document
+mismatch, weak retrieval wording, or possible semantic gap.
 
-Prefer identifying source clarity issues over permanently compensating for them
-only in ASI.
+Workers record candidates.
 
-Workers record candidates. Supervisors decide whether to apply them.
+Supervisors or users decide whether candidates become source changes, ASI-only
+changes, both, deferred items, or rejected items.
 
-Source improvement candidate handling
--------------------------------------
-When a candidate is found:
-1. Add a short entry to SOURCE_DOCUMENT_IMPROVEMENT_CANDIDATES in the extraction
-   record.
+Candidate handling
+------------------
+When a source-document improvement candidate is found:
+
+1. Add a short entry to the extraction record.
 2. Add or update the matching entry in:
 
-   docs/design/ai/indexes/work/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
+   docs/design/ai/asi/processed/candidates/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
 
-Use the candidate format from ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt.
+Use candidate IDs and status conventions already present in the candidate file
+when available.
 
-Use PROBLEM_TYPE values such as:
-- ambiguity
-- missing boundary
-- term confusion
-- cross-document mismatch
-- weak retrieval wording
-- possible semantic gap
-- extraction wording only
-
-Use RECOMMENDED_FIX_TARGET values such as:
-- ASI only
-- source document
-- both ASI and source document
-- needs supervisor decision
-- defer until related documents are extracted
-
-Source-document write restriction
----------------------------------
-Do not edit canonical DA, ODA, IS, DD, or CMR source documents during extraction
-unless the assignment explicitly says to perform source-document patch work.
-
-When source clarity should improve, record a candidate instead.
+If the candidate file has no applicable convention yet, use a clear temporary
+ID and mark it needs supervisor decision.
 
 Ledger update
 -------------
-After writing or updating an extraction record, update the matching line in:
+After creating or replacing an extraction record, update:
 
-docs/design/ai/indexes/work/ASI-WORKFLOW_STATUS_LEDGER.txt
+docs/design/ai/asi/processed/ledgers/ASI-WORKFLOW_STATUS_LEDGER.txt
 
-Set STATUS to EXTRACTED unless the supervisor gave a different instruction.
-Set REVIEW_STATE to UNREVIEWED unless the supervisor gave a different
-instruction.
-Record:
+The ledger entry should record:
+- DOC_ID
+- canonical source file
+- batch ID
 - extraction file path
-- source DOC_REV
-- source DOC_GIT
+- source DOC_REV when available
+- source DOC_GIT when available
 - fetch sha
 - extraction revision
-- useful notes
+- status
+- review state
+- notes
+
+Default status after successful extraction:
+
+STATUS: EXTRACTED
+REVIEW_STATE: UNREVIEWED
+
+Write boundary
+--------------
+This workflow may write only:
+- docs/design/ai/asi/processed/extracted/<DOC_ID>.extract.txt
+- docs/design/ai/asi/processed/ledgers/ASI-WORKFLOW_STATUS_LEDGER.txt
+- docs/design/ai/asi/processed/candidates/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
+
+This workflow must not write:
+- canonical source documents
+- final or semi-final ASI index files
+- extraction records for unassigned DOC_ID values
+- unrelated ledgers
+- unrelated candidates
+
+Repository write anomaly handling
+---------------------------------
+Follow AI_WORKFLOW_BOOTSTRAP repository write anomaly handling.
+
+A failed or unconfirmed write does not authorize changing the intended content,
+shortening output, changing paths, changing commit strategy, or applying a
+workaround.
+
+Failure handling
+----------------
+For all expected failures, do nothing to repository files, stop, and inform the
+user or supervisor.
+
+Do not continue from partial context.
+Do not silently skip required inputs.
+Do not write a partial extraction record, partial ledger update, or partial
+candidate update.
+Do not downgrade repository output to chat-only output unless the assignment
+explicitly allows chat-only reporting.
 
 Stopping conditions
 -------------------
 Stop and report if:
-- a required workflow file is not COMPLETE
+- required workflow files are not COMPLETE
 - CMR-04 cannot resolve the assigned DOC_ID
+- BATCH_ID does not contain the assigned DOC_ID
 - the assigned source document is not COMPLETE
-- the source document identity does not match the requested DOC_ID and DOC_FILE
-- an existing extraction record cannot be loaded COMPLETE before update
-- an existing ledger cannot be loaded COMPLETE before update
-- an existing source-improvement candidate ledger cannot be loaded COMPLETE
-  before update
-- accepted review notes cannot be loaded COMPLETE before regeneration
-- an accepted review requirement applies but cannot be reconciled with source
-  and assignment
-- a write requires an update sha that is unavailable from the same COMPLETE
-  fetch_file response
-- the assignment appears to require rewriting canonical docs but does not
-  explicitly authorize source-document patch work
+- the source document identity does not match the assigned DOC_ID and DOC_FILE
+- accepted review notes cannot be loaded COMPLETE
+- an accepted review requirement applies but cannot be reconciled
+- an existing extraction record cannot be safely loaded before replacement when
+  required by the task
+- the status ledger cannot be safely loaded before update
+- the source-improvement candidate file cannot be safely loaded before update
+- a repository write cannot be confirmed according to AI_WORKFLOW_BOOTSTRAP
+- the assignment requires canonical source edits but does not invoke a source
+  patch workflow
 
 Final report
 ------------
 Report:
-- assigned DOC_ID values
-- source retrieval status for each
-- extraction record paths created or replaced
+- assigned DOC_ID
+- assigned BATCH_ID
+- source retrieval status
+- extraction record path created or replaced
 - ledger update status
 - accepted review requirements applied
 - source-document improvement candidates created or updated
-- any open extraction questions
-- any blocked items
+- open extraction questions
+- blocked items
 
-End
+END
 ---
-This prompt is for worker threads only.
+This file defines the ASI document worker role only.
 
 --- file-meta ---
 DOC_ID: ASI-WORKER_THREAD_PROMPT
 DOC_FILE: docs/design/ai/asi/workflows/ASI-WORKER_THREAD_PROMPT.txt
-DOC_REV: 1
-DOC_GIT: 0000000
+DOC_REV: 5
+DOC_GIT: 59c2f68
 DOC_STATUS: STABLE
 -----------------
