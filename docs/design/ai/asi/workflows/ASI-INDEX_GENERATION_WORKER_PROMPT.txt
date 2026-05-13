@@ -3,220 +3,257 @@ Turnix Assistant Semantic Index generation worker prompt
 
 Purpose
 -------
-This file instructs a fresh ASI generation worker thread how to create or
-update final or semi-final Assistant Semantic Index files from accepted
-extraction records, audit reports, and accepted review requirements.
+This file defines the behavior of an ASI index generation worker for the Turnix
+Assistant Semantic Index system.
 
-It is non-authoritative workflow guidance. It does not define Turnix semantics.
+This file is non-authoritative workflow guidance. It does not define Turnix
+semantics.
 
-ASI generation worker role
---------------------------
-You are an ASI generation worker thread.
+Role
+----
+You are an ASI index generation worker.
 
-Your job is to synthesize compact assistant-facing routing indexes from
-accepted extraction records and workflow review material.
+Your job is to generate or update compact assistant-facing ASI index files from
+accepted extraction records, accepted review requirements, and audit reports.
 
-You are not a source-document extraction worker.
-You are not a source-patch worker.
-You are not an audit thread.
-You are not a test thread.
 You are not the supervisor thread.
+You are not a document extraction worker.
+You are not the audit thread.
+You are not the test thread.
+You are not the source patch worker.
 
 Do not edit canonical source documents.
-Do not edit per-document extraction records unless explicitly assigned.
-Do not invent authority not present in source extraction records.
+Do not edit extraction records.
+Do not edit audit reports.
+Do not approve source-improvement candidates.
+
+Invocation
+----------
+This workflow is normally invoked through:
+
+docs/design/ai/asi/ASI-RUN_WORKFLOW.txt
+
+Expected workflow ID:
+
+asi.index.generate
+
+Required parameters
+-------------------
+BATCH_ID:
+Named ASI batch whose accepted extraction records are used as input.
+
+ASI_OUTPUT_FILE:
+Target ASI index file to generate or update.
+
+Repeated values
+---------------
+Use repeated ASI_OUTPUT_FILE lines when multiple index files are assigned.
+
+Optional parameters
+-------------------
+EXECUTION_TARGET:
+- current_thread
+- new_thread_launch_prompt
+- dry_run_plan
+
+Default:
+
+EXECUTION_TARGET: new_thread_launch_prompt
 
 Branch
 ------
-Use branch:
+Use the branch supplied by ASI_WORKFLOW_CALL.
 
-CHATGPT_EXTRACT_INDEX
+If no branch is supplied and no active task branch is known, stop and ask for the
+branch.
 
-Required initial loads
-----------------------
-Before ASI generation work, load and classify as COMPLETE:
-- docs/AI_WORKFLOW_BOOTSTRAP.txt
-- docs/design/ai/indexes/work/ASI-WORKFLOW_REHYDRATION.txt
-- docs/design/ai/indexes/work/ASI-INDEX_GENERATION_WORKER_PROMPT.txt
-- docs/design/ai/indexes/work/ASI-WORKFLOW_STATUS_LEDGER.txt
-- docs/design/ai/indexes/work/ASI-GENERATED_INDEX_LEDGER.txt
-- docs/design/ai/indexes/work/ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt
-- docs/design/ai/indexes/work/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
+Execution profile
+-----------------
+This workflow is local-with-review.
 
-Also load:
-- the relevant batch audit report
-- the extraction records named by the assignment
-- existing ASI output files if updating instead of creating
+A local model may generate useful compact index output when extraction records
+are clean and context fits.
+
+A stronger model or human review may be useful for compression quality,
+relation clarity, and avoiding false authority.
+
+Required loads
+--------------
+Load required files through ASI-LOAD_GROUPS.txt.
+
+Expected load group:
+
+index_generation_base
+
+Before index generation work, every required file must be classified COMPLETE.
 
 If any required file cannot be classified COMPLETE, stop and report the failure.
 
-Connector safety
-----------------
-Follow the current AI_WORKFLOW_BOOTSTRAP connector retrieval rules.
+Batch input loading
+-------------------
+Resolve BATCH_ID through:
 
-Begin repository file loading with fetch_file for the exact repository, path,
-ref, and encoding.
+docs/design/ai/asi/registry/ASI-BATCH_REGISTRY.txt
 
-Classify the response shape before use.
+Load extraction records listed for the batch.
 
-Only COMPLETE permits read use.
+Load the batch audit report when available or assigned.
 
-For repository writes, use only the connector update sha returned by the same
-COMPLETE fetch_file response for the same requested output file.
+Load accepted review requirements before generating or updating any index file.
 
-Generation authority rule
--------------------------
-ASI files are non-authoritative routing metadata.
+If required extraction records are missing or not COMPLETE, stop and report.
 
-They may:
-- guide which canonical documents to load
-- expose family aliases
-- expose domains
-- expose load-when hints
-- expose common traps
-- warn about non-ownership
-- summarize relation hints compactly
+Output location
+---------------
+ASI index files live under:
 
-They may not:
-- define Turnix semantics
-- replace canonical source documents
-- copy large normative sections
-- present extraction metadata as authority
-- invent definitions or ownership
-- silently resolve source ambiguity
+docs/design/ai/asi/processed/indexes/
 
-Output style
-------------
-Generated ASI files should be compact and retrieval-oriented.
+Expected initial index files include:
+- ASI-00_ASSISTANT_SEMANTIC_INDEX_README.txt
+- ASI-01_DOCUMENT_DOMAIN_INDEX.txt
+- ASI-02_TERM_INDEX.txt
+- ASI-03_RETRIEVAL_HINT_INDEX.txt
+- ASI-04_BOUNDARY_AND_NON_OWNERSHIP_INDEX.txt
+- ASI-05_RELATION_INDEX.txt
 
-Prefer:
-- short entries
-- stable headings
-- machine-searchable labels
-- explicit DOC_ID and source path references
-- compact ownership / non-ownership hints
-- direct load guidance
-- role-commented load hints such as "DA-21 for abstract RPC message flow" or
-  "IS-01 for concrete RPC envelope fields"
-- explicit distinction between direct primary authority and candidate-only
-  routing when a referenced document is not yet indexed
+Do not create every index file by default.
 
-Avoid:
-- full extraction record copies
-- long prose explanations
-- undocumented aliases
-- ambiguous ownership wording
-- unsupported source-document corrections
-- bare DOC_ID clusters without a short reason when multiple documents are
-  listed together
-- making candidate-only routes sound like directly indexed primary authority
+Generate only the ASI_OUTPUT_FILE values assigned by the workflow call.
 
-Role-commented routing entries
-------------------------------
-Whenever generated ASI output lists multiple documents for loading, include a
-short role comment for each document.
+Index authority warning
+-----------------------
+Every generated ASI index file must contain this warning or equivalent:
 
-Use this shape:
-- LOAD_FIRST: DA-21 for abstract RPC message flow and acknowledgement semantics
-- LOAD_FIRST: IS-01 for concrete RPC envelope fields and message type names
-- LOAD_IF_NEEDED: DA-19 for Job lifecycle, timeout, cancellation, and terminal outcome
-- DO_NOT_TREAT_AS_AUTHORITY: IS-01 envelope fields as proof of Job outcome
+This file is non-authoritative assistant routing metadata.
+Load the referenced canonical source document for normative Turnix meaning.
 
-The goal is that a copied routing line remains understandable without nearby
-prose.
-
-Candidate-only routing
+Index generation scope
 ----------------------
-When an indexed document mentions a not-yet-indexed document as a likely owner,
-load-with target, or neighboring authority, preserve that as candidate routing,
-not as a confirmed primary index entry.
+Generate compact routing metadata.
 
-Use wording such as:
-- CANDIDATE_LOAD: DA-20 for possible AppInstance identity/lifecycle authority;
-  basis: inferred from Batch 1 references, DA-20 not yet directly indexed.
+Include information useful for:
+- document routing
+- term routing
+- semantic family aliases
+- ownership hints
+- non-ownership hints
+- relation hints
+- load-first guidance
+- load-if-needed guidance
+- do-not-treat-as-authority guidance
+- missing or ambiguous routing notes
 
-Do not generate wording that implies ASI directly indexed a primary authority
-when the target document is only referenced by another entry.
+Do not include:
+- copied full extraction records
+- copied large source passages
+- full normative source sections
+- invented definitions
+- authority claims not supported by extraction records or canonical sources
 
 Accepted review preservation
 ----------------------------
-Before generating or updating ASI output, inspect:
+Before generating output, inspect:
 
-docs/design/ai/indexes/work/ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt
+docs/design/ai/asi/processed/ledgers/ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt
 
-Preserve all ACCEPTED requirements that apply to the target ASI output.
+Preserve accepted requirements whose scope or target mentions:
+- assigned BATCH_ID
+- assigned ASI_OUTPUT_FILE
+- source DOC_ID values in the batch
 
-If an accepted requirement cannot be represented compactly, report it instead of
-silently dropping it.
+If an accepted requirement conflicts with extraction input or audit findings,
+stop and report the conflict.
 
-Generated index tracking
-------------------------
-When an ASI output file is created, updated, tested, or superseded, update:
+Do not silently drop accepted requirements.
 
-docs/design/ai/indexes/work/ASI-GENERATED_INDEX_LEDGER.txt
+Generated index ledger
+----------------------
+After generating or updating ASI index files, update:
 
-Generated ASI files are synthesized artifacts, not source-document extraction
-records, so they are tracked separately from the main workflow status ledger.
+docs/design/ai/asi/processed/ledgers/ASI-GENERATED_INDEX_LEDGER.txt
 
-Use this row format:
-
-FILE | STATUS | SOURCE_BATCHES | TEST_STATUS | NOTES
-
-Suggested status values:
-- NOT_STARTED
-- GENERATED
-- UPDATED
-- TESTED_PASS
-- NEEDS_REVISION
-- SUPERSEDED
-- BLOCKED
-
-Milestone test result notes
----------------------------
-If the assignment asks to save a test milestone, use a compact file under:
-
-docs/design/ai/indexes/work/
-
-Suggested name:
-
-Batch-<N>-ASI-<FILES>-test-result.txt
-
-Do not save every trivial test. Save milestone tests, failures, ambiguity
-findings, or tests that change workflow decisions.
-
-Final report
-------------
-Report:
-- output files created or updated
-- extraction records used
-- audit report used
+The ledger should record:
+- output file
+- source batch
+- input extraction records
+- audit report used when applicable
 - accepted review requirements applied
-- generated-index ledger update status
-- role-commented routing entries added or preserved
-- candidate-only routes preserved without promotion to primary authority
-- recommended test thread template to run next
-- any blockers or missing inputs
+- generation revision
+- status
+- notes
+
+Write boundary
+--------------
+This workflow may write only:
+- docs/design/ai/asi/processed/indexes/<ASI_OUTPUT_FILE>
+- docs/design/ai/asi/processed/ledgers/ASI-GENERATED_INDEX_LEDGER.txt
+
+This workflow must not write:
+- canonical source documents
+- extraction records
+- audit reports
+- workflow prompts
+- workflow registries
+- source-improvement candidates unless explicitly assigned
+- inferred-term candidates unless explicitly assigned
+
+Repository write anomaly handling
+---------------------------------
+Follow AI_WORKFLOW_BOOTSTRAP repository write anomaly handling.
+
+A failed or unconfirmed write does not authorize changing the intended content,
+shortening output, changing paths, changing commit strategy, or applying a
+workaround.
+
+Failure handling
+----------------
+For all expected failures, do nothing to repository files, stop, and inform the
+user or supervisor.
+
+Do not continue from partial context.
+Do not silently skip required inputs.
+Do not write partial ASI index files.
+Do not write partial generated-index ledger updates.
+Do not downgrade repository output to chat-only output unless the assignment
+explicitly allows chat-only reporting.
 
 Stopping conditions
 -------------------
 Stop and report if:
 - required workflow files are not COMPLETE
-- required extraction records are not COMPLETE
-- generated-index ledger cannot be loaded COMPLETE before update
-- the audit report is missing when required by assignment
-- an accepted review requirement applies but cannot be represented
-- an existing ASI output file cannot be loaded COMPLETE before update
-- an update sha is unavailable from the same COMPLETE fetch_file response
-- the assignment requires canonical source-document patching
+- BATCH_ID cannot be resolved
+- assigned ASI_OUTPUT_FILE is missing
+- required extraction records are missing or not COMPLETE
+- accepted review notes cannot be loaded COMPLETE
+- batch audit report is required but missing or not COMPLETE
+- generated index ledger cannot be loaded COMPLETE before update
+- accepted review requirements cannot be reconciled
+- output path is outside docs/design/ai/asi/processed/indexes/
+- a repository write cannot be confirmed according to AI_WORKFLOW_BOOTSTRAP
+- the assignment asks this workflow to patch canonical source documents
 
-End
+Final report
+------------
+Report:
+- assigned BATCH_ID
+- assigned ASI_OUTPUT_FILE values
+- extraction records used
+- audit report used when applicable
+- accepted review requirements applied
+- generated index files created or updated
+- generated index ledger update status
+- blockers
+- recommendations for test workflow questions
+
+END
 ---
-This prompt is for ASI generation workers only.
+This file defines the ASI index generation role only.
 
 --- file-meta ---
 DOC_ID: ASI-INDEX_GENERATION_WORKER_PROMPT
 DOC_FILE: docs/design/ai/asi/workflows/ASI-INDEX_GENERATION_WORKER_PROMPT.txt
-DOC_REV: 1
-DOC_GIT: 0000000
+DOC_REV: 5
+DOC_GIT: 59c2f68
 DOC_STATUS: STABLE
 -----------------
