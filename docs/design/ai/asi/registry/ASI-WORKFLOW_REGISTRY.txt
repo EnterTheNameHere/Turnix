@@ -15,7 +15,9 @@ The workflow registry maps a workflow ID to:
 - workflow prompt file
 - required parameters
 - optional parameters
+- repeatable parameters
 - required load groups
+- deferred write-phase load groups
 - execution targets
 - execution profile
 - read boundary
@@ -35,11 +37,24 @@ General rules
 8. A default value of none means the parameter is absent and no optional action
    is authorized by that parameter.
 9. BRANCH is a workflow-call context field, not a workflow-specific optional
-   parameter. If BRANCH is omitted, use the active task branch only when it is
-   already unambiguous. If no active task branch is known, stop and ask.
-10. LOAD_GROUP entries are required before the workflow body starts.
-11. LOAD_GROUP_BEFORE_WRITE entries are required before the named write class or
+   parameter.
+10. For current_thread execution of any workflow that may write repository
+    files, BRANCH is required in the ASI_WORKFLOW_CALL.
+11. For new_thread_launch_prompt and dry_run_plan, an active task branch may be
+    used only when it is already unambiguous.
+12. For current_thread read-only execution, an active task branch may be used
+    only when the workflow has no MAY_WRITE entries and the branch is already
+    unambiguous.
+13. If no branch is supplied and no active task branch is unambiguous, stop and
+    ask for BRANCH.
+14. LOAD_GROUP entries are required before the workflow body starts.
+15. LOAD_GROUP_BEFORE_WRITE entries are required before the named write class or
     write phase starts. They must not be parsed as ordinary LOAD_GROUP entries.
+16. Fields may repeat only when declared with REPEATABLE_PARAM.
+17. A repeated non-repeatable field with different values makes the workflow
+    call malformed.
+18. A repeated non-repeatable field with the same value may be ignored only
+    after reporting the duplicate.
 
 Execution profile values
 ------------------------
@@ -115,6 +130,8 @@ DESCRIPTION: Test ASI index usability for load-routing questions without reposit
 PROMPT_FILE: docs/design/ai/asi/workflows/ASI-TEST_THREAD_PROMPT.txt
 REQUIRED_PARAM: ASI_FILE
 REQUIRED_PARAM: QUERY
+REPEATABLE_PARAM: ASI_FILE
+REPEATABLE_PARAM: QUERY
 OPTIONAL_PARAM: EXECUTION_TARGET
 OPTIONAL_PARAM: ALLOW_CANONICAL_LOADING
 OPTIONAL_PARAM: TEST_RESULT_FILE
@@ -143,6 +160,7 @@ DESCRIPTION: Review inferred terms used by generated ASI material against canoni
 PROMPT_FILE: docs/design/ai/asi/workflows/ASI-INFERRED_TERM_REVIEW_PROMPT.txt
 REQUIRED_PARAM: DOC_ID
 REQUIRED_PARAM: GENERATED_MATERIAL_FILE
+REPEATABLE_PARAM: GENERATED_MATERIAL_FILE
 OPTIONAL_PARAM: EXECUTION_TARGET
 OPTIONAL_PARAM: INFERRED_REVIEW_FILE
 DEFAULT_PARAM: EXECUTION_TARGET=new_thread_launch_prompt
@@ -169,6 +187,7 @@ DESCRIPTION: Generate or update ASI index files from accepted extraction records
 PROMPT_FILE: docs/design/ai/asi/workflows/ASI-INDEX_GENERATION_WORKER_PROMPT.txt
 REQUIRED_PARAM: BATCH_ID
 REQUIRED_PARAM: ASI_OUTPUT_FILE
+REPEATABLE_PARAM: ASI_OUTPUT_FILE
 OPTIONAL_PARAM: EXECUTION_TARGET
 DEFAULT_PARAM: EXECUTION_TARGET=new_thread_launch_prompt
 DEFAULT_EXECUTION_TARGET: new_thread_launch_prompt
@@ -194,6 +213,7 @@ DESCRIPTION: Apply a supervisor-approved source-document clarity patch.
 PROMPT_FILE: docs/design/ai/asi/workflows/ASI-SOURCE_PATCH_WORKER_PROMPT.txt
 REQUIRED_PARAM: CANDIDATE_ID
 REQUIRED_PARAM: DOC_ID
+REPEATABLE_PARAM: DOC_ID
 OPTIONAL_PARAM: EXECUTION_TARGET
 OPTIONAL_PARAM: APPROVAL
 DEFAULT_PARAM: EXECUTION_TARGET=new_thread_launch_prompt
@@ -248,7 +268,7 @@ This file defines ASI workflow contracts only.
 --- file-meta ---
 DOC_ID: ASI-WORKFLOW_REGISTRY
 DOC_FILE: docs/design/ai/asi/registry/ASI-WORKFLOW_REGISTRY.txt
-DOC_REV: 1
-DOC_GIT: b2cac12
+DOC_REV: 2
+DOC_GIT: 0000000
 DOC_STATUS: STABLE
 -----------------
