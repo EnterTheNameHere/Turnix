@@ -79,6 +79,23 @@ BATCH_ID: Batch 1 foundation
 EXECUTION_TARGET: new_thread_launch_prompt
 END_ASI_WORKFLOW_CALL
 
+Branch resolution
+-----------------
+BRANCH identifies the Git branch used for repository loads and writes.
+
+For current_thread execution of any workflow that may write repository files,
+BRANCH is required in the ASI_WORKFLOW_CALL.
+
+For new_thread_launch_prompt and dry_run_plan, the runner may use an active task
+branch only when that branch is already unambiguous in the current task.
+
+For current_thread read-only execution, the runner may use an active task branch
+only when the resolved workflow has no MAY_WRITE entries and the active branch
+is already unambiguous.
+
+If no branch is supplied and no active task branch is unambiguous, the runner
+stops and asks for BRANCH.
+
 Resolution steps
 ----------------
 For each ASI_WORKFLOW_CALL:
@@ -87,13 +104,37 @@ For each ASI_WORKFLOW_CALL:
 2. Verify WORKFLOW_ID is present.
 3. Resolve WORKFLOW_ID through ASI-WORKFLOW_REGISTRY.txt.
 4. Verify required parameters are present.
-5. Resolve BATCH_ID through ASI-BATCH_REGISTRY.txt when required or supplied.
-6. Resolve DOC_ID through CMR-04 when required.
-7. Resolve declared load groups through ASI-LOAD_GROUPS.txt.
-8. Load the workflow prompt declared by the registry entry.
-9. Check for contract conflicts between the registry, load groups, and workflow
-   prompt.
-10. Apply the requested EXECUTION_TARGET.
+5. Verify repeated fields only use registry-declared REPEATABLE_PARAM entries.
+6. Apply explicit default values for omitted optional parameters.
+7. Resolve BATCH_ID through ASI-BATCH_REGISTRY.txt when required or supplied.
+8. Resolve DOC_ID through CMR-04 when required.
+9. Resolve ordinary LOAD_GROUP entries through ASI-LOAD_GROUPS.txt.
+10. Record LOAD_GROUP_BEFORE_WRITE entries as deferred write-phase loads.
+11. Load the workflow prompt declared by the registry entry.
+12. Check for contract conflicts between the registry, load groups, and
+    workflow prompt.
+13. Apply the requested EXECUTION_TARGET.
+
+Deferred write-phase load groups
+--------------------------------
+LOAD_GROUP entries are required before the workflow body starts.
+
+LOAD_GROUP_BEFORE_WRITE entries are required only before the named write class
+or write phase starts.
+
+The runner does not treat LOAD_GROUP_BEFORE_WRITE entries as ordinary startup
+LOAD_GROUP entries.
+
+When EXECUTION_TARGET is dry_run_plan or new_thread_launch_prompt, the runner
+reports deferred write-phase load groups but does not load them unless the
+assignment explicitly asks for full write-readiness checking.
+
+When EXECUTION_TARGET is current_thread and the workflow reaches the named write
+phase, the runner loads each required LOAD_GROUP_BEFORE_WRITE group before that
+write phase begins.
+
+If a deferred write-phase load group cannot be classified COMPLETE, the runner
+stops before the write phase.
 
 Contract conflict rule
 ----------------------
@@ -114,14 +155,40 @@ Run the workflow in this conversation only if the workflow registry and workflow
 prompt allow current-thread execution and the user clearly requested it.
 
 new_thread_launch_prompt:
-Prepare a copy-paste first message for a fresh thread. The launch prompt must
-include required loads, role declaration, assigned parameters, task statement,
-and boundary rules.
+Prepare a copy-paste first message for a fresh thread.
+
+The launch prompt must include required loads, role declaration, assigned
+parameters, task statement, read boundary, write boundary, forbidden writes,
+stopping conditions, and execution-target context.
 
 dry_run_plan:
 Report resolved workflow ID, prompt file, required files, required parameters,
 read permissions, write permissions, forbidden writes, expected outputs, and
 blocking issues. Do not run the workflow body.
+
+Launch prompt skeleton
+----------------------
+For new_thread_launch_prompt, print a complete launch prompt in this shape:
+
+BEGIN ASI GENERATED LAUNCH PROMPT
+WORKFLOW_ID:
+ROLE:
+BRANCH:
+EXECUTION_TARGET:
+ASSIGNED_PARAMETERS:
+REQUIRED_LOADS:
+DEFERRED_WRITE_PHASE_LOADS:
+TASK:
+MAY_READ:
+MAY_WRITE:
+MUST_NOT_READ:
+MUST_NOT_WRITE:
+STOPPING_CONDITIONS:
+FINAL_REPORT_REQUIREMENTS:
+END ASI GENERATED LAUNCH PROMPT
+
+The generated launch prompt may use plain prose inside each field, but it keeps
+these field labels so another assistant can parse the launch context reliably.
 
 Write boundary
 --------------
@@ -133,9 +200,9 @@ When preparing a launch prompt, the runner writes no repository files.
 
 When producing a dry-run plan, the runner writes no repository files.
 
-When running a workflow in the current thread, writes are limited to the MAY_WRITE
-entries declared by the resolved registry entry and any stricter workflow prompt
-rule.
+When running a workflow in the current thread, writes are limited to the
+MAY_WRITE entries declared by the resolved registry entry and any stricter
+workflow prompt rule.
 
 Repository write authority still requires complete source state and update SHA
 handling as defined by AI_WORKFLOW_BOOTSTRAP.
@@ -147,11 +214,14 @@ For dry-run or current-thread execution, report:
 - resolved workflow prompt
 - resolved branch
 - required parameters
+- repeatable parameters used
 - resolved DOC_ID and source path when applicable
 - resolved BATCH_ID when applicable
 - required load groups
+- deferred write-phase load groups
 - files loaded and retrieval classification
 - allowed writes
+- forbidden reads
 - forbidden writes
 - execution target
 - blocked items or contract conflicts
@@ -165,7 +235,7 @@ This file defines the ASI workflow runner entrypoint only.
 --- file-meta ---
 DOC_ID: ASI-RUN_WORKFLOW
 DOC_FILE: docs/design/ai/asi/ASI-RUN_WORKFLOW.txt
-DOC_REV: 3
-DOC_GIT: eb08207
+DOC_REV: 4
+DOC_GIT: 0000000
 DOC_STATUS: STABLE
 -----------------
