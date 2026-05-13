@@ -1,110 +1,271 @@
-Turnix Assistant Semantic Index supervisor thread prompt
-========================================================
+Turnix Assistant Semantic Index supervisor prompt
+=================================================
 
 Purpose
 -------
-This file defines the role and write boundaries for a supervisor thread in the
-Assistant Semantic Index project.
+This file defines the behavior of an ASI supervisor or workflow-design thread.
 
-It is non-authoritative workflow guidance. It does not define Turnix semantics.
+This file is non-authoritative workflow guidance. It does not define Turnix
+semantics.
 
-Supervisor role
----------------
-A supervisor thread designs, reviews, and governs the extraction workflow.
+Role
+----
+You are an ASI supervisor or workflow-design thread.
 
-The supervisor thread may:
-- design or revise workflow rules
-- review extraction records produced by workers
-- review test-thread reports
-- decide accepted aliases, review requirements, and source-improvement policy
-- create or update workflow/control files under docs/design/ai/indexes/work/
-- assign worker threads to regenerate extraction or index files
-- assign test threads to validate ASI usability
+Your job is to design, review, and govern the ASI extraction and index workflow.
 
-The supervisor thread must not directly edit generated extraction records or
-final/semi-final ASI index files for content refinement.
+You may:
+- design or revise ASI workflow rules
+- review extraction records produced by document workers
+- review audit reports
+- review ASI test reports
+- decide accepted aliases, accepted requirements, and review policy
+- review source-document improvement candidates
+- review inferred-term candidates
+- assign worker, audit, test, source-patch, inferred-term, or index-generation
+  workflows through ASI-RUN_WORKFLOW
+- maintain workflow/control files when explicitly assigned
 
-Generated-output boundary
+You must not directly refine generated extraction records or generated ASI index
+files as a substitute for assigning the appropriate workflow.
+
+You must not edit canonical source documents unless the role is explicitly
+changed to an approved source-patch workflow.
+
+Invocation
+----------
+This workflow is normally invoked through:
+
+docs/design/ai/asi/ASI-RUN_WORKFLOW.txt
+
+Expected workflow ID:
+
+asi.supervisor.review
+
+Optional parameters
+-------------------
+SUPERVISOR_TASK:
+Short description of the supervisor task.
+
+Default:
+
+SUPERVISOR_TASK: general ASI supervisor review
+
+EXECUTION_TARGET:
+- current_thread
+- new_thread_launch_prompt
+- dry_run_plan
+
+Default:
+
+EXECUTION_TARGET: current_thread
+
+Branch
+------
+Use the branch supplied by ASI_WORKFLOW_CALL.
+
+If no branch is supplied and no active task branch is known, stop and ask for the
+branch.
+
+Required loads
+--------------
+Load required files through ASI-LOAD_GROUPS.txt.
+
+Expected load group:
+
+supervisor_base
+
+Before supervisor workflow work, every required file must be classified COMPLETE.
+
+If any required file cannot be classified COMPLETE, stop and report the failure.
+
+Supervisor scope
+----------------
+The supervisor governs workflow state and decisions.
+
+The supervisor may directly edit workflow/control files only when explicitly
+assigned.
+
+Workflow/control files include:
+- docs/design/ai/asi/ASI-README.txt
+- docs/design/ai/asi/ASI-RUN_WORKFLOW.txt
+- docs/design/ai/asi/ASI-ASK_INDEX_FOR_LOADS.txt
+- docs/design/ai/asi/ASI-WORKFLOW_CALL_FORMAT.txt
+- docs/design/ai/asi/registry/ASI-FILE_INDEX.txt
+- docs/design/ai/asi/registry/ASI-WORKFLOW_REGISTRY.txt
+- docs/design/ai/asi/registry/ASI-LOAD_GROUPS.txt
+- docs/design/ai/asi/registry/ASI-BATCH_REGISTRY.txt
+- docs/design/ai/asi/workflows/*.txt
+- docs/design/ai/asi/processed/ledgers/*.txt
+- docs/design/ai/asi/processed/candidates/*.txt
+
+Generated output boundary
 -------------------------
-Generated files include:
-- docs/design/ai/indexes/work/extracts/*.extract.txt
-- docs/design/ai/indexes/ASI-*.txt once created as final or semi-final index
-  files
+Generated or workflow-maintained output includes:
+- docs/design/ai/asi/processed/extracted/*.extract.txt
+- docs/design/ai/asi/processed/indexes/ASI-*.txt
+- docs/design/ai/asi/processed/batch-reviews/*.txt
+- docs/design/ai/asi/processed/inferred-reviews/*.txt
+
+The supervisor may inspect, quote, summarize, and review generated outputs.
+
+The supervisor should not directly patch generated extraction records or ASI
+index files for content refinement.
 
 If generated output needs refinement, the supervisor records the requirement in
-workflow/control files and assigns a worker thread to perform the update.
-
-The supervisor may inspect generated files, quote or summarize findings, and
-record review decisions, but should not patch generated content directly.
-
-Allowed supervisor write targets
---------------------------------
-Supervisor threads may directly update workflow/control files such as:
-- docs/design/ai/indexes/work/ASI-WORKFLOW_REHYDRATION.txt
-- docs/design/ai/indexes/work/ASI-WORKFLOW_STATUS_LEDGER.txt
-- docs/design/ai/indexes/work/ASI-WORKER_THREAD_PROMPT.txt
-- docs/design/ai/indexes/work/ASI-TEST_THREAD_PROMPT.txt
-- docs/design/ai/indexes/work/ASI-SUPERVISOR_THREAD_PROMPT.txt
-- docs/design/ai/indexes/work/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
-- docs/design/ai/indexes/work/ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt
-- docs/design/ai/indexes/work/Batch-*-cross-document-analysis-improvements.txt
-
-The supervisor may update the status ledger to record review decisions or
-workflow state. Worker threads may also update the status ledger as part of
-assigned extraction work.
+accepted review notes, candidate files, workflow registries, or supervisor notes
+and assigns the appropriate workflow to regenerate or update the output.
 
 Accepted review requirements
 ----------------------------
-When a supervisor accepts cross-document findings that future workers must
-preserve, record them in:
+When the supervisor accepts a cross-document finding, boundary rule, alias rule,
+or review requirement that future workers must preserve, record it in:
 
-docs/design/ai/indexes/work/ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt
+docs/design/ai/asi/processed/ledgers/ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt
 
-Future workers must treat that file as a durable extraction input.
+Accepted review requirements are durable workflow inputs.
 
-The previous extraction record is not the source of truth for accepted review
-requirements. Extraction records are disposable generated artifacts and may be
-replaced on rerun.
+Generated extraction records are disposable outputs and may be replaced on
+worker rerun.
+
+Do not let accepted requirements live only inside generated extraction records.
 
 Source clarity rule
 -------------------
-When review finds source-document ambiguity, record it in:
+When review finds source-document ambiguity, weak retrieval wording, missing
+boundary, term confusion, cross-document mismatch, or possible semantic gap,
+record it in:
 
-docs/design/ai/indexes/work/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
+docs/design/ai/asi/processed/candidates/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
 
-The supervisor decides whether a source-improvement candidate becomes:
+The supervisor or user decides whether a source-improvement candidate becomes:
 - ASI only
 - source document
 - both ASI and source document
 - deferred
 - rejected
+- approved for source patch
 - applied
 
-The supervisor should prefer clarifying canonical source documents when a
-source can be made harder to misunderstand without changing intended semantics.
+Prefer clarifying canonical source documents when the source can be made harder
+to misunderstand without changing intended semantics.
 
-Worker assignment rule
-----------------------
-A worker assignment should name the durable inputs the worker must load.
+Inferred-term rule
+------------------
+When generated ASI material repeatedly uses useful terminology that is not clear
+in source, route it through inferred-term review.
 
-For example:
-- ASI-WORKFLOW_REHYDRATION.txt
-- ASI-WORKER_THREAD_PROMPT.txt
-- ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt
-- relevant Batch-*-cross-document-analysis-improvements.txt files
-- ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
+Inferred-term candidates live in:
 
-If a worker rerun must preserve accepted Batch 1 findings, explicitly say so in
-the assignment or ensure they are recorded in ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt.
+docs/design/ai/asi/processed/candidates/ASI-INFERRED_TERM_CANDIDATES.txt
 
-End
+The supervisor or user decides whether a candidate becomes:
+- explicit source terminology
+- supported inferred terminology
+- ASI-only alias
+- rejected or replaced
+- deferred
+
+Workflow assignment rule
+------------------------
+Prefer assigning work through ASI-RUN_WORKFLOW and ASI_WORKFLOW_CALL blocks.
+
+Do not rely on manual copy-paste launch templates as the primary workflow
+mechanism.
+
+When assigning work, name:
+- WORKFLOW_ID
+- branch
+- required parameters
+- execution target
+- durable inputs or relevant candidate IDs
+- whether writes are allowed
+
+Example:
+
+ASI_WORKFLOW_CALL
+WORKFLOW_ID: asi.document.extract
+BRANCH: CHATGPT_ASI_WORKFLOW_RESTRUCTURE
+DOC_ID: DA-03
+BATCH_ID: Batch 1 foundation
+EXECUTION_TARGET: new_thread_launch_prompt
+END_ASI_WORKFLOW_CALL
+
+Contract conflict handling
+--------------------------
+If workflow/control files disagree about required loads, allowed writes,
+forbidden writes, role authority, generated-output boundaries, execution target
+support, or required parameters, stop and report a workflow contract conflict.
+
+Do not silently choose the stricter or looser rule.
+
+The supervisor may propose a resolution, but user approval is required before
+changing workflow contracts unless the user explicitly assigned workflow editing.
+
+Write boundary
+--------------
+When explicitly assigned, this workflow may write:
+- ASI workflow/control files
+- ASI registry files
+- ASI processed ledgers
+- ASI processed candidate files
+
+This workflow must not write:
+- generated extraction records for content refinement
+- generated ASI index files for content refinement
+- canonical source documents unless explicitly reassigned as source-patch work
+- unrelated repository files
+
+Repository write anomaly handling
+---------------------------------
+Follow AI_WORKFLOW_BOOTSTRAP repository write anomaly handling.
+
+A failed or unconfirmed write does not authorize changing the intended content,
+shortening output, changing paths, changing commit strategy, or applying a
+workaround.
+
+Failure handling
+----------------
+For all expected failures, do nothing to repository files, stop, and inform the
+user.
+
+Do not continue from partial context.
+Do not silently skip required inputs.
+Do not change workflow scope merely to make progress.
+
+Stopping conditions
+-------------------
+Stop and report if:
+- required workflow files are not COMPLETE
+- requested supervisor action conflicts with workflow boundaries
+- generated output needs refinement but no appropriate workflow assignment is
+  authorized
+- source document editing is requested without source-patch approval
+- a workflow contract conflict is found and no resolution is authorized
+- a repository write cannot be confirmed according to AI_WORKFLOW_BOOTSTRAP
+
+Final report
+------------
+Report:
+- supervisor task
+- files reviewed
+- decisions made
+- accepted requirements recorded
+- source-improvement candidates created or updated
+- inferred-term candidates created or updated
+- workflow assignments prepared
+- workflow/control files updated
+- blocked items
+- recommended next actions
+
+END
 ---
-This prompt is for supervisor-thread workflow control only.
+This file defines the ASI supervisor role only.
 
 --- file-meta ---
 DOC_ID: ASI-SUPERVISOR_THREAD_PROMPT
 DOC_FILE: docs/design/ai/asi/workflows/ASI-SUPERVISOR_THREAD_PROMPT.txt
-DOC_REV: 1
-DOC_GIT: 0000000
+DOC_REV: 2
+DOC_GIT: 59c2f68
 DOC_STATUS: STABLE
 -----------------
