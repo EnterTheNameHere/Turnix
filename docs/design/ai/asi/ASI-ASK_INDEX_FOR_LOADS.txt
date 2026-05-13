@@ -1,8 +1,216 @@
+Turnix Assistant Semantic Index ask index for loads
+===================================================
+
+Purpose
+-------
+This file is the read-only Assistant Semantic Index entrypoint for answering:
+
+What should be loaded for this query, term, topic, file, or task?
+
+This file is non-authoritative workflow guidance. It does not define Turnix
+semantics.
+
+Use this file when
+------------------
+Use this file when the user or assistant needs routing guidance from ASI index
+files before doing authoritative Turnix work.
+
+Examples:
+- What are fields of TraceSpan?
+- What owns isComplete?
+- What should I load for transport disconnect?
+- Which document owns committed state mutation?
+- I am editing backend/tracing/trace_span.py; what design docs should I load?
+
+Do not use this file to run extraction, audit, index-generation, inferred-term,
+source-patch, or supervisor workflows.
+
+Read-only boundary
+------------------
+ASK_INDEX_FOR_LOADS is read-only.
+
+It may recommend files and sections to load.
+It may explain why ASI metadata points to those files.
+It may report missing, ambiguous, stale, or weak index coverage.
+
+It must not:
+- update ASI files
+- regenerate indexes
+- edit extraction records
+- edit ledgers
+- edit candidate files
+- edit canonical Turnix documents
+- run any workflow from ASI-WORKFLOW_REGISTRY
+- treat ASI metadata as authoritative Turnix semantics
+
+Required initial loads
+----------------------
+Before answering ASI_LOAD_QUERY, load and classify as COMPLETE:
+- docs/AI_WORKFLOW_BOOTSTRAP.txt
+- docs/design/ai/asi/ASI-ASK_INDEX_FOR_LOADS.txt
+- docs/design/ai/asi/ASI-WORKFLOW_CALL_FORMAT.txt
+- docs/design/ai/asi/registry/ASI-FILE_INDEX.txt
+
+Then load the ASI index files needed for the query.
+
+Default ASI index load order
+----------------------------
+When the query does not explicitly name ASI index files, start with:
+- docs/design/ai/asi/processed/indexes/ASI-00_ASSISTANT_SEMANTIC_INDEX_README.txt
+- docs/design/ai/asi/processed/indexes/ASI-01_DOCUMENT_DOMAIN_INDEX.txt
+
+Load additional ASI index files only when the current query needs them.
+
+Expected additional ASI index files include:
+- docs/design/ai/asi/processed/indexes/ASI-02_TERM_INDEX.txt
+- docs/design/ai/asi/processed/indexes/ASI-03_RETRIEVAL_HINT_INDEX.txt
+- docs/design/ai/asi/processed/indexes/ASI-04_BOUNDARY_AND_NON_OWNERSHIP_INDEX.txt
+- docs/design/ai/asi/processed/indexes/ASI-05_RELATION_INDEX.txt
+
+If an expected ASI index file is missing, report that the index is missing. Do
+not use repository search to hide missing index coverage.
+
+Invocation format
+-----------------
+ASI_LOAD_QUERY syntax is defined in:
+
+docs/design/ai/asi/ASI-WORKFLOW_CALL_FORMAT.txt
+
+Example:
+
+ASI_LOAD_QUERY
+QUERY: What are fields of TraceSpan?
+TASK_CONTEXT: implementing trace serialization
+CURRENT_FILE: backend/tracing/trace_span.py
+ALLOW_CANONICAL_LOADING: no
+END_ASI_LOAD_QUERY
+
+Optional fields
+---------------
+ALLOW_CANONICAL_LOADING:
+- no
+- yes
+
+Default:
+
+ALLOW_CANONICAL_LOADING: no
+
+Canonical loading is allowed only when ALLOW_CANONICAL_LOADING is yes or the
+user gives a direct instruction to load canonical source documents.
+
+Query handling rules
+--------------------
+For each QUERY:
+
+1. Identify likely terms, domains, files, and boundaries named by the query.
+2. Search or inspect only the loaded ASI index files unless canonical loading is
+   explicitly allowed.
+3. Separate direct ASI matches from inferred candidate matches.
+4. Recommend canonical documents or implementation files to load.
+5. State whether each recommendation is direct, inferred, missing, or ambiguous.
+6. Do not answer normative Turnix semantics from ASI metadata.
+7. If authoritative meaning is needed, say which canonical source must be
+   loaded next.
+
+Output format
+-------------
+For each query, report:
+
+QUESTION:
+
+ASI FILES USED:
+
+LOAD_FIRST:
+- DOC_ID_OR_PATH:
+  ROLE:
+  BASIS:
+
+CANDIDATE_LOAD:
+- DOC_ID_OR_PATH:
+  ROLE:
+  BASIS:
+
+LOAD_IF_NEEDED:
+- DOC_ID_OR_PATH:
+  ROLE:
+  BASIS:
+
+DO_NOT_TREAT_AS_AUTHORITY:
+- DOC_ID_OR_SOURCE:
+  REASON:
+
+WHY:
+
+CONFIDENCE:
+- high
+- medium
+- low
+
+INDEX_QUALITY:
+- clear
+- ambiguous
+- missing
+- misleading
+- too verbose
+- too sparse
+
+AUTHORITATIVE_ANSWER_ALLOWED_FROM_ASI:
+- no
+
+NOTES:
+
+Basis values
+------------
+Use these BASIS values when practical:
+- direct-index-match
+- inferred-from-relation
+- inferred-from-domain
+- inferred-from-term
+- user-named-source
+- implementation-file-context
+- missing-from-index
+- ambiguous-index-match
+
+Canonical loading
+-----------------
+ASK_INDEX_FOR_LOADS normally stops after recommending what to load.
+
+It may load canonical source documents only when:
+- ALLOW_CANONICAL_LOADING is yes in the ASI_LOAD_QUERY block, or
+- the user gives a direct instruction to load canonical source documents.
+
+When canonical loading is allowed, resolve DOC_ID through CMR-04 and follow
+AI_WORKFLOW_BOOTSTRAP retrieval classification rules.
+
+If canonical loading is not allowed and authoritative meaning is needed, do not
+load canonical source documents. Report which canonical source should be loaded
+next.
+
+Missing coverage
+----------------
+If the loaded ASI indexes cannot route the query, report INDEX_QUALITY as
+missing or ambiguous.
+
+Do not rescue missing ASI routing by using repository search, prior memory, or
+unloaded canonical documents.
+
+Failure handling
+----------------
+For all expected failures, do nothing to repository files, stop, and inform the
+user.
+
+Do not continue from partial context.
+Do not silently use canonical source documents when ASI routing fails.
+Do not run workflows from ASK_INDEX_FOR_LOADS.
+
+END
+---
+This file defines the ASI load-query entrypoint only.
 
 --- file-meta ---
 DOC_ID: ASI-ASK_INDEX_FOR_LOADS
 DOC_FILE: docs/design/ai/asi/ASI-ASK_INDEX_FOR_LOADS.txt
 DOC_REV: 1
-DOC_GIT: 0000000
+DOC_GIT: 7d1750f
 DOC_STATUS: STABLE
 -----------------
