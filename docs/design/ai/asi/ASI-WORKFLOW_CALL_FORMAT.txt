@@ -1,8 +1,159 @@
+Turnix Assistant Semantic Index workflow call format
+====================================================
+
+Purpose
+-------
+This file defines the plain-text invocation formats used by the Turnix
+Assistant Semantic Index system.
+
+This file is non-authoritative workflow guidance. It does not define Turnix
+semantics.
+
+Format goal
+-----------
+ASI invocation blocks are designed to be easy for humans to type, easy for
+language models to recognize, and resilient to ordinary copy/paste handling.
+
+The format avoids nested indentation as much as possible.
+
+General rules
+-------------
+1. Use one field per line.
+2. Use FIELD: value syntax for parameter lines.
+3. Use explicit BEGIN/END style marker names without Markdown fences.
+4. Use repeated field lines for repeated values.
+5. Do not use Markdown tables for invocation blocks.
+6. Do not use Markdown lists as semantic structure inside invocation blocks.
+7. If an invocation block is ambiguous, stop and ask for clarification.
+8. If lines are collapsed during paste but fields remain unambiguous, the
+   assistant may recover the fields and report that recovery happened.
+9. If recovery is uncertain, the assistant stops and asks the user to resend or
+   repair the block.
+10. A recovered ASI_WORKFLOW_CALL may not execute a write-capable workflow in
+    current_thread mode until the user confirms the recovered fields.
+11. A recovered ASI_WORKFLOW_CALL may be used for dry_run_plan or
+    new_thread_launch_prompt only when all fields are unambiguous and recovery
+    is reported.
+12. A recovered ASI_LOAD_QUERY remains read-only and must not trigger workflow
+    execution.
+
+Workflow invocation block
+-------------------------
+Use ASI_WORKFLOW_CALL when the user wants to run, prepare, or inspect an ASI
+workflow.
+
+Example:
+
+ASI_WORKFLOW_CALL
+WORKFLOW_ID: asi.document.extract
+BRANCH: CHATGPT_ASI_WORKFLOW_RESTRUCTURE
+DOC_ID: DA-03
+BATCH_ID: Batch 1 foundation
+EXECUTION_TARGET: new_thread_launch_prompt
+END_ASI_WORKFLOW_CALL
+
+Required fields depend on WORKFLOW_ID and are defined in:
+
+docs/design/ai/asi/registry/ASI-WORKFLOW_REGISTRY.txt
+
+Common fields
+-------------
+WORKFLOW_ID:
+Identifies the workflow contract to run.
+
+BRANCH:
+Git branch to use for repository loads and writes. If omitted, the workflow
+runner uses the branch declared by its active task context. If no active task
+branch is known, stop and ask.
+
+DOC_ID:
+Canonical Turnix document identifier when the workflow targets one document.
+Resolve DOC_ID through CMR-04 when the workflow requires canonical document
+loading.
+
+BATCH_ID:
+Named batch from ASI-BATCH_REGISTRY when the workflow is batch-aware.
+
+EXECUTION_TARGET:
+Controls how the workflow is used.
+
+Accepted values:
+- current_thread
+- new_thread_launch_prompt
+- dry_run_plan
+
+current_thread means the assistant attempts to run the workflow in the current
+conversation, subject to registry permissions and required loads.
+
+new_thread_launch_prompt means the assistant prepares a complete first message
+for a fresh thread.
+
+dry_run_plan means the assistant resolves the workflow and reports what would be
+loaded, read, written, and blocked, without performing the workflow body.
+
+Load query block
+----------------
+Use ASI_LOAD_QUERY when the user or assistant wants to ask ASI indexes what
+canonical Turnix documents, sections, or implementation files should be loaded
+for a term, topic, question, or current task.
+
+Example:
+
+ASI_LOAD_QUERY
+QUERY: What are fields of TraceSpan?
+TASK_CONTEXT: implementing trace serialization
+CURRENT_FILE: backend/tracing/trace_span.py
+END_ASI_LOAD_QUERY
+
+Repeated values
+---------------
+Use repeated field lines for repeated values.
+
+Example:
+
+ASI_LOAD_QUERY
+QUERY: What are fields of TraceSpan?
+QUERY: What owns isComplete?
+TASK_CONTEXT: preparing implementation work
+ASI_FILE: docs/design/ai/asi/processed/indexes/ASI-00_ASSISTANT_SEMANTIC_INDEX_README.txt
+ASI_FILE: docs/design/ai/asi/processed/indexes/ASI-01_DOCUMENT_DOMAIN_INDEX.txt
+END_ASI_LOAD_QUERY
+
+Malformed invocation handling
+-----------------------------
+An invocation is malformed when:
+- the start marker is missing
+- the end marker is missing
+- required fields for the resolved workflow are missing
+- a field appears with contradictory values where only one value is allowed
+- the WORKFLOW_ID is unknown
+- the BATCH_ID is unknown when a batch is required
+- the DOC_ID cannot be resolved when canonical loading is required
+- the requested execution target is not supported by the workflow
+
+When an invocation is malformed, the assistant stops and reports the missing or
+invalid fields.
+
+Authority boundary
+------------------
+ASI invocation blocks do not grant authority by themselves.
+
+A workflow may only read, write, or interpret sources according to:
+- AI_WORKFLOW_BOOTSTRAP retrieval rules
+- ASI-RUN_WORKFLOW rules
+- ASI-WORKFLOW_REGISTRY entries
+- ASI-LOAD_GROUPS entries
+- the selected workflow prompt
+- explicit user/supervisor instruction
+
+END
+---
+This file defines ASI invocation formats only.
 
 --- file-meta ---
 DOC_ID: ASI-WORKFLOW_CALL_FORMAT
 DOC_FILE: docs/design/ai/asi/ASI-WORKFLOW_CALL_FORMAT.txt
 DOC_REV: 1
-DOC_GIT: 0000000
+DOC_GIT: 7d1750f
 DOC_STATUS: STABLE
 -----------------
