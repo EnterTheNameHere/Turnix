@@ -3,16 +3,15 @@ Turnix Assistant Semantic Index inferred term review prompt
 
 Purpose
 -------
-This file instructs a fresh inferred-term review thread how to identify useful,
-unsupported, or misleading inferred terminology in Assistant Semantic Index
-extraction and index material.
+This file defines the behavior of an inferred-term review thread for the Turnix
+Assistant Semantic Index system.
 
-It is non-authoritative workflow guidance. It does not define Turnix semantics.
+This file is non-authoritative workflow guidance. It does not define Turnix
+semantics.
 
-Review role
------------
-You are an inferred-term review thread for the Turnix Assistant Semantic Index
-project.
+Role
+----
+You are an ASI inferred-term review thread.
 
 Your job is to compare canonical source documents against generated extraction
 or ASI material and identify terms that appear in generated material but do not
@@ -30,61 +29,117 @@ You do not edit extraction records.
 You do not edit ASI index files.
 You do not approve candidates.
 
-The supervisor/user decides which candidates to implement.
+The supervisor or user decides which candidates to implement.
 
-Cloud-oriented review
----------------------
-Prefer running this workflow with a strong cloud LLM when possible.
+Invocation
+----------
+This workflow is normally invoked through:
 
-The review benefits from broad programming, documentation, schema, API, and
-architecture naming patterns. Mechanical term detection may be possible with a
-local LLM or script, but semantic classification should prefer stronger model
-judgment.
+docs/design/ai/asi/ASI-RUN_WORKFLOW.txt
+
+Expected workflow ID:
+
+asi.inferred_terms.review
+
+Required parameters
+-------------------
+DOC_ID:
+Canonical Turnix document identifier for the source document being compared.
+
+GENERATED_MATERIAL_FILE:
+Generated extraction or ASI material to compare against the source.
+
+Repeated values
+---------------
+Use repeated GENERATED_MATERIAL_FILE lines when multiple generated files are
+assigned.
+
+Optional parameters
+-------------------
+EXECUTION_TARGET:
+- current_thread
+- new_thread_launch_prompt
+- dry_run_plan
+
+Default:
+
+EXECUTION_TARGET: new_thread_launch_prompt
+
+INFERRED_REVIEW_FILE:
+Optional inferred-review report filename under:
+
+docs/design/ai/asi/processed/inferred-reviews/
+
+Default:
+
+INFERRED_REVIEW_FILE: none
+
+When INFERRED_REVIEW_FILE is none, do not write an inferred-review report file.
+Only update the inferred-term candidate file when candidate updates are produced
+and writes are authorized.
 
 Branch
 ------
-Use branch:
+Use the branch supplied by ASI_WORKFLOW_CALL.
 
-CHATGPT_EXTRACT_INDEX
+If no branch is supplied and no active task branch is known, stop and ask for the
+branch.
 
-Required initial loads
-----------------------
-Before inferred-term review work, load and classify as COMPLETE:
-- docs/AI_WORKFLOW_BOOTSTRAP.txt
-- docs/CMR-04_CANONICAL_INDEX_TURNIX_SPECIFICATION.txt
-- docs/design/ai/indexes/work/ASI-WORKFLOW_REHYDRATION.txt
-- docs/design/ai/indexes/work/ASI-INFERRED_TERM_REVIEW_PROMPT.txt
-- docs/design/ai/indexes/work/ASI-INFERRED_TERM_CANDIDATES.txt
+Execution profile
+-----------------
+This workflow is cloud-recommended.
 
-Also load the assigned canonical source document and its assigned extraction or
-ASI material.
+It benefits from broad programming, documentation, schema, API, and architecture
+naming knowledge.
 
-If any required file cannot be classified COMPLETE, stop and report the
+Local models or scripts may help collect mechanical candidates, but semantic
+classification should prefer stronger model judgment when possible.
+
+Local-safe subtasks include:
+- listing generated terms not present in source
+- grouping repeated terms
+- flagging CamelCase, PascalCase, capitalized domain terms, and schema-like names
+
+Local-unsafe-as-final subtasks include:
+- deciding canonical source terminology
+- rejecting or accepting architecture terms
+- deciding whether common industry vocabulary applies
+
+Required loads
+--------------
+Load required files through ASI-LOAD_GROUPS.txt.
+
+Expected load group:
+
+inferred_term_base
+
+Before inferred-term review work, every required file must be classified
+COMPLETE.
+
+If any required file cannot be classified COMPLETE, stop and report the failure.
+
+Source and generated material loading
+-------------------------------------
+Resolve DOC_ID through CMR-04.
+
+Load the assigned canonical source document.
+
+Load every assigned GENERATED_MATERIAL_FILE.
+
+Classify every loaded file before use.
+
+If the source document or generated material is not COMPLETE, stop and report the
 failure.
-
-Connector safety
-----------------
-Follow the current AI_WORKFLOW_BOOTSTRAP connector retrieval rules.
-
-Begin repository file loading with fetch_file for the exact repository, path,
-ref, and encoding.
-
-Classify the response shape before use.
-
-Only COMPLETE permits read use.
-
-For repository writes, use only the connector update sha returned by the same
-COMPLETE fetch_file response for the same requested output file.
 
 Review scope
 ------------
-Look primarily at high-value candidate terms:
+Focus on high-value terms:
 - CamelCase terms
 - PascalCase terms
 - capitalized domain terms
 - terms listed in HIGH_VALUE_TERMS
 - terms used in LOAD_FIRST, CANDIDATE_LOAD, or LOAD_IF_NEEDED
-- terms repeated across multiple extraction/index files
+- terms repeated across multiple generated files
 - terms that look like object, type, schema, field, event, span, record, id, or
   lifecycle names
 
@@ -93,39 +148,37 @@ Do not record every harmless paraphrase.
 Focus on terms that may affect future design, retrieval, implementation naming,
 or assistant routing.
 
-Classification rules
---------------------
-Use EXPLICIT_SOURCE_TERM when the exact term appears in the canonical source.
+Classification values
+---------------------
+EXPLICIT_SOURCE_TERM:
+The exact term appears in the canonical source.
 
-Use SUPPORTED_INFERRED_TERM when the exact term does not appear, but the source
-strongly defines the concept in prose.
+SUPPORTED_INFERRED_TERM:
+The exact term does not appear, but the source strongly defines the concept in
+prose.
 
-Use CANONICAL_TERM_CANDIDATE when the term may be worth adding to source as
-stable vocabulary because:
-- the concept is already semantically strong
-- the term matches common programming or architecture naming patterns
-- repeated assistant extraction is likely to infer the same term
-- the term would reduce ambiguity or improve retrieval
+CANONICAL_TERM_CANDIDATE:
+The term may be worth adding to source as stable vocabulary because the concept
+is already semantically strong, the term matches common naming patterns, and the
+term would reduce ambiguity or improve retrieval.
 
-Use INDEX_ALIAS_ONLY when the term is useful for ASI search/routing but should
-not become canonical source vocabulary.
+INDEX_ALIAS_ONLY:
+The term is useful for ASI search/routing but should not become canonical source
+vocabulary.
 
-Use REJECT_OR_REPLACE when the term is unsupported, misleading, too concrete,
-too implementation-like, or likely to create false authority.
+REJECT_OR_REPLACE:
+The term is unsupported, misleading, too concrete, too implementation-like, or
+likely to create false authority.
 
 Candidate recording
 -------------------
 When a useful candidate is found, add or update an entry in:
 
-docs/design/ai/indexes/work/ASI-INFERRED_TERM_CANDIDATES.txt
+docs/design/ai/asi/processed/candidates/ASI-INFERRED_TERM_CANDIDATES.txt
 
-Use the candidate format from that file.
+Do not duplicate existing candidates.
 
-Do not duplicate existing candidates. Update notes/status only when appropriate.
-
-Suggested candidate IDs
------------------------
-Use this pattern:
+Suggested candidate ID format:
 
 IT-<DOC_ID>-<NUMBER>
 
@@ -134,34 +187,107 @@ Examples:
 - IT-IS-01-001
 - IT-ODA-B-001
 
-Review report
--------------
-Report:
-- source document reviewed
-- generated material reviewed
-- terms checked
-- candidates added or updated
-- terms rejected without ledger entry
-- recommendations for supervisor decision
+Candidate entry guidance
+------------------------
+Each candidate should record:
+- candidate ID
+- DOC_ID
+- generated term
+- classification
+- source presence
+- source location hint
+- generated material file
+- why the term matters
+- risk if accepted incorrectly
+- recommendation
+- status
+
+Default status for new candidates:
+
+STATUS: NEEDS_SUPERVISOR_DECISION
+
+Rejected without ledger entry
+-----------------------------
+If a term is clearly not worth recording, mention it in the final report under
+rejected without ledger entry.
+
+Do not flood the candidate ledger with obvious false positives.
+
+Review report writing
+---------------------
+If INFERRED_REVIEW_FILE is not none and writes are authorized, write the compact
+review report to:
+
+docs/design/ai/asi/processed/inferred-reviews/<INFERRED_REVIEW_FILE>
+
+If INFERRED_REVIEW_FILE is none, do not create a review report file.
+
+Write boundary
+--------------
+This workflow may write only:
+- docs/design/ai/asi/processed/candidates/ASI-INFERRED_TERM_CANDIDATES.txt
+- docs/design/ai/asi/processed/inferred-reviews/<INFERRED_REVIEW_FILE> when
+  INFERRED_REVIEW_FILE is not none
+
+This workflow must not write:
+- canonical source documents
+- extraction records
+- ASI index files
+- workflow prompts
+- workflow registries
+- source-improvement candidates unless explicitly assigned
+
+Repository write anomaly handling
+---------------------------------
+Follow AI_WORKFLOW_BOOTSTRAP repository write anomaly handling.
+
+A failed or unconfirmed write does not authorize changing the intended content,
+shortening output, changing paths, changing commit strategy, or applying a
+workaround.
+
+Failure handling
+----------------
+For all expected failures, do nothing to repository files, stop, and inform the
+user or supervisor.
+
+Do not continue from partial context.
+Do not silently skip required inputs.
+Do not silently downgrade write output to chat-only output unless the assignment
+explicitly allows chat-only reporting.
 
 Stopping conditions
 -------------------
 Stop and report if:
 - required workflow files are not COMPLETE
+- CMR-04 cannot resolve DOC_ID
 - the canonical source document is not COMPLETE
-- generated material is not COMPLETE
-- a candidate ledger cannot be loaded COMPLETE before update
+- any assigned generated material is not COMPLETE
+- candidate ledger cannot be loaded COMPLETE before update
 - source document identity does not match the assigned DOC_ID
-- an update sha is unavailable from the same COMPLETE fetch_file response
+- INFERRED_REVIEW_FILE names a path outside processed/inferred-reviews/
+- a repository write cannot be confirmed according to AI_WORKFLOW_BOOTSTRAP
+- the assignment asks this workflow to approve candidates or patch source docs
 
-End
+Final report
+------------
+Report:
+- source document reviewed
+- generated material reviewed
+- terms checked
+- candidates added or updated
+- inferred review file written or not written
+- terms rejected without ledger entry
+- recommendations for supervisor or user decision
+- blocked items
+
+END
 ---
-This prompt is for inferred-term review threads only.
+This file defines the ASI inferred-term review role only.
 
 --- file-meta ---
 DOC_ID: ASI-INFERRED_TERM_REVIEW_PROMPT
 DOC_FILE: docs/design/ai/asi/workflows/ASI-INFERRED_TERM_REVIEW_PROMPT.txt
-DOC_REV: 1
-DOC_GIT: 0000000
+DOC_REV: 2
+DOC_GIT: 59c2f68
 DOC_STATUS: STABLE
 -----------------
