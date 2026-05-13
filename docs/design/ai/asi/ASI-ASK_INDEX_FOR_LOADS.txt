@@ -51,7 +51,10 @@ Before answering ASI_LOAD_QUERY, load and classify as COMPLETE:
 - docs/design/ai/asi/ASI-WORKFLOW_CALL_FORMAT.txt
 - docs/design/ai/asi/registry/ASI-FILE_INDEX.txt
 
-Then load the ASI index files needed for the query.
+Then load ASI index files selected by the query rules below.
+
+Load CMR-04 only if canonical loading is explicitly allowed and the endpoint
+actually proceeds to canonical source loading.
 
 Default ASI index load order
 ----------------------------
@@ -70,6 +73,18 @@ Expected additional ASI index files include:
 If an expected ASI index file is missing, report that the index is missing. Do
 not use repository search to hide missing index coverage.
 
+ASI index file selection
+------------------------
+ASI index files may be selected only from:
+- ASI_FILE fields explicitly supplied in the ASI_LOAD_QUERY block
+- the default ASI index load order
+- processed_index entries listed in ASI-FILE_INDEX
+
+ASI_FILE values are loaded by exact path.
+
+Do not use repository search, file search, GitHub search endpoints, or directory
+listing to discover ASI index files.
+
 Invocation format
 -----------------
 ASI_LOAD_QUERY syntax is defined in:
@@ -85,8 +100,38 @@ CURRENT_FILE: backend/tracing/trace_span.py
 ALLOW_CANONICAL_LOADING: no
 END_ASI_LOAD_QUERY
 
+Required fields
+---------------
+QUERY:
+Question, term, topic, file, or task to route through ASI indexes.
+
+QUERY may repeat.
+
+If no QUERY field exists, stop and report malformed ASI_LOAD_QUERY.
+
 Optional fields
 ---------------
+ASI_FILE:
+Explicit ASI index file to load by exact path.
+
+ASI_FILE may repeat.
+
+When ASI_FILE is present, load those files first. Additional expected ASI index
+files may be loaded only when the query needs them and the file is listed in
+ASI-FILE_INDEX as processed_index.
+
+TASK_CONTEXT:
+Optional task description that helps interpret the query.
+
+TASK_CONTEXT does not authorize repository search, workflow execution, or
+canonical source loading.
+
+CURRENT_FILE:
+Optional implementation or document path that helps interpret the query.
+
+CURRENT_FILE is a routing hint only. It does not authorize repository search,
+file loading, directory inspection, or assumptions about file content.
+
 ALLOW_CANONICAL_LOADING:
 - no
 - yes
@@ -103,7 +148,7 @@ Query handling rules
 For each QUERY:
 
 1. Identify likely terms, domains, files, and boundaries named by the query.
-2. Search or inspect only the loaded ASI index files unless canonical loading is
+2. Inspect only the loaded ASI index files unless canonical loading is
    explicitly allowed.
 3. Separate direct ASI matches from inferred candidate matches.
 4. Recommend canonical documents or implementation files to load.
@@ -138,6 +183,11 @@ LOAD_IF_NEEDED:
 DO_NOT_TREAT_AS_AUTHORITY:
 - DOC_ID_OR_SOURCE:
   REASON:
+
+MISSING_INDEX_COVERAGE:
+- TERM_OR_TOPIC:
+  EXPECTED_INDEX:
+  NOTE:
 
 WHY:
 
@@ -179,8 +229,8 @@ It may load canonical source documents only when:
 - ALLOW_CANONICAL_LOADING is yes in the ASI_LOAD_QUERY block, or
 - the user gives a direct instruction to load canonical source documents.
 
-When canonical loading is allowed, resolve DOC_ID through CMR-04 and follow
-AI_WORKFLOW_BOOTSTRAP retrieval classification rules.
+When canonical loading is allowed and needed, resolve DOC_ID through CMR-04 and
+follow AI_WORKFLOW_BOOTSTRAP retrieval classification rules.
 
 If canonical loading is not allowed and authoritative meaning is needed, do not
 load canonical source documents. Report which canonical source should be loaded
@@ -190,6 +240,9 @@ Missing coverage
 ----------------
 If the loaded ASI indexes cannot route the query, report INDEX_QUALITY as
 missing or ambiguous.
+
+Use MISSING_INDEX_COVERAGE when the query exposes an unindexed term, topic,
+domain, source document, or implementation-file context.
 
 Do not rescue missing ASI routing by using repository search, prior memory, or
 unloaded canonical documents.
@@ -210,7 +263,7 @@ This file defines the ASI load-query entrypoint only.
 --- file-meta ---
 DOC_ID: ASI-ASK_INDEX_FOR_LOADS
 DOC_FILE: docs/design/ai/asi/ASI-ASK_INDEX_FOR_LOADS.txt
-DOC_REV: 1
-DOC_GIT: 7d1750f
+DOC_REV: 2
+DOC_GIT: 0000000
 DOC_STATUS: STABLE
 -----------------
