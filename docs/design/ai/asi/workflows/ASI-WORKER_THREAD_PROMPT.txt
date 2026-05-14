@@ -106,6 +106,54 @@ The existing extraction record is reference material only.
 
 It is not the source of truth for accepted review requirements.
 
+It is not the source of truth for candidate ledger state.
+
+Rerun policy
+------------
+When rerunning extraction, replace the whole extraction record.
+
+Do not patch small fragments into the old extraction record unless the user
+explicitly assigns targeted repair.
+
+The old extraction record may provide overview and provenance, but it must not
+force ledger mutation.
+
+Dangling prior candidate IDs
+----------------------------
+A dangling prior candidate ID exists when the old extraction record references a
+source-improvement candidate ID that is not present in:
+
+docs/design/ai/asi/processed/candidates/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
+
+Treat this as workflow state ambiguity, not as an extraction blocker.
+
+Default handling:
+- do not auto-backfill the candidate ledger
+- do not silently treat the prior candidate ID as accepted
+- do not invent a replacement duplicate ID
+- regenerate the extraction record from the canonical source
+- preserve the prior candidate ID only as provenance if the issue is still
+  relevant to the regenerated extraction
+- mark it as pending supervisor reconciliation
+- update the workflow status ledger normally
+- report the mismatch in the final report
+
+Use this shape inside SOURCE_DOCUMENT_IMPROVEMENT_CANDIDATES when preserving a
+prior missing candidate ID:
+
+- PRIOR_EXTRACTION_CANDIDATE_ID:
+  LEDGER_STATUS: not found in source-improvement candidate ledger
+  ISSUE:
+  RECOMMENDED_ACTION: pending supervisor reconciliation
+
+Do not add or update ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt for dangling prior
+candidate IDs unless the assignment explicitly asks for candidate reconciliation
+or backfill.
+
+New candidates independently found from the current canonical source may still
+be added to the candidate ledger according to normal candidate handling, but do
+not use the old dangling ID as proof that such a candidate must exist.
+
 Accepted review requirements
 ----------------------------
 Before regenerating an extraction record, inspect:
@@ -129,13 +177,6 @@ docs/design/ai/asi/processed/extracted/<DOC_ID>.extract.txt
 Example:
 
 docs/design/ai/asi/processed/extracted/DA-03.extract.txt
-
-Rerun policy
-------------
-When rerunning extraction, replace the whole extraction record.
-
-Do not patch small fragments into the old extraction record unless the user
-explicitly assigns targeted repair.
 
 Extraction scope
 ----------------
@@ -209,7 +250,8 @@ changes, both, deferred items, or rejected items.
 
 Candidate handling
 ------------------
-When a source-document improvement candidate is found:
+When a new source-document improvement candidate is found from the current
+canonical source under the current extraction run:
 
 1. Add a short entry to the extraction record.
 2. Add or update the matching entry in:
@@ -221,6 +263,9 @@ when available.
 
 If the candidate file has no applicable convention yet, use a clear temporary
 ID and mark it needs supervisor decision.
+
+This normal candidate handling does not apply to dangling prior candidate IDs
+unless candidate reconciliation or backfill is explicitly assigned.
 
 Ledger update
 -------------
@@ -309,6 +354,7 @@ Report:
 - ledger update status
 - accepted review requirements applied
 - source-document improvement candidates created or updated
+- dangling prior candidate IDs found and how they were handled
 - open extraction questions
 - blocked items
 
@@ -319,7 +365,7 @@ This file defines the ASI document worker role only.
 --- file-meta ---
 DOC_ID: ASI-WORKER_THREAD_PROMPT
 DOC_FILE: docs/design/ai/asi/workflows/ASI-WORKER_THREAD_PROMPT.txt
-DOC_REV: 6
+DOC_REV: 7
 DOC_GIT: 0000000
 DOC_STATUS: STABLE
 -----------------
