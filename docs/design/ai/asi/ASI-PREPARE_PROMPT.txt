@@ -1,0 +1,205 @@
+Turnix Assistant Semantic Index prepare prompt entrypoint
+=========================================================
+
+Purpose
+-------
+This file is a human-facing convenience entrypoint for preparing ASI workflow
+launch prompts without manually writing full ASI_WORKFLOW_CALL blocks.
+
+This file is non-authoritative workflow guidance. It does not define Turnix
+semantics.
+
+Use this file when
+------------------
+Use this file when the user asks for a prompt for a separate thread, worker
+thread, audit thread, test thread, inferred-term review thread, source-patch
+thread, index-generation thread, or supervisor thread.
+
+This file is for prompt preparation only.
+
+It does not run the target workflow.
+It does not write generated ASI output.
+It does not edit canonical source documents.
+It does not replace ASI-RUN_WORKFLOW.txt.
+
+Shortcut role
+-------------
+The shortcut converts a human request into an ASI_WORKFLOW_CALL with:
+
+EXECUTION_TARGET: new_thread_launch_prompt
+
+Then the assistant uses ASI-RUN_WORKFLOW.txt to resolve the workflow and print
+the generated launch prompt.
+
+The shortcut may infer obvious workflow parameters from the user's sentence when
+unambiguous.
+
+The shortcut must not invent missing required parameters.
+
+Required initial loads
+----------------------
+Before preparing a launch prompt through this shortcut, load and classify as
+COMPLETE:
+- docs/AI_WORKFLOW_BOOTSTRAP.txt
+- docs/design/ai/asi/ASI-PREPARE_PROMPT.txt
+- docs/design/ai/asi/ASI-RUN_WORKFLOW.txt
+- docs/design/ai/asi/ASI-WORKFLOW_CALL_FORMAT.txt
+- docs/design/ai/asi/registry/ASI-FILE_INDEX.txt
+- docs/design/ai/asi/registry/ASI-WORKFLOW_REGISTRY.txt
+- docs/design/ai/asi/registry/ASI-LOAD_GROUPS.txt
+
+Load this when BATCH_ID is needed or can be inferred:
+- docs/design/ai/asi/registry/ASI-BATCH_REGISTRY.txt
+
+If any required file cannot be classified COMPLETE, stop and report the failure.
+
+Natural request examples
+------------------------
+Example:
+
+Load ASI-PREPARE_PROMPT.txt and print prompt for separate thread which extracts
+from DA-02. Branch is CHATGPT_EXTRACT_INDEX.
+
+Equivalent ASI_WORKFLOW_CALL:
+
+ASI_WORKFLOW_CALL
+WORKFLOW_ID: asi.document.extract
+BRANCH: CHATGPT_EXTRACT_INDEX
+DOC_ID: DA-02
+BATCH_ID: <resolved from ASI-BATCH_REGISTRY>
+EXECUTION_TARGET: new_thread_launch_prompt
+END_ASI_WORKFLOW_CALL
+
+Example:
+
+Load ASI-PREPARE_PROMPT.txt and print prompt for audit of Batch 1 foundation.
+Branch is CHATGPT_EXTRACT_INDEX.
+
+Equivalent ASI_WORKFLOW_CALL:
+
+ASI_WORKFLOW_CALL
+WORKFLOW_ID: asi.batch.audit
+BRANCH: CHATGPT_EXTRACT_INDEX
+BATCH_ID: Batch 1 foundation
+EXECUTION_TARGET: new_thread_launch_prompt
+END_ASI_WORKFLOW_CALL
+
+Example:
+
+Load ASI-PREPARE_PROMPT.txt and print prompt for ASI load routing test using
+ASI-00 and ASI-01. Query: What owns isComplete? Branch is
+CHATGPT_EXTRACT_INDEX.
+
+Equivalent ASI_WORKFLOW_CALL:
+
+ASI_WORKFLOW_CALL
+WORKFLOW_ID: asi.test.load_routing
+BRANCH: CHATGPT_EXTRACT_INDEX
+ASI_FILE: docs/design/ai/asi/processed/indexes/ASI-00_ASSISTANT_SEMANTIC_INDEX_README.txt
+ASI_FILE: docs/design/ai/asi/processed/indexes/ASI-01_DOCUMENT_DOMAIN_INDEX.txt
+QUERY: What owns isComplete?
+EXECUTION_TARGET: new_thread_launch_prompt
+END_ASI_WORKFLOW_CALL
+
+Supported shortcut phrases
+--------------------------
+The assistant may map these request shapes:
+
+"extracts from <DOC_ID>"
+"extract <DOC_ID>"
+"document worker for <DOC_ID>"
+  -> WORKFLOW_ID: asi.document.extract
+
+"audit <BATCH_ID>"
+"batch audit for <BATCH_ID>"
+  -> WORKFLOW_ID: asi.batch.audit
+
+"test routing"
+"load routing test"
+  -> WORKFLOW_ID: asi.test.load_routing
+
+"inferred term review for <DOC_ID>"
+"review inferred terms for <DOC_ID>"
+  -> WORKFLOW_ID: asi.inferred_terms.review
+
+"generate index <ASI_OUTPUT_FILE>"
+"index generation for <ASI_OUTPUT_FILE>"
+  -> WORKFLOW_ID: asi.index.generate
+
+"source patch <CANDIDATE_ID>"
+"apply source patch <CANDIDATE_ID>"
+  -> WORKFLOW_ID: asi.source_patch.apply
+
+"supervisor review"
+"ASI supervisor"
+  -> WORKFLOW_ID: asi.supervisor.review
+
+Required parameter inference
+----------------------------
+The shortcut may infer BATCH_ID for a DOC_ID by reading ASI-BATCH_REGISTRY.
+
+If a DOC_ID appears in exactly one batch, use that batch.
+
+If a DOC_ID appears in multiple batches or no batch, stop and ask for BATCH_ID.
+
+The shortcut may normalize obvious ASI index nicknames:
+- ASI-00 -> docs/design/ai/asi/processed/indexes/ASI-00_ASSISTANT_SEMANTIC_INDEX_README.txt
+- ASI-01 -> docs/design/ai/asi/processed/indexes/ASI-01_DOCUMENT_DOMAIN_INDEX.txt
+- ASI-02 -> docs/design/ai/asi/processed/indexes/ASI-02_TERM_INDEX.txt
+- ASI-03 -> docs/design/ai/asi/processed/indexes/ASI-03_RETRIEVAL_HINT_INDEX.txt
+- ASI-04 -> docs/design/ai/asi/processed/indexes/ASI-04_BOUNDARY_AND_NON_OWNERSHIP_INDEX.txt
+- ASI-05 -> docs/design/ai/asi/processed/indexes/ASI-05_RELATION_INDEX.txt
+
+The shortcut may infer EXECUTION_TARGET as new_thread_launch_prompt.
+
+The shortcut must not infer:
+- BRANCH when no active branch is unambiguous
+- QUERY for routing tests
+- GENERATED_MATERIAL_FILE for inferred-term review
+- ASI_OUTPUT_FILE for index generation
+- CANDIDATE_ID for source patch
+- APPROVAL for source patch
+
+When required parameters are missing, stop and ask for the missing parameters.
+
+Branch rule
+-----------
+If the user names a branch, use it.
+
+If no branch is named, the shortcut may use the active task branch only when it
+is already unambiguous.
+
+If no branch is supplied and no active task branch is unambiguous, stop and ask
+for BRANCH.
+
+Output rule
+-----------
+The shortcut must print two things:
+
+1. The resolved ASI_WORKFLOW_CALL block.
+2. The generated launch prompt produced through ASI-RUN_WORKFLOW.
+
+Do not skip the ASI_WORKFLOW_CALL block. It is useful for debugging and copying.
+
+Stopping conditions
+-------------------
+Stop and report if:
+- required files are not COMPLETE
+- the requested workflow cannot be mapped unambiguously
+- required parameters are missing
+- BATCH_ID cannot be inferred for DOC_ID
+- branch resolution fails
+- the resolved ASI_WORKFLOW_CALL would violate ASI-WORKFLOW_CALL_FORMAT
+- ASI-RUN_WORKFLOW reports a contract conflict
+
+End
+---
+This file defines the ASI prompt-preparation shortcut only.
+
+--- file-meta ---
+DOC_ID: ASI-PREPARE_PROMPT
+DOC_FILE: docs/design/ai/asi/ASI-PREPARE_PROMPT.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+DOC_STATUS: STABLE
+-----------------
