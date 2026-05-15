@@ -1,0 +1,221 @@
+ASSISTANT SEMANTIC INDEX BATCH 4 CROSS-DOCUMENT ANALYSIS IMPROVEMENTS
+=====================================================================
+
+SOURCE
+------
+BATCH: Batch 4 persistence, windows, and audit
+ANALYSIS_REF: CHATGPT_EXTRACT_INDEX
+ANALYSIS_REV: 1
+INPUT_BASIS:
+- docs/design/ai/asi/processed/extracted/DA-05.extract.txt
+- docs/design/ai/asi/processed/extracted/DA-06.extract.txt
+- docs/design/ai/asi/processed/extracted/DA-07.extract.txt
+- docs/design/ai/asi/processed/extracted/DA-08.extract.txt
+- docs/design/ai/asi/processed/extracted/DA-25.extract.txt
+- docs/design/ai/asi/processed/extracted/DA-26.extract.txt
+- docs/design/ai/asi/processed/extracted/IS-07.extract.txt
+- docs/design/ai/asi/processed/extracted/IS-08.extract.txt
+- docs/design/ai/asi/processed/ledgers/ASI-WORKFLOW_STATUS_LEDGER.txt
+- docs/design/ai/asi/processed/candidates/ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
+- docs/design/ai/asi/processed/batch-reviews/BATCH-4-EXTRACTION-AUDIT-REPORT.txt
+
+AUTHORITY WARNING
+-----------------
+This file is non-authoritative ASI workflow analysis metadata.
+It does not define Turnix semantics.
+Canonical source documents remain the authority for Turnix meaning.
+
+PURPOSE
+-------
+This file records cross-document analysis notes and improvement recommendations
+for Batch 4 extraction/index-preparation work.
+
+It is intended to help the supervisor, future audit runs, and index-generation
+workers keep batch-specific traps visible before generating or regenerating ASI
+indexes.
+
+SUMMARY
+-------
+- Batch 4 has strong cross-document separation overall.
+- The main conceptual cluster is: committed payload representation, configuration state, persistent I/O, finalized Windows, Window artifacts/exports, replay/comparison/audit workflows, and concrete trace schemas.
+- The most important index-generation risk is over-routing due to nearby terms that sound similar but belong to different documents.
+- The highest-priority repair is candidate ID reconciliation for DA-07: DA-07.extract.txt uses B4-SRC-001, while the candidate ledger uses B4-SRC-DA07-001.
+- The highest-priority routing caveat is DA-08's legacy filename containing exports/offline-comparison wording while DA-25 and DA-26 now own those later scopes.
+
+CROSS_DOCUMENT_MAP
+------------------
+- DA-05 owns storage-neutral committed payload representation: Chunk, ChunkId, ValueRef, immutable payload material, retained roots, and representation-level reachability.
+- DA-06 owns configuration-specific authoritative state: scopes, defaults, override inputs, effectiveConfig, schemas, migration, storage placement, and configuration access API semantics.
+- DA-07 owns persistent I/O authority: IoManager, Reader/Writer mediation, root read/write policy, raw access boundary, rollback points, backup/snapshot concepts, and streaming I/O safety.
+- DA-08 owns Window semantics: SafePointWindow, ActiveWindow, AbortedWindow, finalized runtime history, journal/evidence non-authority, and Window finalization lifecycle.
+- DA-25 owns finalized Window artifact representation: WindowManifest, WindowExport, SafePointWindowExport, AbortedWindowExport, Minimal Audit Bundle, optional digest fields, partial export, missing material, and offline inspection artifact limits.
+- DA-26 owns workflow claims over retained artifacts: ComparisonResult, equality modes, NotComparable, Replay, Resume, Retry, and cross-session audit workflow boundaries.
+- IS-07 owns RuntimeHost-domain trace field vocabulary and RuntimeHost trace context field names.
+- IS-08 owns serialized trace record envelope placement, serialization markers, validation categories, and attributes namespace layout.
+
+HIGH_VALUE_BOUNDARY_RULES
+-------------------------
+- Representation is not persistence authority: DA-05 explains how committed payloads are represented; DA-07 explains who can persist or access them.
+- Persistence is not truth: DA-07 protects persisted material and controls I/O, but committed-state authority still routes to DA-04 when state truth is the question.
+- Runtime-visible configuration is not separate authority: DA-06 treats effectiveConfig as a derived view, not independent committed truth.
+- Window finalization is not export semantics: DA-08 owns Window kinds and finalization; DA-25 owns manifests, exports, and audit bundles derived from finalized Windows.
+- Artifact packaging is not replay authority: DA-25 packages retained material; DA-26 defines what comparison, replay, resume, retry, and audit workflows may claim from it.
+- Trace field vocabulary is not trace meaning: IS-07 names RuntimeHost fields; DA-03 and domain documents own trace semantics and reason meaning.
+- Serialization placement is not semantic ownership: IS-08 maps trace records to concrete serialized fields; it does not transfer reason, outcome, or authority ownership.
+
+BATCH_SPECIFIC_TRAPS
+--------------------
+- TRAP: DA-08 filename contains HISTORICAL_EVIDENCE_EXPORTS_AND_OFFLINE_COMPARISON, but DA-08 title and extraction scope focus on Windows and finalized runtime history.
+  RISK: Assistants may over-route WindowExport, offline inspection, comparison, Replay, Resume, Retry, or audit workflow questions to DA-08.
+  ROUTING_FIX: Route WindowManifest, WindowExport, Minimal Audit Bundle, missing material, digest artifact fields, and offline inspection artifacts to DA-25. Route ComparisonResult, equality modes, Replay, Resume, Retry, and cross-session audit workflow claims to DA-26.
+  RECOMMENDATION: Preserve an explicit DA-08 filename caveat in ASI indexes.
+
+- TRAP: DA-05 ChunkId/ValueRef language can sound like concrete storage implementation.
+  RISK: Assistant may treat ChunkId, ValueRef, or retained roots as granting filesystem/database authority.
+  ROUTING_FIX: Use DA-05 for representation semantics, then DA-07 for concrete persistent I/O authority.
+  RECOMMENDATION: In term indexes, pair ValueRef and ChunkId with a negative routing hint: not raw file path, not row ID, not persistence permission.
+
+- TRAP: DA-06 configuration storage placement overlaps DA-07 persistence mechanics.
+  RISK: Assistant may answer configuration ownership or schema questions from DA-07, or answer atomic persistence/recovery mechanics from DA-06.
+  ROUTING_FIX: DA-06 owns config scopes, defaults, overrides, effectiveConfig, schemas, and migration semantics. DA-07 owns IoManager-mediated writing, rollback points, backup/snapshot mechanics, and persistent I/O failure handling.
+  RECOMMENDATION: Add an index relation that says DA-06 depends on DA-07 for persistence mechanics but DA-07 does not own configuration semantics.
+
+- TRAP: Journal/evidence retention may be mistaken for authoritative state.
+  RISK: Assistant may treat retained journal evidence or audit bundles as correctness dependencies.
+  ROUTING_FIX: DA-08 states journal/history evidence is non-authoritative; DA-25 says artifacts/bundles do not add authority; DA-26 says audit workflows do not mutate state.
+  RECOMMENDATION: Add a cross-index warning: evidence retention supports explanation/audit/debugging, not hidden correctness.
+
+- TRAP: Optional digest fields may be mistaken for identity or equality authority.
+  RISK: Assistant may equate matching digest with authoritative equality or use digest as canonical identity.
+  ROUTING_FIX: DA-25 owns digest fields as artifact features; DA-26 owns digest use as comparison accelerators only.
+  RECOMMENDATION: Index digest terms with both DA-25 and DA-26, but phrase DA-26 as workflow-claim authority.
+
+- TRAP: NotComparable can be collapsed into NotEqual.
+  RISK: Tooling or assistant responses may treat missing material, unsupported modes, partial exports, or corrupt retained data as inequality.
+  ROUTING_FIX: DA-26 owns NotComparable as distinct from Equal and NotEqual.
+  RECOMMENDATION: Put NotComparable in the term index as a high-priority exact term with a warning: not false, not NotEqual, not Equal.
+
+- TRAP: Replay, Resume, and Retry sound like continuation of the same runtime identity.
+  RISK: Assistant may claim previous Jobs, Orchestration Units, adapters, RPC channels, Views, or frontend participants continue after Replay/Resume/Retry.
+  ROUTING_FIX: DA-26 owns the rule that Replay restores retained committed state/casual story where available, Resume starts new explicit work, and Retry is new orchestration work.
+  RECOMMENDATION: Add explicit confusable entries for Replay vs Resume, Resume vs Retry, Retry vs previous execution identity.
+
+- TRAP: Trace level/error serialization can be mistaken for domain outcome.
+  RISK: Assistant may treat serialized level ERROR or a failure category field as automatically proving Job/AppInstance/Window/RuntimeHost outcome.
+  ROUTING_FIX: IS-08 says level is severity/presentation, not domain outcome; IS-07 field vocabulary does not transfer authority; owning domain docs define outcome semantics.
+  RECOMMENDATION: Index traceLevel/level with a warning that outcome must be interpreted through the owning domain.
+
+- TRAP: attributes.runtimeHost placement can be mistaken for RuntimeHost behavior authority.
+  RISK: Assistant may answer RuntimeHost behavior or reason meaning from IS-08 serialization layout.
+  ROUTING_FIX: IS-08 owns placement; IS-07 owns RuntimeHost field vocabulary; DA-28 owns RuntimeHost behavior/reason meaning.
+  RECOMMENDATION: Add a three-step routing hint: IS-08 for serialized placement, IS-07 for field vocabulary, DA-28 for RuntimeHost meaning.
+
+- TRAP: Cross-domain trace correlation fields can be mistaken for ownership transfer.
+  RISK: Assistant may treat appInstanceId, jobId, orchestrationUnitId, viewId, channelId, rpcMessageId, or adapterInstanceId inside RuntimeHost trace evidence as RuntimeHost-owned semantics.
+  ROUTING_FIX: IS-07 treats these as correlation fields. Owning documents retain semantics.
+  RECOMMENDATION: In relation indexes, mark cross-domain trace references as correlation-only unless the owning domain is loaded.
+
+- TRAP: Duplicate-looking section anchors in DA-06, DA-07, and DA-26.
+  RISK: Section-reference tooling may confuse clause anchors with later subsection headings.
+  ROUTING_FIX: Preserve source-improvement candidates and ASI caveats until source numbering is clarified.
+  RECOMMENDATION: Supervisor should reconcile DA-07 candidate ID first, then decide whether the repeated anchor pattern should become a broader source-patch campaign.
+
+SOURCE_IMPROVEMENT_RECOMMENDATIONS
+----------------------------------
+- RECOMMENDATION_ID: B4-XDOC-REC-001
+  TARGETS: DA-07.extract.txt; ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt
+  PRIORITY: high
+  ISSUE: DA-07 extraction candidate ID differs from the candidate ledger ID for the same duplicate-anchor issue.
+  RECOMMENDED_ACTION: Reconcile B4-SRC-001 and B4-SRC-DA07-001 by supervisor decision. Prefer using B4-SRC-DA07-001 as the stable candidate ID because it follows the current Batch 4 candidate naming pattern used by DA-06, DA-08, and DA-26.
+  ASI_IMPACT: Prevents candidate preservation loss and avoids index-generation ambiguity.
+
+- RECOMMENDATION_ID: B4-XDOC-REC-002
+  TARGETS: DA-08; DA-25; DA-26; ASI indexes
+  PRIORITY: high
+  ISSUE: DA-08's filename invites over-routing to exports and offline comparison, but DA-25/DA-26 own those areas.
+  RECOMMENDED_ACTION: Preserve a filename caveat in the document-domain index and relation index. Consider later source filename/title cleanup only if the supervisor wants source-level cleanup.
+  ASI_IMPACT: Prevents DA-08 from becoming an accidental catch-all for Windows, exports, comparison, replay, and audit workflows.
+
+- RECOMMENDATION_ID: B4-XDOC-REC-003
+  TARGETS: DA-05; DA-07; ASI term index
+  PRIORITY: medium
+  ISSUE: Payload identity and persistence authority can be conflated.
+  RECOMMENDED_ACTION: Add paired retrieval hints for ChunkId, ValueRef, retained roots, IoManager, Reader, Writer, and persistent I/O. Terms should state whether the question is about representation identity or authority to read/write material.
+  ASI_IMPACT: Improves routing for storage, artifact, and retained-payload questions.
+
+- RECOMMENDATION_ID: B4-XDOC-REC-004
+  TARGETS: DA-06; DA-07; DA-04; ASI relation index
+  PRIORITY: medium
+  ISSUE: Configuration is authoritative state but uses persistent I/O mechanics.
+  RECOMMENDED_ACTION: Preserve a relation chain: DA-06 owns configuration semantics; DA-04 owns general state authority; DA-07 owns persistence mechanics.
+  ASI_IMPACT: Reduces wrong answers around effectiveConfig, committed config, migrations, rollback, and file writes.
+
+- RECOMMENDATION_ID: B4-XDOC-REC-005
+  TARGETS: DA-08; DA-25; DA-26; ASI boundary index
+  PRIORITY: high
+  ISSUE: Windows, artifacts, and workflow claims are adjacent but separate domains.
+  RECOMMENDED_ACTION: Create explicit routing rows for Window, WindowManifest, WindowExport, Minimal Audit Bundle, ComparisonResult, StateEquality, EvidenceEquality, Replay, Resume, and Retry.
+  ASI_IMPACT: Prevents accidental authority merging between finalization, packaging, and workflow claims.
+
+- RECOMMENDATION_ID: B4-XDOC-REC-006
+  TARGETS: DA-25; DA-26; ASI term index
+  PRIORITY: high
+  ISSUE: Digest fields can be confused with identity, equality, or authority.
+  RECOMMENDED_ACTION: Index digest terms with the phrase: accelerator only, not identity, not authority. Pair DA-25 for artifact fields with DA-26 for comparison use.
+  ASI_IMPACT: Prevents digest shortcuts from becoming false semantic guarantees.
+
+- RECOMMENDATION_ID: B4-XDOC-REC-007
+  TARGETS: DA-26; ASI term index
+  PRIORITY: high
+  ISSUE: NotComparable is likely to be flattened into NotEqual by assistants or tooling.
+  RECOMMENDED_ACTION: Add NotComparable as a protected high-value term and confusable term. State that missing material, unsupported scope, corruption, or unusable required material yields NotComparable, not NotEqual.
+  ASI_IMPACT: Preserves DA-26 comparison semantics.
+
+- RECOMMENDATION_ID: B4-XDOC-REC-008
+  TARGETS: IS-07; IS-08; DA-03; DA-28; ASI relation index
+  PRIORITY: medium
+  ISSUE: Trace field vocabulary, serialized placement, trace semantics, and RuntimeHost reason meaning are four different scopes.
+  RECOMMENDED_ACTION: Add a relation cluster: DA-03 owns trace semantics; IS-07 owns RuntimeHost field vocabulary; IS-08 owns serialized placement; DA-28 owns RuntimeHost trace reason meaning.
+  ASI_IMPACT: Reduces trace-schema overreach and wrong ownership routing.
+
+- RECOMMENDATION_ID: B4-XDOC-REC-009
+  TARGETS: IS-07; IS-08; domain trace owners; ASI boundary index
+  PRIORITY: medium
+  ISSUE: Correlation fields can be mistaken for authority transfer.
+  RECOMMENDED_ACTION: Index appInstanceId, jobId, orchestrationUnitId, transactionId, decisionId, viewId, channelId, rpcMessageId, adapterInstanceId, safePointWindowId, and abortedWindowId as correlation/routing fields unless the owning document is loaded.
+  ASI_IMPACT: Preserves domain ownership boundaries during trace interpretation.
+
+- RECOMMENDATION_ID: B4-XDOC-REC-010
+  TARGETS: DA-06; DA-07; DA-26; future source patch review
+  PRIORITY: low
+  ISSUE: Multiple Batch 4 documents contain duplicate-looking section anchors.
+  RECOMMENDED_ACTION: After candidate-ID reconciliation, supervisor may decide whether to patch only the known cases or launch a broader source-numbering cleanup pass across batches.
+  ASI_IMPACT: Improves reference hygiene but is not required before semantic index generation if ASI warnings are preserved.
+
+INDEX_GENERATION_GUIDANCE
+-------------------------
+- Do not generate final/semi-final Batch 4 index rows by exact heading spelling alone. Batch 4 extraction records are semantically complete but not heading-uniform.
+- Treat DA-07 candidate mismatch as a pre-index warning requiring supervisor decision.
+- Use cross-document relation rows to keep DA-08, DA-25, and DA-26 distinct.
+- Use boundary/non-ownership rows for evidence, digests, trace fields, serialization placement, and correlation fields.
+- Preserve exact high-value terms for NotComparable, ComparisonResult, ValueRef, ChunkId, IoManager, effectiveConfig, WindowManifest, WindowExport, Minimal Audit Bundle, attributes.runtimeHost, and trace level/level.
+- Prefer paired entries when a term belongs to one document but commonly requires another document to answer safely.
+
+SUPERVISOR_DECISIONS_REQUESTED
+------------------------------
+- DECISION: Should B4-SRC-001 be treated as an alias/superseded ID for B4-SRC-DA07-001, or should DA-07.extract.txt be regenerated with B4-SRC-DA07-001?
+  PRIORITY: high
+
+- DECISION: Should DA-08's legacy filename caveat remain ASI-only, or should a source filename/title cleanup candidate be approved later?
+  PRIORITY: medium
+
+- DECISION: Should duplicate-looking section anchors across DA-06, DA-07, DA-26 and other batches be handled as isolated candidate fixes or as a coordinated source-numbering cleanup pass?
+  PRIORITY: low
+
+- DECISION: Should future ASI schemas require normalized heading names for generated extraction records, or should index generation remain semantic and tolerant of heading variants?
+  PRIORITY: low
+
+END
+---
+This file is non-authoritative ASI workflow analysis metadata.
+It does not define Turnix semantics.
