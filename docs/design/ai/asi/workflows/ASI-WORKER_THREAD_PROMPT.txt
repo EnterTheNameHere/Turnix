@@ -57,17 +57,31 @@ Default:
 
 EXECUTION_TARGET: new_thread_launch_prompt
 
-Branch
-------
-Use the branch resolved by ASI-RUN_WORKFLOW.
+Branch fields
+-------------
+Use READ_BRANCH and WRITE_BRANCH resolved by ASI-RUN_WORKFLOW.
 
-For current_thread execution, BRANCH must be supplied in the ASI_WORKFLOW_CALL
-because this workflow may write repository files.
+READ_BRANCH is the repository branch used for repository file loads.
 
-For new_thread_launch_prompt and dry_run_plan, ASI-RUN_WORKFLOW may use an
-active task branch only when that branch is already unambiguous.
+WRITE_BRANCH is the repository branch used for repository file writes when this
+workflow writes.
 
-If branch resolution fails, stop and ask for BRANCH.
+Generated launch prompts must provide READ_BRANCH and WRITE_BRANCH explicitly.
+
+BRANCH may be used only as ASI_WORKFLOW_CALL shorthand before launch-prompt
+generation. Worker threads should not rely on bare BRANCH.
+
+If READ_BRANCH is missing, stop before repository loading and report
+MISSING_READ_BRANCH.
+
+If WRITE_BRANCH is missing before this workflow writes, stop before writing and
+report MISSING_WRITE_BRANCH.
+
+If any repository file load is attempted without using READ_BRANCH, report
+LOAD_BRANCH_VIOLATION.
+
+If any repository write is attempted without using WRITE_BRANCH, report
+WRITE_BRANCH_VIOLATION.
 
 Required loads
 --------------
@@ -85,7 +99,7 @@ Source loading
 --------------
 Resolve DOC_ID through CMR-04.
 
-Fetch the canonical source document from the active branch.
+Fetch the canonical source document from READ_BRANCH.
 
 Classify the source retrieval.
 
@@ -329,7 +343,10 @@ Stopping conditions
 -------------------
 Stop and report if:
 - required workflow files are not COMPLETE
-- branch resolution fails
+- READ_BRANCH is missing before repository loading
+- WRITE_BRANCH is missing before repository writing
+- any repository file load is attempted without using READ_BRANCH
+- any repository write is attempted without using WRITE_BRANCH
 - CMR-04 cannot resolve the assigned DOC_ID
 - BATCH_ID does not contain the assigned DOC_ID
 - the assigned source document is not COMPLETE
@@ -349,6 +366,8 @@ Final report
 Report:
 - assigned DOC_ID
 - assigned BATCH_ID
+- READ_BRANCH used for repository loads
+- WRITE_BRANCH used for repository writes
 - source retrieval status
 - extraction record path created or replaced
 - ledger update status
@@ -365,7 +384,7 @@ This file defines the ASI document worker role only.
 --- file-meta ---
 DOC_ID: ASI-WORKER_THREAD_PROMPT
 DOC_FILE: docs/design/ai/asi/workflows/ASI-WORKER_THREAD_PROMPT.txt
-DOC_REV: 7
+DOC_REV: 8
 DOC_GIT: 0000000
 DOC_STATUS: STABLE
 -----------------
