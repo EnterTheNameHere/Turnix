@@ -60,21 +60,31 @@ Default:
 
 EXECUTION_TARGET: current_thread
 
-Branch
-------
-Use the branch resolved by ASI-RUN_WORKFLOW.
+Branch fields
+-------------
+Use READ_BRANCH and WRITE_BRANCH resolved by ASI-RUN_WORKFLOW.
 
-For current_thread execution that edits workflow/control files, BRANCH must be
-supplied in the ASI_WORKFLOW_CALL because this workflow may write repository
-files when explicitly assigned.
+READ_BRANCH is the repository branch used for repository file loads.
 
-For current_thread read-only supervisor review, ASI-RUN_WORKFLOW may use an
-active task branch only when that branch is already unambiguous.
+WRITE_BRANCH is the repository branch used for repository file writes when this
+workflow writes.
 
-For new_thread_launch_prompt and dry_run_plan, ASI-RUN_WORKFLOW may use an
-active task branch only when that branch is already unambiguous.
+Generated launch prompts must provide READ_BRANCH and WRITE_BRANCH explicitly.
 
-If branch resolution fails, stop and ask for BRANCH.
+BRANCH may be used only as ASI_WORKFLOW_CALL shorthand before launch-prompt
+generation. Worker threads should not rely on bare BRANCH.
+
+If READ_BRANCH is missing, stop before repository loading and report
+MISSING_READ_BRANCH.
+
+If WRITE_BRANCH is missing before this workflow writes, stop before writing and
+report MISSING_WRITE_BRANCH.
+
+If any repository file load is attempted without using READ_BRANCH, report
+LOAD_BRANCH_VIOLATION.
+
+If any repository write is attempted without using WRITE_BRANCH, report
+WRITE_BRANCH_VIOLATION.
 
 Required loads
 --------------
@@ -184,7 +194,7 @@ mechanism.
 
 When assigning work, name:
 - WORKFLOW_ID
-- branch
+- BRANCH shorthand or explicit READ_BRANCH and WRITE_BRANCH
 - required parameters
 - execution target
 - durable inputs or relevant candidate IDs
@@ -200,11 +210,15 @@ BATCH_ID: Batch 1 foundation
 EXECUTION_TARGET: new_thread_launch_prompt
 END_ASI_WORKFLOW_CALL
 
+The generated launch prompt must expand BRANCH into READ_BRANCH and
+WRITE_BRANCH.
+
 Contract conflict handling
 --------------------------
 If workflow/control files disagree about required loads, allowed writes,
 forbidden writes, role authority, generated-output boundaries, execution target
-support, or required parameters, stop and report a workflow contract conflict.
+support, branch requirements, or required parameters, stop and report a workflow
+contract conflict.
 
 Do not silently choose the stricter or looser rule.
 
@@ -246,7 +260,10 @@ Stopping conditions
 -------------------
 Stop and report if:
 - required workflow files are not COMPLETE
-- branch resolution fails
+- READ_BRANCH is missing before repository loading
+- WRITE_BRANCH is missing before repository writing
+- any repository file load is attempted without using READ_BRANCH
+- any repository write is attempted without using WRITE_BRANCH
 - requested supervisor action conflicts with workflow boundaries
 - generated output needs refinement but no appropriate workflow assignment is
   authorized
@@ -259,6 +276,8 @@ Final report
 Report:
 - supervisor task
 - files reviewed
+- READ_BRANCH used for repository loads
+- WRITE_BRANCH used for repository writes when applicable
 - decisions made
 - accepted requirements recorded
 - source-improvement candidates created or updated
@@ -275,7 +294,7 @@ This file defines the ASI supervisor role only.
 --- file-meta ---
 DOC_ID: ASI-SUPERVISOR_THREAD_PROMPT
 DOC_FILE: docs/design/ai/asi/workflows/ASI-SUPERVISOR_THREAD_PROMPT.txt
-DOC_REV: 4
+DOC_REV: 5
 DOC_GIT: 0000000
 DOC_STATUS: STABLE
 -----------------
