@@ -73,17 +73,31 @@ Default:
 
 EXECUTION_TARGET: new_thread_launch_prompt
 
-Branch
-------
-Use the branch resolved by ASI-RUN_WORKFLOW.
+Branch fields
+-------------
+Use READ_BRANCH and WRITE_BRANCH resolved by ASI-RUN_WORKFLOW.
 
-For current_thread execution, BRANCH must be supplied in the ASI_WORKFLOW_CALL
-because this workflow may write repository files.
+READ_BRANCH is the repository branch used for repository file loads.
 
-For new_thread_launch_prompt and dry_run_plan, ASI-RUN_WORKFLOW may use an
-active task branch only when that branch is already unambiguous.
+WRITE_BRANCH is the repository branch used for repository file writes when this
+workflow writes.
 
-If branch resolution fails, stop and ask for BRANCH.
+Generated launch prompts must provide READ_BRANCH and WRITE_BRANCH explicitly.
+
+BRANCH may be used only as ASI_WORKFLOW_CALL shorthand before launch-prompt
+generation. Worker threads should not rely on bare BRANCH.
+
+If READ_BRANCH is missing, stop before repository loading and report
+MISSING_READ_BRANCH.
+
+If WRITE_BRANCH is missing before this workflow writes, stop before writing and
+report MISSING_WRITE_BRANCH.
+
+If any repository file load is attempted without using READ_BRANCH, report
+LOAD_BRANCH_VIOLATION.
+
+If any repository write is attempted without using WRITE_BRANCH, report
+WRITE_BRANCH_VIOLATION.
 
 Execution profile
 -----------------
@@ -284,7 +298,10 @@ Stopping conditions
 -------------------
 Stop and report if:
 - required workflow files are not COMPLETE
-- branch resolution fails
+- READ_BRANCH is missing before repository loading
+- WRITE_BRANCH is missing before repository writing
+- any repository file load is attempted without using READ_BRANCH
+- any repository write is attempted without using WRITE_BRANCH
 - BATCH_ID cannot be resolved
 - assigned ASI_OUTPUT_FILE is missing
 - assigned ASI_OUTPUT_FILE is not filename-only
@@ -302,6 +319,8 @@ Final report
 Report:
 - assigned BATCH_ID
 - assigned ASI_OUTPUT_FILE values
+- READ_BRANCH used for repository loads
+- WRITE_BRANCH used for repository writes
 - extraction records used
 - audit report used when applicable
 - accepted review requirements applied
@@ -320,7 +339,7 @@ This file defines the ASI index generation role only.
 --- file-meta ---
 DOC_ID: ASI-INDEX_GENERATION_WORKER_PROMPT
 DOC_FILE: docs/design/ai/asi/workflows/ASI-INDEX_GENERATION_WORKER_PROMPT.txt
-DOC_REV: 7
+DOC_REV: 8
 DOC_GIT: 0000000
 DOC_STATUS: STABLE
 -----------------
