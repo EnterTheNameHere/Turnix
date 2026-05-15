@@ -11,7 +11,7 @@ a topic, term, domain, boundary question, or common confusion trap.
 
 Authority warning
 -----------------
-ASI files are non-authoritative.
+This file is non-authoritative assistant routing metadata.
 
 ASI files route to canonical documents. They do not replace canonical documents,
 restate full normative meaning, or define Turnix semantics by themselves.
@@ -51,7 +51,7 @@ ownership, and relation indexes.
 
 Current source batch
 --------------------
-This first-pass ASI set is derived from Batch 1 foundation extraction records:
+This ASI set is derived from Batch 1 foundation extraction records:
 - DA-01
 - DA-02
 - DA-03
@@ -62,6 +62,29 @@ This first-pass ASI set is derived from Batch 1 foundation extraction records:
 
 Extraction records are also non-authoritative generated metadata. They help ASI
 creation but do not replace canonical documents.
+
+Audit and review inputs
+-----------------------
+This generation used:
+- Batch 1 foundation extraction records.
+- ASI-ACCEPTED_EXTRACTION_REVIEW_NOTES.txt.
+- BATCH-1-EXTRACTION-AUDIT-REPORT.txt.
+
+No accepted extraction review requirements are currently recorded in the ASI
+structure.
+
+BATCH-1-CROSS-DOCUMENT-ANALYSIS-IMPROVEMENTS.txt was not present during this
+generation. Do not infer additional cross-document analysis guidance from that
+missing file.
+
+Candidate-only provenance note
+------------------------------
+Prior candidate IDs B1-SRC-001, B1-SRC-002, B1-SRC-003, and B1-SRC-004 appear
+in Batch 1 extraction or audit material as provenance/warning material only.
+
+They are not present as accepted entries in ASI-SOURCE_IMPROVEMENT_CANDIDATES.txt.
+Do not promote them to accepted source-improvement candidates or confirmed
+primary authority routes unless a later supervisor decision records that change.
 
 Batch 1 authority ladder
 ------------------------
@@ -92,17 +115,24 @@ Cross-layer routing rule
 When a question combines RPC, trace evidence, state, diagnostics, and
 success/failure, route by owned layer:
 
-- DA-21 for abstract RPC delivery, acknowledgement, request acceptance,
-  routing, subscription, cancellation, timeout, and disconnect meaning.
-- IS-01 for concrete envelope fields, message type strings, serialization,
-  isComplete, final, origin, route, lane, payload, job, and stateUpdate.
-- DA-03 for trace semantics, retained evidence, causal links, trace loss, trace
-  spans, and trace correlation meaning.
-- DA-04 for whether anything became committed authoritative state.
-- ODA-B for how optional developer tooling should display, report, filter, or
-  explain retained evidence.
-- DA-19, DA-23, or DA-28 when the final outcome belongs to Job, adapter, or
-  RuntimeHost lifecycle semantics.
+- LOAD_FIRST: DA-21 for abstract RPC delivery, acknowledgement, request
+  acceptance, routing, subscription, cancellation, timeout, and disconnect
+  meaning.
+- LOAD_FIRST: IS-01 for concrete envelope fields, message type strings,
+  serialization, isComplete, final, origin, route, lane, payload, job, and
+  stateUpdate.
+- LOAD_FIRST: DA-03 for trace semantics, retained evidence, causal links, trace
+  loss, trace spans, and trace correlation meaning.
+- LOAD_FIRST: DA-04 for whether anything became committed authoritative state.
+- LOAD_IF_NEEDED: ODA-B for how optional developer tooling should display,
+  report, filter, or explain retained evidence.
+- CANDIDATE_LOAD: DA-19 for Job lifecycle and terminal outcome; basis: referenced
+  by Batch 1 records but not directly indexed in Batch 1.
+- CANDIDATE_LOAD: DA-23 for adapter lifecycle and execution-boundary outcome;
+  basis: referenced by Batch 1 records but not directly indexed in Batch 1.
+- CANDIDATE_LOAD: DA-28 for RuntimeHost operation, command, entry-surface,
+  workspace, LAN, and lifecycle semantics; basis: referenced by Batch 1 records
+  but not directly indexed in Batch 1.
 
 Batch 1 high-risk traps to preserve
 -----------------------------------
@@ -142,13 +172,43 @@ Batch 1 high-risk traps to preserve
 - Runtime memory is not committed state merely because it is visible, resident,
   active, or in use.
 
-Current generation note
------------------------
-This ASI update uses Batch 1 extraction records, accepted review requirements,
-and the Batch 1 cross-document review guidance.
+Missing index coverage
+----------------------
+This first-pass ASI set covers Batch 1 only.
 
-The generated-index ledger should mark these ASI files as needing a fresh
-ASI-only retest after this update.
+MISSING_INDEX_COVERAGE: Job lifecycle, timeout, cancellation, terminal outcome,
+and retained-result semantics need DA-19 extraction or direct canonical loading
+before ASI can route them as confirmed indexed authority.
+
+MISSING_INDEX_COVERAGE: AppInstance identity and lifecycle need DA-20 extraction
+or direct canonical loading before ASI can route them as confirmed indexed
+authority.
+
+MISSING_INDEX_COVERAGE: execution adapter boundary, adapter lifecycle, adapter
+success/failure, and adapter timeout need DA-23 extraction or direct canonical
+loading before ASI can route them as confirmed indexed authority.
+
+MISSING_INDEX_COVERAGE: RuntimeHost identity, workspace ownership, command
+surface, startup mode, LAN exposure, and host lifecycle need DA-28 and relevant
+IS extraction or direct canonical loading before ASI can route them as confirmed
+indexed authority.
+
+MISSING_INDEX_COVERAGE: pack discovery, pack identity, imports, dependency
+resolution, visibility, and pack management are not directly covered by Batch 1.
+
+MISSING_INDEX_COVERAGE: persistence I/O, windows, finalized runtime history,
+exports, replay, comparison, and audit workflows are not directly covered by
+Batch 1.
+
+MISSING_INDEX_COVERAGE: concrete trace serialization and RuntimeHost trace
+schema are not directly covered by Batch 1.
+
+Generated-index ledger note
+---------------------------
+The generated-index ledger should mark Batch 1 ASI-00 and ASI-01 as generated
+from Batch 1 foundation, with BATCH-1-EXTRACTION-AUDIT-REPORT.txt used, no
+accepted requirements applied, candidate-only provenance preserved, and ASI-only
+routing tests needed after generation.
 
 End
 ---
@@ -157,7 +217,7 @@ This file is non-authoritative assistant routing metadata only.
 --- file-meta ---
 DOC_ID: ASI-00_ASSISTANT_SEMANTIC_INDEX_README
 DOC_FILE: docs/design/ai/asi/processed/indexes/ASI-00_ASSISTANT_SEMANTIC_INDEX_README.txt
-DOC_REV: 1
+DOC_REV: 2
 DOC_GIT: 0000000
 DOC_STATUS: STABLE
 -----------------
