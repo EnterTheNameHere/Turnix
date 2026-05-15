@@ -82,22 +82,67 @@ BATCH_ID: Batch 1 foundation
 EXECUTION_TARGET: new_thread_launch_prompt
 END_ASI_WORKFLOW_CALL
 
-Branch resolution
------------------
-BRANCH identifies the Git branch used for repository loads and writes.
+Branch fields
+-------------
+BRANCH is the normal user-facing shorthand for ordinary ASI workflows.
+
+When BRANCH is supplied, the runner resolves:
+
+READ_BRANCH: <BRANCH>
+WRITE_BRANCH: <BRANCH>
+
+READ_BRANCH is the repository branch used for repository file loads.
+
+WRITE_BRANCH is the repository branch used for repository file writes when the
+workflow writes.
+
+Generated launch prompts must use READ_BRANCH and WRITE_BRANCH explicitly.
+They must not rely on a bare BRANCH field for repository file loading.
+
+For ordinary ASI workflows, READ_BRANCH and WRITE_BRANCH should match. If they
+differ, the prompt must explicitly say the split read/write branch behavior is
+intended.
 
 For current_thread execution of any workflow that may write repository files,
-BRANCH is required in the ASI_WORKFLOW_CALL.
+WRITE_BRANCH is required.
+
+For any workflow that reads repository files, READ_BRANCH is required.
 
 For new_thread_launch_prompt and dry_run_plan, the runner may use an active task
-branch only when that branch is already unambiguous in the current task.
+branch as both READ_BRANCH and WRITE_BRANCH only when that branch is already
+unambiguous in the current task.
 
-For current_thread read-only execution, the runner may use an active task branch
-only when the resolved workflow has no MAY_WRITE entries and the active branch
-is already unambiguous.
+If no BRANCH, READ_BRANCH, or WRITE_BRANCH is supplied and no active task branch
+is unambiguous, the runner stops and asks for the missing branch information.
 
-If no branch is supplied and no active task branch is unambiguous, the runner
-stops and asks for BRANCH.
+Repository load rule
+--------------------
+All repository file loads in generated launch prompts must name READ_BRANCH.
+
+Required loads should use wording like:
+
+From repository EnterTheNameHere/Turnix, branch <READ_BRANCH>, load and classify
+COMPLETE:
+- path: docs/AI_WORKFLOW_BOOTSTRAP.txt
+  branch: <READ_BRANCH>
+
+If READ_BRANCH is missing, stop before repository loading and report
+MISSING_READ_BRANCH.
+
+If a file was loaded from a branch other than READ_BRANCH, report
+LOAD_BRANCH_VIOLATION.
+
+Do not classify a file as missing based on a load from the wrong branch.
+
+Repository write rule
+---------------------
+All repository writes in generated launch prompts must name WRITE_BRANCH.
+
+If WRITE_BRANCH is missing for a write-capable workflow, stop before writing and
+report MISSING_WRITE_BRANCH.
+
+If a write would target a branch other than WRITE_BRANCH, stop and report
+WRITE_BRANCH_VIOLATION.
 
 Progress logging
 ----------------
@@ -128,20 +173,22 @@ For each ASI_WORKFLOW_CALL:
 
 1. Parse the invocation block.
 2. Verify WORKFLOW_ID is present.
-3. Resolve WORKFLOW_ID through ASI-WORKFLOW_REGISTRY.txt.
-4. Verify required parameters are present.
-5. Verify repeated fields only use registry-declared REPEATABLE_PARAM entries.
-6. Apply explicit default values for omitted optional parameters.
-7. Resolve and validate PROGRESS_LOG.
-8. Load ASI-PROGRESS_LOGGING.txt when PROGRESS_LOG is compact or structured.
-9. Resolve BATCH_ID through ASI-BATCH_REGISTRY.txt when required or supplied.
-10. Resolve DOC_ID through CMR-04 when required.
-11. Resolve ordinary LOAD_GROUP entries through ASI-LOAD_GROUPS.txt.
-12. Record LOAD_GROUP_BEFORE_WRITE entries as deferred write-phase loads.
-13. Load the workflow prompt declared by the registry entry.
-14. Check for contract conflicts between the registry, load groups, and
+3. Resolve BRANCH shorthand into READ_BRANCH and WRITE_BRANCH when used.
+4. Verify READ_BRANCH and WRITE_BRANCH are present as required by the workflow.
+5. Resolve WORKFLOW_ID through ASI-WORKFLOW_REGISTRY.txt.
+6. Verify required parameters are present.
+7. Verify repeated fields only use registry-declared REPEATABLE_PARAM entries.
+8. Apply explicit default values for omitted optional parameters.
+9. Resolve and validate PROGRESS_LOG.
+10. Load ASI-PROGRESS_LOGGING.txt when PROGRESS_LOG is compact or structured.
+11. Resolve BATCH_ID through ASI-BATCH_REGISTRY.txt when required or supplied.
+12. Resolve DOC_ID through CMR-04 when required.
+13. Resolve ordinary LOAD_GROUP entries through ASI-LOAD_GROUPS.txt.
+14. Record LOAD_GROUP_BEFORE_WRITE entries as deferred write-phase loads.
+15. Load the workflow prompt declared by the registry entry.
+16. Check for contract conflicts between the registry, load groups, and
     workflow prompt.
-15. Apply the requested EXECUTION_TARGET.
+17. Apply the requested EXECUTION_TARGET.
 
 Deferred write-phase load groups
 --------------------------------
@@ -168,7 +215,8 @@ Contract conflict rule
 ----------------------
 If loaded workflow/control files disagree about required loads, allowed writes,
 forbidden writes, role authority, generated-output boundaries, execution target
-support, or required parameters, stop and report a workflow contract conflict.
+support, branch requirements, or required parameters, stop and report a workflow
+contract conflict.
 
 Do not silently choose the stricter or looser rule.
 
@@ -185,14 +233,16 @@ prompt allow current-thread execution and the user clearly requested it.
 new_thread_launch_prompt:
 Prepare a copy-paste first message for a fresh thread.
 
-The launch prompt must include required loads, role declaration, assigned
-parameters, task statement, read boundary, write boundary, forbidden writes,
-stopping conditions, execution-target context, and progress-log mode.
+The launch prompt must include repository identity, READ_BRANCH, WRITE_BRANCH,
+required loads with branch visibility, role declaration, assigned parameters,
+task statement, read boundary, write boundary, forbidden writes, stopping
+conditions, execution-target context, and progress-log mode.
 
 dry_run_plan:
 Report resolved workflow ID, prompt file, required files, required parameters,
-read permissions, write permissions, forbidden writes, expected outputs, and
-blocking issues. Do not run the workflow body.
+repository, READ_BRANCH, WRITE_BRANCH, read permissions, write permissions,
+forbidden writes, expected outputs, and blocking issues. Do not run the workflow
+body.
 
 Launch prompt skeleton
 ----------------------
@@ -201,7 +251,12 @@ For new_thread_launch_prompt, print a complete launch prompt in this shape:
 BEGIN ASI GENERATED LAUNCH PROMPT
 WORKFLOW_ID:
 ROLE:
-BRANCH:
+REPOSITORY:
+READ_BRANCH:
+WRITE_BRANCH:
+BRANCH_RULE:
+READ_BRANCH_RULE:
+WRITE_BRANCH_RULE:
 EXECUTION_TARGET:
 PROGRESS_LOG:
 ASSIGNED_PARAMETERS:
@@ -218,6 +273,26 @@ END ASI GENERATED LAUNCH PROMPT
 
 The generated launch prompt may use plain prose inside each field, but it keeps
 these field labels so another assistant can parse the launch context reliably.
+
+Required loads in generated launch prompts must show the branch at the file level
+when practical:
+
+- path: docs/AI_WORKFLOW_BOOTSTRAP.txt
+  branch: <READ_BRANCH>
+
+Stopping conditions in generated launch prompts must include:
+- Stop if READ_BRANCH is missing.
+- Stop if WRITE_BRANCH is missing for a write-capable workflow.
+- Stop if any repository file load is attempted without using READ_BRANCH.
+- Report wrong-branch loads as LOAD_BRANCH_VIOLATION, not as MISSING,
+  TRUNCATED, or NOT PROVEN COMPLETE.
+- Stop if any repository write is attempted without using WRITE_BRANCH.
+- Report wrong-branch writes as WRITE_BRANCH_VIOLATION.
+
+When PROGRESS_LOG is compact or structured, the first progress callout should
+include READ_BRANCH, for example:
+
+Starting required-file access from READ_BRANCH: <READ_BRANCH>.
 
 Write boundary
 --------------
@@ -241,7 +316,9 @@ Final report
 For dry-run or current-thread execution, report:
 - WORKFLOW_ID
 - resolved workflow prompt
-- resolved branch
+- repository
+- read branch used for repository loads
+- write branch used for repository writes when applicable
 - required parameters
 - repeatable parameters used
 - progress-log mode
@@ -265,7 +342,7 @@ This file defines the ASI workflow runner entrypoint only.
 --- file-meta ---
 DOC_ID: ASI-RUN_WORKFLOW
 DOC_FILE: docs/design/ai/asi/ASI-RUN_WORKFLOW.txt
-DOC_REV: 5
+DOC_REV: 6
 DOC_GIT: 0000000
 DOC_STATUS: STABLE
 -----------------
