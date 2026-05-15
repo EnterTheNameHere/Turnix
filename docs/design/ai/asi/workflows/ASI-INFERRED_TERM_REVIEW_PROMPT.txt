@@ -87,17 +87,31 @@ When INFERRED_REVIEW_FILE is none, do not write an inferred-review report file.
 Only update the inferred-term candidate file when candidate updates are produced
 and writes are authorized.
 
-Branch
-------
-Use the branch resolved by ASI-RUN_WORKFLOW.
+Branch fields
+-------------
+Use READ_BRANCH and WRITE_BRANCH resolved by ASI-RUN_WORKFLOW.
 
-For current_thread execution, BRANCH must be supplied in the ASI_WORKFLOW_CALL
-because this workflow may write repository files.
+READ_BRANCH is the repository branch used for repository file loads.
 
-For new_thread_launch_prompt and dry_run_plan, ASI-RUN_WORKFLOW may use an
-active task branch only when that branch is already unambiguous.
+WRITE_BRANCH is the repository branch used for repository file writes when this
+workflow writes.
 
-If branch resolution fails, stop and ask for BRANCH.
+Generated launch prompts must provide READ_BRANCH and WRITE_BRANCH explicitly.
+
+BRANCH may be used only as ASI_WORKFLOW_CALL shorthand before launch-prompt
+generation. Worker threads should not rely on bare BRANCH.
+
+If READ_BRANCH is missing, stop before repository loading and report
+MISSING_READ_BRANCH.
+
+If WRITE_BRANCH is missing before this workflow writes, stop before writing and
+report MISSING_WRITE_BRANCH.
+
+If any repository file load is attempted without using READ_BRANCH, report
+LOAD_BRANCH_VIOLATION.
+
+If any repository write is attempted without using WRITE_BRANCH, report
+WRITE_BRANCH_VIOLATION.
 
 Execution profile
 -----------------
@@ -136,9 +150,9 @@ Source and generated material loading
 -------------------------------------
 Resolve DOC_ID through CMR-04.
 
-Load the assigned canonical source document.
+Load the assigned canonical source document from READ_BRANCH.
 
-Load every assigned GENERATED_MATERIAL_FILE.
+Load every assigned GENERATED_MATERIAL_FILE from READ_BRANCH.
 
 Classify every loaded file before use.
 
@@ -273,7 +287,10 @@ Stopping conditions
 -------------------
 Stop and report if:
 - required workflow files are not COMPLETE
-- branch resolution fails
+- READ_BRANCH is missing before repository loading
+- WRITE_BRANCH is missing before repository writing
+- any repository file load is attempted without using READ_BRANCH
+- any repository write is attempted without using WRITE_BRANCH
 - CMR-04 cannot resolve DOC_ID
 - the canonical source document is not COMPLETE
 - any assigned generated material is not COMPLETE
@@ -289,6 +306,8 @@ Final report
 Report:
 - source document reviewed
 - generated material reviewed
+- READ_BRANCH used for repository loads
+- WRITE_BRANCH used for repository writes
 - terms checked
 - candidates added or updated
 - inferred review file written or not written
@@ -303,7 +322,7 @@ This file defines the ASI inferred-term review role only.
 --- file-meta ---
 DOC_ID: ASI-INFERRED_TERM_REVIEW_PROMPT
 DOC_FILE: docs/design/ai/asi/workflows/ASI-INFERRED_TERM_REVIEW_PROMPT.txt
-DOC_REV: 4
+DOC_REV: 5
 DOC_GIT: 0000000
 DOC_STATUS: STABLE
 -----------------
