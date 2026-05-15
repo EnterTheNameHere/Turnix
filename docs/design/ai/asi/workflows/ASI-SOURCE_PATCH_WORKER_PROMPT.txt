@@ -72,17 +72,31 @@ APPROVAL: none
 When APPROVAL is none, this workflow may prepare a dry-run plan or launch prompt
 but must not write canonical source documents.
 
-Branch
-------
-Use the branch resolved by ASI-RUN_WORKFLOW.
+Branch fields
+-------------
+Use READ_BRANCH and WRITE_BRANCH resolved by ASI-RUN_WORKFLOW.
 
-For current_thread execution, BRANCH must be supplied in the ASI_WORKFLOW_CALL
-because this workflow may write repository files.
+READ_BRANCH is the repository branch used for repository file loads.
 
-For new_thread_launch_prompt and dry_run_plan, ASI-RUN_WORKFLOW may use an
-active task branch only when that branch is already unambiguous.
+WRITE_BRANCH is the repository branch used for repository file writes when this
+workflow writes.
 
-If branch resolution fails, stop and ask for BRANCH.
+Generated launch prompts must provide READ_BRANCH and WRITE_BRANCH explicitly.
+
+BRANCH may be used only as ASI_WORKFLOW_CALL shorthand before launch-prompt
+generation. Worker threads should not rely on bare BRANCH.
+
+If READ_BRANCH is missing, stop before repository loading and report
+MISSING_READ_BRANCH.
+
+If WRITE_BRANCH is missing before this workflow writes, stop before writing and
+report MISSING_WRITE_BRANCH.
+
+If any repository file load is attempted without using READ_BRANCH, report
+LOAD_BRANCH_VIOLATION.
+
+If any repository write is attempted without using WRITE_BRANCH, report
+WRITE_BRANCH_VIOLATION.
 
 Execution profile
 -----------------
@@ -151,7 +165,7 @@ Source loading
 --------------
 Resolve each assigned DOC_ID through CMR-04.
 
-Load each assigned canonical source document from the active branch.
+Load each assigned canonical source document from READ_BRANCH.
 
 Classify each source retrieval as COMPLETE before use.
 
@@ -241,7 +255,10 @@ Stopping conditions
 -------------------
 Stop and report if:
 - required workflow files are not COMPLETE
-- branch resolution fails
+- READ_BRANCH is missing before repository loading
+- WRITE_BRANCH is missing before repository writing
+- any repository file load is attempted without using READ_BRANCH
+- any repository write is attempted without using WRITE_BRANCH
 - document-edit guidance cannot be loaded COMPLETE before canonical source write
 - CANDIDATE_ID is missing
 - CANDIDATE_ID cannot be found
@@ -261,6 +278,8 @@ Final report
 Report:
 - assigned CANDIDATE_ID
 - assigned DOC_ID values
+- READ_BRANCH used for repository loads
+- WRITE_BRANCH used for repository writes
 - approval status
 - document edit mode used
 - source files patched
@@ -277,7 +296,7 @@ This file defines the ASI source patch worker role only.
 --- file-meta ---
 DOC_ID: ASI-SOURCE_PATCH_WORKER_PROMPT
 DOC_FILE: docs/design/ai/asi/workflows/ASI-SOURCE_PATCH_WORKER_PROMPT.txt
-DOC_REV: 3
+DOC_REV: 4
 DOC_GIT: 0000000
 DOC_STATUS: STABLE
 -----------------
