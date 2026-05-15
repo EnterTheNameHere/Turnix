@@ -43,11 +43,23 @@ Workflow invocation block
 Use ASI_WORKFLOW_CALL when the user wants to run, prepare, or inspect an ASI
 workflow.
 
-Example:
+Example using BRANCH shorthand:
 
 ASI_WORKFLOW_CALL
 WORKFLOW_ID: asi.document.extract
 BRANCH: CHATGPT_EXTRACT_INDEX
+DOC_ID: DA-03
+BATCH_ID: Batch 1 foundation
+EXECUTION_TARGET: new_thread_launch_prompt
+PROGRESS_LOG: compact
+END_ASI_WORKFLOW_CALL
+
+Example using explicit read/write branches:
+
+ASI_WORKFLOW_CALL
+WORKFLOW_ID: asi.document.extract
+READ_BRANCH: CHATGPT_EXTRACT_INDEX
+WRITE_BRANCH: CHATGPT_EXTRACT_INDEX
 DOC_ID: DA-03
 BATCH_ID: Batch 1 foundation
 EXECUTION_TARGET: new_thread_launch_prompt
@@ -64,19 +76,30 @@ WORKFLOW_ID:
 Identifies the workflow contract to run.
 
 BRANCH:
-Git branch to use for repository loads and writes.
+Normal user-facing shorthand for ordinary ASI workflows.
 
-BRANCH is required for current_thread execution of any workflow that may write
-repository files.
+When BRANCH is supplied, the runner resolves:
+- READ_BRANCH: <BRANCH>
+- WRITE_BRANCH: <BRANCH>
 
-For new_thread_launch_prompt and dry_run_plan, the runner may use the active
-task branch only when it is already unambiguous.
+Generated launch prompts should emit READ_BRANCH and WRITE_BRANCH explicitly.
+They should not rely on a bare BRANCH field for repository file loading.
 
-For current_thread read-only execution, the runner may use the active task
-branch only when the resolved workflow has no MAY_WRITE entries and the active
-branch is already unambiguous.
+READ_BRANCH:
+Repository branch used for repository file loads.
 
-If no branch is supplied and no active task branch is unambiguous, stop and ask.
+If READ_BRANCH is missing and BRANCH is not available as shorthand, repository
+file loads must not begin.
+
+WRITE_BRANCH:
+Repository branch used for repository writes when the workflow writes.
+
+If WRITE_BRANCH is missing and BRANCH is not available as shorthand, repository
+writes must not begin.
+
+For ordinary ASI workflows, READ_BRANCH and WRITE_BRANCH should match. If they
+differ, the workflow call or launch prompt must explicitly state that split
+read/write branch behavior is intended.
 
 DOC_ID:
 Canonical Turnix document identifier when the workflow targets one document.
@@ -173,6 +196,8 @@ An invocation is malformed when:
 - required fields for the resolved workflow are missing
 - a field appears with contradictory values where only one value is allowed
 - a field is repeated but not allowed by the block format or workflow registry
+- BRANCH is supplied together with conflicting READ_BRANCH or WRITE_BRANCH
+- READ_BRANCH and WRITE_BRANCH differ without explicit split-branch approval
 - the WORKFLOW_ID is unknown
 - the BATCH_ID is unknown when a batch is required
 - the DOC_ID cannot be resolved when canonical loading is required
@@ -201,7 +226,7 @@ This file defines ASI invocation formats only.
 --- file-meta ---
 DOC_ID: ASI-WORKFLOW_CALL_FORMAT
 DOC_FILE: docs/design/ai/asi/ASI-WORKFLOW_CALL_FORMAT.txt
-DOC_REV: 4
+DOC_REV: 5
 DOC_GIT: 0000000
 DOC_STATUS: STABLE
 -----------------
