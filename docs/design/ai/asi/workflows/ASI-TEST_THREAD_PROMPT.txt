@@ -86,21 +86,31 @@ TEST_RESULT_FILE: none
 
 When TEST_RESULT_FILE is none, do not write a saved test result file.
 
-Branch
-------
-Use the branch resolved by ASI-RUN_WORKFLOW.
+Branch fields
+-------------
+Use READ_BRANCH and WRITE_BRANCH resolved by ASI-RUN_WORKFLOW.
 
-For current_thread execution, BRANCH must be supplied in the ASI_WORKFLOW_CALL
-when TEST_RESULT_FILE is not none because this workflow may write repository
-files.
+READ_BRANCH is the repository branch used for repository file loads.
 
-For new_thread_launch_prompt and dry_run_plan, ASI-RUN_WORKFLOW may use an
-active task branch only when that branch is already unambiguous.
+WRITE_BRANCH is the repository branch used for repository file writes when this
+workflow writes.
 
-For current_thread execution with TEST_RESULT_FILE set to none, ASI-RUN_WORKFLOW
-may use an active task branch only when that branch is already unambiguous.
+Generated launch prompts must provide READ_BRANCH and WRITE_BRANCH explicitly.
 
-If branch resolution fails, stop and ask for BRANCH.
+BRANCH may be used only as ASI_WORKFLOW_CALL shorthand before launch-prompt
+generation. Worker threads should not rely on bare BRANCH.
+
+If READ_BRANCH is missing, stop before repository loading and report
+MISSING_READ_BRANCH.
+
+If WRITE_BRANCH is missing before this workflow writes, stop before writing and
+report MISSING_WRITE_BRANCH.
+
+If any repository file load is attempted without using READ_BRANCH, report
+LOAD_BRANCH_VIOLATION.
+
+If any repository write is attempted without using WRITE_BRANCH, report
+WRITE_BRANCH_VIOLATION.
 
 Required loads
 --------------
@@ -260,7 +270,7 @@ If ALLOW_CANONICAL_LOADING is yes, then after routing:
 1. Load only canonical documents identified by ASI routing or explicitly named by
    the assignment.
 2. Resolve DOC_ID through CMR-04.
-3. Fetch the source document from the active branch.
+3. Fetch the source document from READ_BRANCH.
 4. Classify retrieval as COMPLETE before use.
 5. Report whether canonical source confirmed, contradicted, or refined the ASI
    routing.
@@ -327,7 +337,10 @@ Stopping conditions
 -------------------
 Stop and report if:
 - required workflow files are not COMPLETE
-- branch resolution fails
+- READ_BRANCH is missing before repository loading
+- WRITE_BRANCH is missing before repository writing
+- any repository file load is attempted without using READ_BRANCH
+- any repository write is attempted without using WRITE_BRANCH
 - assigned ASI files are not COMPLETE
 - ASI_FILE is missing
 - QUERY is missing
@@ -350,6 +363,8 @@ After all questions, summarize:
 - whether repository search was avoided
 - whether inferred candidates were kept separate from direct primary routes
 - whether role comments were consistently present
+- READ_BRANCH used for repository loads
+- WRITE_BRANCH used for repository writes when applicable
 - recommended ASI changes
 - whether a test result was saved
 
@@ -360,7 +375,7 @@ This file defines the ASI test thread role only.
 --- file-meta ---
 DOC_ID: ASI-TEST_THREAD_PROMPT
 DOC_FILE: docs/design/ai/asi/workflows/ASI-TEST_THREAD_PROMPT.txt
-DOC_REV: 8
+DOC_REV: 9
 DOC_GIT: 0000000
 DOC_STATUS: STABLE
 -----------------
