@@ -29,6 +29,28 @@ The target model is:
 - Physical file location is storage only and must not be treated as semantic
   authority.
 
+Snapshot model
+--------------
+Structured ASI files are current snapshots unless a workflow explicitly says the
+file is a history or ledger artifact.
+
+Default behavior:
+
+- Extractor performs a fresh source analysis and writes a clean extracted-item
+  snapshot for the assigned DOC_ID.
+- BatchAuditor writes sparse audit notes for things that need addressing.
+- CrossBatchAuditor writes sparse cross-batch notes for things that need
+  addressing across batches.
+- Indexer writes current index-card output or proposals from extracted items and
+  applicable audit notes.
+- TerminologyInferrer writes current terminology-inference proposals.
+
+Workflows should not load an old structured output merely to mutate lifecycle
+state such as generated, reviewed, accepted, rejected, or superseded.
+
+If comparison with prior output is needed, use a dedicated comparison or
+change-report workflow.
+
 Core schemas
 ------------
 Structured ASI records currently use these standalone schemas:
@@ -56,6 +78,60 @@ documents.
 If a source document needs a better heading or label, record that as a source
 clarification or terminology inference proposal. Do not treat the proposed label
 as an existing source locator until it is actually added to the source document.
+
+Structured flags
+----------------
+Structured records use a required flags array.
+
+An empty flags array means no special handling is currently requested.
+
+A flag is an object with:
+- flagType
+- reason
+
+Optional flag fields may include:
+- emittedBy
+- handledBy
+- relatedItemIds
+- relatedCardIds
+- relatedDecisionIds
+
+Current flag types:
+
+needs_supervisor_decision
+  Requires supervisor/user judgment before affected downstream use. May be
+  emitted by any ASI workflow. Handled by Supervisor.
+
+needs_cross_document_audit
+  Meaning likely depends on comparison with other documents. Emitted by
+  Extractor, BatchAuditor, TerminologyInferrer, or Indexer. Handled by
+  BatchAuditor or CrossBatchAuditor.
+
+needs_source_clarification
+  Canonical source may need clearer wording, a missing boundary, compact term, or
+  better source heading. Handled by Supervisor first. SourcePatcher acts only
+  after explicit approval.
+
+needs_terminology_inference
+  May need a better name, ASI alias, boundary phrase, relation name, or
+  source-term proposal. Handled by TerminologyInferrer.
+
+weak_source_support
+  Plausible but weakly grounded in source. Handled by BatchAuditor,
+  CrossBatchAuditor, Indexer, or Supervisor if final routing would depend on it.
+
+ambiguous_same_literal
+  Same literal key appears in more than one context and may not mean the same
+  thing. Default handling is split, not merge, unless audit/supervisor decision
+  says otherwise.
+
+blocked_by_unresolved_decision
+  Affected output cannot proceed because a required audit, cross-batch, or
+  supervisor decision is unresolved. Handled by Supervisor or the workflow owning
+  the missing decision.
+
+Do not create separate boolean hint fields when a structured flag can express
+the same need.
 
 Extracted item kind meanings
 ----------------------------
@@ -117,8 +193,9 @@ A document-local item found while processing one canonical source document.
 An extracted item is a candidate for audit and possible indexing by virtue of
 existing. It does not need a candidateForIndex boolean.
 
-Extracted items may include source-clarification hints, but they do not approve
-source changes.
+Extracted items may include structured flags such as needs_source_clarification
+or needs_terminology_inference, but they do not approve source changes or
+terminology.
 
 Audit decision
 ~~~~~~~~~~~~~~
@@ -128,20 +205,18 @@ audit_decision
 
 Written by:
 
-Batch Auditor or Cross-Batch Auditor
+BatchAuditor or CrossBatchAuditor
 
 Purpose:
 
-A decision or recommendation about one or more extracted items.
+A sparse decision or recommendation about one or more extracted items.
 
-Audit decisions do not mutate extracted items. The presence of an audit decision
-is how later stages know that an item was reviewed.
+Audit decisions do not mutate extracted items.
+
+Audit decisions should normally record only things that need addressing. Absence
+of an audit decision means no audit objection for normal downstream use.
 
 Useful decision values include:
-- accept_for_index
-- accept_as_alias
-- accept_as_boundary
-- accept_as_relation
 - reject_noise
 - reject_duplicate
 - split_contexts
@@ -213,12 +288,10 @@ Extractor
 Reads:
 - one canonical source document
 - batch registry
-- accepted extraction requirements when applicable
-- existing extraction for the same DOC_ID when needed
+- schema files needed for extracted-item output
 
 Writes:
 - extracted_item records for the assigned DOC_ID
-- source clarification observations when found
 
 Does not write:
 - audit decisions
@@ -226,12 +299,12 @@ Does not write:
 - canonical source documents
 - global manifests
 
-Batch Auditor
-~~~~~~~~~~~~~
+BatchAuditor
+~~~~~~~~~~~~
 Reads:
 - extracted items for one batch
 - relevant batch cross-document material
-- existing audit decisions for that batch when needed
+- existing sparse audit decisions for that batch when explicitly needed
 
 Writes:
 - audit_decision records
@@ -242,6 +315,22 @@ Does not write:
 - canonical source documents
 - final index cards unless explicitly assigned
 - extracted items, except through separate correction/replacement workflows
+
+CrossBatchAuditor
+~~~~~~~~~~~~~~~~~
+Reads:
+- extracted items, sparse audit decisions, or index-card proposals across
+  multiple batches as assigned
+
+Writes:
+- cross-batch audit_decision records
+- cross-batch findings
+- merge/split/supervisor-needed recommendations
+
+Does not write:
+- canonical source documents
+- extracted items
+- final index cards unless explicitly assigned
 
 TerminologyInferrer
 ~~~~~~~~~~~~~~~~~~~
@@ -263,7 +352,7 @@ Indexer
 ~~~~~~~
 Reads:
 - extracted items
-- audit decisions
+- sparse audit decisions
 - accepted supervisor decisions when present
 - terminology inferences accepted for index use
 - current card shards or proposals when needed
@@ -341,28 +430,66 @@ Example card IDs:
 - termctx:isrequired:DA-11:packrequest-grammar
 - termctx:isrequired:IS-04:runtimehost-command-schema
 
+Routing tiers
+-------------
+Index cards may use these route groups:
+
+loadFirst
+  Primary route for the selected card/context.
+
+loadIfNeeded
+  Strong supporting route when the question crosses boundaries or needs
+  additional context.
+
+candidateLoad
+  Weak, possible, or loosely related route. Candidate loads must not be treated
+  as primary route selection by themselves.
+
+doNotTreatAsAuthority
+  Documents or contexts that are relevant but must not be treated as authority
+  for the card's target meaning.
+
+Route basis explains why a document appears in a routing hint. It does not make
+the document authoritative by itself.
+
+Common route basis values include:
+- direct-source-owner
+- direct-index-match
+- boundary-owner
+- related-support
+- load-with
+- candidate-only
+- inferred-from-reference
+- audit-decision
+- supervisor-decision
+
 Append, audit, index
 --------------------
 Do not make every workflow mutate the same JSON object.
 
 Preferred flow:
 
-1. Extractor writes extracted_item records.
-2. Auditor writes audit_decision records about extracted items.
-3. TerminologyInferrer writes terminology_inference records when assigned.
-4. Supervisor writes accepted decisions only when needed.
-5. Indexer writes index_card records from extracted items and decisions.
-6. Deterministic tooling validates, sorts, deduplicates, defragments, shards,
+1. Extractor writes current extracted_item records.
+2. BatchAuditor writes sparse audit_decision records about extracted items that
+   need addressing.
+3. CrossBatchAuditor writes sparse cross-batch audit_decision records when
+   cross-batch reconciliation is assigned.
+4. TerminologyInferrer writes terminology_inference records when assigned.
+5. Supervisor writes accepted decisions only when needed.
+6. Indexer writes index_card records from extracted items and applicable
+   decisions.
+7. Deterministic tooling validates, sorts, deduplicates, defragments, shards,
    and regenerates manifests.
 
 Derived state examples:
 
-- audited means an audit_decision exists for the extracted item.
-- should index means the latest applicable decision accepts the item for index
-  use.
-- rejected means the latest applicable decision rejects or supersedes the item.
+- no audit decision means no audit objection for normal downstream use.
+- rejected means an applicable sparse audit decision rejects the item.
+- split/merge behavior comes from sparse audit or supervisor decisions.
+- current index-card shards contain usable routing metadata by presence.
 
-Avoid mutable booleans such as audited or shouldIndex on extracted items unless a
+Avoid mutable lifecycle fields such as audited, shouldIndex, generated, reviewed,
+accepted, rejected, or superseded on normal current-snapshot records unless a
 future deterministic tool explicitly derives and exports those fields.
 
 Deterministic organization
@@ -421,7 +548,7 @@ This file explains ASI structured-data workflow only.
 --- file-meta ---
 DOC_ID: ASI-STRUCTURED_DATA_README
 DOC_FILE: docs/design/ai/asi/ASI-STRUCTURED_DATA_README.txt
-DOC_REV: 2
+DOC_REV: 3
 DOC_GIT: 0000000
 DOC_STATUS: DRAFT
 -----------------
