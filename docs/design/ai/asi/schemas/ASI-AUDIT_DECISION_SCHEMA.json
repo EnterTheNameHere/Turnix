@@ -33,30 +33,78 @@
       "minLength": 1
     },
     "scope": {
-      "type": "string",
-      "enum": [
-        "batch",
-        "cross-batch",
-        "document",
-        "item"
+      "description": "Scope in which the decision applies.",
+      "oneOf": [
+        {
+          "const": "batch",
+          "description": "Decision applies within one ASI batch."
+        },
+        {
+          "const": "cross-batch",
+          "description": "Decision compares or reconciles items across multiple ASI batches."
+        },
+        {
+          "const": "document",
+          "description": "Decision applies to one canonical document or its extracted items as a group."
+        },
+        {
+          "const": "item",
+          "description": "Decision applies to one or more specific extracted items."
+        }
       ],
       "default": "batch"
     },
     "decision": {
-      "type": "string",
-      "enum": [
-        "accept_for_index",
-        "accept_as_alias",
-        "accept_as_boundary",
-        "accept_as_relation",
-        "reject_noise",
-        "reject_duplicate",
-        "split_contexts",
-        "merge_with_existing",
-        "source_clarification_candidate",
-        "terminology_inference_candidate",
-        "needs_supervisor_decision",
-        "defer"
+      "description": "Audit decision for the target extracted item or item set. Audit decisions do not mutate extracted items; later stages derive state from these records.",
+      "oneOf": [
+        {
+          "const": "accept_for_index",
+          "description": "Accepted for index-card generation in the appropriate form."
+        },
+        {
+          "const": "accept_as_alias",
+          "description": "Accepted as an alias or search synonym, not as a source-defined term unless separately supported."
+        },
+        {
+          "const": "accept_as_boundary",
+          "description": "Accepted as an X-is-not-Y or authority-boundary index item."
+        },
+        {
+          "const": "accept_as_relation",
+          "description": "Accepted as a relation between documents, terms, concepts, or authority areas."
+        },
+        {
+          "const": "reject_noise",
+          "description": "Rejected because it is too generic, incidental, unsupported, or not useful for ASI routing."
+        },
+        {
+          "const": "reject_duplicate",
+          "description": "Rejected because another extracted item or card already covers the same intended meaning."
+        },
+        {
+          "const": "split_contexts",
+          "description": "Same literal key or nearby concept must be split into separate context-specific meanings."
+        },
+        {
+          "const": "merge_with_existing",
+          "description": "Item should be merged with an existing item or card rather than indexed separately."
+        },
+        {
+          "const": "source_clarification_candidate",
+          "description": "Item identifies possible source ambiguity or missing source wording that may need supervisor review."
+        },
+        {
+          "const": "terminology_inference_candidate",
+          "description": "Item should be reviewed by TerminologyInferrer for possible source term, alias, boundary phrase, relation name, or source heading."
+        },
+        {
+          "const": "needs_supervisor_decision",
+          "description": "Auditor cannot safely decide; supervisor or user decision is required before downstream use."
+        },
+        {
+          "const": "defer",
+          "description": "Decision intentionally postponed without accepting or rejecting the item."
+        }
       ]
     },
     "targetItemIds": {
@@ -80,12 +128,24 @@
       "description": "Instruction to the indexer, such as create term literal plus term context cards."
     },
     "sourcePatchRecommendation": {
-      "type": "string",
-      "enum": [
-        "none",
-        "consider",
-        "needs_supervisor_decision",
-        "approved_elsewhere"
+      "description": "Whether this audit decision suggests later source-patch consideration. This is not patch approval.",
+      "oneOf": [
+        {
+          "const": "none",
+          "description": "No source-patch recommendation."
+        },
+        {
+          "const": "consider",
+          "description": "May be worth considering as a source clarification, but no approval is implied."
+        },
+        {
+          "const": "needs_supervisor_decision",
+          "description": "Source-patch relevance requires supervisor or user decision."
+        },
+        {
+          "const": "approved_elsewhere",
+          "description": "Patch approval is recorded in another supervisor/source-patch decision, not in this audit record."
+        }
       ],
       "default": "none"
     },
@@ -117,6 +177,54 @@
     }
   },
   "$defs": {
+    "confidence": {
+      "oneOf": [
+        {
+          "const": "high",
+          "description": "Strongly supported by source or accepted workflow evidence."
+        },
+        {
+          "const": "medium",
+          "description": "Reasonably supported but may need later review or cross-document confirmation."
+        },
+        {
+          "const": "low",
+          "description": "Weak or tentative support; use cautiously."
+        },
+        {
+          "const": "needs-review",
+          "description": "Requires audit, supervisor review, or stronger source evidence before relying on it."
+        }
+      ]
+    },
+    "reviewState": {
+      "oneOf": [
+        {
+          "const": "generated",
+          "description": "Generated by a workflow and not yet reviewed."
+        },
+        {
+          "const": "reviewed",
+          "description": "Reviewed, but not necessarily accepted as final or authoritative routing metadata."
+        },
+        {
+          "const": "accepted",
+          "description": "Accepted for its intended ASI workflow purpose."
+        },
+        {
+          "const": "rejected",
+          "description": "Rejected for its intended ASI workflow purpose."
+        },
+        {
+          "const": "superseded",
+          "description": "Replaced by a newer or better record."
+        },
+        {
+          "const": "needs-supervisor-decision",
+          "description": "Requires supervisor or user decision before downstream use."
+        }
+      ]
+    },
     "quality": {
       "type": "object",
       "additionalProperties": false,
@@ -126,24 +234,10 @@
       ],
       "properties": {
         "confidence": {
-          "type": "string",
-          "enum": [
-            "high",
-            "medium",
-            "low",
-            "needs-review"
-          ]
+          "$ref": "#/$defs/confidence"
         },
         "reviewState": {
-          "type": "string",
-          "enum": [
-            "generated",
-            "reviewed",
-            "accepted",
-            "rejected",
-            "superseded",
-            "needs-supervisor-decision"
-          ]
+          "$ref": "#/$defs/reviewState"
         },
         "notes": {
           "type": "string"
