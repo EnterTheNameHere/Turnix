@@ -38,6 +38,66 @@ Structured ASI records currently use these standalone schemas:
 - docs/design/ai/asi/schemas/ASI-INDEX_CARD_SCHEMA.json
 - docs/design/ai/asi/schemas/ASI-TERMINOLOGY_INFERENCE_SCHEMA.json
 
+Source references
+-----------------
+ASI records must use CMR-native source references whenever possible.
+
+Preferred source locations include:
+- DOC_ID
+- canonical source file path
+- section number
+- rule number
+- paragraph number or range
+- explicit reference marker such as [ref: DA-08 13.5]
+
+ASI must not invent a parallel section-anchor system for existing source
+documents.
+
+If a source document needs a better heading or label, record that as a source
+clarification or terminology inference proposal. Do not treat the proposed label
+as an existing source locator until it is actually added to the source document.
+
+Extracted item kind meanings
+----------------------------
+The extracted-item schema uses these kind values:
+
+document_domain
+  A document-level domain, ownership area, or non-ownership area. Use this for
+  what a document owns, primarily covers, or explicitly does not own.
+
+term
+  A literal term, field name, phrase, named concept, or vocabulary item that may
+  need routing. Same literal term across documents does not automatically mean
+  same semantic meaning.
+
+boundary
+  A distinction or X-is-not-Y rule. Use this for traps such as stateUpdate is not
+  committed state mutation, acknowledgement is not Job success, or trace evidence
+  is not authoritative state.
+
+relation
+  A meaningful relation between documents, terms, concepts, or authority areas.
+  Use this for support, dependency, neighboring authority, load-with, and
+  non-equivalence relationships.
+
+alias
+  A search or retrieval synonym. Alias does not mean source-defined term unless
+  the canonical source explicitly defines or uses it.
+
+source_clarification_observation
+  A note that the source document may be ambiguous, under-named, weakly worded,
+  missing a useful boundary, or worth improving. This is not source patch
+  approval.
+
+implementation_hint
+  A hint that the item affects implementation, schemas, code, command surfaces,
+  adapters, or runtime behavior. This does not become implementation authority by
+  itself.
+
+other
+  Fallback for useful extracted material that does not fit current categories.
+  Use sparingly. If many other items appear, the schema likely needs a new kind.
+
 Record kinds
 ------------
 Extracted item
@@ -115,7 +175,6 @@ Initial card kinds include:
 - boundary
 - relation
 - alias
-- section_anchor
 - implementation_hint
 
 Terminology inference
@@ -130,8 +189,9 @@ TerminologyInferrer
 
 Purpose:
 
-A proposed useful term, name, anchor, boundary phrase, or relation name that may
-not literally appear in source but is strongly implied or useful for retrieval.
+A proposed useful term, name, source heading, boundary phrase, or relation name
+that may not literally appear in source but is strongly implied or useful for
+retrieval.
 
 TerminologyInferrer does not approve terminology and does not patch source
 files.
@@ -142,7 +202,7 @@ becomes:
 - ASI-only alias
 - boundary phrase
 - relation name
-- section anchor
+- source heading
 - rejected item
 - deferred item
 
@@ -361,7 +421,7 @@ This file explains ASI structured-data workflow only.
 --- file-meta ---
 DOC_ID: ASI-STRUCTURED_DATA_README
 DOC_FILE: docs/design/ai/asi/ASI-STRUCTURED_DATA_README.txt
-DOC_REV: 1
+DOC_REV: 2
 DOC_GIT: 0000000
 DOC_STATUS: DRAFT
 -----------------
