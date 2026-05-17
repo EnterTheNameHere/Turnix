@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://turnix.local/schemas/asi/audit-decision.schema.json",
   "title": "ASI Audit Decision",
-  "description": "Schema for audit decisions written by ASI batch or cross-batch audit workflows.",
+  "description": "Schema for sparse audit notes written by BatchAuditor or CrossBatchAuditor workflows. Absence of an audit decision means no audit objection for normal downstream use.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -14,106 +14,45 @@
     "targetItemIds",
     "summary",
     "rationale",
-    "quality"
+    "confidence",
+    "flags"
   ],
   "properties": {
-    "schemaVersion": {
-      "const": 1
-    },
-    "recordType": {
-      "const": "audit_decision"
-    },
+    "schemaVersion": { "const": 1 },
+    "recordType": { "const": "audit_decision" },
     "decisionId": {
       "type": "string",
       "minLength": 1,
       "description": "Stable ID for this audit decision. Suggested form: audit:<batch-slug>:<decision-kind>:<normalizedKey>."
     },
-    "batchId": {
-      "type": "string",
-      "minLength": 1
-    },
+    "batchId": { "type": "string", "minLength": 1 },
     "scope": {
       "description": "Scope in which the decision applies.",
       "oneOf": [
-        {
-          "const": "batch",
-          "description": "Decision applies within one ASI batch."
-        },
-        {
-          "const": "cross-batch",
-          "description": "Decision compares or reconciles items across multiple ASI batches."
-        },
-        {
-          "const": "document",
-          "description": "Decision applies to one canonical document or its extracted items as a group."
-        },
-        {
-          "const": "item",
-          "description": "Decision applies to one or more specific extracted items."
-        }
+        { "const": "batch", "description": "Decision applies within one ASI batch." },
+        { "const": "cross-batch", "description": "Decision compares or reconciles items across multiple ASI batches." },
+        { "const": "document", "description": "Decision applies to one canonical document or its extracted items as a group." },
+        { "const": "item", "description": "Decision applies to one or more specific extracted items." }
       ],
       "default": "batch"
     },
     "decision": {
-      "description": "Audit decision for the target extracted item or item set. Audit decisions do not mutate extracted items; later stages derive state from these records.",
+      "description": "Sparse audit decision for the target extracted item or item set. Audit decisions do not mutate extracted items; later stages derive behavior from these records.",
       "oneOf": [
-        {
-          "const": "accept_for_index",
-          "description": "Accepted for index-card generation in the appropriate form."
-        },
-        {
-          "const": "accept_as_alias",
-          "description": "Accepted as an alias or search synonym, not as a source-defined term unless separately supported."
-        },
-        {
-          "const": "accept_as_boundary",
-          "description": "Accepted as an X-is-not-Y or authority-boundary index item."
-        },
-        {
-          "const": "accept_as_relation",
-          "description": "Accepted as a relation between documents, terms, concepts, or authority areas."
-        },
-        {
-          "const": "reject_noise",
-          "description": "Rejected because it is too generic, incidental, unsupported, or not useful for ASI routing."
-        },
-        {
-          "const": "reject_duplicate",
-          "description": "Rejected because another extracted item or card already covers the same intended meaning."
-        },
-        {
-          "const": "split_contexts",
-          "description": "Same literal key or nearby concept must be split into separate context-specific meanings."
-        },
-        {
-          "const": "merge_with_existing",
-          "description": "Item should be merged with an existing item or card rather than indexed separately."
-        },
-        {
-          "const": "source_clarification_candidate",
-          "description": "Item identifies possible source ambiguity or missing source wording that may need supervisor review."
-        },
-        {
-          "const": "terminology_inference_candidate",
-          "description": "Item should be reviewed by TerminologyInferrer for possible source term, alias, boundary phrase, relation name, or source heading."
-        },
-        {
-          "const": "needs_supervisor_decision",
-          "description": "Auditor cannot safely decide; supervisor or user decision is required before downstream use."
-        },
-        {
-          "const": "defer",
-          "description": "Decision intentionally postponed without accepting or rejecting the item."
-        }
+        { "const": "reject_noise", "description": "Reject because it is too generic, incidental, unsupported, or not useful for ASI routing." },
+        { "const": "reject_duplicate", "description": "Reject because another extracted item or card already covers the same intended meaning." },
+        { "const": "split_contexts", "description": "Same literal key or nearby concept must be split into separate context-specific meanings." },
+        { "const": "merge_with_existing", "description": "Item should be merged with an existing item or card rather than indexed separately." },
+        { "const": "source_clarification_candidate", "description": "Item identifies possible source ambiguity or missing source wording that may need supervisor review." },
+        { "const": "terminology_inference_candidate", "description": "Item should be reviewed by TerminologyInferrer for possible source term, alias, boundary phrase, relation name, or source heading." },
+        { "const": "needs_supervisor_decision", "description": "Auditor cannot safely decide; Supervisor or user decision is required before affected downstream use." },
+        { "const": "defer", "description": "Decision intentionally postponed without accepting or rejecting the item." }
       ]
     },
     "targetItemIds": {
       "type": "array",
       "minItems": 1,
-      "items": {
-        "type": "string",
-        "minLength": 1
-      }
+      "items": { "type": "string", "minLength": 1 }
     },
     "literalKey": {
       "type": "string",
@@ -125,124 +64,64 @@
     },
     "indexerInstruction": {
       "type": "string",
-      "description": "Instruction to the indexer, such as create term literal plus term context cards."
+      "description": "Instruction to the Indexer, such as create term literal plus term context cards."
     },
     "sourcePatchRecommendation": {
       "description": "Whether this audit decision suggests later source-patch consideration. This is not patch approval.",
       "oneOf": [
-        {
-          "const": "none",
-          "description": "No source-patch recommendation."
-        },
-        {
-          "const": "consider",
-          "description": "May be worth considering as a source clarification, but no approval is implied."
-        },
-        {
-          "const": "needs_supervisor_decision",
-          "description": "Source-patch relevance requires supervisor or user decision."
-        },
-        {
-          "const": "approved_elsewhere",
-          "description": "Patch approval is recorded in another supervisor/source-patch decision, not in this audit record."
-        }
+        { "const": "none", "description": "No source-patch recommendation." },
+        { "const": "consider", "description": "May be worth considering as a source clarification, but no approval is implied." },
+        { "const": "needs_supervisor_decision", "description": "Source-patch relevance requires Supervisor or user decision." },
+        { "const": "approved_elsewhere", "description": "Patch approval is recorded in another supervisor/source-patch decision, not in this audit record." }
       ],
       "default": "none"
     },
-    "summary": {
-      "type": "string",
-      "minLength": 1
-    },
-    "rationale": {
-      "type": "string",
-      "minLength": 1
-    },
-    "crossDocumentRisk": {
-      "type": "string"
-    },
-    "relatedDocIds": {
+    "summary": { "type": "string", "minLength": 1 },
+    "rationale": { "type": "string", "minLength": 1 },
+    "crossDocumentRisk": { "type": "string" },
+    "relatedDocIds": { "type": "array", "items": { "type": "string" } },
+    "relatedDecisionIds": { "type": "array", "items": { "type": "string" } },
+    "confidence": { "$ref": "#/$defs/confidence" },
+    "flags": {
       "type": "array",
-      "items": {
-        "type": "string"
-      }
+      "description": "Structured attention flags. Empty array means no special handling is currently requested beyond the audit decision itself.",
+      "items": { "$ref": "#/$defs/flag" }
     },
-    "relatedDecisionIds": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "quality": {
-      "$ref": "#/$defs/quality"
-    }
+    "notes": { "type": "string" }
   },
   "$defs": {
     "confidence": {
       "oneOf": [
-        {
-          "const": "high",
-          "description": "Strongly supported by source or accepted workflow evidence."
-        },
-        {
-          "const": "medium",
-          "description": "Reasonably supported but may need later review or cross-document confirmation."
-        },
-        {
-          "const": "low",
-          "description": "Weak or tentative support; use cautiously."
-        },
-        {
-          "const": "needs-review",
-          "description": "Requires audit, supervisor review, or stronger source evidence before relying on it."
-        }
+        { "const": "high", "description": "Strongly supported by source or accepted workflow evidence." },
+        { "const": "medium", "description": "Reasonably supported but may need later review or cross-document confirmation." },
+        { "const": "low", "description": "Weak or tentative support; use cautiously." },
+        { "const": "needs-review", "description": "Requires audit, supervisor review, or stronger source evidence before relying on it." }
       ]
     },
-    "reviewState": {
-      "oneOf": [
-        {
-          "const": "generated",
-          "description": "Generated by a workflow and not yet reviewed."
-        },
-        {
-          "const": "reviewed",
-          "description": "Reviewed, but not necessarily accepted as final or authoritative routing metadata."
-        },
-        {
-          "const": "accepted",
-          "description": "Accepted for its intended ASI workflow purpose."
-        },
-        {
-          "const": "rejected",
-          "description": "Rejected for its intended ASI workflow purpose."
-        },
-        {
-          "const": "superseded",
-          "description": "Replaced by a newer or better record."
-        },
-        {
-          "const": "needs-supervisor-decision",
-          "description": "Requires supervisor or user decision before downstream use."
-        }
-      ]
-    },
-    "quality": {
+    "flag": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "confidence",
-        "reviewState"
-      ],
+      "required": ["flagType", "reason"],
       "properties": {
-        "confidence": {
-          "$ref": "#/$defs/confidence"
-        },
-        "reviewState": {
-          "$ref": "#/$defs/reviewState"
-        },
-        "notes": {
-          "type": "string"
-        }
+        "flagType": { "$ref": "#/$defs/flagType" },
+        "reason": { "type": "string", "minLength": 1 },
+        "emittedBy": { "type": "string" },
+        "handledBy": { "type": "array", "items": { "type": "string" } },
+        "relatedItemIds": { "type": "array", "items": { "type": "string" } },
+        "relatedCardIds": { "type": "array", "items": { "type": "string" } },
+        "relatedDecisionIds": { "type": "array", "items": { "type": "string" } }
       }
+    },
+    "flagType": {
+      "oneOf": [
+        { "const": "needs_supervisor_decision", "description": "Requires supervisor/user judgment before affected downstream use. May be emitted by any ASI workflow. Handled by Supervisor." },
+        { "const": "needs_cross_document_audit", "description": "Meaning likely depends on comparison with other documents. Emitted by Extractor, BatchAuditor, TerminologyInferrer, or Indexer. Handled by BatchAuditor or CrossBatchAuditor." },
+        { "const": "needs_source_clarification", "description": "Canonical source may need clearer wording, a missing boundary, compact term, or better source heading. Handled by Supervisor first; SourcePatcher only acts after explicit approval." },
+        { "const": "needs_terminology_inference", "description": "May need a better name, ASI alias, boundary phrase, relation name, or source-term proposal. Handled by TerminologyInferrer." },
+        { "const": "weak_source_support", "description": "Plausible but weakly grounded in source. Handled by BatchAuditor, CrossBatchAuditor, Indexer, or Supervisor if final routing would depend on it." },
+        { "const": "ambiguous_same_literal", "description": "Same literal key appears in more than one context and may not mean the same thing. Default handling is split, not merge, unless audit/supervisor decision says otherwise." },
+        { "const": "blocked_by_unresolved_decision", "description": "Affected output cannot proceed because a required audit, cross-batch, or supervisor decision is unresolved. Handled by Supervisor or the workflow owning the missing decision." }
+      ]
     }
   }
 }
