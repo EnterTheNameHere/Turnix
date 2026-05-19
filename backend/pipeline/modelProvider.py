@@ -8,7 +8,7 @@ class ModelProvider(Protocol):
 
     def generateChatResponse(self, messages: list[dict[str, str]]) -> str:
         """Returns one assistant response for the supplied OpenAI-style messages."""
-
+        ...
 
 class MockModelProvider:
     """Small deterministic provider used until the llama.cpp server provider is wired in."""

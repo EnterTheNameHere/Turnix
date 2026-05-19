@@ -1,3 +1,4 @@
+# backend/runtime/roots.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -5,24 +6,19 @@ from pathlib import Path
 
 
 class RepoRootNotFoundError(RuntimeError):
-    """Raised when the Milestone 2 repo-only locator cannot identify the repository root."""
+    """Raised when a Turnix repository root cannot be identified."""
 
 
 @dataclass(frozen=True)
 class RuntimeRoots:
-    """Repository-local roots used by the Milestone 2 RuntimeHost skeleton."""
+    """Repository-local roots used by RuntimeHost."""
 
     repo: Path
-    backend: Path
     custom: Path
     firstParty: Path
     thirdParty: Path
     userdata: Path
     saves: Path
-    docs: Path
-    design: Path
-    pythonEmbedded: Path
-    vendor: Path
 
     @property
     def contentRoots(self) -> tuple[Path, Path, Path]:
@@ -37,10 +33,10 @@ class RuntimeRoots:
 
 class RepoOnlyRootLocator:
     """
-    Locates Turnix roots only inside the repository directory.
+    Locates Turnix roots only inside the repository directory only.
 
-    This is an explicit Milestone 2 cheat. The future locator can add CLI, environment, userdata
-    redirect, and OS-directory lookup without changing RuntimeHost callers.
+    This intentionally omits CLI, environment, userdata redirect, and
+    OS-directory lookup for the first runnable terminal implementation.
     """
 
     _REPO_MARKERS: tuple[str, ...] = ("backend", "first-party")
@@ -49,16 +45,11 @@ class RepoOnlyRootLocator:
         repoRoot = self.findRepoRoot(startPath)
         return RuntimeRoots(
             repo=repoRoot,
-            backend=repoRoot / "backend",
             custom=repoRoot / "custom",
             firstParty=repoRoot / "first-party",
             thirdParty=repoRoot / "third-party",
             userdata=repoRoot / "userdata",
             saves=repoRoot / "saves",
-            docs=repoRoot / "docs",
-            design=repoRoot / "design",
-            pythonEmbedded=repoRoot / "python-embedded",
-            vendor=repoRoot / "vendor",
         )
 
     def findRepoRoot(self, startPath: Path | str | None = None) -> Path:
@@ -69,10 +60,10 @@ class RepoOnlyRootLocator:
                 return candidate.resolve()
 
         searched = ", ".join(str(path) for path in candidates)
-        raise RepoRootNotFoundError(f"Turnix repository root was not found. Searched: {searched}")
+        raise RepoRootNotFoundError(f"Turnix repository root was not found. Searched: '{searched}'")
 
     def ensureRuntimeDirectories(self, roots: RuntimeRoots) -> None:
-        """Creates missing repo-local runtime directories used by the M2 skeleton."""
+        """Creates missing repo-local runtime directories."""
         for path in roots.runtimeVisibleRoots:
             path.mkdir(parents=True, exist_ok=True)
 

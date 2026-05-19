@@ -6,7 +6,7 @@ from backend.runtime.workspace import RuntimeWorkspace
 
 
 class RuntimeHost:
-    """Minimal Milestone 2 RuntimeHost skeleton."""
+    """Minimal RuntimeHost implementation."""
 
     def __init__(self, *, rootLocator: RepoOnlyRootLocator | None = None) -> None:
         self.rootLocator = rootLocator or RepoOnlyRootLocator()

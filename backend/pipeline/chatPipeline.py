@@ -10,7 +10,7 @@ class EmptyUserMessageError(ValueError):
 
 
 class ChatPipeline:
-    """Minimal current-run chat pipeline for the Milestone 2 terminal AppInstance."""
+    """Minimal current-run chat pipeline for the terminal AppInstance."""
 
     def __init__(
         self,

@@ -24,7 +24,7 @@ class AppInstanceIdentity:
 
 
 class AppInstance:
-    """Minimal live AppInstance for the hardcoded Milestone 2 terminal AI chat."""
+    """Minimal live AppInstance for the hardcoded terminal AI chat."""
 
     def __init__(
         self,
