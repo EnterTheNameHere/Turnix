@@ -28,7 +28,7 @@ class ChatPipeline:
         if not normalizedText:
             raise EmptyUserMessageError("user message is empty")
 
-        pendingUserMessage = self.messageStore.appendMessage("user", normalizedText)
+        self.messageStore.appendMessage("user", normalizedText)
         modelMessages = self.promptBuilder.buildMessages(self.messageStore)
         assistantText = self.modelProvider.generateChatResponse(modelMessages)
         assistantText = str(assistantText).strip() or "[empty assistant response]"
