@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from backend.runtime.appInstance import AppInstance, AppInstanceIdentity
+from backend.runtime.appInstance import AppInstance, AppInstanceIdentity, AppInstanceState
 from backend.runtime.roots import RepoOnlyRootLocator
 from backend.runtime.workspace import RuntimeWorkspace
 
@@ -40,7 +40,7 @@ class RuntimeHost:
 
     def stop(self) -> None:
         for appInstance in list(self.appInstances.values()):
-            if appInstance.state != "stopped":
+            if appInstance.state != AppInstanceState.STOPPED:
                 print("Stopping AppInstance...")
                 appInstance.stop()
         self.appInstances.clear()
