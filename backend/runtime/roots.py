@@ -33,7 +33,7 @@ class RuntimeRoots:
 
 class RepoOnlyRootLocator:
     """
-    Locates Turnix roots only inside the repository directory only.
+    Locates Turnix roots inside the repository directory only.
 
     This intentionally omits CLI, environment, userdata redirect, and
     OS-directory lookup for the first runnable terminal implementation.
