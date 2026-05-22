@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from backend.pipeline.modelProvider import ModelProvider
 from backend.runtime.appInstance import AppInstance, AppInstanceIdentity, AppInstanceState
 from backend.runtime.roots import RepoOnlyRootLocator
 from backend.runtime.workspace import RuntimeWorkspace
@@ -23,7 +24,7 @@ class RuntimeHost:
         print("Workspace acquired.")
         return self.workspace
 
-    def startAppInstance(self, appPackId: str) -> AppInstance:
+    def startAppInstance(self, appPackId: str, *, modelProvider: ModelProvider | None = None) -> AppInstance:
         if not self.isRunning:
             raise RuntimeError("RuntimeHost is not running")
 
@@ -31,7 +32,8 @@ class RuntimeHost:
             identity=AppInstanceIdentity(
                 appPackId=appPackId,
                 appInstanceId=f"{appPackId}-current-run",
-            )
+            ),
+            modelProvider=modelProvider,
         )
         print(f"Starting AppInstance: {appPackId}")
         appInstance.start()
