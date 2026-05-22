@@ -1,3 +1,4 @@
+# setup.ps1
 param(
   # Version marker written to python-embedded/VERSION.txt
   [string] $PythonVersion = "3.12.10",
@@ -25,6 +26,28 @@ Set-Location $root
 
 function Section($t){ Write-Host "`n=== $t ===" -ForegroundColor Cyan }
 function Get-Sha256([string]$path){ (Get-FileHash -Algorithm SHA256 -Path $path).Hash.ToUpper() }
+function Write-Utf8NoBom([string]$path, [string]$text) {
+  $utf8NoBomEncoding = New-Object System.Text.UTF8Encoding($false)
+  [IO.File]::WriteAllText($path, $text, $utf8NoBomEncoding)
+}
+function Invoke-NativeChecked([string] $label, [string] $exe, [string[]] $arguments) {
+  Write-Host "Running: $label"
+
+  $output = & $exe @arguments 2>&1
+  $exitCode = $LASTEXITCODE
+
+  if ($exitCode -ne 0) {
+    $outputText = ($output | Out-String).TrimEnd()
+    throw "$label failed with exit code $exitCode.`nCommand: $exe $($arguments -join ' ')`nOutput:`n$outputText"
+  }
+
+  $outputText = ($output | Out-String).TrimEnd()
+  if ($outputText) {
+    Write-Host $outputText
+  }
+
+  return $output
+}
 
 function Ensure-GitHooks() {
   Section "Git hooks setup"
@@ -98,18 +121,60 @@ function Normalize-EmbeddablePth([string]$embedDir) {
   if (!(Test-Path $pth)) {
     $cand = Get-ChildItem -Path $embedDir -Filter "python*.pth" -ErrorAction SilentlyContinue |
             Select-Object -First 1
-    if ($cand) { $pth = $cand.FullName } else { return }
+    if ($cand) {
+      $pth = $cand.FullName
+    } else {
+      throw "No python ._pth file found in embedded Python directory: $embedDir"
+    }
+  }
+  
+  $lines = Get-Content -Path $pth -ErrorAction Stop
+  $normalized = New-Object System.Collections.Generic.List[string]
+  $sawParentPath = $false
+
+  foreach ($line in $lines) {
+    $trimmed = $line.Trim()
+    
+    if ($trimmed -eq "..") {
+      $sawParentPath = $true
+      $normalized.Add("..")
+      continue
+    }
+
+    if ($trimmed -match '(?m)^\s*#\s*import\s+site\s*$' -or $trimmed -eq "import site") {
+      continue
+    }
+
+    $normalized.Add($line)
   }
 
+  if (-not $sawParentPath) {
+    $insertAt = 0
+    # Add it below "." if the file has it
+    for ($ii = 0; $ii -lt $normalized.Count; $ii++) {
+      if ($normalized[$ii].Trim() -eq ".") {
+        $insertAt = $ii + 1
+        break
+      }
+    }
+    $normalized.Insert($insertAt, "..")
+  }
+
+  if ($normalized.Count -gt 0 -and $normalized[$normalized.Count - 1].Trim() -ne "") {
+    $normalized.Add("")
+  }
+  $normalized.Add("# Run site.main() automatically")
+  $normalized.Add("import site")
+
   $text = Get-Content $pth -Raw
-  $text2 = [regex]::Replace($text, '(?m)^\s*#\s*import\s+site\s*$', 'import site', 1)
+  $text2 = ($normalized -join "`r`n") + "`r`n"
 
   if ($text2 -ne $text) {
     Copy-Item $pth "$pth.bak" -Force -ErrorAction SilentlyContinue
-    Set-Content -Path $pth -Value $text2 -Encoding UTF8
-    Write-Host "Uncommented 'import site' in python312._pth"
+    Write-Utf8NoBom -path $pth -text $text2
+    Write-Host "Normalized python ._pth file with repo parent path and import site: $pth"
   } else {
-    Write-Host "python312._pth already normalized"
+    Write-Host "python ._pth already normalized: $pth"
   }
 }
 
@@ -146,7 +211,7 @@ if os.environ.get("ASSERT_STDLIB_HTTP", "1") == "1":
 
   $existing = if (Test-Path $path) { Get-Content $path -Raw } else { "" }
   if ($existing -ne $body) {
-    Set-Content -Path $path -Value $body -Encoding UTF8
+    Write-Utf8NoBom -path $path -text $body
     Write-Host "Wrote sitecustomize.py ($([IO.Path]::GetFileName($path)))"
   } else {
     Write-Host "Already up to date → $([IO.Path]::GetFileName($path))"
@@ -161,7 +226,7 @@ function Ensure-LocalPython(){
   # Optional integrity check
   $shaFile = Join-Path $root $Sha256Rel
   if(Test-Path $shaFile){
-    $expected = (Get-Content $shaFile -Raw).Trim().ToUpper()
+    $expected = ((Get-Content $shaFile -Raw).Trim() -split '\s+')[0].ToUpper()
     $actual   = Get-Sha256 $zipPath
     if($actual -ne $expected){ throw "SHA256 mismatch for $PythonZipRel. Expected $expected, got $actual" }
   }
@@ -185,115 +250,101 @@ function Ensure-LocalPython(){
 
   Normalize-EmbeddablePth -embedDir $dest
   Ensure-SiteCustomize -embedDir $dest -withHttpGuard:$WithHttpGuard
-  Set-Content $verFile $PythonVersion -Encoding UTF8
+  Write-Utf8NoBom -path $verFile -text "$PythonVersion`r`n"
   return (Join-Path $dest "python.exe")
 }
 
 function Ensure-Pip([string]$pyExe, [string]$getPipRelPath){
   Section "Bootstrapping pip (embeddable-safe)"
+  
+  if (-not (Test-Path $pyExe)) {
+    throw "Python executable does not exist: $pyExe"
+  }
+  
   $embedDir = Split-Path $pyExe -Parent
   $scripts  = Join-Path $embedDir "Scripts"
   $pipExe   = Join-Path $scripts "pip.exe"
 
+  # Make pip.exe discoverable for child processes.
   $env:PATH = "$scripts;$env:PATH"
 
-  try { & $pyExe -m ensurepip -q 2>$null | Out-Null } catch { }
+  # First try ensurepip. Embeddable Python often does not have it, so failure here
+  # is not immediately fatal. We only treat it as fatal if no later bootstrap works.
+  if (-not (Test-Path $pipExe)) {
+    Write-Host "pip.exe not found yet. Trying ensurepip..."
 
-  if (!(Test-Path $pipExe)) {
-    if (Test-Path $getPipRelPath) {
-      Write-Host "ensurepip not available; running get-pip.py"
-      & $pyExe $getPipRelPath
-    } else {
-      Write-Host "⚠️  pip not found and $getPipRelPath missing — skipping pip bootstrap"
+    try {
+      Invoke-NativeChecked -label "python -m ensurepip" -exe $pyExe -arguments @("-m", "ensurepip", "--upgrade")
+    } catch {
+      Write-Host "ensurepip did not complete successfully; this is common for embeddable Python." `
+        -ForegroundColor Yellow
+      Write-Host $_.Exception.Message -ForegroundColor DarkYellow
     }
-  } else {
-    Write-Host "pip is available (ensurepip worked)."
   }
 
-  try { & $pyExe -c "import pip, sys; print('pip-ok', pip.__version__)" } catch {
-    Write-Host "⚠️  'python -m pip' import not stable yet; will prefer pip.exe." -ForegroundColor Yellow
+  # If ensurepip did not produce pip.exe, use local get-pip.py.
+  if (-not (Test-Path $pipExe)) {
+    if (-not (Test-Path $getPipRelPath)) {
+      throw "pip.exe was not found and local get-pip.py is missing.`n" +
+            "Expected pip.exe: $pipExe`n" +
+            "Expected get-pip.py: $getPipRelPath`n" +
+            "Add get-pip.py to the repo at <root>/vendor/python/ or install a Python bundle that includes pip."
+    }
+
+    Write-Host "pip.exe still not found. Running local get-pip.py..."
+
+    Invoke-NativeChecked -label "get-pip.py bootstrap" -exe $pyExe -arguments @($getPipRelPath)
   }
+
+  # Hard verification: get-pip.py may have run but still failed to create pip.exe.
+  if (-not (Test-Path $pipExe)) {
+    throw "pip bootstrap completed, but pip.exe still does not exist.`nExpected: $pipExe"
+  }
+
+  Write-Host "pip.exe found: $pipExe"
+
+  # Verify that this embedded Python can import pip.
+  $pipImportOutput = Invoke-NativeChecked -label "python -c import pip" -exe $pyExe -arguments @("-c", "import pip, sys; print('pip-ok', pip.__version__)")
+  
+  $pipImportText = ($pipImportOutput | Out-String).Trim()
+  if ($pipImportText) {
+    Write-Host $pipImportText
+  }
+
+  # Verify pip.exe itself runs and belongs to this environment.
+  $pipVersionOutput = Invoke-NativeChecked -label "pip.exe --version" -exe $pipExe -arguments @("--version")
+  
+  $pipVersionText = ($pipVersionOutput | Out-String).Trim()
+  if ($pipVersionText) {
+    Write-Host $pipVersionText
+  }
+  
+  return $pipExe
 }
 
-function Pip-Step([string]$pyExe, [string]$req){
+function Pip-Step([string]$pipExe, [string]$req){
   Section "Python requirements ($req)"
-  $embedDir = Split-Path $pyExe -Parent
-  $scripts  = Join-Path $embedDir "Scripts"
-  $pipExe   = Join-Path $scripts "pip.exe"
 
+  if (-not (Test-Path $pipExe)) {
+    throw "pip.exe does not exist: $pipExe"
+  }
+  
   if(Test-Path $req){
-    if (Test-Path $pipExe) {
-      & $pipExe install --upgrade pip
-      & $pipExe install -r $req
-    } else {
-      Write-Host "pip.exe not found; attempting 'python -m pip'..."
-      & $pyExe -m pip install --upgrade pip
-      & $pyExe -m pip install -r $req
-    }
+    Invoke-NativeChecked -label "pip install --upgrade pip" -exe $pipExe -arguments @("install", "--upgrade", "pip")
+    Invoke-NativeChecked -label "pip install requirements" -exe $pipExe -arguments @("install", "-r", $req)
   } else {
     Write-Host "No $req → skipping."
   }
 }
 
-function Npm-Electron(){
-  Section "npm install (electron/)"
-  if(Test-Path ".\electron\package.json"){
-    if(Test-Path ".\electron\package-lock.json"){ npm --prefix .\electron ci } else { npm --prefix .\electron install }
-  } else {
-    Write-Host "electron/package.json not found → skipping."
-  }
-}
-
-function Link-NodeModules(){
-  Section "node_modules link (root → electron/node_modules)"
-  $rootLink = Join-Path $root "node_modules"
-  $elecNM   = Join-Path $root "electron\node_modules"
-
-  if(!(Test-Path $elecNM)){
-    Write-Host "electron/node_modules missing → run npm first." -ForegroundColor Yellow
-    return
-  }
-
-  if(Test-Path $rootLink){
-    $attr = Get-Item $rootLink -Force
-    if ($attr.Attributes -band [IO.FileAttributes]::ReparsePoint) { Remove-Item $rootLink -Force }
-    else { Remove-Item $rootLink -Recurse -Force }
-  }
-
-  $created = $false
-  cmd /c "mklink /D `"$rootLink`" `"$elecNM`""
-  $code = $LASTEXITCODE
-  if ($code -eq 0 -and (Test-Path $rootLink)) {
-    $created = $true
-    Write-Host "Created symbolic link: $rootLink → $elecNM"
-  } else {
-    Write-Host "Symlink failed (exit $code). Will try junction..." -ForegroundColor Yellow
-  }
-
-  if (-not $created) {
-    cmd /c "mklink /J `"$rootLink`" `"$elecNM`""
-    $code = $LASTEXITCODE
-    if ($code -eq 0 -and (Test-Path $rootLink)) {
-      $created = $true
-      Write-Host "Created junction:     $rootLink → $elecNM"
-    } else {
-      Write-Host "❌ Failed to create link or junction (exit $code)." -ForegroundColor Red
-      Write-Host "   Try manually with admin or developer mode."
-      return
-    }
-  }
-
-  $item = Get-Item $rootLink -Force
-  $type = ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) ? "ReparsePoint" : "Directory"
-  Write-Host "Created: $($item.FullName)  [$type]"
-}
-
 # --- Run ---
 Ensure-GitHooks
 $py = Ensure-LocalPython
-Ensure-Pip -pyExe $py -getPipRelPath (Join-Path $root $GetPipRel)
-Pip-Step   -pyExe $py -req $Requirements
-Npm-Electron
-Link-NodeModules
+$pip = Ensure-Pip -pyExe $py -getPipRelPath (Join-Path $root $GetPipRel)
+Pip-Step -pipExe $pip -req $Requirements
 
 Write-Host "`nAll set ✅" -ForegroundColor Green
+Write-Host "Run Turnix terminal with:" -ForegroundColor Green
+Write-Host "  .\python-embedded\python.exe -m backend.cli.main" -ForegroundColor Green
+Write-Host "Run with llama.cpp provider using (you need to run your own llama.cpp server):"  -ForegroundColor Green
+Write-Host "  .\python-embedded\python.exe -m backend.cli.main --provider llamacpp" -ForegroundColor Green
