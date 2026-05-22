@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 
 
 class LlamaCppServerProviderError(RuntimeError):
-    """Raised when llama.cpp server response """
+    """Raised when llama.cpp server communication or response parsing fails."""
 
 
 @dataclass(frozen=True)
@@ -29,14 +29,18 @@ class LlamaCppServerProvider:
     def __init__(self, config: LlamaCppServerConfig | None = None) -> None:
         self.config = config or LlamaCppServerConfig()
 
-    def generateChatResponse(self, messages: list[dict[str, str]]) -> str:
+    def generateChatResponse(self, messages: list[dict[str, Any]]) -> str:
+        if not messages:
+            raise LlamaCppServerProviderError("Cannot generate chat response without messages")
+        
         payload = {
-            "model": self.config.model,
             "messages": self._normalizeMessages(messages),
             "temperature": self.config.temperature,
             "max_tokens": self.config.maxTokens,
             "stream": False,
         }
+        if self.config.model:
+            payload["model"] = self.config.model
         
         responseJson = self._postJson("/v1/chat/completions", payload)
         content = self._extractAssistantContent(responseJson)
@@ -62,23 +66,27 @@ class LlamaCppServerProvider:
                 responseBody = response.read().decode("utf-8", errors="replace")
         except HTTPError as err:
             errorBody = err.read().decode("utf-8", errors="replace")
+            errorPreview = self._previewFromStart(errorBody)
+            
             raise LlamaCppServerProviderError(
-                f"llama.cpp HTTP error {err.code}: {errorBody}"
-            ) from err
-        except URLError as err:
-            raise LlamaCppServerProviderError(
-                f"llama.cpp server is not reachable at {self.config.baseUrl}: {err.reason}"
+                f"llama.cpp HTTP error {err.code}: {errorPreview}"
             ) from err
         except TimeoutError as err:
             raise LlamaCppServerProviderError(
                 f"llama.cpp request timed out after {self.config.timeoutSeconds} seconds"
             ) from err
+        except URLError as err:
+            raise LlamaCppServerProviderError(
+                f"llama.cpp server is not reachable at {self.config.baseUrl}: {err.reason}"
+            ) from err
         
         try:
             parsed = json.loads(responseBody)
         except json.JSONDecodeError as err:
+            errorPreview = self._previewAroundPosition(responseBody, err.pos)
+            
             raise LlamaCppServerProviderError(
-                f"llama.cpp response is not valid JSON: {err.msg} at position {err.pos}\n{responseBody[:400]}"
+                f"llama.cpp response is not valid JSON: {err.msg} at position {err.pos}\n{errorPreview}"
             ) from err
         
         if not isinstance(parsed, dict):
@@ -86,10 +94,24 @@ class LlamaCppServerProvider:
         
         return parsed
     
+    def _previewAroundPosition(self, text: str, position: int, radius: int = 200) -> str:
+        start = max(0, position - radius)
+        end = min(len(text), position + radius + 1)
+        
+        prefix = "..." if start > 0 else ""
+        suffix = "..." if end < len(text) else ""
+        
+        return prefix + text[start:end] + suffix
+    
+    def _previewFromStart(self, text: str, limit: int = 400) -> str:
+        if len(text) <= limit:
+            return text
+        return text[:limit] + "..."
+    
     def _extractAssistantContent(self, responseJson: dict[str, Any]) -> str:
         choices = responseJson.get("choices")
         if not isinstance(choices, list) or not choices:
-            raise LlamaCppServerProviderError("llama.cpp returned JSON that does not contain any choices field")
+            raise LlamaCppServerProviderError("llama.cpp returned JSON without a non-empty choices field")
         
         firstChoice = choices[0]
         if not isinstance(firstChoice, dict):
@@ -107,12 +129,15 @@ class LlamaCppServerProvider:
         
         raise LlamaCppServerProviderError("llama.cpp response is missing assistant content field")
     
-    def _normalizeMessages(self, messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    def _normalizeMessages(self, messages: list[dict[str, Any]]) -> list[dict[str, str]]:
         normalizedMessages: list[dict[str, str]] = []
         for message in messages:
+            if not isinstance(message, dict):
+                raise LlamaCppServerProviderError("Chat message must be an object")
+            
             role = str(message.get("role", "user")).lower()
             if role not in {"system", "user", "assistant"}:
-                role = "user"
+                raise LlamaCppServerProviderError(f"Unsupported chat message role: {role}")
             content = "" if message.get("content") is None else str(message.get("content"))
             normalizedMessages.append({"role": role, "content": content})
         return normalizedMessages
