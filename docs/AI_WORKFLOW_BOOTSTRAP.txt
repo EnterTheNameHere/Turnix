@@ -27,6 +27,250 @@ Authority and priority
 5. AI helper files define reusable operational guidance only.
 6. If this file conflicts with indexed documents, indexed documents win.
 
+Repository connector retrieval safety
+-------------------------------------
+GitHub connector operations that return repository text can return truncated,
+malformed, incomplete, stale, aliased, or not-provably-complete content.
+
+This applies to any long repository text returned by the connector, including
+files, blobs, diffs, patches, previews, issue bodies, pull request bodies,
+comments, review comments, commit messages, and similar text sources.
+
+This also applies to this bootstrap file itself while it is being loaded. The
+assistant must not assume that AI_WORKFLOW_BOOTSTRAP was fully read merely
+because the visible response begins with this file or includes these
+retrieval-safety rules.
+
+At minimum, GitHub connector fetch and fetch_file operations are known to be
+capable of returning truncated file previews.
+
+The assistant always begins authoritative repository file loading with
+fetch_file for the requested repository, path, ref, and encoding.
+
+When the user or workflow instruction names an explicit branch, tag, commit,
+or other Git ref for repository loading, the fetch_file ref must be that
+explicit requested ref.
+
+The assistant must not default repository reads to main, master, the
+repository default branch, HEAD, cached branch state, or an inferred branch
+when an explicit requested ref is supplied or required by the task.
+
+Specialized workflow systems may define their own names for the explicit
+repository-read ref. For example, an ASI workflow may resolve a shorthand
+branch into a field such as READ_BRANCH. This bootstrap file does not define
+those specialized workflow fields; it only requires that repository reads use
+the explicit ref established by the active task or workflow.
+
+The assistant does not use repository search, web retrieval, rendered
+previews, branch search, commit search, local memory, cached memory, inferred
+reconstruction, or a similar workaround to complete missing file content or to
+obtain a file update sha.
+
+After fetch_file returns, the assistant classifies the response before using
+the content.
+
+fetch_file supports bounded line-range reads using:
+- start_line
+- end_line
+
+Line ranges are 1-based and inclusive.
+
+The assistant may use fetch_file line ranges to recover complete content when
+a normal fetch_file response is visibly truncated or when a task explicitly
+needs only a specific bounded range.
+
+Visible truncation markers
+--------------------------
+The assistant treats a fetch_file response as visibly truncated when any of
+the following appears:
+- a connector message stating that content was truncated
+- text such as "truncated due to tool response token budget"
+- text such as "truncated"
+- a partial-line report
+- an omitted-content marker
+- a malformed or incomplete ending
+- a missing expected closing marker, metadata block, structured boundary, or
+  end-of-file marker
+- an ending that is visibly inconsistent with the requested file format
+
+When a visible truncation marker appears, the assistant must loudly report the
+truncation in progress/final reporting when the file matters to the task.
+
+A visible truncation marker does not by itself mean the source is unusable.
+It means the full fetch result is not COMPLETE and must be completed through
+bounded fetch_file line-range reads before authoritative use.
+
+Range-loading recovery
+----------------------
+If a repository file matters to the task and a normal fetch_file response is
+TRUNCATED, the assistant attempts recovery with fetch_file line ranges unless
+the task explicitly forbids additional loading.
+
+Range-loading recovery uses the same repository, path, ref, and encoding as
+the original fetch_file request.
+
+When the active task or workflow established an explicit repository-read ref,
+range-loading recovery must use that same explicit ref.
+
+The assistant should retrieve bounded sequential ranges that are small enough
+to avoid connector response truncation.
+
+Recommended starting range size:
+- 100 to 200 lines for large prose or ledger files
+- smaller ranges when previous ranged responses are still truncated
+
+If a ranged response is also truncated, the assistant reduces the range size
+and retries that range.
+
+The assistant may classify a repository file COMPLETE via ranged fetch_file
+only when all required ranges have been retrieved without truncation, the
+concatenated content proves the requested file identity, and expected closing
+content or structured boundaries are present.
+
+A ranged fetch classifies only the fetched range as COMPLETE unless enough
+ranges have been fetched and joined to prove the whole requested file
+complete.
+
+For tasks that only require a bounded cited section or line range, the
+assistant may classify that requested range COMPLETE without proving the
+whole file complete, but it must not claim the whole file was loaded.
+
+For repository file write use, ranged recovery can prove complete content
+only if the assistant has all content needed to reconstruct the exact
+complete file. The update sha must still come from fetch_file for the same
+repository, path, and ref being updated.
+
+If a file is too large to retrieve and reconstruct safely, the assistant does
+not perform whole-file replacement. It stops the write path for that source
+and reports that the file must be split, handled manually, or updated by
+a more suitable deterministic tool.
+
+Repository file retrieval classification
+----------------------------------------
+Every GitHub connector retrieval used for document, code, audit, review, patch
+planning, or repository write work is classified as exactly one of:
+
+- COMPLETE
+- COMPLETE_RANGE
+- TRUNCATED
+- MALFORMED
+- MISSING
+- STALE
+- NOT PROVEN COMPLETE
+
+COMPLETE means the connector returned the full requested source content, no
+truncation marker or partial-line report is present, expected closing content
+or structured boundaries are present, the requested source identity was
+proved, and any required revision identity came from the same successful
+fetch_file response.
+
+COMPLETE_RANGE means the connector returned the complete bounded range
+requested with start_line and end_line, no truncation marker or partial-line
+report is present, and the range identity can be matched to the requested
+source. It does not prove that the whole file was loaded.
+
+TRUNCATED means the connector reports fewer shown lines than total lines,
+emits a truncation marker, emits a partial-line report, or visibly ends
+before the requested source is complete.
+
+MALFORMED means the structured response is incomplete, invalid, internally
+inconsistent, missing expected fields, missing expected closing boundaries,
+or cannot be parsed according to the response shape it appears to use.
+
+MISSING means the connector reports that the requested source does not exist
+or cannot be found.
+
+STALE means the returned content is outdated, aliased, resolves to unrelated
+content, resolves to content whose identity cannot be matched to the requested
+source, or uses the wrong repository, path, ref, branch, or encoding.
+
+NOT PROVEN COMPLETE means the connector returned content but did not expose
+enough information to prove that the returned content is complete.
+
+Only COMPLETE permits authoritative whole-file read use.
+
+COMPLETE_RANGE permits authoritative use only for the loaded range and only
+when the task does not require whole-file knowledge.
+
+Only COMPLETE with the required connector update sha from the same fetch_file
+response permits repository file write use.
+
+If a retrieval is TRUNCATED, the assistant tries fetch_file line-range loading
+before stopping when the source matters to the task.
+
+If a retrieval is MALFORMED, MISSING, STALE, or NOT PROVEN COMPLETE, or
+remains TRUNCATED after range loading is attempted, the assistant treats the
+affected source as not loaded for authoritative document, code, audit, review,
+patch planning, or repository write work.
+
+The assistant does not treat partial snippets, search results, rendered
+previews, web copies, local memory, cached memory, inferred reconstruction, or
+user-independent reconstruction as authoritative source text.
+
+The assistant does not use unrelated workaround retrieval for the affected
+source.
+
+Permitted completion retrieval is limited to fetch_file line-range reads for
+the same repository, path, ref, and encoding as the requested source.
+
+Forbidden workaround retrieval includes repository search results, branch
+search results, commit search results, web retrieval, rendered previews,
+excerpts, snippets, cached memory, inferred reconstruction, stale content,
+wrong-branch content, or any sha, revision identity, or update token obtained
+outside the same fetch_file response family for the requested source.
+
+For repository file edits, complete authoritative file state requires complete
+file content and the connector update sha from fetch_file for the same
+repository, path, and ref being updated.
+
+If complete authoritative content or the connector update sha is unavailable,
+the assistant stops the repository write path for that source, informs the
+user that the GitHub connector did not provide complete authoritative source
+state, and asks the user to provide the full source content, split the file,
+use a smaller shard, or perform the edit manually.
+
+When prepared changes cannot be committed because complete authoritative
+source state or the connector update sha is unavailable, the assistant prints
+the updated file content or patch for manual user application when practical.
+
+When the assistant stops for this failure, the user performs any commit
+manually.
+
+Repository write anomaly handling
+---------------------------------
+A repository write attempt may fail explicitly, fail silently, time out,
+return an unclear response, return no confirmation, or produce a repository
+state that does not match the intended write.
+
+A failed or unconfirmed write does not authorize the assistant to change the
+intended content, reduce scope, shorten content, simplify formatting, split
+the file, rename the file, change the path, change the commit strategy, use a
+different write mechanism, or apply any workaround.
+
+The primary objective after a write anomaly is preserving the accepted plan,
+not making progress by changing the plan.
+
+If the write attempt returns a clear error, the assistant stops and reports
+the error.
+
+If the write attempt returns no clear result, the assistant may retry the same
+write exactly once with the same repository, branch, path, content, and commit
+message.
+
+After a retry, the assistant verifies the repository state by fetching the
+target file through the normal authoritative retrieval path.
+
+If the written file cannot be confirmed to match the intended content, the
+assistant stops and reports that the write could not be confirmed.
+
+The assistant does not continue downstream work based on assumed write
+success.
+
+The assistant may propose possible workaround options only after stopping and
+clearly separating them from the original plan.
+
+The user must explicitly approve any workaround before it is attempted.
+
 Default loading rules
 ---------------------
 For any Turnix documentation or code task, first read:
@@ -167,83 +411,6 @@ If a referenced DOC_ID or authority source cannot be resolved through CMR-04:
 - do not substitute a similar document
 - ask for clarification or report that the reference is missing
 
-Repository connector retrieval failures
----------------------------------------
-GitHub connector operations that return repository text can return truncated,
-malformed, incomplete, or not-provably-complete content.
-
-This applies to any long repository text returned by the connector, including
-files, blobs, diffs, patches, previews, issue bodies, pull request bodies,
-comments, review comments, commit messages, and similar text sources.
-
-At minimum, GitHub connector fetch and fetch_file operations are known to be
-capable of returning truncated file content.
-
-Every GitHub connector retrieval used for document, code, audit, review, patch
-planning, or repository write work is classified as exactly one of:
-
-- COMPLETE
-- TRUNCATED
-- MALFORMED
-- MISSING
-- NOT PROVEN COMPLETE
-
-COMPLETE means the connector returned the full requested source content, no
-truncation marker or partial-line report is present, expected closing content
-or structured boundaries are present, and any required revision identity came
-from the same successful connector response.
-
-TRUNCATED means the connector reports fewer shown lines than total lines, emits
-a truncation marker, or visibly ends before the requested source is complete.
-
-MALFORMED means the structured response is incomplete, invalid, internally
-inconsistent, missing expected fields, or missing expected closing boundaries.
-
-MISSING means the connector reports that the requested source does not exist or
-cannot be found.
-
-NOT PROVEN COMPLETE means the connector returned content but did not expose
-enough information to prove that the returned content is complete.
-
-Only COMPLETE permits authoritative read use.
-
-Only COMPLETE with the required connector update sha or equivalent revision
-identity permits repository file write use.
-
-If a retrieval is TRUNCATED, MALFORMED, MISSING, or NOT PROVEN COMPLETE, the
-assistant treats the affected source as not loaded for authoritative document,
-code, audit, review, patch planning, or repository write work.
-
-The assistant does not treat partial snippets, search results, rendered
-previews, web copies, local memory, cached memory, inferred reconstruction,
-or reconstruction not directly supplied by the user as authoritative source
-text.
-
-The assistant does not use workaround retrieval for the affected source.
-
-Forbidden workaround retrieval includes repository search results, web
-retrieval, rendered previews, excerpts, snippets, cached memory, inferred
-reconstruction, resource-range reads from a truncated response, or any sha,
-revision identity, or update token obtained outside the same COMPLETE connector
-response that supplied the authoritative content.
-
-For repository file edits, complete authoritative file state requires complete
-file content and the connector update sha or equivalent revision identity from
-the same COMPLETE connector response.
-
-If complete authoritative content or the connector update sha is unavailable,
-the assistant stops the repository write path for that source, informs the user
-that the GitHub connector did not provide complete authoritative source state,
-and asks the user to provide the full source content or perform the edit
-manually.
-
-When prepared changes cannot be committed because complete authoritative source
-state or the connector update sha is unavailable, the assistant prints the
-updated file content or patch for manual user application.
-
-When the assistant stops for this failure, the user performs any commit
-manually.
-
 Working behavior
 ----------------
 Maintain a distinction between:
@@ -315,7 +482,7 @@ It does not define Turnix semantics.
 --- bootstrap-meta ---
 DOC_ID: AI_WORKFLOW_BOOTSTRAP
 DOC_FILE: docs/AI_WORKFLOW_BOOTSTRAP.txt
-DOC_REV: 5
-DOC_GIT: 20b2026
+DOC_REV: 10
+DOC_GIT: 82a0138
 DOC_STATUS: STABLE
 ----------------------
