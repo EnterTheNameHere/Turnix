@@ -1,270 +1,374 @@
-import sys, os, json5, subprocess, psutil, time,re
+# launcher.py
+from __future__ import annotations
+
+import re
+import shlex
+import subprocess
+import sys
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import json5
+import psutil
+from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (
     QApplication,
-    QWidget,
-    QVBoxLayout,
+    QCheckBox,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QComboBox,
-    QCheckBox,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import QTimer
+
 
 CREATE_NEW_CONSOLE = subprocess.CREATE_NEW_CONSOLE
+LLAMA_CPP_PRESETS_FILE = "launcher_llama_cpp_presets.json5"
+
+# Compatibility repair for old string-style preset fields only.
+# List-style args should use valid JSON/JSON5 strings, preferably forward slashes.
+LOOSE_BACKSLASH_FIX_FIELDS = {
+    "path",
+    "args",
+}
+
+
+def fixPresetBackslashes(content: str) -> str:
+    fieldPattern = "|".join(re.escape(field) for field in LOOSE_BACKSLASH_FIX_FIELDS)
+    
+    pattern = re.compile(
+        rf'("(?P<field>{fieldPattern})"\s*:\s*)"(?P<value>(?:\\.|[^"\\])*)"',
+    )
+    
+    def replaceMatch(match: re.Match[str]) -> str:
+        prefix = match.group(1)
+        value = match.group("value")
+        
+        if "\\" not in value:
+            return match.group(0)
+        
+        fixedValue = fixLooseBackslashes(value)
+        return f'{prefix}"{fixedValue}"'
+    
+    return pattern.sub(replaceMatch, content)
+
+
+def fixLooseBackslashes(value: str) -> str:
+    result: list[str] = []
+    index = 0
+    
+    while index < len(value):
+        char = value[index]
+        
+        if char != "\\":
+            result.append(char)
+            index += 1
+            continue
+        
+        nextChar = value[index + 1] if index + 1 < len(value) else ""
+        
+        # Preserve only escapes that are useful inside preset command strings.
+        # Other JSON escapes such as \\n, \\t, \\r, or \\u1234 are more likely to be
+        # accidental Windows-path backslashes in these fields.
+        if nextChar in {'"', "\\"}:
+            result.append("\\")
+            result.append(nextChar)
+            index += 2
+            continue
+        
+        # Otherwise treat it as a loose Windows-style backslash and escape it for JSON/JSON5 parsing.
+        result.append("\\\\")
+        index += 1
+    
+    return "".join(result)
+
 
 class Launcher(QWidget):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Turnix Launcher")
 
-        self.backendProcess: psutil.Popen | None = None
-        self.electronProcess: psutil.Popen | None = None
+        self.repoRoot = Path(__file__).resolve().parent
+        self.turnixProcess: psutil.Popen | None = None
         self.llamaCppProcess: psutil.Popen | None = None
 
         self.llamaCppPresets = self.loadLlamaCppPresets()
-        self.selectedLlamaCppPreset = None
+        self.selectedLlamaCppPreset: dict[str, Any] | None = None
 
         self.initUI()
         self.initProcessChecker()
     
-    def loadLlamaCppPresets(self) -> dict:
+    def loadLlamaCppPresets(self) -> dict[str, dict[str, Any]]:
         try:
-            with open("launcher_llama_cpp_presets.json5", "r", encoding="utf-8") as file:
+            presetsFile = self.repoRoot / LLAMA_CPP_PRESETS_FILE
+            with open(presetsFile, "r", encoding="utf-8") as file:
                 content = file.read()
-
-            # Replace single backslashes inside quoted strings that look like Windows paths
-            def fix_path_slashes(match):
-                path = match.group(1)
-                # Only modify if it contains a backslash and a colon (likely Windows path)
-                if "\\" in path and ":" in path:
-                    return '"' + path.replace("\\", "\\\\") + '"'
-                return '"' + path + '"'
             
-            fixed_content = re.sub(r'"([^"]*)"', fix_path_slashes, content)
-            parsedContent = json5.loads(fixed_content)
+            fixedContent = fixPresetBackslashes(content)
+            parsedContent = json5.loads(fixedContent)
             if not isinstance(parsedContent, dict):
                 raise ValueError("Content of launcher_llama_cpp_presets.json5 must be dict.")
-            return parsedContent
+            
+            presets: dict[str, dict[str, Any]] = {}
+            for name, preset in parsedContent.items():
+                if isinstance(name, str) and isinstance(preset, dict):
+                    presets[name] = preset
+            return presets
         
         except FileNotFoundError:
-            print("launcher_llama_cpp_presets.json5 file not found.")
+            print(f"{presetsFile} file not found.")
             return {}
-        except Exception as e:
-            print(f"Error loading Launcher launcher_llama_cpp_presets.json5 presets. {e}")
+        except Exception as err:
+            print(f"Error loading {presetsFile} presets. {err}")
             return {}
     
-    def initUI(self):
+    def initUI(self) -> None:
         layout = QVBoxLayout()
 
-        # --- Backend ---
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("Backend"))
-        row1.addWidget(self.makeButton("Start", self.startBackend))
-        row1.addWidget(self.makeButton("Restart", self.restartBackend))
-        row1.addWidget(self.makeButton("Stop", self.stopBackend))
-        layout.addLayout(row1)
-
-        # --- Electron ---
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("Electron"))
-        row2.addWidget(self.makeButton("Start", self.startElectron))
-        row2.addWidget(self.makeButton("Restart", self.restartElectron))
-        row2.addWidget(self.makeButton("Stop", self.stopElectron))
-        layout.addLayout(row2)
+        # --- Turnix ---
+        turnixRow = QHBoxLayout()
+        turnixRow.addWidget(QLabel("Turnix"))
+        turnixRow.addWidget(self.makeButton("Start", self.startTurnix))
+        turnixRow.addWidget(self.makeButton("Restart", self.restartTurnix))
+        turnixRow.addWidget(self.makeButton("Stop", self.stopTurnix))
+        layout.addLayout(turnixRow)
 
         # --- Llama.cpp ---
-        row3 = QHBoxLayout()
-        row3.addWidget(QLabel("Llama.cpp"))
-        row3.addWidget(self.makeButton("Start", self.startLlamaCpp))
-        row3.addWidget(self.makeButton("Restart", self.restartLlamaCpp))
-        row3.addWidget(self.makeButton("Stop", self.stopLlamaCpp))
-        layout.addLayout(row3)
+        llamaCppRow = QHBoxLayout()
+        llamaCppRow.addWidget(QLabel("Llama.cpp"))
+        llamaCppRow.addWidget(self.makeButton("Start", self.startLlamaCpp))
+        llamaCppRow.addWidget(self.makeButton("Restart", self.restartLlamaCpp))
+        llamaCppRow.addWidget(self.makeButton("Stop", self.stopLlamaCpp))
+        layout.addLayout(llamaCppRow)
         
         # --- Presets + Verbose ---
-        row4 = QHBoxLayout()
-        row4.addWidget(QLabel("Model presets"))
+        presetRow = QHBoxLayout()
+        presetRow.addWidget(QLabel("Model presets"))
         self.modelBox = QComboBox()
-        if self.llamaCppPresets is not None:
-            self.modelBox.addItems(self.llamaCppPresets.keys())
+        self.modelBox.addItems(self.llamaCppPresets.keys())
         self.modelBox.currentTextChanged.connect(self.selectLlamaCppModel)
-        row4.addWidget(self.modelBox)
+        presetRow.addWidget(self.modelBox)
 
         self.verboseBox = QCheckBox("Verbose Logging")
-        row4.addWidget(self.verboseBox)
-        layout.addLayout(row4)
+        presetRow.addWidget(self.verboseBox)
+        layout.addLayout(presetRow)
 
+        turnixOptionsRow = QHBoxLayout()
+        self.useLlamaCppForTurnixBox = QCheckBox("Turnix uses llama.cpp")
+        self.useLlamaCppForTurnixBox.setChecked(True)
+        turnixOptionsRow.addWidget(self.useLlamaCppForTurnixBox)
+        layout.addLayout(turnixOptionsRow)
+        
         self.selectLlamaCppModel(self.modelBox.currentText())
         self.setLayout(layout)
 
-    def makeButton(self, text, callback):
+    def makeButton(self, text: str, callback: Callable[[], None]) -> QPushButton:
         button = QPushButton(text)
         button.clicked.connect(callback)
         return button
 
     # --- Utility: Check if processes were closed manually every 1s ---
-    def initProcessChecker(self):
+    def initProcessChecker(self) -> None:
         self.timer = QTimer()
         self.timer.timeout.connect(self.checkProcesses)
         self.timer.start(1000)  # check every 1s
     
-    def checkProcesses(self):
+    def checkProcesses(self) -> None:
         for name, attr in [
-            ("Backend", "backendProcess"),
-            ("Electron", "electronProcess"),
+            ("Turnix", "turnixProcess"),
             ("Llama.cpp", "llamaCppProcess"),
         ]:
             proc = getattr(self, attr)
-            if proc and not proc.is_running():
+            if proc and proc.poll() is not None:
                 print(f"{name} terminal closed manually.")
                 setattr(self, attr, None)
 
     # --- Utility: Kill process tree ---
-    def killProcessTree(self, proc: psutil.Popen):
+    def killProcessTree(self, proc: psutil.Popen) -> None:
         try:
-            for child in proc.children(recursive=True):
-                try:
-                    child.kill()
-                except psutil.NoSuchProcess:
-                    pass
-            proc.kill()
+            children = proc.children(recursive=True)
+        except psutil.NoSuchProcess:
+            return
+        
+        processes = [*children, proc]
+
+        for child in children:
+            try:
+                child.terminate()
+            except psutil.NoSuchProcess:
+                pass
+            except psutil.AccessDenied as err:
+                print(f"Access denied terminating child PID {child.pid}: {err}")
+        
+        try:
+            proc.terminate()
         except psutil.NoSuchProcess:
             pass
+        except psutil.AccessDenied as err:
+            print(f"Access denied terminating parent PID {proc.pid}: {err}")
+        
+        _gone, alive = psutil.wait_procs(processes, timeout=3.0)
+        
+        for aliveProc in alive:
+            try:
+                print(f"Killing stubborn process PID {aliveProc.pid}...")
+                aliveProc.kill()
+            except psutil.NoSuchProcess:
+                pass
+            except psutil.AccessDenied as err:
+                print(f"Access denied killing {aliveProc.pid}: {err}")
+        
+        psutil.wait_procs(alive, timeout=3.0)
 
-    # --- Backend ---
-    def startBackend(self):
+    # --- Turnix ---
+    def startTurnix(self) -> None:
         try:
-            if not self.backendProcess:
-                print("Starting backend in visible console...")
-                python_embedded = os.path.join(os.getcwd(), "python-embedded", "python.exe")
-                backend_cmd = f'$host.UI.RawUI.WindowTitle = "Backend Server"; & "{python_embedded}" -m uvicorn backend.server:app --port 63726'
-                cmd = ["pwsh", "-NoExit", "-Command", backend_cmd]
-                print("Command:", " ".join(cmd))
-                self.backendProcess = psutil.Popen(cmd, creationflags=CREATE_NEW_CONSOLE)
-                print(f"Backend PID: {self.backendProcess.pid}")
-            else:
-                print("Backend already running.")
-        except Exception as e:
-            print(f"Error starting backend: {e}")
+            if self.turnixProcess:
+                print("Turnix already running.")
+                return
+            
+            pythonEmbedded = self.repoRoot / "python-embedded" / "python.exe"
+            if not pythonEmbedded.exists():
+                print(f"Embedded Python not found: {pythonEmbedded}")
+                return
+            
+            args = [
+                "-m",
+                "backend.cli.main",
+            ]
+            
+            if self.useLlamaCppForTurnixBox.isChecked():
+                args.extend(["--provider", "llamacpp"])
+                
+            command = self.buildPowerShellPythonCommand(
+                title="Turnix",
+                pythonExe=pythonEmbedded,
+                args=args,
+            )
+            cmd = ["pwsh", "-NoExit", "-Command", command]
+            
+            print("Starting Turnix in visible console...")
+            print("Command:", " ".join(cmd))
+            self.turnixProcess = psutil.Popen(
+                cmd,
+                cwd=self.repoRoot,
+                creationflags=CREATE_NEW_CONSOLE,
+            )
+            print(f"Turnix PID: {self.turnixProcess.pid}")
+            
+        except Exception as err:
+            print(f"Error starting Turnix: {err}")
 
-    def restartBackend(self):
-        print("Restarting backend...")
-        self.stopBackend()
-        self.startBackend()
+    def restartTurnix(self) -> None:
+        print("Restarting Turnix...")
+        self.stopTurnix()
+        self.startTurnix()
 
-    def stopBackend(self):
+    def stopTurnix(self) -> None:
         try:
-            if self.backendProcess:
-                print(f"Stopping backend PID {self.backendProcess.pid} and its children...")
-                self.killProcessTree(self.backendProcess)
-                self.backendProcess = None
-                time.sleep(0.3)
-        except Exception as e:
-            print(f"Error stopping backend: {e}")
-
-    # --- Electron ---
-    def startElectron(self):
-        try:
-            if not self.electronProcess:
-                print("Starting Electron in visible console...")
-                #cmd = ["pwsh", "-NoLogo", "-NoExit", "-Command", '& { $host.UI.RawUI.WindowTitle = "Electron"; cmd /c "title Electron && npm.cmd run start" }']
-                cmd = [
-                    "pwsh",
-                    "-NoLogo",
-                    "-NoExit",
-                    "-Command",
-                    'cmd /k "title Electron && npm.cmd run start"'
-                    # use /k to keep the window after it finishes; /c if you want it to close
-                ]
-                print("Command:", " ".join(cmd))
-                self.electronProcess = psutil.Popen(
-                    cmd, cwd="electron", creationflags=CREATE_NEW_CONSOLE
-                )
-                print(f"Electron PID: {self.electronProcess.pid}")
-            else:
-                print("Electron already running.")
-        except Exception as e:
-            print(f"Error starting electron: {e}")
-
-    def restartElectron(self):
-        print("Restarting electron...")
-        self.stopElectron()
-        self.startElectron()
-
-    def stopElectron(self):
-        try:
-            if self.electronProcess:
-                print(f"Stopping Electron PID {self.electronProcess.pid} and its children...")
-                self.killProcessTree(self.electronProcess)
-                self.electronProcess = None
-                time.sleep(0.3)
-        except Exception as e:
-            print(f"Error stopping electron: {e}")
+            if self.turnixProcess:
+                print(f"Stopping Turnix PID {self.turnixProcess.pid} and its children...")
+                self.killProcessTree(self.turnixProcess)
+                self.turnixProcess = None
+        except Exception as err:
+            print(f"Error stopping Turnix: {err}")
 
     # --- Llama.cpp ---
-    def selectLlamaCppModel(self, name):
+    def selectLlamaCppModel(self, name: str) -> None:
+        if not name:
+            self.selectedLlamaCppPreset = None
+            return
+        
         print("Selecting Llama.cpp model: " + name)
         try:
             self.selectedLlamaCppPreset = self.llamaCppPresets.get(name)
-        except Exception as e:
-            print(f"Error selecting Llama.cpp model: {e}")
+        except Exception as err:
+            print(f"Error selecting Llama.cpp model: {err}")
 
-    def startLlamaCpp(self):
+    def startLlamaCpp(self) -> None:
         try:
-            if not self.llamaCppProcess and self.selectedLlamaCppPreset:
-                print("Starting Llama.cpp in visible console with persistent shell...")
-                exe = self.selectedLlamaCppPreset.get("path", "")
-                args = self.selectedLlamaCppPreset.get("args", "").split()
-                if self.verboseBox.isChecked():
-                    args.append("--verbose")
-
-                # Quote exe + args so PowerShell parses them correctly
-                args_quoted = " ".join(
-                    f'"{a}"' if " " in a or "\\" in a else a for a in args
-                )
-                cmd_str = f'$host.UI.RawUI.WindowTitle = "LlamaCPP"; & "{exe}" {args_quoted}'
-
-                pwsh_cmd = ["pwsh", "-NoExit", "-Command", cmd_str]
-
-                print("Command:", " ".join(pwsh_cmd))
-                self.llamaCppProcess = psutil.Popen(
-                    pwsh_cmd,
-                    creationflags=CREATE_NEW_CONSOLE
-                )
-                print(f"Llama.cpp PID: {self.llamaCppProcess.pid}")
+            if self.llamaCppProcess:
+                print("Llama.cpp already running.")
+                return
+            
+            if not self.selectedLlamaCppPreset:
+                print("No llama.cpp preset selected.")
+                return
+            
+            print("Starting Llama.cpp in visible console with persistent shell...")
+            exe = str(self.selectedLlamaCppPreset.get("path", "")).strip()
+            
+            if not exe:
+                print("Selected llama.cpp preset has no path.")
+                return
+            
+            exePath = Path(exe)
+            if not exePath.exists():
+                print(f"llama.cpp executable not found: {exePath}")
+                return
+            
+            argsValue = self.selectedLlamaCppPreset.get("args", "")
+            
+            if isinstance(argsValue, str):
+                argsText = argsValue.strip()
+                args = shlex.split(argsText, posix=False) if argsText else []
+            elif isinstance(argsValue, list):
+                args = [str(arg) for arg in argsValue]
             else:
-                print("Llama.cpp already running or no preset selected.")
-        except Exception as e:
-            print(f"Error starting Llama.cpp: {e}")
+                print("Selected llama.cpp preset has invalid args. Expected string or list.")
+                return
 
-    def restartLlamaCpp(self):
+            if self.verboseBox.isChecked():
+                args.append("--verbose")
+
+            argsQuoted = " ".join(self.quotePowerShellArg(arg) for arg in args)
+            exeQuoted = self.quotePowerShellArg(exe)
+            cmdStr = f'$host.UI.RawUI.WindowTitle = "LlamaCPP"; & {exeQuoted} {argsQuoted}'
+            pwshCmd = ["pwsh", "-NoExit", "-Command", cmdStr]
+
+            print("Command:", " ".join(pwshCmd))
+            self.llamaCppProcess = psutil.Popen(
+                pwshCmd,
+                cwd=self.repoRoot,
+                creationflags=CREATE_NEW_CONSOLE,
+            )
+            print(f"Llama.cpp PID: {self.llamaCppProcess.pid}")
+            
+        except Exception as err:
+            print(f"Error starting Llama.cpp: {err}")
+
+    def restartLlamaCpp(self) -> None:
         print("Restarting Llama.cpp...")
         self.stopLlamaCpp()
         self.startLlamaCpp()
 
-    def stopLlamaCpp(self):
+    def stopLlamaCpp(self) -> None:
         try:
             if self.llamaCppProcess:
                 print(f"Stopping Llama.cpp PID {self.llamaCppProcess.pid} and its children...")
                 self.killProcessTree(self.llamaCppProcess)
                 self.llamaCppProcess = None
-                time.sleep(0.3)
         except Exception as e:
             print(f"Error stopping Llama.cpp: {e}")
 
+    def buildPowerShellPythonCommand(self, *, title: str, pythonExe: Path, args: list[str]) -> str:
+        commandParts = [self.quotePowerShellArg(str(pythonExe)), *[self.quotePowerShellArg(arg) for arg in args]]
+        return f'$host.UI.RawUI.WindowTitle = "{title}"; & {" ".join(commandParts)}'
+    
+    def quotePowerShellArg(self, value: str) -> str:
+        escaped = value.replace("'", "''")
+        return f"'{escaped}'"
+    
     # --- Graceful exit ---
-    def closeEvent(self, event):
+    def closeEvent(self, event) -> None:
         print("Launcher is closing. Stopping all running processes...")
 
         try:
-            self.stopBackend()
+            self.stopTurnix()
         except Exception as e:
-            print(f"Error stopping backend on exit: {e}")
-
-        try:
-            self.stopElectron()
-        except Exception as e:
-            print(f"Error stopping electron on exit: {e}")
+            print(f"Error stopping Turnix on exit: {e}")
 
         try:
             self.stopLlamaCpp()
@@ -273,11 +377,12 @@ class Launcher(QWidget):
 
         event.accept()
 
+
 if __name__ == "__main__":
     try:
         app = QApplication(sys.argv)
         window = Launcher()
         window.show()
         sys.exit(app.exec())
-    except Exception as e:
-        print(f"Error starting the application: {e}")
+    except Exception as err:
+        print(f"Error starting the application: {err}")
