@@ -34,7 +34,7 @@ from PyQt6.QtWidgets import (
 
 
 CREATE_NEW_CONSOLE = subprocess.CREATE_NEW_CONSOLE
-LLAMA_CPP_CONFIG_FILE = "launcher_llama_cpp_config.json5"
+LLAMA_CPP_DEFAULTS_FILE = "launcher_llama_cpp_defaults.local.json5"
 LLAMA_CPP_USER_STATE_FILE = "launcher_llama_cpp_user.local.json5"
 
 CACHE_TYPES = [
@@ -67,16 +67,6 @@ DEFAULT_LLAMA_CPP_OPTIONS: dict[str, Any] = {
     "metrics": False,
     "props": False,
     "slots": True,
-}
-
-LOCAL_DEFAULT_LLAMA_CPP_HOST_PORT_OPTIONS = {
-    "host": "127.0.0.1",
-    "port": 1234,
-}
-
-LOCAL_ONLY_OPTION_KEYS = {
-    "host",
-    "port",
 }
 
 LLAMA_CPP_OPTIONS_TOOLTIPS = {
@@ -190,6 +180,7 @@ LLAMA_CPP_OPTIONS_TOOLTIPS = {
     ),
 }
 
+
 @dataclass(frozen=True)
 class LlamaCppModel:
     displayName: str
@@ -226,24 +217,6 @@ def normalizedSettingsMap(settings: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(DEFAULT_LLAMA_CPP_OPTIONS)
     normalized.update(settings)
     return normalized
-
-
-def portableDefaultOptions(settings: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: value
-        for key, value in settings.items()
-        if key not in LOCAL_ONLY_OPTION_KEYS
-    }
-
-
-def cleanLlamaCppConfig(config: dict[str, Any]) -> dict[str, Any]:
-    defaultOptions = config.get("defaultOptions", {})
-    if not isinstance(defaultOptions, dict):
-        defaultOptions = {}
-
-    return {
-        "defaultOptions": portableDefaultOptions(defaultOptions),
-    }
 
 
 class ProfileNameDialog(QDialog):
@@ -284,7 +257,7 @@ class Launcher(QWidget):
         self.turnixProcess: psutil.Popen | None = None
         self.llamaCppProcess: psutil.Popen | None = None
 
-        self.llamaCppConfig = self.loadLlamaCppConfig()
+        self.llamaCppDefaults = self.loadLlamaCppDefaults()
         self.userState = self.loadUserState()
         
         self.llamaCppModels: list[LlamaCppModel] = []
@@ -298,22 +271,30 @@ class Launcher(QWidget):
         self.initProcessChecker()
         self.refreshModels()
     
-    def loadLlamaCppConfig(self) -> dict[str, Any]:
-        configFile = self.repoRoot / LLAMA_CPP_CONFIG_FILE
-        config = loadJson5File(configFile, {})
-        return cleanLlamaCppConfig(config)
-        
-    def saveLlamaCppConfig(self) -> None:
-        configFile = self.repoRoot / LLAMA_CPP_CONFIG_FILE
-        self.llamaCppConfig = cleanLlamaCppConfig(self.llamaCppConfig)
-        saveJson5File(configFile, self.llamaCppConfig)
+    def loadLlamaCppDefaults(self) -> dict[str, Any]:
+        defaultsFile = self.repoRoot / LLAMA_CPP_DEFAULTS_FILE
+        defaultsFileContent = {
+            "defaultOptions": dict(DEFAULT_LLAMA_CPP_OPTIONS),
+        }
+
+        if not defaultsFile.exists():
+            saveJson5File(defaultsFile, defaultsFileContent)
+            return defaultsFileContent
+
+        defaults = loadJson5File(defaultsFile, defaultsFileContent)
+        defaultOptions = defaults.get("defaultOptions", {})
+        if not isinstance(defaultOptions, dict):
+            defaultOptions = {}
+
+        return {
+            "defaultOptions": normalizedSettingsMap(defaultOptions),
+        }
     
     def loadUserState(self) -> dict[str, Any]:
         stateFile = self.repoRoot / LLAMA_CPP_USER_STATE_FILE
         state = loadJson5File(stateFile, {})
         state.setdefault("serverPath", "")
         state.setdefault("modelDirectories", [])
-        state.setdefault("localDefaultOptions", dict(LOCAL_DEFAULT_LLAMA_CPP_HOST_PORT_OPTIONS))
         state.setdefault("rememberedModelProfiles", {})
         state.setdefault("namedProfilesByModel", {})
         state.setdefault("lastSelectedModelKey", "")
@@ -323,14 +304,6 @@ class Launcher(QWidget):
 
         if not isinstance(state["modelDirectories"], list):
             state["modelDirectories"] = []
-
-        localDefaultOptions = state.get("localDefaultOptions")
-        if not isinstance(localDefaultOptions, dict):
-            localDefaultOptions = dict(LOCAL_DEFAULT_LLAMA_CPP_HOST_PORT_OPTIONS)
-            state["localDefaultOptions"] = localDefaultOptions
-
-        for key, value in LOCAL_DEFAULT_LLAMA_CPP_HOST_PORT_OPTIONS.items():
-            localDefaultOptions.setdefault(key, value)
 
         return state
     
@@ -389,7 +362,7 @@ class Launcher(QWidget):
         runtimeRow = QHBoxLayout()
         runtimeRow.addWidget(QLabel("Server"), 0)
         self.serverPathEdit = QLineEdit(str(self.userState.get("serverPath", "")))
-        self.serverPathEdit.editingFinished.connect(self.saveLlamaCppConfigEdits)
+        self.serverPathEdit.editingFinished.connect(self.saveLocalLauncherStateEdits)
         runtimeRow.addWidget(self.serverPathEdit, 1)
         self.refreshModelsButton = self.makeButton("Refresh models", self.refreshModels)
         runtimeRow.addWidget(self.refreshModelsButton, 0)
@@ -401,7 +374,7 @@ class Launcher(QWidget):
         self.modelDirectoriesEdit.setToolTip(
             "Directories searched recursively for .gguf files. Separate multiple directories with semicolons."
         )
-        self.modelDirectoriesEdit.editingFinished.connect(self.saveLlamaCppConfigEdits)
+        self.modelDirectoriesEdit.editingFinished.connect(self.saveLocalLauncherStateEdits)
         modelDirectoriesRow.addWidget(self.modelDirectoriesEdit, 1)
         settingsLayout.addLayout(modelDirectoriesRow)
         
@@ -606,7 +579,7 @@ class Launcher(QWidget):
         if saveState:
             self.userState["useLlamaCppProvider"] = checked
             self.saveUserState()
-            self.saveLlamaCppConfigEdits()
+            self.saveLocalLauncherStateEdits()
         
         self.scheduleRefitWindowHeight()
     
@@ -762,7 +735,7 @@ class Launcher(QWidget):
         psutil.wait_procs(alive, timeout=3.0)
 
     def refreshModels(self) -> None:
-        self.saveLlamaCppConfigEdits()
+        self.saveLocalLauncherStateEdits()
         self.llamaCppModels = self.discoverLlamaCppModels()
         
         currentKey = self.selectedModel.profileKey if self.selectedModel else str(self.userState.get("lastSelectedModelKey", ""))
@@ -1005,16 +978,11 @@ class Launcher(QWidget):
         return normalizedSettingsMap(settings)
     
     def getDefaultLlamaCppOptions(self) -> dict[str, Any]:
-        settings: dict[str, Any] = {}
-        defaultOptions = self.llamaCppConfig.get("defaultOptions", {})
+        defaultOptions = self.llamaCppDefaults.get("defaultOptions", {})
         if isinstance(defaultOptions, dict):
-            settings.update(defaultOptions)
+            return normalizedSettingsMap(defaultOptions)
 
-        localDefaultOptions = self.userState.get("localDefaultOptions", {})
-        if isinstance(localDefaultOptions, dict):
-            settings.update(localDefaultOptions)
-
-        return normalizedSettingsMap(settings)
+        return dict(DEFAULT_LLAMA_CPP_OPTIONS)
     
     def getNamedProfilesForSelectedModel(self) -> dict[str, dict[str, Any]]:
         if not self.selectedModel:
@@ -1090,11 +1058,10 @@ class Launcher(QWidget):
         self.propsBox.setChecked(bool(normalized["props"]))
         self.slotsBox.setChecked(bool(normalized["slots"]))
     
-    def saveLlamaCppConfigEdits(self) -> None:
+    def saveLocalLauncherStateEdits(self) -> None:
         self.userState["serverPath"] = self.serverPathEdit.text().strip()
         self.userState["modelDirectories"] = self.modelDirectoriesFromText()
         self.saveUserState()
-        self.saveLlamaCppConfig()
     
     def saveCurrentProfile(self) -> None:
         if self.selectedProfileKind != "named" or not self.selectedProfileName:
@@ -1284,7 +1251,6 @@ class Launcher(QWidget):
             
             self.userState["serverPath"] = exe
             self.saveUserState()
-            self.saveLlamaCppConfig()
             self.rememberCurrentProfileSelection()
             
         except Exception as err:
@@ -1375,9 +1341,10 @@ class Launcher(QWidget):
         print("Launcher is closing. Stopping all running processes...")
 
         try:
-            self.saveLlamaCppConfigEdits()
+            self.saveLocalLauncherStateEdits()
+            self.rememberCurrentProfileSelection()
         except Exception as err:
-            print(f"Error saving llama.cpp config on exit: {err}")
+            print(f"Error saving llama.cpp state on exit: {err}")
         
         try:
             self.stopTurnix()
