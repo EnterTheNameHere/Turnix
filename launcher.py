@@ -69,6 +69,16 @@ DEFAULT_LLAMA_CPP_OPTIONS: dict[str, Any] = {
     "slots": True,
 }
 
+LOCAL_DEFAULT_LLAMA_CPP_HOST_PORT_OPTIONS = {
+    "host": "127.0.0.1",
+    "port": 1234,
+}
+
+LOCAL_ONLY_OPTION_KEYS = {
+    "host",
+    "port",
+}
+
 LLAMA_CPP_OPTIONS_TOOLTIPS = {
     "ctxSize": "--ctx-size N\n\nSize of the prompt context.\n\n0 = loaded from model.",
     "flashAttention": (
@@ -218,6 +228,24 @@ def normalizedSettingsMap(settings: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def portableDefaultOptions(settings: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in settings.items()
+        if key not in LOCAL_ONLY_OPTION_KEYS
+    }
+
+
+def cleanLlamaCppConfig(config: dict[str, Any]) -> dict[str, Any]:
+    defaultOptions = config.get("defaultOptions", {})
+    if not isinstance(defaultOptions, dict):
+        defaultOptions = {}
+
+    return {
+        "defaultOptions": portableDefaultOptions(defaultOptions),
+    }
+
+
 class ProfileNameDialog(QDialog):
     def __init__(self, *, title: str, defaultName: str, parent: QWidget | None = None) -> None:
         print("ProfileNameDialog::__init__")
@@ -273,26 +301,37 @@ class Launcher(QWidget):
     def loadLlamaCppConfig(self) -> dict[str, Any]:
         configFile = self.repoRoot / LLAMA_CPP_CONFIG_FILE
         config = loadJson5File(configFile, {})
-        
-        if config:
-            return config
-        
-        return {
-            "serverPath": config.get("serverPath", ""),
-            "modelDirectories": config.get("modelDirectories", []),
-            "defaultOptions": dict(DEFAULT_LLAMA_CPP_OPTIONS),
-        }
+        return cleanLlamaCppConfig(config)
         
     def saveLlamaCppConfig(self) -> None:
         configFile = self.repoRoot / LLAMA_CPP_CONFIG_FILE
+        self.llamaCppConfig = cleanLlamaCppConfig(self.llamaCppConfig)
         saveJson5File(configFile, self.llamaCppConfig)
     
     def loadUserState(self) -> dict[str, Any]:
         stateFile = self.repoRoot / LLAMA_CPP_USER_STATE_FILE
         state = loadJson5File(stateFile, {})
+        state.setdefault("serverPath", "")
+        state.setdefault("modelDirectories", [])
+        state.setdefault("localDefaultOptions", dict(LOCAL_DEFAULT_LLAMA_CPP_HOST_PORT_OPTIONS))
         state.setdefault("rememberedModelProfiles", {})
         state.setdefault("namedProfilesByModel", {})
         state.setdefault("lastSelectedModelKey", "")
+
+        if not isinstance(state["serverPath"], str):
+            state["serverPath"] = ""
+
+        if not isinstance(state["modelDirectories"], list):
+            state["modelDirectories"] = []
+
+        localDefaultOptions = state.get("localDefaultOptions")
+        if not isinstance(localDefaultOptions, dict):
+            localDefaultOptions = dict(LOCAL_DEFAULT_LLAMA_CPP_HOST_PORT_OPTIONS)
+            state["localDefaultOptions"] = localDefaultOptions
+
+        for key, value in LOCAL_DEFAULT_LLAMA_CPP_HOST_PORT_OPTIONS.items():
+            localDefaultOptions.setdefault(key, value)
+
         return state
     
     def saveUserState(self) -> None:
@@ -349,7 +388,7 @@ class Launcher(QWidget):
 
         runtimeRow = QHBoxLayout()
         runtimeRow.addWidget(QLabel("Server"), 0)
-        self.serverPathEdit = QLineEdit(str(self.llamaCppConfig.get("serverPath", "")))
+        self.serverPathEdit = QLineEdit(str(self.userState.get("serverPath", "")))
         self.serverPathEdit.editingFinished.connect(self.saveLlamaCppConfigEdits)
         runtimeRow.addWidget(self.serverPathEdit, 1)
         self.refreshModelsButton = self.makeButton("Refresh models", self.refreshModels)
@@ -655,7 +694,7 @@ class Launcher(QWidget):
         return self.isLlamaCppRunning()
     
     def modelDirectoriesText(self) -> str:
-        modelDirectories = self.llamaCppConfig.get("modelDirectories", [])
+        modelDirectories = self.userState.get("modelDirectories", [])
         if not isinstance(modelDirectories, list):
             return ""
         
@@ -746,7 +785,7 @@ class Launcher(QWidget):
             self.selectCurrentModel()
 
     def discoverLlamaCppModels(self) -> list[LlamaCppModel]:
-        modelDirectories = self.llamaCppConfig.get("modelDirectories", [])
+        modelDirectories = self.userState.get("modelDirectories", [])
         if not isinstance(modelDirectories, list):
             print("llama.cpp modelDirectories must be a list.")
             return []
@@ -812,7 +851,7 @@ class Launcher(QWidget):
         self.rememberSelectedModel()
         self.reloadProfileBoxForSelectedModel()
         self.applyResolvedProfileForSelectedModel()
-    
+
     def rememberSelectedModel(self) -> None:
         if not self.selectedModel:
             return
@@ -966,10 +1005,16 @@ class Launcher(QWidget):
         return normalizedSettingsMap(settings)
     
     def getDefaultLlamaCppOptions(self) -> dict[str, Any]:
+        settings: dict[str, Any] = {}
         defaultOptions = self.llamaCppConfig.get("defaultOptions", {})
         if isinstance(defaultOptions, dict):
-            return normalizedSettingsMap(defaultOptions)
-        return dict(DEFAULT_LLAMA_CPP_OPTIONS)
+            settings.update(defaultOptions)
+
+        localDefaultOptions = self.userState.get("localDefaultOptions", {})
+        if isinstance(localDefaultOptions, dict):
+            settings.update(localDefaultOptions)
+
+        return normalizedSettingsMap(settings)
     
     def getNamedProfilesForSelectedModel(self) -> dict[str, dict[str, Any]]:
         if not self.selectedModel:
@@ -1046,8 +1091,9 @@ class Launcher(QWidget):
         self.slotsBox.setChecked(bool(normalized["slots"]))
     
     def saveLlamaCppConfigEdits(self) -> None:
-        self.llamaCppConfig["serverPath"] = self.serverPathEdit.text().strip()
-        self.llamaCppConfig["modelDirectories"] = self.modelDirectoriesFromText()
+        self.userState["serverPath"] = self.serverPathEdit.text().strip()
+        self.userState["modelDirectories"] = self.modelDirectoriesFromText()
+        self.saveUserState()
         self.saveLlamaCppConfig()
     
     def saveCurrentProfile(self) -> None:
@@ -1118,6 +1164,7 @@ class Launcher(QWidget):
         namedProfiles.pop(self.selectedProfileName, None)
         self.saveUserState()
         
+        self.rememberSelectedModel()
         self.reloadProfileBoxForSelectedModel()
         self.applyResolvedProfileForSelectedModel()
     
@@ -1235,7 +1282,8 @@ class Launcher(QWidget):
             )
             print(f"Llama.cpp PID: {self.llamaCppProcess.pid}")
             
-            self.llamaCppConfig["serverPath"] = exe
+            self.userState["serverPath"] = exe
+            self.saveUserState()
             self.saveLlamaCppConfig()
             self.rememberCurrentProfileSelection()
             
