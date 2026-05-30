@@ -1,11 +1,14 @@
-# llamaCppServerProvider.py
+# backend/pipeline/llamaCppServerProvider.py
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+from backend.pipeline.modelProvider import ModelResponse, ModelTimings, ModelUsage
 
 
 class LlamaCppServerProviderError(RuntimeError):
@@ -16,20 +19,28 @@ class LlamaCppServerProviderError(RuntimeError):
 class LlamaCppServerConfig:
     """Configuration for llama.cpp server chat completion."""
     
-    baseUrl: str = "http://localhost:1234"
+    baseUrl: str = "http://127.0.0.1:1234"
     model: str = ""
     temperature: float = 0.6
     maxTokens: int = 512
     timeoutSeconds: float = 120.0
 
 
+@dataclass(frozen=True)
+class JsonPostResult:
+    """Validated JSON response plus local request timing."""
+    
+    responseJson: dict[str, Any]
+    wallMilliseconds: float
+
+    
 class LlamaCppServerProvider:
     """Synchronous llama.cpp chat provider."""
     
     def __init__(self, config: LlamaCppServerConfig | None = None) -> None:
         self.config = config or LlamaCppServerConfig()
 
-    def generateChatResponse(self, messages: list[dict[str, Any]]) -> str:
+    def generateChatResponse(self, messages: list[dict[str, Any]]) -> ModelResponse:
         if not messages:
             raise LlamaCppServerProviderError("Cannot generate chat response without messages")
         
@@ -42,13 +53,10 @@ class LlamaCppServerProvider:
         if self.config.model:
             payload["model"] = self.config.model
         
-        responseJson = self._postJson("/v1/chat/completions", payload)
-        content = self._extractAssistantContent(responseJson)
-        if not content.strip():
-            raise LlamaCppServerProviderError("llama.cpp returned an empty assistant response")
-        return content
+        postResult = self._postJson("/v1/chat/completions", payload)
+        return self._parseModelResponse(postResult.responseJson, postResult.wallMilliseconds)
     
-    def _postJson(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _postJson(self, path: str, payload: dict[str, Any]) -> JsonPostResult:
         url = self.config.baseUrl.rstrip("/") + path
         body = json.dumps(payload).encode("utf-8")
         request = Request(
@@ -61,6 +69,7 @@ class LlamaCppServerProvider:
             method="POST",
         )
         
+        startedAt = perf_counter()
         try:
             with urlopen(request, timeout=self.config.timeoutSeconds) as response:
                 responseBody = response.read().decode("utf-8", errors="replace")
@@ -79,6 +88,8 @@ class LlamaCppServerProvider:
             raise LlamaCppServerProviderError(
                 f"llama.cpp server is not reachable at {self.config.baseUrl}: {err.reason}"
             ) from err
+        finally:
+            wallMilliseconds = (perf_counter() - startedAt) * 1000.0
         
         try:
             parsed = json.loads(responseBody)
@@ -92,7 +103,106 @@ class LlamaCppServerProvider:
         if not isinstance(parsed, dict):
             raise LlamaCppServerProviderError("llama.cpp returned JSON that is not an object")
         
-        return parsed
+        return JsonPostResult(responseJson=parsed, wallMilliseconds=wallMilliseconds)
+    
+    def _parseModelResponse(self, responseJson: dict[str, Any], wallMilliseconds: float) -> ModelResponse:
+        choices = responseJson.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise LlamaCppServerProviderError("llama.cpp returned JSON without a non-empty choices field")
+        
+        firstChoice = choices[0]
+        if not isinstance(firstChoice, dict):
+            raise LlamaCppServerProviderError("llama.cpp first choice is not an object")
+        
+        finishReason = self._extractOptionalString(firstChoice, "finish_reason")
+        content, reasoningContent = self._extractMessageContent(firstChoice)
+        
+        return ModelResponse(
+            content=content,
+            finishReason=finishReason,
+            reasoningContent=reasoningContent,
+            model=self._extractOptionalString(responseJson, "model"),
+            usage=self._extractUsage(responseJson),
+            timings=self._extractTimings(responseJson, wallMilliseconds),
+            providerDetails={
+                "id": self._extractOptionalString(responseJson, "id"),
+                "object": self._extractOptionalString(responseJson, "object"),
+                "created": self._extractOptionalInt(responseJson, "created"),
+                "systemFingerprint": self._extractOptionalString(responseJson, "system_fingerprint"),
+            },
+        )
+    
+    def _extractMessageContent(self, firstChoice: dict[str, Any]) -> tuple[str, str]:
+        message = firstChoice.get("message")
+        if isinstance(message, dict):
+            content = message.get("content")
+            reasoningContent = message.get("reasoning_content")
+            
+            return (
+                content if isinstance(content, str) else "",
+                reasoningContent if isinstance(reasoningContent, str) else "",
+            )
+        
+        text = firstChoice.get("text")
+        if isinstance(text, str):
+            return text, ""
+        
+        raise LlamaCppServerProviderError("llama.cpp response is missing assistant message or text field")
+    
+    def _extractUsage(self, responseJson: dict[str, Any]) -> ModelUsage:
+        usage = responseJson.get("usage")
+        if not isinstance(usage, dict):
+            return ModelUsage()
+        
+        promptTokensDetails = usage.get("prompt_tokens_details")
+        cachedPromptTokens = None
+        if isinstance(promptTokensDetails, dict):
+            cachedPromptTokens = self._extractOptionalInt(promptTokensDetails, "cached_tokens")
+        
+        return ModelUsage(
+            promptTokens=self._extractOptionalInt(usage, "prompt_tokens"),
+            completionTokens=self._extractOptionalInt(usage, "completion_tokens"),
+            totalTokens=self._extractOptionalInt(usage, "total_tokens"),
+            cachedPromptTokens=cachedPromptTokens,
+        )
+    
+    def _extractTimings(self, responseJson: dict[str, Any], wallMilliseconds: float) -> ModelTimings:
+        timings = responseJson.get("timings")
+        if not isinstance(timings, dict):
+            return ModelTimings(wallMilliseconds=wallMilliseconds)
+        
+        return ModelTimings(
+            wallMilliseconds=wallMilliseconds,
+            promptMilliseconds=self._extractOptionalFloat(timings, "prompt_ms"),
+            predictedMilliseconds=self._extractOptionalFloat(timings, "predicted_ms"),
+            predictedTokensPerSecond=self._extractOptionalFloat(timings, "predicted_per_second"),
+        )
+    
+    def _extractOptionalString(self, source: dict[str, Any], key: str) -> str | None:
+        value = source.get(key)
+        if isinstance(value, str):
+            return value
+        return None
+    
+    def _extractOptionalInt(self, source: dict[str, Any], key: str) -> int | None:
+        value = source.get(key)
+        if isinstance(value, bool):
+            return None
+
+        if isinstance(value, int):
+            return value
+        
+        return None
+    
+    def _extractOptionalFloat(self, source: dict[str, Any], key: str) -> float | None:
+        value = source.get(key)
+        if isinstance(value, bool):
+            return None
+        
+        if isinstance(value, int | float):
+            return float(value)
+        
+        return None
     
     def _previewAroundPosition(self, text: str, position: int, radius: int = 200) -> str:
         start = max(0, position - radius)
@@ -107,27 +217,6 @@ class LlamaCppServerProvider:
         if len(text) <= limit:
             return text
         return text[:limit] + "..."
-    
-    def _extractAssistantContent(self, responseJson: dict[str, Any]) -> str:
-        choices = responseJson.get("choices")
-        if not isinstance(choices, list) or not choices:
-            raise LlamaCppServerProviderError("llama.cpp returned JSON without a non-empty choices field")
-        
-        firstChoice = choices[0]
-        if not isinstance(firstChoice, dict):
-            raise LlamaCppServerProviderError("llama.cpp first choice is not an object")
-        
-        message = firstChoice.get("message")
-        if isinstance(message, dict):
-            content = message.get("content")
-            if isinstance(content, str):
-                return content
-        
-        text = firstChoice.get("text")
-        if isinstance(text, str):
-            return text
-        
-        raise LlamaCppServerProviderError("llama.cpp response is missing assistant content field")
     
     def _normalizeMessages(self, messages: list[dict[str, Any]]) -> list[dict[str, str]]:
         normalizedMessages: list[dict[str, str]] = []
