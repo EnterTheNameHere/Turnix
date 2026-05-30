@@ -16,7 +16,6 @@ class EmptyUserMessageError(ValueError):
 class ChatPipelineResult:
     """Turnix-facing result of one chat pipeline user message turn."""
     
-    assistantText: str
     modelResponse: ModelResponse
     infoMessages: list[str] = field(default_factory=list)
 
@@ -44,32 +43,14 @@ class ChatPipeline:
         modelMessages = self.promptBuilder.buildMessages(self.messageStore)
         
         modelResponse = self.modelProvider.generateChatResponse(modelMessages)
-        assistantText = self._makeAssistantText(modelResponse)
         infoMessages = self._makeInfoMessages(modelResponse)
         
-        self.messageStore.appendMessage("assistant", assistantText)
+        self.messageStore.appendMessage("assistant", modelResponse.content)
         return ChatPipelineResult(
-            assistantText=assistantText,
             modelResponse=modelResponse,
             infoMessages=infoMessages,
         )
-    
-    def _makeAssistantText(self, modelResponse: ModelResponse) -> str:
-        if modelResponse.hasVisibleContent:
-            return modelResponse.content.strip()
-        
-        outcome = modelResponse.classifyOutcome()
-        if outcome == ModelCompletionOutcome.NO_VISIBLE_CONTENT_HIT_TOKEN_LIMIT:
-            if modelResponse.hasReasoningContent:
-                return (
-                    "[No visible answer was produced. The model reached the token limit while "
-                    "generating reasoning output.]"
-                )
-            
-            return "[No visible answer was produced. The model reached the token limit.]"
-        
-        return "[The model returned an empty response.]"
-    
+
     def _makeInfoMessages(self, modelResponse: ModelResponse) -> list[str]:
         infoMessages: list[str] = []
         outcome = modelResponse.classifyOutcome()
@@ -77,8 +58,18 @@ class ChatPipeline:
         if outcome == ModelCompletionOutcome.PARTIAL_CONTENT_HIT_TOKEN_LIMIT:
             infoMessages.append("The model stopped because it reached the token limit. The answer may be incomplete.")
 
-        if outcome == ModelCompletionOutcome.NO_VISIBLE_CONTENT_HIT_TOKEN_LIMIT and modelResponse.hasReasoningContent:
-            infoMessages.append("The model spent the completion budget on reasoning before producing visible content.")
+        if outcome == ModelCompletionOutcome.NO_VISIBLE_CONTENT_HIT_TOKEN_LIMIT:
+            if modelResponse.hasReasoningContent:
+                infoMessages.append(
+                    "No visible answer was produced. The model reached the token limit while generating reasoning."
+                )
+            else:
+                infoMessages.append(
+                    "No visible answer was produced. The model reached the token limit."
+                )
+        
+        if outcome == ModelCompletionOutcome.EMPTY_RESPONSE:
+            infoMessages.append("The model returned an empty response.")
         
         completionDetails = self._makeCompletionDetails(modelResponse)
         if completionDetails:
