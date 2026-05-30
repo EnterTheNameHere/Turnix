@@ -1,10 +1,11 @@
+# backend/runtime/appInstance.py
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
 
 from backend.memory.messageStore import MessageStore
-from backend.pipeline.chatPipeline import ChatPipeline
+from backend.pipeline.chatPipeline import ChatPipeline, ChatPipelineResult
 from backend.pipeline.modelProvider import MockModelProvider, ModelProvider
 from backend.pipeline.promptBuilder import PromptBuilder
 
@@ -63,7 +64,7 @@ class AppInstance:
             return
         self.state = AppInstanceState.STOPPED
 
-    def handleUserMessage(self, userText: str) -> str:
+    def handleUserMessage(self, userText: str) -> ChatPipelineResult:
         if self.state != AppInstanceState.RUNNING:
             raise RuntimeError(f"AppInstance '{self.appInstanceId}' is not running")
         return self.chatPipeline.runUserMessage(userText)
