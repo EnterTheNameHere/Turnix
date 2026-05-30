@@ -1,6 +1,7 @@
 # backend/pipeline/__init__.py
 from backend.pipeline.chatPipeline import ChatPipeline, ChatPipelineResult, EmptyUserMessageError
 from backend.pipeline.llamaCppServerProvider import (
+    LlamaCppContextExceededError,
     LlamaCppServerConfig,
     LlamaCppServerProvider,
     LlamaCppServerProviderError,
@@ -19,6 +20,7 @@ __all__ = [
     "ChatPipeline",
     "ChatPipelineResult",
     "EmptyUserMessageError",
+    "LlamaCppContextExceededError",
     "LlamaCppServerConfig",
     "LlamaCppServerProvider",
     "LlamaCppServerProviderError",
