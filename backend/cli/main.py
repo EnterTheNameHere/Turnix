@@ -1,3 +1,4 @@
+# backend/cli/main.py
 from __future__ import annotations
 
 import argparse
@@ -35,8 +36,8 @@ def parseArgs(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--llama-url",
-        default="http://localhost:1234",
-        help="Base URL for llama.cpp server (default: http://localhost:1234)",
+        default="http://127.0.0.1:1234",
+        help="Base URL for llama.cpp server (default: http://127.0.0.1:1234)",
     )
     parser.add_argument(
         "--llama-model",
