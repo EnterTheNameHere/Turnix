@@ -37,6 +37,6 @@ class TerminalAdapter:
                 print(f"error> {type(err).__name__}: {err}")
                 continue
 
-            print(f"ai> {result.assistantText}")
+            print(f"ai> {result.modelResponse.content}")
             for infoMessage in result.infoMessages:
                 print(f"info> {infoMessage}")
