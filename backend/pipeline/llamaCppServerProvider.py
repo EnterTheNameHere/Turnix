@@ -13,6 +13,45 @@ from backend.pipeline.modelProvider import ModelResponse, ModelTimings, ModelUsa
 
 class LlamaCppServerProviderError(RuntimeError):
     """Raised when llama.cpp server communication or response parsing fails."""
+    
+    def __init__(
+        self,
+        message: str,
+        *,
+        statusCode: int | None = None,
+        errorType: str | None = None,
+        serverMessage: str | None = None,
+        providerDetails: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.statusCode = statusCode
+        self.errorType = errorType
+        self.serverMessage = serverMessage
+        self.providerDetails = providerDetails or {}
+
+
+class LlamaCppContextExceededError(LlamaCppServerProviderError):
+    """Raised when llama.cpp rejects a request because it exceeds context size."""
+    
+    def __init__(
+        self,
+        message: str,
+        *,
+        promptTokensCount: int | None = None,
+        contextSize: int | None = None,
+        statusCode: int | None = None,
+        serverMessage: str | None = None,
+        providerDetails: dict[str, Any] | None = None
+    ) -> None:
+        super().__init__(
+            message,
+            statusCode=statusCode,
+            errorType="exceed_context_size_error",
+            serverMessage=serverMessage,
+            providerDetails=providerDetails,
+        )
+        self.promptTokensCount = promptTokensCount
+        self.contextSize = contextSize
 
 
 @dataclass(frozen=True)
@@ -75,11 +114,7 @@ class LlamaCppServerProvider:
                 responseBody = response.read().decode("utf-8", errors="replace")
         except HTTPError as err:
             errorBody = err.read().decode("utf-8", errors="replace")
-            errorPreview = self._previewFromStart(errorBody)
-            
-            raise LlamaCppServerProviderError(
-                f"llama.cpp HTTP error {err.code}: {errorPreview}"
-            ) from err
+            self._raiseHttpError(err, errorBody)
         except TimeoutError as err:
             raise LlamaCppServerProviderError(
                 f"llama.cpp request timed out after {self.config.timeoutSeconds} seconds"
@@ -104,6 +139,78 @@ class LlamaCppServerProvider:
             raise LlamaCppServerProviderError("llama.cpp returned JSON that is not an object")
         
         return JsonPostResult(responseJson=parsed, wallMilliseconds=wallMilliseconds)
+    
+    def _raiseHttpError(self, err: HTTPError, errorBody: str) -> None:
+        parsedError = self._parseErrorBody(errorBody)
+        if parsedError is None:
+            errorPreview = self._previewFromStart(errorBody)
+            raise LlamaCppServerProviderError(
+                f"llama.cpp HTTP error {err.code}: {errorPreview}",
+                statusCode=err.code,
+            ) from err
+        
+        errorObject = parsedError.get("error")
+        if not isinstance(errorObject, dict):
+            errorPreview = self._previewFromStart(errorBody)
+            raise LlamaCppServerProviderError(
+                f"llama.cpp HTTP error {err.code}: {errorPreview}",
+                statusCode=err.code,
+                providerDetails=parsedError,
+            ) from err
+        
+        errorType = self._extractOptionalString(errorObject, "type")
+        serverMessage = self._extractOptionalString(errorObject, "message")
+        serverCode = self._extractOptionalInt(errorObject, "code")
+        statusCode = serverCode if serverCode is not None else err.code
+        
+        if errorType == "exceed_context_size_error":
+            promptTokensCount = self._extractOptionalInt(errorObject, "n_prompt_tokens")
+            contextSize = self._extractOptionalInt(errorObject, "n_ctx")
+            raise LlamaCppContextExceededError(
+                self._makeContextExceededMessage(promptTokensCount, contextSize, serverMessage),
+                promptTokensCount=promptTokensCount,
+                contextSize=contextSize,
+                statusCode=statusCode,
+                serverMessage=serverMessage,
+                providerDetails=errorObject,
+            ) from err
+        
+        message = serverMessage or self._previewFromStart(errorBody)
+        raise LlamaCppServerProviderError(
+            f"llama.cpp {errorType or 'http_error'} {statusCode}: {message}",
+            statusCode=statusCode,
+            errorType=errorType,
+            serverMessage=serverMessage,
+            providerDetails=errorObject,
+        ) from err
+    
+    def _parseErrorBody(self, errorBody: str) -> dict[str, Any] | None:
+        try:
+            parsed = json.loads(errorBody)
+        except json.JSONDecodeError:
+            return None
+        
+        if isinstance(parsed, dict):
+            return parsed
+        
+        return None
+    
+    def _makeContextExceededMessage(
+        self,
+        promptTokensCount: int | None,
+        contextSize: int | None,
+        serverMessage: str | None,
+    ) -> str:
+        if promptTokensCount is not None and contextSize is not None:
+            return (
+                f"llama.cpp context exceeded: request used {promptTokensCount} prompt tokens, "
+                f"context size is {contextSize}."
+            )
+        
+        if serverMessage:
+            return f"llama.cpp context exceeded: {serverMessage}"
+        
+        return "llama.cpp context exceeded."
     
     def _parseModelResponse(self, responseJson: dict[str, Any], wallMilliseconds: float) -> ModelResponse:
         choices = responseJson.get("choices")
