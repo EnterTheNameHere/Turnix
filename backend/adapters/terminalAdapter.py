@@ -1,3 +1,4 @@
+# backend/adapters/terminalAdapter.py
 from __future__ import annotations
 
 from backend.pipeline.chatPipeline import EmptyUserMessageError
@@ -5,7 +6,7 @@ from backend.runtime.appInstance import AppInstance
 
 
 class TerminalAdapter:
-    """In-process terminal adapter for the Milestone 2 chat AppInstance."""
+    """In-process terminal adapter for the default Turnix AppInstance."""
 
     def __init__(self, *, appInstance: AppInstance) -> None:
         self.appInstance = appInstance
@@ -24,11 +25,11 @@ class TerminalAdapter:
                 print()
                 break
 
-            if userText.strip() == "/exit":
+            if userText.strip() == "/exit" or userText.strip() == "/quit":
                 break
 
             try:
-                assistantText = self.appInstance.handleUserMessage(userText)
+                result = self.appInstance.handleUserMessage(userText)
             except EmptyUserMessageError as err:
                 print(f"error> {err}")
                 continue
@@ -36,4 +37,6 @@ class TerminalAdapter:
                 print(f"error> {type(err).__name__}: {err}")
                 continue
 
-            print(f"ai> {assistantText}")
+            print(f"ai> {result.assistantText}")
+            for infoMessage in result.infoMessages:
+                print(f"info> {infoMessage}")
