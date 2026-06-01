@@ -7,6 +7,7 @@ from enum import Enum
 from backend.memory.messageStore import MessageStore
 from backend.pipeline.chatPipeline import ChatPipeline, ChatPipelineResult
 from backend.pipeline.modelProvider import MockModelProvider, ModelProvider
+from backend.pipeline.promptBudget import PromptTokenBudgetPolicy
 from backend.pipeline.promptBuilder import PromptBuilder
 
 
@@ -25,23 +26,26 @@ class AppInstanceIdentity:
 
 
 class AppInstance:
-    """Minimal live AppInstance for the hardcoded terminal AI chat."""
+    """Live AppInstance for the terminal chat runtime."""
 
     def __init__(
         self,
         *,
         identity: AppInstanceIdentity,
         modelProvider: ModelProvider | None = None,
+        promptTokenBudgetPolicy: PromptTokenBudgetPolicy | None = None,
     ) -> None:
         self.identity = identity
         self.state = AppInstanceState.CREATED
         self.messageStore = MessageStore()
         self.promptBuilder = PromptBuilder()
         self.modelProvider = modelProvider or MockModelProvider()
+        self.promptTokenBudgetPolicy = promptTokenBudgetPolicy or PromptTokenBudgetPolicy()
         self.chatPipeline = ChatPipeline(
             messageStore=self.messageStore,
             promptBuilder=self.promptBuilder,
             modelProvider=self.modelProvider,
+            promptTokenBudgetPolicy=self.promptTokenBudgetPolicy,
         )
 
     @property
