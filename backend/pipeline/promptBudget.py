@@ -119,7 +119,7 @@ class PromptTokenBudgetPolicy:
                 "newest message is too large for the configured prompt token budget: "
                 f"last_message_token_count={lastMessageTokenCount}, "
                 f"prompt_token_budget={promptTokenBudget}, "
-                f"token_count_source={self.tokenCounter.tokenCountSource}"
+                f"token_count_source={self.tokenCounter.tokenCountSource}",
             )
         
         keptMessages: list[dict[str, str]] = [requiredLastMessage]
@@ -165,7 +165,7 @@ class PromptTokenBudgetPolicy:
                 "configured prompt token budget is not positive: "
                 f"context_size={self.config.contextSize}, "
                 f"reserved_response_token_count={self.config.reservedResponseTokenCount}, "
-                f"safety_margin_token_count={self.config.safetyMarginTokenCount}"
+                f"safety_margin_token_count={self.config.safetyMarginTokenCount}",
             )
 
         return promptTokenBudget

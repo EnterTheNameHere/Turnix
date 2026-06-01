@@ -41,7 +41,7 @@ class LlamaCppContextExceededError(LlamaCppServerProviderError):
         contextSize: int | None = None,
         statusCode: int | None = None,
         serverMessage: str | None = None,
-        providerDetails: dict[str, Any] | None = None
+        providerDetails: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
             message,
@@ -117,11 +117,11 @@ class LlamaCppServerProvider:
             self._raiseHttpError(err, errorBody)
         except TimeoutError as err:
             raise LlamaCppServerProviderError(
-                f"llama.cpp request timed out after {self.config.timeoutSeconds} seconds"
+                f"llama.cpp request timed out after {self.config.timeoutSeconds} seconds",
             ) from err
         except URLError as err:
             raise LlamaCppServerProviderError(
-                f"llama.cpp server is not reachable at {self.config.baseUrl}: {err.reason}"
+                f"llama.cpp server is not reachable at {self.config.baseUrl}: {err.reason}",
             ) from err
         finally:
             wallMilliseconds = (perf_counter() - startedAt) * 1000.0
@@ -132,7 +132,7 @@ class LlamaCppServerProvider:
             errorPreview = self._previewAroundPosition(responseBody, err.pos)
             
             raise LlamaCppServerProviderError(
-                f"llama.cpp response is not valid JSON: {err.msg} at position {err.pos}\n{errorPreview}"
+                f"llama.cpp response is not valid JSON: {err.msg} at position {err.pos}\n{errorPreview}",
             ) from err
         
         if not isinstance(parsed, dict):
