@@ -1,13 +1,15 @@
+# backend/runtime/runtimeHost.py
 from __future__ import annotations
 
 from backend.pipeline.modelProvider import ModelProvider
+from backend.pipeline.promptBudget import PromptTokenBudgetPolicy
 from backend.runtime.appInstance import AppInstance, AppInstanceIdentity, AppInstanceState
 from backend.runtime.roots import RepoOnlyRootLocator
 from backend.runtime.workspace import RuntimeWorkspace
 
 
 class RuntimeHost:
-    """Minimal RuntimeHost implementation."""
+    """Runtime host for local Turnix execution."""
 
     def __init__(self, *, rootLocator: RepoOnlyRootLocator | None = None) -> None:
         self.rootLocator = rootLocator or RepoOnlyRootLocator()
@@ -24,7 +26,13 @@ class RuntimeHost:
         print("Workspace acquired.")
         return self.workspace
 
-    def startAppInstance(self, appPackId: str, *, modelProvider: ModelProvider | None = None) -> AppInstance:
+    def startAppInstance(
+        self,
+        appPackId: str,
+        *,
+        modelProvider: ModelProvider | None = None,
+        promptTokenBudgetPolicy: PromptTokenBudgetPolicy | None = None,
+    ) -> AppInstance:
         if not self.isRunning:
             raise RuntimeError("RuntimeHost is not running")
 
@@ -34,6 +42,7 @@ class RuntimeHost:
                 appInstanceId=f"{appPackId}-current-run",
             ),
             modelProvider=modelProvider,
+            promptTokenBudgetPolicy=promptTokenBudgetPolicy,
         )
         print(f"Starting AppInstance: {appPackId}")
         appInstance.start()
