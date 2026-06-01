@@ -1,139 +1,187 @@
 # backend/pipeline/promptBudget.py
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from enum import StrEnum
-import math
+from typing import Protocol
 
 
-class PromptBudgetMode(StrEnum):
-    """Supported prompt budget modes for Milestone 2 chat requests."""
+class PromptTokenBudgetMode(StrEnum):
+    """Supported prompt token budget modes for chat model requests."""
 
     NONE = "none"
     ESTIMATED = "estimated"
 
 
-class PromptBudgetExceededError(ValueError):
-    """Raised when required prompt content cannot fit the configured prompt budget."""
+class PromptTokenBudgetExceededError(ValueError):
+    """Raised when required prompt content cannot fit the configured prompt token budget."""
+
+
+class PromptTokenCounter(Protocol):
+    """Counts or estimates prompt tokens for OpenAI-style chat messages."""
+    
+    @property
+    def tokenCountSource(self) -> str:
+        """Human-readable source name for diagnostic output."""
+        ...
+    
+    def countChatPromptTokens(self, messages: list[dict[str, str]]) -> int | None:
+        """Returns token count when available, or None when this counter does not count."""
+        ...
 
 
 @dataclass(frozen=True)
-class PromptBudgetConfig:
+class PromptTokenBudgetConfig:
     """Configuration for fitting model messages into a prompt token budget."""
 
-    mode: PromptBudgetMode = PromptBudgetMode.NONE
     contextSize: int | None = None
-    maxCompletionTokens: int = 512
-    safetyMarginTokens: int = 128
-    estimatedCharactersPerToken: float = 3.0
+    reservedResponseTokenCount: int = 512
+    safetyMarginTokenCount: int = 128
 
 
 @dataclass(frozen=True)
-class PromptBudgetResult:
-    """Result of applying a prompt budget policy to model messages."""
+class PromptTokenBudgetTrimResult:
+    """Result of applying a prompt token budget trimming policy to model messages."""
 
-    messages: list[dict[str, str]]
-    mode: PromptBudgetMode
+    keptMessages: list[dict[str, str]]
     wasTrimmed: bool = False
+    usedPromptTokenCount: int | None = None
     droppedMessageCount: int = 0
-    estimatedPromptTokens: int | None = None
     promptTokenBudget: int | None = None
+    remainingPromptTokenBudget: int | None = None
     tokenCountSource: str | None = None
 
 
-class PromptBudgetPolicy:
-    """Fits OpenAI-style chat messages into a configured prompt budget."""
+class NoPromptTokenCounter:
+    """Token counter strategy that intentionally disables prompt budgeting."""
+    
+    @property
+    def tokenCountSource(self) -> str:
+        return "none"
+    
+    def countChatPromptTokens(self, messages: list[dict[str, str]]) -> int | None:
+        return None
 
-    def __init__(self, config: PromptBudgetConfig | None = None) -> None:
-        self.config = config or PromptBudgetConfig()
 
-    def fitMessages(self, messages: list[dict[str, str]]) -> PromptBudgetResult:
-        copiedMessages = [dict(message) for message in messages]
-        if self.config.mode == PromptBudgetMode.NONE:
-            return PromptBudgetResult(
-                messages=copiedMessages,
-                mode=self.config.mode,
-            )
-
-        promptTokenBudget = self._getPromptTokenBudget()
-        if promptTokenBudget is None:
-            return PromptBudgetResult(
-                messages=copiedMessages,
-                mode=PromptBudgetMode.NONE,
-            )
-
-        return self._fitEstimatedMessages(copiedMessages, promptTokenBudget)
-
-    def _getPromptTokenBudget(self) -> int | None:
-        if self.config.contextSize is None or self.config.contextSize <= 0:
-            return None
-
-        promptTokenBudget = self.config.contextSize - self.config.maxCompletionTokens - self.config.safetyMarginTokens
-        if promptTokenBudget <= 0:
-            raise PromptBudgetExceededError(
-                "configured prompt token budget is not positive: "
-                f"context_size={self.config.contextSize}, "
-                f"max_completion_tokens={self.config.maxCompletionTokens}, "
-                f"safety_margin_tokens={self.config.safetyMarginTokens}"
-            )
-
-        return promptTokenBudget
-
-    def _fitEstimatedMessages(
-        self,
-        messages: list[dict[str, str]],
-        promptTokenBudget: int,
-    ) -> PromptBudgetResult:
-        if not messages:
-            return PromptBudgetResult(
-                messages=[],
-                mode=self.config.mode,
-                estimatedPromptTokens=0,
-                promptTokenBudget=promptTokenBudget,
-                tokenCountSource="estimated",
-            )
-
-        requiredMessage = messages[-1]
-        requiredMessageTokens = self._estimateMessagesTokens([requiredMessage])
-        if requiredMessageTokens > promptTokenBudget:
-            raise PromptBudgetExceededError(
-                "newest message is too large for the configured prompt token budget: "
-                f"estimated_prompt_tokens={requiredMessageTokens}, "
-                f"prompt_token_budget={promptTokenBudget}"
-            )
-
-        keptMessages: list[dict[str, str]] = [requiredMessage]
-        keptPromptTokens = requiredMessageTokens
-        droppedMessageCount = 0
-
-        for message in reversed(messages[:-1]):
-            candidateTokens = self._estimateMessagesTokens([message])
-            if keptPromptTokens + candidateTokens > promptTokenBudget:
-                droppedMessageCount += 1
-                continue
-
-            keptMessages.insert(0, message)
-            keptPromptTokens += candidateTokens
-
-        return PromptBudgetResult(
-            messages=keptMessages,
-            mode=self.config.mode,
-            wasTrimmed=droppedMessageCount > 0,
-            droppedMessageCount=droppedMessageCount,
-            estimatedPromptTokens=keptPromptTokens,
-            promptTokenBudget=promptTokenBudget,
-            tokenCountSource="estimated",
-        )
-
-    def _estimateMessagesTokens(self, messages: list[dict[str, str]]) -> int:
+class EstimatedPromptTokenCounter:
+    """Local heuristic token counter for cheap approximate prompt budgeting."""
+    
+    def __init__(self, *, estimatedCharactersPerToken: float = 3.0) -> None:
+        self.estimatedCharactersPerToken = estimatedCharactersPerToken
+    
+    @property
+    def tokenCountSource(self) -> str:
+        return "estimated"
+    
+    def countChatPromptTokens(self, messages: list[dict[str, str]]) -> int:
         characterCount = 0
         for message in messages:
             characterCount += len(str(message.get("role", "")))
             characterCount += len(str(message.get("content", "")))
             characterCount += 8
-
-        charactersPerToken = self.config.estimatedCharactersPerToken
+        
+        charactersPerToken = self.estimatedCharactersPerToken
         if charactersPerToken <= 0.0:
             charactersPerToken = 3.0
-
+        
         return max(1, math.ceil(characterCount / charactersPerToken))
+
+
+class PromptTokenBudgetPolicy:
+    """Fits OpenAI-style chat messages into a configured prompt token budget."""
+
+    def __init__(
+        self,
+        *,
+        config: PromptTokenBudgetConfig | None = None,
+        tokenCounter: PromptTokenCounter | None = None,
+    ) -> None:
+        self.config = config or PromptTokenBudgetConfig()
+        self.tokenCounter = tokenCounter or NoPromptTokenCounter()
+
+    def trimMessagesToBudget(self, messages: list[dict[str, str]]) -> PromptTokenBudgetTrimResult:
+        if not messages:
+            return PromptTokenBudgetTrimResult(keptMessages=[])
+        
+        messagesCopy = [dict(message) for message in messages]
+        promptTokenBudget = self._getPromptTokenBudget()
+        if promptTokenBudget is None:
+            return PromptTokenBudgetTrimResult(keptMessages=messagesCopy)
+
+        requiredLastMessage = messagesCopy[-1]
+        lastMessageTokenCount = self.tokenCounter.countChatPromptTokens([requiredLastMessage])
+        if lastMessageTokenCount is None:
+            return PromptTokenBudgetTrimResult(keptMessages=messagesCopy)
+        
+        if lastMessageTokenCount > promptTokenBudget:
+            raise PromptTokenBudgetExceededError(
+                "newest message is too large for the configured prompt token budget: "
+                f"last_message_token_count={lastMessageTokenCount}, "
+                f"prompt_token_budget={promptTokenBudget}, "
+                f"token_count_source={self.tokenCounter.tokenCountSource}"
+            )
+        
+        keptMessages: list[dict[str, str]] = [requiredLastMessage]
+        usedPromptTokenCount = lastMessageTokenCount
+        
+        olderMessages = messagesCopy[:-1]
+        for message in reversed(olderMessages):
+            candidateMessages = [message, *keptMessages]
+            candidateTokenCount = self.tokenCounter.countChatPromptTokens(candidateMessages)
+            if candidateTokenCount is None:
+                return PromptTokenBudgetTrimResult(keptMessages=messagesCopy)
+            
+            if candidateTokenCount > promptTokenBudget:
+                break
+            
+            keptMessages.insert(0, message)
+            usedPromptTokenCount = candidateTokenCount
+        
+        droppedMessageCount = len(messagesCopy) - len(keptMessages)
+        remainingPromptTokenBudget = promptTokenBudget - usedPromptTokenCount
+        
+        return PromptTokenBudgetTrimResult(
+            keptMessages=keptMessages,
+            wasTrimmed=droppedMessageCount > 0,
+            usedPromptTokenCount=usedPromptTokenCount,
+            droppedMessageCount=droppedMessageCount,
+            promptTokenBudget=promptTokenBudget,
+            remainingPromptTokenBudget=remainingPromptTokenBudget,
+            tokenCountSource=self.tokenCounter.tokenCountSource,
+        )
+
+    def _getPromptTokenBudget(self) -> int | None:
+        if self.config.contextSize is None or self.config.contextSize <= 0:
+            return None
+
+        promptTokenBudget = (
+            self.config.contextSize
+            - self.config.reservedResponseTokenCount
+            - self.config.safetyMarginTokenCount
+        )
+        if promptTokenBudget <= 0:
+            raise PromptTokenBudgetExceededError(
+                "configured prompt token budget is not positive: "
+                f"context_size={self.config.contextSize}, "
+                f"reserved_response_token_count={self.config.reservedResponseTokenCount}, "
+                f"safety_margin_token_count={self.config.safetyMarginTokenCount}"
+            )
+
+        return promptTokenBudget
+
+
+def makePromptTokenCounter(
+    mode: PromptTokenBudgetMode,
+    *,
+    estimatedCharactersPerToken: float = 3.0,
+) -> PromptTokenCounter:
+    if mode == PromptTokenBudgetMode.NONE:
+        return NoPromptTokenCounter()
+    
+    if mode == PromptTokenBudgetMode.ESTIMATED:
+        return EstimatedPromptTokenCounter(
+            estimatedCharactersPerToken=estimatedCharactersPerToken,
+        )
+
+    raise ValueError(f"unsupported prompt token budget mode: {mode}")
