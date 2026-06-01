@@ -95,7 +95,7 @@ class ChatPipeline:
         if modelResponse.timings.wallMilliseconds is not None:
             details.append(f"wall_ms={modelResponse.timings.wallMilliseconds:.1f}")
         
-        if modelResponse.timings.predictedMilliseconds is not None:
+        if modelResponse.timings.predictedTokensPerSecond  is not None:
             details.append(f"predicted_tokens/s={modelResponse.timings.predictedTokensPerSecond:.2f}")
         
         if not details:

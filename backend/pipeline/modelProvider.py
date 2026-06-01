@@ -42,7 +42,7 @@ class ModelResponse:
     content: str
     finishReason: str | None = None
     reasoningContent: str = ""
-    model: str | None = ""
+    model: str | None = None
     usage: ModelUsage = field(default_factory=ModelUsage)
     timings: ModelTimings = field(default_factory=ModelTimings)
     providerDetails: dict[str, Any] = field(default_factory=dict)
