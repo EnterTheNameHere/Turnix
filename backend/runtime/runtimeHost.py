@@ -1,11 +1,15 @@
 # backend/runtime/runtimeHost.py
 from __future__ import annotations
 
-from backend.pipeline.modelProvider import ModelProvider
-from backend.pipeline.promptBudget import PromptTokenBudgetPolicy
+from typing import TYPE_CHECKING
+
 from backend.runtime.appInstance import AppInstance, AppInstanceIdentity, AppInstanceState
 from backend.runtime.roots import RepoOnlyRootLocator
 from backend.runtime.workspace import RuntimeWorkspace
+
+if TYPE_CHECKING:
+    from backend.pipeline.modelProvider import ModelProvider
+    from backend.pipeline.promptBudget import PromptTokenBudgetPolicy
 
 
 class RuntimeHost:
@@ -34,7 +38,8 @@ class RuntimeHost:
         promptTokenBudgetPolicy: PromptTokenBudgetPolicy | None = None,
     ) -> AppInstance:
         if not self.isRunning:
-            raise RuntimeError("RuntimeHost is not running")
+            msg = "RuntimeHost is not running"  # TODO: Make this its own exception?
+            raise RuntimeError(msg)
 
         appInstance = AppInstance(
             identity=AppInstanceIdentity(
