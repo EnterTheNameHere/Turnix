@@ -3,10 +3,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 class RepoRootNotFoundError(RuntimeError):
     """Raised when a Turnix repository root cannot be identified."""
+
+    def __init__(self, searchedPaths: Sequence[Path]) -> None:
+        self.searchedPaths = tuple(searchedPaths)
+        searched = ", ".join(str(path) for path in self.searchedPaths)
+        super().__init__(f"could not find Turnix repository root. Searched: {searched}")
 
 
 @dataclass(frozen=True)
@@ -59,8 +68,7 @@ class RepoOnlyRootLocator:
             if self._isRepoRoot(candidate):
                 return candidate.resolve()
 
-        searched = ", ".join(str(path) for path in candidates)
-        raise RepoRootNotFoundError(f"Turnix repository root was not found. Searched: '{searched}'")
+        raise RepoRootNotFoundError(candidates)
 
     def ensureRuntimeDirectories(self, roots: RuntimeRoots) -> None:
         """Creates missing repo-local runtime directories."""
