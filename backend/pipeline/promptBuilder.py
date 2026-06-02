@@ -1,7 +1,10 @@
 # backend/pipeline/promptBuilder.py
 from __future__ import annotations
 
-from backend.memory.messageStore import ChatMessage, MessageStore
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from backend.memory.messageStore import ChatMessage, MessageStore
 
 
 class PromptBuilder:
