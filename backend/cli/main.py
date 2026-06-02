@@ -14,7 +14,6 @@ from backend.pipeline.promptBudget import (
 )
 from backend.runtime.runtimeHost import RuntimeHost
 
-
 DEFAULT_APP_PACK_ID = "terminal-ai-chat"
 
 
@@ -22,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parseArgs(argv)
     modelProvider = makeModelProvider(args)
     promptTokenBudgetPolicy = makePromptTokenBudgetPolicy(args)
-    
+
     host = RuntimeHost()
     try:
         host.start()
@@ -103,7 +102,7 @@ def parseArgs(argv: list[str] | None = None) -> argparse.Namespace:
 def makeModelProvider(args: argparse.Namespace) -> ModelProvider:
     if args.provider == "mock":
         return MockModelProvider()
-    
+
     return LlamaCppServerProvider(
         config=LlamaCppServerConfig(
             baseUrl=args.llama_url,
