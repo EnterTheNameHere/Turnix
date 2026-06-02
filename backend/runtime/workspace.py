@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from backend.runtime.roots import RuntimeRoots
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from backend.runtime.roots import RuntimeRoots
 
 
 @dataclass(frozen=True)
@@ -13,5 +17,5 @@ class RuntimeWorkspace:
     roots: RuntimeRoots
 
     @property
-    def repoRoot(self):
+    def repoRoot(self) -> Path:
         return self.roots.repo
