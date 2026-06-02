@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 from backend.memory.messageStore import MessageStore
 from backend.pipeline.chatPipeline import ChatPipeline, ChatPipelineResult
@@ -11,7 +11,7 @@ from backend.pipeline.promptBudget import PromptTokenBudgetPolicy
 from backend.pipeline.promptBuilder import PromptBuilder
 
 
-class AppInstanceState(str, Enum):
+class AppInstanceState(StrEnum):
     CREATED = "created"
     RUNNING = "running"
     STOPPED = "stopped"
@@ -60,7 +60,9 @@ class AppInstance:
         if self.state == AppInstanceState.RUNNING:
             return
         if self.state == AppInstanceState.STOPPED:
-            raise RuntimeError(f"AppInstance '{self.appInstanceId}' cannot be restarted after stop")
+            # TODO: Make this its own exception?
+            msg = f"AppInstance '{self.appInstanceId}' cannot be restarted after stop"
+            raise RuntimeError(msg)
         self.state = AppInstanceState.RUNNING
 
     def stop(self) -> None:
@@ -70,5 +72,6 @@ class AppInstance:
 
     def handleUserMessage(self, userText: str) -> ChatPipelineResult:
         if self.state != AppInstanceState.RUNNING:
-            raise RuntimeError(f"AppInstance '{self.appInstanceId}' is not running")
+            msg = f"AppInstance '{self.appInstanceId}' is not running"  # TODO: Make this its own exception?
+            raise RuntimeError(msg)
         return self.chatPipeline.runUserMessage(userText)
