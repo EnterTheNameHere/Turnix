@@ -1,8 +1,12 @@
 # backend/adapters/terminalAdapter.py
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from backend.pipeline.chatPipeline import EmptyUserMessageError
-from backend.runtime.appInstance import AppInstance
+
+if TYPE_CHECKING:
+    from backend.runtime.appInstance import AppInstance
 
 
 class TerminalAdapter:
