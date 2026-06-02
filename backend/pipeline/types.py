@@ -2,17 +2,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Iterable, Literal, TypedDict
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
-
-class MessageRole(str, Enum):
+class MessageRole(StrEnum):
     system = "system"
     user = "user"
     assistant = "assistant"
     tool = "tool"
-
 
 
 @dataclass
@@ -29,12 +30,10 @@ class QueryItem:
         return {"role": self.role.value, "content": self.text or ""}
 
 
-
 class ThreadSnapshot(TypedDict, total=False):
     kind: Literal["threadSnapshot"]
     order: list[str]
     headers: dict[str, dict[str, Any]] # oid -> { role, preview, status?, ts? }
-
 
 
 class ThreadDelta(TypedDict, total=False):
@@ -45,7 +44,6 @@ class ThreadDelta(TypedDict, total=False):
     headers: dict[str, dict[str, Any]] | None
 
 
-
 class MessageDelta(TypedDict, total=False):
     kind: Literal["messageDelta"]
     oid: str
@@ -53,7 +51,6 @@ class MessageDelta(TypedDict, total=False):
     text: str | None
     fields: dict[str, Any] | None
     headers: dict[str, dict[str, Any]] | None
-
 
 
 def iterAsOpenAI(items: Iterable[QueryItem]) -> list[dict[str, str]]:
