@@ -2,15 +2,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-from backend.memory.messageStore import MessageStore
 from backend.pipeline.modelProvider import ModelCompletionOutcome, ModelProvider, ModelResponse
 from backend.pipeline.promptBudget import PromptTokenBudgetPolicy, PromptTokenBudgetTrimResult
-from backend.pipeline.promptBuilder import PromptBuilder
+
+if TYPE_CHECKING:
+    from backend.memory.messageStore import MessageStore
+    from backend.pipeline.promptBuilder import PromptBuilder
 
 
 class EmptyUserMessageError(ValueError):
-    """Raised when the terminal chat pipeline receives an empty user message."""
+    """Raised when the chat pipeline receives an empty user message."""
+
+    def __init__(self) -> None:
+        super().__init__("user message is empty")
 
 
 @dataclass(frozen=True)
