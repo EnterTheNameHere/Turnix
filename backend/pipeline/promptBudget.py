@@ -17,6 +17,60 @@ class PromptTokenBudgetMode(StrEnum):
 class PromptTokenBudgetExceededError(ValueError):
     """Raised when required prompt content cannot fit the configured prompt token budget."""
 
+    def __init__(self, message: str, *, details: dict[str, object] | None = None) -> None:
+        super().__init__(message)
+        self.details = details or {}
+
+    @classmethod
+    def forNewestMessageTooLarge(
+        cls,
+        *,
+        lastMessageTokenCount: int,
+        promptTokenBudget: int,
+        tokenCountSource: str,
+    ) -> PromptTokenBudgetExceededError:
+        message = (
+            "newest message is too large for the configured prompt token budget: "
+            f"last_message_token_count={lastMessageTokenCount}, "
+            f"prompt_token_budget={promptTokenBudget}, "
+            f"token_count_source={tokenCountSource}"
+        )
+        return cls(
+            message,
+            details={
+                "reason": "newest_message_too_large",
+                "lastMessageTokenCount": lastMessageTokenCount,
+                "promptTokenBudget": promptTokenBudget,
+                "tokenCountSource": tokenCountSource,
+            },
+        )
+
+    @classmethod
+    def forNoPromptTokensRemaining(
+        cls,
+        *,
+        contextSize: int,
+        reservedResponseTokenCount: int,
+        safetyMarginTokenCount: int,
+    ) -> PromptTokenBudgetExceededError:
+        promptTokenBudget = contextSize - reservedResponseTokenCount - safetyMarginTokenCount
+        message = (
+            "prompt token budget is invalid because no prompt tokens remain: "
+            f"context_size={contextSize}"
+            f"reserved_response_token_count={reservedResponseTokenCount}, "
+            f"safety_margin_token_count={safetyMarginTokenCount}, "
+            f"prompt_token_budget={promptTokenBudget}"
+        )
+        return cls(
+            message,
+            details={
+                "reason": "no_prompt_tokens_remaining",
+                "contextSize": contextSize,
+                "reservedResponseTokenCount": reservedResponseTokenCount,
+                "safetyMarginTokenCount": safetyMarginTokenCount,
+            },
+        )
+
 
 class PromptTokenCounter(Protocol):
     """Counts or estimates prompt tokens for OpenAI-style chat messages."""
@@ -115,11 +169,10 @@ class PromptTokenBudgetPolicy:
             return PromptTokenBudgetTrimResult(keptMessages=messagesCopy)
 
         if lastMessageTokenCount > promptTokenBudget:
-            raise PromptTokenBudgetExceededError(
-                "newest message is too large for the configured prompt token budget: "
-                f"last_message_token_count={lastMessageTokenCount}, "
-                f"prompt_token_budget={promptTokenBudget}, "
-                f"token_count_source={self.tokenCounter.tokenCountSource}",
+            raise PromptTokenBudgetExceededError.forNewestMessageTooLarge(
+                lastMessageTokenCount=lastMessageTokenCount,
+                promptTokenBudget=promptTokenBudget,
+                tokenCountSource=self.tokenCounter.tokenCountSource,
             )
 
         keptMessages: list[dict[str, str]] = [requiredLastMessage]
@@ -156,16 +209,13 @@ class PromptTokenBudgetPolicy:
             return None
 
         promptTokenBudget = (
-            self.config.contextSize
-            - self.config.reservedResponseTokenCount
-            - self.config.safetyMarginTokenCount
+            self.config.contextSize - self.config.reservedResponseTokenCount - self.config.safetyMarginTokenCount
         )
         if promptTokenBudget <= 0:
-            raise PromptTokenBudgetExceededError(
-                "configured prompt token budget is not positive: "
-                f"context_size={self.config.contextSize}, "
-                f"reserved_response_token_count={self.config.reservedResponseTokenCount}, "
-                f"safety_margin_token_count={self.config.safetyMarginTokenCount}",
+            raise PromptTokenBudgetExceededError.forNoPromptTokensRemaining(
+                contextSize=self.config.contextSize,
+                reservedResponseTokenCount=self.config.reservedResponseTokenCount,
+                safetyMarginTokenCount=self.config.safetyMarginTokenCount,
             )
 
         return promptTokenBudget
@@ -184,4 +234,5 @@ def makePromptTokenCounter(
             estimatedCharactersPerToken=estimatedCharactersPerToken,
         )
 
-    raise ValueError(f"unsupported prompt token budget mode: {mode}")
+    msg = f"unsupported prompt token budget mode: {mode}"  # TODO: Make this its own exception?
+    raise ValueError(msg)
