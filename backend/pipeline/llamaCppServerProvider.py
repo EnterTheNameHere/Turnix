@@ -13,7 +13,7 @@ from backend.pipeline.modelProvider import ModelResponse, ModelTimings, ModelUsa
 
 class LlamaCppServerProviderError(RuntimeError):
     """Raised when llama.cpp server communication or response parsing fails."""
-    
+
     def __init__(
         self,
         message: str,
@@ -32,7 +32,7 @@ class LlamaCppServerProviderError(RuntimeError):
 
 class LlamaCppContextExceededError(LlamaCppServerProviderError):
     """Raised when llama.cpp rejects a request because it exceeds context size."""
-    
+
     def __init__(
         self,
         message: str,
@@ -57,7 +57,7 @@ class LlamaCppContextExceededError(LlamaCppServerProviderError):
 @dataclass(frozen=True)
 class LlamaCppServerConfig:
     """Configuration for llama.cpp server chat completion."""
-    
+
     baseUrl: str = "http://127.0.0.1:1234"
     model: str = ""
     temperature: float = 0.6
@@ -68,14 +68,14 @@ class LlamaCppServerConfig:
 @dataclass(frozen=True)
 class JsonPostResult:
     """Validated JSON response plus local request timing."""
-    
+
     responseJson: dict[str, Any]
     wallMilliseconds: float
 
-    
+
 class LlamaCppServerProvider:
     """Synchronous llama.cpp chat provider."""
-    
+
     def __init__(self, config: LlamaCppServerConfig | None = None) -> None:
         self.config = config or LlamaCppServerConfig()
 
@@ -91,7 +91,7 @@ class LlamaCppServerProvider:
         }
         if self.config.model:
             payload["model"] = self.config.model
-        
+
         postResult = self._postJson("/v1/chat/completions", payload)
         return self._parseModelResponse(postResult.responseJson, postResult.wallMilliseconds)
     
@@ -125,7 +125,7 @@ class LlamaCppServerProvider:
             ) from err
         finally:
             wallMilliseconds = (perf_counter() - startedAt) * 1000.0
-        
+
         try:
             parsed = json.loads(responseBody)
         except json.JSONDecodeError as err:
@@ -134,7 +134,7 @@ class LlamaCppServerProvider:
             raise LlamaCppServerProviderError(
                 f"llama.cpp response is not valid JSON: {err.msg} at position {err.pos}\n{errorPreview}",
             ) from err
-        
+
         if not isinstance(parsed, dict):
             raise LlamaCppServerProviderError("llama.cpp returned JSON that is not an object")
         
@@ -148,7 +148,7 @@ class LlamaCppServerProvider:
                 f"llama.cpp HTTP error {err.code}: {errorPreview}",
                 statusCode=err.code,
             ) from err
-        
+
         errorObject = parsedError.get("error")
         if not isinstance(errorObject, dict):
             errorPreview = self._previewFromStart(errorBody)
@@ -157,12 +157,12 @@ class LlamaCppServerProvider:
                 statusCode=err.code,
                 providerDetails=parsedError,
             ) from err
-        
+
         errorType = self._extractOptionalString(errorObject, "type")
         serverMessage = self._extractOptionalString(errorObject, "message")
         serverCode = self._extractOptionalInt(errorObject, "code")
         statusCode = serverCode if serverCode is not None else err.code
-        
+
         if errorType == "exceed_context_size_error":
             promptTokensCount = self._extractOptionalInt(errorObject, "n_prompt_tokens")
             contextSize = self._extractOptionalInt(errorObject, "n_ctx")
@@ -189,7 +189,7 @@ class LlamaCppServerProvider:
             parsed = json.loads(errorBody)
         except json.JSONDecodeError:
             return None
-        
+
         if isinstance(parsed, dict):
             return parsed
         
@@ -223,7 +223,7 @@ class LlamaCppServerProvider:
         
         finishReason = self._extractOptionalString(firstChoice, "finish_reason")
         content, reasoningContent = self._extractMessageContent(firstChoice)
-        
+
         return ModelResponse(
             content=content,
             finishReason=finishReason,
@@ -244,12 +244,12 @@ class LlamaCppServerProvider:
         if isinstance(message, dict):
             content = message.get("content")
             reasoningContent = message.get("reasoning_content")
-            
+
             return (
                 content if isinstance(content, str) else "",
                 reasoningContent if isinstance(reasoningContent, str) else "",
             )
-        
+
         text = firstChoice.get("text")
         if isinstance(text, str):
             return text, ""
@@ -260,24 +260,24 @@ class LlamaCppServerProvider:
         usage = responseJson.get("usage")
         if not isinstance(usage, dict):
             return ModelUsage()
-        
+
         promptTokensDetails = usage.get("prompt_tokens_details")
         cachedPromptTokens = None
         if isinstance(promptTokensDetails, dict):
             cachedPromptTokens = self._extractOptionalInt(promptTokensDetails, "cached_tokens")
-        
+
         return ModelUsage(
             promptTokens=self._extractOptionalInt(usage, "prompt_tokens"),
             completionTokens=self._extractOptionalInt(usage, "completion_tokens"),
             totalTokens=self._extractOptionalInt(usage, "total_tokens"),
             cachedPromptTokens=cachedPromptTokens,
         )
-    
+
     def _extractTimings(self, responseJson: dict[str, Any], wallMilliseconds: float) -> ModelTimings:
         timings = responseJson.get("timings")
         if not isinstance(timings, dict):
             return ModelTimings(wallMilliseconds=wallMilliseconds)
-        
+
         return ModelTimings(
             wallMilliseconds=wallMilliseconds,
             promptMilliseconds=self._extractOptionalFloat(timings, "prompt_ms"),
@@ -298,26 +298,26 @@ class LlamaCppServerProvider:
 
         if isinstance(value, int):
             return value
-        
+
         return None
     
     def _extractOptionalFloat(self, source: dict[str, Any], key: str) -> float | None:
         value = source.get(key)
         if isinstance(value, bool):
             return None
-        
+
         if isinstance(value, int | float):
             return float(value)
-        
+
         return None
     
     def _previewAroundPosition(self, text: str, position: int, radius: int = 200) -> str:
         start = max(0, position - radius)
         end = min(len(text), position + radius + 1)
-        
+
         prefix = "..." if start > 0 else ""
         suffix = "..." if end < len(text) else ""
-        
+
         return prefix + text[start:end] + suffix
     
     def _previewFromStart(self, text: str, limit: int = 400) -> str:
