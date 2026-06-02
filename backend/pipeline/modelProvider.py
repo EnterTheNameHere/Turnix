@@ -8,7 +8,7 @@ from typing import Any, Protocol
 
 class ModelCompletionOutcome(StrEnum):
     """Turnix-facing classification for valid model completion results."""
-    
+
     COMPLETE = "complete"
     PARTIAL_CONTENT_HIT_TOKEN_LIMIT = "partial_content_hit_token_limit"
     NO_VISIBLE_CONTENT_HIT_TOKEN_LIMIT = "no_visible_content_hit_token_limit"
@@ -28,7 +28,7 @@ class ModelUsage:
 @dataclass(frozen=True)
 class ModelTimings:
     """Timing information for one model provider call when available."""
-    
+
     wallMilliseconds: float | None = None
     promptMilliseconds: float | None = None
     predictedMilliseconds: float | None = None
@@ -38,7 +38,7 @@ class ModelTimings:
 @dataclass(frozen=True)
 class ModelResponse:
     """Validated Turnix-facing model completion response."""
-    
+
     content: str
     finishReason: str | None = None
     reasoningContent: str = ""
@@ -46,29 +46,29 @@ class ModelResponse:
     usage: ModelUsage = field(default_factory=ModelUsage)
     timings: ModelTimings = field(default_factory=ModelTimings)
     providerDetails: dict[str, Any] = field(default_factory=dict)
-    
+
     @property
     def hasVisibleContent(self) -> bool:
         return bool(self.content.strip())
-    
+
     @property
     def hasReasoningContent(self) -> bool:
         return bool(self.reasoningContent.strip())
-    
+
     @property
     def reachedTokenLimit(self) -> bool:
         return self.finishReason == "length"
-    
+
     def classifyOutcome(self) -> ModelCompletionOutcome:
         if self.hasVisibleContent and self.reachedTokenLimit:
             return ModelCompletionOutcome.PARTIAL_CONTENT_HIT_TOKEN_LIMIT
-        
+
         if self.hasVisibleContent:
             return ModelCompletionOutcome.COMPLETE
-        
+
         if self.reachedTokenLimit:
             return ModelCompletionOutcome.NO_VISIBLE_CONTENT_HIT_TOKEN_LIMIT
-        
+
         return ModelCompletionOutcome.EMPTY_RESPONSE
 
 
@@ -95,7 +95,7 @@ class MockModelProvider:
                 finishReason="stop",
                 model="mock",
             )
-        
+
         return ModelResponse(
             content=f"Mock response: {lastUser}",
             finishReason="stop",
