@@ -1,0 +1,454 @@
+TURNIX DV3 AUDIT NOTE
+=====================
+
+Source file:
+    docs/design/DA-04_MEMORY_STATE_AND_AUTHORITATIVE_COMMIT_MODEL.txt
+
+Branch:
+    Dv3
+
+Loaded file metadata:
+    DOC_REV: 24
+    DOC_GIT: b7469b6
+    GitHub blob SHA seen by assistant:
+        629956eb4b3e3ee0ed5ce1216e32fba04c2b2d76
+
+Audit note status:
+    First-pass Dv3 architecture audit note.
+
+Audit scope:
+    This note audits architectural meaning, doctrine, and direction.
+    It does not audit formatting unless formatting/structure affects meaning,
+    machine interpretation, rule priority, or human usability as reference.
+
+Important excluded source:
+    AI_WORKFLOW_BOOTSTRAP.txt was intentionally not read.
+    It is part of the workflow system being audited separately and should not
+    bias this architecture pass.
+
+
+SUMMARY
+=======
+
+DA-04 is strong and highly Dv3-compatible.
+
+It answers the question left by DA-03:
+
+    If trace is evidence, where does authoritative truth live?
+
+DA-04 answers:
+
+    committed state
+
+This is the correct architecture.
+
+DA-04 defines how Turnix distinguishes runtime memory from authoritative state,
+how state is layered and mutated, and how committed state changes become
+deterministic, restorable, and traceable without depending on observational
+history.
+
+Overall recommendation:
+
+    KEEP
+
+No heavy rewrite is recommended.
+
+
+CURRENT CLASSIFICATION
+======================
+
+Overall classification:
+
+    KEEP
+
+Detailed classification:
+
+    01. Interpretation Basis
+        KEEP
+
+    02. Core Concept
+        KEEP
+        Excellent authority split.
+
+    03. Memory, State, and Authority Classes
+        KEEP
+        Correctly resolves trace-vs-state authority.
+
+    04. Identity and Revision Terms
+        KEEP
+        Good conflict-detection basis.
+
+    05. Memory Layers
+        KEEP
+        Strong. Concrete layer catalog should be defined later without turning
+        examples into a closed taxonomy.
+
+    06. Transactions
+        KEEP
+        Very strong.
+
+    06.3 Commit Conflict Detection
+        KEEP
+        Especially no silent merge, no last-write-wins, and no heuristic
+        reconciliation.
+
+    06.4 State and Transaction Trace Obligations
+        KEEP BUT ALIGN WORDING WITH DA-03
+        "Trace-visible" should be understood as an emission obligation, not a
+        trace-persistence requirement for committed-state correctness.
+
+    07. Relation to Orchestration Units
+        KEEP
+        Important dependency on DA-24.
+
+    08. Persistence as Protection, Not Truth
+        KEEP
+        Excellent.
+
+    09. Static Data and Mutation Intent
+        KEEP
+        Patch vs Copy is useful and should survive.
+
+    10. Revisions and State Garbage Collection
+        KEEP
+        Good latest-state preservation.
+
+    11. Tooling-Initiated State Mutation Constraints
+        KEEP
+        Important for debugger/editor safety.
+
+    12. Committed-State Restoration Boundary
+        KEEP
+        Strong and precise.
+
+    13. Migration Commit Rule
+        KEEP
+
+    14. What Is Explicitly Not Required
+        KEEP
+        Especially no trace-backed correctness.
+
+    15. Locked Summary
+        KEEP
+
+
+WHAT IS ALREADY NAILED
+======================
+
+DA-04 correctly says runtime memory is not authoritative merely because it is:
+
+    - resident
+    - visible
+    - active
+    - currently in use
+
+Committed state becomes authoritative only after crossing the explicit commit
+boundary defined by this document.
+
+This prevents the bad model:
+
+    value is in RAM, therefore value is truth
+
+Correct Dv3 model:
+
+    memory = runtime representation
+    state = committed authority
+    trace = evidence / observation
+    persistence = protection
+
+
+RELATION TO DA-03
+=================
+
+DA-03 says trace is evidence, not committed state.
+
+DA-04 confirms this by placing traces in non-authoritative material.
+
+DA-04 also says observational material may explain what happened, but it does
+not define committed truth.
+
+Correct combined model:
+
+    Trace can prove or explain within retained evidence.
+    Trace does not define committed truth.
+    Trace loss does not corrupt committed state.
+    Committed state is restorable without requiring non-authoritative
+    observational history.
+
+This means the earlier DA-01 recommendation should be refined:
+
+    trace emission obligations may be required
+    trace persistence may still be policy-governed and lossy
+    trace loss affects evidential completeness, not committed-state correctness
+
+
+AUTHORITY CLASSES
+=================
+
+DA-04 correctly uses exactly two authority classes:
+
+    Authoritative
+    Non-authoritative
+
+This is good.
+
+Avoid introducing semi-authoritative or partially-authoritative categories.
+
+Material may be important, required to attempt, useful for explanation, or
+required by policy, but for committed-state truth it is either authoritative or
+non-authoritative.
+
+This binary distinction should survive.
+
+
+MEMORY LAYER MODEL
+==================
+
+DA-04 correctly defines memory as layered by:
+
+    - authority
+    - scope
+    - lifetime
+    - rollback boundary
+
+It also says there is no single global memory object.
+
+This matches the Dv3 runtime model.
+
+Concrete layer kinds should be defined later as implementation/spec detail.
+
+The example list should not become a closed taxonomy.
+
+
+TRANSACTION MODEL
+=================
+
+DA-04's transaction model is strong.
+
+A transaction is temporary staging overlay.
+
+Staged mutation is not authoritative.
+
+A transaction resolves only by:
+
+    - commit
+    - abort
+
+Commit and abort are atomic.
+
+Partial propagation does not occur.
+
+A transaction does not remain half-committed.
+
+This should remain unchanged.
+
+
+NESTED TRANSACTION MODEL
+========================
+
+Child transaction commits propagate into parent transactions, not directly into
+committed layers while an enclosing transaction exists.
+
+Only the outermost transaction commit mutates committed layers.
+
+This is important for nested pipeline/session behavior.
+
+It allows child work to complete locally without becoming committed system
+truth until the enclosing boundary commits.
+
+
+CONFLICT DETECTION
+==================
+
+DA-04's conflict detection model is strong.
+
+A transaction records the base committed revision visible when a key was first
+touched.
+
+Commit conflicts occur when committed existence or committed revision changed.
+
+A conflicting commit fails deterministically.
+
+Turnix does not silently use:
+
+    - merge
+    - last-write-wins
+    - heuristic reconciliation
+
+Any override requires explicit user decision or explicit policy elsewhere.
+
+This is exactly the right no-magic behavior.
+
+
+TRACE-VISIBLE STATE MUTATION
+============================
+
+DA-04 says authoritative state mutation and transaction outcomes remain
+trace-visible.
+
+This is correct.
+
+After DA-03, this should be interpreted carefully:
+
+    trace-visible = the domain has a trace emission obligation
+
+Not:
+
+    retained trace evidence is required for committed-state correctness
+
+DA-04 already supports this interpretation because it says traces are
+non-authoritative and committed-state correctness does not depend on trace
+completeness.
+
+Possible future clarification:
+
+    State and transaction trace obligations are emission obligations. Trace
+    retention and loss are governed by DA-03. Loss of trace evidence affects
+    evidential completeness, not committed-state correctness.
+
+
+PERSISTENCE AS PROTECTION, NOT TRUTH
+====================================
+
+This is one of the strongest sections.
+
+DA-04 correctly says:
+
+    Persistence protects committed state against loss.
+    Persistence does not define what state truth is.
+    Committed state truth is determined by the commit model.
+    Persistence failure does not silently redefine committed-state truth.
+
+This gives the clean stack:
+
+    Commit model decides truth.
+    Persistence protects truth.
+    Trace explains or reports what happened.
+
+
+STATIC DATA MUTATION INTENT
+===========================
+
+Patch vs Copy should remain.
+
+Static data is read-only by default.
+
+Mutation intent must be explicit:
+
+    Patch:
+        original key remains authoritative
+        patch is applied on read
+        patch is persisted as overlay data
+
+    Copy:
+        new key is created
+        data is copied and modified
+        original remains unchanged
+
+Turnix must not silently substitute Patch for Copy or Copy for Patch.
+
+This will matter for packs, mods, content, prompt fragments, defaults, and
+templates.
+
+
+REVISION RETENTION AND LATEST STATE
+===================================
+
+DA-04 correctly allows revision retention to be policy-driven.
+
+Older revisions may be removed.
+
+However, garbage collection does not remove data required to reconstruct the
+latest committed state for each committed key.
+
+This matches the Dv3/latest-state requirement:
+
+    latest committed state must remain restorable
+
+History can be bounded.
+
+Current committed truth cannot be silently rewritten by retention policy.
+
+
+TOOLING MUTATION
+================
+
+Tooling can inspect through controlled surfaces.
+
+Tooling-initiated mutation occurs inside a transaction and follows the same
+commit/abort rules as runtime mutation.
+
+Tooling does not bypass authority boundaries merely because it is privileged
+tooling.
+
+This is important for debugger, memory viewer, CLI inspection, and future
+editor-like tools.
+
+The debug UI must not become a separate state authority path.
+
+
+RESTORATION BOUNDARY
+====================
+
+DA-04's restoration boundary is correct.
+
+Turnix supports deterministic restoration of committed state from retained
+authoritative material.
+
+This does not imply:
+
+    - deterministic reconstruction of in-flight activity
+    - deterministic replay of external side effects
+    - reproducibility of uncommitted activity
+
+Correct model:
+
+    Restore committed state: yes.
+    Reconstruct uncommitted runtime activity: no.
+    Replay external side effects: no.
+
+
+EXPLICIT NON-REQUIREMENTS
+=========================
+
+DA-04 correctly says Turnix does not require:
+
+    - infinite committed history retention
+    - journal-backed determinism
+    - journal-backed recovery
+    - trace-backed correctness
+    - concurrency-first execution
+    - deterministic reconstruction of uncommitted runtime activity
+
+This is a useful anti-overengineering shield.
+
+Especially keep:
+
+    no trace-backed correctness
+
+
+CURRENT FINAL RECOMMENDATION
+============================
+
+Keep DA-04.
+
+No heavy rewrite is recommended.
+
+Main future clarification:
+
+    Align "trace-visible" wording with DA-03's distinction between trace
+    emission obligation and trace persistence guarantee.
+
+Do not make trace authoritative state.
+
+Do not make persistence define truth.
+
+Do not let tooling, adapters, same-language execution, or Orchestration Unit
+existence bypass the commit boundary.
+
+--- doc-meta ---
+DOC_ID: REWRITE-DA-04
+DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-04_RECOMMENDATION.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
