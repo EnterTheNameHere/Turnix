@@ -16,6 +16,7 @@ Loaded file metadata:
 Audit note status:
     First-pass Dv3 architecture audit note.
     Updated after DA-28 RuntimeHost audit.
+    Updated after DA-03 tracing audit and DA-04 memory/state audit.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -72,6 +73,25 @@ Update after DA-28:
     user-controlled local infrastructure, not necessarily inside one process
     or on one physical machine.
 
+Update after DA-03 and DA-04:
+
+    DA-03 clarifies that trace is evidence, not committed state.
+
+    DA-04 clarifies that committed state is the authoritative state boundary.
+
+    Therefore DA-01 should not imply that retained trace evidence is required
+    for committed-state correctness.
+
+    The better doctrine is:
+
+        domain-required trace emission is not optional as an obligation
+
+        trace persistence is policy-governed and may be lossy when loss is
+        represented honestly
+
+        trace loss weakens evidential completeness, but does not change
+        committed-state correctness
+
 
 CURRENT CLASSIFICATION
 ======================
@@ -98,7 +118,7 @@ More precise classification:
         KEEP
 
     04. Locked Invariants
-        KEEP BUT PATCH TRACE OPTIONALITY
+        KEEP BUT PATCH TRACE OPTIONALITY USING DA-03/DA-04 MODEL
 
     04.19 Local-first
         KEEP BUT CLARIFY WITH DA-28 LANGUAGE
@@ -208,40 +228,71 @@ Current problem:
 
 Why this is a problem:
 
-    Dv3 elevates tracing from "debugging/diagnostic convenience" to a core
-    runtime proof/replay spine.
+    Dv3 elevates tracing from "debugging/diagnostic convenience" to structured
+    runtime evidence.
 
-    Current Dv3 trace doctrine:
+    However, DA-03 and DA-04 clarify that trace must not be confused with
+    committed state.
 
-        If not traced, it did not happen.
+Corrected Dv3 trace doctrine after DA-03 and DA-04:
 
-    Turnix can still have optional diagnostic traces, but authoritative runtime
-    trace records cannot be globally treated as optional if they are used for:
+    Trace is evidence, not committed state.
 
-        - reproducibility
-        - reversibility
-        - recovery
-        - state-change proof
-        - orchestration history
-        - replay
-        - explaining what happened
+    Committed state is authoritative only after crossing the DA-04 commit
+    boundary.
+
+    Trace evidence can prove or explain only within retained trace evidence.
+
+    Trace persistence is policy-governed, bounded, and may be lossy when loss
+    is represented honestly.
+
+    Trace loss weakens evidential completeness, but does not change
+    committed-state correctness.
+
+Current Dv3 trace mantra:
+
+    If not traced, it did not happen.
+
+Correct interpretation:
+
+    If an action is not present in retained trace evidence, the trace cannot
+    prove that it happened.
+
+    If trace evidence was lost, the loss itself must be represented honestly
+    when possible.
+
+Incorrect interpretation to avoid:
+
+    If trace persistence fails, committed state becomes invalid.
 
 Required distinction:
 
-    There are at least two kinds of trace-like data:
+    There are at least three relevant categories:
 
-        1. Authoritative runtime trace / proof trace
-           Required when it is part of Turnix's ability to explain, replay,
-           recover, or prove meaningful runtime transitions.
+        1. Domain-required trace emission
+           A subject-owning document may require that a domain attempt to emit
+           trace evidence for a meaningful action.
 
-        2. Optional diagnostic trace / verbose trace
-           Best-effort observability data that may be dropped without breaking
-           runtime integrity.
+           This is an emission obligation.
+
+        2. Trace persistence / retention
+           The trace substrate does not guarantee that all emitted trace
+           evidence is durably retained forever.
+
+           Retention is policy-governed and may be bounded or lossy when loss
+           is represented honestly.
+
+        3. Optional diagnostic / verbose trace
+           Development-mode or diagnostic enrichment that may be best-effort
+           and non-authoritative.
 
 Recommended change:
 
     Patch the best-effort section to avoid saying "traces are optional" as a
     global doctrine.
+
+    But do not overcorrect by making trace persistence equivalent to committed
+    state persistence.
 
 Suggested replacement direction:
 
@@ -251,13 +302,18 @@ Suggested replacement direction:
            - verbose diagnostic traces
            - analytics
 
-    04.11. Authoritative trace records required for reproducibility,
-           reversibility, recovery, state-change proof, or orchestration history
-           are not optional data.
+    04.11. Domain-required trace evidence is not optional as an emission
+           obligation.
 
-    04.12. If a trace record is part of Turnix's ability to explain, recover,
-           replay, or prove runtime behavior, failure to record it is treated as
-           a runtime integrity concern rather than cosmetic loss.
+    04.12. Trace persistence and retention are policy-governed. Retained trace
+           evidence may be bounded, rotated, or lossy when loss is represented
+           honestly.
+
+    04.13. Trace loss weakens evidential completeness. It does not by itself
+           change committed-state correctness.
+
+    04.14. Committed-state truth is governed by the authoritative commit model,
+           not by trace completeness.
 
 Reasoning:
 
@@ -265,8 +321,25 @@ Reasoning:
     effort, while preventing the architecture from treating all traces as
     disposable.
 
-    Without this distinction, later documents may contradict DA-01 when they
-    define tracing as foundational.
+    It also preserves the DA-03/DA-04 distinction:
+
+        trace explains and proves within retained evidence
+        committed state defines authoritative state truth
+
+    Without this distinction, DA-01 may conflict with DA-03 and DA-04 in either
+    direction:
+
+        too weak:
+            traces are merely optional diagnostics
+
+        too strong:
+            trace persistence becomes state authority
+
+    The corrected middle is:
+
+        required trace emission where a domain owns such an obligation
+        honest loss evidence when trace is missing/lost
+        committed-state correctness remains governed by DA-04
 
 
 THIRD ISSUE: LOCAL-FIRST CLARIFICATION
@@ -397,6 +470,20 @@ Update after DA-28:
     This means DA-01 should keep the authority ordering short and doctrinal,
     while DA-28 owns the detailed RuntimeHost explanation.
 
+Update after DA-04:
+
+    The phrase "SavePack stores durable executed state" may eventually need to
+    be checked against later SavePack/AppInstance documents.
+
+    DA-04 confirms that committed state, not trace, is authoritative.
+
+    If SavePack wording is revised later, likely preferred wording may become:
+
+        SavePack stores durable AppInstance state.
+
+    Do not change this in DA-01 until SavePack/AppInstance documents are
+    audited.
+
 The "no guarantees outside orchestration" invariant should remain.
 
 Reason:
@@ -407,6 +494,14 @@ Reason:
     side-effect-only module execution outside Turnix orchestration, Turnix
     should not promise reversibility, tracing, recovery, or lifecycle control
     for that behavior.
+
+Update after DA-24:
+
+    DA-24 confirms that mutation outside orchestration does not acquire Turnix
+    guarantees by implication.
+
+    DA-24 also confirms that OrchestrationUnit authority does not bypass DA-04
+    transaction and commit rules.
 
 
 READABILITY / MACHINE INTERPRETATION NOTE
@@ -425,6 +520,13 @@ Observed risk:
     Listing "traces" beside "logs" and "analytics" under optional best-effort
     data may be interpreted as a broad statement that traces are nonessential.
 
+Updated risk after DA-03 and DA-04:
+
+    Overcorrecting the trace wording may create the opposite problem.
+
+    A machine assistant could incorrectly infer that retained trace evidence is
+    required for committed-state correctness.
+
 Recommended handling:
 
     Keep the natural doctrine style, but be careful when giving examples in
@@ -435,7 +537,12 @@ Recommended handling:
     In this file, trace should be split into:
 
         - optional diagnostic/verbose traces
-        - authoritative runtime/proof traces
+        - domain-required trace emission obligations
+        - policy-governed trace persistence/retention/loss evidence
+
+    Also preserve the DA-04 rule:
+
+        committed-state correctness is not trace-backed correctness
 
 
 RECOMMENDED EDIT ORDER
@@ -446,10 +553,18 @@ RECOMMENDED EDIT ORDER
    Goal:
        Move Turnix from "pack-built system" toward "runtime domain".
 
-2. Patch trace optionality.
+2. Patch trace optionality using DA-03/DA-04 wording.
 
    Goal:
-       Prevent contradiction with Dv3 trace doctrine.
+       Prevent contradiction with Dv3 trace doctrine while preserving the
+       distinction between trace evidence and committed state.
+
+       Required final doctrine:
+
+           trace emission may be required by domain obligation
+           trace persistence is policy-governed
+           trace loss weakens evidential completeness
+           committed-state correctness is governed by DA-04
 
 3. Add local-first clarification using DA-28 wording.
 
@@ -513,8 +628,6 @@ Impact on DA-01 recommendations:
 
     The DA-01 identity rewrite remains valid.
 
-    The DA-01 trace optionality patch remains valid.
-
     The DA-01 local-first recommendation should be strengthened using DA-28's
     wording:
 
@@ -529,6 +642,96 @@ Impact on DA-01 recommendations:
     mode, LAN exposure, or RuntimeHost lifecycle detail.
 
 
+UPDATE AFTER DA-03 AND DA-04
+============================
+
+DA-03 and DA-04 refine the earlier DA-01 trace recommendation.
+
+Earlier DA-01 recommendation said, in effect:
+
+    authoritative runtime trace is not optional
+
+That was directionally useful because DA-01 had been treating traces too much
+like optional diagnostics.
+
+However, after DA-03 and DA-04, the wording should be more precise.
+
+DA-03 says:
+
+    - trace is structured evidence
+    - trace is not logging
+    - trace is not committed state
+    - trace retention is policy-governed
+    - trace loss is acceptable only when represented as loss evidence
+    - trace proves only within retained trace evidence
+
+DA-04 says:
+
+    - committed state is authoritative only after commit
+    - traces are non-authoritative material
+    - committed-state correctness is not trace-backed correctness
+    - retained authoritative material restores committed state, not trace alone
+
+Therefore DA-01 should say:
+
+    domain-required trace emission is not optional as an obligation
+
+not:
+
+    trace persistence is always mandatory
+
+Corrected trace doctrine for DA-01:
+
+    Trace evidence is not merely optional diagnostics.
+
+    Domain-owning documents may require trace emission for meaningful actions.
+
+    Trace persistence and retention are policy-governed.
+
+    Trace loss must not be hidden or presented as complete evidence.
+
+    Trace loss weakens evidential completeness.
+
+    Trace loss does not by itself change committed-state correctness.
+
+    Committed-state truth is governed by DA-04's commit model.
+
+Impact on DA-01 recommendations:
+
+    The DA-01 trace optionality patch remains valid, but its wording should be
+    refined.
+
+    Do not make DA-01 imply that retained trace evidence is as authoritative as
+    committed state.
+
+    Do not make DA-01 imply trace-backed correctness.
+
+    Keep DA-01 at doctrine level and let DA-03/DA-04 own the detailed split.
+
+
+UPDATE AFTER DA-24
+==================
+
+DA-24 confirms the "no guarantees outside orchestration" invariant.
+
+DA-24 says mutation outside orchestration does not acquire Turnix guarantees by
+implication.
+
+DA-24 also says OrchestrationUnit authority does not bypass DA-04 transaction
+and commit rules.
+
+Impact on DA-01 recommendations:
+
+    Keep the "no guarantees outside orchestration" invariant.
+
+    Do not expand DA-01 into detailed OrchestrationUnit doctrine.
+
+    DA-01 should only preserve the top-level rule:
+
+        Turnix guarantees apply only inside Turnix-owned orchestration,
+        transaction, capability, persistence, policy, and trace boundaries.
+
+
 CURRENT FINAL RECOMMENDATION
 ============================
 
@@ -539,7 +742,18 @@ AppPack/modular-pack application system.
 
 Preserve packs as first-class, but not identity-defining.
 
-Patch trace wording so authoritative runtime trace is not optional.
+Patch trace wording so trace is not treated as merely optional diagnostics.
+
+Use DA-03/DA-04 wording for trace:
+
+    domain-required trace emission is not optional as an obligation
+
+    trace persistence is policy-governed and may be lossy when loss is
+    represented honestly
+
+    trace loss weakens evidential completeness
+
+    committed-state correctness is governed by DA-04, not by trace completeness
 
 Clarify local-first using DA-28 wording:
 
@@ -549,12 +763,16 @@ Clarify local-first using DA-28 wording:
 Do not weaken the same-language authority doctrine. It is already correct and
 important.
 
-Do not expand DA-01 into a detailed RuntimeHost specification. DA-28 already
-owns that layer.
+Do not weaken the "no guarantees outside orchestration" invariant. DA-24
+confirms it.
+
+Do not expand DA-01 into a detailed RuntimeHost, trace, memory, or
+OrchestrationUnit specification. DA-28, DA-03, DA-04, and DA-24 already own
+those layers.
 
 --- doc-meta ---
 DOC_ID: REWRITE-DA-01
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-01_RECOMMENDATION.txt
-DOC_REV: 2
-DOC_GIT: 70b6992
+DOC_REV: 3
+DOC_GIT: 3bd3e24
 ----------------
