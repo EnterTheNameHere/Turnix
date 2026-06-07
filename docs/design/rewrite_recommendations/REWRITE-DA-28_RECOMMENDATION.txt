@@ -1,0 +1,412 @@
+TURNIX DV3 AUDIT NOTE
+=====================
+
+Source file:
+    docs/design/DA-28_RUNTIME_HOST_WORKSPACE_OWNERSHIP_AND_COMMAND_SURFACE.txt
+
+Branch:
+    Dv3
+
+Loaded file metadata:
+    DOC_REV: 1
+    DOC_GIT: e5656d5
+    GitHub blob SHA seen by assistant:
+        d2f9cfc70728019683abc9c7b154b8dfe1a25c34
+
+Audit note status:
+    First-pass Dv3 architecture audit note.
+
+Audit scope:
+    This note audits architectural meaning, doctrine, and direction.
+    It does not audit formatting unless formatting/structure affects meaning,
+    machine interpretation, rule priority, or human usability as reference.
+
+Important excluded source:
+    AI_WORKFLOW_BOOTSTRAP.txt was intentionally not read.
+    It is part of the workflow system being audited separately and should not
+    bias this architecture pass.
+
+
+SUMMARY
+=======
+
+DA-28 is strongly compatible with the Dv3 runtime-domain direction.
+
+It correctly defines RuntimeHost as the running Turnix host boundary, not as
+Kernel, not as AppInstance, not as SavePack, not as CLI, not as transport, and
+not as an execution adapter.
+
+The document already prevents RuntimeHost, CLI, launcher mode, browser frontend,
+remote client, deployment shape, command syntax, or implementation framework
+from becoming Turnix authority or identity.
+
+Overall recommendation:
+
+    KEEP WITH SMALL TERMINOLOGY ALIGNMENT
+
+
+CURRENT CLASSIFICATION
+======================
+
+Overall classification:
+
+    KEEP WITH SMALL TERMINOLOGY ALIGNMENT
+
+Detailed classification:
+
+    01. Interpretation Basis
+        KEEP
+
+    02. Core Concept
+        KEEP
+
+    03. RuntimeHost Identity
+        KEEP
+
+    04. Relation to Kernel
+        KEEP
+        Critical section. Already preserves Kernel authority.
+
+    05. Workspace Ownership
+        KEEP
+        Strong protection against silent multi-host mutation.
+
+    06. Relation to AppInstances and SavePacks
+        KEEP
+        Correctly prevents CLI/browser/test/remote paths from owning separate
+        save creation/loading semantics.
+
+    07. Shared Runtime Operation Composition
+        KEEP
+        Very Dv3-compatible.
+
+    08. Startup Modes
+        KEEP
+        Correctly says startup modes are entry workflows, not separate runtime
+        semantics.
+
+    09. Entry Surfaces and Command Surfaces
+        KEEP WITH SMALL TERMINOLOGY ALIGNMENT
+        Align "frontend adapter" wording with Dv3 ExecutionAdapter terminology.
+
+    10. Command Surface Meaning
+        KEEP
+
+    11. Second Host and Existing Host Behavior
+        KEEP
+
+    12. Local-first and LAN Exposure
+        KEEP
+        This section already contains the local-first clarification that DA-01
+        should probably mirror in shorter form.
+
+    13. RuntimeHost Lifecycle
+        KEEP
+
+    14. RuntimeHost Trace Reason Identifiers
+        KEEP
+        Later DA-03 trace substrate must support authoritative RuntimeHost trace
+        evidence.
+
+    15. RuntimeHost Trace Context
+        KEEP
+
+    16. Relation to Implementation Specifications
+        KEEP
+
+    17. What Is Explicitly Not Supported
+        KEEP
+
+    18. Explicitly Open Questions
+        KEEP
+
+    19. Locked Summary
+        KEEP
+
+
+WHAT IS ALREADY NAILED
+======================
+
+DA-28 correctly answers:
+
+    What owns Turnix host execution while Turnix is running?
+    Which workspace or runtime scope is bound?
+    How do entry surfaces reach Kernel-owned authority without becoming
+    authority themselves?
+
+The answer is:
+
+    RuntimeHost owns the running host boundary.
+    Kernel owns runtime authority.
+    Entry surfaces and command surfaces request/observe/control through
+    mediated paths, but do not become authority.
+
+This is the correct Dv3 relationship:
+
+    Kernel
+        authority owner
+
+    RuntimeHost
+        running host boundary
+
+    Entry surfaces / command surfaces
+        controlled ways to enter, observe, request, or control
+
+    AppInstance
+        hosted application instance
+
+    SavePack
+        persisted AppInstance state
+
+    ExecutionAdapter
+        external code/runtime execution boundary
+
+    RPC / transport
+        communication mechanism, not authority
+
+
+PRIMARY POSITIVE FINDING: RUNTIMEHOST DOES NOT REPLACE KERNEL
+=============================================================
+
+DA-28 already says:
+
+    Kernel owns runtime authority.
+    RuntimeHost owns the running host boundary through which Kernel authority
+    is started, exposed, coordinated, and eventually closed.
+
+This is exactly what DA-02 required.
+
+RuntimeHost is not allowed to make non-Kernel code Kernel authority.
+
+RuntimeHost is not allowed to let command surfaces, adapters, transports,
+frontend clients, or LAN clients bypass Kernel-owned authority paths.
+
+This section should remain.
+
+
+WORKSPACE OWNERSHIP FINDING
+===========================
+
+DA-28 has a strong workspace ownership model.
+
+A writable workspace is owned by at most one RuntimeHost at a time unless a
+later authoritative multi-host design defines another mode.
+
+A second RuntimeHost does not silently:
+
+    - acquire writable ownership
+    - downgrade to read-only
+    - ignore existing ownership evidence
+    - overwrite stale ownership evidence
+    - take over stale ownership
+
+Stale ownership recovery is explicit, policy-governed, and trace-visible.
+
+This is correct because it prevents silent multi-host mutation of durable
+Turnix-managed state.
+
+
+APPINSTANCE / SAVEPACK FINDING
+==============================
+
+DA-28 correctly says a RuntimeHost may load zero, one, or multiple AppInstances.
+
+This matches Dv3.
+
+RuntimeHost is not AppInstance.
+
+RuntimeHost may host AppInstances, but AppInstance lifecycle and mutation
+authority remain governed by their owning design areas.
+
+DA-28 also correctly says SavePack creation/loading is not owned by CLI or
+browser launcher behavior.
+
+All entry surfaces use the same Kernel-mediated new-save and existing-save
+paths.
+
+This prevents architecture fracture where CLI, browser, test, launcher, or
+remote-client paths each invent separate save semantics.
+
+
+STARTUP MODE FINDING
+====================
+
+DA-28 correctly says startup modes are entry workflows over shared
+Kernel-mediated runtime operations.
+
+Startup modes do not define independent runtime semantics.
+
+This is important for Dv3.
+
+Examples such as:
+
+    - interactive host mode
+    - one-shot command mode
+    - serve mode
+    - connect mode
+    - test mode
+    - launcher mode
+
+are different ways to enter Turnix, not different versions of Turnix.
+
+This prevents command syntax and launcher behavior from becoming architecture.
+
+
+LOCAL-FIRST FINDING
+===================
+
+DA-28 already contains the local-first clarification needed upstream in DA-01.
+
+It says local-first does not require same-machine execution.
+
+It defines local-first as authoritative runtime and state remaining under
+user-controlled local infrastructure.
+
+It allows:
+
+    - same-machine RuntimeHost and frontend
+    - LAN machine hosting RuntimeHost with another machine as frontend
+    - home server hosting RuntimeHost and SavePack state
+    - powerful local AI machine hosting RuntimeHost-adjacent execution with
+      lighter client presentation surface
+
+This is exactly the desired Dv3 doctrine:
+
+    local-first, not local-only
+
+Recommendation:
+
+    Mirror this idea into DA-01 in shorter form.
+
+
+TRACE FINDING
+=============
+
+DA-28 owns RuntimeHost-domain trace reason identifiers.
+
+This is good.
+
+It defines RuntimeHost trace reasons for:
+
+    - lifecycle
+    - workspace ownership
+    - entry surfaces
+    - LAN and remote exposure
+    - command surfaces
+    - startup modes
+    - host-level runtime operations
+
+It also defines required RuntimeHost trace context.
+
+This supports the Dv3 trace doctrine:
+
+    Trace is proof/evidence, not just optional debugging output.
+
+Dependency:
+
+    DA-03 must define the trace substrate in a way that supports
+    authoritative RuntimeHost trace evidence.
+
+DA-03 must not reduce all traces to optional diagnostic logs.
+
+DA-28 correctly says DA-03 owns the trace substrate, while DA-28 owns
+RuntimeHost lifecycle semantics and RuntimeHost-domain trace reason
+identifiers.
+
+
+TERMINOLOGY ALIGNMENT: FRONTEND ADAPTER
+=======================================
+
+Small issue:
+
+    DA-28 says browser frontend is a frontend surface or frontend adapter into
+    the RuntimeHost.
+
+This is not a major conflict because the sentence is specifically about browser
+frontend behavior.
+
+However, Dv3 has selected ExecutionAdapter as the general adapter category.
+
+Recommendation:
+
+    Do not use FrontendAdapter as the umbrella adapter concept.
+
+Possible future wording:
+
+    Browser frontend is a frontend surface exposed through an ExecutionAdapter
+    or frontend-specific adapter realization.
+
+Or:
+
+    Browser frontend is a UI/front-end surface into RuntimeHost, mediated by
+    the relevant execution adapter and RPC boundaries.
+
+The important distinction:
+
+    ExecutionAdapter = general category
+    Browser/frontend adapter = specific realization or subtype
+
+
+NO MAJOR DV3 CONFLICT FOUND
+===========================
+
+DA-28 does not bind Turnix to:
+
+    - CLI
+    - launcher mode
+    - browser frontend
+    - FastAPI
+    - WebSocket
+    - Python
+    - service wrappers
+    - subprocesses
+    - containers
+    - virtual machines
+    - local-only execution
+    - single AppInstance forever
+    - command syntax as authority
+
+DA-28 explicitly rejects these collapses.
+
+This file is already serving the Dv3 architecture well.
+
+
+RECOMMENDED EDIT ORDER
+======================
+
+1. Keep DA-28 mostly as-is.
+
+2. Later, align "frontend adapter" wording with ExecutionAdapter terminology.
+
+3. When DA-01 is rewritten, mirror DA-28's local-first clarification upward:
+
+       local-first does not require same-machine execution
+       local-first means authoritative runtime/state remain under
+       user-controlled local infrastructure
+
+4. When DA-03 is audited, verify that trace substrate supports DA-28's
+   RuntimeHost trace evidence as authoritative where needed.
+
+5. When DA-23 and DA-27 are audited, verify that ExecutionAdapter terminology
+   becomes the general adapter framing.
+
+
+CURRENT FINAL RECOMMENDATION
+============================
+
+Keep DA-28.
+
+It is already one of the stronger Dv3-compatible documents.
+
+Only minor terminology alignment is needed around frontend adapter wording.
+
+The document correctly prevents RuntimeHost, CLI, launcher, browser frontend,
+remote client, deployment shape, command syntax, or implementation framework
+from becoming Kernel authority or Turnix identity.
+
+--- doc-meta ---
+DOC_ID: REWRITE-DA-28
+DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-28_RECOMMENDATION.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
