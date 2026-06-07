@@ -1,0 +1,380 @@
+TURNIX DV3 AUDIT NOTE
+=====================
+
+Source file:
+    docs/design/DA-03_TRACING_DIAGNOSTICS_AND_OBSERVABILITY.txt
+
+Branch:
+    Dv3
+
+Loaded file metadata:
+    DOC_REV: 21
+    DOC_GIT: c8cc0b8
+    GitHub blob SHA seen by assistant:
+        91d098b6ce484a95908ec8edd993517fb05dd1e1
+
+Audit note status:
+    First-pass Dv3 architecture audit note.
+
+Audit scope:
+    This note audits architectural meaning, doctrine, and direction.
+    It does not audit formatting unless formatting/structure affects meaning,
+    machine interpretation, rule priority, or human usability as reference.
+
+Important excluded source:
+    AI_WORKFLOW_BOOTSTRAP.txt was intentionally not read.
+    It is part of the workflow system being audited separately and should not
+    bias this architecture pass.
+
+
+SUMMARY
+=======
+
+DA-03 is strong and mostly Dv3-compatible.
+
+It already defines tracing as structured evidence, not logging.
+
+It already distinguishes trace evidence from:
+
+    - logs
+    - committed state
+    - committed-state restoration
+    - replay semantics
+    - rollback eligibility
+    - object lifecycle truth outside retained trace evidence
+
+This is important and should be preserved.
+
+The document correctly says DA-03 owns the trace substrate, while subject-owning
+documents own domain-specific trace obligations.
+
+Overall recommendation:
+
+    KEEP BUT CLARIFY TRACE EMISSION VS TRACE PERSISTENCE
+
+
+CURRENT CLASSIFICATION
+======================
+
+Overall classification:
+
+    KEEP BUT CLARIFY TRACE EMISSION VS TRACE PERSISTENCE
+
+Detailed classification:
+
+    01. Interpretation Basis
+        KEEP
+
+    02. Core Concept
+        KEEP
+        Strong. Especially "tracing is not logging."
+
+    03. Trace Substrate Ownership
+        KEEP
+        Correctly separates substrate from domain-specific obligations.
+
+    04. Trace Event Model
+        KEEP
+
+    05. Trace DAG
+        KEEP
+        Causality is explicit. Timestamp is observational.
+
+    06. Parent Links
+        KEEP
+
+    07. Trace Spans
+        KEEP
+
+    08. Trace Roots and Span Stratification
+        KEEP
+
+    09. Trace Reason Field
+        KEEP
+
+    10. Trace Attributes
+        KEEP
+
+    11. Trace Storage and Loss Evidence
+        KEEP BUT CLARIFY
+        Needs explicit distinction between trace emission obligations and
+        trace persistence guarantees.
+
+    12. Trace Access
+        KEEP
+
+    13. User-facing Diagnostics
+        KEEP
+
+    14. Error Envelope Correlation
+        KEEP
+
+    15. Development-mode Trace Enhancements
+        KEEP
+
+    16. No Heuristic Trace Suppression
+        KEEP
+        Strong trace honesty doctrine.
+
+    17. Migrated Domain Trace Obligations
+        KEEP
+
+    18. Explicitly Open Questions
+        KEEP
+
+    19. Locked Summary
+        KEEP BUT UPDATE IF SECTION 11 IS CLARIFIED
+
+
+WHAT IS ALREADY NAILED
+======================
+
+DA-03 correctly says tracing answers:
+
+    What happened, what caused what, and why?
+
+Tracing is structured evidence with explicit reasons and causal links.
+
+Tracing is not logging.
+
+Plain logs are secondary and optional.
+
+Logs do not replace trace evidence.
+
+This directly supports the Dv3 runtime-evidence direction.
+
+
+TRACE IS EVIDENCE, NOT COMMITTED STATE
+======================================
+
+DA-03 correctly says tracing is not authoritative for:
+
+    - committed state
+    - committed-state restoration
+    - replay semantics
+    - rollback eligibility by itself
+    - object lifecycle truth outside retained trace evidence
+
+This is important.
+
+Earlier Dv3 phrasing sometimes suggested trace might rebuild last state by
+itself.
+
+DA-03 corrects that.
+
+Better model:
+
+    Trace = causal/evidential proof within retained trace evidence.
+    Memory/state system = authoritative committed state.
+    SavePack/persistence = durable committed state package.
+    Replay = requires trace plus state/checkpoints/domain semantics, not trace
+    alone.
+
+DA-03 should not be rewritten to make trace into the state system.
+
+
+"IF NOT TRACED, DID NOT HAPPEN"
+===============================
+
+DA-03 already defines this mantra carefully.
+
+It means:
+
+    - trace evidence is proof that a trace-using subsystem recorded the action
+    - if an action cannot be found in retained trace evidence, the action is not
+      provable from trace
+    - trace retention is policy-driven
+    - trace loss is acceptable only when represented as loss evidence
+
+This is the correct interpretation.
+
+It avoids the bad interpretation:
+
+    If trace was lost, reality did not happen.
+
+Correct meaning:
+
+    If trace is absent, trace cannot prove it happened.
+    If trace was lost, loss must itself be represented honestly.
+
+
+MAIN ISSUE: TRACE STORAGE AND LOSS EVIDENCE
+===========================================
+
+Section 11 says trace data is:
+
+    - best-effort persistence
+    - non-blocking
+    - bounded or rotating
+    - safe to drop under pressure
+
+It also says failure to write trace evidence does not block execution and does
+not affect committed-state correctness.
+
+This is coherent if trace is evidence rather than committed state.
+
+However, it can appear to conflict with the stronger DA-01 audit recommendation
+that authoritative trace records required for proof/recovery/replay should not
+be optional.
+
+DA-03 provides the better nuance:
+
+    Trace evidence can be authoritative only within retained evidence.
+    Trace persistence may still be best-effort.
+    The system must not lie about completeness.
+
+Therefore the real distinction should be:
+
+    trace emission obligation
+        A domain may be required to attempt to emit trace evidence for a
+        meaningful action.
+
+    trace persistence guarantee
+        The trace substrate does not guarantee that all emitted trace evidence
+        is durably retained forever.
+
+Recommended clarification:
+
+    Add wording to section 11 distinguishing emission obligation from
+    persistence guarantee.
+
+
+SUGGESTED CLARIFICATION FOR SECTION 11
+======================================
+
+Possible addition:
+
+    11.x. A subject-owning document may require that a domain attempt to emit
+          trace evidence for a meaningful action.
+
+    11.x. Such an obligation is an emission obligation, not a guarantee that
+          trace persistence cannot fail.
+
+    11.x. If required trace evidence cannot be persisted, retained trace
+          evidence records the known loss, failure, or incompleteness when
+          possible.
+
+    11.x. Failure to retain trace evidence weakens evidential completeness; it
+          does not by itself change committed-state correctness.
+
+Reasoning:
+
+    This reconciles:
+
+        - DA-01's desire for tracing as meaningful runtime evidence
+        - DA-03's correct statement that trace is not committed state
+        - DA-28's use of RuntimeHost trace evidence
+        - policy-governed retention/loss
+
+    It also prevents a machine assistant from reading "trace data is
+    best-effort" as "domain trace obligations are optional."
+
+
+RELATION TO DA-01 RECOMMENDATION
+================================
+
+DA-01 recommendation should be refined after reading DA-03.
+
+Earlier DA-01 wording suggested:
+
+    Authoritative trace records required for reproducibility, reversibility,
+    recovery, state-change proof, or orchestration history are not optional
+    data.
+
+After DA-03, better wording is:
+
+    Trace evidence required by a domain obligation is not optional as an
+    emission obligation, but trace persistence remains policy-governed and may
+    be lossy when loss is explicitly represented.
+
+    Trace loss affects evidential completeness. It does not by itself invalidate
+    committed-state correctness.
+
+This refinement should be applied to the DA-01 recommendation note later.
+
+
+NO HEURISTIC TRACE SUPPRESSION
+==============================
+
+Section 16 is strong and should remain.
+
+It says Turnix does not:
+
+    - infer reasons without recording them
+    - fabricate causal links from temporal ordering
+    - hide known trace loss
+    - present incomplete trace evidence as complete
+
+This is the trace honesty doctrine.
+
+Keep it.
+
+
+DEVELOPMENT-MODE TRACE ENRICHMENT
+=================================
+
+Section 15 is good.
+
+Development-mode trace enrichment may include:
+
+    - verbose traces
+    - speculative branches
+    - why-not-chosen explanations
+    - layer-resolution breakdowns
+    - debugger-specific annotations
+
+It is explicit, non-authoritative, does not change runtime behavior, does not
+create additional authority, and does not replace domain-owned trace
+obligations.
+
+This supports the distinction between:
+
+    optional diagnostic/verbose trace
+    domain-required trace evidence
+
+
+DOMAIN TRACE OBLIGATION OWNERSHIP
+=================================
+
+Section 17 is correct.
+
+Domain-specific trace obligations should live in the documents that own the
+domains.
+
+Examples:
+
+    - RuntimeHost obligations belong in DA-28
+    - state/transaction trace obligations belong in DA-04
+    - RPC trace obligations belong in RPC implementation/spec documents
+    - capability obligations belong in capability-owning documents
+    - debugger obligations belong in debugger-owning documents
+
+DA-03 should not become the catalog of all trace reasons.
+
+
+CURRENT FINAL RECOMMENDATION
+============================
+
+Keep DA-03.
+
+Do not rewrite it heavily.
+
+Do not make trace authoritative committed state.
+
+Do not make DA-03 own every domain-specific trace obligation.
+
+Add a clarification to section 11:
+
+    domain trace obligations may require attempted emission of trace evidence,
+    but trace persistence remains policy-governed and may fail or be lossy when
+    loss is represented honestly.
+
+Then update the DA-01 recommendation note so it stops implying trace
+persistence is as authoritative as committed state.
+
+--- doc-meta ---
+DOC_ID: REWRITE-DA-03
+DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-03_RECOMMENDATION.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
