@@ -1,0 +1,464 @@
+TURNIX DV3 AUDIT NOTE
+=====================
+
+Source file:
+    docs/design/DA-01_PROJECT_INVARIANTS_AND_PHILOSOPHY.txt
+
+Branch:
+    Dv3
+
+Loaded file metadata:
+    DOC_REV: 10
+    DOC_GIT: 1aff0d0
+    GitHub blob SHA seen by assistant:
+        4bad8714bfbb5197e9e5099370ce38e00c99b3aa
+
+Audit note status:
+    First-pass Dv3 architecture audit note.
+
+Audit scope:
+    This note audits architectural meaning, doctrine, and direction.
+    It does not audit formatting unless formatting/structure affects meaning,
+    machine interpretation, rule priority, or human usability as reference.
+
+Important excluded source:
+    AI_WORKFLOW_BOOTSTRAP.txt was intentionally not read.
+    It is part of the workflow system being audited separately and should not
+    bias this architecture pass.
+
+
+SUMMARY
+=======
+
+DA-01 is a strong grounding document and should be kept.
+
+It already contains several important Dv3-compatible ideas:
+
+    - Turnix is not merely a plugin loader.
+    - Turnix is not merely a dynamic script runner.
+    - Turnix values continuity, determinism, explicitness, reversibility, and
+      explicit uncertainty.
+    - Kernel owns runtime authority but should not be over-specified.
+    - RuntimeHost, adapters, transports, RPC, capabilities, and SavePack are
+      already separated conceptually.
+    - Same host language does not imply same authority.
+    - Pack-provided Python is not automatically trusted backend implementation
+      code just because Turnix backend is written in Python.
+    - Turnix does not guarantee behavior outside Turnix orchestration.
+
+Main required Dv3 change:
+
+    DA-01 currently still points Turnix toward being a pack-built application
+    system.
+
+    Dv3 moves Turnix into the runtime domain.
+
+    Turnix should be described primarily as a runtime for persistent,
+    local-first, identity-stable, traceable, orchestrated systems.
+
+    Packs remain first-class, but they are not the whole identity of Turnix.
+
+
+CURRENT CLASSIFICATION
+======================
+
+Overall classification:
+
+    KEEP BUT UPDATE
+
+More precise classification:
+
+    01. Interpretation Basis
+        KEEP
+
+    02. Core Identity and Project Goal
+        KEEP BUT GENERALIZE
+
+    02.8 Runtime Authority Ordering
+        KEEP
+
+    02.12-02.13 Same Language Authority
+        KEEP
+
+    03. Core Truth Doctrine
+        KEEP
+
+    04. Locked Invariants
+        KEEP BUT PATCH TRACE OPTIONALITY
+
+    04.19 Local-first
+        KEEP BUT CLARIFY EVENTUALLY
+
+    04.25 No Guarantees Outside Orchestration
+        KEEP
+
+    05. Adjustable Design Attitude
+        KEEP
+
+    06. Explicitly Open Questions
+        KEEP
+
+    07. Why This Area Exists
+        KEEP
+
+
+PRIMARY DV3 ISSUE: TURNIX IDENTITY
+==================================
+
+Current problem:
+
+    The file currently describes Turnix as a persistent, local,
+    identity-stable system "built on modular packs".
+
+Why this is a problem:
+
+    The phrase "built on modular packs" can make packs sound like the
+    foundation of Turnix's identity.
+
+    That points toward:
+
+        Turnix = pack-based app system
+
+    But Dv3 wants:
+
+        Turnix = runtime domain
+        packs = first-class composition/distribution/deployment mechanism
+        apps = one kind of thing the runtime can host
+
+    The earlier direction risks making AppPack feel mandatory for all valid
+    Turnix usage. That would conflict with the emerging Dv3 idea that Turnix
+    subsystems should also be usable in embedded, scripted, test, replay, or
+    server contexts without requiring AppPack as the conceptual root.
+
+New intended doctrine:
+
+    Turnix does not merely run AppPacks.
+    Turnix runs AppInstances.
+    AppPack is one declarative way to create an AppInstance.
+
+Recommended change:
+
+    Rewrite the opening identity section so Turnix is described as a runtime,
+    not as a pack-built app system.
+
+Suggested replacement direction:
+
+    02.1. Turnix exists to provide a persistent, local-first, identity-stable
+          runtime for traceable and orchestrated systems.
+
+    02.2. Turnix is not defined by any single launch mode, pack format, user
+          interface, host process, model provider, or application packaging
+          strategy.
+
+    02.3. Modular packs are a first-class Turnix mechanism for describing,
+          distributing, composing, extending, and persisting runtime behavior,
+          but packs do not define the whole identity of Turnix.
+
+    02.4. Turnix is not:
+          - a plugin loader
+          - a dynamic script runner
+          - a web app framework
+          - a convenience-first modding system
+          - a pack-only application launcher
+
+    02.5. Turnix is:
+          - a runtime continuity engine
+          - a deterministic resolver
+          - a policy-driven orchestrator
+          - an explainable system
+          - a controlled execution and state boundary
+
+Reasoning:
+
+    This keeps the original philosophy while changing the center of gravity.
+
+    The old text says, in effect:
+
+        persistent local identity-stable system built on modular packs
+
+    The new text says:
+
+        persistent local-first identity-stable runtime for traceable
+        orchestrated systems, with packs as first-class mechanisms
+
+    That better matches Dv3.
+
+
+SECOND ISSUE: TRACE OPTIONALITY
+===============================
+
+Current problem:
+
+    In the best-effort section, traces are listed with logs and analytics as
+    explicitly optional data.
+
+Why this is a problem:
+
+    Dv3 elevates tracing from "debugging/diagnostic convenience" to a core
+    runtime proof/replay spine.
+
+    Current Dv3 trace doctrine:
+
+        If not traced, it did not happen.
+
+    Turnix can still have optional diagnostic traces, but authoritative runtime
+    trace records cannot be globally treated as optional if they are used for:
+
+        - reproducibility
+        - reversibility
+        - recovery
+        - state-change proof
+        - orchestration history
+        - replay
+        - explaining what happened
+
+Required distinction:
+
+    There are at least two kinds of trace-like data:
+
+        1. Authoritative runtime trace / proof trace
+           Required when it is part of Turnix's ability to explain, replay,
+           recover, or prove meaningful runtime transitions.
+
+        2. Optional diagnostic trace / verbose trace
+           Best-effort observability data that may be dropped without breaking
+           runtime integrity.
+
+Recommended change:
+
+    Patch the best-effort section to avoid saying "traces are optional" as a
+    global doctrine.
+
+Suggested replacement direction:
+
+    04.10. Best-effort behavior is acceptable only for explicitly optional
+           non-authoritative data such as:
+           - diagnostic logs
+           - verbose diagnostic traces
+           - analytics
+
+    04.11. Authoritative trace records required for reproducibility,
+           reversibility, recovery, state-change proof, or orchestration history
+           are not optional data.
+
+    04.12. If a trace record is part of Turnix's ability to explain, recover,
+           replay, or prove runtime behavior, failure to record it is treated as
+           a runtime integrity concern rather than cosmetic loss.
+
+Reasoning:
+
+    This preserves the old intent that some observability data can be best
+    effort, while preventing the architecture from treating all traces as
+    disposable.
+
+    Without this distinction, later documents may contradict DA-01 when they
+    define tracing as foundational.
+
+
+THIRD ISSUE: LOCAL-FIRST CLARIFICATION
+======================================
+
+Current state:
+
+    The file says Turnix is local-first and assumes local filesystem, limited
+    hardware, and limited context window.
+
+This is mostly correct.
+
+Potential future problem:
+
+    Dv3 now allows thinking about Turnix as a runtime that may eventually run
+    locally, on a server, remotely, as a worker, or through connected clients.
+
+    The current local-first doctrine should not accidentally become:
+
+        local-only forever
+
+Recommended clarification:
+
+    Local-first should mean local operation remains the baseline authority and
+    failure model.
+
+    It should not ban explicit, policy-governed remote execution or remote
+    resources.
+
+Suggested replacement direction:
+
+    04.19. Turnix is local-first.
+
+    04.20. Local-first means local operation remains the baseline authority,
+           persistence model, failure model, and recovery model.
+
+    04.21. Local-first does not prohibit explicit, policy-governed remote
+           execution, remote resources, server hosting, or federated discovery.
+
+    04.22. Turnix assumes:
+           - local filesystem
+           - limited hardware
+           - limited context window
+
+    04.23. Server-scale patterns are rejected by default, including:
+           - lazy global registries
+           - infinite retries
+           - implicit availability
+
+Reasoning:
+
+    This keeps local-first as the default philosophy while leaving room for
+    runtime-hosted/server/remote modes under explicit policy.
+
+    This also matches the existing open-question section, which already does
+    not fully ban remote assets, remote compilers, or federated indexes.
+
+
+WHAT SHOULD NOT CHANGE
+======================
+
+The same-language authority doctrine should remain.
+
+Reason:
+
+    It already protects one of the most important Dv3 boundaries:
+
+        Internal Turnix Python is trusted backend implementation.
+        Pack-provided Python is external code.
+
+    Pack-provided code should not gain direct backend authority merely because
+    it is written in the same language or happens to run in the same process.
+
+This should survive as a major invariant.
+
+The runtime authority ordering should remain.
+
+Reason:
+
+    It already supports Dv3:
+
+        Kernel owns authority.
+        RuntimeHost exposes controlled entry surfaces.
+        Adapters execute declared pack code.
+        Transports carry messages.
+        RPC defines the logical communication boundary.
+        Capabilities define what code may do.
+        SavePack stores durable executed state.
+
+    This is compatible with the idea that Kernel is important but intentionally
+    not over-specified.
+
+The "no guarantees outside orchestration" invariant should remain.
+
+Reason:
+
+    This strongly supports the Dv3 Job / OrchestrationUnit model.
+
+    If code creates timers, background threads, ad-hoc async tasks, or
+    side-effect-only module execution outside Turnix orchestration, Turnix
+    should not promise reversibility, tracing, recovery, or lifecycle control
+    for that behavior.
+
+
+READABILITY / MACHINE INTERPRETATION NOTE
+=========================================
+
+The document intentionally avoids RFC-style MUST/SHOULD/MAY language and says
+normative meaning comes from sentence structure and context.
+
+This is acceptable.
+
+However, it means examples inside locked-invariant sections can become global
+doctrine for a machine assistant.
+
+Observed risk:
+
+    Listing "traces" beside "logs" and "analytics" under optional best-effort
+    data may be interpreted as a broad statement that traces are nonessential.
+
+Recommended handling:
+
+    Keep the natural doctrine style, but be careful when giving examples in
+    high-authority sections.
+
+    If an example has categories with different authority levels, split them.
+
+    In this file, trace should be split into:
+
+        - optional diagnostic/verbose traces
+        - authoritative runtime/proof traces
+
+
+RECOMMENDED EDIT ORDER
+======================
+
+1. Rewrite the identity section first.
+
+   Goal:
+       Move Turnix from "pack-built system" toward "runtime domain".
+
+2. Patch trace optionality.
+
+   Goal:
+       Prevent contradiction with Dv3 trace doctrine.
+
+3. Add local-first clarification if desired.
+
+   Goal:
+       Preserve local-first as baseline authority without banning future
+       explicit remote/server runtime modes.
+
+4. Do not yet heavily rewrite Kernel, RuntimeHost, adapter, RPC, capability, or
+   SavePack wording here.
+
+   Goal:
+       DA-01 should remain the top-level philosophy anchor, not become the
+       detailed subsystem spec.
+
+
+POSSIBLE FUTURE FOLLOW-UP
+=========================
+
+Later documents should define in more detail:
+
+    - RuntimeHost
+    - Kernel
+    - AppInstance
+    - AppPack
+    - SavePack
+    - ExecutionAdapter
+    - RPC protocol vs transport
+    - Capabilities
+    - Jobs
+    - OrchestrationUnit
+    - Trace categories
+    - Memory latest-state guarantee
+    - IOManager authority
+    - standalone subsystem usage
+
+DA-01 should only anchor the doctrine.
+
+It should not become the full Turnix architecture specification.
+
+
+CURRENT FINAL RECOMMENDATION
+============================
+
+Keep DA-01.
+
+Rewrite the project identity so Turnix is clearly a runtime, not merely an
+AppPack/modular-pack application system.
+
+Preserve packs as first-class, but not identity-defining.
+
+Patch trace wording so authoritative runtime trace is not optional.
+
+Clarify local-first as default authority/failure model, not a ban on explicit
+remote runtime modes.
+
+Do not weaken the same-language authority doctrine. It is already correct and
+important.
+
+--- doc-meta ---
+DOC_ID: REWRITE-DA-01
+DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-01_RECOMMENDATION.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
