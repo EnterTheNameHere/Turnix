@@ -14,7 +14,9 @@ Loaded file metadata:
         00f31c5f489042a5b18db7c8c085d950338f2d47
 
 Audit note status:
-    First-pass Dv3 architecture audit recommendation.
+    Consolidated Dv3 architecture rewrite recommendation.
+    Action-focused compression after DA-03 trace wording rule, DA-19 Job
+    audit, and DA-23 ExecutionAdapter audit.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -32,33 +34,29 @@ SUMMARY
 
 DA-21 is strong and highly Dv3-compatible.
 
-It defines RPC as a logical communication boundary while separating it from:
+No heavy rewrite is recommended.
 
-    - transport
-    - WebSocket
-    - JSON envelope schema
-    - capability authority
-    - adapter authority
-    - RuntimeHost authority
-    - Job lifecycle
-    - final work outcome
+DA-21 should preserve the core split:
 
-This is the correct Dv3 model.
+    RPC = logical communication boundary
 
-DA-21 explicitly separates:
+    RPCChannel = transport-neutral interface
 
-    - message delivery
-    - message acknowledgement
-    - request acceptance
-    - handler execution
-    - Job creation
-    - Job terminal outcome
+    Transport = concrete carrier
+
+    WebSocket = one concrete transport
+
+    JSON = concrete envelope/schema representation
+
+Required small cleanup:
+
+    Clarify that trace-visible RPC flow means RPC-domain trace emission
+    obligation where applicable, while trace retention and loss remain governed
+    by DA-03.
 
 Overall recommendation:
 
     KEEP WITH SMALL TRACE WORDING CLARIFICATION
-
-No heavy rewrite is recommended.
 
 
 CURRENT CLASSIFICATION
@@ -75,48 +73,35 @@ Detailed classification:
 
     02. Core Concept
         KEEP
-        Very strong. RPC is a logical communication boundary, not transport,
-        WebSocket, JSON, capability authority, adapter authority, or Job
-        lifecycle.
 
     03. RPC, Channel, and Transport Terms
         KEEP
-        Strong RPC / RPCChannel / transport split.
 
     04. RPC Message Categories
         KEEP
-        Especially acknowledgement semantics.
 
     05. Routing Model
         KEEP
-        Strong. Routing does not grant permission, activate packs, authorize
-        adapters, or bypass capability mediation.
 
     06. Request, Acceptance, and Job-backed Work
         KEEP
-        Excellent DA-19 alignment.
 
     07. Emit, Subscribe, and Update Flow
         KEEP
-        Good. Subscription delivery does not own domain meaning.
 
     08. Transport Timeout, Disconnect, and Cancellation
         KEEP
-        Very strong. Transport timeout/disconnect/cancellation are not Job,
-        adapter, or RuntimeHost outcomes by themselves.
 
     09. RPCChannel Contract
         KEEP
-        Good transport-neutral abstraction.
 
     10. Trace and Observability
         KEEP BUT ALIGN WORDING WITH DA-03
-        "Trace-visible" should be read as RPC-domain trace emission
-        obligation where applicable, not trace persistence guarantee.
+        "Trace-visible" should be read as RPC-domain trace emission obligation
+        where applicable, not trace persistence guarantee.
 
     11. Relation to Implementation Specifications
         KEEP
-        Strong DA/IS split.
 
     12. Explicitly Open Questions
         KEEP
@@ -125,23 +110,53 @@ Detailed classification:
         KEEP
 
 
-WHAT IS ALREADY NAILED
-======================
+RECOMMENDED CLEANUP: TRACE-VISIBLE RPC FLOW
+===========================================
 
-DA-21 correctly says RPC answers:
+Current issue:
 
-    How do Turnix participants communicate across a boundary without confusing
-    transport delivery, permission authority, execution lifecycle, and final
-    work outcome?
+    DA-21 says RPC message flow remains trace-visible where trace evidence
+    exists.
 
-This is exactly the right question.
+This should follow the DA-03 cross-document trace wording check.
 
-Correct model:
+Correct reading:
+
+    RPC-domain trace evidence is a domain emission obligation where applicable.
+
+    Trace retention and loss remain governed by DA-03.
+
+    RPC observability does not replace capability, decision, Job, adapter,
+    RuntimeHost, AppInstance, debugger, or Window trace evidence.
+
+Not:
+
+    RPC trace persistence is guaranteed forever.
+
+Not:
+
+    RPC trace evidence becomes committed-state authority.
+
+Not:
+
+    RPC observability replaces the owning domain's evidence.
+
+No heavy DA-21 rewrite is needed.
+
+
+RECOMMENDED PRESERVATION 1: RPC IS LOGICAL BOUNDARY, NOT TRANSPORT
+==================================================================
+
+Preserve the core model:
 
     RPC = logical communication boundary
+
     RPCChannel = transport-neutral interface
+
     Transport = concrete carrier
+
     WebSocket = one concrete transport
+
     JSON = concrete envelope/schema representation
 
 RPC is not:
@@ -156,10 +171,10 @@ RPC is not:
     - final work outcome
 
 
-ACKNOWLEDGEMENT IS NOT OUTCOME
-==============================
+RECOMMENDED PRESERVATION 2: ACKNOWLEDGEMENT IS NOT OUTCOME
+==========================================================
 
-DA-21's acknowledgement rules are very strong and should remain.
+Preserve acknowledgement semantics.
 
 Acknowledgement means message receipt or transport-level handling only.
 
@@ -171,22 +186,29 @@ Acknowledgement does not imply:
     - Job creation
     - Job success
 
-This prevents the bad model:
+Reason:
 
-    packet arrived, therefore work happened
+    This prevents the bad model:
+
+        packet arrived, therefore work happened
 
 Correct model:
 
     Acknowledgement says something about communication handling.
+
     It does not say the target operation executed.
+
     It does not say authority was granted.
+
     It does not say work succeeded.
 
 
-ROUTING IS NOT AUTHORITY
-========================
+RECOMMENDED PRESERVATION 3: ROUTING IS NOT AUTHORITY
+====================================================
 
-DA-21 correctly says RPC routing identifies the logical target of a message.
+Preserve routing boundaries.
+
+RPC routing identifies the logical target of a message.
 
 RPC routes may target:
 
@@ -200,7 +222,7 @@ But RPC routing does not:
 
     - grant permission
     - activate packs
-    - select or authorize an execution adapter
+    - select or authorize an ExecutionAdapter
     - bypass capability mediation
     - grant workspace ownership
     - accept RuntimeHost commands by itself
@@ -213,13 +235,13 @@ Adapter-facing RPC remains subject to DA-23.
 
 RuntimeHost control-surface RPC remains subject to DA-28.
 
-This should remain.
 
+RECOMMENDED PRESERVATION 4: REQUEST ACCEPTANCE IS NOT FINAL SUCCESS
+===================================================================
 
-REQUEST ACCEPTANCE IS NOT FINAL SUCCESS
-=======================================
+Preserve request/acceptance/outcome separation.
 
-DA-21 correctly says an RPC request may end in:
+An RPC request may end in:
 
     - immediate reply
     - structured error
@@ -234,16 +256,14 @@ accepted by the target operation.
 Request acceptance is not final operation success unless the operation contract
 explicitly defines successful acceptance as the result.
 
-This distinction should remain.
-
 Accepted work may expose correlation to later lifecycle evidence, but lifecycle
 meaning remains owned by the relevant domain.
 
 
-RPC / JOB RELATION
-==================
+RECOMMENDED PRESERVATION 5: RPC REQUEST IS NOT JOB
+==================================================
 
-DA-21 fully aligns with DA-19.
+Preserve RPC / Job separation.
 
 Once Job-backed work exists, DA-19 owns Job lifecycle semantics.
 
@@ -252,43 +272,35 @@ outcome.
 
 RPC request identity and jobId remain distinct.
 
-RPC correlation may link request identity to jobId when a Job exists.
+RPC correlation may link request identity to jobId only when a Job exists.
 
 A request accepted as Job-backed work may return a Job handle, immediate
 accepted-work response, subscription relationship, or other operation-defined
 lifecycle surface.
 
-Concrete envelope shape remains owned by IS-01, IS-02, or future
-implementation specifications constrained by DA-19.
-
 Correct model:
 
     RPC request may cause or expose Job-backed work.
+
     RPC request is not Job.
+
     RPC rejection before Job exists is not Job failure.
+
     Job lifecycle remains DA-19-owned.
 
 
-RPC / CAPABILITY RELATION
-=========================
+RECOMMENDED PRESERVATION 6: RPC DOES NOT BYPASS CAPABILITY, ADAPTER, OR RUNTIMEHOST OWNERSHIP
+============================================================================================
 
-DA-21 aligns with DA-16.
+Preserve cross-domain ownership.
 
-A capability-routed RPC message remains capability-mediated.
+Capability-routed RPC remains capability-mediated.
 
 RPC routing does not bypass capability mediation.
 
 RPC acknowledgement does not imply capability execution.
 
 Capability permission remains owned by DA-16.
-
-This should remain.
-
-
-RPC / ADAPTER RELATION
-======================
-
-DA-21 aligns with the Dv3 ExecutionAdapter boundary.
 
 Adapter-facing RPC messages remain subject to DA-23.
 
@@ -298,19 +310,6 @@ A request rejected before adapter-mediated work exists does not produce adapter
 execution failure unless DA-23 classifies that relationship explicitly.
 
 Adapter lifecycle semantics remain owned by DA-23.
-
-A transport adapter is distinct from an ExecutionAdapter under DA-23, even when
-one implementation object performs both roles.
-
-This should remain.
-
-DA-23 should be audited later to confirm the adapter side of this boundary.
-
-
-RPC / RUNTIMEHOST RELATION
-==========================
-
-DA-21 aligns with DA-28.
 
 RuntimeHost entry surfaces and command surfaces may use RPC to communicate with
 Kernel-mediated runtime paths.
@@ -328,13 +327,11 @@ A request rejected before RuntimeHost command acceptance does not produce
 RuntimeHost operation completion or failure unless DA-28 classifies that
 relationship explicitly.
 
-This should remain.
 
+RECOMMENDED PRESERVATION 7: SUBSCRIPTION DELIVERY IS NOT DOMAIN TRUTH
+====================================================================
 
-EMIT, SUBSCRIBE, AND UPDATE FLOW
-================================
-
-DA-21 correctly separates subscription delivery from domain ownership.
+Preserve emit/subscribe/update boundaries.
 
 Subscription delivery may carry:
 
@@ -351,6 +348,7 @@ But subscription delivery does not by itself define:
     - adapter lifecycle state
     - RuntimeHost lifecycle
     - RuntimeHost command outcome
+    - committed-state truth
 
 If subscription delivery reports Job progress or terminal outcome, the reported
 Job meaning remains owned by DA-19.
@@ -366,13 +364,11 @@ Unsubscribe withdraws interest in future subscription delivery.
 Unsubscribe does not by itself cancel the underlying work unless the operation
 contract or policy explicitly connects unsubscribe to cancellation.
 
-This is correct.
 
+RECOMMENDED PRESERVATION 8: TRANSPORT TIMEOUT, DISCONNECT, AND CANCELLATION ARE NOT DOMAIN OUTCOMES
+===================================================================================================
 
-TRANSPORT TIMEOUT, DISCONNECT, AND CANCELLATION
-===============================================
-
-DA-21's timeout/disconnect/cancellation section is very strong.
+Preserve timeout/disconnect/cancellation separation.
 
 Transport timeout is an RPC, channel, or transport concern.
 
@@ -381,7 +377,7 @@ Job timeout is a Job lifecycle concern.
 Adapter timeout, if defined, is an adapter lifecycle concern.
 
 RuntimeHost timeout, if defined, is a RuntimeHost lifecycle or operation
-concern under DA-28.
+concern.
 
 Transport timeout does not automatically:
 
@@ -394,7 +390,7 @@ Transport disconnect does not automatically:
     - cancel a Job
     - supersede a Job
     - discard a Job result
-    - close or fail an execution adapter
+    - close or fail an ExecutionAdapter
     - stop, fail, or close a RuntimeHost
 
 If accepted or in-flight work exists when transport disconnect occurs, policy
@@ -415,11 +411,11 @@ RPC cancellation messages are requests.
 
 RPC cancellation messages do not directly kill arbitrary execution.
 
-This should remain.
 
+RECOMMENDED PRESERVATION 9: RPCCHANNEL IS TRANSPORT-NEUTRAL
+===========================================================
 
-RPCCHANNEL CONTRACT
-===================
+Preserve RPCChannel contract.
 
 RPCChannel is the abstract communication surface used by the RPC host or
 equivalent runtime owner.
@@ -446,52 +442,15 @@ A channel implementation does not silently transform disconnect into:
     - adapter failure
     - RuntimeHost stop, failure, or command cancellation
 
-This should remain.
 
+RECOMMENDED PRESERVATION 10: RPC TRACE OWNERSHIP STAYS DOMAIN-SPECIFIC
+======================================================================
 
-TRACE AND OBSERVABILITY
-=======================
+Preserve RPC-domain trace ownership.
 
 DA-21 owns RPC-domain trace and observability obligations.
 
-RPC trace evidence distinguishes:
-
-    - message receipt
-    - message acknowledgement
-    - routing or dispatch
-    - rejection before accepted work exists
-    - request accepted as Job-backed work
-    - request accepted as adapter-mediated work
-    - request accepted as RuntimeHost operation
-    - reply sent
-    - delivery failure
-    - cancellation requested
-    - transport timeout
-    - generation or session mismatch
-    - channel disconnect
-    - disconnect policy application
-    - incomplete or malformed envelope rejection
-
-RPC trace evidence records enough context, when available, to explain:
-
-    - message identity
-    - correlation identity
-    - route
-    - lane or logical stream
-    - peer identity
-    - channel identity
-    - transport kind
-    - runtimeHostId when applicable
-    - RuntimeHost operation identity when applicable
-    - appInstanceId
-    - adapter kind when applicable
-    - adapter instance identity when applicable
-    - capability identifier when applicable
-    - jobId when applicable
-    - timeout category when applicable
-    - disconnect category when applicable
-
-DA-03 defines the tracing substrate.
+DA-03 owns the trace substrate.
 
 DA-16 owns capability-domain trace reasons.
 
@@ -504,35 +463,20 @@ DA-23 owns adapter-domain trace reasons.
 DA-28 owns RuntimeHost-domain trace reasons.
 
 RPC observability does not replace trace evidence owned by capability,
-decision, Job, debugger, AppInstance, adapter, RuntimeHost, or Window
-documents.
+decision, Job, debugger, AppInstance, adapter, RuntimeHost, or Window documents.
 
 RPC observability preserves causal links between RPC messages and higher-domain
 events when those events exist.
 
-This is correct.
+Trace wording should follow the DA-03 cross-document trace wording check.
 
 
-RECOMMENDED CLARIFICATION: TRACE-VISIBLE RPC FLOW
-=================================================
+RECOMMENDED PRESERVATION 11: DA / IS SPLIT
+==========================================
 
-DA-21 says RPC message flow remains trace-visible where trace evidence exists.
+Preserve the DA / IS authority split.
 
-This should follow the DA-03 cross-document trace wording check:
-
-    RPC-domain trace evidence is a domain emission obligation where applicable.
-    Trace retention/loss remains governed by DA-03.
-    RPC observability does not replace capability, Job, adapter, RuntimeHost,
-    AppInstance, debugger, or Window trace evidence.
-
-No heavy DA-21 rewrite is needed.
-
-
-DA / IS SPLIT
-=============
-
-DA-21 correctly separates DA-level RPC semantics from implementation
-specifications.
+DA-21 owns DA-level RPC semantics.
 
 IS-01 defines concrete RPC message envelope schema.
 
@@ -562,29 +506,6 @@ IS documents do not redefine:
 If an IS document needs a semantic rule not defined here, DA-21 is updated first
 or alongside the IS document.
 
-This is the right authority ordering.
-
-
-NO MAJOR DV3 CONFLICT FOUND
-===========================
-
-DA-21 does not collapse RPC into:
-
-    - transport
-    - WebSocket
-    - JSON schema
-    - capability authority
-    - adapter authority
-    - RuntimeHost authority
-    - Job lifecycle
-    - request success
-    - work completion
-    - policy authority
-    - execution kill authority
-    - implementation specification
-
-This is exactly what the document should prevent.
-
 
 CURRENT FINAL RECOMMENDATION
 ============================
@@ -593,11 +514,25 @@ Keep DA-21.
 
 No heavy rewrite is recommended.
 
-Small future cleanup:
+Required small cleanup:
 
     Clarify that trace-visible RPC flow means RPC-domain trace emission
     obligation where applicable, while trace retention/loss remains governed by
     DA-03.
+
+Preserve:
+
+    - RPC as logical boundary, not transport
+    - acknowledgement is not outcome
+    - routing is not authority
+    - request acceptance is not final success
+    - RPC request is not Job
+    - RPC does not bypass Capability, ExecutionAdapter, or RuntimeHost ownership
+    - subscription delivery is not domain truth
+    - transport timeout, disconnect, and cancellation are not domain outcomes
+    - RPCChannel is transport-neutral
+    - RPC trace ownership is domain-specific
+    - DA / IS authority split
 
 Future audits should check:
 
@@ -605,13 +540,14 @@ Future audits should check:
       envelope fields.
     - IS-02 preserves DA-21 transport/RPC separation while defining concrete
       WebSocket flow.
-    - DA-23 preserves adapter/RPC separation.
     - DA-17 preserves policy handling for disconnect, cancellation, and
       remembered decisions.
+
+DA-23 has already been audited and preserves adapter/RPC separation.
 
 --- doc-meta ---
 DOC_ID: REWRITE-DA-21
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-21_RECOMMENDATION.txt
-DOC_REV: 1
-DOC_GIT: 134fb76
+DOC_REV: 2
+DOC_GIT: c220ea2
 ----------------
