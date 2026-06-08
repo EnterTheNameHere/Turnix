@@ -1,0 +1,616 @@
+TURNIX DV3 AUDIT NOTE
+=====================
+
+Source file:
+    docs/design/DA-16_SERVICES_CAPABILITIES_AND_PERMISSIONS.txt
+
+Branch:
+    Dv3
+
+Loaded file metadata:
+    DOC_REV: 17
+    DOC_GIT: 35c1049
+    GitHub blob SHA seen by assistant:
+        fe79199082907df3de04a23142b265f0465c60d4
+
+Audit note status:
+    First-pass Dv3 architecture audit note.
+
+Audit scope:
+    This note audits architectural meaning, doctrine, and direction.
+    It does not audit formatting unless formatting/structure affects meaning,
+    machine interpretation, rule priority, or human usability as reference.
+
+Important excluded source:
+    AI_WORKFLOW_BOOTSTRAP.txt was intentionally not read.
+    It is part of the workflow system being audited separately and should not
+    bias this architecture pass.
+
+
+SUMMARY
+=======
+
+DA-16 is strong and highly Dv3-compatible.
+
+It preserves the key runtime interaction split:
+
+    Service = runtime wiring object
+    Capability = named, permissioned, Turnix-mediated operation
+    Job = optional observable lifecycle handle when the capability operation
+          needs Job semantics
+
+DA-16 correctly says Services and Capabilities are orthogonal and are not
+conflated.
+
+DA-16 also correctly says same process, same runtime, or same language does not
+bypass capability mediation.
+
+Overall recommendation:
+
+    KEEP WITH SMALL CLARIFICATION
+
+No heavy rewrite is recommended.
+
+
+CURRENT CLASSIFICATION
+======================
+
+Overall classification:
+
+    KEEP WITH SMALL CLARIFICATION
+
+Detailed classification:
+
+    01. Interpretation Basis
+        KEEP
+
+    02. Core Distinction
+        KEEP
+        Strong Service / Capability split.
+
+    03. Services - Runtime Wiring
+        KEEP
+        Good: service is opaque runtime object, no permission layer by itself.
+
+    04. Service Access Rules
+        KEEP
+        Strong: services are not cross-pack execution shortcut.
+
+    05. Capabilities - Execution Boundary
+        KEEP
+        Very strong.
+
+    06. Capability Identities and Versioning
+        KEEP
+        Stable, exact major-version identity.
+
+    07. Capability Export vs Usage
+        KEEP
+        Good runtime reality vs manifest intent split.
+
+    08. Permissions Model
+        KEEP
+        Good simple permission class model. DA-17 remains load-bearing for
+        remembered-decision semantics.
+
+    09. Capability Invocation Flow
+        KEEP WITH SMALL STRUCTURAL CLEANUP
+        Content is strong. Section numbering has duplicate 09.1.
+
+    09.1 Capability Execution Modes and Jobs
+        KEEP
+        Excellent DA-19 alignment.
+
+    10. User Decisions and Policy
+        KEEP
+        DA-17 owns details.
+
+    11. Services vs Capabilities - Strict Separation
+        KEEP
+        Very important.
+
+    12. Computed and Reactive Behavior
+        KEEP
+        Good anti-hidden-mutation rule.
+
+    13. Conflicts and Overrides
+        KEEP
+        Good no-silent-override rule.
+
+    14. Trace and Audit
+        KEEP BUT ALIGN WORDING WITH DA-03
+        "Required for reproducibility/audit" should be read as emission
+        obligation, not persistence guarantee.
+
+    15. Development-Time Diagnostics
+        KEEP
+
+    16. Cross-Runtime and Cross-Adapter Symmetry
+        KEEP
+        Very strong.
+
+    17. Explicitly Open Questions
+        KEEP
+
+    18. Locked Summary
+        KEEP
+
+
+WHAT IS ALREADY NAILED
+======================
+
+DA-16 correctly defines two orthogonal runtime interaction mechanisms:
+
+    Services
+    Capabilities
+
+Services provide shared runtime wiring.
+
+Capabilities provide named, permissioned operations.
+
+They serve different purposes and are not conflated.
+
+This prevents the bad model:
+
+    I got a service object, therefore I can call whatever I want.
+
+Services are runtime wiring.
+
+Capabilities are the mediated execution boundary.
+
+
+SERVICES
+========
+
+DA-16 correctly says a Service is:
+
+    - a concrete runtime object or instance
+    - registered by a pack during activation
+    - stored in a scoped service registry
+    - retrieved explicitly by other packs
+
+Services are opaque runtime objects.
+
+Service lifetime is bound to the providing pack's activation.
+
+Service name collisions are forbidden.
+
+Services have no permission layer by themselves.
+
+Services are not:
+
+    - adapter authority
+    - PackContext authority
+    - backend-internal exposure to adapter-executed code
+    - cross-pack execution shortcut
+    - in-process adapter bypass
+
+Services must not bypass:
+
+    - configuration schemas
+    - persistence rules
+    - execution authorization
+    - permission checks
+    - capability mediation
+    - adapter boundaries
+    - Job lifecycle boundaries
+
+This is the correct constraint for direct runtime wiring.
+
+
+CAPABILITIES
+============
+
+DA-16 correctly says a Capability is:
+
+    - a named operation
+    - exported by a pack
+    - invoked by other packs or adapter-executed code
+    - mediated by Turnix
+    - permission-checked
+
+Capabilities are the only supported cross-pack execution boundary.
+
+Capabilities are the supported authority boundary for adapter-executed code
+that requests pack-provided behavior.
+
+This is the correct Dv3 model.
+
+Capability does not mean:
+
+    - permission itself
+    - Job
+    - OrchestrationUnit
+    - RPC message
+    - direct service object
+    - committed-state authority
+    - PackManager authority
+    - adapter authority
+
+
+CAPABILITY / JOB RELATION
+=========================
+
+DA-16 fully satisfies the DA-19 dependency.
+
+A capability invocation may complete without creating a Job.
+
+A capability invocation may create or attach to a Job when the operation
+requires observable Job lifecycle semantics.
+
+Direct execution means the capability handler completes the operation in the
+immediate invocation path.
+
+Job-backed execution means the capability operation is represented by or
+attached to a Job lifecycle owned by DA-19.
+
+Not every capability invocation creates a Job.
+
+Long-running, cancellable, progress-reporting, or timeout-managed capability
+execution may create or attach to a Job.
+
+A Job-backed capability remains a capability invocation.
+
+Job-backed execution does not bypass capability mediation.
+
+Job-backed execution does not expose service internals.
+
+Job-backed execution does not expose raw implementation objects.
+
+Job-backed execution does not grant callers direct access to the underlying
+execution mechanism.
+
+Correct model:
+
+    Capability invocation may be direct.
+    Capability invocation may be Job-backed.
+    Job-backed capability is still a capability invocation.
+    Job lifecycle semantics belong to DA-19.
+    Permission and mediation semantics belong to DA-16.
+
+
+PERMISSIONS
+===========
+
+Permission classes are:
+
+    - none
+    - soft
+    - hard
+
+Permission class is immutable per major version.
+
+Permission classification is capability-defined and is not negotiated by
+callers.
+
+Remembered capability permission matching uses the exact versioned capability
+identifier.
+
+This document does not introduce wildcard, prefix, family, or versionless
+fallback matching for remembered capability decisions.
+
+Capability permission is distinct from DA-23 execution authorization for a code
+artifact.
+
+A code artifact may be allowed to run while a specific capability invocation is
+still denied.
+
+This prevents:
+
+    adapter code is allowed to execute, therefore it may do everything
+
+
+RUNTIME EXPORT VS MANIFEST INTENT
+=================================
+
+DA-16 correctly distinguishes runtime export from manifest declaration.
+
+Capability export happens at runtime through ctx.registerCapability.
+
+Capability export defines authoritative runtime behavior.
+
+Capability usage happens through ctx.callCapability or equivalent mediated
+request surface.
+
+Manifest capability declarations are optional and advisory only.
+
+Manifest declarations may support tooling, diagnostics, and user experience.
+
+Manifest intent does not override runtime reality.
+
+Runtime behavior remains authoritative over manifest intent.
+
+Adapter metadata or adapter binding does not substitute for runtime capability
+export.
+
+Implementation warning:
+
+    Do not make manifest declarations look like granted/exported capabilities.
+
+
+INVOCATION FLOW AND PERMISSION PAUSE
+====================================
+
+DA-16's invocation flow is good.
+
+When a mediated capability request is invoked:
+
+    1. Turnix evaluates permission.
+    2. If allowed, handler executes or accepted Job-backed execution begins.
+    3. If undecided, execution pauses for decision handling.
+
+During undecided permission handling:
+
+    - decision surface may be shown
+    - user or policy input is obtained
+    - resulting decision is recorded according to DA-17 policy rules
+    - execution resumes only after that decision path completes
+
+Turnix remains responsive while execution is paused for decision handling.
+
+No background mutation may occur while paused.
+
+Execution resumes deterministically from the pause point.
+
+Permission evaluation occurs before capability execution begins.
+
+Job-backed, adapter-mediated, and in-process invocation do not skip permission
+evaluation.
+
+This is important and should remain.
+
+
+STRUCTURAL NOTE: SECTION NUMBERING
+==================================
+
+There is a small structure issue.
+
+The document has:
+
+    09. CAPABILITY INVOCATION FLOW
+
+then numbered lines:
+
+    09.1.
+    09.2.
+    ...
+
+then a subheading:
+
+    09.1 CAPABILITY EXECUTION MODES AND JOBS
+
+This duplicate 09.1 can confuse references.
+
+Recommendation:
+
+    Keep the content.
+
+    Rename or renumber the subheading later, for example:
+
+        09.8. Capability Execution Modes and Jobs
+
+    or:
+
+        09A. Capability Execution Modes and Jobs
+
+    or split into a separate section if the surrounding document numbering
+    allows it.
+
+This is structural/readability cleanup, not architecture rewrite.
+
+
+STRICT SERVICE / CAPABILITY SEPARATION
+======================================
+
+Section 11 is very strong and should remain.
+
+Capabilities must not expose service internals directly as a bypass path.
+
+One pack must not call another pack's service-provided behavior directly across
+pack boundaries.
+
+Cross-pack execution must go through capability mediation.
+
+Adapter-executed cross-pack behavior must go through capability mediation.
+
+Job-backed capability execution does not expose service internals.
+
+Job handles do not provide direct service access.
+
+
+COMPUTED AND REACTIVE BEHAVIOR
+==============================
+
+DA-16 correctly allows packs to react to runtime state or configuration by:
+
+    - observing values
+    - computing derived behavior
+    - adjusting runtime output
+
+But such behavior remains runtime-only.
+
+It does not mutate stored configuration or memory by itself.
+
+It does not intercept persistence.
+
+It does not replace the authoritative source of truth.
+
+This is a useful anti-hidden-mutation rule.
+
+It allows dynamic behavior without turning it into hidden committed state.
+
+
+CONFLICTS AND OVERRIDES
+=======================
+
+DA-16 correctly says multiple packs exporting the same capability identity are
+not allowed by default.
+
+Conflict is explicit.
+
+Resolution requires:
+
+    - explicit user choice
+    - or hard failure if no permitted resolution path exists
+
+Silent override is forbidden.
+
+Adapter selection does not silently resolve capability conflicts.
+
+This matches Turnix's no-clever-magic-merge doctrine.
+
+
+TRACE AND AUDIT
+===============
+
+DA-16 owns capability-domain trace reason identifiers.
+
+Capability-call trace evidence includes:
+
+    - caller pack identity
+    - caller adapter identity when applicable
+    - target capability identifier
+    - exact versioned capability identity used for permission matching
+    - permission classification
+    - permission decision when one occurs
+    - invocation mode
+    - execution outcome
+    - jobId when a Job is created or attached
+    - duration or elapsed execution evidence when available
+
+Capability-call trace evidence distinguishes:
+
+    - denied execution
+    - deferred execution while waiting on decision handling
+    - direct successful execution
+    - direct failed execution
+    - Job-backed execution accepted by the capability boundary
+
+Job-backed execution acceptance is not a Job terminal outcome.
+
+Job-backed execution acceptance is not capability success by itself unless the
+operation's contract defines successful acceptance as the direct capability
+result.
+
+When a capability invocation creates or attaches to a Job, the Job lifecycle
+trace remains causally linked to the capability invocation trace evidence
+through DA-03 trace DAG parentage.
+
+DA-19 owns Job-domain trace reasons.
+
+DA-23 owns adapter-domain trace obligations.
+
+This is correct.
+
+
+TRACE WORDING CLARIFICATION
+===========================
+
+DA-16 says capability-call trace evidence is required for debugging, trust,
+reproducibility, and audit.
+
+After DA-03, this should be interpreted carefully.
+
+Correct reading:
+
+    capability-call trace evidence is required as a domain emission obligation
+
+Not:
+
+    trace persistence is guaranteed forever
+
+Not:
+
+    committed-state correctness depends on retained capability trace evidence
+
+DA-03 still owns trace persistence, retention, loss evidence, and trace
+substrate semantics.
+
+No source rewrite is urgently required, but future wording could clarify:
+
+    Capability-call trace evidence is required as an emission obligation where
+    capability calls occur. Trace retention and loss remain governed by DA-03.
+
+
+CROSS-RUNTIME AND CROSS-ADAPTER SYMMETRY
+========================================
+
+DA-16 strongly supports Dv3.
+
+The same interaction model applies across supported runtimes such as Python and
+JavaScript.
+
+The same interaction model applies across execution adapters.
+
+Python packs may expose capabilities used by JavaScript packs.
+
+JavaScript packs may invoke Python logic through capabilities.
+
+Browser frontend adapters may invoke Kernel-mediated capabilities only through
+Turnix-mediated surfaces.
+
+Python in-process adapters may invoke capabilities only through Turnix-mediated
+surfaces.
+
+Direct cross-language object access is not part of this model.
+
+Direct cross-adapter object access is not part of this model.
+
+Capabilities remain the universal mediated execution boundary.
+
+Job-backed capability execution does not change cross-runtime or cross-adapter
+boundary rules.
+
+This is the antidote to:
+
+    Python is in-process, so it gets secret doors.
+
+
+NO MAJOR DV3 CONFLICT FOUND
+===========================
+
+DA-16 does not collapse capability into:
+
+    - permission itself
+    - Service
+    - Job
+    - OrchestrationUnit
+    - RPC message
+    - direct service object
+    - committed-state authority
+    - PackManager authority
+    - adapter authority
+    - execution authorization
+    - persistence authority
+
+This is exactly what the document should prevent.
+
+
+CURRENT FINAL RECOMMENDATION
+============================
+
+Keep DA-16.
+
+No heavy rewrite is recommended.
+
+Small future cleanups:
+
+    1. Fix duplicate 09.1 section numbering around "Capability Execution Modes
+       and Jobs".
+
+    2. If desired, clarify that capability-call trace evidence is required as
+       an emission obligation, while trace retention/loss remains governed by
+       DA-03.
+
+Future audits should check:
+
+    - DA-17 preserves decision persistence and remembered-permission boundaries.
+    - DA-21 / IS-01 preserve RPC/capability separation.
+    - DA-23 and DA-27 preserve ExecutionAdapter/capability separation.
+
+--- doc-meta ---
+DOC_ID: REWRITE-DA-16
+DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-16_RECOMMENDATION.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
