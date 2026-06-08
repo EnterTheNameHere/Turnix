@@ -1,0 +1,762 @@
+TURNIX DV3 AUDIT NOTE
+=====================
+
+Source file:
+    docs/design/DA-13_DEPENDENCIES_REQUIREMENTS_AND_PACK_REQUESTS.txt
+
+Branch:
+    Dv3
+
+Loaded file metadata:
+    DOC_REV: 14
+    DOC_GIT: 023e3de
+    GitHub blob SHA seen by assistant:
+        21161debeb81a287cdade2cbb72bbb014d8e2de0
+
+Audit note status:
+    First-pass Dv3 architecture audit recommendation.
+
+Audit scope:
+    This note audits architectural meaning, doctrine, and direction.
+    It does not audit formatting unless formatting/structure affects meaning,
+    machine interpretation, rule priority, or human usability as reference.
+
+Important excluded source:
+    AI_WORKFLOW_BOOTSTRAP.txt was intentionally not read.
+    It is part of the workflow system being audited separately and should not
+    bias this architecture pass.
+
+
+SUMMARY
+=======
+
+DA-13 is strong and highly Dv3-compatible.
+
+It defines dependency semantics as hard contracts and defines a policy layer
+above DA-11 generic resolution mechanics.
+
+It correctly separates:
+
+    - hard dependency declarations
+    - PackRequest meaning in dependency context
+    - accepted-entry normalization
+    - dependency-resolution source policy
+    - version and fingerprint enforcement
+    - deterministic GlobalNormal selection
+    - provider-role requirements
+    - advisory pack relations
+    - ambiguity and external decision handling
+    - last-known-good fallback boundary
+
+It correctly says dependencies are contracts, not preferences.
+
+It correctly says advisory pack relations are not dependencies.
+
+Overall recommendation:
+
+    KEEP WITH SMALL PROVIDER-ROLE / REGISTRATION WATCH
+
+No heavy rewrite is recommended.
+
+
+CURRENT CLASSIFICATION
+======================
+
+Overall classification:
+
+    KEEP WITH SMALL PROVIDER-ROLE / REGISTRATION WATCH
+
+Detailed classification:
+
+    01. Interpretation Basis
+        KEEP
+
+    02. Core Concept
+        KEEP
+        Strong. Dependencies are hard functional requirements, not preferences.
+
+    03. Shared Pack-Specifier Model
+        KEEP
+        Good. Shared syntax does not imply shared semantics.
+
+    04. Declaring Hard Dependencies
+        KEEP
+        Good. "packs" means hard dependencies only.
+
+    05. PackRequest in Dependency Context
+        KEEP
+        Good DA-11 layering.
+
+    06. Accepted-Entry Normalization
+        KEEP
+        Strong fingerprint/exact-version rules and one-of accepted-entry
+        semantics.
+
+    07. Hard Dependency Model
+        KEEP
+        Strong. No automatic disabling, downgrade, fallback, or substitution.
+
+    08. Resolution Overview
+        KEEP
+        Good. Dependency resolution uses DA-11 mechanics but adds dependency
+        source and ordering policy.
+
+    09. Dependency Resolution Source Model
+        KEEP
+        Strong SaveOnly / GlobalPinned / GlobalNormal exclusivity.
+
+    10. Version and Fingerprint Enforcement
+        KEEP
+        Good exact-artifact lock semantics.
+
+    11. GlobalNormal Selection Procedure
+        KEEP WITH WATCH
+        Deterministic procedure is good.
+        Highest version and root precedence should be checked against
+        SavePack/AppInstance/selected graph semantics later.
+
+    12. Required Roles and Provided Roles
+        KEEP WITH WATCH
+        Good separation from runtime capability calls.
+        Provider selection / first-registered-provider behavior touches runtime
+        registration and should be checked against later provider/runtime docs.
+
+    13. Advisory Pack Relations
+        KEEP
+        Excellent. Advisory metadata does not become dependency, activation
+        blocker, generic resolution constraint, or loader/runtime warning rule
+        by itself.
+
+    14. Ambiguity and Required External Involvement
+        KEEP
+        Strong. Resolver does not guess.
+
+    15. Failure Conditions
+        KEEP
+        Good explicit classified failure.
+
+    16. Last-Known-Good Fallback Boundary
+        KEEP
+        Very important. LKG fallback happens after activation failure, not
+        during dependency resolution.
+
+    17. Dependency Is Not Activation
+        KEEP
+        Critical boundary.
+
+    18. Locked Summary
+        KEEP
+
+
+WHAT IS ALREADY NAILED
+======================
+
+DA-13 correctly says a dependency expresses a hard functional requirement:
+
+    This pack cannot function correctly unless another pack exists that
+    satisfies this request.
+
+Dependencies are contracts, not preferences.
+
+Declaring a dependency does not:
+
+    - load code
+    - activate a pack
+    - grant visibility
+    - grant capabilities
+    - define activation order
+
+Failure to satisfy a hard dependency is a hard failure unless some other
+accepted policy or user decision explicitly resolves it.
+
+This is the correct model.
+
+
+SHARED PACK-SPECIFIER MODEL
+===========================
+
+DA-13 correctly says manifest fields that refer to packs use one shared
+pack-specifier structure unless another authoritative document explicitly
+states otherwise.
+
+A shared pack specifier may appear as:
+
+    - one single specifier
+    - an array of specifiers
+
+The surrounding field defines the meaning of that acceptance.
+
+Shared syntax does not imply shared semantics.
+
+A hard dependency field, advisory field, and role-related field may reuse the
+same pack-specifier structure while producing different higher-level meaning.
+
+This is important.
+
+It prevents the bad model:
+
+    same syntax, therefore same authority
+
+No. Same syntax can feed different semantic layers.
+
+
+HARD DEPENDENCIES
+=================
+
+DA-13 defines the manifest field:
+
+    packs
+
+as the hard dependency field.
+
+Rules:
+
+    - absence of "packs" means no hard dependencies
+    - an empty list means explicitly no hard dependencies
+    - every entry under "packs" is a hard dependency meaning
+    - list order carries no semantic meaning by itself
+
+DA-13 does not define optional, soft, or advisory dependency semantics for the
+"packs" field.
+
+This is good.
+
+It keeps "packs" strong and unambiguous.
+
+
+PACKREQUEST IN DEPENDENCY CONTEXT
+=================================
+
+Dependencies are expressed using PackRequestRef and normalized into PackRequest
+and accepted-entry form.
+
+DA-11 defines PackRequest grammar and generic parsing rules.
+
+DA-13 defines how a PackRequest is interpreted when the requesting relationship
+is a dependency.
+
+In dependency context, PackRequest means:
+
+    - resolve one satisfying concrete dependency target
+    - obey dependency-source policy
+    - obey dependency version and fingerprint rules
+    - fail explicitly if no permitted dependency outcome exists
+
+Dependency context does not change PackRequest structure.
+
+Dependency context changes how the surrounding policy layer uses it.
+
+This is exactly the right DA-11 / DA-13 split.
+
+
+ACCEPTED-ENTRY NORMALIZATION
+============================
+
+DA-13 normalizes dependency requests into one or more accepted pack entries.
+
+Each accepted entry contains:
+
+    - canonicalPackId or PackRequest-identifiable pack reference
+    - packVersion or version requirement according to the original form
+    - optional fingerprint
+
+A dependency is satisfied if at least one normalized accepted entry can be
+resolved successfully under the active dependency-resolution source and context.
+
+Name-only shorthand remains allowed where existing field semantics already allow
+versionless PackRequestRef.
+
+Fingerprint requires exact concrete version.
+
+Invalid forms:
+
+    - name plus fingerprint with no version
+    - name plus range plus fingerprint
+    - name plus wildcard plus fingerprint
+
+Multiple accepted entries in the same dependency express one-of semantics at
+the accepted-entry level.
+
+This allows:
+
+    - one of several known-good versions of the same pack
+    - one of several concrete packs that satisfy the declared dependency intent
+
+This is good.
+
+The fingerprint rule is especially important: fingerprint is an exact artifact
+lock, not a vague compatibility hint.
+
+
+HARD DEPENDENCY MODEL
+=====================
+
+DA-13 correctly says all dependencies declared through "packs" are hard
+dependencies.
+
+Consequences:
+
+    - failure to resolve causes activation failure
+    - no automatic disabling occurs
+    - no silent downgrade occurs
+    - no implicit fallback occurs
+    - no best-effort substitution occurs
+
+This is exactly right.
+
+A dependency failure should not quietly turn into "disable the mod and continue"
+unless a later explicit policy/user decision layer owns that behavior.
+
+
+DEPENDENCY RESOLUTION SOURCE MODEL
+==================================
+
+DA-13 defines three mutually exclusive dependency-resolution sources:
+
+    - SaveOnly
+    - GlobalPinned
+    - GlobalNormal
+
+Every hard dependency is resolved from exactly one dependency-resolution source.
+
+Dependency-resolution sources are mutually exclusive.
+
+The resolver does not mix these sources silently.
+
+The resolver does not fall back between these sources silently.
+
+This is very strong.
+
+
+SAVEONLY
+========
+
+SaveOnly applies when the dependency's packTreeId is listed in SavePack
+metadata as copied.
+
+Under SaveOnly:
+
+    - only copied packs inside that SavePack are eligible
+    - the global registry is not consulted
+    - absence of the copied pack is a hard error
+
+Saved packs under this model:
+
+    - are identified by full identity
+      (author + packTreeId + version)
+    - are owned by the SavePack
+    - are immutable unless explicitly replaced
+    - are visible only within that save context
+
+This aligns with DA-09 and DA-10.
+
+It preserves save-local isolation and prevents global content from silently
+repairing missing copied SavePack material.
+
+
+GLOBALPINNED
+============
+
+GlobalPinned applies when the dependency is bound to a pin in SavePack metadata.
+
+Under GlobalPinned:
+
+    - only the pinned concrete identity is eligible
+    - resolution occurs in the global registry only
+    - a missing pinned identity is a hard error
+    - the pin does not imply copying or saving
+
+Pins express explicit historical intent and bypass selector-based candidate
+choice.
+
+This is good.
+
+It preserves reproducibility intent without pretending the pinned pack was
+copied into the SavePack.
+
+
+GLOBALNORMAL
+============
+
+GlobalNormal applies in all other dependency cases.
+
+Under GlobalNormal:
+
+    - resolution occurs in the global registry only
+    - SavePack content is not consulted
+    - selection follows the deterministic procedure in section 11
+
+This is good.
+
+It preserves the source boundary:
+
+    SaveOnly -> SavePack copied material only
+    GlobalPinned -> pinned global identity only
+    GlobalNormal -> ordinary global registry only
+
+No silent source mixing.
+
+
+VERSION AND FINGERPRINT ENFORCEMENT
+===================================
+
+DA-13 correctly enforces semantic versions and fingerprints.
+
+If a semantic-version requirement is present, only candidates allowed by that
+requirement remain eligible.
+
+If a concrete version is requested:
+
+    - only that version is eligible
+    - mismatch is a hard failure
+
+If a version range is requested:
+
+    - only matching versions are eligible
+    - surrounding policy may restrict further
+
+If no semantic-version requirement exists, or if "*" is used:
+
+    - all versions remain eligible
+
+If no eligible versions remain, dependency resolution fails with
+VersionMismatchError.
+
+If an accepted entry declares a fingerprint:
+
+    - the resolved dependency must also match that fingerprint
+    - fingerprint mismatch is a non-success outcome for that accepted entry
+
+Fingerprint expectation is an exact-artifact lock for that accepted entry.
+
+This is correct.
+
+
+GLOBALNORMAL SELECTION PROCEDURE
+================================
+
+DA-13 defines deterministic GlobalNormal selection.
+
+No scoring model exists.
+
+Procedure:
+
+    Step 1 - version handling
+        - if a concrete version is specified:
+          only that version remains eligible
+        - if a range or versionless form is specified:
+          the highest semantic version is preferred
+        - packs without version metadata are ordered last
+
+    Step 2 - author relationship ordering
+        1) exact requested author
+        2) same author as the requesting pack
+        3) different known author
+        4) unknown author
+
+    Step 3 - root precedence
+        custom
+        first-party
+        third-party
+
+    Step 4 - final tie-break
+        lexicographic order of:
+        "<author>@<packTreeId>@<version>"
+
+Selection rule:
+
+    - the first eligible candidate is selected
+    - silent substitution is forbidden
+
+This is deterministic and matches the DA-09 content-root precedence watch.
+
+Watch item:
+
+    This is correct for GlobalNormal.
+
+    It must not be applied to SaveOnly or GlobalPinned.
+
+    It must not override SavePack copied material, pinned dependencies, or
+    explicit selected graph/activation graph semantics.
+
+DA-13 appears to preserve that source split correctly.
+
+
+REQUIRED ROLES AND PROVIDED ROLES
+=================================
+
+DA-13 defines role requirements separately from hard pack dependencies.
+
+Manifest field for role requirements:
+
+    requiredRoles
+
+Manifest field for role providers:
+
+    providedRoles
+
+A required role means the pack expects one provider of that named role to be
+available when the surrounding runtime logic uses it.
+
+requiredRoles is a dependency/resolution-layer declaration rather than a
+runtime capability call.
+
+A pack declaring providedRoles says that it can serve as a provider for those
+roles.
+
+This is a good distinction.
+
+DA-13 correctly says requiredRoles does not itself force loader reordering or
+magical dependency-graph mutation.
+
+PackManager may use role metadata to help users build sensible load lists, but
+runtime behavior remains explicit.
+
+Watch item:
+
+    DA-13 says that if several providers declare the same role, runtime/provider
+    selection behavior is defined outside this document.
+
+    It also says that by current locked design, the first registered provider
+    wins by default, and specific-provider request may be used
+    programmatically.
+
+This needs later audit.
+
+Reason:
+
+    "first registered provider wins" touches runtime registration order and may
+    become nondeterministic if registration order is not itself deterministic,
+    trace-visible, and policy-governed.
+
+Recommended future check:
+
+    The provider-registration owner should define:
+
+        - what "registered" means
+        - who may register providers
+        - where provider registration lives
+        - whether registration order is deterministic
+        - whether activation order controls registration order
+        - whether PackManager load-list order controls registration order
+        - whether provider selection is trace-visible
+        - whether provider selection grants capability-like power
+        - whether specific-provider request bypasses policy or permission
+
+This is not necessarily a DA-13 rewrite issue, but it is the main watch item.
+
+
+ADVISORY PACK RELATIONS
+=======================
+
+DA-13 handles advisory metadata very well.
+
+Advisory fields:
+
+    - supportedPacks
+    - conflictingPacks
+    - recommendedPacks
+
+They reuse the shared pack-specifier structure.
+
+The surrounding advisory field defines the meaning.
+
+supportedPacks means:
+
+    - this pack is specifically known to be compatible with those packs
+    - if they are available, this pack is expected to work with them
+
+conflictingPacks means:
+
+    - if one of those packs is present, issues are known or expected
+
+recommendedPacks means:
+
+    - those packs are good to use together
+    - they express useful synergy or ecosystem guidance
+
+Advisory pack relations are hints.
+
+Advisory pack relations are not:
+
+    - hard dependencies
+    - hard activation blockers
+    - generic resolution constraints
+    - loader/runtime warning rules by themselves
+
+Advisory pack relations are for:
+
+    - PackManager
+    - UI
+    - compatibility presentation
+    - helping the user assemble a load list
+
+Advisory pack relations do not participate in dependency graph enforcement or
+activation validity.
+
+A shared pack-specifier structure does not upgrade advisory metadata into
+dependency semantics.
+
+This is exactly aligned with DA-29.
+
+Keep it.
+
+
+AMBIGUITY AND EXTERNAL INVOLVEMENT
+==================================
+
+DA-13 correctly says if deterministic dependency selection cannot produce one
+unambiguous candidate, dependency resolution pauses.
+
+Ambiguity is surfaced explicitly.
+
+User decision or accepted policy input is then required.
+
+Once such a decision is made:
+
+    - it is persisted by the surrounding consumer
+    - future runs remain deterministic
+
+The resolver does not guess.
+
+This is strong.
+
+DA-17 should later confirm remembered-decision scope and no silent broadening.
+
+
+FAILURE CONDITIONS
+==================
+
+Dependency resolution fails explicitly if:
+
+    - no candidates remain after hard constraints
+    - dependency-resolution source rules are violated
+    - a pinned or saved identity is missing
+    - ambiguity cannot be resolved
+    - no permitted decision path exists
+
+Dependency-resolution failure is:
+
+    - explicit
+    - classified
+    - observable
+    - never silently resolved by fallback
+
+This is correct.
+
+
+LAST-KNOWN-GOOD FALLBACK BOUNDARY
+=================================
+
+DA-13 correctly separates last-known-good from dependency resolution.
+
+Turnix stores the last successfully activated graph per SavePack.
+
+Resolution always attempts fresh dependency resolution first.
+
+Last-known-good is not consulted during dependency resolution.
+
+Last-known-good fallback is used only after activation failure.
+
+Fallback procedure:
+
+    1) abort current activation
+    2) attempt activation using the stored graph
+    3) propagate failure if fallback fails
+
+This is very important.
+
+It prevents LKG from becoming hidden dependency-resolution fallback.
+
+Correct model:
+
+    Dependency resolution remains strict.
+    Activation may later decide to attempt last-known-good graph fallback.
+    That fallback is activation/recovery behavior, not dependency success.
+
+
+DEPENDENCY IS NOT ACTIVATION
+============================
+
+DA-13 correctly says declaring or resolving a dependency does not:
+
+    - activate a pack
+    - load code
+    - grant runtime access
+
+Activation semantics are defined elsewhere.
+
+This should remain.
+
+
+NO MAJOR DV3 CONFLICT FOUND
+===========================
+
+DA-13 does not collapse dependencies into:
+
+    - generic resolution mechanics
+    - activation
+    - import
+    - loading
+    - runtime access
+    - capability invocation
+    - capability permission
+    - advisory metadata
+    - PackManager repair
+    - user-decision policy
+    - last-known-good fallback
+    - source mixing
+    - silent substitution
+
+This is exactly what the document should prevent.
+
+
+CURRENT FINAL RECOMMENDATION
+============================
+
+Keep DA-13.
+
+No heavy rewrite is recommended.
+
+Small future watch items:
+
+    1. Provider-role registration:
+       Later provider/runtime documents must define deterministic, scoped,
+       trace-visible provider registration and selection behavior.
+
+       The phrase "first registered provider wins by default" is acceptable
+       only if registration order itself is deterministic and authority-safe.
+
+    2. GlobalNormal root precedence:
+       custom > first-party > third-party is correct inside GlobalNormal.
+
+       Keep verifying that this does not apply to SaveOnly, GlobalPinned,
+       copied SavePack material, pinned graph identity, or explicit selected
+       graph semantics.
+
+    3. DA-17 decisions:
+       Ambiguity decisions and accepted policy input must not silently broaden
+       across packs, versions, SavePacks, RuntimeHosts, trust classes, or
+       provider roles.
+
+    4. Trace wording:
+       Follow the DA-03 cross-document trace wording check.
+
+Future audits should check:
+
+    - DA-14 activation preserves dependency/activation separation and owns
+      last-known-good fallback behavior.
+    - DA-16 confirms provider-role behavior does not become capability
+      invocation or permission by accident.
+    - DA-17 preserves ambiguity decision scope.
+    - DA-29 uses advisory pack relations for presentation/graph preparation
+      without turning them into hard dependencies or activation blockers.
+    - SavePack/AppInstance documents define copied, pinned, and selected graph
+      behavior consistently with SaveOnly and GlobalPinned.
+
+--- doc-meta ---
+DOC_ID: REWRITE-DA-13
+DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-13_RECOMMENDATION.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
