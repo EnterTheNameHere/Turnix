@@ -14,7 +14,13 @@ Loaded file metadata:
         a251dd43566589cb2f81832ec739e9a078b32049
 
 Audit note status:
-    First-pass Dv3 architecture audit recommendation.
+    Consolidated Dv3 architecture rewrite recommendation.
+    Action-focused revision pass for activation lifecycle, PackContext
+    authority, activation entrypoints, activation/execution separation,
+    immediate execution boundaries, JavaScript entry semantics, activation-
+    independent code, activation order, PackManager wording, resolvePack /
+    ensureActivated separation, orchestrated execution guarantees, trace wording,
+    activation failure, last-known-good boundary, and cross-document guardrails.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -32,10 +38,31 @@ SUMMARY
 
 DA-14 is strong and highly Dv3-compatible.
 
-It defines activation as the sole mechanism that transitions a pack from inert
-metadata to executable participation under Turnix control.
+No heavy rewrite is recommended.
 
-It correctly says activation is not:
+DA-14 defines activation as the sole mechanism that transitions a pack from
+inert metadata to executable participation under Turnix control.
+
+DA-14 should preserve the core rule:
+
+    Activation answers whether Turnix has intentionally brought this pack into
+    recognized executable participation under Turnix orchestration.
+
+Activation is a controlled, explicit, one-time state transition.
+
+Before activation:
+
+    - a pack exists only as metadata
+    - its code has no execution authority under Turnix
+    - adapter loading or native module evaluation does not make it active
+
+After activation:
+
+    - the pack may participate in runtime behavior
+    - execution is allowed only through Turnix-controlled orchestration pathways
+    - PackContext defines the pack-facing authority context
+
+Activation is not:
 
     - discovery
     - indexing
@@ -46,18 +73,49 @@ It correctly says activation is not:
     - adapter loading
     - visibility granting
     - capability permission
+    - PackManager repair
+    - RuntimeHost authority
+    - Job terminal outcome
+    - committed-state mutation
+    - native immediate execution
+    - background work guarantee
 
-It correctly says adapter loading or native module evaluation does not make a
-pack active.
+Main watch items:
 
-It correctly says execution is allowed only through Turnix-controlled
-orchestration pathways after activation.
+    1. Activation order / PackManager wording:
+        Treat PackManager as graph-preparation and management surface unless a
+        specific activation authority path says otherwise.
+
+        Activation itself remains Turnix-controlled and constrained by DA-14,
+        DA-16, DA-17, DA-23, and DA-24.
+
+    2. Last-known-good fallback:
+        If defined later, it must remain explicit post-activation-failure
+        recovery, not silent dependency-resolution fallback.
+
+    3. Trace wording:
+        Follow the DA-03 cross-document trace wording check.
+
+    4. Future entrypoints:
+        Future activation entrypoints are allowed only if explicitly defined by
+        Turnix and preserving the same PackContext/orchestration boundary.
+
+Rewrite-boundary guardrails:
+
+    DA-14 owns activation lifecycle and execution-guarantee boundaries.
+
+    DA-14 should not absorb detailed generic resolution, dependency source
+    selection, importing/module-loading, ExecutionAdapter lifecycle/trust,
+    trace schema/storage, capability schema, permission prompting, user decision,
+    remembered policy, Job lifecycle, OrchestrationUnit lifecycle,
+    RuntimeHost command-surface, PackManager graph-preparation, or concrete
+    last-known-good recovery semantics.
+
+    Those details belong to their subject-owning documents.
 
 Overall recommendation:
 
     KEEP WITH SMALL ACTIVATION-ORDER / PACKMANAGER WORDING WATCH
-
-No heavy rewrite is recommended.
 
 
 CURRENT CLASSIFICATION
@@ -74,74 +132,57 @@ Detailed classification:
 
     02. Core Concept
         KEEP
-        Very strong. Activation is explicit Turnix-recognized executable
-        participation under orchestration.
 
     03. Lifecycle Phases
         KEEP
-        Good externally observable phase order.
 
     04. What Activated Means
         KEEP
-        Strong PackContext / adapter-mediated activation split.
 
     05. Pack-level Activation
         KEEP
-        Good. Activation applies to pack as a whole, not individual modules or
-        files.
 
     06. PackContext (ctx) - Execution Authority
         KEEP
-        Strong controlled authority context model.
 
     07. Activation Entrypoint
         KEEP
-        onLoad(ctx) is currently sole entrypoint, with future entrypoints
+        onLoad(ctx) is currently the sole entrypoint, with future entrypoints
         allowed only if explicitly defined by Turnix.
 
     08. Activation vs Execution
         KEEP
-        Critical distinction.
 
     09. Immediate Execution and Language Constructs
         KEEP
-        Strong unsupported-import-time-execution doctrine.
 
     10. Runtime Entries - JavaScript Semantics
         KEEP
-        Good entry vs entries split.
 
     11. Entry vs Entries - Execution Rules
         KEEP
-        Good library-only behavior.
 
     12. Activation-independent Code
         KEEP
-        Very good authority delegation rule.
 
     13. Activation Order
         KEEP WITH WATCH
-        Directionally good, but PackManager wording should be checked so
-        PackManager graph preparation does not silently become hidden runtime
-        authority.
+        PackManager wording should be interpreted as graph preparation /
+        management unless a specific activation authority path says otherwise.
 
     14. resolvePack vs ensureActivated
         KEEP
-        Strong metadata / activation separation.
 
     15. Orchestrated Execution Guarantee
         KEEP
-        Good. Guarantees apply only to Turnix-invoked and tracked execution.
         Trace wording should follow the DA-03 cross-document trace wording
         check.
 
     16. Activation Failure and NotActivatedError
         KEEP
-        Strong visible failure and no silent fallback.
 
     17. Activation Result
         KEEP
-        Good. ensureActivated returns metadata/diagnostics, not code/symbols.
 
     18. Explicitly Open Questions
         KEEP
@@ -150,10 +191,12 @@ Detailed classification:
         KEEP
 
 
-WHAT IS ALREADY NAILED
-======================
+PRESERVATION RULE 1: ACTIVATION IS THE EXECUTABLE-PARTICIPATION TRANSITION
+==========================================================================
 
-DA-14 correctly says activation answers exactly one question:
+Preserve DA-14's core concept.
+
+Activation answers exactly one question:
 
     Has Turnix intentionally brought this pack into recognized executable
     participation under Turnix orchestration?
@@ -172,13 +215,15 @@ After activation:
     - execution is allowed only through Turnix-controlled orchestration pathways
     - PackContext defines the pack-facing authority context
 
-This is exactly the correct activation boundary.
+This is the core activation boundary.
 
 
-ACTIVATION IS NOT EARLIER PIPELINE STAGES
-=========================================
+PRESERVATION RULE 2: ACTIVATION IS NOT EARLIER PIPELINE STAGES
+==============================================================
 
-DA-14 correctly says activation is not:
+Preserve activation separation from earlier stages.
+
+Activation is not:
 
     - discovery
     - indexing
@@ -193,7 +238,7 @@ DA-14 correctly says activation is not:
 Earlier phases may occur before activation, but none of them implies
 activation.
 
-This preserves the chain:
+Preserve the chain:
 
     discovery finds candidates
 
@@ -212,17 +257,17 @@ This preserves the chain:
 No earlier phase becomes activation.
 
 
-LIFECYCLE PHASES
-================
+PRESERVATION RULE 3: LIFECYCLE PHASES ARE ORDERED AND EXTERNALLY OBSERVABLE
+===========================================================================
 
-DA-14 defines logically ordered, externally observable phases:
+Preserve logically ordered, externally observable phases:
 
-    1) Discovery
-    2) Indexing
-    3) Resolution
-    4) Execution adapter preparation where applicable
-    5) Activation
-    6) Running or Finalized
+    1. Discovery
+    2. Indexing
+    3. Resolution
+    4. Execution adapter preparation where applicable
+    5. Activation
+    6. Running or Finalized
 
 Activation is the first moment Turnix may intentionally execute pack code with
 PackContext authority.
@@ -243,11 +288,11 @@ Turnix-orchestrated execution pathways.
 Code that executes outside Turnix orchestration remains outside Turnix
 guarantees.
 
-This is correct.
 
+PRESERVATION RULE 4: ACTIVATED MEANS PACKCONTEXT-MEDIATED PARTICIPATION
+========================================================================
 
-WHAT ACTIVATED MEANS
-====================
+Preserve the meaning of Activated.
 
 When a pack is activated:
 
@@ -256,7 +301,7 @@ When a pack is activated:
     - the pack may participate in Turnix-managed runtime behavior
 
 When the activated pack's executable artifact belongs to an adapter runtime,
-activation dispatch occurs through the appropriate execution adapter under
+activation dispatch occurs through the appropriate ExecutionAdapter under
 DA-23.
 
 Activated packs may register services, register capabilities, subscribe to
@@ -271,13 +316,13 @@ Before activation:
     - artifact loading may have occurred
     - pack code must not execute under Turnix authority
 
-This is good.
 
+PRESERVATION RULE 5: ACTIVATION APPLIES TO PACK AS A WHOLE
+==========================================================
 
-PACK-LEVEL ACTIVATION
-=====================
+Preserve pack-level activation.
 
-DA-14 correctly says activation applies to the pack as a whole.
+Activation applies to the pack as a whole.
 
 Activation does not apply to:
 
@@ -289,22 +334,20 @@ Activation does not apply to:
 
 A pack is either activated or not activated.
 
-Partial, staged, deferred, or per-file activation is not defined by this
-document.
+Partial, staged, deferred, or per-file activation is not defined by DA-14.
 
 Adapter loading does not create partial activation.
 
-This is good and should remain.
-
-The open questions already allow staged/phased activation to be considered
-later without silently changing current semantics.
+The open questions may allow staged or phased activation to be considered later
+without silently changing current semantics.
 
 
-PACKCONTEXT AUTHORITY
-=====================
+PRESERVATION RULE 6: PACKCONTEXT IS PACK-FACING EXECUTION AUTHORITY
+===================================================================
 
-DA-14 correctly defines PackContext as the pack-facing execution-authority
-context.
+Preserve PackContext authority semantics.
+
+PackContext is the pack-facing execution-authority context.
 
 PackContext is created only by Turnix.
 
@@ -331,21 +374,18 @@ Representation difference across adapters does not change authority meaning.
 In-process PackContext calls do not bypass capability mediation, policy,
 transaction, trace, persistence, or lifecycle rules.
 
-This is strong.
 
+PRESERVATION RULE 7: PASSING PACKCONTEXT IS EXPLICIT DELEGATION
+===============================================================
 
-PACKCONTEXT DELEGATION
-======================
+Preserve PackContext delegation semantics.
 
-DA-14 explicitly says passing ctx to other code is an explicit delegation of
-authority.
+Passing ctx to other code is an explicit delegation of authority.
 
 The delegating pack remains fully responsible for actions performed using its
 ctx.
 
-This is extremely important.
-
-It cleanly handles activation-independent library code:
+This handles activation-independent library code:
 
     The provider pack does not become activated or authorized merely because its
     library function is called.
@@ -356,17 +396,20 @@ It cleanly handles activation-independent library code:
 
     The caller remains responsible.
 
-Keep this.
+Passing PackContext into activation-independent code does not change the
+provider pack's activation state.
 
 
-ACTIVATION ENTRYPOINT
-=====================
+PRESERVATION RULE 8: ACTIVATION ENTRYPOINT IS TURNIX-DEFINED
+============================================================
 
-DA-14 says the sole activation entrypoint is:
+Preserve activation entrypoint semantics.
+
+DA-14 currently says the sole activation entrypoint is:
 
     onLoad(ctx)
 
-Locked rules:
+Locked current rules:
 
     - onLoad(ctx) is called exactly once per pack instance
     - onLoad(ctx) is called only by Turnix
@@ -381,22 +424,22 @@ themselves.
 Future activation entrypoints, if introduced, follow the same rules and are
 explicitly defined by Turnix.
 
-This resolves the DA-12 watch item well.
+This resolves the DA-12 watch item:
 
-DA-12's "only onLoad(ctx)" wording is acceptable because DA-14 explicitly leaves
-a controlled future-entrypoint path.
+    DA-12's "only onLoad(ctx)" wording is acceptable because DA-14 explicitly
+    leaves a controlled future-entrypoint path.
 
 
-ACTIVATION VS EXECUTION
-=======================
+PRESERVATION RULE 9: ACTIVATION AND EXECUTION REMAIN SEPARATE
+=============================================================
 
-DA-14 correctly separates activation and execution.
+Preserve activation / execution separation.
 
 Activation:
 
     - is a one-time state transition
     - establishes PackContext authority
-    - occurs exclusively through onLoad(ctx)
+    - occurs currently through onLoad(ctx)
     - may dispatch through an execution adapter when applicable
 
 Execution:
@@ -412,17 +455,15 @@ No execution mechanism substitutes for onLoad(ctx).
 Adapter execution without PackContext authority is not Turnix-recognized
 activated execution.
 
-This is correct.
 
+PRESERVATION RULE 10: IMMEDIATE EXECUTION IS UNSUPPORTED
+========================================================
 
-IMMEDIATE EXECUTION AND LANGUAGE CONSTRUCTS
-===========================================
-
-DA-14 correctly handles immediate execution.
+Preserve immediate execution boundaries.
 
 Some languages permit immediate execution constructs:
 
-    - Immediately Invoked Function Expressions (IIFE)
+    - Immediately Invoked Function Expressions
     - module-level executable statements
     - top-level side effects
 
@@ -453,13 +494,13 @@ Same-language execution does not make immediate execution supported.
 
 Adapter loading does not make immediate execution supported.
 
-This is excellent.
 
+PRESERVATION RULE 11: JAVASCRIPT ENTRY AND ENTRIES STAY DISTINCT
+================================================================
 
-JAVASCRIPT ENTRY VS ENTRIES
-===========================
+Preserve JavaScript entry semantics.
 
-DA-14 correctly distinguishes:
+DA-14 distinguishes:
 
     runtimes.javascript.entry
 
@@ -483,13 +524,11 @@ runtimes.javascript.entries:
 
 This aligns with DA-12.
 
-Good.
 
+PRESERVATION RULE 12: ACTIVATION-INDEPENDENT CODE USES CALLER AUTHORITY
+=======================================================================
 
-ACTIVATION-INDEPENDENT CODE
-===========================
-
-DA-14 defines activation-independent code well.
+Preserve activation-independent code semantics.
 
 Activation-independent code:
 
@@ -513,14 +552,14 @@ initialized from that pack's activation entry.
 Passing PackContext into activation-independent code does not change the
 provider pack's activation state.
 
-This is a very good rule.
-
-It gives library-like packs a clean model without turning import into
+This gives library-like packs a clean model without turning import into
 activation.
 
 
-ACTIVATION ORDER
-================
+PRESERVATION RULE 13: ACTIVATION ORDER MUST NOT BECOME PACKMANAGER AUTHORITY
+============================================================================
+
+Preserve activation order boundaries.
 
 DA-14 says activation order is determined exclusively by:
 
@@ -540,15 +579,10 @@ Adapter readiness does not define activation order.
 
 Adapter loading does not define activation order.
 
-This is directionally correct.
-
 Watch item:
 
     "PackManager determines activation order" should be read carefully after
     DA-29.
-
-    DA-29 says PackManager prepares, explains, validates, repairs, and manages
-    graph intent, but should not silently become runtime authority.
 
 Recommended interpretation:
 
@@ -563,10 +597,10 @@ Recommended interpretation:
 This is a wording watch, not a major source conflict.
 
 
-RESOLVEPACK VS ENSUREACTIVATED
-==============================
+PRESERVATION RULE 14: RESOLVEPACK AND ENSUREACTIVATED STAY SEPARATE
+===================================================================
 
-DA-14 correctly distinguishes resolvePack and ensureActivated.
+Preserve resolvePack / ensureActivated separation.
 
 resolvePack(selector):
 
@@ -591,14 +625,14 @@ executable artifact belongs to an adapter runtime.
 
 ensureActivated does not expose adapter internals.
 
-This is strong and aligns with DA-12.
 
+PRESERVATION RULE 15: TURNIX GUARANTEES ONLY ORCHESTRATED EXECUTION
+===================================================================
 
-ORCHESTRATED EXECUTION GUARANTEE
-================================
+Preserve the orchestrated execution guarantee.
 
-DA-14 correctly says Turnix guarantees behavior only for execution invoked and
-tracked through Turnix orchestration.
+Turnix guarantees behavior only for execution invoked and tracked through Turnix
+orchestration.
 
 Guaranteed execution pathways include:
 
@@ -623,11 +657,13 @@ through Turnix orchestration.
 In-process execution has no extra guarantees merely because it runs in the same
 process as the backend implementation.
 
-This is correct.
+Trace wording should follow the DA-03 cross-document trace wording check.
 
 
-TRACE WORDING
-=============
+PRESERVATION RULE 16: ACTIVATION TRACE WORDING FOLLOWS DA-03
+============================================================
+
+Preserve activation trace ownership.
 
 DA-14 uses trace-visible and trace evidence wording.
 
@@ -649,13 +685,11 @@ Correct interpretation:
 DA-14 already explicitly says activation trace evidence does not redefine those
 other domains.
 
-This is good.
 
+PRESERVATION RULE 17: ACTIVATION FAILURE IS VISIBLE AND DOES NOT SILENTLY FALL BACK
+===================================================================================
 
-ACTIVATION FAILURE AND NOTACTIVATEDERROR
-========================================
-
-DA-14 correctly defines activation failure.
+Preserve activation failure behavior.
 
 Activation failure indicates a system-level error such as:
 
@@ -680,13 +714,13 @@ Swallowing NotActivatedError hides orchestration failure.
 Activation failure is not a Job terminal outcome merely because the activation
 path used adapter-executed code.
 
-This is exactly right.
 
+PRESERVATION RULE 18: ENSUREACTIVATED RETURNS DIAGNOSTICS, NOT CODE
+===================================================================
 
-ACTIVATION RESULT
-=================
+Preserve activation result semantics.
 
-DA-14 correctly says ensureActivated may return:
+ensureActivated may return:
 
     - activation status
     - warnings
@@ -702,47 +736,244 @@ ensureActivated does not return:
 This keeps ensureActivated separate from import and adapter internals.
 
 
-LAST-KNOWN-GOOD NOTE
-====================
+PRESERVATION RULE 19: LAST-KNOWN-GOOD IS POST-ACTIVATION-FAILURE RECOVERY ONLY
+=============================================================================
 
-DA-13 said last-known-good fallback is used only after activation failure.
+Preserve the last-known-good boundary.
+
+DA-13 says last-known-good fallback is used only after activation failure.
 
 DA-14 does not define last-known-good fallback behavior here.
 
 That is acceptable because DA-14 says activation failure surfaces and silent
 fallback is forbidden.
 
-Future watch:
+If last-known-good activation fallback is defined elsewhere, it must remain:
 
-    If last-known-good activation fallback is defined elsewhere, it must remain
-    explicit, trace-visible, policy-bound, and must not turn dependency
-    resolution failure into silent success.
+    - explicit
+    - trace-visible
+    - policy-bound
+    - post-activation-failure recovery
 
-No DA-14 rewrite is required for this now.
+It must not turn dependency resolution failure into silent success.
 
 
-NO MAJOR DV3 CONFLICT FOUND
-===========================
+SOURCE BOUNDARY STATEMENT: ACTIVATION IS CONTROLLED EXECUTABLE PARTICIPATION
+============================================================================
 
-DA-14 does not collapse activation into:
+DA-14 may state the source-level boundary:
 
-    - discovery
-    - indexing
-    - dependency resolution
-    - import
-    - adapter selection
-    - execution authorization
-    - adapter loading
-    - visibility
-    - capability permission
-    - PackManager repair
-    - RuntimeHost authority
-    - Job terminal outcome
-    - committed-state mutation
-    - native immediate execution
-    - background work guarantees
+    Activation is the sole mechanism that transitions a pack from inert metadata
+    to recognized executable participation under Turnix orchestration.
 
-This is exactly what the document should prevent.
+    Activation is not discovery, indexing, dependency resolution, importing,
+    adapter selection, execution authorization, adapter loading, visibility
+    granting, capability permission, PackManager repair, RuntimeHost authority,
+    Job terminal outcome, committed-state mutation, native immediate execution,
+    or background work guarantee.
+
+    Adapter loading, native module evaluation, imported module evaluation,
+    immediate execution, and PackManager graph preparation do not make a pack
+    active.
+
+    A pack is active only when Turnix creates PackContext for that pack instance
+    and dispatches the Turnix-defined activation entrypoint under the activation
+    lifecycle rules.
+
+This source-level boundary is useful because DA-14 owns activation lifecycle and
+execution-guarantee semantics.
+
+The detailed ownership map belongs in the guardrail section below.
+
+
+REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-14 CONTENT
+=========================================================
+
+This section is not suggested DA-14 wording.
+
+It exists to prevent architectural drift during rewrite when the editor knows
+DA-14 but may not have every subject-owning document loaded.
+
+Use these as guardrails only.
+
+Activation-boundary guardrails:
+
+    Activation is executable participation, not metadata existence.
+
+    Activation is not discovery.
+
+    Activation is not indexing.
+
+    Activation is not dependency resolution.
+
+    Activation is not importing.
+
+    Activation is not adapter selection.
+
+    Activation is not execution authorization.
+
+    Activation is not adapter loading.
+
+    Activation is not visibility granting.
+
+    Activation is not capability permission.
+
+    Activation is not PackManager repair.
+
+    Activation is not RuntimeHost authority.
+
+    Activation is not Job terminal outcome.
+
+    Activation is not OrchestrationUnit terminal outcome.
+
+    Activation is not committed-state mutation.
+
+    Activation is not native immediate execution.
+
+    Activation is not background work guarantee.
+
+    Pack activation is pack-level, not per-file.
+
+    Pack activation is pack-level, not per-module.
+
+    Pack activation is pack-level, not per-import.
+
+    Pack activation is pack-level, not per-capability.
+
+    Adapter loading does not create partial activation.
+
+    Module evaluation does not activate a pack.
+
+    Import-time side effects do not activate a pack.
+
+    Immediate execution is outside Turnix guarantees.
+
+    PackContext is not raw backend access.
+
+    PackContext is not unrestricted Kernel access.
+
+    PackContext operations route through Kernel-owned boundaries.
+
+    Passing PackContext is explicit delegation.
+
+    Activation-independent library code uses caller authority when caller
+    supplies ctx.
+
+    onLoad(ctx) is current activation entrypoint, not native import symbol
+    access.
+
+    Future activation entrypoints must be explicitly defined by Turnix.
+
+    Runtime entries other than activation entry are library modules, not
+    activation targets.
+
+    PackManager may prepare or propose activation graph/load order, but does not
+    become activation authority by helpfulness.
+
+    ensureActivated returns activation metadata/diagnostics, not executable code
+    or symbols.
+
+    NotActivatedError is orchestration failure and must not be swallowed.
+
+    Last-known-good fallback is not dependency-resolution fallback.
+
+Owning-document boundaries:
+
+    DA-03 owns trace schema, trace DAG semantics, trace storage, trace retention,
+    and trace loss.
+
+    DA-11 owns generic resolution mechanics.
+
+    DA-12 owns importing, module loading, code-boundary rules, turnixImport, and
+    native import limits.
+
+    DA-13 owns dependency semantics, dependency source selection, and the
+    last-known-good dependency-resolution boundary.
+
+    DA-16 owns service, capability, permission, capability registration,
+    capability invocation, and Job-backed capability semantics.
+
+    DA-17 owns user decision, remembered policy, policy violation, and
+    remembered-decision scope.
+
+    DA-19 owns Job lifecycle, timeout, cancellation, progress, result, and
+    terminal outcome semantics.
+
+    DA-21 owns RPC, channel, and transport semantics.
+
+    DA-23 owns ExecutionAdapter boundary semantics, adapter-mediated execution,
+    same-language execution boundaries, and adapter lifecycle/trust details
+    where delegated to DA-27.
+
+    DA-24 owns OrchestrationUnit lifecycle and mutation-authority semantics.
+
+    DA-28 owns RuntimeHost workspace ownership, entry surfaces, and command
+    surfaces.
+
+    DA-29 owns PackManager graph-preparation, graph management, repair,
+    advisory presentation, and PackManager-domain trace semantics.
+
+Local rewrite rule:
+
+    DA-14 may name these concepts when needed to protect activation lifecycle
+    and execution-guarantee boundaries.
+
+    DA-14 should not define their detailed behavior.
+
+    DA-14 should remain the activation lifecycle, PackContext authority,
+    activation entrypoint, activation/execution separation, immediate execution,
+    orchestrated execution, activation failure, activation result, and
+    activation-domain trace document.
+
+
+WATCH ITEMS
+===========
+
+Activation order / PackManager wording watch:
+
+    Treat PackManager as graph-preparation and management surface unless a
+    specific activation authority path says otherwise.
+
+    Activation itself remains Turnix-controlled and constrained by DA-14, DA-16,
+    DA-17, DA-23, and DA-24.
+
+Last-known-good fallback watch:
+
+    If defined later, it must remain explicit post-activation-failure recovery,
+    not silent dependency-resolution fallback.
+
+Trace wording watch:
+
+    Follow the DA-03 cross-document trace wording check.
+
+    Activation trace obligations are activation-domain emission obligations.
+
+    Trace retention and loss remain governed by DA-03.
+
+Future entrypoints watch:
+
+    Future activation entrypoints are allowed only if explicitly defined by
+    Turnix and preserving the same PackContext/orchestration boundary.
+
+Service/capability registration watch:
+
+    DA-16 should preserve service/capability registration during activation as
+    mediated capability/service behavior, not raw authority.
+
+Policy watch:
+
+    DA-17 should preserve activation failure policy and remembered decisions
+    without silent broadening.
+
+Adapter watch:
+
+    DA-23 and DA-27 should preserve adapter-mediated activation diagnostics
+    without making adapter loading activation.
+
+OrchestrationUnit watch:
+
+    DA-24 should preserve activation-time mutation boundaries if activation
+    creates or enters OrchestrationUnits.
 
 
 CURRENT FINAL RECOMMENDATION
@@ -752,38 +983,58 @@ Keep DA-14.
 
 No heavy rewrite is recommended.
 
-Small future watch items:
+Main watch items:
 
     1. Activation order / PackManager wording:
-       Treat PackManager as graph-preparation and management surface unless a
-       specific activation authority path says otherwise.
+        Treat PackManager as graph-preparation and management surface unless a
+        specific activation authority path says otherwise.
 
-       Activation itself remains Turnix-controlled and constrained by DA-14,
-       DA-16, DA-17, DA-23, and DA-24.
+        Activation itself remains Turnix-controlled and constrained by DA-14,
+        DA-16, DA-17, DA-23, and DA-24.
 
     2. Last-known-good fallback:
-       If defined later, it must remain explicit post-activation-failure
-       recovery, not silent dependency-resolution fallback.
+        If defined later, it must remain explicit post-activation-failure
+        recovery, not silent dependency-resolution fallback.
 
     3. Trace wording:
-       Follow the DA-03 cross-document trace wording check.
+        Follow the DA-03 cross-document trace wording check.
 
     4. Future entrypoints:
-       Future activation entrypoints are allowed only if explicitly defined by
-       Turnix and preserving the same PackContext/orchestration boundary.
+        Future activation entrypoints are allowed only if explicitly defined by
+        Turnix and preserving the same PackContext/orchestration boundary.
 
-Future audits should check:
+Preserve:
 
-    - DA-15 graph/load-list semantics if it owns activation graph ordering.
-    - DA-16 service/capability registration during activation.
-    - DA-17 policy and remembered decisions around activation failure.
-    - DA-23 adapter lifecycle and adapter-mediated activation diagnostics.
-    - DA-24 OrchestrationUnit relation to activation-time mutation.
-    - DA-29 PackManager relation to activation order and graph preparation.
+    - activation as executable-participation transition
+    - activation not being earlier pipeline stages
+    - ordered and externally observable lifecycle phases
+    - Activated meaning as PackContext-mediated participation
+    - pack-level activation
+    - PackContext as pack-facing execution authority
+    - PackContext delegation semantics
+    - Turnix-defined activation entrypoints
+    - activation / execution separation
+    - immediate execution as unsupported
+    - JavaScript entry / entries distinction
+    - activation-independent code using caller authority
+    - activation order not becoming PackManager authority
+    - resolvePack / ensureActivated separation
+    - Turnix guarantees applying only to orchestrated execution
+    - DA-03-compatible activation trace wording
+    - visible activation failure and no silent fallback
+    - ensureActivated returning diagnostics, not code
+    - last-known-good as post-activation-failure recovery only
+
+Do not expand DA-14 into detailed generic resolution, dependency source
+selection, importing/module-loading, ExecutionAdapter lifecycle/trust, trace
+schema/storage, capability schema, permission prompting, user decision,
+remembered policy, Job lifecycle, OrchestrationUnit lifecycle, RuntimeHost
+command-surface, PackManager graph-preparation, or concrete last-known-good
+recovery semantics.
 
 --- doc-meta ---
 DOC_ID: REWRITE-DA-14
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-14_RECOMMENDATION.txt
-DOC_REV: 1
-DOC_GIT: d49070d
+DOC_REV: 2
+DOC_GIT: d70445c
 ----------------
