@@ -1,0 +1,659 @@
+TURNIX DV3 AUDIT NOTE
+=====================
+
+Source file:
+    docs/design/DA-11_GENERIC_RESOLUTION_SEMANTICS.txt
+
+Branch:
+    Dv3
+
+Loaded file metadata:
+    DOC_REV: 16
+    DOC_GIT: a428a7a
+    GitHub blob SHA seen by assistant:
+        e7f0e553c2f7bc3e5457046391be425c797f9d9f
+
+Audit note status:
+    First-pass Dv3 architecture audit recommendation.
+
+Audit scope:
+    This note audits architectural meaning, doctrine, and direction.
+    It does not audit formatting unless formatting/structure affects meaning,
+    machine interpretation, rule priority, or human usability as reference.
+
+Important excluded source:
+    AI_WORKFLOW_BOOTSTRAP.txt was intentionally not read.
+    It is part of the workflow system being audited separately and should not
+    bias this architecture pass.
+
+
+SUMMARY
+=======
+
+DA-11 is strong and highly Dv3-compatible.
+
+It defines generic, dependency-agnostic resolution mechanics.
+
+It correctly separates:
+
+    - request parsing
+    - candidate enumeration
+    - whole-candidate comparison
+    - constraint application
+    - deterministic selection
+    - ambiguity and failure signaling
+
+It explicitly does not define:
+
+    - discovery boundaries
+    - pack identity and visibility semantics
+    - dependency meaning or strength
+    - save-specific override policy
+    - warning / allow / deny / remember / user-decision behavior
+    - activation, execution, or lifecycle semantics
+    - capability authority or permission mechanics
+
+This is the correct Dv3 layer boundary.
+
+Overall recommendation:
+
+    KEEP WITH SMALL CONTEXT / PRECEDENCE WATCH
+
+No heavy rewrite is recommended.
+
+
+CURRENT CLASSIFICATION
+======================
+
+Overall classification:
+
+    KEEP WITH SMALL CONTEXT / PRECEDENCE WATCH
+
+Detailed classification:
+
+    01. Interpretation Basis
+        KEEP
+
+    02. Core Concept
+        KEEP
+        Strong. Resolution is side-effect-free and does not rescan, lazily read
+        manifests, merge manifest fragments, activate packs, load runtimes, or
+        guess policy.
+
+    03. PackRequest Reference Grammar
+        KEEP
+        Clear canonical grammar.
+
+    04. Single-At Disambiguation Rule
+        KEEP
+        Good deterministic author/version ambiguity rule.
+
+    05. PackRequest Internal Representation
+        KEEP
+        Strong. PackRequest is immutable and does not carry higher-level policy.
+
+    06. Resolution Overview
+        KEEP
+        Excellent deterministic, side-effect-free snapshot model.
+
+    07. Candidate Enumeration - Phase A
+        KEEP
+        Good structural enumeration only.
+
+    08. Whole-Candidate Boundary
+        KEEP
+        Strong. Resolution does not merge manifests or compose synthetic
+        candidates.
+
+    09. Candidate Equivalence and Fingerprints
+        KEEP
+        Good distinction between fingerprint equivalence and divergence.
+
+    10. Constraint Application - Phase B
+        KEEP
+        Strong hard/soft constraint split.
+
+    11. Resolution Context and Source Boundary
+        KEEP WITH WATCH
+        Correct explicit-context model.
+        Later consumer documents must not smuggle hidden policy or context
+        switching into the generic resolver.
+
+    12. Deterministic Selection
+        KEEP WITH WATCH
+        Deterministic ordering is good.
+        Consumer-supplied ordering criteria must be audited in later documents.
+
+    13. Resolution Observability
+        KEEP
+        Strong explainability requirement.
+        Trace wording should follow the DA-03 cross-document trace wording
+        check.
+
+    14. Ambiguity Handling
+        KEEP
+        Excellent. Generic resolver does not guess or auto-persist decisions.
+
+    15. Failure Conditions
+        KEEP
+        Explicit failure and no silent fallback.
+
+    16. Resolution Is Not Activation
+        KEEP
+        Critical boundary.
+
+    17. Error Model
+        KEEP
+        Good explicit classification requirement.
+
+    18. Locked Summary
+        KEEP
+
+
+WHAT IS ALREADY NAILED
+======================
+
+DA-11 correctly says resolution answers:
+
+    Which concrete pack identity satisfies this PackRequest inside the current
+    resolution context?
+
+Resolution consumes:
+
+    - a PackRequest
+    - a snapshot of discovered and indexed pack descriptors
+    - a resolution context supplied by a higher consumer
+
+Resolution does not:
+
+    - rescan the filesystem
+    - read manifests lazily
+    - merge manifest fragments
+    - activate packs
+    - load runtimes
+    - guess policy
+
+Discovery builds the candidate universe.
+
+Resolution selects from that already-built universe.
+
+Resolution works on whole discovered candidate artifacts produced by DA-09
+discovery, not on merged fragments of multiple manifests.
+
+This is exactly right.
+
+
+PACKREQUEST GRAMMAR
+===================
+
+DA-11 defines canonical PackRequest grammar:
+
+    [<author>@]<packTreeId>[@<semverRequirement>]
+
+Grammar rules:
+
+    - case-sensitive
+    - exactly zero, one, or two "@" characters
+    - no filesystem paths
+    - no slashes
+    - dots are allowed only for pack hierarchy
+    - no implicit defaults inside the raw reference string
+
+This is good.
+
+PackRequest syntax remains identity/request syntax, not filesystem syntax.
+
+This prevents resolution from becoming path lookup.
+
+
+SINGLE-AT DISAMBIGUATION
+========================
+
+DA-11 defines a deterministic single-@ rule.
+
+If a PackRequest contains exactly one "@", the resolver first attempts to parse
+the suffix as a semantic version requirement.
+
+If semantic-version parsing succeeds, the suffix is treated as semverRequirement.
+
+If semantic-version parsing fails, the suffix is treated as author.
+
+Examples:
+
+    "foo@1.2" -> packTreeId = "foo", semverRequirement = "1.2"
+
+    "foo@bar" -> author = "foo", packTreeId = "bar"
+
+This is acceptable and deterministic.
+
+It should be kept unless the syntax design is intentionally changed later.
+
+
+PACKREQUEST INTERNAL REPRESENTATION
+===================================
+
+DA-11 correctly says PackRequest is the parsed internal representation used by
+the generic resolver.
+
+PackRequest structure:
+
+    - author: str | None
+    - packTreeId: str
+    - semverRequirement: SemVerPackRequirement | None
+    - kind: PackKind | None
+
+PackRequest is immutable after creation.
+
+PackRequest carries only normalized request identity and request constraints.
+
+PackRequest does not carry higher-level resolution policy such as:
+
+    - optionality
+    - source preference
+    - prerelease allowance
+    - persisted ambiguity decisions
+
+This is very important.
+
+It keeps request identity separate from consumer policy.
+
+
+RESOLUTION OVERVIEW
+===================
+
+DA-11 correctly defines resolution as deterministic and side-effect-free.
+
+Inputs:
+
+    - one PackRequest
+    - one registry snapshot
+    - one externally supplied resolution context
+
+Outputs:
+
+    - exactly one resolved concrete pack identity
+    - or one classified resolution failure
+    - or one classified ambiguity requiring external decision
+
+Given the same inputs and same resolution context, the outcome is identical.
+
+The resolver does not mutate the registry snapshot.
+
+The resolver does not trigger new discovery.
+
+The resolver does not combine partial candidate data into a new candidate.
+
+This is exactly the Dv3 model.
+
+
+CANDIDATE ENUMERATION
+=====================
+
+Phase A candidate enumeration identifies packs that are structurally compatible
+with a PackRequest.
+
+Enumeration steps:
+
+    1) match packTreeId
+    2) apply author constraint if present
+    3) apply kind constraint if present
+    4) collect remaining candidates
+
+Candidate enumeration does not:
+
+    - order candidates
+    - select a winner
+    - apply consumer preference
+    - perform fallback
+    - interpret optionality
+    - merge candidates
+
+This phase answers only:
+
+    Which candidates could structurally satisfy this request?
+
+This is correct.
+
+
+WHOLE-CANDIDATE BOUNDARY
+========================
+
+DA-11 strongly preserves DA-09's whole-manifest / whole-candidate boundary.
+
+Resolution operates on whole discovered candidate artifacts supplied by the
+registry snapshot.
+
+The candidate universe is produced by discovery and indexing.
+
+Resolution does not:
+
+    - merge duplicate manifests
+    - stack manifest fields
+    - compose a synthetic candidate from several shadowed candidates
+
+If several discovered candidates exist for the same apparent pack, resolution
+compares those candidates as whole candidates.
+
+This prevents resolution from becoming a hidden manifest merge stage.
+
+This should remain.
+
+
+CANDIDATE EQUIVALENCE AND FINGERPRINTS
+======================================
+
+DA-11 defines candidate equivalence as two or more candidates representing the
+same concrete pack content for the current comparison purpose.
+
+When pack fingerprints are available and relevant, equality of the full
+fingerprint string establishes fingerprint equivalence for that comparison.
+
+Equivalent candidates do not all load or all become winners.
+
+The first equivalent candidate in deterministic order wins.
+
+Later equivalent candidates remain separate shadowed-equivalent entries for
+diagnostics, provenance, and explanation.
+
+If candidates share the same canonicalPackId and packVersion but have different
+fingerprints, they are not equivalent.
+
+A same-identity same-version fingerprint difference is candidate divergence.
+
+Warning, allow, deny, remember, or user-decision behavior belongs to DA-17 and
+the surrounding consumer.
+
+Candidate origin by itself does not prove authenticity.
+
+Resolution may expose candidate origin as context, but origin alone does not
+decide that one candidate is authentic and another is not.
+
+This is strong and should remain.
+
+
+CONSTRAINT APPLICATION
+======================
+
+DA-11 defines hard and soft constraints.
+
+Hard constraints permanently exclude candidates.
+
+Examples include:
+
+    - packTreeId mismatch
+    - required author mismatch
+    - kind mismatch
+    - visibility violation
+    - forbidden root or source within the current resolution context
+    - concrete version mismatch
+    - fingerprint mismatch when an exact fingerprint expectation is supplied by
+      the current consumer context
+
+A candidate that fails a hard constraint is not selectable.
+
+A candidate that fails a hard constraint is not offered as a valid outcome.
+
+Soft constraints discourage selection without erasing candidate identity.
+
+Examples include:
+
+    - prerelease discouraged by policy
+    - deprecated pack
+    - policy-based discouragement
+
+Soft-constrained candidates remain known to the resolver.
+
+Soft-constrained candidates are not selected unless the surrounding consumer
+context explicitly allows them.
+
+Request strength or optionality is defined outside this document.
+
+This is correct.
+
+
+RESOLUTION CONTEXT AND SOURCE BOUNDARY
+======================================
+
+DA-11 correctly says resolution always occurs inside one explicit resolution
+context.
+
+The resolution context determines:
+
+    - which candidate population is visible to the resolver
+    - which source boundaries are legal
+    - which policy constraints are in force
+    - which ordering criteria will later be applied
+    - whether an exact fingerprint expectation is being enforced
+
+The generic resolver does not invent or switch resolution context.
+
+The generic resolver does not mix contexts silently.
+
+If the surrounding consumer violates context assumptions, resolution fails
+explicitly.
+
+This document does not define the final save-specific or consumer-specific
+source model.
+
+It only requires that one explicit context applies during one resolution
+attempt.
+
+This is good.
+
+Watch item:
+
+    Later consumer documents must define their resolution contexts explicitly.
+
+    PackManager, dependency resolution, activation, import, SavePack-local
+    resolution, selected graph restoration, and AppInstance loading must not
+    silently switch contexts to make resolution succeed.
+
+This is the main place to keep pressure on later documents.
+
+
+DETERMINISTIC SELECTION
+=======================
+
+After constraints are applied, the resolver imposes a total deterministic
+ordering on remaining selectable candidates.
+
+The resolver selects the first candidate in that ordering.
+
+Ordering is:
+
+    - stable
+    - reproducible
+    - independent of incidental iteration order
+    - free of randomness
+
+The exact ordering criteria are supplied by the surrounding consumer.
+
+Silent substitution is forbidden.
+
+Equivalent candidates follow the same deterministic ordering rule: the first
+equivalent candidate wins, and later equivalent candidates remain
+shadowed-equivalent rather than loaded as additional winners.
+
+This is good.
+
+Watch item:
+
+    Because ordering criteria are supplied by the surrounding consumer, later
+    documents must be audited for what ordering they provide.
+
+    DA-09 content-root precedence custom > first-party > third-party may be one
+    ordering input for ordinary content-root resolution.
+
+    It must not accidentally override save-local material, selected graph
+    intent, pinned SavePack graph evidence, or explicit AppInstance/SavePack
+    semantics unless a later authoritative document says so.
+
+
+RESOLUTION OBSERVABILITY
+========================
+
+DA-11 correctly says resolution outcomes remain observable.
+
+Observability covers successful resolution paths as well as failures.
+
+A successful resolution outcome remains explainable after the fact.
+
+Resolution observability supports explanation of:
+
+    - which candidates were enumerated
+    - which filters or constraints were applied
+    - which candidates were softly constrained
+    - which candidates were hard-rejected
+    - why the selected candidate won
+    - why another candidate did not win
+    - why a candidate was shadowed as equivalent
+    - why the active resolution context permitted this outcome
+
+This is strong.
+
+Trace wording should follow the DA-03 cross-document trace wording check:
+
+    resolution trace obligations are resolution-domain emission obligations
+
+    DA-03 owns trace substrate, retention, and loss semantics
+
+    trace evidence does not become resolution truth beyond retained evidence
+
+DA-11 owns resolution-domain trace reason identifiers.
+
+This is correct.
+
+
+AMBIGUITY HANDLING
+==================
+
+DA-11 handles ambiguity well.
+
+If deterministic ordering cannot reduce selectable candidates to one
+unambiguous result, resolution pauses.
+
+Ambiguity is classified explicitly.
+
+External policy or user decision is then required.
+
+Once such a decision is made by the surrounding consumer, that decision is
+persisted by the consumer rather than by the generic resolver.
+
+The generic resolver does not guess.
+
+The generic resolver does not auto-persist decisions.
+
+This is excellent.
+
+It aligns with DA-17 and DA-29.
+
+It prevents generic resolution from becoming "just pick something and remember
+it forever."
+
+
+FAILURE CONDITIONS
+==================
+
+Resolution fails explicitly if:
+
+    - no candidates exist after hard constraints
+    - no candidates are selectable under the supplied context
+    - context rules are violated
+    - ambiguity requires decision and no decision path is available
+
+Resolution failure is:
+
+    - explicit
+    - classified
+    - observable
+
+Resolution failure never falls back silently.
+
+This is exactly right.
+
+
+RESOLUTION IS NOT ACTIVATION
+============================
+
+DA-11 correctly says resolution determines which concrete pack identity
+satisfies a request.
+
+Resolution does not:
+
+    - load code
+    - activate packs
+    - guarantee execution order
+    - grant runtime access
+
+Activation and lifecycle behavior are defined elsewhere.
+
+This should remain.
+
+
+NO MAJOR DV3 CONFLICT FOUND
+===========================
+
+DA-11 does not collapse generic resolution into:
+
+    - discovery
+    - visibility computation
+    - indexing
+    - dependency meaning
+    - dependency satisfaction
+    - save-specific override policy
+    - user-decision policy
+    - PackManager repair
+    - activation
+    - import
+    - runtime loading
+    - capability permission
+    - execution order
+    - AppInstance lifecycle
+    - committed-state authority
+
+This is exactly what the document should prevent.
+
+
+CURRENT FINAL RECOMMENDATION
+============================
+
+Keep DA-11.
+
+No heavy rewrite is recommended.
+
+Small future watch items:
+
+    1. Resolution context:
+       Later consumer documents must explicitly define the resolution context
+       they supply.
+
+       The generic resolver must not invent, switch, or mix contexts silently.
+
+    2. Ordering criteria:
+       Later consumer documents must define deterministic ordering criteria.
+
+       DA-09 content-root precedence should remain an ordinary content-root
+       resolution input, not a blanket override over save-local, selected graph,
+       pinned, or explicit AppInstance/SavePack semantics.
+
+    3. Trace wording:
+       Follow the DA-03 cross-document trace wording check.
+
+Future audits should check:
+
+    - DA-12 importing preserves resolution/import separation.
+    - DA-13 dependency semantics preserve generic-resolution/dependency
+      separation.
+    - DA-14 activation preserves resolution/activation separation.
+    - DA-17 user decisions preserve ambiguity and remembered-decision scope.
+    - DA-29 PackManager uses resolution without redefining it or silently
+      repairing context failures.
+    - SavePack/AppInstance documents define save-local, pinned, copied, and
+      selected-graph resolution contexts explicitly.
+
+--- doc-meta ---
+DOC_ID: REWRITE-DA-11
+DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-11_RECOMMENDATION.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
