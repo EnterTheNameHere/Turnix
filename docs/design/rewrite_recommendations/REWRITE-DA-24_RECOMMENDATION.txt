@@ -14,7 +14,7 @@ Loaded file metadata:
         80a3c2668a291c88af072e2761c7c09b49c2dccc
 
 Audit note status:
-    First-pass Dv3 architecture audit note.
+    Consolidated Dv3 architecture audit recommendation.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -39,6 +39,19 @@ This is the correct split:
 
     OrchestrationUnit authorizes and coordinates mutation flow.
     DA-04 still owns committed-state truth.
+
+Later audits confirm the main dependencies:
+
+    DA-19:
+        Job is an observable lifecycle handle for requested work.
+        Job is not OrchestrationUnit, transaction, committed state, RPC request,
+        capability, or execution mechanism.
+
+    DA-16:
+        Capability is a named, permissioned, Turnix-mediated operation.
+        Capability is not OrchestrationUnit, Job, Service, permission itself,
+        RPC message, committed-state authority, adapter authority, or
+        persistence authority.
 
 Overall recommendation:
 
@@ -78,7 +91,7 @@ Detailed classification:
 
     06. Relation to Jobs
         KEEP
-        Important identity/outcome separation.
+        DA-19 audit confirms the intended identity/outcome separation.
 
     07. Relation to AppInstances
         KEEP
@@ -95,7 +108,8 @@ Detailed classification:
 
     10. Relation to Capabilities and RPC
         KEEP
-        Good separation of identities and outcomes.
+        DA-16 audit confirms the capability/OrchestrationUnit separation.
+        RPC separation remains pending RPC audit.
 
     11. Relation to Execution Adapters
         KEEP
@@ -136,9 +150,9 @@ DA-24 correctly says:
 
     - mutation outside orchestration does not acquire Turnix guarantees by
       implication
-    - Orchestration Unit authority does not bypass DA-04 transaction and commit
+    - OrchestrationUnit authority does not bypass DA-04 transaction and commit
       rules
-    - Orchestration Units, Jobs, and transactions remain distinct
+    - OrchestrationUnits, Jobs, and transactions remain distinct
     - adapter-executed code does not directly mutate committed state
     - RuntimeHost implementation code does not directly mutate committed state
       outside Kernel-owned orchestration paths
@@ -197,6 +211,8 @@ mutation authority by themselves.
 
 This directly supports Dv3's ExecutionAdapter model.
 
+Future adapter audits should preserve this.
+
 
 RUNTIMEHOST RELATION
 ====================
@@ -223,14 +239,53 @@ outcome.
 An OrchestrationUnit terminal outcome is not automatically a Job terminal
 outcome.
 
-This supports the Dv3 distinction:
+DA-19 audit confirms this separation.
 
-    OrchestrationUnit = longer-lived controller/state machine or execution-
-    authority unit
+Correct Dv3 distinction:
+
+    OrchestrationUnit = kernel-tracked execution-authority unit that owns or
+    coordinates mutation flow.
+
+    Job = observable lifecycle handle for requested work.
+
+This distinction should remain.
+
+Avoid the weaker wording:
 
     Job = bounded operation
 
-DA-19 should preserve this separation when audited.
+Reason:
+
+    A Job may represent bounded requested work, but DA-19 carefully defines Job
+    as the observable lifecycle handle, not the execution primitive or operation
+    itself.
+
+
+CAPABILITY RELATION
+===================
+
+DA-24 correctly separates OrchestrationUnit from Capability.
+
+A capability request is not automatically an OrchestrationUnit.
+
+A capability result is not automatically an OrchestrationUnit outcome.
+
+Capability-mediated work may create, attach to, or participate in Jobs or
+OrchestrationUnits only through the owning runtime rules.
+
+DA-16 audit confirms this separation.
+
+Correct Dv3 distinction:
+
+    Capability = named, permissioned, Turnix-mediated operation.
+
+    OrchestrationUnit = kernel-tracked execution-authority unit that owns or
+    coordinates mutation flow.
+
+Capability permission does not grant committed-state authority by itself.
+
+Job-backed capability execution remains capability-mediated and does not become
+OrchestrationUnit authority by implication.
 
 
 OUTCOME MODEL
@@ -287,10 +342,12 @@ DA-03 owns the trace substrate.
 DA-24 trace evidence does not replace:
 
     - DA-04 transaction trace evidence
+    - DA-16 capability trace evidence
     - DA-19 Job trace evidence
     - DA-08 Window evidence
     - DA-23 adapter trace evidence
     - DA-28 RuntimeHost trace evidence
+    - DA-29 PackManager trace evidence
 
 This is correct and should remain.
 
@@ -316,6 +373,8 @@ This is especially important for:
     - same-language Python pack code
     - model/tool callbacks
     - future plugin-like behavior
+    - PackManager-triggered graph or lifecycle operations
+    - capability-backed operations
 
 
 NO MAJOR DV3 CONFLICT FOUND
@@ -347,16 +406,22 @@ Preserve the core rule:
     OrchestrationUnit coordinates mutation authority.
     DA-04 still owns committed-state truth.
 
+DA-19 has already been audited and confirms Job/OrchestrationUnit separation.
+
+DA-16 has already been audited and confirms Capability/OrchestrationUnit
+separation.
+
 Future audits should check:
 
-    - DA-19 Jobs preserves Job/OrchestrationUnit separation.
-    - DA-16 Capabilities preserves capability/OrchestrationUnit separation.
-    - DA-21 RPC preserves RPC/OrchestrationUnit separation.
+    - DA-21 / IS-01 RPC preserves RPC/OrchestrationUnit separation.
     - DA-23 ExecutionAdapter preserves adapter/OrchestrationUnit separation.
+    - DA-08 Window semantics preserve OrchestrationUnit outcome / Window
+      finalization separation.
+    - DA-18 Debugger preserves safe-point pause and mutation-boundary semantics.
 
 --- doc-meta ---
 DOC_ID: REWRITE-DA-24
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-24_RECOMMENDATION.txt
-DOC_REV: 1
-DOC_GIT: 743d3be
+DOC_REV: 2
+DOC_GIT: f624e89
 ----------------
