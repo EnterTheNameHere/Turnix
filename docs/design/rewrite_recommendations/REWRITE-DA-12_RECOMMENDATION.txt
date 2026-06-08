@@ -1,0 +1,764 @@
+TURNIX DV3 AUDIT NOTE
+=====================
+
+Source file:
+    docs/design/DA-12_IMPORTING_MODULE_LOADING_AND_CODE_BOUNDARIES.txt
+
+Branch:
+    Dv3
+
+Loaded file metadata:
+    DOC_REV: 17
+    DOC_GIT: 023e3de
+    GitHub blob SHA seen by assistant:
+        62e6f841423726fcdd9469a7f4e8fcc55ba6f3b2
+
+Audit note status:
+    First-pass Dv3 architecture audit recommendation.
+
+Audit scope:
+    This note audits architectural meaning, doctrine, and direction.
+    It does not audit formatting unless formatting/structure affects meaning,
+    machine interpretation, rule priority, or human usability as reference.
+
+Important excluded source:
+    AI_WORKFLOW_BOOTSTRAP.txt was intentionally not read.
+    It is part of the workflow system being audited separately and should not
+    bias this architecture pass.
+
+
+SUMMARY
+=======
+
+DA-12 is strong and highly Dv3-compatible.
+
+It defines importing, module loading, and code-boundary rules without allowing
+native language import systems to bypass Turnix semantics.
+
+It correctly states:
+
+    Importing is not dependency declaration.
+    Importing is not resolution.
+    Importing is not adapter selection.
+    Importing is not execution authorization.
+    Importing is not activation.
+    Importing is not execution authority.
+    Importing is not capability permission.
+
+This is exactly the right Dv3 boundary.
+
+Overall recommendation:
+
+    KEEP WITH SMALL ONLOAD / FUTURE ENTRYPOINT WATCH
+
+No heavy rewrite is recommended.
+
+
+CURRENT CLASSIFICATION
+======================
+
+Overall classification:
+
+    KEEP WITH SMALL ONLOAD / FUTURE ENTRYPOINT WATCH
+
+Detailed classification:
+
+    01. Interpretation Basis
+        KEEP
+
+    02. Core Problem Statement
+        KEEP
+        Very strong. Native language import systems do not understand Turnix
+        pack resolution, visibility, save scoping, adapter selection, execution
+        authorization, activation boundaries, or execution authority.
+
+    03. Separation of Concerns
+        KEEP
+        Excellent. Importing is kept separate from dependency declaration,
+        resolution, adapter selection, execution authorization, activation,
+        execution authority, and capability permission.
+
+    04. Python Import Rules
+        KEEP
+        Strong same-language boundary.
+
+    05. Python Cross-Pack Access
+        KEEP
+        Strong. Python cross-pack interaction is mediated, not native import.
+
+    06. JavaScript Import Model
+        KEEP
+        Good browser/ESM/turnixImport boundary.
+
+    07. turnixImport - What It Is
+        KEEP
+        Good mediated loader model.
+
+    08. turnixImport - What It Is Not
+        KEEP
+        Critical defensive section.
+
+    09. turnixImport Selector Forms
+        KEEP
+        Good identity-based selector restriction.
+
+    10. Dependency Consistency Rule
+        KEEP
+        Strong resolved-identity consistency rule.
+
+    11. SemVer in Imports
+        KEEP
+        Good. Importing is identity-based, not version-selection-based.
+
+    12. File Matching Rules
+        KEEP
+        Good no-guessing model.
+
+    13. Default Entry Behavior
+        KEEP
+        Good no implicit index.js / filename guessing.
+
+    14. Importing vs Activation
+        KEEP
+        Critical distinction.
+
+    15. resolvePack vs ensureActivated
+        KEEP
+        Good metadata / activation / import separation.
+
+    16. Immediate Execution and Side Effects
+        KEEP
+        Strong import-time execution boundary.
+
+    17. Canonical Entrypoints
+        KEEP WITH WATCH
+        onLoad(ctx) as currently supported activation entrypoint is fine, but
+        should be checked against DA-14 and future adapter/runtime documents.
+
+    18. Background Work Guarantee
+        KEEP
+        Good. Background work outside orchestration is unsupported by Turnix
+        guarantees.
+
+    19. Error Philosophy
+        KEEP
+        Strong strict-error doctrine.
+
+    20. Explicitly Open Questions
+        KEEP
+
+    21. Locked Summary
+        KEEP
+
+
+WHAT IS ALREADY NAILED
+======================
+
+DA-12 correctly says native language import systems do not understand:
+
+    - Turnix pack resolution
+    - visibility
+    - save scoping
+    - adapter selection
+    - execution authorization
+    - activation boundaries
+    - execution authority
+
+Therefore Turnix does not allow arbitrary language-native importing across
+packs.
+
+Cross-pack code access routes only through Turnix-defined mechanisms.
+
+Native imports remain allowed only for:
+
+    - language internals
+    - same-file or same-directory code under normal local language rules
+    - explicitly allowed Turnix platform surfaces where such access is part of
+      the supported execution model
+
+Any mechanism that bypasses Turnix resolution, visibility, adapter selection,
+execution authorization, activation, or execution boundaries is forbidden.
+
+Same host language does not imply same authority.
+
+Python pack code remains adapter-executed pack code and does not become backend
+implementation code through Python import behavior.
+
+This is exactly right.
+
+
+SEPARATION OF CONCERNS
+======================
+
+DA-12 strongly separates importing from other phases.
+
+Importing is not:
+
+    - dependency declaration
+    - resolution
+    - adapter selection
+    - execution authorization
+    - activation
+    - execution authority
+    - capability permission
+
+Correct meanings:
+
+    Resolution answers which pack identity satisfies a request.
+
+    Adapter selection answers which adapter kind or concrete adapter provider is
+    eligible for a declared executable artifact.
+
+    Execution authorization answers whether a declared executable artifact may
+    be loaded and executed in the current pack, AppInstance, SavePack, adapter,
+    policy, and trust context.
+
+    Importing answers how a code artifact is obtained once Turnix rules permit
+    that step.
+
+    Activation answers when Turnix intentionally starts recognized pack
+    behavior.
+
+    Execution authority answers whether code may perform meaningful
+    Turnix-recognized work.
+
+    Capability permission answers whether a capability invocation is allowed
+    under the capability, policy, and decision model.
+
+This should remain.
+
+
+PYTHON IMPORT RULES
+===================
+
+DA-12 correctly says Python pack code may use native Python imports only for
+local code under the same-file or same-directory rule and for explicitly allowed
+Turnix platform surfaces.
+
+Allowed local examples include:
+
+    from .llamacpp_client import LlamaCppClient
+    from .config import loadConfig
+
+Explicitly allowed Turnix platform-surface imports include only the whitelisted
+supported surface.
+
+Explicitly allowed platform-surface imports do not include raw backend internals
+merely because the pack code is Python.
+
+Cross-pack native Python imports are not allowed.
+
+Disallowed examples include:
+
+    from ui.controls import Button
+    from Turnix.ui.controls import Button
+    from first_party.mods.foo import bar
+    from backend.core.kernel import Kernel
+    from backend.persistence.io import IoManager
+
+This is exactly the boundary needed for same-language safety.
+
+Python import machinery has no awareness of Turnix pack resolution, visibility,
+save scoping, adapter selection, execution authorization, activation
+boundaries, or capability permission.
+
+Allowing native cross-pack Python imports would bypass Turnix guarantees.
+
+Allowing Python pack code to import backend internals as authority would bypass
+DA-23.
+
+This should remain.
+
+
+PYTHON CROSS-PACK ACCESS
+========================
+
+DA-12 correctly says Python pack code interacts with other packs only through
+Turnix-mediated APIs.
+
+Supported mediated categories include:
+
+    - services where allowed by DA-16
+    - capabilities
+    - pack metadata and activation control
+
+Example mediated patterns include:
+
+    ctx.registerService(name, instance)
+    ctx.services.get(name)
+    ctx.callCapability("llm.pipeline@1", args)
+    ctx.resolvePack(selector)
+    ctx.ensureActivated(selector)
+
+There is no Python equivalent of turnixImport as a cross-pack native symbol or
+executable-code import mechanism.
+
+Python code does not receive executable code objects or symbols from other
+packs through native import bypass.
+
+Python pack code may still receive Turnix-created context, capability, service,
+metadata, and activation-control surfaces when those surfaces are granted by the
+owning documents.
+
+In-process Python access remains mediated by DA-23, DA-14, and DA-16.
+
+In-process Python access does not become backend authority merely because it
+uses function calls instead of network transport.
+
+This is strong.
+
+Watch DA-16 service semantics:
+
+    services where allowed by DA-16 must remain runtime wiring / mediated
+    surfaces, not raw backend authority or cross-pack shortcut.
+
+
+JAVASCRIPT IMPORT MODEL
+=======================
+
+DA-12 correctly says JavaScript pack code runs in a browser environment.
+
+Current constraints include:
+
+    - no Node.js runtime assumptions
+    - no filesystem access
+    - no per-pack import maps
+    - no native cross-pack imports
+
+Dynamic cross-pack JavaScript loading routes through:
+
+    turnixImport(selector)
+
+turnixImport is a Turnix-defined mediated loader.
+
+It is not equivalent to native import().
+
+Browser JavaScript code remains adapter-executed frontend code under DA-23 and
+DA-22.
+
+This matches the Dv3 frontend boundary.
+
+
+TURNIXIMPORT MODEL
+==================
+
+DA-12 correctly defines turnixImport(selector) as:
+
+    - a Turnix-aware resolver
+    - a controlled loader
+    - a mediated ESM importer
+
+turnixImport behavior includes:
+
+    - parsing a Turnix selector
+    - asking the backend to resolve pack identity and load target
+    - performing visibility and policy checks
+    - fetching the permitted JavaScript artifact
+    - performing dynamic ESM import of that permitted artifact
+
+turnixImport does not create a second independent resolution system.
+
+It depends on Turnix resolution and boundary checks already defined elsewhere.
+
+turnixImport participates in adapter loading semantics without becoming
+activation or execution authorization by itself.
+
+This is correct.
+
+
+TURNIXIMPORT IS NOT AUTHORITY
+=============================
+
+DA-12 correctly says turnixImport is not:
+
+    - a dependency declaration
+    - an adapter selection request
+    - an execution authorization request
+    - an activation request
+    - a capability permission request
+    - a visibility override
+    - a permissive or best-effort loader
+    - a version selector
+    - an execution authorization
+
+If importing fails, the failure is explicit.
+
+turnixImport does not silently guess or broaden the requested target.
+
+turnixImport does not grant Kernel authority to imported module code.
+
+This is a critical defensive section and should remain.
+
+
+TURNIXIMPORT SELECTORS
+======================
+
+DA-12 correctly says a turnixImport selector is not:
+
+    - a filesystem path
+    - a URI
+    - a semver-qualified reference
+
+A turnixImport selector is an identity-based Turnix selector.
+
+Supported conceptual forms:
+
+    A) Core or internal runtime files
+       "core/rpc.js"
+       "core/layout.js"
+
+    B) Pack default entry
+       "ui.controls"
+
+    C) Pack sub-entry or export
+       "ui.controls/Button"
+
+Pack default-entry selectors require the corresponding declared dependency
+relationship already to exist where dependency rules require it.
+
+Pack sub-entry selectors resolve against declared JavaScript entry mappings
+rather than filesystem guessing.
+
+Disallowed selector forms include:
+
+    - "../"
+    - absolute paths
+    - filesystem guessing
+    - semver in selector
+    - author mismatch against the already-resolved dependency identity
+
+This is good.
+
+Watch item:
+
+    "Core or internal runtime files" should remain a whitelisted Turnix platform
+    surface, not a general path namespace.
+
+    It should not become a backdoor filesystem import path.
+
+
+DEPENDENCY CONSISTENCY
+======================
+
+DA-12 correctly says importing respects the concrete identity already chosen
+during dependency resolution.
+
+If a pack declares a dependency that resolves to one concrete pack identity,
+importing must remain consistent with that chosen identity.
+
+Allowed imports refer to that already-resolved identity.
+
+Disallowed imports include attempts to:
+
+    - switch author identity
+    - restate semver in the selector
+    - bypass the already-resolved dependency choice
+
+Violations are hard errors.
+
+Importing does not reopen dependency resolution.
+
+This is exactly right.
+
+It prevents import-time version drift.
+
+
+SEMVER IN IMPORTS
+=================
+
+DA-12 correctly forbids semver in turnixImport selectors.
+
+Semver belongs to:
+
+    - manifests
+    - dependency resolution
+    - policy decisions
+
+Importing is identity-based rather than version-selection-based.
+
+This should remain.
+
+
+FILE MATCHING AND DEFAULT ENTRY
+===============================
+
+DA-12 correctly says sub-entry imports resolve against
+runtimes.javascript.entries.
+
+Matching logic:
+
+    - exact "Button"
+    - or "Button.<extension>"
+
+Allowed current extension forms:
+
+    - .js
+    - .mjs
+    - .ts compiled to the served artifact form
+
+Ambiguous matches are errors.
+
+Missing matches are errors.
+
+There is no fallback from sub-entry import to default entry.
+
+For default entry behavior, if the selector has no sub-path, Turnix loads the
+declared default JavaScript entry for that pack.
+
+runtimes.javascript.entry must exist.
+
+There is no implicit index.js, filename guessing, or directory guessing.
+
+This is good.
+
+It prevents module loading from becoming heuristic filesystem crawling.
+
+
+IMPORTING VS ACTIVATION
+=======================
+
+This is one of the most important sections.
+
+DA-12 correctly says turnixImport loads a JavaScript module and may trigger
+normal ESM evaluation by the JavaScript runtime.
+
+That ESM module evaluation is not Turnix-recognized activation.
+
+turnixImport does not:
+
+    - activate the pack
+    - grant execution authority
+    - grant capability permission
+    - imply lifecycle participation
+
+Activation remains a separate Turnix-controlled action handled through the
+appropriate activation mechanisms.
+
+Module evaluation that occurs merely because the JavaScript runtime evaluated
+an imported module is not treated as Turnix-recognized pack execution by
+itself.
+
+Adapter loading or module evaluation is not activation under DA-23 and DA-14.
+
+This should remain.
+
+
+RESOLVEPACK VS ENSUREACTIVATED
+==============================
+
+DA-12 correctly distinguishes resolvePack and ensureActivated.
+
+resolvePack(selector):
+
+    - resolves metadata only
+    - performs visibility checks
+    - does not load code
+    - does not select an adapter for execution
+    - does not authorize execution
+    - does not activate
+
+ensureActivated(selector):
+
+    - ensures pack activation
+    - may trigger activation
+    - does not return exports or symbols
+    - may return activation diagnostics
+    - may raise NotActivatedError
+
+NotActivatedError indicates orchestration failure rather than native import
+failure.
+
+NotActivatedError must surface to the user.
+
+This distinction is strong.
+
+
+IMMEDIATE EXECUTION AND SIDE EFFECTS
+====================================
+
+DA-12 correctly handles import-time execution danger.
+
+Some languages permit immediate execution constructs such as:
+
+    - module-level statements
+    - IIFE-style patterns
+    - top-level side effects
+
+Turnix does not coordinate, track, or rely on immediate execution.
+
+Immediate execution is discouraged in pack code.
+
+Import-time execution is not an activation mechanism.
+
+Importing a module does not imply permission to execute meaningful
+Turnix-recognized logic.
+
+Code that executes immediately:
+
+    - runs outside Turnix orchestration
+    - runs without PackContext authority
+    - is outside Turnix guarantees
+    - is not considered activated even if it appears to work
+
+Meaningful Turnix-recognized execution waits for the supported activation
+entrypoint.
+
+Adapter execution that occurs outside Turnix-recognized activation or
+orchestration remains unsupported by Turnix guarantees.
+
+This is excellent.
+
+
+CANONICAL ENTRYPOINTS
+=====================
+
+DA-12 currently says the supported activation entrypoint is:
+
+    onLoad(ctx)
+
+onLoad(ctx):
+
+    - is called exactly once by Turnix
+    - is the only supported activation entrypoint
+    - is the first moment Turnix intentionally executes pack code
+    - receives a Turnix-created PackContext
+    - prepares the pack for later runtime behavior
+
+Turnix recognizes no alternative activation path.
+
+This is fine as current doctrine.
+
+Watch item:
+
+    Check DA-14 later.
+
+    If future lifecycle needs more entrypoints, DA-14 should own the activation
+    lifecycle and DA-12 should continue to own the import/activation boundary.
+
+    Avoid turning "currently supported activation entrypoint" into an
+    accidental permanent restriction if the architecture later needs structured
+    lifecycle phases.
+
+For now, no rewrite is required.
+
+
+BACKGROUND WORK
+===============
+
+DA-12 correctly says Turnix does not guarantee behavior for background work
+started outside Turnix orchestration.
+
+Only work triggered by:
+
+    - supported activation entrypoints
+    - capability calls
+    - other Turnix-defined orchestrated execution pathways
+
+is supported by Turnix guarantees.
+
+Background work started otherwise:
+
+    - may execute
+    - remains unsupported
+    - remains untracked
+    - is not abortable by Turnix guarantees
+    - is not cleaned up by Turnix guarantees
+
+Adapter implementation details do not convert unsupported background work into
+supported Turnix execution.
+
+This should remain.
+
+
+ERROR PHILOSOPHY
+================
+
+DA-12 correctly says import errors are hard errors.
+
+Rationale:
+
+    - importing implies certainty
+    - permissive loading creates nondeterminism
+    - failures must remain visible and explainable
+
+Import-related errors use the standard error envelope and include:
+
+    - requesting pack identity
+    - target identity
+    - reason classification
+
+Import-related errors do not become capability permission failures or Job
+terminal outcomes merely because later execution might have used capabilities
+or Jobs.
+
+This is strong.
+
+It prevents error-domain collapse.
+
+
+NO MAJOR DV3 CONFLICT FOUND
+===========================
+
+DA-12 does not collapse importing into:
+
+    - dependency declaration
+    - generic resolution
+    - discovery
+    - visibility override
+    - adapter selection
+    - execution authorization
+    - activation
+    - execution authority
+    - capability permission
+    - Kernel authority
+    - PackContext authority
+    - Job lifecycle
+    - OrchestrationUnit lifecycle
+    - background work guarantee
+    - native backend import authority
+    - filesystem path lookup
+
+This is exactly what the document should prevent.
+
+
+CURRENT FINAL RECOMMENDATION
+============================
+
+Keep DA-12.
+
+No heavy rewrite is recommended.
+
+Small future watch items:
+
+    1. onLoad(ctx) and future lifecycle:
+       Check DA-14 to make sure activation lifecycle ownership remains there.
+
+       DA-12 should continue to define the import/activation boundary, not all
+       future lifecycle semantics.
+
+    2. Core/internal runtime file selectors:
+       Keep these as whitelisted Turnix platform surfaces, not a general
+       filesystem path namespace.
+
+    3. Service wording:
+       Python mediated service access must remain constrained by DA-16.
+
+       Service access must not become raw backend authority or cross-pack
+       shortcut.
+
+Future audits should check:
+
+    - DA-13 dependency semantics preserve import/dependency separation.
+    - DA-14 activation preserves import/activation separation.
+    - DA-16 service/capability semantics preserve mediated Python access.
+    - DA-17 policy/user decisions preserve hard import errors and no silent
+      broadening.
+    - DA-23 execution boundaries remain aligned with Python/JavaScript import
+      restrictions.
+
+--- doc-meta ---
+DOC_ID: REWRITE-DA-12
+DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-12_RECOMMENDATION.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
