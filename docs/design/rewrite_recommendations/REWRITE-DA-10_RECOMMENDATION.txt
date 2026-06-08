@@ -14,7 +14,12 @@ Loaded file metadata:
         7aa23c4464400d7f0cdabd5b6dd5b9d0ce8d1e16
 
 Audit note status:
-    First-pass Dv3 architecture audit recommendation.
+    Consolidated Dv3 architecture rewrite recommendation.
+    Action-focused revision pass for pack identity, hierarchy, visibility,
+    parent-import visibility, SavePack-local visibility, visibility/resolution
+    separation, visibility/capability separation, import-authority separation,
+    activation separation, PackManager presentation boundaries, and
+    cross-document guardrails.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -32,18 +37,23 @@ SUMMARY
 
 DA-10 is strong and highly Dv3-compatible.
 
-It defines pack identity, hierarchy, and visibility without conflating
-visibility with resolution, activation, dependency satisfaction, capability
-authority, or permission.
+No heavy rewrite is recommended.
 
-It correctly says:
+DA-10 defines how Turnix identifies packs, how pack hierarchy is formed, and how
+visibility is computed without conflating visibility with resolution,
+activation, import authority, capability authority, or permission.
+
+DA-10 should preserve these core boundaries:
 
     Pack is the general container concept.
 
-    AppPack, ModPack, ViewPack, ContentPack, and SavePack are specific pack
-    kinds within that broader container model.
+    AppPack, ModPack, ViewPack, ContentPack, and SavePack are specific pack kinds
+    within that broader container model.
 
     Pack hierarchy is structural containment, not runtime activation order.
+
+    Identity answers what a pack is, where it sits in hierarchy, which author
+    scope it belongs to, and which version identity applies.
 
     Visibility answers whether one pack is eligible to be seen from another
     context.
@@ -51,11 +61,36 @@ It correctly says:
     Visibility does not decide resolution winner, activation order, capability
     authority, or permission grant.
 
+Main watch item:
+
+    Preserve SavePack-local visibility.
+
+    Packs copied into a SavePack do not leak into global visibility merely
+    because they exist inside that SavePack.
+
+    Save-local copied packs may override external candidates within that
+    SavePack context.
+
+    Exact internal visibility rules inside one SavePack should be resolved with
+    SavePack/AppInstance and selected-graph documents.
+
+Rewrite-boundary guardrails:
+
+    DA-10 owns pack identity, hierarchy, visibility declarations, computed
+    visibility, parent-import visibility, capability/visibility separation, and
+    save-local visibility constraints.
+
+    DA-10 should not absorb detailed root discovery, resolution winner/source
+    selection, activation lifecycle, importing/module loading authority,
+    capability schema, permission prompts, enforcement mechanics, PackManager
+    UI, PackManager repair, SavePack runtime behavior, AppInstance lifecycle, or
+    broader pack addressing syntax.
+
+    Those details belong to their subject-owning documents.
+
 Overall recommendation:
 
     KEEP WITH SAVEPACK VISIBILITY WATCH
-
-No heavy rewrite is recommended.
 
 
 CURRENT CLASSIFICATION
@@ -72,47 +107,33 @@ Detailed classification:
 
     02. Core Concept
         KEEP
-        Strong. Identity and visibility are clearly separated from resolution,
-        activation, capability invocation, and permission grant.
 
     03. Pack Identity Model
         KEEP
-        Good distinct declaredId / packTreeId / author layers.
-        Minor structural note: heading numbering duplicates 03.1, but meaning
-        is clear.
 
     04. Version Identity
         KEEP
-        Good version identity / inheritance split.
 
     05. Hierarchy and Containment
         KEEP
-        Strong. Hierarchy does not grant visibility, capability authority,
-        activation, permission, or runtime execution order.
 
     06. Visibility Model
         KEEP
-        Strong local visibility / exportNestedPacks / computed global
-        visibility model.
 
     07. importPacksFromParent
         KEEP
-        Good parent-context import-visibility control.
-        Minor structural note: heading numbering duplicates 07.1, but meaning
-        is clear.
 
     08. Visibility vs Resolution
         KEEP
-        Critical distinction.
 
     09. Capabilities Are Not Visibility
         KEEP
-        Very important privilege-separation rule.
 
     10. SavePack Visibility
         KEEP WITH WATCH
-        Correct save-local boundary, but internal SavePack visibility remains
-        open and should be resolved later with SavePack/AppInstance documents.
+        Save-local boundary is correct. Exact internal SavePack visibility
+        remains open and should be resolved later with SavePack/AppInstance and
+        selected-graph documents.
 
     11. Why This Area Is Hard
         KEEP
@@ -121,36 +142,10 @@ Detailed classification:
         KEEP
 
 
-WHAT IS ALREADY NAILED
-======================
+PRESERVATION RULE 1: PACK IS THE GENERAL CONTAINER CONCEPT
+==========================================================
 
-DA-10 correctly separates identity from visibility.
-
-Identity answers:
-
-    - what this pack is
-    - where it sits in the pack hierarchy
-    - which author scope it belongs to
-    - which version identity applies
-
-Visibility answers:
-
-    - whether one pack is eligible to be seen from another context
-
-DA-10 correctly does not answer:
-
-    - which candidate wins during resolution
-    - which pack activates first
-    - which capability may be invoked
-    - which permission is granted
-
-This is exactly the right boundary between DA-10 and later documents.
-
-
-PACK AS GENERAL CONTAINER
-=========================
-
-DA-10 correctly says Pack is the general container concept in Turnix.
+Preserve Pack as the general container concept in Turnix.
 
 Specific pack kinds include:
 
@@ -160,17 +155,21 @@ Specific pack kinds include:
     - ContentPack
     - SavePack
 
-This aligns with the Dv3 architecture checkpoint:
+Specific pack kinds are uses of the broader pack container model.
+
+This preserves the Dv3 distinction:
 
     Packs are first-class.
+
     Packs are not the whole identity of Turnix.
-    Pack kinds are specific uses of the broader pack container model.
 
-This should remain.
+    Pack kinds are specific uses of the broader pack model.
 
 
-PACK IDENTITY LAYERS
-====================
+PRESERVATION RULE 2: PACK IDENTITY LAYERS STAY DISTINCT
+=======================================================
+
+Preserve DA-10's identity-layer split.
 
 DA-10 defines distinct identity layers and says they are not conflated.
 
@@ -199,22 +198,24 @@ invalid.
 Author resolution failure is explicit and is not repaired through silent
 substitution.
 
-This is strong.
-
-It prevents identity from becoming filesystem location, display name, or
+This prevents identity from becoming filesystem location, display name, or
 best-effort guesswork.
 
 
-VERSION IDENTITY
-================
+PRESERVATION RULE 3: VERSION IDENTITY IS IDENTITY INPUT, NOT COMPATIBILITY MAGIC
+================================================================================
 
-DA-10 correctly says declaredVersion is raw manifest version value or None.
+Preserve version identity rules.
 
-version is parsed version identity used by later resolution.
+DA-10 says:
 
-Parsing occurs after discovery.
+    declaredVersion is the raw manifest version value or None.
 
-Invalid version syntax causes pack rejection.
+    version is parsed version identity used by later resolution.
+
+    Parsing occurs after discovery.
+
+    Invalid version syntax causes pack rejection.
 
 Version inheritance rules are:
 
@@ -223,16 +224,16 @@ Version inheritance rules are:
 
 Version affects pack identity and later resolution compatibility.
 
-This is fine.
+Watch item:
 
-Watch later DA-11 / resolution docs to ensure inherited/default root versions
-do not become hidden compatibility magic.
+    DA-11 / resolution rules should ensure inherited/default root versions do
+    not become hidden compatibility magic.
 
 
-HIERARCHY AND CONTAINMENT
-=========================
+PRESERVATION RULE 4: HIERARCHY AND CONTAINMENT DO NOT GRANT AUTHORITY
+=====================================================================
 
-DA-10 correctly says pack hierarchy is containment.
+Preserve hierarchy as structural containment.
 
 A child pack belongs to the pack tree of its parent.
 
@@ -246,21 +247,21 @@ Parent-child hierarchy does not by itself grant:
     - permission
     - runtime execution order
 
-This is critical.
-
-It prevents the bad model:
+This prevents the bad model:
 
     child is inside parent, therefore child can do whatever parent can do
 
-No. Hierarchy is structural first.
+Hierarchy is structural first.
 
 Later areas define runtime behavior over that structure.
 
 
-VISIBILITY MODEL
-================
+PRESERVATION RULE 5: VISIBILITY IS ELIGIBILITY TO BE SEEN
+=========================================================
 
-DA-10 defines visibility as eligibility to be seen from another pack context.
+Preserve DA-10's visibility model.
+
+Visibility is eligibility to be seen from another pack context.
 
 Visibility is not the same as:
 
@@ -268,13 +269,14 @@ Visibility is not the same as:
     - import use
     - activation order
     - capability authority
+    - permission grant
 
-Local visibility values:
+Local visibility values are:
 
     - public
     - private
 
-Current default local visibility:
+Current default local visibility is:
 
     - ContentPack -> public
     - AppPack -> private
@@ -284,16 +286,17 @@ Current default local visibility:
 
 Local visibility is only one input to broader visibility outcome.
 
-This is correct.
+This conservative default model should remain unless another authoritative
+document explicitly changes it.
 
-The default model is conservative: only content is public by default.
 
+PRESERVATION RULE 6: EXPORTNESTEDPACKS CONTROLS DIRECT CHILD EXPORT ONLY
+========================================================================
 
-EXPORTNESTEDPACKS
-=================
+Preserve exportNestedPacks semantics.
 
-DA-10 defines exportNestedPacks as the control for whether direct children
-become externally visible beyond the local parent context.
+exportNestedPacks controls whether direct children become externally visible
+beyond the local parent context.
 
 Allowed forms:
 
@@ -313,13 +316,13 @@ Dotted hierarchical ids are not valid inside exportNestedPacks.
 
 exportNestedPacks applies only to direct children.
 
-This is good.
-
-It avoids ambiguous deep export semantics.
+This avoids ambiguous deep export semantics.
 
 
-COMPUTED GLOBAL VISIBILITY
-==========================
+PRESERVATION RULE 7: COMPUTED GLOBAL VISIBILITY IS NOT RESOLUTION
+=================================================================
+
+Preserve computed global visibility semantics.
 
 DA-10 defines computed visibility after hierarchy is known.
 
@@ -346,20 +349,22 @@ Computed visibility is static relative to the discovered/indexed pack tree.
 
 Computed visibility is not a runtime resolution outcome.
 
-This is the correct distinction.
 
+PRESERVATION RULE 8: IMPORTPACKSFROMPARENT IS IMPORT-VISIBILITY, NOT AUTHORITY
+==============================================================================
 
-IMPORTPACKSFROMPARENT
-=====================
+Preserve importPacksFromParent semantics.
 
-DA-10 defines importPacksFromParent as the control for which parent-context
-packs are import-visible to a child pack.
+importPacksFromParent controls which parent-context packs are import-visible to
+a child pack.
 
 importPacksFromParent does not imply:
 
     - export
     - capability inheritance
     - permission inheritance
+    - native import authority
+    - activation authority
 
 Allowed forms:
 
@@ -387,33 +392,28 @@ Rationale:
     - view isolation is preserved
     - unintended UI contamination is reduced
 
-This is reasonable and should remain.
+Watch item:
 
-Watch later DA-12 / imports to ensure import visibility does not become native
-import authority or capability permission.
+    DA-12 / importing rules should ensure importPacksFromParent does not become
+    native import authority or capability permission.
 
 
-VISIBILITY VS RESOLUTION
-========================
+PRESERVATION RULE 9: VISIBILITY IS NOT RESOLUTION
+=================================================
 
-This is one of the most important sections.
+Preserve visibility / resolution separation.
 
-DA-10 correctly says:
+Visibility is static and computed from structure plus visibility declarations.
 
-    Visibility is static and computed from structure plus visibility
-    declarations.
+Resolution is contextual.
 
-    Resolution is contextual.
+A pack may exist but be invisible.
 
-    A pack may exist but be invisible.
+A visible pack may still fail resolution.
 
-    A visible pack may still fail resolution.
+Visibility is not dependency satisfaction.
 
-    Visibility is not dependency satisfaction.
-
-    This document defines eligibility to be seen, not selection of a winner.
-
-This is exactly the needed split after DA-09.
+DA-10 defines eligibility to be seen, not selection of a winner.
 
 Correct pipeline:
 
@@ -426,30 +426,30 @@ Correct pipeline:
 Visibility must remain an input to resolution, not resolution itself.
 
 
-CAPABILITIES ARE NOT VISIBILITY
-===============================
+PRESERVATION RULE 10: CAPABILITIES ARE NOT VISIBILITY
+=====================================================
 
-DA-10 correctly says capability exports are not inherited through visibility
-alone.
+Preserve capability / visibility separation.
+
+Capability exports are not inherited through visibility alone.
 
 Capability imports remain explicit.
 
 Parent visibility does not grant capability authority.
 
-Capabilities are behavioral power and remain governed by later areas.
+Capabilities are behavioral power and remain governed by capability and
+permission documents.
 
 This separation prevents accidental privilege escalation through structural
 visibility alone.
 
-This is fully aligned with DA-16.
 
-Keep it.
+PRESERVATION RULE 11: SAVEPACK VISIBILITY STAYS SAVE-LOCAL
+==========================================================
 
+Preserve SavePack visibility boundaries.
 
-SAVEPACK VISIBILITY
-===================
-
-DA-10 correctly says SavePack visibility remains save-local.
+SavePack visibility remains save-local.
 
 Packs copied into a SavePack do not leak into global visibility merely because
 they exist inside that SavePack.
@@ -457,15 +457,11 @@ they exist inside that SavePack.
 Save-local copied packs may override external candidates within that SavePack
 context.
 
-This aligns with DA-09.
-
 Open questions remain:
 
     - exact internal visibility rules inside one SavePack
     - interaction with exportNestedPacks inside SavePack context
     - tooling and UI representation of SavePack-local visibility graphs
-
-This is the main watch item.
 
 Recommendation:
 
@@ -483,8 +479,8 @@ Recommendation:
     visibility or runtime authority.
 
 
-STRUCTURAL / NUMBERING NOTE
-===========================
+PRESERVATION RULE 12: STRUCTURAL NUMBERING CLEANUP MUST NOT CHANGE MEANING
+==========================================================================
 
 DA-10 has minor duplicate heading-number style issues:
 
@@ -502,23 +498,167 @@ This is readable enough and not an architectural problem.
 If formatting is normalized later, avoid changing meaning.
 
 
-NO MAJOR DV3 CONFLICT FOUND
-===========================
+SOURCE BOUNDARY STATEMENT: VISIBILITY IS ELIGIBILITY, NOT AUTHORITY
+===================================================================
 
-DA-10 does not collapse visibility into:
+DA-10 may state the source-level boundary:
 
-    - discovery
-    - resolution
-    - dependency satisfaction
-    - activation
-    - import execution
-    - capability authority
-    - permission grant
-    - runtime execution order
-    - SavePack global visibility
-    - PackManager authority
+    Pack identity defines what a pack is, where it sits in hierarchy, which
+    author scope it belongs to, and which version identity applies.
 
-This is exactly what the document should prevent.
+    Visibility defines whether one pack is eligible to be seen from another
+    pack context.
+
+    Visibility does not decide resolution winner, activation order, dependency
+    satisfaction, native import authority, capability authority, permission
+    grant, runtime execution order, or SavePack global visibility.
+
+    Hierarchy and containment do not grant authority by themselves.
+
+    SavePack-local copied packs remain SavePack-context-local unless another
+    authoritative document explicitly states otherwise.
+
+This source-level boundary is useful because DA-10 owns pack identity,
+hierarchy, and visibility semantics.
+
+The detailed ownership map belongs in the guardrail section below.
+
+
+REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-10 CONTENT
+=========================================================
+
+This section is not suggested DA-10 wording.
+
+It exists to prevent architectural drift during rewrite when the editor knows
+DA-10 but may not have every subject-owning document loaded.
+
+Use these as guardrails only.
+
+Pack identity / visibility guardrails:
+
+    Pack is the general container concept, not Turnix identity.
+
+    Pack hierarchy is structural containment, not activation order.
+
+    declaredId is local, not globally unique.
+
+    packTreeId is computed from hierarchy, not filesystem path.
+
+    author is identity, not decoration.
+
+    author resolution failure is explicit and is not silently repaired.
+
+    version identity affects later resolution compatibility, but DA-10 does not
+    own resolution winner selection.
+
+    visibility is eligibility to be seen, not resolution.
+
+    visibility is not dependency satisfaction.
+
+    visibility is not import execution.
+
+    visibility is not activation.
+
+    visibility is not capability authority.
+
+    visibility is not permission grant.
+
+    visibility is not runtime execution order.
+
+    computed global visibility is not runtime-loaded state.
+
+    importPacksFromParent is import-visibility, not capability inheritance.
+
+    exportNestedPacks controls direct child export only.
+
+    SavePack visibility is save-local.
+
+    SavePack-local copied packs do not leak into global visibility merely
+    because they exist inside a SavePack.
+
+    Global custom precedence does not override SavePack-local copied material by
+    default.
+
+    PackManager UI display of SavePack-local visibility does not grant global
+    visibility or runtime authority.
+
+Owning-document boundaries:
+
+    DA-09 owns root discovery boundaries and discovered candidate production.
+
+    DA-11 owns resolution winner selection, source selection, selector
+    resolution, and deterministic resolution semantics.
+
+    DA-12 owns importing, module loading, and native/runtime import authority.
+
+    DA-13 owns dependency semantics and advisory relation semantics.
+
+    DA-14 owns activation order and runtime lifecycle.
+
+    DA-16 owns capability schema, permission prompts, enforcement mechanics, and
+    capability authority.
+
+    DA-20 owns AppInstance lifecycle and runtime identity semantics.
+
+    DA-21 owns RPC, channel, and transport semantics.
+
+    DA-23 owns execution adapter boundary semantics.
+
+    DA-24 owns OrchestrationUnit and mutation-authority semantics.
+
+    DA-28 owns RuntimeHost workspace ownership and command-surface semantics.
+
+    DA-29 owns PackManager inspection, UI presentation, graph preparation,
+    repair, and PackManager-domain trace semantics.
+
+Local rewrite rule:
+
+    DA-10 may name these concepts when needed to protect pack identity,
+    hierarchy, and visibility boundaries.
+
+    DA-10 should not define their detailed behavior.
+
+    DA-10 should remain the pack identity, hierarchy, visibility, parent-import
+    visibility, capability/visibility separation, and SavePack-local visibility
+    document.
+
+
+WATCH ITEMS
+===========
+
+SavePack visibility watch:
+
+    Resolve exact SavePack internal visibility and exportNestedPacks interaction
+    later with SavePack/AppInstance and selected-graph documents.
+
+    Do not let SavePack-local visibility leak globally.
+
+    Do not let ordinary content-root precedence override save-local copied
+    material by default.
+
+Import visibility watch:
+
+    DA-12 should preserve importPacksFromParent as import-visibility.
+
+    It must not become native import authority or capability permission.
+
+Resolution watch:
+
+    DA-11 should preserve visibility as eligibility-to-be-seen.
+
+    It must not become winner selection.
+
+Capability watch:
+
+    DA-16 should preserve explicit capability imports.
+
+    Capabilities must not be inherited through visibility alone.
+
+Numbering watch:
+
+    Minor duplicate heading-number style may be cleaned later if desired.
+
+    Formatting cleanup must not change meaning.
 
 
 CURRENT FINAL RECOMMENDATION
@@ -528,38 +668,43 @@ Keep DA-10.
 
 No heavy rewrite is recommended.
 
-Small future watch items:
+Main watch item:
 
-    1. SavePack visibility:
-       Resolve exact SavePack internal visibility and exportNestedPacks
-       interaction later with SavePack/AppInstance and selected graph
-       documents.
+    Preserve SavePack-local visibility.
 
-    2. Import visibility:
-       Check DA-12 so importPacksFromParent does not become native import
-       authority or capability permission.
+    Resolve exact internal SavePack visibility and exportNestedPacks interaction
+    later with SavePack/AppInstance and selected-graph documents.
 
-    3. Resolution:
-       Check DA-11 so visibility remains eligibility-to-be-seen, not winner
-       selection.
+Preserve:
 
-    4. Numbering:
-       Minor duplicate heading-number style may be cleaned later if desired.
+    - Pack as the general container concept
+    - specific pack kinds as uses of the broader Pack model
+    - distinct identity layers
+    - declaredId as local, not globally unique
+    - packTreeId as hierarchical and not filesystem-based
+    - author as identity, not decoration
+    - explicit author resolution failure
+    - version identity as resolution input, not compatibility magic
+    - hierarchy as containment, not authority
+    - visibility as eligibility to be seen
+    - computed global visibility as static relative to discovered/indexed tree
+    - exportNestedPacks as direct-child export control
+    - importPacksFromParent as import-visibility, not authority
+    - visibility / resolution separation
+    - capability / visibility separation
+    - SavePack visibility as save-local
+    - structural numbering cleanup without meaning change
 
-Future audits should check:
-
-    - DA-11 resolution preserves visibility/resolution separation.
-    - DA-12 importing preserves visibility/import-authority separation.
-    - DA-13 dependencies preserve visibility/dependency separation.
-    - DA-14 activation preserves visibility/activation separation.
-    - DA-16 capabilities remain explicit and are not inherited through
-      visibility.
-    - SavePack/AppInstance documents define SavePack-local visibility without
-      leaking it globally.
+Do not expand DA-10 into detailed root discovery, resolution winner/source
+selection, importing/module-loading authority, activation lifecycle, dependency
+satisfaction, capability schema, permission prompts, enforcement mechanics,
+AppInstance lifecycle, RPC/channel/transport, ExecutionAdapter, RuntimeHost,
+PackManager repair/UI, SavePack runtime behavior, or broader pack addressing
+syntax.
 
 --- doc-meta ---
 DOC_ID: REWRITE-DA-10
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-10_RECOMMENDATION.txt
-DOC_REV: 1
-DOC_GIT: f39c629
+DOC_REV: 2
+DOC_GIT: d70445c
 ----------------
