@@ -14,7 +14,9 @@ Loaded file metadata:
         4bad8714bfbb5197e9e5099370ce38e00c99b3aa
 
 Audit note status:
-    Consolidated Dv3 architecture audit recommendation.
+    Consolidated Dv3 architecture rewrite recommendation.
+    Action-focused compression after DA-09, DA-21, DA-23, DA-28, and DA-29
+    audits.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -32,19 +34,9 @@ SUMMARY
 
 DA-01 is a strong grounding document and should be kept.
 
-It already contains several important Dv3-compatible ideas:
+No heavy rewrite is recommended.
 
-    - Turnix is not merely a plugin loader.
-    - Turnix is not merely a dynamic script runner.
-    - Turnix values continuity, determinism, explicitness, reversibility, and
-      explicit uncertainty.
-    - Kernel owns runtime authority but should not be over-specified.
-    - RuntimeHost, adapters, transports, RPC, capabilities, and SavePack are
-      already separated conceptually.
-    - Same host language does not imply same authority.
-    - Pack-provided Python is not automatically trusted backend implementation
-      code just because Turnix backend is written in Python.
-    - Turnix does not guarantee behavior outside Turnix orchestration.
+DA-01 should remain the top-level philosophy anchor.
 
 Required Dv3 changes:
 
@@ -58,9 +50,13 @@ Required Dv3 changes:
     3. Clarify local-first so it means user-controlled local infrastructure,
        not same-machine-only and not local-only forever.
 
-    4. Preserve existing authority boundaries without expanding DA-01 into
-       detailed RuntimeHost, Memory, Trace, Job, OrchestrationUnit,
-       Capability, PackManager, AppInstance, SavePack, RPC, or adapter specs.
+    4. Keep pack identity general so packs remain first-class without becoming
+       the whole identity of Turnix.
+
+    5. Preserve same-language, same-process, RuntimeHost, adapter, RPC,
+       capability, Job, OrchestrationUnit, PackManager, discovery, and
+       SavePack authority boundaries without expanding DA-01 into detailed
+       subsystem specification.
 
 Overall recommendation:
 
@@ -118,7 +114,7 @@ Current problem:
     DA-01 currently describes Turnix as a persistent, local, identity-stable
     system "built on modular packs".
 
-Why this is a problem:
+Why this should change:
 
     The phrase "built on modular packs" can make packs sound like the
     foundation of Turnix's identity.
@@ -133,43 +129,6 @@ Why this is a problem:
         packs = first-class composition/distribution/deployment mechanism
         apps = one kind of thing the runtime can host
 
-    Later audited documents reinforce this:
-
-        DA-28:
-            RuntimeHost is the running host boundary, not Turnix identity.
-            Startup modes, command surfaces, launcher mode, browser frontend,
-            remote clients, deployment shape, and command syntax do not become
-            runtime identity or authority.
-
-        DA-29:
-            PackManager is an official Turnix management domain, but it is not
-            Turnix identity.
-            PackManager helps choose and explain what Turnix will try, but
-            accepted graph, activation plan, policy, and operation still run
-            through Kernel-mediated boundaries.
-
-    Therefore DA-01 should avoid making any of these the project identity:
-
-        - AppPack
-        - modular pack system
-        - PackManager
-        - catalog UI
-        - launcher
-        - graph-preparation tool
-        - command surface
-        - frontend/backend implementation shape
-        - current RuntimeHost realization
-
-New intended doctrine:
-
-    Turnix does not merely run AppPacks.
-
-    Turnix runs AppInstances.
-
-    AppPack is one declarative way to create an AppInstance.
-
-    Packs remain first-class, but they are not identity-defining.
-
 Recommended change:
 
     Rewrite the opening identity section so Turnix is described as a runtime,
@@ -181,8 +140,9 @@ Suggested replacement direction:
           runtime for traceable and orchestrated systems.
 
     02.2. Turnix is not defined by any single launch mode, pack format, user
-          interface, host process, model provider, or application packaging
-          strategy.
+          interface, host process, model provider, application packaging
+          strategy, catalog surface, graph-preparation tool, or RuntimeHost
+          realization.
 
     02.3. Modular packs are a first-class Turnix mechanism for describing,
           distributing, composing, extending, and persisting runtime behavior,
@@ -197,6 +157,8 @@ Suggested replacement direction:
           - a pack manager
           - a catalog system
           - a graph-preparation tool
+          - a root-discovery system
+          - a pack-discovery system
 
     02.5. Turnix is:
           - a runtime continuity engine
@@ -205,21 +167,15 @@ Suggested replacement direction:
           - an explainable system
           - a controlled execution and state boundary
 
-Reasoning:
+Core doctrine to preserve:
 
-    This keeps the original philosophy while changing the center of gravity.
+    Turnix does not merely run AppPacks.
 
-    The old text says, in effect:
+    Turnix runs AppInstances.
 
-        persistent local identity-stable system built on modular packs
+    AppPack is one declarative way to create an AppInstance.
 
-    The new text says:
-
-        persistent local-first identity-stable runtime for traceable
-        orchestrated systems, with packs as first-class mechanisms
-
-    This matches the Dv3 runtime-domain direction while preserving packs as
-    important composition and distribution mechanisms.
+    Packs remain first-class, but they are not identity-defining.
 
 
 RECOMMENDED CHANGE 2: TRACE OPTIONALITY
@@ -230,79 +186,12 @@ Current problem:
     In the best-effort section, traces are listed with logs and analytics as
     explicitly optional data.
 
-Why this is a problem:
+Why this should change:
 
     Dv3 treats trace as structured runtime evidence, not merely debugging
     output.
 
-    However, DA-03 and DA-04 also clarify that trace must not be confused with
-    committed state.
-
-Relevant doctrine from later audited documents:
-
-    DA-03:
-        Trace is structured evidence.
-        Trace is not logging.
-        Trace is not committed state.
-        Trace retention is policy-governed.
-        Trace loss is acceptable only when represented as loss evidence.
-        Trace proves only within retained trace evidence.
-
-    DA-04:
-        Committed state is authoritative only after commit.
-        Traces are non-authoritative material.
-        Committed-state correctness is not trace-backed correctness.
-        Retained authoritative material restores committed state, not trace
-        alone.
-
-Corrected Dv3 trace doctrine:
-
-    Trace evidence is not merely optional diagnostics.
-
-    Domain-owning documents may require trace emission for meaningful actions.
-
-    Required trace emission is an emission obligation.
-
-    Trace persistence and retention are policy-governed.
-
-    Trace may be bounded, rotated, or lossy when loss is represented honestly.
-
-    Trace loss weakens evidential completeness.
-
-    Trace loss does not by itself change committed-state correctness.
-
-    Committed-state truth is governed by DA-04's commit model.
-
-Incorrect interpretations to avoid:
-
-    1. Trace is just optional logging.
-
-    2. Trace persistence failure invalidates committed state.
-
-    3. Retained trace evidence is as authoritative as committed state.
-
-    4. Turnix uses trace-backed correctness.
-
-Required distinction:
-
-    There are at least three relevant categories:
-
-        1. Domain-required trace emission
-           A subject-owning document may require that a domain attempt to emit
-           trace evidence for a meaningful action.
-
-           This is an emission obligation.
-
-        2. Trace persistence / retention
-           The trace substrate does not guarantee that all emitted trace
-           evidence is durably retained forever.
-
-           Retention is policy-governed and may be bounded or lossy when loss
-           is represented honestly.
-
-        3. Optional diagnostic / verbose trace
-           Development-mode or diagnostic enrichment that may be best-effort
-           and non-authoritative.
+    But trace must also not be confused with committed state.
 
 Recommended change:
 
@@ -333,22 +222,32 @@ Suggested replacement direction:
     04.14. Committed-state truth is governed by the authoritative commit model,
            not by trace completeness.
 
-Reasoning:
+Doctrine to preserve:
 
-    This preserves the old intent that some observability data can be best
-    effort, while preventing the architecture from treating all traces as
-    disposable.
+    Trace evidence is not merely optional diagnostics.
 
-    It also preserves the DA-03/DA-04 distinction:
+    Domain-owning documents may require trace emission for meaningful actions.
 
-        trace explains and proves within retained evidence
-        committed state defines authoritative state truth
+    Required trace emission is an emission obligation.
 
-    The corrected middle is:
+    Trace persistence and retention are policy-governed.
 
-        required trace emission where a domain owns such an obligation
-        honest loss evidence when trace is missing/lost
-        committed-state correctness remains governed by DA-04
+    Trace loss weakens evidential completeness.
+
+    Trace loss does not by itself change committed-state correctness.
+
+    Committed-state truth is governed by DA-04's commit model.
+
+Avoid these interpretations:
+
+    - trace is just optional logging
+    - trace persistence failure invalidates committed state
+    - retained trace evidence is as authoritative as committed state
+    - Turnix uses trace-backed correctness
+
+DA-03 owns detailed trace substrate semantics.
+
+DA-04 owns committed-state authority.
 
 
 RECOMMENDED CHANGE 3: LOCAL-FIRST CLARIFICATION
@@ -359,38 +258,14 @@ Current problem:
     DA-01 says Turnix is local-first and assumes local filesystem, limited
     hardware, and limited context window.
 
-    This is mostly correct, but Dv3 now allows Turnix to run through different
-    host shapes:
-
-        - same-machine desktop runtime
-        - RuntimeHost on one LAN machine and frontend on another
-        - home server RuntimeHost with local SavePack/state ownership
-        - powerful local AI machine hosting execution while lighter clients
-          present UI
-        - explicit remote-resource or federated modes under policy
-
-    The local-first doctrine should not accidentally become:
+    This is mostly correct, but the wording should not accidentally become:
 
         local-only forever
 
-Relevant doctrine from later audited documents:
+Recommended change:
 
-    DA-28:
-        Local-first does not require same-machine execution.
-
-        Local-first means authoritative runtime and state remain under
-        user-controlled local infrastructure.
-
-        RuntimeHost is the running host boundary through which Kernel-owned
-        authority is started, exposed, coordinated, and closed.
-
-Recommended clarification:
-
-    Local-first should mean local operation remains the baseline authority,
-    persistence model, failure model, and recovery model.
-
-    It should not ban explicit, policy-governed LAN, server, remote-resource,
-    or federated modes.
+    Clarify local-first as baseline authority and state ownership, not
+    same-machine-only execution.
 
 Suggested replacement direction:
 
@@ -416,14 +291,14 @@ Suggested replacement direction:
            - infinite retries
            - implicit availability
 
-Reasoning:
+Doctrine to preserve:
 
-    This keeps local-first as the default philosophy while leaving room for
-    runtime-hosted, LAN, server, remote-resource, or federated modes under
-    explicit policy.
+    local-first, not local-only
 
-    This also matches the existing open-question section, which already does
-    not fully ban remote assets, remote compilers, or federated indexes.
+    user-controlled local infrastructure, not necessarily one process or one
+    physical machine
+
+DA-28 owns detailed RuntimeHost and local/LAN exposure semantics.
 
 
 RECOMMENDED CHANGE 4: KEEP PACK IDENTITY GENERAL
@@ -433,53 +308,14 @@ Current problem:
 
     DA-01 is a top-level philosophy document.
 
-    Once PackManager exists as an official domain, there is a risk that DA-01
-    may drift from:
+    It should not drift from:
 
-        Turnix has packs and pack management.
+        Turnix has packs, discovery, and pack management.
 
     into:
 
-        Turnix is the pack manager / launcher / catalog / graph-preparation
-        system.
-
-Why this is a problem:
-
-    DA-29 intentionally creates PackManager so pack catalog, graph preparation,
-    graph repair, risk presentation, source management, and selected-graph
-    intent handling can exist in one domain without making the rest of Turnix
-    clever or heuristic.
-
-    But DA-29 also prevents PackManager from becoming hidden authority.
-
-Relevant doctrine from later audited documents:
-
-    DA-29:
-        PackManager is the official Turnix pack-management and
-        graph-preparation domain.
-
-        PackManager is not Kernel authority, discovery, generic resolution,
-        importing, activation, execution adapter, mechanical loader,
-        capability permission, persistence authority, View authority, policy
-        owner, AppInstance lifecycle owner, SavePack authority, or Turnix
-        identity.
-
-        PackManager helps choose and explain what Turnix will try.
-
-        Turnix still performs only accepted graph, activation plan, policy, and
-        operation through Kernel-mediated boundaries.
-
-    DA-09:
-        Root discovery is a strict, boring, side-effect-free candidate
-        production stage.
-
-        Discovery identifies and classifies candidate pack entities, but does
-        not decide visibility, enablement, selector resolution, dependency
-        satisfaction, activation, runtime loading, capability authority, or
-        broader policy outcomes.
-
-        This reinforces that pack roots, discovery, catalog listing, and pack
-        availability are not Turnix identity.
+        Turnix is the pack manager, launcher, catalog, discovery system, or
+        graph-preparation system.
 
 Recommended change:
 
@@ -502,104 +338,94 @@ Recommended change:
     DA-01 should not explain detailed PackManager, discovery, indexing,
     resolution, activation, import, or pack-management semantics.
 
-Reasoning:
+Doctrine to preserve:
 
-    DA-01 should anchor the identity:
+    Packs are first-class but not identity-defining.
 
-        Turnix is a runtime.
-        Packs are first-class but not identity-defining.
-        PackManager is an official management domain inside Turnix.
-        Discovery is an input stage, not runtime identity.
+    Discovery is input/candidate production, not runtime identity.
 
-    DA-09 owns root and discovery semantics.
+    PackManager is an official management domain inside Turnix, not Turnix
+    identity or authority root.
 
-    DA-29 owns detailed PackManager semantics.
+DA-09 owns root and discovery semantics.
+
+DA-29 owns detailed PackManager semantics.
 
 
 WHAT SHOULD NOT CHANGE
 ======================
 
-The same-language authority doctrine should remain.
+Same-language authority doctrine should remain.
 
 Reason:
 
-    It protects one of the most important Dv3 boundaries:
+    Internal Turnix Python is trusted backend implementation.
 
-        Internal Turnix Python is trusted backend implementation.
-        Pack-provided Python is external code.
+    Pack-provided Python is external code.
 
     Pack-provided code should not gain direct backend authority merely because
     it is written in the same language or happens to run in the same process.
 
-    DA-16 reinforces the same rule from the capability side:
+Preserve this boundary for:
 
-        same process, same runtime, or same language does not bypass capability
-        mediation.
+    - same-language execution
+    - same-process execution
+    - in-process transport
+    - direct-call optimization
+    - frontend messages
+    - RuntimeHost command surfaces
+    - pack declarations
+    - PackContext access
 
-    DA-23 reinforces the same rule from the execution-boundary side:
+DA-16 owns capability mediation detail.
 
-        Pack-provided code is not backend implementation code merely because it
-        is written in the backend implementation language or runs in the backend
-        process.
+DA-23 owns detailed ExecutionAdapter, PackContext, same-language, same-process,
+and direct-call boundary semantics.
 
-        Same process, same language, in-process transport, frontend message,
-        RuntimeHost command surface, and pack declaration do not grant Kernel
-        authority.
 
-The runtime authority ordering should remain.
+Runtime authority ordering should remain.
 
-Reason:
+Current ordering to preserve:
 
-    It already supports Dv3:
+    Kernel owns authority.
+    RuntimeHost exposes controlled entry surfaces.
+    Adapters execute declared pack code.
+    Transports carry messages.
+    RPC defines the logical communication boundary.
+    Capabilities define what code may do.
+    SavePack stores durable executed state.
 
-        Kernel owns authority.
-        RuntimeHost exposes controlled entry surfaces.
-        Adapters execute declared pack code.
-        Transports carry messages.
-        RPC defines the logical communication boundary.
-        Capabilities define what code may do.
-        SavePack stores durable executed state.
+This ordering is compatible with Kernel being important but intentionally not
+over-specified.
 
-    This is compatible with the idea that Kernel is important but intentionally
-    not over-specified.
+RuntimeHost is not Kernel authority.
 
-    DA-28 confirms that RuntimeHost is not Kernel authority. It is the running
-    host boundary through which Kernel-owned authority is started, exposed,
-    coordinated, and closed.
+Entry surfaces and command surfaces may request, observe, or control through
+mediated runtime paths, but they do not become authority themselves.
 
-    Entry surfaces and command surfaces may request, observe, or control
-    through mediated runtime paths, but they do not become authority
-    themselves.
 
 SavePack wording should remain watched, but not changed in DA-01 yet.
 
-Reason:
+Current wording:
 
-    DA-04 confirms that committed state, not trace, is authoritative.
+    SavePack stores durable executed state.
 
-    The phrase "SavePack stores durable executed state" may eventually need to
-    be checked against later SavePack/AppInstance documents.
+Possible later wording after SavePack/AppInstance audit:
 
-    If SavePack wording is revised later, likely preferred wording may become:
+    SavePack stores durable AppInstance state.
 
-        SavePack stores durable AppInstance state.
+Do not change this in DA-01 until SavePack/AppInstance documents are audited.
 
-    Do not change this in DA-01 until SavePack/AppInstance documents are
-    audited.
 
 The "no guarantees outside orchestration" invariant should remain.
 
 Reason:
 
-    This strongly supports the Dv3 Job / OrchestrationUnit model.
+    Mutation outside orchestration does not acquire Turnix guarantees by
+    implication.
 
-    DA-24 confirms that mutation outside orchestration does not acquire Turnix
-    guarantees by implication.
-
-    DA-24 also confirms that OrchestrationUnit authority does not bypass DA-04
-    transaction and commit rules.
-
-    DA-29 confirms the same invariant from the PackManager side.
+    OrchestrationUnit authority does not bypass DA-04 transaction and commit
+    rules.
 
     PackManager can prepare and explain selected pack graph intent, but it does
     not silently activate, import, load, execute, mutate SavePack state, mutate
@@ -630,9 +456,6 @@ Known risks and handling:
             - domain-required trace emission obligations
             - policy-governed trace persistence/retention/loss evidence
 
-        Preserve the DA-04 rule:
-            committed-state correctness is not trace-backed correctness
-
     PackManager risk:
         Words such as "repair", "prepare", "manage", or "help choose" can be
         misread as permission for PackManager to automatically fix pack graphs.
@@ -647,9 +470,6 @@ Known risks and handling:
             - capability permission
             - persistence authority
             - runtime identity
-
-        PackManager repair must mean explicit, scoped, policy/user-mediated
-        graph-preparation repair, not hidden automatic correction.
 
     Discovery risk:
         Words such as "discover", "available", "candidate", "root", "catalog",
@@ -668,9 +488,6 @@ Known risks and handling:
             - capability availability
             - runtime identity
 
-        Discovery must remain strict, boring, side-effect-free candidate
-        production, not clever pack management or runtime authority.
-
 
 RECOMMENDED EDIT ORDER
 ======================
@@ -686,21 +503,11 @@ RECOMMENDED EDIT ORDER
        Prevent contradiction with Dv3 trace doctrine while preserving the
        distinction between trace evidence and committed state.
 
-       Required final doctrine:
-
-           trace emission may be required by domain obligation
-           trace persistence is policy-governed
-           trace loss weakens evidential completeness
-           committed-state correctness is governed by DA-04
-
 3. Add local-first clarification.
 
    Goal:
        Preserve local-first as baseline authority without banning future
        explicit LAN/server/remote-resource/federated modes.
-
-       Make clear that local-first means user-controlled local infrastructure,
-       not same-machine-only.
 
 4. Keep pack identity general.
 
@@ -713,25 +520,6 @@ RECOMMENDED EDIT ORDER
 
    Goal:
        DA-01 should remain the top-level philosophy anchor.
-
-       DA-01 should not become the detailed specification for:
-           - RuntimeHost
-           - Trace
-           - Memory
-           - OrchestrationUnit
-           - Job
-           - Capability
-           - PackManager
-           - root discovery
-           - pack discovery
-           - indexing
-           - resolution
-           - activation
-           - import
-           - AppInstance
-           - SavePack
-           - RPC
-           - ExecutionAdapter
 
 
 POSSIBLE FUTURE FOLLOW-UP
@@ -809,6 +597,6 @@ ExecutionAdapter specification.
 --- doc-meta ---
 DOC_ID: REWRITE-DA-01
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-01_RECOMMENDATION.txt
-DOC_REV: 6
-DOC_GIT: 4edc6a6
+DOC_REV: 7
+DOC_GIT: d2710c9
 ----------------
