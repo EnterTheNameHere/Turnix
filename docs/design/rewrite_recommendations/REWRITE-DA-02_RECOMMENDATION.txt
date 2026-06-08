@@ -17,6 +17,7 @@ Audit note status:
     First-pass Dv3 architecture audit note.
     Updated after DA-28 RuntimeHost audit.
     Updated after DA-29 PackManager audit.
+    Updated after DA-16 Services, Capabilities, and Permissions audit.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -78,6 +79,33 @@ Update after DA-29:
         Convenience surfaces do not become authority merely because they are
         useful, official, or close to the runtime.
 
+Update after DA-16:
+
+    DA-16 confirms DA-02's contract-boundary doctrine from the service and
+    capability side.
+
+    DA-16 says same process, same runtime, or same language does not bypass
+    capability mediation.
+
+    DA-16 also separates:
+
+        - Service
+        - Capability
+        - Permission
+        - Job
+        - execution authorization
+        - adapter boundary
+        - persistence authority
+
+    This confirms the DA-02 rule:
+
+        In-process fast paths may exist only when they preserve the same
+        contract meaning an explicit boundary would provide.
+
+        Services must not become cross-pack execution shortcuts.
+
+        Capabilities remain mediated, permission-checked operation boundaries.
+
 
 CURRENT CLASSIFICATION
 ======================
@@ -102,6 +130,7 @@ More precise classification:
     04. Contract Boundaries
         KEEP
         Very important.
+        DA-16 confirms this from the service/capability side.
 
     05. First-party Modularity
         KEEP
@@ -113,6 +142,8 @@ More precise classification:
         KEEP
         Strongly supports Python-pack isolation and same-language boundary
         discipline.
+        DA-16 confirms same process, same runtime, or same language does not
+        bypass capability mediation.
 
     07. Interoperability Envelope Role
         KEEP
@@ -188,6 +219,29 @@ Update after DA-29:
 
     Official tooling may expose controlled operations, but it does not erase
     ownership boundaries.
+
+Update after DA-16:
+
+    DA-16 extends the same boundary principle to services, capabilities,
+    permissions, and same-process execution.
+
+    A Service may be an in-process runtime object, but it does not become a
+    permission layer, adapter authority, PackContext authority, backend-internal
+    exposure path, or cross-pack execution shortcut.
+
+    A Capability may be exported by a pack and invoked by another pack or
+    adapter-executed code, but it remains Turnix-mediated and
+    permission-checked.
+
+    Same process, same runtime, same language, direct in-process invocation, and
+    Job-backed execution do not bypass capability mediation.
+
+    This protects Dv3 from another common collapse:
+
+        The object is reachable in memory.
+        Therefore the boundary no longer exists.
+
+    DA-16 rejects that.
 
 
 PRIMARY WATCH ITEM: PLATFORM CORE
@@ -324,6 +378,22 @@ Update after DA-29:
 
     This reinforces ExecutionAdapter as a separate authority boundary.
 
+Update after DA-16:
+
+    DA-16 confirms that adapter-executed code invokes capabilities through
+    Turnix-mediated context, RPC, or equivalent capability surfaces.
+
+    Adapter-mediated execution does not bypass capability mediation.
+
+    Capability permission is distinct from execution authorization for a code
+    artifact.
+
+    Execution authorization may allow adapter code to run while a specific
+    capability invocation is still denied.
+
+    This reinforces ExecutionAdapter as an execution boundary, not an authority
+    bypass.
+
 
 INTEROPERABILITY ENVELOPE NOTE
 ==============================
@@ -368,6 +438,23 @@ Update after DA-29:
         transport is not authority
         envelope is not authority
         authority remains in the owning domain and Kernel-mediated path
+
+Update after DA-16:
+
+    DA-16 confirms that capability invocation may occur through
+    ctx.callCapability or an equivalent Turnix-mediated request surface.
+
+    Browser frontend adapters, Python in-process adapters, and cross-runtime
+    pack interactions invoke Kernel-mediated capabilities only through
+    Turnix-mediated surfaces.
+
+    Direct cross-language object access and direct cross-adapter object access
+    are not part of the capability model.
+
+    This supports the DA-02 interoperability doctrine:
+
+        in-process call path may be an optimization
+        it must not erase the logical boundary
 
 
 SAVEPACK WORDING
@@ -473,6 +560,76 @@ Recommendation:
     first-party tooling not erasing contract boundaries.
 
 
+SERVICES / CAPABILITIES / PERMISSIONS BOUNDARY
+===============================================
+
+DA-16 defines two orthogonal runtime interaction mechanisms:
+
+    Services
+    Capabilities
+
+This is compatible with DA-02.
+
+It confirms another useful rule:
+
+    Runtime object access does not erase contract boundaries.
+
+Services may provide shared runtime wiring.
+
+Capabilities provide named, permissioned, Turnix-mediated operations.
+
+Services are not:
+
+    - permission layer
+    - adapter authority
+    - PackContext authority
+    - backend-internal exposure path to adapter-executed code
+    - cross-pack execution shortcut
+    - in-process adapter bypass
+    - Job lifecycle boundary bypass
+    - persistence authority
+
+Capabilities are:
+
+    - named operations
+    - exported by packs
+    - invoked by packs or adapter-executed code
+    - Turnix-mediated
+    - permission-checked
+
+Capabilities are not:
+
+    - Services
+    - Jobs
+    - OrchestrationUnits
+    - RPC messages
+    - raw implementation objects
+    - committed-state authority
+    - adapter authority
+    - execution authorization
+    - persistence authority
+
+Capability permission is distinct from adapter execution authorization.
+
+A code artifact may be allowed to run while a specific capability invocation is
+still denied.
+
+Job-backed capability execution remains capability-mediated.
+
+In-process capability execution remains capability-mediated.
+
+Same process, same runtime, or same language does not bypass capability
+mediation.
+
+Recommendation:
+
+    Keep this as confirmation of DA-02.
+
+    No source rewrite needed unless DA-02 later needs an explicit example of
+    service/capability mediation preserving logical boundaries inside one
+    runtime.
+
+
 NO MAJOR DV3 CONFLICT FOUND
 ===========================
 
@@ -507,6 +664,20 @@ Update after DA-29:
     resolver, activator, importer, loader, capability authority, persistence
     authority, SavePack mutator, AppInstance graph mutator, or platform identity.
 
+Update after DA-16:
+
+    DA-16 confirms that DA-02's contract-boundary doctrine is being preserved
+    in the Services, Capabilities, and Permissions design area.
+
+    Services do not collapse into cross-pack execution authority.
+
+    Capabilities do not collapse into Jobs, OrchestrationUnits, RPC messages,
+    raw services, execution authorization, adapter authority, or persistence
+    authority.
+
+    Same-process and same-language execution do not bypass capability
+    mediation.
+
 
 CURRENT FINAL RECOMMENDATION
 ============================
@@ -526,12 +697,15 @@ Only minor future clarifications are likely needed:
     7. Preserve the rule that official first-party tooling does not erase
        contract boundaries.
        DA-29 currently satisfies this for PackManager.
+    8. Preserve the rule that service object access, in-process calls, and
+       same-language execution do not erase capability mediation.
+       DA-16 currently satisfies this for Services and Capabilities.
 
 No heavy rewrite recommended at this stage.
 
 --- doc-meta ---
 DOC_ID: REWRITE-DA-02
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-02_RECOMMENDATION.txt
-DOC_REV: 3
-DOC_GIT: 3bd3e24
+DOC_REV: 4
+DOC_GIT: ad74392
 ----------------
