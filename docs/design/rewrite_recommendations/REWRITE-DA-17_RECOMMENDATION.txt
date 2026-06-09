@@ -14,8 +14,9 @@ Loaded file metadata:
         7d6abd41eda439c12180350da0795dd5d37d5d22
 
 Audit note status:
-    First-pass Dv3 architecture rewrite recommendation.
-    Action-focused format under the compressed rewrite-recommendation rule.
+    Consolidated Dv3 architecture rewrite recommendation.
+    Action-focused revision pass for boundary compression, policy outcome
+    stop-lines, and later domain guardrail alignment.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -31,14 +32,18 @@ Important excluded source:
 SUMMARY
 =======
 
-DA-17 is strong and Dv3-compatible.
+DA-17 is Dv3-compatible.
 
-Keep it as the Kernel-mediated user-decision and policy-handling document.
+No heavy rewrite is recommended.
+
+Keep DA-17 as the Kernel-mediated user-decision and policy-handling document.
 
 Preserve the central rule:
 
     Turnix does not make ambiguous decisions silently.
+
     Turnix does not delegate authority implicitly.
+
     Policy reduces repeated friction; it does not redefine authority.
 
 Decision handling exists only where Turnix cannot proceed safely or
@@ -46,6 +51,10 @@ deterministically on its own.
 
 Decisions affecting identity, persistence, authority, safety, work lifecycle,
 or known content equivalence must remain explicit and trace-backed.
+
+Overall recommendation:
+
+    KEEP WITH SMALL WORK-LIFECYCLE KEY / CROSS-SCOPE PROMOTION WATCH
 
 
 CURRENT CLASSIFICATION
@@ -68,7 +77,39 @@ Future edits should preserve:
     - no wildcard or versionless capability permission fallback
     - no silent cancellation, supersession, detachment, result retention, or
       result discard
+    - policy decisions do not redefine Job, RPC/transport, OrchestrationUnit,
+      AppInstance, adapter, RuntimeHost, Window, PackManager, or committed-state
+      outcomes
     - trace-backed explanation only
+
+
+ACTUAL DA-17 CHANGE 1: POLICY DOES NOT DEFINE DOMAIN OUTCOME
+===========================================================
+
+DA-17 should contain a compact source-level boundary statement.
+
+Recommended source-level boundary:
+
+    Policy decisions choose allowed responses where Turnix cannot safely or
+    deterministically proceed on its own.
+
+    Policy does not redefine authority.
+
+    Policy does not directly define Job terminal states, RPC/transport outcomes,
+    OrchestrationUnit terminal outcomes, AppInstance lifecycle, adapter
+    lifecycle, RuntimeHost lifecycle, Window finalization, PackManager operation
+    outcomes, capability permission, or committed-state truth.
+
+    If a policy decision affects another domain, the owning domain defines the
+    resulting domain outcome.
+
+    Correlation between a policy decision and a domain outcome must be explicit.
+
+This belongs in DA-17 because DA-17 owns decision and remembered-policy
+semantics.
+
+Detailed ownership mapping belongs in the guardrail section, not in the source
+document.
 
 
 PRESERVATION RULE 1: DECISION AUTHORITY IS KERNEL-MEDIATED
@@ -249,6 +290,7 @@ PRESERVATION RULE 7: POLICY DOES NOT REDEFINE AUTHORITY
 Preserve the rule:
 
     Policies influence default responses.
+
     Policies do not redefine authority.
 
 Policies do not:
@@ -265,12 +307,17 @@ Policies do not:
     - silently detach work
     - silently retain result
     - silently discard result
+    - silently finalize a Window
+    - silently mutate committed state
+    - silently authorize adapter execution
+    - silently accept RuntimeHost command authority
+    - silently grant PackManager write or repair authority
 
 Policy exists to reduce friction, not weaken safety or determinism.
 
 
-PRESERVATION RULE 8: PAUSES ARE SCOPED AND DO NOT IMPLY JOB OUTCOMES
-====================================================================
+PRESERVATION RULE 8: PAUSES ARE SCOPED AND DO NOT IMPLY DOMAIN OUTCOMES
+======================================================================
 
 Preserve scoped pause behavior.
 
@@ -294,10 +341,20 @@ While a decision is pending:
     - no SavePack mutation may complete
     - no Job or OrchestrationUnit affected by the decision may silently cross
       the decision-controlled boundary
+    - no Window finalization affected by the decision may silently occur
+    - no RuntimeHost operation affected by the decision may silently complete
+    - no adapter execution authorization affected by the decision may silently
+      proceed
 
 A decision pause does not by itself cancel, supersede, or time out a Job.
 
-Job lifecycle changes caused by decision timeout or policy are owned by DA-19.
+A decision pause does not by itself complete, fail, cancel, or supersede an
+OrchestrationUnit.
+
+A decision pause does not by itself finalize a Window.
+
+Lifecycle changes caused by decision timeout or policy are owned by the
+affected domain documents.
 
 
 PRESERVATION RULE 9: WORK-LIFECYCLE POLICY IS DISTINCT FROM JOB LIFECYCLE
@@ -312,6 +369,11 @@ Work-lifecycle policy decisions may affect:
     - RPC request handling
     - scheduler-owned work
     - debugger-controlled work
+    - adapter-mediated work
+    - RuntimeHost operations
+    - AppInstance startup or shutdown work
+    - PackManager-triggered operations
+    - Window-related finalization workflows
 
 Possible outcomes include:
 
@@ -330,6 +392,9 @@ DA-19 defines Job lifecycle states, terminal outcomes, cancellation, timeout,
 supersession, progress, and late completion semantics.
 
 Work-lifecycle policy decisions do not define RPC transport mechanics.
+
+DA-21 defines RPC, RPCChannel, transport, timeout, disconnect, cancellation
+message, and acknowledgement semantics.
 
 Work-lifecycle policy decisions do not define capability permission semantics.
 
@@ -359,11 +424,17 @@ Remembered work-lifecycle policy subject identity may include:
     - capability identity when capability work is involved
     - RPC route or request class when RPC work is involved
     - scheduler policy class when scheduler work is involved
+    - adapter kind or adapter execution class when adapter-mediated work is
+      involved
+    - RuntimeHost operation class when host work is involved
+    - AppInstance lifecycle operation class when AppInstance work is involved
     - disconnect condition when disconnect handling is involved
     - supersession target class when supersession handling is involved
 
 A remembered policy that applies to cancellation does not imply a remembered
-policy that applies to supersession, timeout, or disconnect.
+policy that applies to supersession, timeout, disconnect, detachment, result
+retention, result discard, adapter failure, RuntimeHost failure, or Window
+finalization.
 
 A remembered policy that applies to transport disconnect does not imply a
 remembered policy that applies to Job timeout.
@@ -387,6 +458,7 @@ Frontends do not:
     - auto-confirm without policy
     - bypass Kernel authority
     - obscure the impact of denial
+    - turn presentation state into policy state
 
 For fingerprint-mismatch decisions, frontends may show origin context, but must
 not present origin as authenticity proof.
@@ -399,6 +471,8 @@ For work-lifecycle policy decisions, frontends distinguish:
     - detaching work from current frontend or transport
     - retaining result for later retrieval
     - discarding result when no consumer remains
+    - refusing unsafe continuation
+    - aborting startup or affected work
 
 Frontends do not present Superseded as failure.
 
@@ -415,19 +489,23 @@ If multiple frontends are connected:
 The Kernel remains the single arbiter.
 
 
-PRESERVATION RULE 12: MODS DO NOT HANDLE DECISIONS DIRECTLY
-===========================================================
+PRESERVATION RULE 12: MODS AND PACKS DO NOT HANDLE DECISIONS DIRECTLY
+=====================================================================
 
-Preserve mod involvement boundary.
+Preserve mod and pack involvement boundary.
 
-Mods may trigger decision points.
+Mods and packs may trigger decision points.
 
-Mods do not handle decision points directly.
+Mods and packs do not handle decision points directly.
 
-Mods do not block while awaiting frontend interaction.
+Mods and packs do not block while awaiting frontend interaction.
 
-Mods observe decision outcomes only through Turnix-provided context and
-results.
+Mods and packs do not invent policy defaults.
+
+Mods and packs do not persist policy decisions directly.
+
+Mods and packs observe decision outcomes only through Turnix-provided context
+and results.
 
 
 PRESERVATION RULE 13: DECISION FAILURE IS SAFE AND NON-MUTATING
@@ -456,8 +534,11 @@ whether the affected Job:
     - retains result for later retrieval
     - discards result if no consumer remains
 
-Disconnect handling does not silently cancel, supersede, or detach a Job
-without explicit policy.
+Disconnect handling does not silently cancel, supersede, detach, retain, or
+discard a Job without explicit policy.
+
+Disconnect handling does not silently define adapter, RuntimeHost,
+OrchestrationUnit, AppInstance, Window, PackManager, or committed-state outcome.
 
 
 WATCH ITEM: WORK-LIFECYCLE POLICY KEY SCHEMA
@@ -473,9 +554,13 @@ Future rewrite should preserve the current boundary:
       distinct unless an owning document explicitly defines a safe shared key
     - transport disconnect policy is not Job timeout policy
     - Job timeout policy is not transport disconnect policy
+    - adapter failure policy is not transport disconnect policy by default
+    - RuntimeHost operation policy is not adapter lifecycle policy by default
+    - AppInstance lifecycle policy is not Job lifecycle policy by default
+    - Window finalization policy is not Job terminal outcome policy by default
 
-This matters for DA-19, IS-01, IS-02, DA-18, schedulers, and capability-backed
-work.
+This matters for DA-19, DA-20, DA-21, DA-23, DA-24, DA-27, DA-28, DA-29,
+DA-18, IS-01, IS-02, schedulers, and capability-backed work.
 
 
 WATCH ITEM: CROSS-SCOPE COPY AND PROMOTION
@@ -517,43 +602,119 @@ trace persistence is guaranteed forever.
 REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-17 CONTENT
 =========================================================
 
-Use these as rewrite guardrails only.
+This section is not suggested DA-17 wording.
 
-Do not let policy redefine authority.
+It exists to prevent architectural drift during rewrite when the editor knows
+DA-17 but may not have every related document loaded.
 
-Do not let remembered decisions silently broaden across capability families,
-versions, packs, SavePacks, RuntimeHosts, owners, work kinds, or transports.
+Use these as guardrails only.
 
-Do not let pack-provided hints become binding policy.
+Decision and policy guardrails:
 
-Do not let mods or packs own decision handling.
+    Policy does not redefine authority.
 
-Do not let frontends invent defaults or auto-confirm without policy.
+    Policy does not define committed-state truth.
 
-Do not prompt for reads.
+    Policy does not directly define Job terminal state.
 
-Do not allow wildcard capability permission matching.
+    Policy does not directly define OrchestrationUnit terminal outcome.
 
-Do not allow versionless capability permission fallback.
+    Policy does not directly define RPC or transport outcome.
 
-Do not treat origin as authenticity proof.
+    Policy does not directly define adapter lifecycle outcome.
 
-Do not treat fingerprint acceptance as general trust.
+    Policy does not directly define RuntimeHost lifecycle or operation outcome.
 
-Do not treat transport disconnect as Job timeout.
+    Policy does not directly define AppInstance lifecycle outcome.
 
-Do not treat Job timeout as transport timeout.
+    Policy does not directly define Window finalization.
 
-Do not treat Superseded as failure.
+    Policy does not directly define PackManager operation outcome.
 
-Do not silently cancel, supersede, detach, retain, or discard work without
-policy.
+    Remembered decisions must not silently broaden across capability families,
+    versions, packs, SavePacks, RuntimeHosts, AppInstances, owners, work kinds,
+    adapters, RPC routes, or transports.
 
-Do not let pending decisions commit persisted mutation across the
-decision-controlled boundary.
+    Pack-provided hints are not binding policy.
 
-Do not let cross-scope copy or promotion bypass owner-domain permission checks,
-conflict handling, or atomicity rules.
+    Mods and packs do not own decision handling.
+
+    Frontends do not invent defaults or auto-confirm without policy.
+
+    Reads are not prompted.
+
+    Wildcard capability permission matching is forbidden.
+
+    Versionless capability permission fallback is forbidden.
+
+    Origin is not authenticity proof.
+
+    Fingerprint acceptance is not general trust.
+
+    Transport disconnect is not Job timeout.
+
+    Job timeout is not transport timeout.
+
+    Superseded is not failure.
+
+    Work is not silently cancelled, superseded, detached, retained, or discarded
+    without policy.
+
+    Pending decisions do not commit persisted mutation across the
+    decision-controlled boundary.
+
+    Cross-scope copy or promotion must not bypass owner-domain permission
+    checks, conflict handling, or atomicity rules.
+
+Owning-document guardrails:
+
+    DA-03 owns trace substrate, retention, loss, trace DAG, and span semantics.
+
+    DA-04 owns committed-state authority, transactions, and commit boundaries.
+
+    DA-06 owns durable policy storage locations and configuration/persistence
+    scope where applicable.
+
+    DA-08 owns Window, ActiveWindow, SafePointWindow, AbortedWindow, and
+    finalized runtime history semantics.
+
+    DA-16 owns service, capability, and permission semantics.
+
+    DA-18 owns debugger pause, breakpoint, and execution-control behavior.
+
+    DA-19 owns Job lifecycle, timeout, cancellation, progress, result,
+    supersession, late-completion, and Job terminal outcome semantics.
+
+    DA-20 owns AppInstance lifecycle and runtime identity semantics.
+
+    DA-21 owns RPC, channel, transport, timeout, disconnect, cancellation
+    message, and acknowledgement semantics.
+
+    DA-23 owns abstract execution adapter authority boundaries.
+
+    DA-24 owns OrchestrationUnit lifecycle, mutation authority, and terminal
+    outcome semantics.
+
+    DA-27 owns adapter lifecycle, trust, isolation, failure, disconnect, and
+    adapter-domain trace semantics.
+
+    DA-28 owns RuntimeHost lifecycle, startup mode, command surface, workspace
+    ownership, local-first, and LAN exposure semantics.
+
+    DA-29 owns PackManager catalog, graph-preparation, repair, View, write, and
+    PackManager-domain trace semantics.
+
+Local rewrite rule:
+
+    DA-17 may name these concepts when needed to protect decision and policy
+    handling boundaries.
+
+    DA-17 should not define their detailed behavior.
+
+    DA-17 should remain the Kernel-mediated user-decision, policy precedence,
+    policy persistence, remembered permission, fingerprint mismatch,
+    work-lifecycle policy, frontend-presentation, and decision-domain trace
+    document.
 
 
 CURRENT FINAL RECOMMENDATION
@@ -567,8 +728,10 @@ Recommended future edits:
 
     - keep DA-17 focused on Kernel-mediated decision and policy handling
     - preserve exact remembered permission and fingerprint policy keys
-    - preserve work-lifecycle policy separation from Job lifecycle and transport
-      mechanics
+    - preserve work-lifecycle policy separation from Job lifecycle, RPC transport,
+      OrchestrationUnit lifecycle, adapter lifecycle, RuntimeHost lifecycle,
+      AppInstance lifecycle, Window finalization, PackManager operation, and
+      committed-state semantics
     - preserve no-prompt-for-read-access rule
     - preserve frontend-as-presentation-only rule
     - preserve mod-trigger-but-not-handle rule
@@ -580,6 +743,6 @@ Recommended future edits:
 --- doc-meta ---
 DOC_ID: REWRITE-DA-17
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-17_RECOMMENDATION.txt
-DOC_REV: 1
-DOC_GIT: 6f871ed
+DOC_REV: 2
+DOC_GIT: e60f331
 ----------------
