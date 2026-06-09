@@ -15,9 +15,8 @@ Loaded file metadata:
 
 Audit note status:
     Consolidated Dv3 architecture rewrite recommendation.
-    Action-focused revision pass for Services, Capabilities, Permissions,
-    Job-backed capability execution, adapter-mediated invocation, trace wording,
-    and cross-domain authority guardrails.
+    Action-focused revision pass for boundary compression, stale DA-27 watch
+    removal, and later domain guardrail alignment.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -33,27 +32,14 @@ Important excluded source:
 SUMMARY
 =======
 
-DA-16 is strong and highly Dv3-compatible.
+DA-16 is Dv3-compatible.
 
 No heavy rewrite is recommended.
 
 DA-16 defines the strict, auditable runtime interaction model used by Turnix for
 cross-pack wiring and cross-pack execution.
 
-It defines:
-
-    - Services as runtime wiring objects
-    - Capabilities as permissioned, Turnix-mediated operations
-    - permission classes and decision triggers
-    - capability identity and version rules
-    - conflict rules for capability identities
-    - capability invocation flow and execution modes
-    - capability relationship to execution adapters
-    - capability relationship to Jobs when execution is Job-backed
-    - trace and audit requirements for capability calls
-    - cross-runtime and cross-adapter symmetry
-
-DA-16 should preserve this core split:
+Preserve the core split:
 
     Service = runtime wiring object
 
@@ -71,18 +57,6 @@ Required small cleanups:
        an emission obligation, while trace retention and loss remain governed by
        DA-03.
 
-Rewrite-boundary guardrails:
-
-    DA-16 owns Services, Capabilities, permission classes, capability invocation
-    mediation, capability-domain trace reasons, and cross-pack execution
-    boundary behavior.
-
-    DA-16 should not absorb detailed importing, activation, adapter lifecycle,
-    persistence, remembered-decision precedence, trace storage, or Job lifecycle
-    semantics.
-
-    Those details belong to their subject-owning documents.
-
 Overall recommendation:
 
     KEEP WITH SMALL CLARIFICATION
@@ -91,72 +65,25 @@ Overall recommendation:
 CURRENT CLASSIFICATION
 ======================
 
-Overall classification:
+KEEP WITH SMALL CLARIFICATION
 
-    KEEP WITH SMALL CLARIFICATION
+DA-16 should not be rewritten heavily.
 
-Detailed classification:
+Future edits should preserve:
 
-    01. Interpretation Basis
-        KEEP
-
-    02. Core Distinction
-        KEEP
-
-    03. Services - Runtime Wiring
-        KEEP
-
-    04. Service Access Rules
-        KEEP
-
-    05. Capabilities - Execution Boundary
-        KEEP
-
-    06. Capability Identities and Versioning
-        KEEP
-
-    07. Capability Export vs Usage
-        KEEP
-
-    08. Permissions Model
-        KEEP
-
-    09. Capability Invocation Flow
-        KEEP WITH SMALL STRUCTURAL CLEANUP
-        Section numbering has duplicate 09.1.
-
-    09.1 Capability Execution Modes and Jobs
-        KEEP BUT RENUMBER
-        Content should remain, but duplicate 09.1 should be fixed.
-
-    10. User Decisions and Policy
-        KEEP
-
-    11. Services vs Capabilities - Strict Separation
-        KEEP
-
-    12. Computed and Reactive Behavior
-        KEEP
-
-    13. Conflicts and Overrides
-        KEEP
-
-    14. Trace and Audit
-        KEEP BUT ALIGN WORDING WITH DA-03
-        "Required for reproducibility/audit" should be read as emission
-        obligation, not persistence guarantee.
-
-    15. Development-Time Diagnostics
-        KEEP
-
-    16. Cross-Runtime and Cross-Adapter Symmetry
-        KEEP
-
-    17. Explicitly Open Questions
-        KEEP
-
-    18. Locked Summary
-        KEEP
+    - Service / Capability separation
+    - Capability / Job separation
+    - permission identity versus execution authorization
+    - runtime export versus manifest intent
+    - invocation pause and permission decision flow
+    - strict cross-pack capability mediation
+    - computed/reactive behavior as runtime-only
+    - explicit capability conflict handling
+    - capability-domain trace ownership
+    - cross-runtime and cross-adapter capability symmetry
+    - capability invocation not becoming OrchestrationUnit automatically
+    - capability result not becoming Job, Window, RuntimeHost, adapter, or
+      PackManager outcome by default
 
 
 ACTUAL DA-16 CLEANUP 1: SECTION NUMBERING
@@ -231,6 +158,33 @@ Reason:
     retention into a committed-state correctness requirement.
 
 
+ACTUAL DA-16 CLEANUP 3: CAPABILITY OUTCOME STOP-LINE
+====================================================
+
+DA-16 should contain a compact source-level boundary statement.
+
+Recommended source-level boundary:
+
+    Capability invocation is a named, permissioned, Turnix-mediated operation.
+
+    Capability invocation is not automatically a Job, OrchestrationUnit, RPC
+    outcome, adapter lifecycle outcome, RuntimeHost outcome, AppInstance
+    lifecycle outcome, Window finalization, PackManager outcome, or
+    committed-state mutation.
+
+    If capability invocation affects another domain, that domain defines the
+    resulting domain outcome.
+
+    Correlation between a capability invocation and another domain outcome must
+    be explicit.
+
+This belongs in DA-16 because DA-16 owns capability invocation and permission
+mediation.
+
+Detailed ownership mapping belongs in the guardrail section, not in the source
+document.
+
+
 PRESERVATION RULE 1: SERVICE / CAPABILITY DISTINCTION
 =====================================================
 
@@ -249,7 +203,9 @@ Services are not:
     - cross-pack execution shortcut
     - in-process adapter bypass
     - Job lifecycle boundary bypass
+    - OrchestrationUnit authority
     - persistence authority
+    - committed-state authority
 
 Capabilities are not:
 
@@ -263,6 +219,9 @@ Capabilities are not:
     - adapter authority
     - execution authorization
     - persistence authority
+    - RuntimeHost authority
+    - AppInstance identity
+    - Window finalization
 
 This prevents the bad model:
 
@@ -298,6 +257,12 @@ Job-backed execution does not expose raw implementation objects.
 Job-backed execution does not grant callers direct access to the underlying
 execution mechanism.
 
+Job-backed execution acceptance is not Job terminal outcome.
+
+Job-backed execution acceptance is not capability success by itself unless the
+operation contract defines successful acceptance as the direct capability
+result.
+
 Correct model:
 
     Capability invocation may be direct.
@@ -311,7 +276,32 @@ Correct model:
     Permission and mediation semantics belong to DA-16.
 
 
-PRESERVATION RULE 3: PERMISSION IDENTITY AND EXECUTION AUTHORIZATION REMAIN SEPARATE
+PRESERVATION RULE 3: CAPABILITY / ORCHESTRATIONUNIT RELATION
+============================================================
+
+Preserve Capability / OrchestrationUnit separation.
+
+A capability invocation is not automatically an OrchestrationUnit.
+
+A capability result is not automatically an OrchestrationUnit outcome.
+
+Capability-mediated work may create, attach to, or participate in an
+OrchestrationUnit only through the owning runtime rules.
+
+Capability permission does not grant committed-state mutation authority by
+itself.
+
+Capability invocation that mutates state remains constrained by DA-04 and
+DA-24.
+
+Job-backed capability execution remains capability-mediated and does not become
+OrchestrationUnit authority by implication.
+
+DA-24 owns OrchestrationUnit lifecycle, mutation authority, and terminal outcome
+semantics.
+
+
+PRESERVATION RULE 4: PERMISSION IDENTITY AND EXECUTION AUTHORIZATION REMAIN SEPARATE
 ====================================================================================
 
 Preserve the permission model defined here.
@@ -346,7 +336,7 @@ This prevents the bad model:
 DA-17 remains load-bearing for remembered-decision semantics.
 
 
-PRESERVATION RULE 4: RUNTIME EXPORT OVERRIDES MANIFEST INTENT
+PRESERVATION RULE 5: RUNTIME EXPORT OVERRIDES MANIFEST INTENT
 =============================================================
 
 Preserve the runtime export / manifest declaration split.
@@ -371,7 +361,7 @@ Implementation warning:
     Do not make manifest declarations look like granted/exported capabilities.
 
 
-PRESERVATION RULE 5: INVOCATION FLOW AND PERMISSION PAUSE
+PRESERVATION RULE 6: INVOCATION FLOW AND PERMISSION PAUSE
 =========================================================
 
 Preserve the invocation flow.
@@ -399,11 +389,14 @@ Execution resumes deterministically from the pause point.
 
 Permission evaluation occurs before capability execution begins.
 
-Job-backed, adapter-mediated, and in-process invocation do not skip permission
-evaluation.
+Job-backed, adapter-mediated, in-process, and RPC-shaped invocation do not skip
+permission evaluation.
+
+A permission pause does not by itself define Job, OrchestrationUnit, adapter,
+RuntimeHost, AppInstance, Window, PackManager, or committed-state outcome.
 
 
-PRESERVATION RULE 6: STRICT SERVICE / CAPABILITY SEPARATION
+PRESERVATION RULE 7: STRICT SERVICE / CAPABILITY SEPARATION
 ===========================================================
 
 Preserve strict cross-pack execution mediation.
@@ -421,8 +414,10 @@ Job-backed capability execution does not expose service internals.
 
 Job handles do not provide direct service access.
 
+PackContext access does not replace capability mediation.
 
-PRESERVATION RULE 7: COMPUTED AND REACTIVE BEHAVIOR IS RUNTIME-ONLY
+
+PRESERVATION RULE 8: COMPUTED AND REACTIVE BEHAVIOR IS RUNTIME-ONLY
 ===================================================================
 
 Preserve the anti-hidden-mutation rule.
@@ -441,8 +436,11 @@ It does not intercept persistence.
 
 It does not replace the authoritative source of truth.
 
+If computed or reactive behavior needs durable mutation, it must use the owning
+state, transaction, capability, permission, and persistence boundaries.
 
-PRESERVATION RULE 8: CAPABILITY CONFLICTS DO NOT SILENTLY RESOLVE
+
+PRESERVATION RULE 9: CAPABILITY CONFLICTS DO NOT SILENTLY RESOLVE
 =================================================================
 
 Preserve explicit conflict handling.
@@ -461,8 +459,13 @@ Silent override is forbidden.
 
 Adapter selection does not silently resolve capability conflicts.
 
+PackManager graph preparation does not silently resolve capability conflicts as
+runtime export authority.
 
-PRESERVATION RULE 9: TRACE OWNERSHIP STAYS DOMAIN-SPECIFIC
+Runtime export remains authoritative for actual capability behavior.
+
+
+PRESERVATION RULE 10: TRACE OWNERSHIP STAYS DOMAIN-SPECIFIC
 ==========================================================
 
 Preserve capability-domain trace ownership.
@@ -486,14 +489,30 @@ result.
 When a capability invocation creates or attaches to a Job, the Job lifecycle
 trace remains causally linked to the capability invocation trace evidence.
 
+Capability trace evidence does not replace trace evidence owned by:
+
+    - Job documents
+    - OrchestrationUnit documents
+    - RPC documents
+    - adapter documents
+    - RuntimeHost documents
+    - AppInstance documents
+    - Window documents
+    - PackManager documents
+    - committed-state documents
+
 DA-19 owns Job-domain trace reasons.
 
-DA-23 owns adapter-domain trace obligations.
+DA-21 owns RPC-domain trace reasons.
+
+DA-23 and DA-27 own adapter-domain trace obligations.
+
+DA-24 owns OrchestrationUnit-domain trace reasons.
 
 Trace wording should follow the DA-03 cross-document trace wording check.
 
 
-PRESERVATION RULE 10: CROSS-RUNTIME AND CROSS-ADAPTER SYMMETRY
+PRESERVATION RULE 11: CROSS-RUNTIME AND CROSS-ADAPTER SYMMETRY
 ==============================================================
 
 Preserve the cross-runtime capability model.
@@ -521,6 +540,15 @@ Capabilities remain the universal mediated execution boundary.
 Job-backed capability execution does not change cross-runtime or cross-adapter
 boundary rules.
 
+Adapter lifecycle does not become capability permission.
+
+Adapter execution authorization does not become capability permission.
+
+RuntimeHost command surfaces do not become capability permission.
+
+PackManager operations do not become capability permission unless they invoke a
+capability through the normal mediated path.
+
 
 REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-16 CONTENT
 =========================================================
@@ -543,6 +571,14 @@ Capability-boundary guardrails:
     Execution authorization does not grant all capability permissions.
 
     Capability invocation is not automatically Job.
+
+    Capability invocation is not automatically OrchestrationUnit.
+
+    Capability invocation is not automatically Window finalization.
+
+    Capability invocation is not automatically RuntimeHost operation success.
+
+    Capability invocation is not automatically PackManager operation success.
 
     Job-backed capability execution is still capability-mediated.
 
@@ -567,35 +603,53 @@ Capability-boundary guardrails:
 
     Capability conflict resolution is explicit, not silent adapter selection.
 
+    Capability conflict resolution is not silent PackManager graph repair.
+
 Owning-document boundaries:
 
     DA-03 owns trace substrate, trace event schema, trace storage, trace
     retention, and trace loss semantics.
 
+    DA-04 owns authoritative committed state, transactions, and commit
+    boundaries.
+
     DA-06 owns configuration schemas and policy storage formats.
 
     DA-07 owns persistence rules and file I/O.
+
+    DA-08 owns Window, ActiveWindow, SafePointWindow, AbortedWindow, and
+    finalized runtime history semantics.
 
     DA-12 owns importing and module-loading rules.
 
     DA-14 owns activation semantics and execution guarantees.
 
-    DA-17 owns remembered-decision precedence and user-decision persistence
+    DA-17 owns remembered-decision precedence, permission decision keying,
+    policy scope, work-lifecycle policy, and user-decision persistence
     semantics.
 
     DA-19 owns Job lifecycle, Job result, Job timeout, Job cancellation,
     supersession, progress, and late completion semantics.
 
-    DA-21 owns RPC semantics.
+    DA-20 owns AppInstance lifecycle and runtime identity semantics.
 
-    DA-23 owns execution adapter boundary semantics and adapter-executed code
-    authority boundaries.
+    DA-21 owns RPC, channel, transport, timeout, disconnect, cancellation
+    message, and acknowledgement semantics.
+
+    DA-23 owns abstract execution adapter boundary semantics and
+    adapter-executed code authority boundaries.
 
     DA-24 owns OrchestrationUnit mutation authority and execution-authority
     coordination.
 
-    DA-27 should preserve ExecutionAdapter/capability separation from the
-    concrete adapter lifecycle side when audited.
+    DA-27 owns adapter lifecycle, trust, isolation, failure, disconnect, and
+    adapter-domain trace semantics.
+
+    DA-28 owns RuntimeHost lifecycle, startup mode, command surface, workspace
+    ownership, local-first, and LAN exposure semantics.
+
+    DA-29 owns PackManager catalog, graph-preparation, repair, View, write, and
+    PackManager-domain trace semantics.
 
 Local rewrite rule:
 
@@ -608,34 +662,38 @@ Local rewrite rule:
     capability-mediated cross-pack interaction document.
 
 
-WATCH ITEMS
-===========
+WATCH ITEM: DECISION PERSISTENCE
+================================
 
-Decision persistence watch:
+DA-17 remains load-bearing for remembered capability decisions.
 
-    DA-17 remains load-bearing for remembered capability decisions.
+Preserve:
 
-    When DA-17 is revised or audited, verify that it preserves:
+    - exact versioned capability identity matching
+    - no wildcard, prefix, family, or versionless fallback
+    - run/save/global remembered-decision ordering
+    - user-decision reversibility and explainability
+    - no adapter-owned permission decision authority
+    - no RuntimeHost-owned permission decision authority
+    - no PackManager-owned permission decision authority
 
-        - exact versioned capability identity matching
-        - no wildcard/prefix/family/versionless fallback unless explicitly
-          introduced by policy
-        - run/save/global remembered-decision ordering
-        - user-decision reversibility and explainability
-        - no adapter-owned permission decision authority
 
-Adapter lifecycle watch:
+WATCH ITEM: ADAPTER LIFECYCLE
+=============================
 
-    DA-27 should preserve the separation between:
+DA-27 preserves the separation between:
 
-        - adapter lifecycle
-        - adapter execution authorization
-        - PackContext authority
-        - capability invocation
-        - capability permission
-        - Job-backed capability lifecycle
+    - adapter lifecycle
+    - adapter execution authorization
+    - PackContext authority
+    - capability invocation
+    - capability permission
+    - Job-backed capability lifecycle
 
-    Adapter lifecycle must not become capability permission or service access.
+Adapter lifecycle must not become capability permission or service access.
+
+Adapter failure does not silently become capability failure unless the
+capability-owning operation contract defines that relationship explicitly.
 
 
 CURRENT FINAL RECOMMENDATION
@@ -654,10 +712,17 @@ Required small cleanups:
        an emission obligation, while trace retention/loss remains governed by
        DA-03.
 
+    3. Add or preserve a compact capability outcome stop-line:
+       capability invocation is not automatically Job, OrchestrationUnit, RPC
+       outcome, adapter lifecycle outcome, RuntimeHost outcome, AppInstance
+       lifecycle outcome, Window finalization, PackManager outcome, or
+       committed-state mutation.
+
 Preserve:
 
     - Service / Capability separation
     - Capability / Job separation
+    - Capability / OrchestrationUnit separation
     - permission identity versus execution authorization
     - runtime export versus manifest intent
     - invocation pause and permission decision flow
@@ -669,11 +734,13 @@ Preserve:
 
 Do not expand DA-16 into detailed importing, activation, adapter lifecycle,
 persistence, configuration schema, remembered-decision precedence, trace storage,
-Job lifecycle, RPC, OrchestrationUnit, or concrete adapter protocol semantics.
+Job lifecycle, RPC, OrchestrationUnit, AppInstance lifecycle, Window
+finalization, RuntimeHost lifecycle, PackManager operation, or concrete adapter
+protocol semantics.
 
 --- doc-meta ---
 DOC_ID: REWRITE-DA-16
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-16_RECOMMENDATION.txt
-DOC_REV: 4
-DOC_GIT: 8bbc2d0
+DOC_REV: 5
+DOC_GIT: f985b77
 ----------------
