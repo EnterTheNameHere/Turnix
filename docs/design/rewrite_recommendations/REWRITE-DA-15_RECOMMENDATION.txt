@@ -1,0 +1,392 @@
+TURNIX DV3 AUDIT NOTE
+=====================
+
+Source file:
+    docs/design/DA-15_VISIBILITY_EXPORTS_AND_ACCESS_CONTROL.txt
+
+Branch:
+    Dv3
+
+Loaded file metadata:
+    DOC_REV: 14
+    DOC_GIT: 10093de
+    GitHub blob SHA seen by assistant:
+        22033a03fc4469d1704cbafd3b12cca09f5daf42
+
+Audit note status:
+    First-pass Dv3 architecture rewrite recommendation.
+    Action-focused format under the compressed rewrite-recommendation rule.
+
+Audit scope:
+    This note audits architectural meaning, doctrine, and direction.
+    It does not audit formatting unless formatting/structure affects meaning,
+    machine interpretation, rule priority, or human usability as reference.
+
+Important excluded source:
+    AI_WORKFLOW_BOOTSTRAP.txt was intentionally not read.
+    It is part of the workflow system being audited separately and should not
+    bias this architecture pass.
+
+
+SUMMARY
+=======
+
+DA-15 is strong and Dv3-compatible.
+
+Keep it as the visibility enforcement / reachability access-control document.
+
+DA-15 should preserve the rule that visibility answers:
+
+    Is pack A permitted to reference pack B?
+
+Visibility is permissioned reachability.
+
+Visibility is not:
+
+    - activation
+    - code loading
+    - execution order
+    - dependency satisfaction
+    - version compatibility
+    - runtime capability access
+    - runtime service access
+
+Visibility violations are hard failures.
+
+No silent bypass, fallback, probing, or runtime negotiation by packs should be
+introduced.
+
+
+CURRENT CLASSIFICATION
+======================
+
+KEEP WITH SMALL DA-10 OVERLAP / PERMISSIONDENIED WORDING WATCH
+
+DA-15 should not be rewritten heavily.
+
+Main future edits should:
+
+    - preserve visibility as enforced reference reachability
+    - preserve hard failure on visibility violation
+    - preserve SavePack visibility isolation
+    - preserve source-domain isolation
+    - preserve separation from capability and service access
+    - avoid duplicating DA-10 identity/hierarchy material beyond what DA-15
+      needs for enforcement
+
+
+ACTUAL DA-15 CHANGE 1: CLARIFY DA-10 / DA-15 OWNERSHIP SPLIT
+============================================================
+
+DA-10 and DA-15 overlap in visibility concepts.
+
+Preserve this local split:
+
+    DA-10:
+        Pack identity, hierarchy, local/global visibility model,
+        exportNestedPacks, importPacksFromParent as identity/visibility
+        structure.
+
+    DA-15:
+        Visibility enforcement, reference reachability, source-domain
+        isolation, SavePack visibility isolation, failure behavior, and
+        access-control consequences.
+
+Do not expand DA-15 into a full duplicate of DA-10.
+
+Do not remove DA-15 merely because DA-10 exists.
+
+DA-15 is useful as the enforcement/access-control document.
+
+
+PRESERVATION RULE 1: VISIBILITY IS REFERENCE PERMISSION
+=======================================================
+
+Preserve the rule:
+
+    Visibility answers whether one pack is permitted to reference another pack.
+
+Visibility is about reachability and permission only.
+
+Visibility does not:
+
+    - activate packs
+    - load code
+    - imply execution order
+    - imply dependency satisfaction
+    - imply version compatibility
+    - grant runtime capabilities
+    - grant runtime services
+
+Dependency declaration expresses requirement.
+
+Visibility expresses permission.
+
+A pack may depend on another pack and still be forbidden from referencing it.
+
+If visibility forbids a dependency target, the dependency fails.
+
+No silent bypass is allowed.
+
+
+PRESERVATION RULE 2: VISIBILITY IS ENFORCED AT USE POINTS
+=========================================================
+
+Preserve visibility checks during:
+
+    - dependency resolution
+    - resolvePack calls
+    - turnixImport resolution
+
+Visibility is not bypassed or deferred.
+
+Visibility is evaluated dynamically between:
+
+    - the requesting pack
+    - the target pack
+
+Visibility is not pre-expanded into a static graph.
+
+This allows visibility enforcement to remain contextual without becoming
+runtime negotiation by packs.
+
+
+PRESERVATION RULE 3: EXPORTNESTEDPACKS REMAINS DIRECT-CHILD ONLY
+================================================================
+
+Preserve exportNestedPacks as direct-child export control.
+
+Allowed values:
+
+    - true
+    - false
+    - list of localId strings
+
+Required constraints:
+
+    - only direct children may be listed
+    - dotted identifiers are forbidden
+    - non-existent localId is an error
+    - exportNestedPacks does not apply transitively
+
+Do not introduce deep implicit export.
+
+Do not let exportNestedPacks become a general visibility wildcard.
+
+
+PRESERVATION RULE 4: IMPORTPACKSFROMPARENT DOES NOT GRANT SERVICES OR CAPABILITIES
+=================================================================================
+
+Preserve importPacksFromParent as parent-to-child reference visibility only.
+
+importPacksFromParent does not imply:
+
+    - export
+    - capability access
+    - service access
+    - permission inheritance
+
+Default values remain:
+
+    - ViewPack -> false
+    - all other pack kinds -> true
+
+The ViewPack default should remain isolated unless later source documents
+explicitly change view semantics.
+
+List resolution should remain parent-relative:
+
+    resolvedId = parent.packTreeId + "." + selector
+
+Escaping the parent tree is forbidden.
+
+Invalid resolution is a hard error.
+
+Visibility checks still apply after list resolution.
+
+
+PRESERVATION RULE 5: RESOLUTION SOURCE RESTRICTS VISIBILITY DOMAIN
+==================================================================
+
+Preserve this ordering:
+
+    Resolution source is determined first.
+    Visibility is evaluated inside that active source domain.
+
+Rules:
+
+    - only packs inside the active source are considered visible candidates
+    - packs outside the active source are not visible regardless of declared
+      visibility or globalVisibility
+    - save-scoped resolution ignores global packs
+    - global resolution ignores save-scoped copies
+    - visibility does not bridge resolution sources
+
+This is important for DA-13 source rules:
+
+    - SaveOnly
+    - GlobalPinned
+    - GlobalNormal
+
+Do not let visibility bridge SavePack-local and global source domains.
+
+
+PRESERVATION RULE 6: SAVEPACK VISIBILITY IS STRICTLY ISOLATED
+=============================================================
+
+Preserve SavePack visibility isolation.
+
+Rules:
+
+    - SavePack is never globally visible
+    - SavePack is visible only within its AppInstance context
+    - copied packs inside a SavePack are visible only within that save
+    - copied packs inside a SavePack are not visible globally
+    - copied packs shadow global packs of the same identity within that save
+      domain
+
+If a pack is resolved from a save-scoped source:
+
+    - global packs with the same identity are not visible
+    - the global registry is not consulted
+
+Do not let SavePack-local copied packs leak into global visibility.
+
+Do not let global custom precedence override SavePack-local copied material by
+default.
+
+
+PRESERVATION RULE 7: CAPABILITIES AND SERVICES ARE NOT VISIBILITY
+=================================================================
+
+Preserve capability separation.
+
+Visibility does not:
+
+    - grant capabilities
+    - inherit capabilities
+    - imply capability access
+    - bypass capability request/grant rules
+
+Capability access requires explicit request and grant.
+
+Preserve service separation.
+
+Services are runtime objects.
+
+Visibility does not grant service access.
+
+Service access requires:
+
+    - service registration
+    - explicit lookup
+
+Service access remains governed by DA-16 and PackContext authority boundaries.
+
+Visible pack does not mean usable service.
+
+Visible pack does not mean callable capability.
+
+
+WATCH ITEM: PERMISSIONDENIEDERROR NAMING
+========================================
+
+DA-15 says visibility failure raises PermissionDeniedError.
+
+This is acceptable if the standard error model treats visibility denial as a
+permission/access-control failure.
+
+Future edit should check whether the error taxonomy wants a more specific
+visibility-denial subtype.
+
+Do not change semantics:
+
+    visibility failure is hard
+    visibility failure is classified
+    visibility failure includes requesting pack identity, target pack identity,
+    and violated rule
+    no fallback is permitted
+    no probing is permitted
+
+Only the exact error name is a possible taxonomy watch item.
+
+
+WATCH ITEM: DA-10 / DA-15 DUPLICATION
+=====================================
+
+DA-15 restates local visibility, globalVisibility, exportNestedPacks, and
+importPacksFromParent concepts also covered by DA-10.
+
+This is not currently harmful.
+
+Future rewrite should avoid divergence:
+
+    DA-10 should own identity/hierarchy/computed visibility model.
+
+    DA-15 should own enforcement/access-control consequences.
+
+If wording differs, preserve the interpretation that maintains:
+
+    - visibility as eligibility/reference permission
+    - source-domain isolation
+    - SavePack isolation
+    - hard failure on violation
+    - no capability/service inheritance
+
+
+REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-15 CONTENT
+=========================================================
+
+Use these as rewrite guardrails only.
+
+Do not let visibility become dependency satisfaction.
+
+Do not let visibility become generic resolution winner selection.
+
+Do not let visibility become import authority.
+
+Do not let visibility become activation.
+
+Do not let visibility grant capability access.
+
+Do not let visibility grant service access.
+
+Do not let importPacksFromParent become permission inheritance.
+
+Do not let exportNestedPacks become transitive export.
+
+Do not let SavePack-local copied packs leak globally.
+
+Do not let source-domain boundaries be bridged by declared visibility.
+
+Do not let PackManager UI presentation of visibility become authority.
+
+Do not let RuntimeHost command surfaces bypass visibility enforcement.
+
+Do not let same-process or same-language execution bypass visibility
+enforcement.
+
+
+CURRENT FINAL RECOMMENDATION
+============================
+
+Keep DA-15.
+
+No heavy rewrite is recommended.
+
+Recommended future edits:
+
+    - keep DA-15 focused on visibility enforcement and access-control
+      consequences
+    - preserve DA-10 / DA-15 ownership split
+    - keep visibility failure hard and explicit
+    - keep SavePack visibility strictly isolated
+    - check PermissionDeniedError naming only as error-taxonomy polish
+    - do not weaken service/capability separation
+
+--- doc-meta ---
+DOC_ID: REWRITE-DA-15
+DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-15_RECOMMENDATION.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
