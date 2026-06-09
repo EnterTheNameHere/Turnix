@@ -15,11 +15,8 @@ Loaded file metadata:
 
 Audit note status:
     Consolidated Dv3 architecture rewrite recommendation.
-    Action-focused revision pass for Orchestration Unit lifecycle,
-    mutation-authority boundaries, transaction/commit separation, Job
-    separation, Capability separation, RPC separation, adapter re-entry,
-    RuntimeHost re-entry, single-lane AppInstance orchestration, trace wording,
-    and cross-domain authority guardrails.
+    Action-focused revision pass for boundary compression, OrchestrationUnit
+    authority stop-line, and later domain guardrail alignment.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -35,39 +32,20 @@ Important excluded source:
 SUMMARY
 =======
 
-DA-24 is strong and highly Dv3-compatible.
+DA-24 is Dv3-compatible.
 
 No heavy rewrite is recommended.
 
 DA-24 defines how Turnix identifies and controls execution that may mutate
 Turnix-managed state.
 
-It defines:
-
-    - Orchestration Unit meaning and identity role
-    - mutation authority boundaries for Orchestration Units
-    - relationship between Orchestration Units, transactions, and committed
-      state
-    - relationship between Orchestration Units and Jobs
-    - relationship between Orchestration Units and Windows
-    - relationship between Orchestration Units and AppInstances
-    - relationship between Orchestration Units, capabilities, RPC, and
-      execution adapters
-    - relationship between Orchestration Units and RuntimeHost operations
-    - Orchestration Unit terminal outcomes
-    - Superseded outcome semantics
-    - deterministic single-lane AppInstance mutation orchestration
-    - Orchestration Unit trace reason ownership
-    - adapter-executed mutation re-entry boundaries
-    - RuntimeHost-operation mutation re-entry boundaries
-
-DA-24 should preserve the core rule:
+Preserve the central rule:
 
     OrchestrationUnit coordinates mutation authority.
 
     DA-04 still owns committed-state truth.
 
-Main watch item:
+Main required clarification:
 
     Preserve the intended meaning of "execution-authority unit".
 
@@ -75,18 +53,6 @@ Main watch item:
 
     It does not mean arbitrary contained code receives direct committed-state
     authority.
-
-Rewrite-boundary guardrails:
-
-    DA-24 owns Orchestration Unit lifecycle and mutation-authority semantics.
-
-    DA-24 should not absorb detailed memory/state/transaction mechanics, trace
-    substrate, Window finalization, capability/permission, policy decision,
-    debugger, Job lifecycle, AppInstance lifecycle, RPC/channel/transport,
-    UI/View, ExecutionAdapter boundary, or RuntimeHost command-surface
-    semantics.
-
-    Those details belong to their subject-owning documents.
 
 Overall recommendation:
 
@@ -96,89 +62,55 @@ Overall recommendation:
 CURRENT CLASSIFICATION
 ======================
 
-Overall classification:
+KEEP
 
-    KEEP
+DA-24 should not be rewritten heavily.
 
-Detailed classification:
+Future edits should preserve:
 
-    01. Interpretation Basis
-        KEEP
-
-    02. Core Concept
-        KEEP
-
-    03. Orchestration Unit Identity
-        KEEP
-
-    04. Mutation Authority
-        KEEP
-
-    05. Relation to Transactions and Commit
-        KEEP
-
-    06. Relation to Jobs
-        KEEP
-
-    07. Relation to AppInstances
-        KEEP
-
-    08. Relation to Windows
-        KEEP
-
-    09. Relation to RuntimeHost Operations
-        KEEP
-
-    10. Relation to Capabilities and RPC
-        KEEP
-
-    11. Relation to Execution Adapters
-        KEEP
-
-    12. Orchestration Unit Outcomes
-        KEEP
-
-    13. Single-lane AppInstance Orchestration
-        KEEP
-
-    14. Orchestration Unit Trace Reason Identifiers
-        KEEP
-
-    15. Orchestration Unit Trace Context
-        KEEP
-
-    16. What Is Explicitly Not Supported
-        KEEP
-
-    17. Explicitly Open Questions
-        KEEP
-
-    18. Locked Summary
-        KEEP
+    - OrchestrationUnit coordinates mutation authority
+    - OrchestrationUnit authority does not bypass DA-04 commit authority
+    - adapter-executed code does not directly mutate committed state
+    - RuntimeHost operations do not become OrchestrationUnit outcomes by default
+    - Job and OrchestrationUnit remain separate
+    - Capability and OrchestrationUnit remain separate
+    - RPC request and acknowledgement do not automatically become
+      OrchestrationUnit lifecycle events
+    - Window finalization does not become OrchestrationUnit outcome by default
+    - AppInstance lifecycle does not become OrchestrationUnit lifecycle
+    - PackManager-triggered graph or lifecycle operations do not bypass
+      OrchestrationUnit authority boundaries
+    - single-lane AppInstance orchestration remains the default
+    - OrchestrationUnit trace ownership remains domain-specific
 
 
-WATCH ITEM: EXECUTION-AUTHORITY WORDING
-=======================================
+ACTUAL DA-24 CHANGE 1: PRESERVE ORCHESTRATIONUNIT AUTHORITY STOP-LINE
+=====================================================================
 
-The phrase "execution-authority unit" is useful, but later readers could misread
-it as:
+DA-24 should contain a compact source-level boundary statement.
 
-    anything inside the unit has direct authority
+Recommended source-level boundary:
 
-Preserve this intended meaning:
+    OrchestrationUnit is a kernel-tracked execution-authority unit that may own
+    or coordinate mutation-bearing work.
 
-    OrchestrationUnit has authority to coordinate or own a mutation flow.
+    OrchestrationUnit authority is scoped authority to coordinate a mutation
+    flow.
 
-    It does not grant arbitrary contained code direct committed-state authority.
+    It is not general backend authority.
 
-This is especially important for:
+    It is not direct committed-state authority for arbitrary contained code.
 
-    - adapter-executed code
-    - same-language Python pack code
-    - model/tool callbacks
-    - future plugin-like behavior
-    - PackManager-triggered graph or lifecycle operations
-    - capability-backed operations
+    It does not replace DA-04 transaction and commit boundaries.
+
+    It does not replace Job, Capability, RPC, ExecutionAdapter, RuntimeHost,
+    Window, AppInstance, debugger, policy, or PackManager semantics.
+
+This source-level boundary belongs in DA-24 because DA-24 owns
+OrchestrationUnit lifecycle and mutation-authority semantics.
+
+Detailed ownership mapping belongs in the guardrail section, not in the source
+document.
 
 
 PRESERVATION RULE 1: MUTATION AUTHORITY DOES NOT BYPASS COMMIT AUTHORITY
@@ -199,14 +131,15 @@ Correct model:
     Mutation still crosses DA-04 transaction and commit boundaries.
 
 OrchestrationUnit may be where decisions happen, where work is sequenced, where
-transactions are opened, where tools/models/adapters are called, and where
-outcomes are resolved.
+transactions are opened, where tools, models, adapters, PackManager operations,
+RuntimeHost operations, or capability calls are coordinated, and where outcomes
+are resolved.
 
 Committed truth still belongs to the DA-04 commit model.
 
 
 PRESERVATION RULE 2: ADAPTER-EXECUTED CODE DOES NOT DIRECTLY MUTATE COMMITTED STATE
-===================================================================================
+==================================================================================
 
 Preserve ExecutionAdapter / OrchestrationUnit separation.
 
@@ -223,7 +156,15 @@ authority.
 Direct in-process calls may carry a mutation request, but they do not become
 mutation authority by themselves.
 
-DA-23 owns detailed ExecutionAdapter authority boundaries.
+Adapter lifecycle state does not become OrchestrationUnit lifecycle state by
+itself.
+
+Adapter failure does not become OrchestrationUnit failure by default.
+
+DA-23 owns abstract ExecutionAdapter authority boundaries.
+
+DA-27 owns adapter lifecycle, trust, isolation, and adapter failure/disconnect
+semantics.
 
 
 PRESERVATION RULE 3: RUNTIMEHOST OPERATIONS DO NOT BECOME ORCHESTRATION OUTCOMES BY DEFAULT
@@ -236,8 +177,9 @@ RuntimeHost command acceptance does not imply OrchestrationUnit completion.
 RuntimeHost operation outcome does not by itself define OrchestrationUnit
 terminal outcome unless the owning workflow maps those outcomes explicitly.
 
-This prevents CLI, command surface, RuntimeHost operation, transport ACK, or
-entry-surface behavior from becoming orchestration outcome authority.
+This prevents CLI, command surface, RuntimeHost operation, transport ACK, entry
+surface behavior, or management surface behavior from becoming orchestration
+outcome authority.
 
 DA-28 owns RuntimeHost semantics.
 
@@ -264,10 +206,8 @@ Avoid the weaker wording:
 
     Job = bounded operation
 
-Reason:
-
-    A Job may represent bounded requested work, but DA-19 defines Job as the
-    observable lifecycle handle, not the execution primitive or operation itself.
+A Job may represent bounded requested work, but DA-19 defines Job as the
+observable lifecycle handle, not the execution primitive or operation itself.
 
 
 PRESERVATION RULE 5: CAPABILITY AND ORCHESTRATIONUNIT REMAIN SEPARATE
@@ -295,7 +235,51 @@ Job-backed capability execution remains capability-mediated and does not become
 OrchestrationUnit authority by implication.
 
 
-PRESERVATION RULE 6: ORCHESTRATION OUTCOMES STAY DISTINCT
+PRESERVATION RULE 6: RPC DOES NOT DEFINE ORCHESTRATION OUTCOME
+==============================================================
+
+Preserve RPC / OrchestrationUnit separation.
+
+RPC request is not automatically an OrchestrationUnit.
+
+RPC acknowledgement is not OrchestrationUnit completion.
+
+RPC request acceptance is not OrchestrationUnit success unless the owning
+operation contract explicitly defines acceptance as the complete result.
+
+Transport timeout, disconnect, and cancellation-message handling do not directly
+define OrchestrationUnit terminal outcome.
+
+If RPC or transport behavior affects OrchestrationUnit state, the owning
+workflow and DA-24 semantics define the OrchestrationUnit outcome.
+
+DA-21 owns RPC, channel, transport, timeout, disconnect, and cancellation
+message semantics.
+
+
+PRESERVATION RULE 7: WINDOW FINALIZATION DOES NOT DEFINE ORCHESTRATION OUTCOME
+==============================================================================
+
+Preserve Window / OrchestrationUnit separation.
+
+Window finalization is not OrchestrationUnit outcome by default.
+
+SafePointWindow creation does not by itself mean OrchestrationUnit Completed.
+
+AbortedWindow creation does not by itself mean OrchestrationUnit Failed,
+Cancelled, or Superseded.
+
+OrchestrationUnit terminal outcome does not by itself create SafePointWindow or
+AbortedWindow.
+
+Window finalization and OrchestrationUnit outcome may be causally related, but
+the relationship must be explicit in the owning workflow.
+
+DA-08 owns Window, ActiveWindow, SafePointWindow, AbortedWindow, journal
+evidence, and finalized runtime history semantics.
+
+
+PRESERVATION RULE 8: ORCHESTRATION OUTCOMES STAY DISTINCT
 =========================================================
 
 Preserve OrchestrationUnit terminal outcomes:
@@ -311,12 +295,17 @@ Superseded is:
 
     - not failure
     - not timeout
+    - not rollback by itself
     - does not roll back authoritative state already committed
 
 Open transactional staging is resolved by DA-04.
 
+Job terminal outcomes, adapter outcomes, RuntimeHost outcomes, RPC outcomes,
+Window outcomes, and policy decisions do not automatically substitute for these
+OrchestrationUnit outcomes.
 
-PRESERVATION RULE 7: SINGLE-LANE APPINSTANCE ORCHESTRATION REMAINS DEFAULT
+
+PRESERVATION RULE 9: SINGLE-LANE APPINSTANCE ORCHESTRATION REMAINS DEFAULT
 ==========================================================================
 
 Preserve the single-lane default.
@@ -338,9 +327,13 @@ Reason:
     Async/suspension behavior must not accidentally become concurrency
     authority.
 
+DA-20 owns AppInstance lifecycle and runtime identity.
 
-PRESERVATION RULE 8: ORCHESTRATIONUNIT TRACE OWNERSHIP STAYS DOMAIN-SPECIFIC
-============================================================================
+DA-04 owns committed-state mutation authority.
+
+
+PRESERVATION RULE 10: ORCHESTRATIONUNIT TRACE OWNERSHIP STAYS DOMAIN-SPECIFIC
+=============================================================================
 
 Preserve OrchestrationUnit trace ownership.
 
@@ -351,40 +344,55 @@ DA-03 owns the trace substrate.
 DA-24 trace evidence does not replace:
 
     - DA-04 transaction trace evidence
+    - DA-08 Window trace/evidence
     - DA-16 capability trace evidence
+    - DA-17 decision/policy trace evidence
     - DA-19 Job trace evidence
-    - DA-08 Window evidence
-    - DA-23 adapter trace evidence
+    - DA-20 AppInstance trace evidence
+    - DA-21 RPC trace evidence
+    - DA-23 / DA-27 adapter trace evidence
     - DA-28 RuntimeHost trace evidence
     - DA-29 PackManager trace evidence
 
 Trace wording should follow the DA-03 cross-document trace wording check.
 
 
-SOURCE BOUNDARY STATEMENT: ORCHESTRATIONUNIT IS MUTATION-AUTHORITY COORDINATION
-===============================================================================
+WATCH ITEM: EXECUTION-AUTHORITY WORDING
+=======================================
 
-DA-24 may state the source-level boundary:
+The phrase "execution-authority unit" is useful, but later readers could misread
+it as:
 
-    OrchestrationUnit is a kernel-tracked execution-authority unit that may own
-    or coordinate mutation-bearing work.
+    anything inside the unit has direct authority
 
-    OrchestrationUnit authority is scoped authority to coordinate a mutation
-    flow.
+Preserve this intended meaning:
 
-    It is not general backend authority.
+    OrchestrationUnit has authority to coordinate or own a mutation flow.
 
-    It is not direct committed-state authority for arbitrary contained code.
+    It does not grant arbitrary contained code direct committed-state authority.
 
-    It does not replace DA-04 transaction and commit boundaries.
+This is especially important for:
 
-    It does not replace Job, Capability, RPC, ExecutionAdapter, RuntimeHost,
-    Window, AppInstance, debugger, or policy semantics.
+    - adapter-executed code
+    - same-language Python pack code
+    - model/tool callbacks
+    - future plugin-like behavior
+    - PackManager-triggered graph or lifecycle operations
+    - RuntimeHost-triggered operations
+    - capability-backed operations
 
-This source-level boundary is useful because DA-24 owns Orchestration Unit
-lifecycle and mutation-authority semantics.
 
-The detailed ownership map belongs in the guardrail section below.
+WATCH ITEM: DEBUGGER SEMANTICS
+==============================
+
+DA-18 should preserve safe-point pause and mutation-boundary semantics.
+
+Debugger pause must not become OrchestrationUnit terminal outcome.
+
+Debugger breakpoint behavior must not grant mutation authority.
+
+Debugger tooling that initiates mutation must still use DA-04 transaction and
+commit boundaries.
 
 
 REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-24 CONTENT
@@ -393,7 +401,7 @@ REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-24 CONTENT
 This section is not suggested DA-24 wording.
 
 It exists to prevent architectural drift during rewrite when the editor knows
-DA-24 but may not have every subject-owning document loaded.
+DA-24 but may not have every related document loaded.
 
 Use these as guardrails only.
 
@@ -435,6 +443,10 @@ Orchestration-boundary guardrails:
 
     Window finalization is not OrchestrationUnit outcome by default.
 
+    SafePointWindow is not OrchestrationUnit completion by default.
+
+    AbortedWindow is not OrchestrationUnit failure by default.
+
     Browser/frontend state loss is not OrchestrationUnit outcome.
 
     PackManager-triggered graph or lifecycle operations do not bypass
@@ -449,14 +461,15 @@ Orchestration-boundary guardrails:
     Single-lane AppInstance orchestration remains the default unless explicit
     concurrency mode permits otherwise.
 
-Owning-document boundaries:
+Owning-document guardrails:
 
-    DA-03 owns trace event structure, trace DAG semantics, and span mechanics.
+    DA-03 owns trace substrate, retention, loss, trace DAG, and span semantics.
 
-    DA-04 owns memory, state, transaction, and commit mechanics.
+    DA-04 owns memory, state, transaction, commit mechanics, and committed-state
+    authority.
 
-    DA-08 owns Window, SafePointWindow, AbortedWindow, and Window finalization
-    semantics.
+    DA-08 owns Window, ActiveWindow, SafePointWindow, AbortedWindow, journal
+    evidence, and finalized runtime history semantics.
 
     DA-16 owns service, capability, and permission semantics.
 
@@ -469,11 +482,15 @@ Owning-document boundaries:
 
     DA-20 owns AppInstance lifecycle and runtime identity semantics.
 
-    DA-21 owns RPC, channel, and transport semantics.
+    DA-21 owns RPC, channel, transport, timeout, disconnect, and cancellation
+    message semantics.
 
     DA-22 owns UI, View, and frontend runtime semantics.
 
-    DA-23 owns execution adapter boundary semantics.
+    DA-23 owns abstract execution adapter boundary semantics.
+
+    DA-27 owns adapter lifecycle, trust, isolation, failure, disconnect, and
+    adapter-domain trace semantics.
 
     DA-28 owns RuntimeHost identity, workspace ownership, startup modes, entry
     surfaces, command-surface semantics, and RuntimeHost trace reason
@@ -488,29 +505,9 @@ Local rewrite rule:
 
     DA-24 should not define their detailed behavior.
 
-    DA-24 should remain the Orchestration Unit lifecycle, mutation-authority,
+    DA-24 should remain the OrchestrationUnit lifecycle, mutation-authority,
     outcome, single-lane AppInstance orchestration, and OrchestrationUnit-domain
     trace document.
-
-
-WATCH ITEMS
-===========
-
-Window watch:
-
-    DA-08 Window semantics should preserve OrchestrationUnit outcome / Window
-    finalization separation.
-
-    Window finalization must not redefine OrchestrationUnit terminal outcome.
-
-Debugger watch:
-
-    DA-18 Debugger should preserve safe-point pause and mutation-boundary
-    semantics.
-
-    Debugger pause must not become OrchestrationUnit terminal outcome.
-
-    Debugger breakpoint behavior must not grant mutation authority.
 
 
 CURRENT FINAL RECOMMENDATION
@@ -526,28 +523,31 @@ Preserve the core rule:
 
     DA-04 still owns committed-state truth.
 
-Preserve:
+Preserve execution-authority wording as coordination authority, not arbitrary
+contained-code authority.
 
-    - execution-authority wording as coordination authority, not arbitrary
-      contained-code authority
-    - mutation authority not bypassing DA-04 commit authority
-    - adapter-executed code not directly mutating committed state
-    - RuntimeHost operations not becoming OrchestrationUnit outcomes by default
-    - Job / OrchestrationUnit separation
-    - Capability / OrchestrationUnit separation
-    - distinct OrchestrationUnit outcomes
-    - single-lane AppInstance orchestration as default
-    - OrchestrationUnit trace ownership as domain-specific
+Preserve OrchestrationUnit separation from:
+
+    - DA-04 transaction and commit authority
+    - DA-08 Window finalization
+    - DA-16 capability semantics
+    - DA-17 policy and decision semantics
+    - DA-19 Job lifecycle
+    - DA-20 AppInstance lifecycle
+    - DA-21 RPC and transport semantics
+    - DA-23 / DA-27 adapter boundary and lifecycle semantics
+    - DA-28 RuntimeHost operations and command surfaces
+    - DA-29 PackManager graph-management semantics
 
 Do not expand DA-24 into detailed memory/state/transaction mechanics, trace
 substrate, Window finalization, capability/permission, user-decision policy,
 debugger execution-control, Job lifecycle, AppInstance lifecycle,
-RPC/channel/transport, UI/View, ExecutionAdapter boundary, RuntimeHost
-command-surface, or PackManager graph-management semantics.
+RPC/channel/transport, UI/View, ExecutionAdapter boundary, adapter lifecycle,
+RuntimeHost command-surface, or PackManager graph-management semantics.
 
 --- doc-meta ---
 DOC_ID: REWRITE-DA-24
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-24_RECOMMENDATION.txt
-DOC_REV: 4
-DOC_GIT: 03ea8ed
+DOC_REV: 5
+DOC_GIT: 4eca641
 ----------------
