@@ -14,8 +14,9 @@ Loaded file metadata:
         d9f9c89cd7753ef9f14b4d4740ae7c060cb3d807
 
 Audit note status:
-    First-pass Dv3 architecture rewrite recommendation.
-    Action-focused format under the compressed rewrite-recommendation rule.
+    Consolidated Dv3 architecture rewrite recommendation.
+    Action-focused revision pass for boundary compression, adapter lifecycle
+    stop-lines, and guardrail framing.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -31,9 +32,11 @@ Important excluded source:
 SUMMARY
 =======
 
-DA-27 is strong and Dv3-compatible.
+DA-27 is Dv3-compatible.
 
-Keep it as the adapter lifecycle, trust, isolation, and adapter-domain
+No heavy rewrite is recommended.
+
+Keep DA-27 as the adapter lifecycle, trust, isolation, and adapter-domain
 traceability document.
 
 Preserve the ownership split:
@@ -41,7 +44,7 @@ Preserve the ownership split:
     DA-23 owns the abstract execution adapter authority boundary.
 
     DA-27 owns operational adapter lifecycle, trust, isolation, traceability,
-    and initial adapter classes.
+    and concrete adapter classes.
 
     DA-28 owns RuntimeHost identity, workspace ownership, startup modes, entry
     surfaces, command-surface semantics, local-first interpretation, LAN
@@ -51,6 +54,10 @@ DA-27 must not weaken DA-23 or DA-28.
 
 If DA-27 appears to grant authority that DA-23 or DA-28 withholds, preserve the
 interpretation that maintains DA-23 and DA-28 authority boundaries.
+
+Overall recommendation:
+
+    KEEP WITH SMALL TRUST-CLASS / TRACE-WORDING WATCH
 
 
 CURRENT CLASSIFICATION
@@ -66,14 +73,43 @@ Future edits should preserve:
     - sandboxing does not grant Kernel authority
     - lack of sandboxing does not grant backend implementation authority
     - adapter lifecycle does not replace activation, AppInstance, Job,
-      transport, RuntimeHost, or capability lifecycle
+      transport, RuntimeHost, Window, OrchestrationUnit, or capability
+      lifecycle
     - adapter readiness does not imply activation success, capability
       permission, RuntimeHost readiness, AppInstance readiness, or Job success
     - adapter failure/disconnect does not silently define Job, OrchestrationUnit,
-      AppInstance, RuntimeHost, Window, transport, or committed-state outcome
+      AppInstance, RuntimeHost, Window, transport, capability, or committed-state
+      outcome
     - adapter trace evidence does not replace trace evidence owned by other
       domains
     - runtime-host deployment shape does not redefine adapter authority
+
+
+ACTUAL DA-27 CHANGE 1: PRESERVE ADAPTER OUTCOME STOP-LINE
+=========================================================
+
+DA-27 should contain a compact source-level boundary statement for adapter
+lifecycle outcomes.
+
+Recommended source-level boundary:
+
+    Adapter lifecycle state is adapter-domain state.
+
+    Adapter readiness does not imply activation success, AppInstance readiness,
+    RuntimeHost readiness, capability permission, or Job success.
+
+    Adapter failure, closure, or disconnect does not silently become Job
+    failure, Job cancellation, OrchestrationUnit cancellation, AppInstance
+    failure, RuntimeHost failure, Window finalization, transport failure,
+    capability denial, or committed-state change.
+
+    If adapter lifecycle events affect another domain, the owning domain defines
+    the resulting outcome.
+
+This belongs in DA-27 because DA-27 owns adapter lifecycle meaning.
+
+Detailed ownership mapping belongs in the guardrail section, not in the source
+document.
 
 
 PRESERVATION RULE 1: ADAPTER MEDIATION IS NOT SANDBOXING
@@ -135,8 +171,8 @@ change, LAN exposure, or command-surface acceptance unless the governing
 RuntimeHost and policy documents define that combined effect explicitly.
 
 
-PRESERVATION RULE 3: INITIAL ADAPTER CLASSES DO NOT DEFINE AUTHORITY
-====================================================================
+PRESERVATION RULE 3: ADAPTER CLASSES DO NOT DEFINE AUTHORITY
+============================================================
 
 Preserve class-specific authority boundaries.
 
@@ -212,6 +248,8 @@ Adapter lifecycle does not replace:
     - Job lifecycle
     - transport lifecycle
     - RuntimeHost lifecycle
+    - Window finalization
+    - OrchestrationUnit lifecycle
     - capability permission
 
 Adapter readiness means the adapter can participate in the expected runtime
@@ -252,7 +290,11 @@ Adapter failure does not silently redefine:
     - AppInstance lifecycle
     - RuntimeHost lifecycle
     - committed-state meaning
+    - Window finalization
     - AbortedWindow creation
+    - OrchestrationUnit terminal outcome
+    - capability permission
+    - transport outcome
 
 Adapter disconnect does not automatically:
 
@@ -265,19 +307,28 @@ Adapter disconnect does not automatically:
     - cancel an OrchestrationUnit
     - fail an AppInstance
     - stop, fail, or close a RuntimeHost
+    - finalize an ActiveWindow
+    - create an AbortedWindow
+    - mutate committed state
 
 If adapter failure or disconnect affects accepted work, decision,
 OrchestrationUnit, Job, and policy documents govern the resulting lifecycle
 handling.
 
 If adapter failure or disconnect affects transport state, DA-21 and the
-relevant IS document govern the transport-side behavior.
+relevant implementation specification govern the transport-side behavior.
 
 If adapter failure or disconnect affects UI or View state, DA-22 governs the UI
 and View-side behavior.
 
 If adapter failure or disconnect affects RuntimeHost behavior, DA-28 governs
 RuntimeHost lifecycle, host-operation, and command-surface classification.
+
+If adapter failure or disconnect affects Window finalization, DA-08 governs
+Window outcome semantics.
+
+If adapter failure or disconnect affects committed state, DA-04 governs whether
+any material becomes authoritative.
 
 
 PRESERVATION RULE 6: ADAPTER TRACE DOES NOT REPLACE OTHER DOMAIN TRACE
@@ -321,11 +372,16 @@ Adapter trace evidence does not replace:
     - activation trace evidence
     - RPC trace evidence
     - capability trace evidence
+    - policy trace evidence
     - Job trace evidence
     - AppInstance trace evidence
     - OrchestrationUnit trace evidence
+    - Window trace evidence
     - UI-domain trace evidence
     - RuntimeHost trace evidence
+    - committed-state trace evidence
+
+Trace wording should follow the DA-03 cross-document trace wording check.
 
 Implementation-specific trace reason extensions do not redefine the
 adapter-domain reason meanings owned by DA-27.
@@ -378,8 +434,8 @@ Future edits should preserve current semantics:
     - trust decisions are scoped
     - trust decisions do not grant capability permission, committed-state
       mutation, persistent I/O, RuntimeHost control, workspace ownership, LAN
-      exposure, or command-surface acceptance unless the owning documents
-      explicitly define the combined effect
+      exposure, command-surface acceptance, or Window outcome authority unless
+      the owning documents explicitly define the combined effect
 
 
 WATCH ITEM: TRACE WORDING
@@ -393,46 +449,98 @@ DA-03 owns trace substrate, retention, and loss semantics.
 
 Do not let adapter trace wording imply that trace evidence is committed state,
 that trace persistence is guaranteed forever, or that adapter trace evidence
-replaces activation, RPC, capability, Job, AppInstance, OrchestrationUnit, UI,
-or RuntimeHost trace evidence.
+replaces activation, RPC, capability, policy, Job, AppInstance,
+OrchestrationUnit, Window, UI, committed-state, or RuntimeHost trace evidence.
 
 
 REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-27 CONTENT
 =========================================================
 
-Use these as rewrite guardrails only.
+This section is not suggested DA-27 wording.
 
-Do not let adapter mediation become sandboxing.
+It exists to prevent architectural drift during rewrite when the editor knows
+DA-27 but may not have every related document loaded.
 
-Do not let sandboxing grant Kernel authority.
+Use these as guardrails only.
 
-Do not let lack of sandboxing grant backend implementation authority.
+Adapter-boundary guardrails:
 
-Do not let PythonInProcessAdapter become backend implementation authority.
+    Adapter mediation is not sandboxing.
 
-Do not let BrowserJSAdapter state become authoritative persistent state.
+    Sandboxing does not grant Kernel authority.
 
-Do not let CliAdapter become Kernel or RuntimeHost authority.
+    Lack of sandboxing does not grant backend implementation authority.
 
-Do not let RemoteClientAdapter own state authority or RuntimeHost authority.
+    PythonInProcessAdapter does not become backend implementation authority.
 
-Do not let TestAdapter weaken runtime authority boundaries.
+    BrowserJSAdapter state does not become authoritative persistent state.
 
-Do not let adapter readiness imply activation success, capability permission,
-AppInstance readiness, RuntimeHost readiness, or Job success.
+    CliAdapter does not become Kernel or RuntimeHost authority.
 
-Do not let adapter lifecycle replace activation, AppInstance, Job, transport,
-RuntimeHost, or capability lifecycle.
+    RemoteClientAdapter does not own state authority or RuntimeHost authority.
 
-Do not let adapter failure/disconnect silently redefine outcomes owned by other
-domains.
+    TestAdapter does not weaken runtime authority boundaries.
 
-Do not let deployment topology redefine adapter or RuntimeHost authority.
+    Adapter readiness does not imply activation success, capability permission,
+    AppInstance readiness, RuntimeHost readiness, or Job success.
 
-Do not let remote or LAN access imply remote state authority.
+    Adapter lifecycle does not replace activation, AppInstance, Job, transport,
+    RuntimeHost, Window, OrchestrationUnit, or capability lifecycle.
 
-Do not let implementation-specific trace reason extensions redefine DA-27
-adapter-domain reason meanings.
+    Adapter failure or disconnect does not silently redefine outcomes owned by
+    other domains.
+
+    Deployment topology does not redefine adapter or RuntimeHost authority.
+
+    Remote or LAN access does not imply remote state authority.
+
+    Implementation-specific trace reason extensions do not redefine DA-27
+    adapter-domain reason meanings.
+
+Owning-document guardrails:
+
+    DA-03 owns trace substrate, retention, loss, and trace DAG semantics.
+
+    DA-04 owns committed-state authority, transactions, and commit boundaries.
+
+    DA-08 owns Window, ActiveWindow, SafePointWindow, AbortedWindow, and
+    finalized runtime history semantics.
+
+    DA-14 owns activation lifecycle and PackContext authority.
+
+    DA-16 owns service, capability, and permission semantics.
+
+    DA-17 owns user decision and remembered policy semantics.
+
+    DA-19 owns Job lifecycle, timeout, cancellation, progress, result, and
+    terminal outcome semantics.
+
+    DA-20 owns AppInstance lifecycle and runtime identity semantics.
+
+    DA-21 owns RPC, channel, transport, timeout, disconnect, and cancellation
+    message semantics.
+
+    DA-22 owns UI, View, and frontend runtime semantics.
+
+    DA-23 owns abstract execution adapter authority boundaries.
+
+    DA-24 owns OrchestrationUnit lifecycle, mutation authority, and terminal
+    outcome semantics.
+
+    DA-28 owns RuntimeHost lifecycle, startup mode, command surface, workspace
+    ownership, local-first, and LAN exposure semantics.
+
+    DA-29 owns PackManager graph-management semantics.
+
+Local rewrite rule:
+
+    DA-27 may name these concepts when needed to protect adapter lifecycle,
+    trust, isolation, and traceability boundaries.
+
+    DA-27 should not define their detailed behavior.
+
+    DA-27 should remain the adapter lifecycle, trust, isolation, concrete
+    adapter class, and adapter-domain trace document.
 
 
 CURRENT FINAL RECOMMENDATION
@@ -448,16 +556,19 @@ Recommended future edits:
       adapter-domain traceability
     - preserve DA-23 / DA-27 / DA-28 ownership split
     - preserve scoped trust-decision semantics
-    - preserve adapter lifecycle separation from other lifecycles
+    - preserve adapter lifecycle separation from activation, AppInstance, Job,
+      transport, RuntimeHost, Window, OrchestrationUnit, and capability
+      lifecycle
     - preserve no silent outcome conversion on adapter failure or disconnect
     - define trust and isolation vocabulary later without changing authority
       boundaries
     - define concrete adapter state machines later without replacing activation,
-      AppInstance, Job, transport, RuntimeHost, or capability lifecycle
+      AppInstance, Job, transport, RuntimeHost, Window, OrchestrationUnit, or
+      capability lifecycle
 
 --- doc-meta ---
 DOC_ID: REWRITE-DA-27
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-27_RECOMMENDATION.txt
-DOC_REV: 1
-DOC_GIT: e4dbece
+DOC_REV: 2
+DOC_GIT: e60f331
 ----------------
