@@ -15,10 +15,8 @@ Loaded file metadata:
 
 Audit note status:
     Consolidated Dv3 architecture rewrite recommendation.
-    Action-focused revision pass for Job identity, lifecycle states, terminal
-    outcomes, cancellation, timeout, supersession, progress, trace ownership,
-    RPC separation, capability separation, and cross-domain authority
-    guardrails.
+    Action-focused revision pass for boundary compression, Job lifecycle
+    stop-line, and later domain guardrail alignment.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -34,34 +32,17 @@ Important excluded source:
 SUMMARY
 =======
 
-DA-19 is strong and highly Dv3-compatible.
+DA-19 is Dv3-compatible.
 
 No heavy rewrite is recommended.
 
 DA-19 defines the Turnix Job lifecycle and identity model.
 
-It defines:
-
-    - Job as an explicit observable lifecycle object for requested work
-    - Job identity and owner correlation
-    - the relationship between Jobs and OrchestrationUnits
-    - the distinction between Job lifecycle and underlying execution
-    - Job lifecycle states and terminal outcomes
-    - result, error, cancellation, timeout, and supersession ownership
-    - progress semantics
-    - cancellation and execution-stop behavior
-    - timeout behavior
-    - supersession as a first-class non-error terminal outcome
-    - late completion handling after terminal outcome
-    - safe-point pause behavior
-    - Job-domain trace reason identifiers
-    - minimum trace evidence for Job lifecycle events
-
-DA-19 should preserve the core split:
+Preserve the core split:
 
     Job = observable lifecycle handle for requested work
 
-    OrchestrationUnit = execution-authority unit
+    OrchestrationUnit = execution-authority unit coordinating mutation flow
 
     Transaction = mutation staging and commit boundary
 
@@ -76,16 +57,6 @@ Main watch item:
     Later concrete result/error/envelope specs must not weaken the rule that a
     Job result exists only for Succeeded.
 
-Rewrite-boundary guardrails:
-
-    DA-19 owns Job lifecycle and Job-domain trace reason semantics.
-
-    DA-19 should not absorb detailed trace substrate, committed-state,
-    transaction, Window, activation, capability, permission, decision,
-    debugger, AppInstance, RPC, or transport semantics.
-
-    Those details belong to their subject-owning documents.
-
 Overall recommendation:
 
     KEEP
@@ -94,65 +65,56 @@ Overall recommendation:
 CURRENT CLASSIFICATION
 ======================
 
-Overall classification:
+KEEP
 
-    KEEP
+DA-19 should not be rewritten heavily.
 
-Detailed classification:
+Future edits should preserve:
 
-    01. Interpretation Basis
-        KEEP
+    - Job as observable lifecycle handle, not execution primitive
+    - Job identity distinct from RPC request identity, OrchestrationUnit identity,
+      AppInstance identity, adapter identity, RuntimeHost identity, and result
+      payload identity
+    - Job / OrchestrationUnit / Transaction separation
+    - final and exclusive terminal states
+    - result only for Succeeded
+    - progress as observational evidence
+    - cancellation request / outcome / stop-attempt split
+    - Job timeout versus transport timeout
+    - Superseded as terminal non-error outcome
+    - late completion safety rule
+    - Job-domain trace ownership
+    - RPC / transport / Job separation
+    - optional and mediated Capability / Job relation
+    - Job lifecycle separation from Window, AppInstance, adapter, RuntimeHost,
+      OrchestrationUnit, committed-state, and PackManager outcomes
 
-    02. Core Concept
-        KEEP
 
-    03. Job Identity
-        KEEP
+ACTUAL DA-19 CHANGE 1: JOB LIFECYCLE STOP-LINE
+==============================================
 
-    04. Job Ownership and Correlation
-        KEEP
+DA-19 should contain a compact source-level boundary statement.
 
-    05. Relation to Orchestration Units
-        KEEP
+Recommended source-level boundary:
 
-    06. Job Lifecycle State Model
-        KEEP
+    Job is an observable lifecycle handle for requested work.
 
-    07. Result and Error Ownership
-        KEEP
+    Job lifecycle state does not directly define underlying execution state,
+    OrchestrationUnit outcome, transaction commit or abort, committed-state
+    truth, Window finalization, AppInstance lifecycle, adapter lifecycle,
+    RuntimeHost lifecycle, PackManager operation outcome, RPC request outcome,
+    or transport outcome.
 
-    08. Progress
-        KEEP
+    If a Job outcome affects another domain, that domain defines the resulting
+    consequence.
 
-    09. Cancellation and Execution Stopping
-        KEEP
+    Correlation between a Job and another domain outcome must be explicit.
 
-    10. Timeout
-        KEEP
+This belongs in DA-19 because DA-19 owns Job lifecycle and Job-domain trace
+reason semantics.
 
-    11. Supersession
-        KEEP
-
-    12. Late Completion After Terminal Outcome
-        KEEP
-
-    13. Safe-point Pause and Debugger Interaction
-        KEEP
-
-    14. Job Trace Reason Identifiers
-        KEEP
-
-    15. Relation to RPC and Transport
-        KEEP
-
-    16. Relation to Capabilities
-        KEEP
-
-    17. Explicitly Open Questions
-        KEEP
-
-    18. Locked Summary
-        KEEP
+Detailed ownership mapping belongs in the guardrail section, not in the source
+document.
 
 
 PRESERVATION RULE 1: JOB IS LIFECYCLE HANDLE, NOT EXECUTION PRIMITIVE
@@ -187,6 +149,9 @@ Job identity must remain distinct from:
 
     - RPC request identity
     - OrchestrationUnit identity
+    - AppInstance identity
+    - adapter identity
+    - RuntimeHost identity
     - underlying execution identity
     - result payload identity
 
@@ -221,8 +186,8 @@ effects:
     - capability
     - persistence
 
-A Job terminal outcome does not automatically commit, abort, or roll back an
-OrchestrationUnit.
+A Job terminal outcome does not automatically commit, abort, roll back, or
+complete an OrchestrationUnit.
 
 State mutation authority remains constrained by DA-04 even when work is
 represented as a Job.
@@ -303,7 +268,8 @@ Progress updates do not commit authoritative state by themselves.
 
 Progress does not prove eventual success.
 
-Trace/progress/UI visibility must not become committed-state authority.
+Trace, progress, subscription delivery, and UI visibility must not become
+committed-state authority.
 
 
 PRESERVATION RULE 6: CANCELLATION IS REQUEST / OUTCOME / STOP ATTEMPT SPLIT
@@ -331,9 +297,16 @@ Cancelling after execution begins may attempt to stop the underlying execution
 mechanism, but Job cancellation outcome and execution-stop outcome remain
 distinct.
 
+RPC cancellation messages are requests, not arbitrary execution kill.
+
+Transport disconnect is not Job cancellation by itself.
+
+Policy may decide what happens after disconnect or cancellation request when
+in-flight or accepted work exists.
+
 
 PRESERVATION RULE 7: JOB TIMEOUT IS NOT TRANSPORT TIMEOUT
-=========================================================
+========================================================
 
 Preserve the timeout split:
 
@@ -349,9 +322,14 @@ Timeout policy source is explicit.
 
 TimedOut is distinct from Cancelled and Failed.
 
-DA-21 owns RPC/transport timeout semantics.
+DA-21 owns RPC and transport timeout semantics.
 
 DA-19 owns Job timeout semantics.
+
+Transport timeout does not by itself define Job timeout.
+
+Job timeout does not by itself define transport timeout, adapter timeout,
+RuntimeHost timeout, OrchestrationUnit timeout, or Window finalization.
 
 
 PRESERVATION RULE 8: SUPERSESSION IS TERMINAL NON-ERROR OUTCOME
@@ -413,9 +391,12 @@ Trace wording should follow the DA-03 cross-document trace wording check.
 DA-19 trace evidence must not replace:
 
     - DA-04 state/transaction trace obligations
+    - DA-08 Window trace/evidence
     - DA-16 capability trace reasons
+    - DA-17 decision/policy trace evidence
+    - DA-20 AppInstance trace reasons
     - DA-21 RPC trace reasons
-    - DA-23 adapter trace reasons
+    - DA-23 / DA-27 adapter trace reasons
     - DA-24 OrchestrationUnit trace reasons
     - DA-28 RuntimeHost trace reasons
     - DA-29 PackManager trace reasons
@@ -439,6 +420,10 @@ A Job timeout does not automatically imply transport timeout.
 A request may be rejected before a Job exists.
 
 A request may be accepted as Job-backed work.
+
+RPC request identity and jobId remain distinct.
+
+Request acceptance is not final Job success.
 
 DA-21 owns RPC and transport semantics.
 
@@ -472,6 +457,86 @@ DA-16 owns capability mediation.
 DA-19 owns Job lifecycle.
 
 
+PRESERVATION RULE 13: JOB DOES NOT DEFINE APPINSTANCE, ADAPTER, RUNTIMEHOST, WINDOW, OR PACKMANAGER OUTCOMES
+===========================================================================================================
+
+Preserve cross-domain lifecycle separation.
+
+Job terminal outcome does not automatically:
+
+    - stop or fail an AppInstance
+    - complete or fail an OrchestrationUnit
+    - commit or abort a transaction
+    - create SafePointWindow
+    - create AbortedWindow
+    - define adapter lifecycle outcome
+    - define RuntimeHost operation outcome
+    - define PackManager operation outcome
+    - mutate committed state
+
+AppInstance stop does not automatically define Job terminal outcome.
+
+Adapter failure does not automatically define Job terminal outcome.
+
+RuntimeHost operation outcome does not automatically define Job terminal
+outcome.
+
+Window finalization does not automatically define Job terminal outcome.
+
+PackManager operation outcome does not automatically define Job terminal
+outcome.
+
+Relationships between Job outcome and other domain outcomes must be explicit.
+
+
+WATCH ITEM: CONCRETE RESULT / ERROR / ENVELOPE
+==============================================
+
+Later concrete result/error/envelope specs must not smuggle partial output,
+diagnostic metadata, cancellation metadata, timeout metadata, or supersession
+metadata into "result" in a way that weakens the rule:
+
+    result = successful result only
+
+
+WATCH ITEM: CONCRETE RPC / WEBSOCKET
+====================================
+
+IS-01 should preserve Job/RPC identity separation.
+
+IS-02 should preserve Job/transport lifecycle separation.
+
+Concrete RPC and WebSocket fields must not make acknowledgement, request
+acceptance, frame delivery, reconnect, timeout, or disconnect redefine Job
+lifecycle semantics.
+
+
+WATCH ITEM: DEBUGGER SEMANTICS
+==============================
+
+DA-18 should preserve safe-point pause semantics.
+
+Debugger pause must not become Job terminal outcome.
+
+Debugger breakpoint behavior must not imply Job result.
+
+Debugger safe-point pause is not Job Succeeded, Failed, Cancelled, TimedOut, or
+Superseded.
+
+
+WATCH ITEM: WINDOW SEMANTICS
+============================
+
+DA-08 should preserve Job outcome / Window finalization separation.
+
+Window finalization must not redefine Job terminal state.
+
+SafePointWindow creation is not Job Succeeded by default.
+
+AbortedWindow creation is not Job Failed, Cancelled, TimedOut, or Superseded by
+default.
+
+
 REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-19 CONTENT
 =========================================================
 
@@ -490,11 +555,27 @@ Job-boundary guardrails:
 
     Job identity is not OrchestrationUnit identity.
 
+    Job identity is not AppInstance identity.
+
+    Job identity is not adapter identity.
+
+    Job identity is not RuntimeHost identity.
+
     Job identity is not result payload identity.
 
     Job lifecycle is not underlying execution lifecycle.
 
+    Job lifecycle is not AppInstance lifecycle.
+
+    Job lifecycle is not adapter lifecycle.
+
+    Job lifecycle is not RuntimeHost lifecycle.
+
     Job terminal outcome is not committed-state truth by itself.
+
+    Job terminal outcome is not OrchestrationUnit terminal outcome by default.
+
+    Job terminal outcome is not Window finalization by default.
 
     Job result exists only for Succeeded.
 
@@ -505,6 +586,12 @@ Job-boundary guardrails:
     Job timeout is not transport timeout.
 
     Transport timeout is not Job timeout.
+
+    Transport disconnect is not Job cancellation by default.
+
+    Adapter failure is not Job failure by default.
+
+    RuntimeHost operation outcome is not Job outcome by default.
 
     Superseded is terminal and non-error.
 
@@ -522,13 +609,14 @@ Job-boundary guardrails:
 
     Transaction commit/abort is not controlled by Job terminal state.
 
-Owning-document boundaries:
+Owning-document guardrails:
 
-    DA-03 owns trace event structure, trace DAG semantics, and span mechanics.
+    DA-03 owns trace substrate, retention, loss, trace DAG, and span semantics.
 
     DA-04 owns authoritative committed state and transaction semantics.
 
-    DA-08 owns Window, SafePointWindow, and AbortedWindow semantics.
+    DA-08 owns Window, ActiveWindow, SafePointWindow, AbortedWindow, and
+    finalized runtime history semantics.
 
     DA-14 owns pack activation semantics and PackContext authority.
 
@@ -536,16 +624,21 @@ Owning-document boundaries:
 
     DA-17 owns user decision and remembered policy semantics.
 
-    DA-18 owns debugger UI layout and breakpoint behavior.
+    DA-18 owns debugger UI layout, safe-point pause, breakpoint, and
+    execution-control behavior.
 
     DA-20 owns AppInstance lifecycle and runtime identity semantics.
 
-    DA-21 owns RPC lifecycle and logical communication semantics.
+    DA-21 owns RPC lifecycle, channel, transport, timeout, disconnect, and
+    logical communication semantics.
 
-    DA-23 owns adapter execution boundary semantics.
+    DA-23 owns abstract execution adapter boundary semantics.
 
     DA-24 owns OrchestrationUnit lifecycle, mutation-authority ownership, and
     execution-authority coordination.
+
+    DA-27 owns adapter lifecycle, trust, isolation, failure, disconnect, and
+    adapter-domain trace semantics.
 
     DA-28 owns RuntimeHost command-surface and host-boundary semantics.
 
@@ -562,38 +655,6 @@ Local rewrite rule:
 
     DA-19 should remain the Job lifecycle, long-running work, cancellation,
     timeout, supersession, progress, and Job-domain trace document.
-
-
-WATCH ITEMS
-===========
-
-Concrete result/error/envelope watch:
-
-    Later concrete result/error/envelope specs must not smuggle partial output,
-    diagnostic metadata, cancellation metadata, timeout metadata, or supersession
-    metadata into "result" in a way that weakens the rule:
-
-        result = successful result only
-
-Concrete RPC / WebSocket watch:
-
-    IS-01 should preserve Job/RPC identity separation.
-
-    IS-02 should preserve Job/transport lifecycle separation.
-
-Debugger watch:
-
-    DA-18 should preserve safe-point pause semantics.
-
-    Debugger pause must not become Job terminal outcome.
-
-    Debugger breakpoint behavior must not imply Job result.
-
-Window watch:
-
-    DA-08 should preserve Job outcome / Window finalization separation.
-
-    Window finalization must not redefine Job terminal state.
 
 
 CURRENT FINAL RECOMMENDATION
@@ -617,6 +678,8 @@ Preserve:
     - Job-domain trace ownership
     - RPC / transport / Job separation
     - optional and mediated Capability / Job relation
+    - Job separation from AppInstance, adapter, RuntimeHost, Window,
+      OrchestrationUnit, PackManager, and committed-state outcomes
 
 Do not expand DA-19 into detailed trace substrate, committed-state,
 transaction, Window, activation, capability, permission, decision persistence,
@@ -631,6 +694,6 @@ Main future watch item:
 --- doc-meta ---
 DOC_ID: REWRITE-DA-19
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-19_RECOMMENDATION.txt
-DOC_REV: 4
-DOC_GIT: 58d69c5
+DOC_REV: 5
+DOC_GIT: bc9945d
 ----------------
