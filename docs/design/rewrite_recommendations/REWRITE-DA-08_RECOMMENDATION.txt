@@ -1,0 +1,624 @@
+TURNIX DV3 AUDIT NOTE
+=====================
+
+Source file:
+    docs/design/DA-08_WINDOWS_HISTORICAL_EVIDENCE_EXPORTS_AND_OFFLINE_COMPARISON.txt
+
+Branch:
+    Dv3
+
+Loaded file metadata:
+    DOC_REV: 8
+    DOC_GIT: 68f7647
+    GitHub blob SHA seen by assistant:
+        4aa515838d72cb167578701e9c6a56a26f81be5f
+
+Audit note status:
+    First-pass Dv3 architecture rewrite recommendation.
+    Action-focused format under the compressed rewrite-recommendation rule.
+
+Audit scope:
+    This note audits architectural meaning, doctrine, and direction.
+    It does not audit formatting unless formatting/structure affects meaning,
+    machine interpretation, rule priority, or human usability as reference.
+
+Important excluded source:
+    AI_WORKFLOW_BOOTSTRAP.txt was intentionally not read.
+    It is part of the workflow system being audited separately and should not
+    bias this architecture pass.
+
+
+SUMMARY
+=======
+
+DA-08 is strong and Dv3-compatible.
+
+Keep it as the Window finalization, bounded runtime history, and retained
+evidence document.
+
+Preserve the central distinction:
+
+    SafePointWindow may contain authoritative committed material.
+
+    ActiveWindow is non-authoritative in-flight evidence.
+
+    AbortedWindow is finalized non-authoritative abort evidence.
+
+    Journal material is non-authoritative evidence.
+
+    Optional retained evidence does not add authority.
+
+Window finalization does not redefine authoritative committed state.
+
+DA-04 remains the authority for committed-state truth and transactions.
+
+
+CURRENT CLASSIFICATION
+======================
+
+KEEP WITH SMALL TITLE / DA-25 / DA-26 BOUNDARY WATCH
+
+DA-08 should not be rewritten heavily.
+
+Future edits should preserve:
+
+    - Window sequence is explicit and ordered
+    - at most one ActiveWindow exists per AppInstance
+    - ActiveWindow is the unique mutable tail
+    - finalization produces exactly one finalized outcome
+    - SafePointWindow is the committed-state boundary
+    - AbortedWindow is finalized non-commit evidence
+    - journal is non-authoritative evidence
+    - retained evidence does not become committed state
+    - Job terminal outcome does not define Window finalization
+    - OrchestrationUnit terminal outcome does not define Window finalization
+    - transaction commit/abort does not define Window finalization
+    - Window exports and offline comparison workflows are DA-25 / DA-26
+
+
+ACTUAL DA-08 CHANGE 1: TITLE / FILENAME ALIGNMENT WATCH
+=======================================================
+
+The file path says:
+
+    DA-08_WINDOWS_HISTORICAL_EVIDENCE_EXPORTS_AND_OFFLINE_COMPARISON.txt
+
+The document title says:
+
+    DESIGN AREA DA-08 - WINDOWS AND FINALIZED RUNTIME HISTORY
+
+The body explicitly defers exports and offline comparison to DA-25 and DA-26.
+
+Recommended future rewrite:
+
+    Keep DA-08 focused on Windows and finalized runtime history.
+
+    If filenames are normalized later, consider aligning the filename/title so
+    DA-08 does not appear to own WindowExport, Minimal Audit Bundle, offline
+    comparison, Replay, Resume, Retry, or cross-session audit workflows.
+
+Do not move DA-25 / DA-26 semantics into DA-08.
+
+
+PRESERVATION RULE 1: WINDOW HISTORY IS NOT HIDDEN CORRECTNESS DEPENDENCY
+========================================================================
+
+Preserve the central question:
+
+    How does Turnix preserve bounded committed-state history and bounded
+    historical evidence without making retained history a hidden correctness
+    dependency?
+
+Windows distinguish:
+
+    - authoritative committed boundaries
+    - non-authoritative in-flight activity
+    - non-authoritative historical evidence
+
+Finalized Windows preserve:
+
+    - what was committed
+    - what was aborted
+    - what evidence remains retained for explanation, audit, and offline
+      inspection
+
+Historical evidence may support explanation, audit, and debugging.
+
+Historical evidence does not become a hidden correctness dependency.
+
+This document defines how finalized Windows relate to authoritative state and
+retained evidence.
+
+It does not redefine authoritative state.
+
+
+PRESERVATION RULE 2: JOURNAL IS NON-AUTHORITATIVE EVIDENCE
+==========================================================
+
+Preserve journal status.
+
+Journal content is:
+
+    - append-oriented
+    - non-authoritative
+    - non-blocking
+    - evidence-oriented rather than correctness-defining
+
+Journal data is not state.
+
+Journal data is not required for correctness.
+
+Journal loss does not change committed-state meaning.
+
+Journal retention follows explicit best-effort policy.
+
+Journal writes may be dropped rather than block execution when storage is
+unavailable or under severe pressure.
+
+Journal pruning or dropped writes remain trace-visible and classified.
+
+Journal retention class affects garbage collection only.
+
+Journal retention policy does not alter authority boundaries.
+
+
+PRESERVATION RULE 3: WINDOW SEQUENCE IS EXPLICIT
+================================================
+
+Preserve the ordered Window sequence.
+
+An AppInstance maintains one explicit ordered Window sequence.
+
+Every Window in that sequence is exactly one of:
+
+    - SafePointWindow
+    - AbortedWindow
+    - ActiveWindow
+
+At most one ActiveWindow exists for one AppInstance at a time.
+
+If an ActiveWindow exists, it is the unique mutable tail of the Window sequence.
+
+SafePointWindow and AbortedWindow are finalized Window forms.
+
+ActiveWindow is not finalized.
+
+Window ordering is explicit.
+
+Window ordering does not rely on:
+
+    - timestamps
+    - inference
+    - presentation order
+
+Window ordering is distinct from Job lifecycle ordering.
+
+Window ordering is distinct from OrchestrationUnit lifecycle ordering.
+
+Job and OrchestrationUnit lifecycle evidence remains correlated to Windows
+through trace and retained evidence rather than timestamp inference.
+
+
+PRESERVATION RULE 4: SAFEPOINTWINDOW IS COMMITTED BOUNDARY
+==========================================================
+
+Preserve SafePointWindow semantics.
+
+A SafePointWindow is a finalized authoritative committed boundary.
+
+A SafePointWindow contains committed layers and committed config as
+authoritative material.
+
+The authoritative portion of a SafePointWindow contains committed state material
+only.
+
+Transactional layer contents are not part of the authoritative SafePointWindow
+boundary.
+
+A retained SafePointWindow includes retained trace identity and scope evidence
+sufficient to identify:
+
+    - the SafePointWindow itself
+    - the committed scope or scopes it covers
+    - its relation to the committed work it finalizes
+
+Optional retained evidence may include:
+
+    - revision history
+    - journal material
+    - additional trace evidence
+    - Job lifecycle evidence compatible with retained scope
+    - OrchestrationUnit lifecycle evidence compatible with retained scope
+    - other non-authoritative evidence compatible with DA-08
+
+Optional retained evidence does not add authority.
+
+Trace, journal, revision, Job lifecycle, and OrchestrationUnit lifecycle
+material retained within a SafePointWindow may be truncated or removed according
+to explicit policy.
+
+Retention reduction within a SafePointWindow does not invalidate the retained
+authoritative committed-state boundary, provided enough authoritative material
+remains to restore that SafePointWindow deterministically.
+
+A retained SafePointWindow is not treated as complete if retained trace identity
+and scope evidence are insufficient to identify the Window and its committed
+scope.
+
+A Job reaching Succeeded does not by itself create a SafePointWindow.
+
+An OrchestrationUnit reaching Completed does not by itself create a
+SafePointWindow.
+
+A transaction commit does not by itself create a SafePointWindow.
+
+
+PRESERVATION RULE 5: ACTIVEWINDOW IS NON-AUTHORITATIVE IN-FLIGHT REGION
+=======================================================================
+
+Preserve ActiveWindow semantics.
+
+ActiveWindow is the current in-flight region after the last finalized committed
+boundary.
+
+ActiveWindow contains activity that has not yet been finalized as a
+SafePointWindow or AbortedWindow.
+
+ActiveWindow may contain:
+
+    - trace events emitted after the last finalized SafePointWindow
+    - journal entries produced after the last finalized SafePointWindow
+    - metadata about active OrchestrationUnits sufficient for diagnosis
+    - metadata about active Jobs sufficient for diagnosis when Jobs exist
+    - transactional staging layers and in-flight transactional state
+
+ActiveWindow is non-authoritative.
+
+ActiveWindow does not define committed truth.
+
+ActiveWindow may be discarded during recovery.
+
+ActiveWindow is not interpreted as a deterministic replay boundary.
+
+ActiveWindow does not guarantee deterministic reconstruction of:
+
+    - in-flight activity
+    - active or pending Job execution
+    - active OrchestrationUnit execution
+    - external side effects
+    - pre-crash execution ordering beyond what later committed boundaries
+      explicitly retain
+
+ActiveWindow evidence does not convert Pending or Running Jobs into replayable
+work.
+
+
+PRESERVATION RULE 6: ABORTEDWINDOW IS NON-COMMIT FINALIZED EVIDENCE
+===================================================================
+
+Preserve AbortedWindow semantics.
+
+An AbortedWindow is a finalized ActiveWindow that did not produce a new
+authoritative committed boundary.
+
+An AbortedWindow may retain:
+
+    - trace evidence describing what happened after the previous finalized
+      SafePointWindow
+    - finalization outcome identifying the abort path and reason category
+    - journal evidence
+    - Job lifecycle evidence compatible with retained scope
+    - OrchestrationUnit lifecycle evidence compatible with retained scope
+    - other non-authoritative evidence compatible with DA-08
+
+An AbortedWindow does not contain authoritative committed-state changes as part
+of its finalized outcome.
+
+An AbortedWindow does not preserve transactional layer contents as authoritative
+material.
+
+An AbortedWindow is finalized evidence of non-commit outcome, not a committed
+boundary.
+
+An AbortedWindow does not acquire authority merely because it is finalized,
+retained, or exported.
+
+If an AbortedWindow is retained at all, it retains enough trace meaning to
+explain:
+
+    - that the Window was aborted rather than committed
+    - why it was aborted
+    - how it relates causally to the retained evidence still present
+
+A Job reaching Failed, Cancelled, TimedOut, or Superseded does not by itself
+create an AbortedWindow.
+
+An OrchestrationUnit reaching Failed, Cancelled, or Superseded does not by
+itself create an AbortedWindow.
+
+A transaction abort does not by itself create an AbortedWindow.
+
+
+PRESERVATION RULE 7: FINALIZATION PRODUCES EXACTLY ONE OUTCOME
+==============================================================
+
+Preserve finalization rules.
+
+ActiveWindow finalizes as exactly one outcome:
+
+    - SafePointWindow
+    - AbortedWindow
+
+Finalization never produces both outcomes for the same ActiveWindow.
+
+Finalization never produces a partial finalized artifact.
+
+Finalization never preserves an unresolved mixed state in which a Window is
+partly authoritative and partly aborted.
+
+Finalization into SafePointWindow requires that all transactions relevant to
+the finalized committed boundary are resolved.
+
+Finalization into AbortedWindow occurs when in-flight work concludes without
+producing a new SafePointWindow and the authoritative committed state remains
+that of the last finalized SafePointWindow.
+
+Finalization preserves the distinction between:
+
+    - committed authoritative outcome
+    - non-authoritative retained evidence about failed or aborted work
+
+Job terminal outcome does not by itself define Window finalization.
+
+OrchestrationUnit terminal outcome does not by itself define Window
+finalization.
+
+Transaction commit or abort does not by itself define Window finalization.
+
+Including evidence about Job, OrchestrationUnit, or transaction outcomes does
+not make that evidence authoritative committed state.
+
+
+PRESERVATION RULE 8: SAFEPOINTWINDOW CREATION MODES ARE EXPLICIT
+================================================================
+
+Preserve SafePointWindow request mode separation.
+
+Turnix may support multiple SafePointWindow creation request modes.
+
+Request-mode semantics are explicit.
+
+Request-mode semantics are trace-visible.
+
+Turnix does not silently substitute one request mode for another.
+
+ImmediateCommitted:
+
+    - attempts SafePointWindow creation without waiting for quiescence
+    - succeeds immediately if eligible
+    - fails deterministically with explicit reason if not eligible
+    - does not silently degrade into waiting behavior
+
+AtQuiescence:
+
+    - attempts SafePointWindow creation only when no OrchestrationUnit is active
+      for the target AppInstance
+    - may queue the request until quiescence is reached
+    - queued requests are explicit
+    - queued requests are trace-visible
+    - queued AtQuiescence does not mean queued Job execution
+    - queued AtQuiescence does not alter Job lifecycle state by itself
+
+AtQuiescence waiting is bounded by explicit policy.
+
+Turnix does not silently wait forever.
+
+Turnix does not silently cancel in-flight work to satisfy SafePointWindow
+creation.
+
+Turnix does not silently downgrade AtQuiescence into ImmediateCommitted.
+
+SafePointWindow creation timeout is not Job timeout.
+
+SafePointWindow creation cancellation is not Job cancellation.
+
+If Window creation policy affects a Job or OrchestrationUnit, that effect
+remains governed by the Job, OrchestrationUnit, and policy documents that own
+those lifecycle outcomes.
+
+
+PRESERVATION RULE 9: WINDOW TRACE CORRELATION IS EXPLICIT CAUSAL IDENTITY
+=========================================================================
+
+Preserve trace correlation rules.
+
+DA-08 consumes the trace substrate defined by DA-03.
+
+DA-08 defines Window-specific trace obligations.
+
+DA-08 does not redefine:
+
+    - trace event structure
+    - trace DAG structure
+    - span semantics
+    - trace storage semantics
+
+Finalized Windows are correlated to trace evidence through explicit retained
+trace identity and causal relationships rather than through timestamps alone.
+
+Each SafePointWindow is identifiable through retained trace evidence that
+states:
+
+    - safePointWindowId
+    - committed scope or scopes covered
+    - reason or creation path
+    - whether optional evidence classes are included by policy
+
+Each AbortedWindow is identifiable through retained trace evidence that states:
+
+    - abortedWindowId
+    - abort outcome
+    - abort reason category
+    - causal relation to retained evidence still present
+
+Trace incompleteness, pruning, corruption, or partial export remains explicit
+when it affects retained finalized evidence.
+
+Job lifecycle evidence retained inside finalized Window evidence remains
+non-authoritative evidence unless it is also part of committed state under
+DA-04.
+
+OrchestrationUnit evidence retained inside finalized Window evidence remains
+non-authoritative evidence unless it is also part of committed state under
+DA-04.
+
+
+PRESERVATION RULE 10: EXPORTS AND OFFLINE WORKFLOWS ARE DA-25 / DA-26
+=====================================================================
+
+Preserve DA-25 / DA-26 ownership.
+
+DA-25 defines:
+
+    - WindowManifest
+    - WindowExport
+    - Minimal Audit Bundle
+    - optional digest representation
+    - partial export
+    - missing material
+    - offline inspection artifact semantics
+
+DA-26 defines:
+
+    - equality modes
+    - ComparisonResult
+    - Replay
+    - Resume
+    - Retry
+    - cross-session audit workflow semantics
+
+A Window finalization outcome does not by itself create:
+
+    - WindowExport
+    - Minimal Audit Bundle
+    - comparison work
+    - Replay
+    - Resume
+    - Retry
+    - audit workflow work
+
+Artifact and workflow documents consume Window finalization semantics.
+
+They do not redefine Window finalization.
+
+DA-08 remains authority for:
+
+    - Window kind
+    - Window ordering
+    - Window finalization
+    - Window-domain trace reason ownership
+
+
+WATCH ITEM: TITLE / FILENAME SCOPE
+==================================
+
+The filename mentions exports and offline comparison, but the document body
+delegates those semantics to DA-25 and DA-26.
+
+Future edits should avoid moving DA-25 or DA-26 semantics into DA-08 merely
+because of filename wording.
+
+A title or filename cleanup may be useful later if document names are normalized.
+
+
+WATCH ITEM: TRACE WORDING
+=========================
+
+Follow the DA-03 cross-document trace wording check.
+
+Window trace requirements are Window-domain emission obligations.
+
+DA-03 owns trace substrate, retention, and loss semantics.
+
+Do not let Window trace wording imply that trace evidence is committed state or
+that trace persistence is guaranteed forever.
+
+Preserve the distinction:
+
+    trace/journal/evidence may explain Window history
+
+    authoritative committed-state truth remains DA-04
+
+
+REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-08 CONTENT
+=========================================================
+
+Use these as rewrite guardrails only.
+
+Do not let retained history become a hidden correctness dependency.
+
+Do not let journal data become state.
+
+Do not let journal loss change committed-state meaning.
+
+Do not let ActiveWindow define committed truth.
+
+Do not treat ActiveWindow as deterministic replay boundary.
+
+Do not let AbortedWindow acquire authority because it is finalized, retained, or
+exported.
+
+Do not let SafePointWindow optional evidence add authority.
+
+Do not let retained Job evidence become Job result semantics.
+
+Do not let retained OrchestrationUnit evidence become committed-state authority.
+
+Do not let Job terminal outcome define Window finalization.
+
+Do not let OrchestrationUnit terminal outcome define Window finalization.
+
+Do not let transaction commit/abort define Window finalization by itself.
+
+Do not let SafePointWindow creation timeout become Job timeout.
+
+Do not let SafePointWindow creation cancellation become Job cancellation.
+
+Do not let AtQuiescence silently wait forever.
+
+Do not let AtQuiescence silently cancel in-flight work.
+
+Do not let AtQuiescence silently downgrade to ImmediateCommitted.
+
+Do not let Window finalization create exports, audit bundles, Replay, Resume,
+Retry, comparison, or audit workflows by itself.
+
+Do not let DA-25 / DA-26 redefine Window finalization.
+
+
+CURRENT FINAL RECOMMENDATION
+============================
+
+Keep DA-08.
+
+No heavy rewrite is recommended.
+
+Recommended future edits:
+
+    - keep DA-08 focused on Window kinds, ordering, finalization, and
+      Window-domain trace obligations
+    - preserve DA-04 authority over committed-state truth
+    - preserve journal and historical evidence as non-authoritative
+    - preserve SafePointWindow / ActiveWindow / AbortedWindow separation
+    - preserve exact-one-finalization-outcome rule
+    - preserve SafePointWindow request-mode distinctions
+    - preserve DA-25 / DA-26 ownership of exports, bundles, offline comparison,
+      Replay, Resume, Retry, and audit workflows
+    - consider title/filename normalization later if document names are revised
+
+--- doc-meta ---
+DOC_ID: REWRITE-DA-08
+DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-08_RECOMMENDATION.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
