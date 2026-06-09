@@ -1,0 +1,585 @@
+TURNIX DV3 AUDIT NOTE
+=====================
+
+Source file:
+    docs/design/DA-17_USER_INTERACTION_DECISION_POINTS_AND_POLICY_HANDLING.txt
+
+Branch:
+    Dv3
+
+Loaded file metadata:
+    DOC_REV: 13
+    DOC_GIT: f10e39e
+    GitHub blob SHA seen by assistant:
+        7d6abd41eda439c12180350da0795dd5d37d5d22
+
+Audit note status:
+    First-pass Dv3 architecture rewrite recommendation.
+    Action-focused format under the compressed rewrite-recommendation rule.
+
+Audit scope:
+    This note audits architectural meaning, doctrine, and direction.
+    It does not audit formatting unless formatting/structure affects meaning,
+    machine interpretation, rule priority, or human usability as reference.
+
+Important excluded source:
+    AI_WORKFLOW_BOOTSTRAP.txt was intentionally not read.
+    It is part of the workflow system being audited separately and should not
+    bias this architecture pass.
+
+
+SUMMARY
+=======
+
+DA-17 is strong and Dv3-compatible.
+
+Keep it as the Kernel-mediated user-decision and policy-handling document.
+
+Preserve the central rule:
+
+    Turnix does not make ambiguous decisions silently.
+    Turnix does not delegate authority implicitly.
+    Policy reduces repeated friction; it does not redefine authority.
+
+Decision handling exists only where Turnix cannot proceed safely or
+deterministically on its own.
+
+Decisions affecting identity, persistence, authority, safety, work lifecycle,
+or known content equivalence must remain explicit and trace-backed.
+
+
+CURRENT CLASSIFICATION
+======================
+
+KEEP WITH SMALL WORK-LIFECYCLE KEY / CROSS-SCOPE PROMOTION WATCH
+
+DA-17 should not be rewritten heavily.
+
+Future edits should preserve:
+
+    - Kernel-mediated decision authority
+    - scoped pause/resume behavior
+    - explicit policy persistence
+    - run/save/global policy precedence
+    - exact capability permission keying
+    - exact fingerprint mismatch keying
+    - separation between permission, fingerprint, and work-lifecycle policies
+    - no prompting for reads
+    - no wildcard or versionless capability permission fallback
+    - no silent cancellation, supersession, detachment, result retention, or
+      result discard
+    - trace-backed explanation only
+
+
+PRESERVATION RULE 1: DECISION AUTHORITY IS KERNEL-MEDIATED
+==========================================================
+
+Preserve the rule:
+
+    User interaction is a system concern.
+
+User interaction is not:
+
+    - UI-specific
+    - mod-specific
+    - frontend-specific
+
+User interaction is:
+
+    - Kernel-mediated
+    - policy-driven
+    - serializable
+    - trace-backed
+
+All decision points originate in the Kernel.
+
+Mods and packs may trigger decision points.
+
+Mods and packs do not own, implement, or bypass decision handling.
+
+Frontends present decisions; they do not own decision semantics.
+
+
+PRESERVATION RULE 2: DECISION TYPES REMAIN DISTINCT
+===================================================
+
+Preserve distinct decision-point types:
+
+    - Resolution decisions
+    - Permission decisions
+    - Recovery decisions
+    - Configuration-scope decisions
+    - Fingerprint-mismatch decisions
+    - Work-lifecycle policy decisions
+
+Do not merge these into one generic prompt model.
+
+Each decision type has different authority, persistence, trace, and policy
+scope implications.
+
+
+PRESERVATION RULE 3: PERMISSION DECISIONS ARE NOT READ PROMPTS
+==============================================================
+
+Preserve the read-access rule.
+
+Permission decisions apply only to actions that:
+
+    - mutate persisted state
+    - delete persisted state
+    - intentionally cross ownership boundaries
+
+Permission decisions are not raised for:
+
+    - computed-only effects
+    - runtime-only transforms
+    - observation or watching of values
+
+Read access is excluded from permission decisions:
+
+    - reads either succeed or return NotFoundOrPermissionDenied
+    - user interaction is never used for reads
+    - prompting, confirmation, and policy do not apply to reads
+
+This preserves determinism, prevents probing, and avoids decision spam.
+
+Do not add "ask user for read access" behavior unless a later source document
+explicitly redefines this security model.
+
+
+PRESERVATION RULE 4: REMEMBERED CAPABILITY PERMISSION KEYS ARE EXACT
+====================================================================
+
+Preserve exact capability permission keying.
+
+For capability-based permission decisions, remembered permission identity uses:
+
+    - packCanonicalId
+    - exact versioned capability id
+
+A capability permission for:
+
+    storage.export@1
+
+is remembered against:
+
+    storage.export@1
+
+not against:
+
+    storage.export
+    storage
+    wildcard family
+    prefix family
+    versionless family
+
+DA-17 must not introduce:
+
+    - wildcard capability permission matching
+    - prefix capability permission matching
+    - broader family matching
+    - versionless fallback lookup
+
+The pack version may be comparison metadata.
+
+The pack version is not part of the permission policy identity key.
+
+
+PRESERVATION RULE 5: FINGERPRINT POLICY KEYS ARE EXACT MISMATCH PAIRS
+=====================================================================
+
+Preserve exact fingerprint-mismatch keying.
+
+Remembered fingerprint-mismatch policy is keyed by:
+
+    - canonicalPackId
+    - packVersion
+    - expectedFingerprint
+    - actualFingerprint
+
+expectedFingerprint and actualFingerprint are full fingerprint strings.
+
+The fingerprint algorithm/version is part of the full fingerprint string.
+
+Fingerprint-mismatch policy is specific to the exact mismatch pair.
+
+Remembering one fingerprint mismatch does not bless all future mismatches for
+the same pack or version.
+
+For-this-run fingerprint acceptance does not update persisted policy and does
+not update an expected fingerprint.
+
+Remembering a fingerprint mismatch records acceptance of the specific mismatch
+under the selected policy scope.
+
+Origin alone is not authenticity proof.
+
+
+PRESERVATION RULE 6: POLICY SCOPE PRECEDENCE IS RUN, SAVE, GLOBAL
+=================================================================
+
+Preserve policy evaluation order:
+
+    1) run policy
+    2) save policy
+    3) global policy
+
+Run policy overrides save policy.
+
+Save policy overrides global policy.
+
+Run policy is memory-only and ends with the current Turnix run.
+
+Save policy is persisted inside save-bound policy storage defined by DA-06.
+
+Global policy is persisted inside global policy storage defined by DA-06.
+
+Silent or implicit policy creation is forbidden.
+
+Persisted policies must remain:
+
+    - explicit
+    - inspectable
+    - editable through Turnix management surfaces
+
+
+PRESERVATION RULE 7: POLICY DOES NOT REDEFINE AUTHORITY
+=======================================================
+
+Preserve the rule:
+
+    Policies influence default responses.
+    Policies do not redefine authority.
+
+Policies do not:
+
+    - override ownership rules
+    - bypass access levels
+    - grant mutation rights forbidden by system rules
+    - convert Job terminal outcomes into ordinary failures
+    - treat transport timeout as Job timeout
+    - treat Job timeout as transport timeout
+    - silently create work
+    - silently cancel work
+    - silently supersede work
+    - silently detach work
+    - silently retain result
+    - silently discard result
+
+Policy exists to reduce friction, not weaken safety or determinism.
+
+
+PRESERVATION RULE 8: PAUSES ARE SCOPED AND DO NOT IMPLY JOB OUTCOMES
+====================================================================
+
+Preserve scoped pause behavior.
+
+When a decision is required:
+
+    - the triggering execution unit pauses
+    - unrelated execution may continue
+    - frontends are notified through a Kernel-mediated event
+    - execution resumes only after decision handling completes
+
+Rules:
+
+    - no busy waiting
+    - no polling
+    - no global freeze
+
+While a decision is pending:
+
+    - no persisted mutation may be committed
+    - no configuration write may be finalized
+    - no SavePack mutation may complete
+    - no Job or OrchestrationUnit affected by the decision may silently cross
+      the decision-controlled boundary
+
+A decision pause does not by itself cancel, supersede, or time out a Job.
+
+Job lifecycle changes caused by decision timeout or policy are owned by DA-19.
+
+
+PRESERVATION RULE 9: WORK-LIFECYCLE POLICY IS DISTINCT FROM JOB LIFECYCLE
+=========================================================================
+
+Preserve the work-lifecycle boundary.
+
+Work-lifecycle policy decisions may affect:
+
+    - Jobs
+    - OrchestrationUnits
+    - RPC request handling
+    - scheduler-owned work
+    - debugger-controlled work
+
+Possible outcomes include:
+
+    - continue work
+    - cancel work
+    - supersede work
+    - detach work from the transport or frontend that caused it
+    - retain result for later retrieval
+    - discard result when no consumer remains
+    - refuse unsafe continuation
+    - abort startup or affected work
+
+Work-lifecycle policy decisions do not define Job terminal states.
+
+DA-19 defines Job lifecycle states, terminal outcomes, cancellation, timeout,
+supersession, progress, and late completion semantics.
+
+Work-lifecycle policy decisions do not define RPC transport mechanics.
+
+Work-lifecycle policy decisions do not define capability permission semantics.
+
+A remembered work-lifecycle policy does not imply a remembered capability
+permission decision.
+
+A remembered capability permission decision does not imply a remembered
+work-lifecycle policy.
+
+
+PRESERVATION RULE 10: WORK-LIFECYCLE POLICIES ARE NOT KEYED BY JOBID ALONE
+==========================================================================
+
+Preserve the rule:
+
+    A remembered work-lifecycle policy is not keyed by jobId alone.
+
+jobId identifies one Job lifecycle.
+
+A remembered work-lifecycle policy governs future matching decisions, not only
+the original Job instance.
+
+Remembered work-lifecycle policy subject identity may include:
+
+    - work kind
+    - owner domain
+    - capability identity when capability work is involved
+    - RPC route or request class when RPC work is involved
+    - scheduler policy class when scheduler work is involved
+    - disconnect condition when disconnect handling is involved
+    - supersession target class when supersession handling is involved
+
+A remembered policy that applies to cancellation does not imply a remembered
+policy that applies to supersession, timeout, or disconnect.
+
+A remembered policy that applies to transport disconnect does not imply a
+remembered policy that applies to Job timeout.
+
+
+PRESERVATION RULE 11: FRONTENDS PRESENT, KERNEL DECIDES
+=======================================================
+
+Preserve frontend responsibility.
+
+Frontends:
+
+    - present clear explanation
+    - show consequences
+    - indicate scope of effect
+    - offer only valid choices
+
+Frontends do not:
+
+    - invent defaults
+    - auto-confirm without policy
+    - bypass Kernel authority
+    - obscure the impact of denial
+
+For fingerprint-mismatch decisions, frontends may show origin context, but must
+not present origin as authenticity proof.
+
+For work-lifecycle policy decisions, frontends distinguish:
+
+    - continuing work
+    - cancelling work
+    - superseding work
+    - detaching work from current frontend or transport
+    - retaining result for later retrieval
+    - discarding result when no consumer remains
+
+Frontends do not present Superseded as failure.
+
+Frontends do not present transport timeout as Job timeout.
+
+Frontends do not present Job timeout as transport timeout.
+
+If multiple frontends are connected:
+
+    - the decision is shown on all connected frontends
+    - the first valid response wins
+    - all other pending presentations are dismissed
+
+The Kernel remains the single arbiter.
+
+
+PRESERVATION RULE 12: MODS DO NOT HANDLE DECISIONS DIRECTLY
+===========================================================
+
+Preserve mod involvement boundary.
+
+Mods may trigger decision points.
+
+Mods do not handle decision points directly.
+
+Mods do not block while awaiting frontend interaction.
+
+Mods observe decision outcomes only through Turnix-provided context and
+results.
+
+
+PRESERVATION RULE 13: DECISION FAILURE IS SAFE AND NON-MUTATING
+===============================================================
+
+Preserve failure behavior.
+
+If a frontend disconnects during a decision:
+
+    - affected execution remains paused
+    - timeout policy may apply
+    - user may reconnect through another valid frontend
+
+If the decision handler fails:
+
+    - execution aborts safely
+    - failure is trace-logged
+    - persisted state remains unchanged
+
+If a frontend or transport disconnects while a Job exists, policy decides
+whether the affected Job:
+
+    - continues detached
+    - is cancelled
+    - is superseded
+    - retains result for later retrieval
+    - discards result if no consumer remains
+
+Disconnect handling does not silently cancel, supersede, or detach a Job
+without explicit policy.
+
+
+WATCH ITEM: WORK-LIFECYCLE POLICY KEY SCHEMA
+============================================
+
+DA-17 leaves the exact work-lifecycle policy-key schema open.
+
+Future rewrite should preserve the current boundary:
+
+    - not keyed by jobId alone
+    - policy subjects are explicit
+    - cancellation, supersession, timeout, and disconnect policies remain
+      distinct unless an owning document explicitly defines a safe shared key
+    - transport disconnect policy is not Job timeout policy
+    - Job timeout policy is not transport disconnect policy
+
+This matters for DA-19, IS-01, IS-02, DA-18, schedulers, and capability-backed
+work.
+
+
+WATCH ITEM: CROSS-SCOPE COPY AND PROMOTION
+==========================================
+
+DA-17 leaves cross-scope copy and promotion open.
+
+Future rewrite should preserve these constraints:
+
+    - computed-only or derived values are rejected cleanly
+    - owner-domain boundaries may impose additional permission checks
+    - overwrite and conflict behavior must be explicit
+    - source-layer removal vs preservation must be explicit
+    - batching must define atomicity
+    - trace shape must distinguish copy, promotion, overwrite, refusal, discard,
+      and conflict outcomes
+    - policy remembering for copy/promotion must not silently broaden authority
+
+Do not introduce implicit promotion or hidden cross-scope copying.
+
+
+WATCH ITEM: TRACE WORDING
+=========================
+
+Follow the DA-03 cross-document trace wording check.
+
+Decision trace requirements are decision-domain emission obligations.
+
+DA-03 owns trace substrate, retention, and loss semantics.
+
+User-facing explanations are derived from trace data.
+
+User-facing surfaces do not invent rationale.
+
+Do not let trace wording imply that trace evidence is committed state or that
+trace persistence is guaranteed forever.
+
+
+REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-17 CONTENT
+=========================================================
+
+Use these as rewrite guardrails only.
+
+Do not let policy redefine authority.
+
+Do not let remembered decisions silently broaden across capability families,
+versions, packs, SavePacks, RuntimeHosts, owners, work kinds, or transports.
+
+Do not let pack-provided hints become binding policy.
+
+Do not let mods or packs own decision handling.
+
+Do not let frontends invent defaults or auto-confirm without policy.
+
+Do not prompt for reads.
+
+Do not allow wildcard capability permission matching.
+
+Do not allow versionless capability permission fallback.
+
+Do not treat origin as authenticity proof.
+
+Do not treat fingerprint acceptance as general trust.
+
+Do not treat transport disconnect as Job timeout.
+
+Do not treat Job timeout as transport timeout.
+
+Do not treat Superseded as failure.
+
+Do not silently cancel, supersede, detach, retain, or discard work without
+policy.
+
+Do not let pending decisions commit persisted mutation across the
+decision-controlled boundary.
+
+Do not let cross-scope copy or promotion bypass owner-domain permission checks,
+conflict handling, or atomicity rules.
+
+
+CURRENT FINAL RECOMMENDATION
+============================
+
+Keep DA-17.
+
+No heavy rewrite is recommended.
+
+Recommended future edits:
+
+    - keep DA-17 focused on Kernel-mediated decision and policy handling
+    - preserve exact remembered permission and fingerprint policy keys
+    - preserve work-lifecycle policy separation from Job lifecycle and transport
+      mechanics
+    - preserve no-prompt-for-read-access rule
+    - preserve frontend-as-presentation-only rule
+    - preserve mod-trigger-but-not-handle rule
+    - define work-lifecycle policy-key schema later in the owning workflow or
+      implementation specification
+    - define cross-scope copy/promotion later without implicit authority
+      broadening
+
+--- doc-meta ---
+DOC_ID: REWRITE-DA-17
+DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-17_RECOMMENDATION.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
