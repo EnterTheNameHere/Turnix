@@ -14,9 +14,8 @@ Loaded file metadata:
         00ce33a8d0a7812e93346f723558a489cff55c75
 
 Audit note status:
-    Consolidated Dv3 architecture rewrite recommendation.
-    Action-focused revision pass for boundary compression, Job lifecycle
-    stop-line, and later domain guardrail alignment.
+    Mode 1 Dv3 architecture rewrite recommendation update.
+    Action-focused revision using Checkpoint 06.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -52,6 +51,21 @@ Preserve the core split:
 
     Execution mechanism = implementation primitive
 
+    Replay / Resume / Retry = DA-26 workflow concepts, not Job lifecycle states
+
+Current required source-level changes:
+
+    1. Add or preserve a compact Job lifecycle stop-line.
+
+    2. Clarify Retry wording now that DA-26 exists:
+       Retry is new work and does not reuse the previous jobId.
+
+    3. Clarify "resumed" lifecycle-event wording so it does not imply DA-26
+       Resume workflow.
+
+    4. Add DA-25 / DA-26 as stop-lines where Job wording touches artifacts,
+       exports, comparison, Replay, Resume, Retry, or audit workflows.
+
 Main watch item:
 
     Later concrete result/error/envelope specs must not weaken the rule that a
@@ -59,13 +73,13 @@ Main watch item:
 
 Overall recommendation:
 
-    KEEP
+    KEEP WITH SMALL DA-26 RETRY / RESUME WORDING WATCH
 
 
 CURRENT CLASSIFICATION
 ======================
 
-KEEP
+KEEP WITH SMALL DA-26 RETRY / RESUME WORDING WATCH
 
 DA-19 should not be rewritten heavily.
 
@@ -73,8 +87,8 @@ Future edits should preserve:
 
     - Job as observable lifecycle handle, not execution primitive
     - Job identity distinct from RPC request identity, OrchestrationUnit identity,
-      AppInstance identity, adapter identity, RuntimeHost identity, and result
-      payload identity
+      AppInstance identity, adapter identity, RuntimeHost identity, Window
+      identity, artifact identity, workflow identity, and result payload identity
     - Job / OrchestrationUnit / Transaction separation
     - final and exclusive terminal states
     - result only for Succeeded
@@ -87,7 +101,8 @@ Future edits should preserve:
     - RPC / transport / Job separation
     - optional and mediated Capability / Job relation
     - Job lifecycle separation from Window, AppInstance, adapter, RuntimeHost,
-      OrchestrationUnit, committed-state, and PackManager outcomes
+      OrchestrationUnit, committed-state, PackManager, artifact/export, Replay,
+      Resume, Retry, comparison, and audit-workflow outcomes
 
 
 ACTUAL DA-19 CHANGE 1: JOB LIFECYCLE STOP-LINE
@@ -103,7 +118,8 @@ Recommended source-level boundary:
     OrchestrationUnit outcome, transaction commit or abort, committed-state
     truth, Window finalization, AppInstance lifecycle, adapter lifecycle,
     RuntimeHost lifecycle, PackManager operation outcome, RPC request outcome,
-    or transport outcome.
+    transport outcome, artifact/export authority, comparison outcome, Replay
+    outcome, Resume outcome, Retry outcome, or audit-workflow outcome.
 
     If a Job outcome affects another domain, that domain defines the resulting
     consequence.
@@ -115,6 +131,91 @@ reason semantics.
 
 Detailed ownership mapping belongs in the guardrail section, not in the source
 document.
+
+
+ACTUAL DA-19 CHANGE 2: RETRY WORDING NOW THAT DA-26 EXISTS
+==========================================================
+
+DA-19 currently says:
+
+    Retry is modeled as new work unless a later document explicitly defines a
+    retry relationship.
+
+Checkpoint 06 now has DA-26 defining Retry as new work.
+
+Recommended source-level replacement:
+
+    Retry is new work.
+
+    Retry does not reuse the previous jobId.
+
+    A Retry workflow may reference earlier Job evidence to explain why the new
+    attempt exists, but that reference does not reopen or continue the earlier
+    Job lifecycle.
+
+    DA-26 owns Retry workflow semantics.
+
+Reason:
+
+    DA-19 owns Job lifecycle identity.
+
+    DA-26 owns Retry workflow semantics.
+
+    Retry does not restart a closed Job.
+
+    Retry does not make the original jobId reusable.
+
+
+ACTUAL DA-19 CHANGE 3: CLARIFY "RESUMED" LIFECYCLE-EVENT WORDING
+=================================================================
+
+DA-19 says that "resumed" is a lifecycle event, phase, or control condition
+rather than a primary Job state.
+
+This is locally valid Job wording, but DA-26 now gives Resume a formal workflow
+meaning.
+
+Recommended source-level clarification:
+
+    Resume from paused Job state is a Job control event or lifecycle condition.
+    It is not DA-26 Resume after SafePointWindow restoration.
+
+Or use wording such as:
+
+    continued after pause
+
+instead of bare "resumed" where the context is Job pause control.
+
+Reason:
+
+    DA-19 owns Job pause/control lifecycle events.
+
+    DA-26 owns Replay / Resume / Retry workflow semantics.
+
+    The same word should not silently carry both meanings.
+
+
+ACTUAL DA-19 CHANGE 4: ADD DA-25 / DA-26 STOP-LINES
+===================================================
+
+DA-19 should acknowledge DA-25 and DA-26 where needed.
+
+Recommended source-level stop-lines:
+
+    DA-25 defines WindowManifest, WindowExport, Minimal Audit Bundle, digest,
+    partial export, missing material, and artifact/export semantics.
+
+    DA-26 defines ComparisonResult, equality modes, Replay, Resume, Retry, and
+    audit workflow semantics.
+
+    A Job result, Job terminal outcome, Job trace event, or Job progress event
+    does not by itself define artifact/export authority, comparison result,
+    Replay, Resume, Retry, or audit workflow outcome.
+
+Reason:
+
+    Jobs can be involved in export, audit, replay, resume, retry, or comparison
+    workflows, but DA-19 must not become the owner of those workflow meanings.
 
 
 PRESERVATION RULE 1: JOB IS LIFECYCLE HANDLE, NOT EXECUTION PRIMITIVE
@@ -141,6 +242,12 @@ A Job is not:
     - committed state
     - execution mechanism
     - result payload
+    - Window
+    - artifact
+    - export
+    - Replay workflow
+    - Resume workflow
+    - Retry workflow
 
 Runtime primitives may implement Jobs, but those primitives do not define Job
 lifecycle semantics.
@@ -154,6 +261,9 @@ Job identity must remain distinct from:
     - RuntimeHost identity
     - underlying execution identity
     - result payload identity
+    - Window identity
+    - artifact/export identity
+    - Replay / Resume / Retry workflow identity
 
 
 PRESERVATION RULE 2: JOB / ORCHESTRATIONUNIT / TRANSACTION TRIAD
@@ -163,7 +273,7 @@ Preserve the core triad:
 
     Job answers:
         What requested work is waiting, running, succeeded, failed, cancelled,
-        timed out, superseded, or paused?
+        timed out, superseded, paused, or controlled at safe point?
 
     OrchestrationUnit answers:
         What owns or coordinates execution authority?
@@ -185,6 +295,8 @@ effects:
     - Window
     - capability
     - persistence
+    - artifact/export
+    - workflow
 
 A Job terminal outcome does not automatically commit, abort, roll back, or
 complete an OrchestrationUnit.
@@ -220,10 +332,12 @@ Terminal state is final.
 
 Closed Jobs are not restarted.
 
-Retry is new work unless a later document explicitly defines a retry
-relationship.
+Retry is new work under DA-26.
 
 Retry does not reuse the previous jobId.
+
+Retry may reference earlier Job evidence, but referencing earlier Job evidence
+does not reopen the earlier Job lifecycle.
 
 
 PRESERVATION RULE 4: RESULT ONLY EXISTS FOR SUCCEEDED
@@ -241,18 +355,24 @@ Later concrete envelope specs must not smuggle these into result:
     - timeout metadata
     - supersession metadata
     - failure metadata
+    - retained artifact metadata
+    - comparison metadata
+    - Replay / Resume / Retry workflow metadata
 
 Recommended later convention:
 
     result = successful result only
 
-    failure / cancellation / timeout / supersession / diagnostic / partial data
-    = separate metadata or event structures
+    failure / cancellation / timeout / supersession / diagnostic / partial /
+    workflow / artifact data = separate metadata or event structures
 
 Reason:
 
     This prevents non-success terminal states from quietly becoming partial
     success.
+
+    This also prevents workflow or artifact metadata from pretending to be the
+    successful Job result.
 
 
 PRESERVATION RULE 5: PROGRESS IS OBSERVATIONAL
@@ -270,6 +390,13 @@ Progress does not prove eventual success.
 
 Trace, progress, subscription delivery, and UI visibility must not become
 committed-state authority.
+
+Progress evidence does not define Window finalization.
+
+Progress evidence does not define artifact/export authority.
+
+Progress evidence does not define Replay, Resume, Retry, comparison, or audit
+workflow outcome.
 
 
 PRESERVATION RULE 6: CANCELLATION IS REQUEST / OUTCOME / STOP ATTEMPT SPLIT
@@ -304,6 +431,9 @@ Transport disconnect is not Job cancellation by itself.
 Policy may decide what happens after disconnect or cancellation request when
 in-flight or accepted work exists.
 
+Cancellation does not define Retry unless a later policy or workflow explicitly
+requests new work through DA-26 Retry semantics.
+
 
 PRESERVATION RULE 7: JOB TIMEOUT IS NOT TRANSPORT TIMEOUT
 ========================================================
@@ -329,7 +459,8 @@ DA-19 owns Job timeout semantics.
 Transport timeout does not by itself define Job timeout.
 
 Job timeout does not by itself define transport timeout, adapter timeout,
-RuntimeHost timeout, OrchestrationUnit timeout, or Window finalization.
+RuntimeHost timeout, OrchestrationUnit timeout, Window finalization, Retry,
+Replay, Resume, export, comparison, or audit workflow outcome.
 
 
 PRESERVATION RULE 8: SUPERSESSION IS TERMINAL NON-ERROR OUTCOME
@@ -355,6 +486,10 @@ after terminal transition.
 
 Open transactional staging is resolved by DA-04.
 
+Superseded does not itself create Retry.
+
+A later Retry is new work under DA-26.
+
 
 PRESERVATION RULE 9: LATE COMPLETION CANNOT CHANGE TERMINAL OUTCOME
 ===================================================================
@@ -368,6 +503,9 @@ Late completion after terminal outcome:
     - does not deliver a reply/result
     - may be traced as diagnostic evidence
     - may not commit new authoritative mutation after the terminal transition
+    - may not create artifact/export authority
+    - may not silently trigger Replay, Resume, Retry, comparison, or audit
+      workflow outcome
 
 Reason:
 
@@ -388,7 +526,7 @@ correlation evidence.
 
 Trace wording should follow the DA-03 cross-document trace wording check.
 
-DA-19 trace evidence must not replace:
+DA-19 trace evidence must not replace trace evidence owned by:
 
     - DA-04 state/transaction trace obligations
     - DA-08 Window trace/evidence
@@ -398,6 +536,8 @@ DA-19 trace evidence must not replace:
     - DA-21 RPC trace reasons
     - DA-23 / DA-27 adapter trace reasons
     - DA-24 OrchestrationUnit trace reasons
+    - DA-25 artifact/export trace obligations
+    - DA-26 workflow trace obligations
     - DA-28 RuntimeHost trace reasons
     - DA-29 PackManager trace reasons
 
@@ -457,8 +597,8 @@ DA-16 owns capability mediation.
 DA-19 owns Job lifecycle.
 
 
-PRESERVATION RULE 13: JOB DOES NOT DEFINE APPINSTANCE, ADAPTER, RUNTIMEHOST, WINDOW, OR PACKMANAGER OUTCOMES
-===========================================================================================================
+PRESERVATION RULE 13: JOB DOES NOT DEFINE OTHER DOMAIN OUTCOMES
+===============================================================
 
 Preserve cross-domain lifecycle separation.
 
@@ -473,6 +613,14 @@ Job terminal outcome does not automatically:
     - define RuntimeHost operation outcome
     - define PackManager operation outcome
     - mutate committed state
+    - create WindowExport
+    - create Minimal Audit Bundle
+    - define artifact/export authority
+    - define ComparisonResult
+    - trigger DA-26 Replay
+    - trigger DA-26 Resume
+    - trigger DA-26 Retry
+    - define audit workflow outcome
 
 AppInstance stop does not automatically define Job terminal outcome.
 
@@ -482,6 +630,11 @@ RuntimeHost operation outcome does not automatically define Job terminal
 outcome.
 
 Window finalization does not automatically define Job terminal outcome.
+
+Artifact/export creation does not automatically define Job terminal outcome.
+
+Replay, Resume, or Retry workflow outcome does not automatically define prior
+Job terminal outcome.
 
 PackManager operation outcome does not automatically define Job terminal
 outcome.
@@ -493,10 +646,28 @@ WATCH ITEM: CONCRETE RESULT / ERROR / ENVELOPE
 ==============================================
 
 Later concrete result/error/envelope specs must not smuggle partial output,
-diagnostic metadata, cancellation metadata, timeout metadata, or supersession
-metadata into "result" in a way that weakens the rule:
+diagnostic metadata, cancellation metadata, timeout metadata, supersession
+metadata, artifact metadata, comparison metadata, or workflow metadata into
+"result" in a way that weakens the rule:
 
     result = successful result only
+
+
+WATCH ITEM: RETRY / RESUME WORDING
+==================================
+
+DA-19 source uses retry and resumed wording.
+
+Preserve:
+
+    - Retry is new work under DA-26
+    - Retry does not reuse the previous jobId
+    - Retry may reference earlier Job evidence but does not reopen earlier Job
+      lifecycle
+    - Job "resumed" means resumed / continued from a Job pause or control
+      condition
+    - Job "resumed" does not mean DA-26 Resume after SafePointWindow restoration
+    - closed Jobs are not restarted
 
 
 WATCH ITEM: CONCRETE RPC / WEBSOCKET
@@ -523,9 +694,11 @@ Debugger breakpoint behavior must not imply Job result.
 Debugger safe-point pause is not Job Succeeded, Failed, Cancelled, TimedOut, or
 Superseded.
 
+Debugger resume / continue from pause is not DA-26 Resume.
 
-WATCH ITEM: WINDOW SEMANTICS
-============================
+
+WATCH ITEM: WINDOW AND ARTIFACT SEMANTICS
+=========================================
 
 DA-08 should preserve Job outcome / Window finalization separation.
 
@@ -535,6 +708,13 @@ SafePointWindow creation is not Job Succeeded by default.
 
 AbortedWindow creation is not Job Failed, Cancelled, TimedOut, or Superseded by
 default.
+
+DA-25 should preserve that WindowManifest, WindowExport, Minimal Audit Bundle,
+optional digest, partial export, and missing-material semantics do not redefine
+Job lifecycle.
+
+DA-26 should preserve that Replay, Resume, Retry, comparison, and audit workflow
+semantics do not redefine prior Job lifecycle.
 
 
 REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-19 CONTENT
@@ -563,6 +743,12 @@ Job-boundary guardrails:
 
     Job identity is not result payload identity.
 
+    Job identity is not Window identity.
+
+    Job identity is not artifact/export identity.
+
+    Job identity is not Replay / Resume / Retry workflow identity.
+
     Job lifecycle is not underlying execution lifecycle.
 
     Job lifecycle is not AppInstance lifecycle.
@@ -571,11 +757,19 @@ Job-boundary guardrails:
 
     Job lifecycle is not RuntimeHost lifecycle.
 
+    Job lifecycle is not Replay / Resume / Retry workflow lifecycle.
+
     Job terminal outcome is not committed-state truth by itself.
 
     Job terminal outcome is not OrchestrationUnit terminal outcome by default.
 
     Job terminal outcome is not Window finalization by default.
+
+    Job terminal outcome is not artifact/export authority by default.
+
+    Job terminal outcome is not ComparisonResult.
+
+    Job terminal outcome is not DA-26 Replay, Resume, or Retry by default.
 
     Job result exists only for Succeeded.
 
@@ -609,6 +803,12 @@ Job-boundary guardrails:
 
     Transaction commit/abort is not controlled by Job terminal state.
 
+    Retry is new work.
+
+    Retry does not reuse the previous jobId.
+
+    Job resume / continue from pause is not DA-26 Resume.
+
 Owning-document guardrails:
 
     DA-03 owns trace substrate, retention, loss, trace DAG, and span semantics.
@@ -637,6 +837,13 @@ Owning-document guardrails:
     DA-24 owns OrchestrationUnit lifecycle, mutation-authority ownership, and
     execution-authority coordination.
 
+    DA-25 owns Window artifacts, WindowManifests, WindowExports, Minimal Audit
+    Bundles, optional digest representation, partial export, missing material,
+    and offline inspection artifact semantics.
+
+    DA-26 owns ComparisonResult, equality modes, Replay, Resume, Retry, and
+    audit workflow semantics.
+
     DA-27 owns adapter lifecycle, trust, isolation, failure, disconnect, and
     adapter-domain trace semantics.
 
@@ -654,7 +861,8 @@ Local rewrite rule:
     DA-19 should not define their detailed behavior.
 
     DA-19 should remain the Job lifecycle, long-running work, cancellation,
-    timeout, supersession, progress, and Job-domain trace document.
+    timeout, supersession, progress, pause-at-safe-point, execution-stop, and
+    Job-domain trace document.
 
 
 CURRENT FINAL RECOMMENDATION
@@ -664,27 +872,33 @@ Keep DA-19.
 
 No heavy rewrite is recommended.
 
-Preserve:
+Recommended future edits:
 
-    - Job as observable lifecycle handle, not execution primitive
-    - Job / OrchestrationUnit / Transaction separation
-    - final and exclusive terminal states
-    - result only for Succeeded
-    - progress as observational evidence
-    - cancellation request / outcome / stop-attempt split
-    - Job timeout versus transport timeout
-    - Superseded as terminal non-error outcome
-    - late completion safety rule
-    - Job-domain trace ownership
-    - RPC / transport / Job separation
-    - optional and mediated Capability / Job relation
-    - Job separation from AppInstance, adapter, RuntimeHost, Window,
-      OrchestrationUnit, PackManager, and committed-state outcomes
+    - add or preserve compact Job lifecycle stop-line
+    - update Retry wording now that DA-26 exists:
+      Retry is new work and does not reuse the previous jobId
+    - clarify Job resume / continue from pause so it does not imply DA-26 Resume
+    - preserve Job as observable lifecycle handle, not execution primitive
+    - preserve Job / OrchestrationUnit / Transaction separation
+    - preserve final and exclusive terminal states
+    - preserve result only for Succeeded
+    - preserve progress as observational evidence
+    - preserve cancellation request / outcome / stop-attempt split
+    - preserve Job timeout versus transport timeout
+    - preserve Superseded as terminal non-error outcome
+    - preserve late completion safety rule
+    - preserve Job-domain trace ownership
+    - preserve RPC / transport / Job separation
+    - preserve optional and mediated Capability / Job relation
+    - preserve Job separation from AppInstance, adapter, RuntimeHost, Window,
+      OrchestrationUnit, PackManager, artifact/export, Replay, Resume, Retry,
+      comparison, audit-workflow, and committed-state outcomes
 
 Do not expand DA-19 into detailed trace substrate, committed-state,
 transaction, Window, activation, capability, permission, decision persistence,
-debugger UI, AppInstance, RPC, transport, adapter lifecycle, RuntimeHost, or
-PackManager semantics.
+debugger UI, AppInstance, RPC, transport, adapter lifecycle, RuntimeHost,
+PackManager, artifact/export, comparison, Replay, Resume, Retry, or audit
+workflow semantics.
 
 Main future watch item:
 
@@ -694,6 +908,6 @@ Main future watch item:
 --- doc-meta ---
 DOC_ID: REWRITE-DA-19
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-19_RECOMMENDATION.txt
-DOC_REV: 5
-DOC_GIT: bc9945d
+DOC_REV: 6
+DOC_GIT: 976b4f7
 ----------------
