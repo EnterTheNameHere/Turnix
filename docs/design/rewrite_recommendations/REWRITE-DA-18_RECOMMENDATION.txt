@@ -1,0 +1,1078 @@
+TURNIX DV3 AUDIT NOTE
+=====================
+
+Source file:
+    docs/design/DA-18_DEBUGGING_INSPECTION_AND_BREAKPOINTS.txt
+
+Branch:
+    Dv3
+
+Loaded file metadata:
+    DOC_REV: 18
+    DOC_GIT: d2b2648
+    GitHub blob SHA seen by assistant:
+        46c1a3a5f4c7281450975aba63d58427f93f7d7d
+
+Audit note status:
+    First-pass Dv3 architecture rewrite recommendation.
+    Action-focused format under the compressed rewrite-recommendation rule.
+
+Audit scope:
+    This note audits architectural meaning, doctrine, and direction.
+    It does not audit formatting unless formatting/structure affects meaning,
+    machine interpretation, rule priority, or human usability as reference.
+
+Important excluded source:
+    AI_WORKFLOW_BOOTSTRAP.txt was intentionally not read.
+    It is part of the workflow system being audited separately and should not
+    bias this architecture pass.
+
+
+SUMMARY
+=======
+
+DA-18 is strong and Dv3-compatible.
+
+Keep it as the debugging, semantic inspection, breakpoint, manual pause,
+apply-at-safe-point, debugger mutation, debugger undo/redo, and
+debugger-domain trace document.
+
+Preserve the central rule:
+
+    Debugging in Turnix is semantic, intentional, observable, scoped, and
+    mediated.
+
+    Debugging operates on Turnix concepts first, not on arbitrary language
+    runtime internals as the primary model.
+
+DA-18 must not redefine:
+
+    - trace substrate
+    - committed-state truth
+    - transaction semantics
+    - Window finalization
+    - activation lifecycle
+    - decision and policy handling
+    - Job lifecycle
+    - OrchestrationUnit lifecycle
+    - AppInstance lifecycle
+    - RPC/channel/transport semantics
+    - frontend/debugger UI semantics
+    - adapter lifecycle
+    - RuntimeHost authority
+
+
+CURRENT CLASSIFICATION
+======================
+
+KEEP WITH SMALL CROSS-DOCUMENT REFERENCE / SAFE-POINT ALIGNMENT WATCH
+
+DA-18 should not be rewritten heavily.
+
+Future edits should preserve:
+
+    - semantic breakpoints rather than arbitrary code-line breakpoints
+    - memory breakpoints are committed-mutation-only by default
+    - staged mutation observation must be explicit
+    - child transaction commit into parent is not committed mutation
+    - only outermost transaction commit creates authoritative committed-mutation
+      events
+    - breakpoints pause triggering execution and mutation-capable execution for
+      owning AppInstance
+    - breakpoints do not mutate state, auto-resume, alter execution order,
+      cancel Jobs, or supersede Jobs by default
+    - live inspection is read-only by default
+    - debugger actions go through Turnix-mediated RPC, capability, lifecycle,
+      policy, transaction, and persistence paths
+    - controlled debugger mutation is explicit, traceable, and subject to
+      normal authority rules
+    - apply-at-safe-point mutation is deterministic and trace-visible
+    - manual pause is non-terminal and does not silently cancel or supersede Jobs
+    - debugger-originated Job control remains governed by DA-17 and DA-19
+    - debugger UI does not own debugger semantics
+    - undo of authoritative state is new explicit mutation
+    - redo history is debugger-local, ephemeral, and non-authoritative
+    - debugger disconnect outcome is policy-governed, trace-visible, and cannot
+      deadlock
+
+
+ACTUAL DA-18 CHANGE 1: WINDOW CROSS-REFERENCE SHOULD BE UPDATED
+===============================================================
+
+DA-18 currently says it does not define:
+
+    authoritative committed state, transactions, or windows (see DA-04)
+
+Recommended future rewrite:
+
+    DA-18 does not define:
+        - authoritative committed state or transaction semantics (see DA-04)
+        - Window, SafePointWindow, ActiveWindow, AbortedWindow, or Window
+          finalization semantics (see DA-08)
+
+Reason:
+
+    DA-04 owns committed-state truth and transaction semantics.
+
+    DA-08 owns Window kinds, Window ordering, SafePointWindow, ActiveWindow,
+    AbortedWindow, Window finalization, and Window-domain trace obligations.
+
+This is a source-level cross-document correction, not a conceptual rewrite.
+
+
+ACTUAL DA-18 CHANGE 2: ADD MODERN UPSTREAM / STOP-LINE REFERENCES
+=================================================================
+
+DA-18 predates several later Dv3 documents and should be cross-aligned.
+
+Recommended future rewrite should include or acknowledge stop-lines for:
+
+    - DA-08 Window finalization and SafePointWindow creation
+    - DA-20 AppInstance lifecycle and active-region semantics
+    - DA-21 RPC/channel/transport semantics
+    - DA-22 debugger UI boundaries
+    - DA-23 execution adapter authority boundaries
+    - DA-24 OrchestrationUnit lifecycle and mutation authority
+    - DA-27 adapter lifecycle, trust, isolation, and disconnect semantics
+    - DA-28 RuntimeHost command-surface and lifecycle semantics
+
+This does not require expanding DA-18.
+
+DA-18 should name these documents only where needed to prevent debugger wording
+from redefining their domains.
+
+
+ACTUAL DA-18 CHANGE 3: NUMBERING CLEANUP
+========================================
+
+DA-18 has duplicate local section numbering under section 03:
+
+    03.1 PIPELINE-STAGE BREAKPOINTS
+    03.2 MEMORY BREAKPOINTS
+    03.2.1 MEMORY BREAKPOINTS AND TRANSACTIONAL STAGING
+    03.3 CAPABILITY BREAKPOINTS
+
+This is mostly formatting, but it affects stable reference usability.
+
+Recommended future rewrite:
+
+    Normalize subsection numbering without changing semantics.
+
+Do not treat the numbering cleanup as architecture change.
+
+
+PRESERVATION RULE 1: DEBUGGING IS SEMANTIC, NOT LANGUAGE-INTERNAL FIRST
+======================================================================
+
+Preserve the debugging model.
+
+Debugging in Turnix is not primarily:
+
+    - print-statement debugging
+    - ad-hoc logging
+    - attaching debuggers to arbitrary threads
+
+Debugging in Turnix is:
+
+    - intentional
+    - observable
+    - reversible where the surrounding state model allows reversal
+    - scoped
+
+Turnix debugging operates on Turnix concepts rather than language internals as
+the primary debugging surface.
+
+Primary debugging targets include:
+
+    - packs
+    - activation
+    - pipelines
+    - memory layers
+    - capabilities
+    - Jobs when Jobs exist
+
+Python frames or JavaScript call stacks may appear as contextual information.
+
+They are not the primary debugging model.
+
+
+PRESERVATION RULE 2: BREAKPOINTS ARE SEMANTIC
+=============================================
+
+Preserve semantic breakpoint classes.
+
+Turnix supports semantic breakpoints rather than code-line breakpoints.
+
+Supported semantic breakpoint classes include:
+
+    - pipeline-stage breakpoints
+    - memory breakpoints
+    - capability breakpoints
+    - Job-scoped breakpoints when Jobs exist
+
+Pipeline-stage breakpoint:
+
+    - pauses execution when a pipeline reaches a specific stage
+    - may inspect prompt, memory composition, or transformations
+    - may trigger by stageId, pipelineId, and optional condition
+
+Memory breakpoint:
+
+    - pauses execution when memory changes according to configured trigger
+    - may trigger by memory key, memory layer, change type, and optional value
+      predicate
+
+Capability breakpoint:
+
+    - pauses execution before or after a capability call according to configured
+      trigger
+    - may observe capability invocations that later create or attach to Jobs
+    - does not own Job lifecycle when a Job is created or attached
+
+
+PRESERVATION RULE 3: MEMORY BREAKPOINTS ALIGN WITH DA-04 TRANSACTION AUTHORITY
+==============================================================================
+
+Preserve transaction-aware memory breakpoint semantics.
+
+Memory breakpoints observe state transitions rather than storage mechanics.
+
+Definitions:
+
+    staged mutation:
+        write into a transactional layer
+
+    committed mutation:
+        write that becomes visible in a committed authoritative memory layer
+        after successful commit
+
+    aborted mutation:
+        staged mutation discarded during abort
+
+By default, memory breakpoints trigger on committed mutations only.
+
+Writing into a transactional layer does not trigger a memory breakpoint by
+default.
+
+Aborting a transaction does not trigger a memory breakpoint by default.
+
+Only the moment a value becomes authoritative is breakpoint-visible by default.
+
+Memory breakpoints may explicitly observe staged mutations.
+
+If staged observation is enabled, a breakpoint may specify:
+
+    - observeStaged = true
+    - observeCommitted = true or false
+
+Every memory-breakpoint hit is classified as exactly one of:
+
+    - StagedMutation
+    - CommittedMutation
+
+Breakpoints do not fire twice for the same mutation phase.
+
+If both staged and committed mutation phases are observed, the staged hit and
+committed hit are distinct events.
+
+Those distinct events are trace-linked to the same mutation lineage.
+
+Nested transactions inherit breakpoint semantics unless explicitly scoped
+otherwise.
+
+A child transaction commit into a parent transaction is not treated as a
+committed mutation.
+
+Only the outermost transaction commit produces authoritative
+committed-mutation events.
+
+This preserves determinism and aligns debugger semantics with DA-04.
+
+
+PRESERVATION RULE 4: BREAKPOINT PAUSE DOES NOT MUTATE OR DECIDE JOB OUTCOME
+===========================================================================
+
+Preserve breakpoint behavior.
+
+When a breakpoint triggers:
+
+    - execution of the triggering unit pauses
+    - mutation-capable execution for the owning AppInstance pauses
+    - other AppInstances may continue if the runtime supports that
+    - non-mutating Kernel activity may continue unless configured otherwise
+    - debugger tooling is notified
+    - relevant state becomes inspectable
+
+Breakpoints do not:
+
+    - auto-resume silently
+    - alter execution order
+    - mutate state by default
+    - silently cancel Jobs
+    - silently supersede Jobs
+
+Breakpoint pause is not a Job terminal outcome.
+
+Breakpoint pause is not AppInstance stop.
+
+Breakpoint pause is not Window finalization.
+
+Breakpoint pause is not RuntimeHost failure.
+
+
+PRESERVATION RULE 5: LIVE INSPECTION IS READ-ONLY BY DEFAULT
+============================================================
+
+Preserve live debugging without pause.
+
+Debugger inspection may be used while Turnix is running normally.
+
+Debugger inspection does not require:
+
+    - a breakpoint hit
+    - Turnix to be paused
+
+A user may open inspectors, browse state, and request read-only views at any
+time.
+
+Such inspection is traceable and marked as debugger or tooling activity.
+
+Inspection is read-only by default.
+
+Inspectable objects may include:
+
+    - PackDescriptors
+    - activation state
+    - memory layers
+    - pipeline objects
+    - capability registry
+    - services registry
+    - Jobs when Jobs exist
+
+Inspection surfaces do not silently collapse committed and staged state into one
+undifferentiated view.
+
+Inspecting transactional state does not turn staged values into authoritative
+state.
+
+Inspecting committed-state history does not bypass the committed-state
+authority model.
+
+Inspecting a Job does not grant direct access to the underlying execution
+mechanism.
+
+
+PRESERVATION RULE 6: DEBUGGER ACTIONS DO NOT BYPASS ORCHESTRATION
+==================================================================
+
+Preserve debugger action authority boundaries.
+
+Debugger actions execute through:
+
+    - Turnix-controlled RPC
+    - capabilities
+    - equivalent Turnix-mediated interfaces
+
+Debugger tooling does not bypass Turnix orchestration.
+
+Debugger tooling does not access raw filesystem input or output directly as a
+bypass path.
+
+Persistence-affecting debugger actions execute through the same authority path
+as normal runtime actions.
+
+Debugger-originated Job control actions execute through Turnix lifecycle and
+policy surfaces.
+
+Debugger tooling does not mutate Job terminal state directly.
+
+Debugger tooling does not become Kernel authority.
+
+Debugger tooling does not become persistence authority.
+
+Debugger tooling does not become committed-state authority.
+
+
+PRESERVATION RULE 7: CONTROLLED MUTATION IS EXPLICIT, STAGED, TRACEABLE
+=======================================================================
+
+Preserve controlled mutation semantics.
+
+Explicit mutation is allowed only through:
+
+    - debugger actions
+    - explicit user confirmation where required
+    - trace logging
+
+Examples include:
+
+    - editing a memory value
+    - disabling or modifying a breakpoint
+    - forcing resume or abort of a debugger pause scope
+
+Every debugger-initiated mutation emits trace evidence.
+
+Debugger tooling may create its own temporary transactional overlay for
+controlled staged edits.
+
+A debugger-created temporary transactional overlay remains subject to the same:
+
+    - authority rules
+    - scope rules
+    - ownership rules
+    - trace rules
+    - transaction rules
+
+that govern other transactional mutation.
+
+A debugger-created temporary transactional overlay does not become authoritative
+merely because the debugger created it.
+
+If debugger tooling uses such an overlay, the overlay remains distinct from
+committed state until normal commit rules make the mutation authoritative.
+
+Job lifecycle control is not controlled mutation of committed state.
+
+Job lifecycle control remains constrained by DA-19 and policy handling when
+policy participates.
+
+
+PRESERVATION RULE 8: MUTATION WHILE RUNNING REQUIRES PAUSE OR SAFE POINT
+========================================================================
+
+Preserve mutation-while-running constraints.
+
+Controlled mutation may be performed while Turnix is active and not paused.
+
+Rules:
+
+    - mutation is explicit user action in debugger tooling
+    - mutation is traceable and labeled as debugger-initiated
+    - mutation obeys the same permission, ownership, and scope rules as normal
+      runtime actions
+
+If a mutation affects data that active execution units may read concurrently,
+the debugger either:
+
+    - requires a manual pause
+    - enforces deterministic apply-at-safe-point semantics
+
+Debugger mutation while running must not become hidden concurrent mutation.
+
+Debugger mutation while running must not bypass DA-04 transaction and commit
+rules.
+
+
+PRESERVATION RULE 9: MANUAL PAUSE IS DETERMINISTIC AND NON-TERMINAL
+===================================================================
+
+Preserve manual pause semantics.
+
+Turnix may support manual pausing even when no breakpoint is hit.
+
+Manual pause exists to:
+
+    - allow deterministic inspection and mutation
+    - prevent important work from being voided by cancellation
+
+Manual pause is deterministic.
+
+Manual pause does not silently cancel in-flight work.
+
+Manual pause does not silently supersede in-flight work.
+
+If pausing cannot be achieved safely, Turnix refuses the pause request with an
+explicit, traceable reason.
+
+Manual pause may operate by enforcing quiescence at defined safe points such as:
+
+    - between pipeline stages
+    - between capability calls
+    - before commit points for persistence
+
+Manual pause of a Job remains non-terminal unless a later explicit lifecycle or
+policy outcome changes the Job state under DA-19.
+
+
+PRESERVATION RULE 10: APPLY-AT-SAFE-POINT IS DETERMINISTIC
+==========================================================
+
+Preserve apply-at-safe-point semantics.
+
+When Turnix is not paused, debugger-initiated mutations may be staged and
+applied only at a deterministic safe point.
+
+Rules:
+
+    - staging is traceable
+    - the exact safe point where the mutation becomes visible is traceable
+    - staged mutations do not partially apply
+    - if the safe point is never reached, the staged mutation is discarded
+      deterministically and traced
+
+Debugger tooling may use a temporary transactional overlay as the staging
+vehicle for apply-at-safe-point mutation.
+
+If such an overlay is used, the overlay remains debugger-owned staging state
+until the mutation is applied or discarded according to DA-18 and DA-04.
+
+Discard of a debugger-staged overlay is explicit and trace-visible.
+
+Application of a debugger-staged overlay does not bypass normal:
+
+    - transaction rules
+    - ownership rules
+    - scope rules
+    - authority rules
+
+
+PRESERVATION RULE 11: UNDO IS NEW EXPLICIT MUTATION
+==================================================
+
+Preserve undo/redo semantics.
+
+Debugger tooling may support undo of debugger-initiated changes within the
+boundaries defined by the Turnix state model.
+
+Undo that affects authoritative state operates on committed revisions.
+
+Undo that affects authoritative state is performed as a new explicit
+debugger-initiated mutation.
+
+Undo that affects authoritative state is trace-visible.
+
+Undo does not bypass:
+
+    - transaction rules
+    - permission rules
+    - ownership rules
+    - scope rules
+    - safe-point rules
+
+Redo history is debugger-local, ephemeral, and non-authoritative.
+
+Redo history does not become committed state merely because debugger tooling
+remembers it.
+
+Redo history is discarded deterministically when a new committed revision makes
+the stored redo path no longer valid.
+
+Debugger tooling does not present ephemeral redo state as if it were
+authoritative system history.
+
+
+PRESERVATION RULE 12: DEBUGGER ACTIONS DO NOT CREATE UNTRACED GAPS
+===================================================================
+
+Preserve debugger trace obligations.
+
+Debugger tooling does not create untraced gaps for debugger actions that:
+
+    - inspect Turnix-managed state
+    - pause Turnix-managed state
+    - resume Turnix-managed state
+    - abort Turnix-managed state
+    - stage Turnix-managed state
+    - apply Turnix-managed state
+    - discard Turnix-managed state
+    - mutate Turnix-managed state
+
+Debugger actions that affect trace evidence, including export, prune, clear, or
+retention-policy changes, remain trace-visible.
+
+Debugger-originated trace-affecting actions are marked as debugger-initiated
+through trace attributes.
+
+Trace retention and loss-evidence rules apply equally to debugger-initiated
+trace-affecting actions.
+
+DA-03 defines the tracing substrate used to represent debugger trace evidence.
+
+DA-18 defines debugger-specific trace obligations.
+
+
+PRESERVATION RULE 13: DEBUGGER UI DOES NOT OWN DEBUGGER SEMANTICS
+=================================================================
+
+Preserve debugger UI boundaries.
+
+Debugger user interfaces may:
+
+    - subscribe via RPC
+    - receive breakpoint-hit events
+    - show causal context
+    - allow resume, step, abort of a debugger pause scope, undo, or redo where
+      supported
+    - request Job pause-at-safe-point, cancellation, or supersession where
+      supported
+
+Debugger user interfaces are optional but supported.
+
+Debugger user interfaces do not present Superseded Job outcomes as failures.
+
+Debugger user interfaces do not present paused-at-safe-point Jobs as terminal.
+
+DA-22 owns debugger UI as frontend surface.
+
+DA-18 owns debugger inspection, breakpoint, pause, mutation, disconnect, and
+Job-control semantics.
+
+
+PRESERVATION RULE 14: STEP MODES DO NOT REDEFINE JOB LIFECYCLE
+==============================================================
+
+Preserve step-mode boundaries.
+
+Supported step modes include:
+
+    - Resume
+    - Step over, meaning the next stage or memory change
+    - Abort, meaning fail the current debugger-controlled execution scope
+
+Unsupported step modes include:
+
+    - instruction-level stepping
+    - time travel as a runtime debugger mode in DA-18
+
+Step modes do not redefine Job lifecycle states.
+
+If step or abort actions affect a Job, the resulting Job lifecycle outcome
+remains governed by DA-19.
+
+Abort of a debugger-controlled execution scope is not automatically the same as
+Job cancellation, Job failure, AppInstance failure, or Window abort unless the
+owning lifecycle document and policy define that outcome.
+
+
+PRESERVATION RULE 15: JOB DEBUGGING IS JOB-AWARE BUT NOT JOB-AUTHORITY
+======================================================================
+
+Preserve Job-aware debugger boundaries.
+
+Turnix may represent long-running work as explicit Jobs.
+
+If Jobs exist:
+
+    - Jobs are observable through status, owner, progress, terminal outcome,
+      and causal trace links
+    - Jobs are controlled only through Turnix lifecycle, orchestration, or policy
+      surfaces
+    - Job lifecycle semantics remain owned by DA-19
+
+Debugger interaction with Jobs may include requests for:
+
+    - pause-at-safe-point for a Job
+    - breakpoint-at-safe-point for a Job
+    - resume of a paused Job
+    - cancellation request for a Job
+    - supersession request for a Job where supported
+
+Manual pause does not implicitly cancel Jobs.
+
+Manual pause does not implicitly supersede Jobs.
+
+Safe-point pausing or breakpointing of Jobs occurs at boundaries such as:
+
+    - between pipeline stages
+    - before or after capability boundaries
+    - before commit points for persistence
+
+If a Job cannot reach a safe point:
+
+    - that fact is surfaced explicitly
+    - no silent cancellation is permitted
+    - no silent supersession is permitted
+
+A paused-at-safe-point Job remains non-terminal.
+
+Debugger-originated cancellation, supersession, continuation, or hold behavior
+may require work-lifecycle policy handling under DA-17.
+
+The debugger does not directly write a Job terminal state.
+
+Job terminal outcomes caused or requested through debugger action are recorded
+through Job lifecycle evidence owned by DA-19.
+
+
+PRESERVATION RULE 16: BREAKPOINT SCOPING IS EXPLICIT
+====================================================
+
+Preserve breakpoint scoping rules.
+
+Breakpoints may be scoped to:
+
+    - global
+    - AppInstance
+    - view
+    - pack
+    - pipeline
+    - Job when Jobs exist
+
+Unscoped breakpoints are discouraged.
+
+A Job-scoped breakpoint does not create a Job.
+
+A Job-scoped breakpoint applies only to the Job lifecycle or work region
+selected by the debugger configuration.
+
+If breakpoint scope crosses AppInstance, View, pack, pipeline, Job, or
+OrchestrationUnit boundaries, the owning identity and authority rules still
+apply.
+
+A breakpoint scope is not authority by itself.
+
+
+PRESERVATION RULE 17: DEVELOPMENT AVAILABILITY DOES NOT BYPASS AUTHORITY
+========================================================================
+
+Preserve development vs production boundary.
+
+In production:
+
+    - breakpoints are disabled by default
+    - inspection is limited
+    - mutation is disallowed unless explicitly enabled
+
+In development:
+
+    - all debugging features in DA-18 are available
+
+Development availability does not allow debugger tooling to bypass:
+
+    - Job lifecycle boundaries
+    - policy boundaries
+    - transaction boundaries
+    - capability authority boundaries
+    - persistence authority boundaries
+    - adapter boundaries
+    - AppInstance boundaries
+    - RuntimeHost boundaries
+
+
+PRESERVATION RULE 18: DEBUGGER DISCONNECT OUTCOME IS POLICY-GOVERNED
+====================================================================
+
+Preserve debugger disconnect failure-mode semantics.
+
+If the debugger disconnects:
+
+    - execution resumes, cancels, supersedes, aborts the affected
+      debugger-controlled scope, or refuses to hold according to policy
+    - the chosen outcome is trace-visible
+    - deadlock is not allowed
+
+Debugger disconnect outcome trace evidence distinguishes:
+
+    - execution resumed after debugger disconnect by policy
+    - active work cancelled, superseded, or aborted after debugger disconnect by
+      policy
+    - hold refused because holding is unsupported, unsafe, or impossible
+
+Debugger disconnect outcome trace evidence records enough context to explain:
+
+    - debugger client identity
+    - policy identity
+    - disconnect kind
+    - affected target when work is cancelled, superseded, or aborted
+    - refusal reason category when hold is refused
+
+If breakpoint logic errors:
+
+    - the breakpoint is disabled
+    - the error is trace-visible
+
+If debugger disconnect policy affects a Job, the Job lifecycle outcome remains
+governed by DA-19.
+
+If debugger disconnect policy is a work-lifecycle policy decision, the policy
+handling remains governed by DA-17.
+
+
+PRESERVATION RULE 19: DEBUGGER TRACE REASONS DO NOT DEFINE OTHER OUTCOMES
+=========================================================================
+
+Preserve debugger-domain trace reason ownership.
+
+DA-18 owns debugger-domain trace reason identifiers used for:
+
+    - debugger inspection
+    - breakpoints
+    - manual pause
+    - safe-point pause
+    - debugger disconnect outcomes
+    - debugger-initiated mutation
+
+Current debugger-domain trace reasons include:
+
+    - DebuggerConnected
+    - DebuggerDisconnected
+    - DebuggerDisconnectedResume
+    - DebuggerDisconnectedAbort
+    - DebuggerDisconnectedHoldRefused
+    - BreakpointHit
+    - BreakpointResumed
+    - ManualPauseRequested
+    - ManualPauseGranted
+    - ManualPauseRefused
+    - PauseAtSafePointRequested
+    - PauseAtSafePointApplied
+    - DebuggerInspection
+    - DebuggerMutationRequested
+    - DebuggerMutationStaged
+    - DebuggerMutationApplied
+    - DebuggerMutationDiscarded
+
+Debugger-domain trace reasons describe debugger-domain behavior only.
+
+They do not define:
+
+    - Job terminal outcome
+    - OrchestrationUnit terminal outcome
+    - Window finalization
+    - AppInstance lifecycle outcome
+    - adapter lifecycle outcome
+    - RuntimeHost lifecycle outcome
+    - committed-state mutation outcome
+
+DA-03 defines trace event structure, trace DAG semantics, span mechanics, and
+trace retention semantics.
+
+DA-17 defines work-lifecycle policy trace obligations when policy participates.
+
+DA-19 defines Job lifecycle trace obligations when debugger-originated control
+affects a Job.
+
+
+WATCH ITEM: SAFE-POINT SEMANTICS AND DA-08 ALIGNMENT
+====================================================
+
+DA-18 uses safe-point language for manual pause, apply-at-safe-point mutation,
+and Job pause-at-safe-point behavior.
+
+Future rewrite should align this with DA-08 without collapsing the domains.
+
+Preserve:
+
+    - debugger safe point is an execution/mutation safety boundary
+    - SafePointWindow is a Window finalization committed boundary
+    - debugger safe point does not automatically create a SafePointWindow
+    - SafePointWindow AtQuiescence does not automatically imply debugger pause
+    - debugger pause-at-safe-point does not automatically imply Window
+      finalization
+    - Job pause-at-safe-point remains non-terminal
+
+When debugger safe-point behavior affects Window creation, DA-08 governs Window
+finalization and SafePointWindow creation semantics.
+
+
+WATCH ITEM: ORCHESTRATIONUNIT ALIGNMENT
+=======================================
+
+DA-18 uses execution-unit and orchestration language but predates DA-24.
+
+Future rewrite should explicitly align with DA-24.
+
+Preserve:
+
+    - debugger pause may affect a triggering unit or mutation-capable execution
+      region
+    - OrchestrationUnit lifecycle remains owned by DA-24
+    - debugger pause does not directly define OrchestrationUnit terminal outcome
+    - debugger mutation still follows OrchestrationUnit, policy, transaction, and
+      commit boundaries where mutation authority is involved
+
+
+WATCH ITEM: APPINSTANCE ACTIVE REGION ALIGNMENT
+===============================================
+
+DA-18 mentions owning AppInstance pause behavior.
+
+Future rewrite should align with DA-20.
+
+Preserve:
+
+    - AppInstance lifecycle remains DA-20
+    - AppInstance active-region semantics remain DA-20
+    - debugger pause does not stop or close AppInstance by itself
+    - debugger disconnect does not stop or close AppInstance by itself
+    - debugger mutation does not make adapter-executed code or debugger UI own
+      AppInstance state
+
+
+WATCH ITEM: DEBUGGER UI / FRONTEND ALIGNMENT
+============================================
+
+DA-18 owns debugger semantics.
+
+DA-22 owns debugger UI as frontend surface.
+
+Future rewrite should preserve:
+
+    - debugger UI does not own debugger semantics
+    - debugger UI requests actions through Turnix-mediated channels
+    - debugger UI does not directly write committed state
+    - debugger UI does not directly write Job terminal state
+    - debugger UI does not bypass policy decisions
+    - debugger UI does not bypass adapter boundaries
+
+
+WATCH ITEM: ADVANCED DEBUGGING FEATURES
+=======================================
+
+DA-18 leaves these open:
+
+    - conditional breakpoint language
+    - snapshot or restore state
+    - time-travel debugging
+    - replay-from-trace tooling
+    - exact debugger UI affordances for Job lifecycle control
+
+Future documents must not introduce these by weakening current authority
+boundaries.
+
+Preserve:
+
+    - time travel is not supported as runtime debugger mode in DA-18
+    - replay-from-trace tooling must not treat trace as committed-state truth
+    - snapshot/restore must not bypass DA-04, DA-08, DA-25, or DA-26
+    - conditional breakpoint language must not become arbitrary code execution
+      with backend authority
+
+
+WATCH ITEM: TRACE WORDING
+=========================
+
+Follow the DA-03 cross-document trace wording check.
+
+Debugger trace requirements are debugger-domain emission obligations.
+
+DA-03 owns trace substrate, retention, loss, event structure, trace DAG
+semantics, span mechanics, and trace storage semantics.
+
+Do not let debugger trace wording imply that trace evidence is committed state
+or that trace persistence is guaranteed forever.
+
+Preserve:
+
+    Debugger actions are trace-visible where required.
+
+    Trace retention and loss rules still follow DA-03.
+
+
+REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-18 CONTENT
+=========================================================
+
+Use these as rewrite guardrails only.
+
+Do not turn debugger tooling into Kernel authority.
+
+Do not turn debugger tooling into committed-state authority.
+
+Do not let debugger tooling bypass OrchestrationUnit boundaries.
+
+Do not let debugger tooling bypass transaction and commit boundaries.
+
+Do not let debugger tooling bypass policy decisions.
+
+Do not let debugger tooling bypass capability mediation.
+
+Do not let debugger tooling bypass adapter boundaries.
+
+Do not let debugger tooling bypass persistence authority.
+
+Do not let debugger tooling write raw filesystem input/output directly as a
+Turnix authority path.
+
+Do not let debugger UI own debugger semantics.
+
+Do not let debugger UI directly write committed state.
+
+Do not let debugger UI directly write Job terminal state.
+
+Do not treat debugger-created transactional overlays as authoritative merely
+because the debugger created them.
+
+Do not treat staged debugger mutations as committed state.
+
+Do not apply debugger-staged mutation partially.
+
+Do not hide discarded debugger-staged mutation.
+
+Do not treat undo as rollback magic; undo that affects authoritative state is
+new explicit mutation.
+
+Do not treat redo history as authoritative system history.
+
+Do not silently cancel Jobs from debugger tooling.
+
+Do not silently supersede Jobs from debugger tooling.
+
+Do not directly write Job terminal state from debugger tooling.
+
+Do not treat paused-at-safe-point Jobs as terminal.
+
+Do not present Superseded as failure.
+
+Do not let manual pause cancel or supersede in-flight work silently.
+
+Do not let debugger disconnect create deadlock.
+
+Do not treat debugger disconnect policy as Job lifecycle authority; DA-19 owns
+Job lifecycle outcome.
+
+Do not treat debugger disconnect policy as work-lifecycle policy authority;
+DA-17 owns policy handling.
+
+Do not treat debugger safe point as SafePointWindow by default.
+
+Do not let debugger pause-at-safe-point automatically create Window
+finalization.
+
+Do not let trace-backed debugger behavior imply trace is committed state.
+
+Do not introduce arbitrary Python debugger injection.
+
+Do not introduce JavaScript eval debugging.
+
+Do not modify pack code at runtime.
+
+Do not hot-patch logic without reload.
+
+Do not introduce time-travel runtime debugging under DA-18 without separate
+architecture.
+
+
+CURRENT FINAL RECOMMENDATION
+============================
+
+Keep DA-18.
+
+No heavy rewrite is recommended.
+
+Recommended future edits:
+
+    - update the "does NOT define" section so Window semantics point to DA-08,
+      not DA-04
+    - add modern stop-line references to DA-08, DA-20, DA-21, DA-22, DA-23,
+      DA-24, DA-27, and DA-28 where needed
+    - normalize duplicate local subsection numbering under section 03
+    - keep DA-18 focused on semantic breakpoints, inspection, controlled
+      mutation, manual pause, safe-point application, debugger undo/redo,
+      debugger-originated Job control requests, failure modes, and
+      debugger-domain trace obligations
+    - preserve debugger mutation as explicit, staged, trace-visible, and
+      governed by normal authority boundaries
+    - preserve debugger safe-point behavior as execution/mutation safety, not
+      Window finalization by default
+    - preserve debugger-originated Job control as explicit, trace-visible, and
+      governed by DA-17 and DA-19
+    - leave conditional breakpoint language, snapshot/restore, time-travel,
+      replay-from-trace, and exact debugger UI affordances to later documents
+      without weakening current authority boundaries
+
+--- doc-meta ---
+DOC_ID: REWRITE-DA-18
+DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-18_RECOMMENDATION.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
