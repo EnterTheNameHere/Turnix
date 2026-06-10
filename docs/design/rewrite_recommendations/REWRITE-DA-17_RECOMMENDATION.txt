@@ -15,8 +15,7 @@ Loaded file metadata:
 
 Audit note status:
     Consolidated Dv3 architecture rewrite recommendation.
-    Action-focused revision pass for boundary compression, policy outcome
-    stop-lines, and later domain guardrail alignment.
+    Action-focused Mode 1 revision using Checkpoint 06.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -52,15 +51,29 @@ deterministically on its own.
 Decisions affecting identity, persistence, authority, safety, work lifecycle,
 or known content equivalence must remain explicit and trace-backed.
 
+Current required source-level changes:
+
+    1. Add or preserve a compact stop-line that policy does not define domain
+       outcomes.
+
+    2. Replace or clarify "replayable" wording in decision/policy traceability
+       so it does not imply DA-26 Replay semantics.
+
+    3. Preserve the DA-06 / DA-17 split:
+       DA-06 owns policy storage location and top-level persistent file
+       structure; DA-17 owns decision semantics and remembered-policy meaning.
+
 Overall recommendation:
 
-    KEEP WITH SMALL WORK-LIFECYCLE KEY / CROSS-SCOPE PROMOTION WATCH
+    KEEP WITH SMALL REPLAY-WORDING / WORK-LIFECYCLE KEY /
+    CROSS-SCOPE PROMOTION WATCH
 
 
 CURRENT CLASSIFICATION
 ======================
 
-KEEP WITH SMALL WORK-LIFECYCLE KEY / CROSS-SCOPE PROMOTION WATCH
+KEEP WITH SMALL REPLAY-WORDING / WORK-LIFECYCLE KEY /
+CROSS-SCOPE PROMOTION WATCH
 
 DA-17 should not be rewritten heavily.
 
@@ -78,9 +91,10 @@ Future edits should preserve:
     - no silent cancellation, supersession, detachment, result retention, or
       result discard
     - policy decisions do not redefine Job, RPC/transport, OrchestrationUnit,
-      AppInstance, adapter, RuntimeHost, Window, PackManager, or committed-state
-      outcomes
+      AppInstance, adapter, RuntimeHost, Window, PackManager, Replay, Resume,
+      Retry, artifact/export, audit-workflow, or committed-state outcomes
     - trace-backed explanation only
+    - no use of "replayable" that implies DA-26 Replay semantics
 
 
 ACTUAL DA-17 CHANGE 1: POLICY DOES NOT DEFINE DOMAIN OUTCOME
@@ -98,7 +112,8 @@ Recommended source-level boundary:
     Policy does not directly define Job terminal states, RPC/transport outcomes,
     OrchestrationUnit terminal outcomes, AppInstance lifecycle, adapter
     lifecycle, RuntimeHost lifecycle, Window finalization, PackManager operation
-    outcomes, capability permission, or committed-state truth.
+    outcomes, Replay / Resume / Retry workflow outcomes, artifact/export
+    authority, capability permission, or committed-state truth.
 
     If a policy decision affects another domain, the owning domain defines the
     resulting domain outcome.
@@ -110,6 +125,76 @@ semantics.
 
 Detailed ownership mapping belongs in the guardrail section, not in the source
 document.
+
+
+ACTUAL DA-17 CHANGE 2: REPLACE OR CLARIFY "REPLAYABLE" WORDING
+==============================================================
+
+DA-17 currently says:
+
+    All decisions remain:
+        - traceable
+        - attributable
+        - replayable within the meaning of the governing tracing and policy
+          documents
+
+This wording is now risky because DA-26 gives Replay a formal meaning.
+
+Recommended source-level replacement:
+
+    All decisions remain:
+        - traceable
+        - attributable
+        - auditable from retained decision evidence where retained evidence
+          exists
+        - explainable from retained trace and policy records where retained
+          evidence exists
+
+Or:
+
+    All decisions remain traceable and attributable. Retained decision evidence
+    may support audit, explanation, and offline inspection, but decision
+    traceability does not imply DA-26 Replay, Resume, Retry, or deterministic
+    re-execution.
+
+Reason:
+
+    DA-17 owns decision traceability and policy explanation.
+
+    DA-26 owns Replay, Resume, Retry, comparison, and audit workflow semantics.
+
+    DA-17 should not use "replayable" unless it explicitly means DA-26 Replay,
+    which is not the intended meaning here.
+
+
+ACTUAL DA-17 CHANGE 3: POLICY STORAGE IS NOT POLICY SEMANTICS
+=============================================================
+
+DA-17 correctly references DA-06 for save/global policy storage locations.
+
+Checkpoint 06 adds a clearer boundary:
+
+    DA-06 owns policy storage location, file placement, and top-level persistent
+    config structure.
+
+    DA-17 owns decision semantics, remembered policy semantics, policy scope
+    precedence, permission policy identity, fingerprint policy identity, and
+    work-lifecycle policy behavior.
+
+Recommended source-level boundary:
+
+    Policy storage location and top-level persisted file structure are defined
+    by DA-06.
+
+    Decision meaning, remembered-policy matching, policy scope precedence,
+    permission policy keys, fingerprint policy keys, and work-lifecycle policy
+    semantics are defined by DA-17.
+
+    Storing a policy record does not by itself create a valid policy outcome
+    outside DA-17 semantics.
+
+This prevents policies.config.json from becoming hidden policy authority by
+file placement alone.
 
 
 PRESERVATION RULE 1: DECISION AUTHORITY IS KERNEL-MEDIATED
@@ -284,7 +369,49 @@ Persisted policies must remain:
     - editable through Turnix management surfaces
 
 
-PRESERVATION RULE 7: POLICY DOES NOT REDEFINE AUTHORITY
+PRESERVATION RULE 7: POLICY STORAGE IS CONFIG STORAGE, NOT POLICY MEANING
+=========================================================================
+
+Preserve the DA-06 / DA-17 split.
+
+DA-06 owns:
+
+    - policy storage location
+    - policy file placement
+    - top-level persistent config structure
+    - policies.config.json placement
+    - configuration storage mechanics
+
+DA-17 owns:
+
+    - decision semantics
+    - remembered-policy semantics
+    - policy scope precedence
+    - permission policy identity
+    - fingerprint policy identity
+    - work-lifecycle policy behavior
+    - exact matching behavior for remembered decisions
+
+Run-scoped policy is memory-only and never persisted.
+
+Persisted permission policies and fingerprint policies remain semantically
+distinct remembered-decision classes.
+
+Work-lifecycle policies remain semantically distinct from permission and
+fingerprint policies.
+
+If work-lifecycle policies are persisted, they must not be silently folded into
+permissionPolicies or fingerprintPolicies.
+
+If a future top-level policy-file section is introduced for persisted
+work-lifecycle policies, its storage shape belongs to DA-06 or an
+implementation spec constrained by DA-06 and DA-17.
+
+Storing a policy record does not by itself create a valid policy outcome outside
+the owning decision semantics.
+
+
+PRESERVATION RULE 8: POLICY DOES NOT REDEFINE AUTHORITY
 =======================================================
 
 Preserve the rule:
@@ -312,11 +439,12 @@ Policies do not:
     - silently authorize adapter execution
     - silently accept RuntimeHost command authority
     - silently grant PackManager write or repair authority
+    - silently trigger DA-26 Replay, Resume, or Retry workflow success
 
 Policy exists to reduce friction, not weaken safety or determinism.
 
 
-PRESERVATION RULE 8: PAUSES ARE SCOPED AND DO NOT IMPLY DOMAIN OUTCOMES
+PRESERVATION RULE 9: PAUSES ARE SCOPED AND DO NOT IMPLY DOMAIN OUTCOMES
 ======================================================================
 
 Preserve scoped pause behavior.
@@ -345,6 +473,8 @@ While a decision is pending:
     - no RuntimeHost operation affected by the decision may silently complete
     - no adapter execution authorization affected by the decision may silently
       proceed
+    - no Replay / Resume / Retry workflow affected by the decision may silently
+      proceed across the decision-controlled boundary
 
 A decision pause does not by itself cancel, supersede, or time out a Job.
 
@@ -357,7 +487,7 @@ Lifecycle changes caused by decision timeout or policy are owned by the
 affected domain documents.
 
 
-PRESERVATION RULE 9: WORK-LIFECYCLE POLICY IS DISTINCT FROM JOB LIFECYCLE
+PRESERVATION RULE 10: WORK-LIFECYCLE POLICY IS DISTINCT FROM JOB LIFECYCLE
 =========================================================================
 
 Preserve the work-lifecycle boundary.
@@ -374,6 +504,8 @@ Work-lifecycle policy decisions may affect:
     - AppInstance startup or shutdown work
     - PackManager-triggered operations
     - Window-related finalization workflows
+    - Replay / Resume / Retry workflow requests where those workflows are
+      controlled by policy
 
 Possible outcomes include:
 
@@ -404,8 +536,11 @@ permission decision.
 A remembered capability permission decision does not imply a remembered
 work-lifecycle policy.
 
+Work-lifecycle policy decisions do not define DA-26 Replay, Resume, Retry,
+comparison, or audit-workflow semantics.
 
-PRESERVATION RULE 10: WORK-LIFECYCLE POLICIES ARE NOT KEYED BY JOBID ALONE
+
+PRESERVATION RULE 11: WORK-LIFECYCLE POLICIES ARE NOT KEYED BY JOBID ALONE
 ==========================================================================
 
 Preserve the rule:
@@ -430,17 +565,18 @@ Remembered work-lifecycle policy subject identity may include:
     - AppInstance lifecycle operation class when AppInstance work is involved
     - disconnect condition when disconnect handling is involved
     - supersession target class when supersession handling is involved
+    - Replay / Resume / Retry workflow class when DA-26 workflows are involved
 
 A remembered policy that applies to cancellation does not imply a remembered
 policy that applies to supersession, timeout, disconnect, detachment, result
-retention, result discard, adapter failure, RuntimeHost failure, or Window
-finalization.
+retention, result discard, adapter failure, RuntimeHost failure, Window
+finalization, Replay, Resume, or Retry.
 
 A remembered policy that applies to transport disconnect does not imply a
 remembered policy that applies to Job timeout.
 
 
-PRESERVATION RULE 11: FRONTENDS PRESENT, KERNEL DECIDES
+PRESERVATION RULE 12: FRONTENDS PRESENT, KERNEL DECIDES
 =======================================================
 
 Preserve frontend responsibility.
@@ -488,8 +624,12 @@ If multiple frontends are connected:
 
 The Kernel remains the single arbiter.
 
+DA-22 owns UI, View, frontend runtime, and frontend presentation semantics.
 
-PRESERVATION RULE 12: MODS AND PACKS DO NOT HANDLE DECISIONS DIRECTLY
+DA-17 owns decision semantics.
+
+
+PRESERVATION RULE 13: MODS AND PACKS DO NOT HANDLE DECISIONS DIRECTLY
 =====================================================================
 
 Preserve mod and pack involvement boundary.
@@ -508,7 +648,7 @@ Mods and packs observe decision outcomes only through Turnix-provided context
 and results.
 
 
-PRESERVATION RULE 13: DECISION FAILURE IS SAFE AND NON-MUTATING
+PRESERVATION RULE 14: DECISION FAILURE IS SAFE AND NON-MUTATING
 ===============================================================
 
 Preserve failure behavior.
@@ -538,7 +678,8 @@ Disconnect handling does not silently cancel, supersede, detach, retain, or
 discard a Job without explicit policy.
 
 Disconnect handling does not silently define adapter, RuntimeHost,
-OrchestrationUnit, AppInstance, Window, PackManager, or committed-state outcome.
+OrchestrationUnit, AppInstance, Window, PackManager, Replay / Resume / Retry,
+artifact/export, audit-workflow, or committed-state outcome.
 
 
 WATCH ITEM: WORK-LIFECYCLE POLICY KEY SCHEMA
@@ -558,9 +699,41 @@ Future rewrite should preserve the current boundary:
     - RuntimeHost operation policy is not adapter lifecycle policy by default
     - AppInstance lifecycle policy is not Job lifecycle policy by default
     - Window finalization policy is not Job terminal outcome policy by default
+    - Replay policy is not Resume policy by default
+    - Resume policy is not Retry policy by default
+    - Retry policy is not Job retry identity by default
 
-This matters for DA-19, DA-20, DA-21, DA-23, DA-24, DA-27, DA-28, DA-29,
-DA-18, IS-01, IS-02, schedulers, and capability-backed work.
+This matters for DA-18, DA-19, DA-20, DA-21, DA-22, DA-23, DA-24, DA-26,
+DA-27, DA-28, DA-29, IS-01, IS-02, schedulers, debugger-controlled work,
+RuntimeHost operations, and capability-backed work.
+
+
+WATCH ITEM: WORK-LIFECYCLE POLICY STORAGE
+=========================================
+
+DA-17 currently separates work-lifecycle policy semantics from permission and
+fingerprint policy semantics.
+
+DA-06 currently defines policies.config.json placement and top-level persisted
+policy structure for permissionPolicies and fingerprintPolicies.
+
+Future design should decide whether persisted work-lifecycle policies get a
+top-level section such as:
+
+    workLifecyclePolicies
+
+or whether they are intentionally stored elsewhere or not persisted.
+
+Do not add this silently.
+
+Preserve:
+
+    - DA-06 owns storage file placement and top-level persistent structure
+    - DA-17 owns work-lifecycle policy semantics
+    - persisted work-lifecycle policy must not silently masquerade as capability
+      permission policy
+    - persisted work-lifecycle policy must not silently masquerade as
+      fingerprint mismatch policy
 
 
 WATCH ITEM: CROSS-SCOPE COPY AND PROMOTION
@@ -589,14 +762,19 @@ Follow the DA-03 cross-document trace wording check.
 
 Decision trace requirements are decision-domain emission obligations.
 
-DA-03 owns trace substrate, retention, and loss semantics.
+DA-03 owns trace substrate, retention, loss, trace DAG, and span semantics.
 
-User-facing explanations are derived from trace data.
+User-facing explanations are derived from retained trace and policy evidence
+where retained evidence exists.
 
 User-facing surfaces do not invent rationale.
 
-Do not let trace wording imply that trace evidence is committed state or that
-trace persistence is guaranteed forever.
+Do not let trace wording imply that trace evidence is committed state.
+
+Do not let trace wording imply that trace persistence is guaranteed forever.
+
+Do not use "replayable" for ordinary decision traceability unless the text
+explicitly means DA-26 Replay.
 
 
 REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-17 CONTENT
@@ -621,6 +799,8 @@ Decision and policy guardrails:
 
     Policy does not directly define RPC or transport outcome.
 
+    Policy does not directly define UI/View/frontend lifecycle outcome.
+
     Policy does not directly define adapter lifecycle outcome.
 
     Policy does not directly define RuntimeHost lifecycle or operation outcome.
@@ -629,11 +809,17 @@ Decision and policy guardrails:
 
     Policy does not directly define Window finalization.
 
+    Policy does not directly define artifact/export authority.
+
+    Policy does not directly define Replay, Resume, Retry, comparison, or audit
+    workflow semantics.
+
     Policy does not directly define PackManager operation outcome.
 
     Remembered decisions must not silently broaden across capability families,
     versions, packs, SavePacks, RuntimeHosts, AppInstances, owners, work kinds,
-    adapters, RPC routes, or transports.
+    adapters, RPC routes, transports, Views, frontend clients, Window kinds,
+    artifact kinds, or workflow kinds.
 
     Pack-provided hints are not binding policy.
 
@@ -657,6 +843,12 @@ Decision and policy guardrails:
 
     Superseded is not failure.
 
+    Replay is not Resume.
+
+    Resume is not Retry.
+
+    Retry is new work.
+
     Work is not silently cancelled, superseded, detached, retained, or discarded
     without policy.
 
@@ -672,8 +864,11 @@ Owning-document guardrails:
 
     DA-04 owns committed-state authority, transactions, and commit boundaries.
 
-    DA-06 owns durable policy storage locations and configuration/persistence
-    scope where applicable.
+    DA-06 owns durable policy storage locations, policy file placement, and
+    top-level persistent configuration structure where applicable.
+
+    DA-07 owns persistent I/O authority, root boundaries, Reader / Writer
+    providers, and persistence-safety behavior.
 
     DA-08 owns Window, ActiveWindow, SafePointWindow, AbortedWindow, and
     finalized runtime history semantics.
@@ -690,10 +885,20 @@ Owning-document guardrails:
     DA-21 owns RPC, channel, transport, timeout, disconnect, cancellation
     message, and acknowledgement semantics.
 
+    DA-22 owns UI, View, frontend runtime, frontend presentation, frontend
+    disconnect, and multi-client presentation semantics.
+
     DA-23 owns abstract execution adapter authority boundaries.
 
     DA-24 owns OrchestrationUnit lifecycle, mutation authority, and terminal
     outcome semantics.
+
+    DA-25 owns Window artifacts, WindowManifests, WindowExports, Minimal Audit
+    Bundles, optional digest representation, partial export, missing material,
+    and offline inspection artifact semantics.
+
+    DA-26 owns comparison, ComparisonResult, Replay, Resume, Retry, and audit
+    workflow semantics.
 
     DA-27 owns adapter lifecycle, trust, isolation, failure, disconnect, and
     adapter-domain trace semantics.
@@ -730,19 +935,27 @@ Recommended future edits:
     - preserve exact remembered permission and fingerprint policy keys
     - preserve work-lifecycle policy separation from Job lifecycle, RPC transport,
       OrchestrationUnit lifecycle, adapter lifecycle, RuntimeHost lifecycle,
-      AppInstance lifecycle, Window finalization, PackManager operation, and
+      AppInstance lifecycle, Window finalization, PackManager operation,
+      Replay, Resume, Retry, artifact/export, audit-workflow, and
       committed-state semantics
     - preserve no-prompt-for-read-access rule
     - preserve frontend-as-presentation-only rule
     - preserve mod-trigger-but-not-handle rule
+    - replace or clarify ordinary "replayable" decision wording so it does not
+      imply DA-26 Replay semantics
+    - preserve DA-06 ownership of policy storage location and top-level
+      persistent structure while DA-17 owns decision and remembered-policy
+      semantics
     - define work-lifecycle policy-key schema later in the owning workflow or
       implementation specification
+    - decide persisted work-lifecycle policy storage shape later without folding
+      it into permission or fingerprint policy semantics
     - define cross-scope copy/promotion later without implicit authority
       broadening
 
 --- doc-meta ---
 DOC_ID: REWRITE-DA-17
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-17_RECOMMENDATION.txt
-DOC_REV: 2
-DOC_GIT: e60f331
+DOC_REV: 3
+DOC_GIT: b283d90
 ----------------
