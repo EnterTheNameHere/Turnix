@@ -14,9 +14,8 @@ Loaded file metadata:
         9a8301df77d84d39985ff223294d76b48ad7d8a7
 
 Audit note status:
-    Consolidated Dv3 architecture rewrite recommendation.
-    Action-focused revision pass for AppPack-backing scope, boundary
-    compression, guardrail framing, and later domain stop-line alignment.
+    Mode 1 Dv3 architecture rewrite recommendation update.
+    Action-focused revision using Checkpoint 06.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -55,15 +54,32 @@ remains:
     AppPack is one declarative way to create an AppInstance.
     AppPack may be absent in embedded/scripted/test usage.
 
+Current required source-level changes:
+
+    1. Resolve AppPack-backing scope.
+
+    2. Replace "durable executed state" with "durable AppInstance state."
+
+    3. Add or preserve a compact AppInstance lifecycle stop-line.
+
+    4. Add DA-05 / DA-06 / DA-25 / DA-26 stop-lines where save context,
+       committed values, configuration, retained evidence, artifacts, export,
+       comparison, Replay, Resume, Retry, or audit workflows are mentioned.
+
+    5. Clarify AppInstance "resumed" and "retried" wording so it does not imply
+       DA-26 Resume or Retry semantics unless explicitly routed through DA-26.
+
 Overall recommendation:
 
-    KEEP WITH REQUIRED APPPACK-BACKING DECISION / SAVEPACK WORDING WATCH
+    KEEP WITH REQUIRED APPPACK-BACKING DECISION / SAVEPACK /
+    DA-26 WORDING WATCH
 
 
 CURRENT CLASSIFICATION
 ======================
 
-KEEP WITH REQUIRED APPPACK-BACKING DECISION / SAVEPACK WORDING WATCH
+KEEP WITH REQUIRED APPPACK-BACKING DECISION / SAVEPACK /
+DA-26 WORDING WATCH
 
 DA-20 should not be rewritten heavily.
 
@@ -72,18 +88,20 @@ Future edits should preserve:
     - AppInstance as runtime identity, distinct from pack identity
     - appInstanceId as runtime instance correlation identity
     - AppInstance identity distinct from AppPack, SavePack, View, adapter, Job,
-      OrchestrationUnit, RPC, RuntimeHost, and workspace identity
+      OrchestrationUnit, RPC, RuntimeHost, workspace, Window, artifact, export,
+      and Replay / Resume / Retry workflow identity
     - AppInstance creation does not reopen AppPack resolution silently
     - optional active SavePack/save context where durable save context is bound
     - writable SavePack single-writer rule
     - RuntimeHost startup modes and command surfaces reuse the same
       Kernel-mediated AppInstance creation paths
     - AppInstance lifecycle does not define Job, OrchestrationUnit, Window,
-      adapter, transport, RuntimeHost, or PackManager outcomes
+      adapter, transport, RuntimeHost, PackManager, artifact/export, comparison,
+      Replay, Resume, Retry, audit workflow, or committed-state outcomes
     - adapter-executed code does not own AppInstance state
     - AppInstance trace does not replace activation, adapter, RPC, Job,
-      OrchestrationUnit, Window, RuntimeHost, PackManager, or committed-state
-      trace evidence
+      OrchestrationUnit, Window, RuntimeHost, PackManager, artifact/export,
+      workflow, or committed-state trace evidence
 
 Future edits must also resolve whether:
 
@@ -181,11 +199,16 @@ Preserve the underlying boundary:
 
     Authoritative mutation remains governed by DA-04.
 
+    Committed value representation remains governed by DA-05.
+
+    Configuration semantics remain governed by DA-06.
+
     Persistent I/O remains governed by DA-07.
 
     Window and retained evidence behavior remains governed by DA-08.
 
-Do not expand DA-20 into detailed SavePack persistence semantics.
+Do not expand DA-20 into detailed SavePack persistence, representation,
+configuration, Window artifact, or Replay / Resume / Retry semantics.
 
 
 ACTUAL DA-20 CHANGE 2: APPINSTANCE LIFECYCLE STOP-LINE
@@ -202,7 +225,9 @@ Recommended source-level boundary:
     AppInstance lifecycle does not by itself define pack activation outcome,
     adapter lifecycle outcome, RPC transport outcome, Job terminal outcome,
     OrchestrationUnit terminal outcome, Window finalization, RuntimeHost
-    lifecycle outcome, PackManager operation outcome, or committed-state truth.
+    lifecycle outcome, PackManager operation outcome, artifact/export
+    authority, comparison result, Replay outcome, Resume outcome, Retry outcome,
+    audit-workflow outcome, or committed-state truth.
 
     When AppInstance lifecycle events affect another domain, the owning domain
     defines the resulting outcome.
@@ -215,6 +240,76 @@ identity.
 
 Detailed ownership mapping belongs in the guardrail section, not in the source
 document.
+
+
+ACTUAL DA-20 CHANGE 3: ADD DA-05 / DA-06 / DA-25 / DA-26 STOP-LINES
+===================================================================
+
+DA-20 source already references committed state, save context, retained
+evidence, save-local material, read-only inspection, export, audit, retained
+results, and lifecycle relations.
+
+Checkpoint 06 now has completed ownership boundaries for DA-05, DA-06, DA-25,
+and DA-26.
+
+Recommended source-level stop-lines:
+
+    DA-05 defines payload identity, Chunk, ChunkId, ValueRef, decode, integrity,
+    and committed-value representation.
+
+    DA-06 defines configuration semantics, configuration storage layout,
+    configuration migration, and policy-file placement.
+
+    DA-25 defines WindowManifest, WindowExport, Minimal Audit Bundle, optional
+    digest representation, partial export, missing material, and artifact/export
+    semantics.
+
+    DA-26 defines ComparisonResult, equality modes, Replay, Resume, Retry, and
+    audit workflow semantics.
+
+    AppInstance lifecycle may correlate with these domains, but DA-20 does not
+    define their detailed behavior.
+
+Reason:
+
+    DA-20 is a runtime identity/lifecycle document.
+
+    It should not become the owner of payload representation, configuration,
+    artifact/export, comparison, Replay, Resume, Retry, or audit workflows.
+
+
+ACTUAL DA-20 CHANGE 4: CLARIFY RETRIED / RESUMED WORDING
+========================================================
+
+DA-20 says ending an AppInstance does not by itself define whether related work
+was:
+
+    retried
+    resumed
+
+This is directionally correct, but DA-26 now gives Resume and Retry formal
+workflow meanings.
+
+Recommended future rewrite:
+
+    Ending an AppInstance active region does not by itself define whether
+    in-flight work committed, aborted, was cancelled, was superseded, was
+    detached, retained a result, finalized a Window, or triggered a DA-26
+    Replay, Resume, or Retry workflow.
+
+Or:
+
+    If DA-20 keeps "retried" and "resumed", qualify them as DA-26 workflow
+    concepts:
+
+        DA-26 owns Retry and Resume workflow semantics.
+
+Reason:
+
+    AppInstance lifecycle can cause circumstances where later Resume or Retry
+    workflows are requested.
+
+    AppInstance lifecycle does not define DA-26 workflow outcomes.
 
 
 PRESERVATION RULE 1: APPINSTANCE IS RUNTIME IDENTITY
@@ -250,6 +345,11 @@ Do not rewrite AppInstance as:
     - activation graph
     - selected graph
     - committed state
+    - payload representation
+    - configuration
+    - Window
+    - export
+    - Replay / Resume / Retry workflow
     - persistence record only
 
 If the one-AppPack model is kept, define how embedded/scripted/test usage is
@@ -260,7 +360,7 @@ path rather than the whole AppInstance concept.
 
 
 PRESERVATION RULE 2: APPINSTANCE IDENTITY IS DISTINCT
-====================================================
+=====================================================
 
 Preserve appInstanceId semantics.
 
@@ -283,6 +383,10 @@ appInstanceId does not identify:
     - Job by itself
     - OrchestrationUnit by itself
     - RuntimeHost by itself
+    - workspace by itself
+    - Window by itself
+    - artifact/export by itself
+    - Replay / Resume / Retry workflow by itself
 
 An AppInstance record may include enough context to relate:
 
@@ -354,7 +458,7 @@ If the broader model is kept:
 
 
 PRESERVATION RULE 4: SAVE CONTEXT IS OPTIONAL AND DISTINCT
-=========================================================
+==========================================================
 
 Preserve SavePack/save context separation.
 
@@ -367,13 +471,27 @@ Absence of active SavePack identity does not invalidate the AppInstance
 identity.
 
 Active save context identifies the save scope against which committed state,
-Windows, retained evidence, and save-local material are interpreted.
+configuration, Windows, retained evidence, and save-local material are
+interpreted.
 
 SavePack identity is not AppInstance identity.
 
 AppInstance identity is not SavePack identity.
 
 Save-local pack material remains constrained by pack and save-scope documents.
+
+DA-05 still owns committed payload representation.
+
+DA-06 still owns configuration semantics.
+
+DA-07 still owns persistent I/O authority.
+
+DA-08 still owns Window semantics.
+
+DA-25 still owns artifact/export semantics.
+
+DA-26 still owns comparison, Replay, Resume, Retry, and audit workflow
+semantics.
 
 
 PRESERVATION RULE 5: CREATION PATHS ARE KERNEL-MEDIATED
@@ -419,7 +537,10 @@ Save generation behavior remains subject to:
     - policy boundaries
     - persistence boundaries
     - DA-04 committed-state rules
+    - DA-05 committed-value representation when committed values are produced
+    - DA-06 configuration semantics when configuration is produced
     - DA-07 persistence authority
+    - DA-08 Window semantics where Window material is produced
 
 Existing save path validates compatibility between resolved AppPack and selected
 SavePack/save context.
@@ -500,6 +621,9 @@ Lifecycle phase names do not define:
     - adapter lifecycle outcomes
     - RuntimeHost lifecycle outcomes
     - PackManager operation outcomes
+    - artifact/export authority
+    - comparison outcomes
+    - Replay / Resume / Retry workflow outcomes
     - committed-state truth
 
 An AppInstance active region is the bounded runtime interval during which an
@@ -512,15 +636,22 @@ work:
 
     - committed
     - aborted
-    - retried
-    - resumed
-    - cancelled
-    - superseded
+    - was cancelled
+    - was superseded
     - detached
     - retained a result
     - finalized a Window
+    - created an artifact or export
+    - entered DA-26 Replay
+    - entered DA-26 Resume
+    - entered DA-26 Retry
 
 Window finalization semantics are defined by DA-08.
+
+Artifact/export semantics are defined by DA-25.
+
+Replay, Resume, Retry, comparison, and audit workflow semantics are defined by
+DA-26.
 
 Pack activation failure semantics are defined by DA-14.
 
@@ -563,8 +694,8 @@ participation must still have an explicit activation/execution-authority model
 or must explicitly state that no pack activation path is involved.
 
 
-PRESERVATION RULE 9: ADAPTERS, VIEWS, RPC, JOBS, AND ORCHESTRATIONUNITS DO NOT OWN APPINSTANCE
-==============================================================================================
+PRESERVATION RULE 9: PARTICIPANTS DO NOT OWN APPINSTANCE
+========================================================
 
 Preserve participant separation.
 
@@ -677,6 +808,8 @@ AppInstance trace evidence does not replace:
     - Window finalization evidence
     - RuntimeHost trace evidence
     - PackManager trace evidence
+    - artifact/export trace evidence
+    - Replay / Resume / Retry workflow trace evidence
     - committed-state trace evidence
 
 DA-03 owns the trace substrate, not AppInstance lifecycle semantics.
@@ -729,26 +862,33 @@ Use the replacement carefully:
 
     It should not imply SavePack owns runtime lifecycle.
 
-    It should not imply SavePack mutation bypasses DA-04 or DA-07.
+    It should not imply SavePack mutation bypasses DA-04, DA-05, DA-06, or
+    DA-07.
 
     It should not imply trace or retained Window evidence is committed state.
 
+    It should not imply WindowExport, Minimal Audit Bundle, or retained artifact
+    material is committed state.
 
-WATCH ITEM: RESTART AND RETAINED-RESULT SEMANTICS
-=================================================
+
+WATCH ITEM: RESTART / RETAINED-RESULT / RESUME / RETRY SEMANTICS
+================================================================
 
 DA-20 leaves exact AppInstance restart semantics and retained-result behavior
 when clients disconnect open.
 
 Future rewrite should preserve:
 
-    - AppInstance restart is not job retry by default
+    - AppInstance restart is not Job retry by default
+    - AppInstance restart is not DA-26 Retry by default
+    - AppInstance restart is not DA-26 Resume by default
     - AppInstance restart is not reuse of appInstanceId unless explicitly
       defined
     - retained results are not committed state merely because they are retained
     - frontend/RPC disconnect does not automatically stop AppInstance or discard
       results
     - Job retained-result semantics remain DA-19 / DA-17 / workflow-owned
+    - DA-26 owns Replay, Resume, Retry, and related audit workflow semantics
 
 
 WATCH ITEM: CREATION FAILURE AND RECOVERY POLICY
@@ -768,7 +908,7 @@ Future edits should preserve:
 
 
 REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-20 CONTENT
-=========================================================
+========================================================
 
 This section is not suggested DA-20 wording.
 
@@ -791,9 +931,15 @@ AppInstance-boundary guardrails:
 
     AppInstance identity is not OrchestrationUnit identity.
 
-    RuntimeHost identity is not AppInstance identity.
+    AppInstance identity is not RuntimeHost identity.
 
-    Workspace identity is not AppInstance identity.
+    AppInstance identity is not workspace identity.
+
+    AppInstance identity is not Window identity.
+
+    AppInstance identity is not artifact/export identity.
+
+    AppInstance identity is not Replay / Resume / Retry workflow identity.
 
     Do not let AppInstance creation reopen AppPack resolution silently.
 
@@ -818,6 +964,12 @@ AppInstance-boundary guardrails:
 
     Do not let AppInstance stop silently finalize a Window.
 
+    Do not let AppInstance stop silently create WindowExport or Minimal Audit
+    Bundle authority.
+
+    Do not let AppInstance stop silently trigger DA-26 Replay, Resume, Retry,
+    comparison, or audit workflow outcome.
+
     Do not let AppInstance failure silently create an AbortedWindow.
 
     Do not let AppInstance creation failure leave a partially valid AppInstance.
@@ -830,7 +982,8 @@ AppInstance-boundary guardrails:
 
     Do not let AppInstance trace evidence replace trace evidence owned by
     activation, adapter, RPC, Job, OrchestrationUnit, Window, RuntimeHost,
-    PackManager, or committed-state domains.
+    PackManager, artifact/export, Replay / Resume / Retry workflow, or
+    committed-state domains.
 
 AppPack-backing guardrails:
 
@@ -853,6 +1006,12 @@ Owning-document guardrails:
     DA-03 owns trace substrate, retention, loss, and trace DAG semantics.
 
     DA-04 owns committed-state authority, transactions, and commit boundaries.
+
+    DA-05 owns ValueRef, Chunk, ChunkId, payload identity, decode, integrity, and
+    committed-value representation.
+
+    DA-06 owns configuration semantics, configuration storage layout,
+    configuration migration, and policy-file placement.
 
     DA-07 owns persistent I/O authority and filesystem rules.
 
@@ -878,6 +1037,13 @@ Owning-document guardrails:
 
     DA-24 owns OrchestrationUnit lifecycle, mutation authority, and terminal
     outcome semantics.
+
+    DA-25 owns Window artifacts, WindowManifests, WindowExports, Minimal Audit
+    Bundles, optional digest representation, partial export, missing material,
+    and offline inspection artifact semantics.
+
+    DA-26 owns ComparisonResult, equality modes, Replay, Resume, Retry, and
+    audit workflow semantics.
 
     DA-27 owns adapter lifecycle, trust, isolation, failure, disconnect, and
     adapter-domain trace semantics.
@@ -919,14 +1085,18 @@ Required future edit:
 Recommended future edits:
 
     - replace "durable executed state" with "durable AppInstance state"
+    - add DA-05, DA-06, DA-25, and DA-26 stop-lines where needed
+    - clarify AppInstance "resumed" / "retried" wording so it does not imply
+      DA-26 Resume / Retry semantics
     - keep DA-20 focused on AppInstance lifecycle and runtime identity
     - preserve AppInstance/AppPack/SavePack/RuntimeHost identity separation
     - preserve optional save context and single-writer writable SavePack rule
     - preserve shared Kernel-mediated AppInstance creation paths across
       RuntimeHost startup modes and command surfaces
     - preserve lifecycle separation from activation, adapters, Views, RPC,
-      Jobs, OrchestrationUnits, Windows, RuntimeHost, PackManager, and committed
-      state
+      Jobs, OrchestrationUnits, Windows, RuntimeHost, PackManager,
+      artifact/export, Replay, Resume, Retry, comparison, audit workflows, and
+      committed state
     - leave exact appInstanceId, restart, retained-result, SavePack generator,
       compatibility-validation, non-AppPack-backed creation if accepted, and
       implementation substate details to later implementation specifications
@@ -934,6 +1104,6 @@ Recommended future edits:
 --- doc-meta ---
 DOC_ID: REWRITE-DA-20
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-20_RECOMMENDATION.txt
-DOC_REV: 3
-DOC_GIT: 9c5479a
+DOC_REV: 4
+DOC_GIT: 7663f07
 ----------------
