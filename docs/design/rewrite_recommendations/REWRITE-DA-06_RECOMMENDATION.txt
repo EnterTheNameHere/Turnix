@@ -1,0 +1,1224 @@
+TURNIX DV3 AUDIT NOTE
+=====================
+
+Source file:
+    docs/design/DA-06_CONFIGURATION_SCHEMAS_AND_MIGRATION.txt
+
+Branch:
+    Dv3
+
+Loaded file metadata:
+    DOC_REV: 16
+    DOC_GIT: b2bb738
+    GitHub blob SHA seen by assistant:
+        d00f1c61aa9d34fad42cf8e820b46b930a9e3c81
+
+Audit note status:
+    First-pass Dv3 architecture rewrite recommendation.
+    Action-focused format under the compressed rewrite-recommendation rule.
+
+Audit scope:
+    This note audits architectural meaning, doctrine, and direction.
+    It does not audit formatting unless formatting/structure affects meaning,
+    machine interpretation, rule priority, or human usability as reference.
+
+Important excluded source:
+    AI_WORKFLOW_BOOTSTRAP.txt was intentionally not read.
+    It is part of the workflow system being audited separately and should not
+    bias this architecture pass.
+
+
+SUMMARY
+=======
+
+DA-06 is strong and Dv3-compatible.
+
+Keep it as the configuration, schema-for-configuration, configuration
+materialization, configuration storage layout, configuration migration, policy
+storage placement, and configuration recovery document.
+
+Preserve the central rule:
+
+    Configuration is authoritative state, but configuration is not a separate
+    state architecture.
+
+DA-06 builds on DA-04.
+
+DA-06 should also build on DA-05 for committed value representation where the
+implementation stores configuration values as committed payload material.
+
+DA-06 defines configuration-specific meaning:
+
+    - scopes
+    - ownership
+    - precedence
+    - defaults
+    - override inputs
+    - schema-governed validation
+    - effectiveConfig
+    - materialization
+    - migration
+    - storage layout
+    - policy-file placement
+    - recovery boundaries
+
+DA-06 does not redefine:
+
+    - general memory/state model
+    - ValueRef / Chunk representation
+    - persistent I/O authority
+    - trace substrate
+    - decision and policy semantics
+    - capability permission
+    - debugger mutation safety
+    - root/bootstrap candidate semantics
+
+
+CURRENT CLASSIFICATION
+======================
+
+KEEP WITH SMALL DA-05 REUSE / POLICY-STORAGE / APPINSTANCE-PATH WATCH
+
+DA-06 should not be rewritten heavily.
+
+Future edits should preserve:
+
+    - configuration is authoritative state
+    - configuration follows DA-04 memory/state model
+    - configuration is a specialized state domain, not separate state
+      architecture
+    - runtime-visible config views are not authoritative merely because resident
+      or currently effective
+    - persistence protects configuration from loss but does not define truth
+    - storage layout and file placement do not redefine authority
+    - configuration mutation follows normal transaction and commit rules
+    - schema governs interpretation, validation, migration, compatibility, and
+      access metadata
+    - schema is not source of runtime defaults
+    - defaults are immutable input material
+    - overrides are explicit user-authored persisted deviations
+    - effectiveConfig is derived runtime-visible view, not separate authority
+    - computed transforms do not mutate stored values
+    - duplicate schema/default/config files are selected and shadowed, not
+      stacked or merged
+    - configuration persistence routes through IoManager
+    - configuration migration follows normal state rules
+    - migration failure aborts without changing authoritative committed state
+    - policy storage location is owned here, but policy semantics remain DA-17
+    - no implicit fallbacks
+
+
+ACTUAL DA-06 CHANGE 1: ADD DA-05 REUSE STOP-LINE
+================================================
+
+DA-06 currently builds strongly on DA-04 and DA-07, but it does not explicitly
+reference DA-05.
+
+Recommended future rewrite:
+
+    Add DA-05 to upstream documents.
+
+    Add a local boundary statement:
+
+        Configuration committed values use the committed-value representation
+        contract defined by DA-05 when they are stored as Turnix committed
+        payload material.
+
+        DA-06 defines configuration meaning, scope, schema use, materialization,
+        migration, and storage placement.
+
+        DA-05 defines payload identity, Chunk, ChunkId, ValueRef, decode, and
+        reachability representation.
+
+        DA-06 does not redefine ValueRef, Chunk identity, or payload
+        reachability.
+
+Reason:
+
+    Configuration should reuse the same committed-value representation model as
+    the rest of memory/state where possible.
+
+    This prevents configuration from becoming a parallel value storage model.
+
+This is not a heavy rewrite.
+
+
+ACTUAL DA-06 CHANGE 2: POLICY STORAGE MUST NOT BECOME POLICY AUTHORITY
+======================================================================
+
+DA-06 correctly defines policies.config.json placement and top-level persistent
+structure.
+
+DA-06 also correctly says identity keys and higher-level decision semantics are
+defined by permission and decision-handling areas that use them.
+
+Future rewrite should preserve and strengthen this boundary.
+
+Recommended source-level boundary:
+
+    DA-06 owns policy storage location, file placement, and top-level persistent
+    config structure.
+
+    DA-17 owns decision semantics, remembered policy semantics, policy scope
+    precedence, work-lifecycle policy behavior, fingerprint policy keys, and
+    permission policy keys.
+
+    Storing a policy record in policies.config.json does not by itself create a
+    valid policy outcome outside DA-17 semantics.
+
+Reason:
+
+    Policy files are configuration storage.
+
+    Policy meaning is decision/policy domain semantics.
+
+This prevents DA-06 from accidentally becoming policy authority.
+
+
+ACTUAL DA-06 CHANGE 3: APPINSTANCE/SAVEPACK PATH PLACEHOLDER WATCH
+==================================================================
+
+DA-06 path examples currently use:
+
+    saves/<appPackId>/<instanceId>/...
+
+This is acceptable as current placeholder wording, but it should be revisited
+after the AppInstance/AppPack-backing decision is resolved.
+
+Future rewrite should preserve:
+
+    Save-bound configuration is scoped to a save context.
+
+    Save-bound configuration is not global configuration.
+
+    Save-bound configuration participates in save-bound authoritative state
+    snapshots and restoration boundaries.
+
+If DA-20 chooses the model where every AppInstance is formally AppPack-backed,
+the path placeholders may remain AppPack-oriented.
+
+If DA-20 keeps non-AppPack-backed AppInstances, the path placeholders may need
+to change to AppInstance/save identity terminology instead of assuming appPackId
+is always available.
+
+Do not treat this as a current error.
+
+Treat it as a DA-20-dependent naming watch.
+
+
+ACTUAL DA-06 CHANGE 4: NUMBERING CLEANUP
+========================================
+
+DA-06 has local numbering reuse around:
+
+    08. EFFECTIVECONFIG AND COMPUTED TRANSFORMS
+    08.1 CONFIGURATION TRACE OBLIGATIONS
+
+This is mostly formatting, but it affects stable reference usability.
+
+Recommended future rewrite:
+
+    Normalize subsection numbering without changing semantics.
+
+Do not treat numbering cleanup as architecture change.
+
+
+PRESERVATION RULE 1: CONFIGURATION IS SPECIALIZED AUTHORITATIVE STATE
+====================================================================
+
+Preserve configuration-as-state semantics.
+
+Configuration answers:
+
+    Which parameters influence Turnix and packs at runtime, how are they made
+    safe, stable, and evolvable, and where are they persisted?
+
+Configuration is authoritative state.
+
+Configuration is not:
+
+    - arbitrary JSON blobs
+    - free-form user data
+    - implicit defaults hidden in code
+
+Configuration follows the general DA-04 memory/state model.
+
+DA-06 refines that general model only for:
+
+    - configuration scopes
+    - schema-governed validation and interpretation
+    - defaults and override inputs
+    - effectiveConfig materialization
+    - persistent configuration file placement
+    - configuration migration and recovery
+
+Configuration remains explainable, reversible, and protected from silent
+breakage.
+
+DA-06 does not create a separate state architecture for configuration.
+
+
+PRESERVATION RULE 2: CONFIGURATION AUTHORITY USES DA-04
+======================================================
+
+Preserve DA-04 alignment.
+
+Configuration uses the same authority boundary as other Turnix state.
+
+Committed configuration is authoritative.
+
+Runtime-visible configuration views are not authoritative merely because they
+are resident or currently effective.
+
+Configuration persistence is protection against loss rather than the definition
+of truth.
+
+Storage layout and file placement define where authoritative configuration is
+persisted, not what makes it authoritative.
+
+Configuration mutation that changes authoritative committed state is normal
+orchestrated work.
+
+Configuration mutation follows general DA-04 transaction and commit rules.
+
+Do not let configuration files, layout, live residency, effectiveConfig, or
+computed transforms become a separate authority model.
+
+
+PRESERVATION RULE 3: CONFIGURATION SCOPES AND OWNERSHIP ARE EXPLICIT
+====================================================================
+
+Preserve configuration scope and ownership semantics.
+
+Turnix distinguishes configuration by scope:
+
+    - Engine
+    - Pack-global
+    - Save-bound
+
+Engine scope is Kernel-global configuration.
+
+Pack-global scope is configuration owned by one specific pack and shared across
+saves.
+
+Save-bound scope is configuration owned by one specific pack and bound to one
+save.
+
+Scopes are strictly ordered by precedence:
+
+    Save-bound > Pack-global > Engine > Defaults
+
+Each scope has:
+
+    - schema-governed value shape
+    - defaults
+    - explicit override inputs
+    - migration path
+
+Ownership rules:
+
+    - Engine scope is owned by Kernel.
+    - Pack-global scope is owned by one specific canonicalPackId.
+    - Save-bound scope is owned by one specific canonicalPackId inside one save
+      context.
+
+Ownership is immutable without migration.
+
+There is no shared global bag of configuration keys.
+
+canonicalPackId is persistent configuration-ownership identity for pack-global
+and save-bound configuration.
+
+canonicalPackId is exactly:
+
+    resolvedAuthor + "@" + packTreeId
+
+canonicalPackId does not include version or semver.
+
+Version metadata may be stored inside configuration files, migration metadata,
+or both, but version is not part of persistent ownership identity.
+
+If resolvedAuthor cannot be determined, the pack is invalid.
+
+
+PRESERVATION RULE 4: SCHEMA GOVERNS CONFIGURATION, NOT DEFAULTS
+==============================================================
+
+Preserve schema role for configuration.
+
+Schemas define:
+
+    - structure
+    - types
+    - constraints
+    - allowed value shapes
+    - compatibility expectations
+    - access-level metadata when configuration authority rules require it
+
+Schemas are not a source of runtime defaults.
+
+Schemas do not by themselves create authoritative values.
+
+In DA-06, schema governs how configuration values are:
+
+    - interpreted
+    - validated
+    - migrated safely
+    - exposed with correct ownership and access metadata
+
+The schema model is storage-agnostic at semantic level.
+
+Storage placement and file realization do not redefine schema meaning.
+
+Current schema realization may use JSON-like structured forms, but DA-06 does
+not lock the full implementation dialect.
+
+Schema evolution rules:
+
+    Released schema meaning does not rewrite old meaning silently.
+
+    Breaking schema change requires explicit new compatibility boundary and
+    matching migration treatment.
+
+    Access-level metadata does not change silently.
+
+DA-06 defines schema use for configuration first.
+
+DA-06 does not define full generalized schema system for all future structured
+data domains.
+
+
+PRESERVATION RULE 5: DEFAULTS ARE IMMUTABLE INPUT, OVERRIDES ARE USER-AUTHORED
+==============================================================================
+
+Preserve defaults and override-input semantics.
+
+Defaults define initial values only.
+
+Defaults are immutable input material.
+
+Defaults are not user configuration.
+
+Defaults are not mutable state.
+
+Override inputs record explicit user-authored deviations from defaults.
+
+Override inputs never modify defaults.
+
+Override inputs are loaded after defaults.
+
+Override inputs are migrated explicitly.
+
+Override inputs are not modified silently.
+
+Override inputs are not silently rewritten by:
+
+    - storage materialization
+    - migration
+    - normalization
+    - persistence side effects
+
+Override inputs are the only user-authored persisted configuration input layer.
+
+This does not create an exception to DA-04 state model.
+
+Authoritative committed configuration still follows normal state mutation and
+commit rules.
+
+Defaults may change between pack or platform versions at author responsibility.
+
+Changed defaults remain authored input change, not user-authored override
+change.
+
+If changed defaults alter effective behavior, that change remains
+distinguishable from user-authored overrides.
+
+Duplicate schema, default, or configuration file is selected, not stacked.
+
+Duplicate schema, default, or configuration file is shadowed, not merged.
+
+Deterministic selection rule:
+
+    - first candidate in deterministic order wins
+    - later duplicates remain shadowed
+    - no additive combination occurs
+
+Diagnostics and tracing should surface duplicate schema, default, or
+configuration files as strongly as possible, including equivalent duplicates,
+selected file, and shadowed files.
+
+
+PRESERVATION RULE 6: MATERIALIZATION HAS GATING AND RUNTIME-VIEW STAGES
+=======================================================================
+
+Preserve configuration materialization pipeline.
+
+Configuration is materialized through semantic stages:
+
+    1) schema interpretation
+    2) defaults input
+    3) explicit override inputs
+    4) migration when required
+    5) validation of stored values
+    6) computed transforms when allowed
+    7) effectiveConfig materialization
+
+Stages 1 through 5 are gating stages.
+
+Stages 6 and 7 are runtime-view stages.
+
+Runtime-view stages do not by themselves create authoritative committed state.
+
+Materialization produces a runtime-visible configuration view from
+authoritative committed configuration plus permitted derived behavior.
+
+Materialization remains explainable and traceable.
+
+Computed layers and effectiveConfig remain compatible with DA-04 authority
+model.
+
+
+PRESERVATION RULE 7: EFFECTIVECONFIG IS NOT A SEPARATE AUTHORITY CLASS
+======================================================================
+
+Preserve effectiveConfig and computed-transform boundaries.
+
+effectiveConfig is the final runtime-visible configuration view.
+
+effectiveConfig is not a separate authoritative state class.
+
+Some configuration values may be:
+
+    - computed
+    - derived
+    - transformed
+    - adjusted based on other values
+
+Computed transforms operate only on effectiveConfig.
+
+Computed transforms do not mutate stored values.
+
+Computed transforms do not write configuration.
+
+Removal of a computed transform restores prior behavior automatically.
+
+Computed layers remain traceable.
+
+Diagnostic validation of effectiveConfig may exist.
+
+Stored-value validation remains authoritative.
+
+Do not let effectiveConfig become hidden committed state.
+
+Do not let computed transforms become stored mutation.
+
+
+PRESERVATION RULE 8: CONFIGURATION TRACE DISTINGUISHES MUTATION, COMPUTED EFFECT, AND READ RESOLUTION
+====================================================================================================
+
+Preserve configuration trace obligations.
+
+Configuration interactions remain trace-visible when they affect:
+
+    - authoritative configuration
+    - validation
+    - migration
+    - materialization
+    - recovery
+
+Configuration trace evidence distinguishes:
+
+    Stored mutation:
+        - change written through configuration authority path
+        - persisted through IoManager when persistence is required
+        - attributed to engine, pack-global, or save-bound scope
+
+    Computed effect:
+        - derived value
+        - reactive transform
+        - accessibility scaling
+        - runtime-only override
+
+    Read resolution:
+        - which layer provided the value
+        - defaults versus user override versus save override
+        - not-found or permission-denied outcome when applicable
+
+Computed effects do not appear as stored mutations.
+
+Configuration trace evidence records enough context to explain:
+
+    - configuration key or subtree identity
+    - configuration scope
+    - source layer
+    - owning pack identity when applicable
+    - whether action was debugger-initiated
+    - whether migration, validation, or recovery participated
+
+Debugger-initiated configuration changes are labeled explicitly.
+
+Debugger-initiated configuration changes are not conflated with
+runtime-originated or pack-originated changes.
+
+Configuration trace obligations remain constrained by DA-04 state and
+transaction authority rules.
+
+DA-03 defines the tracing substrate.
+
+
+PRESERVATION RULE 9: CONFIG ACCESS API IS SCOPE-EXPLICIT AND OWNERSHIP-AWARE
+============================================================================
+
+Preserve configuration access API semantics.
+
+Configuration access is scope-explicit and ownership-aware.
+
+Engine scope API includes:
+
+    config.engine.get(key)
+    config.engine.set(key, value)
+    config.engine.delete(key)
+    config.engine.deleteTree(prefixKey)
+    config.engine.tryGet(key)
+
+Pack-global scope API includes:
+
+    config.user.get(packSelector, key)
+    config.user.set(packSelector, key, value)
+    config.user.delete(packSelector, key)
+    config.user.deleteTree(packSelector, prefixKey)
+    config.user.tryGet(packSelector, key)
+
+Save-bound scope API for current owner pack context includes:
+
+    config.save.get(key)
+    config.save.set(key, value)
+    config.save.delete(key)
+    config.save.deleteTree(prefixKey)
+    config.save.tryGet(key)
+
+Save-bound scope API for explicit target pack ownership includes:
+
+    config.save.getFrom(packSelector, key)
+    config.save.setFrom(packSelector, key)
+    config.save.deleteFrom(packSelector, key)
+    config.save.deleteTreeFrom(packSelector, prefixKey)
+    config.save.tryGetFrom(packSelector, key)
+
+Read semantics:
+
+    get() returns value or raises NotFoundOrPermissionDenied.
+
+    tryGet() returns value when present or None when the addressed key does not
+    exist.
+
+    API does not distinguish not-found from permission-denied
+    programmatically.
+
+    Real denial reason remains trace-visible internally.
+
+Write semantics:
+
+    Writes target an explicit owner scope.
+
+    Writes may trigger permission decisions or user decisions.
+
+    delete() removes exactly the addressed override key. It never mutates
+    defaults.
+
+    deleteTree() removes the addressed override node and subtree. It never
+    mutates defaults.
+
+    Delete is a write-class operation.
+
+
+PRESERVATION RULE 10: CONFIG STORAGE LAYOUT DOES NOT DEFINE AUTHORITY
+=====================================================================
+
+Preserve configuration storage layout semantics.
+
+Turnix-written live and save-bound configuration files use strict JSON.
+
+Human-facing defaults and other authored source material may use
+comment-capable JSON dialects where other authoritative documents permit it.
+
+Turnix-written live/save configuration files do not use comments as a semantic
+mechanism.
+
+Comments never carry:
+
+    - structure
+    - authority
+    - migration meaning
+    - loader instructions
+
+Current storage locations:
+
+    Engine-global live configuration:
+        userdata/config/engine/
+
+    Save-bound engine configuration:
+        saves/<appPackId>/<instanceId>/config/engine/
+
+    Pack-global live configuration:
+        userdata/config/packs/
+
+    Save-bound pack configuration:
+        saves/<appPackId>/<instanceId>/config/packs/
+
+Current file forms:
+
+    Engine-global config:
+        userdata/config/engine/<name>.config.json
+
+    Save-bound engine config:
+        saves/<appPackId>/<instanceId>/config/engine/<name>.config.json
+
+    Pack-global config:
+        userdata/config/packs/<canonicalPackId>.config.json
+
+    Save-bound pack config:
+        saves/<appPackId>/<instanceId>/config/packs/<canonicalPackId>.config.json
+
+One clearly owned file per owner/name is current rule.
+
+Defaults and authored configuration material remain load-only at runtime.
+
+Turnix runtime does not rewrite defaults or authored source material as part of
+ordinary persistence.
+
+Storage layout and file placement do not redefine authority.
+
+
+PRESERVATION RULE 11: PATHS.CONFIG.JSON IS ENGINE-OWNED CONFIGURATION
+=====================================================================
+
+Preserve paths.config.json ownership split.
+
+paths.config.json is engine-owned configuration stored at:
+
+    userdata/config/engine/paths.config.json
+
+DA-09 defines root/bootstrap behavior of paths.config.json fields.
+
+DA-06 is authoritative for:
+
+    - field naming
+    - ownership classification
+    - storage placement
+    - persistence materialization
+
+paths.config.json file placement does not redefine DA-09 bootstrap semantics.
+
+Locked field names for paths.config.json:
+
+    - redirectUserdataDirectoryTo
+    - userdataDirectoryRoots
+    - savesDirectoryRoots
+    - customDirectoryRoots
+    - firstPartyDirectoryRoots
+    - thirdPartyDirectoryRoots
+    - selectedUserdata
+    - selectedSaves
+    - preferredUserdata
+    - preferredSaves
+    - preferredCustom
+    - preferredFirstParty
+    - preferredThirdParty
+
+selected* fields express explicit user-selected roots for active state
+categories.
+
+preferred* fields express last used usable directory for their category.
+
+preferred* is sticky.
+
+Stored preferred* values are always rechecked for continued usability and,
+where writing is required, writability before reuse.
+
+preferred* is not replaced merely because a different candidate becomes
+writable later.
+
+selected* for userdata and saves overrides preferred* when usable.
+
+selected* and preferred* for userdata or saves may differ when a previously
+selected path becomes unusable and controlled recovery causes Turnix to use
+another path.
+
+DA-09 defines how selected* and *DirectoryRoots participate in bootstrap and
+candidate-root behavior.
+
+DA-06 does not duplicate that bootstrap logic.
+
+
+PRESERVATION RULE 12: IOMANAGER MEDIATES CONFIGURATION PERSISTENCE
+===================================================================
+
+Preserve IoManager mediation.
+
+Configuration services and providers do not perform filesystem I/O directly.
+
+Configuration persistence routes through IoManager.
+
+IoManager enforces:
+
+    - root boundaries
+    - permissions
+    - atomic writes
+    - backup and snapshot policy
+    - error classification
+    - recovery surfaces
+
+DA-06 defines storage layout, file placement, and ownership mapping for
+configuration.
+
+DA-06 does not redefine low-level filesystem behavior, direct filesystem I/O
+rules, or DA-07 persistence mechanics.
+
+If selected/preferred directories or canonical persisted config locations cannot
+be written:
+
+    - Turnix does not silently fall through to another writable path
+    - failure is surfaced through IoManager or delegated manager flow
+    - failed persistence action fails explicitly rather than faking success
+      elsewhere
+
+Path/config placement failure follows the same explicit recovery model as other
+configuration persistence failure.
+
+Directory/path queries may yield no usable target when no valid directory is
+currently available.
+
+Consumers that can tolerate absence may handle it in controlled form.
+
+Consumers that cannot tolerate absence propagate failure normally into the
+surrounding error-handling model.
+
+User prompting and recovery remain centralized through IoManager or delegated
+manager flow rather than ad hoc consumer logic.
+
+This remains aligned with DA-17 decision-handling and failure propagation.
+
+
+PRESERVATION RULE 13: CONFIGURATION MIGRATION FOLLOWS STATE RULES
+=================================================================
+
+Preserve configuration migration semantics.
+
+Configuration migration evolves authoritative configuration state.
+
+Configuration migration is not a side path outside normal state rules.
+
+Configuration migration that changes authoritative committed state follows
+DA-04 commit and migration rules.
+
+Configuration migration runs before stored-value validation of migrated result.
+
+Migrators are versioned and ordered.
+
+Multiple migrators may run sequentially.
+
+A migrator is deterministic transformation from one configuration
+representation to another.
+
+Migration may inspect previous values.
+
+Migration does not discard user intent silently.
+
+Migration preserves ownership and access metadata unless an explicit accepted
+migration rule changes them.
+
+If migration cannot complete safely, migration aborts and authoritative
+configuration remains identical to pre-migration committed state.
+
+Before writing migrated configuration, IoManager may create a recoverable
+snapshot of last known good state.
+
+Migrated authoritative configuration writes are atomic.
+
+Rollback capability remains available when policy requires it.
+
+No silent fallback is allowed.
+
+User-mediated recovery options may include:
+
+    - restore last known good
+    - reset to defaults
+    - quarantine broken configuration
+    - abort affected startup or affected operation
+
+Recovery remains explicit and trace-visible.
+
+
+PRESERVATION RULE 14: CONFIGURATION MIGRATION IS NOT MANIFEST MIGRATION
+=======================================================================
+
+Preserve migration class separation.
+
+Manifest migration and configuration migration are separate concerns.
+
+Manifest migration evolves pack or artifact metadata.
+
+Configuration migration evolves user or engine configuration state.
+
+These migration classes remain separate even when they use related schema ideas.
+
+DA-06 defines configuration migration only.
+
+
+PRESERVATION RULE 15: SAVE-BOUND CONFIGURATION IS SAVE-LOCAL
+============================================================
+
+Preserve save-bound configuration semantics.
+
+Save-bound configuration is isolated per save.
+
+Save-bound configuration overrides pack-global and engine values within that
+save context.
+
+Save-bound configuration migrates independently.
+
+Save-bound configuration is included in save-bound authoritative state snapshots
+and restoration boundaries.
+
+Corruption or deletion of save-bound configuration does not by itself alter
+global configuration state.
+
+Engine save-bound configuration is allowed.
+
+Pack-owned save-bound configuration follows same owner/file model as pack-global
+configuration, but under save-bound location.
+
+policies.config.json may exist in save-bound engine config storage without
+changing the general ownership model.
+
+
+PRESERVATION RULE 16: POLICY FILE STORAGE IS NOT POLICY SEMANTICS
+=================================================================
+
+Preserve DA-06 / DA-17 boundary.
+
+Global persisted policies are stored in:
+
+    userdata/config/engine/policies.config.json
+
+Save-scoped persisted policies are stored in:
+
+    saves/<appPackId>/<instanceId>/config/engine/policies.config.json
+
+Run-scoped policy is memory-only and never persisted.
+
+policies.config.json contains top-level sections:
+
+    - permissionPolicies
+    - fingerprintPolicies
+
+permissionPolicies and fingerprintPolicies are semantically distinct
+remembered-decision classes.
+
+permissionPolicies persist remembered permission decisions.
+
+fingerprintPolicies persist remembered fingerprint-mismatch acceptance
+decisions.
+
+Exact internal JSON record shape inside those sections remains intentionally
+flexible for now.
+
+Identity keys and higher-level decision semantics for these policy classes are
+defined by the permission and decision-handling areas that use them.
+
+DA-06 is authoritative for:
+
+    - storage location
+    - file placement
+    - top-level persistent config structure
+
+DA-17 is authoritative for:
+
+    - decision semantics
+    - remembered policy semantics
+    - policy scope precedence
+    - permission policy identity
+    - fingerprint policy identity
+    - work-lifecycle policy semantics
+
+Storing a policy record does not by itself create a valid policy outcome outside
+the owning policy semantics.
+
+
+PRESERVATION RULE 17: CONFIGURATION RECOVERY HAS NO IMPLICIT FALLBACKS
+=====================================================================
+
+Preserve error handling and recovery boundaries.
+
+Configuration errors are classified.
+
+Fatal examples include:
+
+    - missing required schema material
+    - missing required defaults material where defaults are mandatory
+    - failure before minimal recovery UI is ready
+
+Recoverable examples include:
+
+    - invalid user value
+    - parse errors
+    - migration-required state
+    - restore-from-backup decisions
+
+Recovery remains UI-driven or policy-driven where surrounding design permits it.
+
+Configuration handling does not:
+
+    - invent defaults
+    - ignore invalid stored values
+    - auto-reset silently
+    - treat parse errors as empty configuration
+    - silently write to another config file because chosen one failed
+    - silently move selected/preferred config state elsewhere
+
+Explicitness takes precedence over convenience.
+
+
+PRESERVATION RULE 18: DEVELOPMENT DIAGNOSTICS ARE NON-MUTATING
+==============================================================
+
+Preserve dev-mode diagnostic boundaries.
+
+Development diagnostics may report:
+
+    - unused keys
+    - deprecated keys
+    - schema drift
+    - effective-config diagnostics
+    - access denials as informational diagnostics
+    - duplicate schema, default, or configuration files
+    - shadowed equivalent or divergent config files
+
+Development diagnostics are non-fatal unless some other authoritative document
+explicitly states otherwise.
+
+Development diagnostics do not rewrite stored configuration.
+
+
+WATCH ITEM: DA-05 CONFIG VALUE REPRESENTATION
+=============================================
+
+DA-06 should explicitly reuse DA-05 where committed configuration values are
+stored as committed payload material.
+
+Preserve:
+
+    - DA-06 owns configuration semantics
+    - DA-05 owns ValueRef / Chunk committed-value representation
+    - DA-06 should not define a parallel value storage model
+    - configuration committed values should remain compatible with the same
+      storage-neutral representation model as other committed state
+
+
+WATCH ITEM: POLICY STORAGE AND WORK-LIFECYCLE POLICIES
+======================================================
+
+DA-06 currently lists policy storage sections:
+
+    - permissionPolicies
+    - fingerprintPolicies
+
+DA-17 later adds work-lifecycle policy decisions.
+
+Future rewrite should decide whether persisted work-lifecycle policies get a
+top-level section such as:
+
+    - workLifecyclePolicies
+
+or whether work-lifecycle policy persistence is intentionally excluded or stored
+elsewhere.
+
+Do not add this silently.
+
+Preserve:
+
+    DA-06 owns storage location and top-level file structure.
+
+    DA-17 owns work-lifecycle policy semantics.
+
+
+WATCH ITEM: APPINSTANCE / SAVEPACK PATH TERMS
+=============================================
+
+DA-06 path examples use:
+
+    saves/<appPackId>/<instanceId>/...
+
+This is acceptable as current placeholder wording.
+
+Future rewrite should revisit this after DA-20 resolves whether every
+AppInstance is formally AppPack-backed.
+
+Preserve:
+
+    - save-bound configuration is save-local
+    - save-bound configuration is included in save-bound authoritative state
+      snapshots and restoration boundaries
+    - save-bound configuration does not become global configuration
+    - path placeholders do not define AppInstance identity
+
+
+WATCH ITEM: GENERALIZED SCHEMA SYSTEM
+=====================================
+
+DA-06 defines schema use for configuration first.
+
+It does not define the full generalized schema system for all structured data.
+
+Future schema expansion should avoid making DA-06 the owner of every schema in
+Turnix.
+
+Preserve:
+
+    - DA-06 owns configuration schema use
+    - manifest/artifact schema migration remains separate unless later documents
+      intentionally define shared schema infrastructure
+    - configuration migration and manifest migration remain separate
+
+
+WATCH ITEM: CROSS-SCOPE PROMOTION UX
+====================================
+
+DA-06 leaves cross-scope promotion UX open.
+
+Future design should preserve:
+
+    - no silent promotion from save-bound to pack-global
+    - no silent promotion from pack-global to engine
+    - no silent broadening of policy/config authority
+    - user or policy decision required when promotion changes scope,
+      ownership, persistence, or authority
+    - DA-17 owns configuration-scope decisions
+
+
+WATCH ITEM: TRACE WORDING
+=========================
+
+Follow the DA-03 cross-document trace wording check.
+
+Configuration trace requirements are configuration-domain emission obligations.
+
+DA-03 owns trace substrate, retention, loss, event structure, trace DAG
+semantics, span mechanics, and trace storage semantics.
+
+Do not let configuration trace wording imply that trace evidence is committed
+state or that trace persistence is guaranteed forever.
+
+
+REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-06 CONTENT
+=========================================================
+
+Use these as rewrite guardrails only.
+
+Do not create separate configuration state architecture.
+
+Do not let effectiveConfig become authoritative state.
+
+Do not let computed transforms mutate stored values.
+
+Do not let schema become source of runtime defaults.
+
+Do not let schema create authoritative values by itself.
+
+Do not let defaults become user configuration.
+
+Do not let defaults become mutable state.
+
+Do not let override inputs modify defaults.
+
+Do not let migration silently rewrite user intent.
+
+Do not let migration bypass DA-04 commit rules.
+
+Do not let migration failure partially commit.
+
+Do not let storage layout define truth.
+
+Do not let file placement define authority.
+
+Do not let config services or providers perform direct filesystem I/O.
+
+Do not let IoManager placement failure silently fall through to another writable
+path.
+
+Do not invent defaults.
+
+Do not ignore invalid stored values.
+
+Do not auto-reset without consent or explicit policy.
+
+Do not treat parse errors as empty configuration.
+
+Do not silently move selected/preferred config state elsewhere.
+
+Do not stack duplicate schema/default/config files.
+
+Do not merge duplicate schema/default/config files.
+
+Do not let development diagnostics rewrite stored configuration.
+
+Do not let policy storage location become policy semantics.
+
+Do not let policies.config.json create valid remembered-policy outcomes outside
+DA-17 semantics.
+
+Do not let path placeholders define AppInstance identity.
+
+Do not let save-bound configuration corrupt or alter global configuration state.
+
+Do not let configuration committed values define a separate value-reference
+model from DA-05.
+
+Do not let DA-06 redefine DA-04 committed-state truth.
+
+Do not let DA-06 redefine DA-05 ValueRef / Chunk representation.
+
+Do not let DA-06 redefine DA-07 persistent I/O authority.
+
+Do not let DA-06 redefine DA-09 root/bootstrap behavior.
+
+Do not let DA-06 redefine DA-17 decision and policy semantics.
+
+Do not let DA-06 redefine DA-18 debugger mutation safety.
+
+
+CURRENT FINAL RECOMMENDATION
+============================
+
+Keep DA-06.
+
+No heavy rewrite is recommended.
+
+Recommended future edits:
+
+    - add DA-05 as upstream / representation stop-line
+    - clarify that configuration committed values reuse DA-05 ValueRef / Chunk
+      representation where applicable
+    - preserve DA-04 as committed-state authority
+    - preserve DA-07 as persistent I/O authority
+    - preserve DA-09 as root/bootstrap owner for paths.config.json behavior
+    - preserve DA-17 as decision and remembered-policy semantics owner
+    - preserve DA-18 as debugger mutation safety owner
+    - preserve policy storage as file placement and top-level structure only,
+      not policy authority
+    - decide whether work-lifecycle policy persistence needs a top-level
+      policies.config.json section after DA-17
+    - revisit saves/<appPackId>/<instanceId>/ placeholders after the DA-20
+      AppPack-backing decision
+    - normalize local subsection numbering
+    - leave hot reload, config-diff UI, cross-scope promotion UX, generalized
+      schema-system split, and finer-grained policy-file partitioning to later
+      design without weakening these boundaries
+
+--- doc-meta ---
+DOC_ID: REWRITE-DA-06
+DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-06_RECOMMENDATION.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
