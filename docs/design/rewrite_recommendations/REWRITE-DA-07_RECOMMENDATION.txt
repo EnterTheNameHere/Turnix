@@ -1,0 +1,1043 @@
+TURNIX DV3 AUDIT NOTE
+=====================
+
+Source file:
+    docs/design/DA-07_FILE_IO_READERS_WRITERS_AND_PERSISTENCE_SAFETY.txt
+
+Branch:
+    Dv3
+
+Loaded file metadata:
+    DOC_REV: 16
+    DOC_GIT: 023e3de
+    GitHub blob SHA seen by assistant:
+        6f25ec769f1181831b2198fd31678f3a82758dfe
+
+Audit note status:
+    First-pass Dv3 architecture rewrite recommendation.
+    Action-focused format under the compressed rewrite-recommendation rule.
+
+Audit scope:
+    This note audits architectural meaning, doctrine, and direction.
+    It does not audit formatting unless formatting/structure affects meaning,
+    machine interpretation, rule priority, or human usability as reference.
+
+Important excluded source:
+    AI_WORKFLOW_BOOTSTRAP.txt was intentionally not read.
+    It is part of the workflow system being audited separately and should not
+    bias this architecture pass.
+
+
+SUMMARY
+=======
+
+DA-07 is strong and Dv3-compatible.
+
+Keep it as the persistent I/O authority, Reader / Writer provider,
+root-boundary, raw-access containment, persistence-safety, backup/snapshot,
+recovery, streaming-I/O, and no-backdoor document.
+
+Preserve the central rule:
+
+    All persistence in Turnix is centralized and mediated through IoManager.
+
+DA-07 is the persistence authority umbrella.
+
+DA-07 protects authoritative state and retained artifacts, but it does not
+define what authoritative state means.
+
+DA-07 consumes and supports:
+
+    - DA-04 committed-state truth and transaction semantics
+    - DA-05 payload identity, Chunk, ChunkId, and ValueRef representation
+    - DA-06 configuration storage and migration
+    - DA-08 Window and retained-history material
+    - DA-09 root/discovery boundaries
+    - DA-17 user decision and recovery policy
+    - DA-20 AppInstance and SavePack ownership
+    - DA-23 / DA-27 adapter boundaries
+    - DA-28 RuntimeHost workspace ownership and command surfaces
+
+DA-07 does not redefine:
+
+    - committed-state truth
+    - payload identity
+    - configuration semantics
+    - Window finalization
+    - trace substrate
+    - capability permission
+    - AppInstance lifecycle
+    - RuntimeHost workspace ownership
+    - adapter lifecycle
+    - pack activation
+    - dependency resolution
+
+
+CURRENT CLASSIFICATION
+======================
+
+KEEP WITH SMALL DA-05 / DA-08 / DA-27 / DA-28 CROSS-REFERENCE WATCH
+
+DA-07 should not be rewritten heavily.
+
+Future edits should preserve:
+
+    - centralized IoManager authority
+    - Reader / Writer provider abstraction
+    - raw handles do not escape Reader / Writer boundary
+    - packs do not receive unrestricted filesystem handles or path APIs
+    - adapter-executed code does not receive filesystem authority
+    - same-language execution does not bypass IoManager
+    - same-process execution does not bypass IoManager
+    - IoManager does not replace DA-04 state model
+    - Readers / Writers do not become platform persistence authority
+    - built-in providers exist before discovery
+    - pack-provided providers are unavailable until provider pack activation
+    - discovery and indexing use built-in Readers only
+    - runtime writable roots are userdata/ and saves/
+    - custom/, first-party/, and third-party/ are read-only at runtime
+    - root writability does not by itself authorize state mutation
+    - writable SavePack access remains constrained by AppInstance ownership
+    - persistent I/O errors are classified
+    - identity-bearing data never uses silent fallback
+    - I/O outcomes are trace-visible
+    - save-local copied packs do not enter global indexing merely by existing
+    - configuration persistence uses IoManager but config semantics remain DA-06
+    - rollback points precede identity-bearing mutations
+    - streaming is explicit and forbidden in deterministic early phases
+    - no backdoors through packs, adapters, services, capabilities, Views, RPC
+      handlers, Jobs, tools, or native filesystem APIs
+
+
+ACTUAL DA-07 CHANGE 1: ADD DA-05 PAYLOAD REPRESENTATION STOP-LINE
+==================================================================
+
+DA-07 currently defines persistent I/O authority but does not explicitly list
+DA-05 in its upstream / boundary references.
+
+Recommended future rewrite:
+
+    Add DA-05 to upstream documents.
+
+    Add a local boundary statement:
+
+        DA-07 owns persistent I/O authority and persistence safety.
+
+        DA-05 owns payload identity, Chunk, ChunkId, ValueRef, decode,
+        integrity representation, and retained-root reachability.
+
+        IoManager may store, retrieve, verify, copy, stream, back up, snapshot,
+        and garbage-collect payload material, but it does not redefine Chunk
+        identity or ValueRef semantics.
+
+Reason:
+
+    DA-07 is the operational persistence authority.
+
+    DA-05 is the representation contract for committed payload material.
+
+This prevents persistence implementation from becoming payload identity
+authority.
+
+
+ACTUAL DA-07 CHANGE 2: ADD DA-08 / DA-25 / DA-26 ARTIFACT STOP-LINES
+====================================================================
+
+DA-07 handles persistence of saved data, retained artifacts, backups,
+snapshots, streaming, and recovery.
+
+Future rewrite should cross-reference:
+
+    - DA-08 for Window, SafePointWindow, ActiveWindow, AbortedWindow, and Window
+      finalization semantics
+    - DA-25 for WindowManifest, WindowExport, Minimal Audit Bundle, digest
+      representation, partial export, missing material, and offline inspection
+      artifact semantics
+    - DA-26 for comparison, Replay, Resume, Retry, and audit workflow semantics
+
+Recommended source-level boundary:
+
+    DA-07 may persist and recover retained Window-related artifacts.
+
+    DA-07 does not define what those artifacts mean.
+
+    Persisting, backing up, snapshotting, restoring, or streaming an artifact
+    does not change its authority class.
+
+Reason:
+
+    DA-07 protects storage.
+
+    DA-08 / DA-25 / DA-26 define Window/artifact/workflow meaning.
+
+
+ACTUAL DA-07 CHANGE 3: ADD DA-24 / DA-27 / DA-28 STOP-LINES
+===========================================================
+
+DA-07 mentions Jobs, adapter-executed code, AppInstance, and SavePack ownership,
+but newer documents define additional boundaries.
+
+Future rewrite should reference:
+
+    - DA-24 for OrchestrationUnit lifecycle and mutation authority
+    - DA-27 for adapter lifecycle, trust, isolation, disconnect, and
+      adapter-domain trace semantics
+    - DA-28 for RuntimeHost workspace ownership, command-surface semantics,
+      startup modes, and LAN/local-first boundaries
+
+Recommended source-level boundary:
+
+    Persistence requests may be correlated with Jobs, OrchestrationUnits,
+    adapters, AppInstances, RPC, capabilities, Views, RuntimeHost operations,
+    or tools.
+
+    Correlation does not transfer persistence authority.
+
+    Owning lifecycle documents define their own outcomes.
+
+Reason:
+
+    DA-07 is central, so it must not accidentally become owner of every runtime
+    lifecycle that can request persistence.
+
+
+ACTUAL DA-07 CHANGE 4: SAVE DATA / SAVEPACK WORDING WATCH
+=========================================================
+
+DA-07 currently says:
+
+    SavePack write ownership remains constrained by AppInstance and SavePack
+    lifecycle rules.
+
+This is correct as a boundary statement.
+
+Future rewrite should align terminology with the current DA-20 watch:
+
+    SavePack stores durable AppInstance state.
+
+    Writable SavePack ownership is constrained by AppInstance lifecycle and
+    SavePack ownership rules.
+
+    Concrete workspace locking and writable SavePack ownership implementation
+    details remain open.
+
+Do not expand DA-07 into SavePack lifecycle or AppInstance identity semantics.
+
+DA-20 and future SavePack documents own those meanings.
+
+
+ACTUAL DA-07 CHANGE 5: STREAMING SECTION NUMBERING CLEANUP
+==========================================================
+
+DA-07 has local numbering reuse under section 16:
+
+    16. STREAMING I/O
+    16.1 STREAMING KINDS
+    16.2 CANCELLATION AND CLEANUP
+    16.3 WHERE STREAMING IS FORBIDDEN
+
+This is mostly formatting, but stable references matter in architecture docs.
+
+Recommended future rewrite:
+
+    Normalize subsection numbering without changing semantics.
+
+Do not treat numbering cleanup as architecture change.
+
+
+PRESERVATION RULE 1: IOMANAGER IS THE SOLE PERSISTENT-I/O AUTHORITY
+====================================================================
+
+Preserve centralized I/O authority.
+
+Persistent I/O in Turnix routes through centralized I/O authority.
+
+Packs, tools inside runtime orchestration, adapter-executed code, and runtime
+components do not read or write persistent data by bypassing that authority.
+
+This applies to:
+
+    - configuration
+    - manifests
+    - save data
+    - logs and traces
+    - caches
+    - compiled assets
+    - future databases or storage backends
+
+Persistent I/O centralization exists to preserve:
+
+    - determinism
+    - reversibility
+    - explicit uncertainty
+    - root-boundary control
+    - user-trustworthy recovery behavior
+
+Same-language execution does not create persistence authority.
+
+Same-process execution does not create persistence authority.
+
+Python pack code, in-process adapter code, frontend adapter code, and other
+adapter-executed code remain subject to IoManager mediation.
+
+
+PRESERVATION RULE 2: IOMANAGER PROTECTS STATE BUT DOES NOT DEFINE STATE TRUTH
+============================================================================
+
+Preserve the DA-07 / DA-04 boundary.
+
+IoManager is the sole authority responsible for persistent I/O.
+
+IoManager responsibilities include:
+
+    - mediating reads and writes
+    - enforcing root boundaries and permissions
+    - normalizing and validating storage targets
+    - selecting appropriate Readers and Writers
+    - classifying errors
+    - ensuring trace-visible persistence outcomes
+    - providing atomic-write guarantees where required
+    - managing backups and snapshots per policy
+    - preserving rollback points for identity-bearing mutations
+
+No other component bypasses IoManager for persistent I/O.
+
+IoManager does not replace DA-04 state model.
+
+IoManager enforces how persistence occurs for state and other persisted
+artifacts.
+
+IoManager authority does not transfer to:
+
+    - adapters
+    - packs
+    - services
+    - Views
+    - transports
+
+merely because they can request persistence.
+
+Commit model decides truth.
+
+Persistence protects truth.
+
+Trace explains what happened.
+
+
+PRESERVATION RULE 3: READERS AND WRITERS ARE FORMAT PROVIDERS, NOT AUTHORITY ROOTS
+==================================================================================
+
+Preserve Reader / Writer provider model.
+
+IoManager does not hardcode all persistence formats.
+
+IoManager delegates concrete format handling to registered providers:
+
+    - Readers
+    - Writers
+
+A Reader loads data from storage under IoManager control.
+
+A Writer persists data to storage under IoManager control.
+
+Each Reader or Writer:
+
+    - supports one or more specific kinds
+    - declares its supported formats explicitly
+    - is registered with IoManager
+    - operates strictly within IoManager control
+    - executes in Turnix-controlled backend environment
+
+Reader / Writer providers refine persistence mechanics.
+
+Reader / Writer providers do not redefine platform persistence authority.
+
+Reader / Writer providers do not become general backend authority surfaces for
+adapter-executed code.
+
+
+PRESERVATION RULE 4: RAW ACCESS IS CONTAINED
+============================================
+
+Preserve raw access boundary.
+
+Reader / Writer implementations may internally use:
+
+    - raw filesystem handles
+    - platform-native APIs
+    - low-level I/O operations
+
+Raw handles do not escape the Reader / Writer boundary.
+
+Raw paths do not become part of the calling runtime surface.
+
+Packs do not receive filesystem handles or unrestricted path APIs.
+
+Adapter-executed code does not receive filesystem handles or unrestricted path
+APIs as a Turnix persistence authority path.
+
+Readers return loaded data or streaming views when explicit streaming mode
+allows it.
+
+Writers accept data or explicit streams to persist under IoManager control.
+
+The raw filesystem remains an internal implementation detail of IoManager and
+its providers.
+
+
+PRESERVATION RULE 5: BUILT-IN PROVIDERS EXIST BEFORE DISCOVERY
+==============================================================
+
+Preserve built-in / extended provider separation.
+
+Turnix core provides built-in persistence kinds required before discovery
+begins.
+
+Built-in kinds currently include:
+
+    - utf8Text
+    - binary
+    - json
+    - json5
+    - jsonl
+
+These built-in kinds remain available before discovery and indexing.
+
+Additional kinds may be provided by packs or later platform extensions.
+
+Extended providers:
+
+    - register with IoManager
+    - declare supported kinds explicitly
+    - are not usable until the providing pack is activated
+
+Turnix does not auto-discover or load providers in the middle of a read or
+write operation.
+
+Early phases use only built-in providers.
+
+Provider registration through adapter-executed code remains governed by:
+
+    - activation boundaries
+    - adapter boundaries
+    - capability boundaries
+    - policy boundaries
+    - IoManager boundaries
+
+
+PRESERVATION RULE 6: DISCOVERY AND INDEXING USE BUILT-IN READERS ONLY
+=====================================================================
+
+Preserve early-phase I/O limits.
+
+Discovery and indexing use built-in Readers only.
+
+During discovery and indexing, Turnix does not use:
+
+    - pack-provided Readers
+    - pack-provided Writers
+    - compilers
+    - transformers
+    - streaming I/O
+
+Early phases remain:
+
+    - deterministic
+    - fast
+    - independent of pack activation
+
+These limits remain compatible with DA-09 and DA-14.
+
+Discovery remains candidate/root production.
+
+Discovery does not activate packs or load pack-provided persistence providers.
+
+
+PRESERVATION RULE 7: ROOT WRITABILITY IS NOT STATE MUTATION AUTHORITY
+=====================================================================
+
+Preserve runtime root permission boundaries.
+
+Writable roots at runtime:
+
+    - userdata/
+    - saves/
+
+Read-only roots at runtime:
+
+    - custom/
+    - first-party/
+    - third-party/
+
+Runtime orchestration enforces root rules strictly.
+
+Authoring tools outside runtime orchestration may define broader editing
+behavior.
+
+Authoring-tool behavior does not weaken runtime rules.
+
+IoManager enforces root-boundary rules for runtime persistence.
+
+Root writability does not by itself authorize state mutation.
+
+State-mutation authority remains constrained by relevant higher design areas.
+
+Adapter-executed code does not gain write authority merely because a root is
+writable.
+
+Writable SavePack access remains constrained by AppInstance and SavePack
+lifecycle rules.
+
+
+PRESERVATION RULE 8: I/O ERRORS ARE CLASSIFIED AND IDENTITY-BEARING DATA HAS NO SILENT FALLBACK
+================================================================================================
+
+Preserve error classification.
+
+Persistent I/O errors are classified into exactly one category:
+
+    - Unrecoverable
+    - User-decidable
+    - Optional / best-effort
+
+Unrecoverable errors include failures such as:
+
+    - failure to load required configuration schema material
+    - failure to load required default configuration material
+    - corruption of identity-bearing state required before minimal recovery UI is
+      available
+
+Unrecoverable errors terminate the affected operation or runtime path as fatal.
+
+User-decidable errors include failures such as:
+
+    - corrupted user configuration
+    - missing optional files required for a chosen action
+    - version mismatch requiring migration or reset
+    - recoverable restore decisions
+
+User-decidable errors pause normal continuation and require explicit recovery
+flow.
+
+Optional / best-effort errors include data such as:
+
+    - logs
+    - traces
+    - caches
+
+Optional / best-effort failures do not corrupt authoritative state.
+
+Identity-bearing data never uses silent fallback.
+
+
+PRESERVATION RULE 9: RECOVERY REQUIRES RECOVERY SURFACE OR FATAL CLASSIFICATION
+================================================================================
+
+Preserve recovery bootstrap semantics.
+
+User recovery is mediated through a minimal guaranteed recovery surface.
+
+Before that recovery surface is available, recovery decisions do not occur.
+
+Failures before minimal recovery availability are fatal for the affected boot
+path.
+
+The permanent implementation stack of the recovery surface is not locked by
+DA-07.
+
+The platform guarantee is:
+
+    - a minimal recovery surface becomes available before user-decidable
+      recovery is required
+    - if that recovery surface is not yet available, the failure is treated as
+      unrecoverable in that moment
+
+DA-07 does not define frontend implementation details for the recovery surface.
+
+
+PRESERVATION RULE 10: I/O OUTCOMES ARE TRACE-VISIBLE BUT TRACE SUBSTRATE REMAINS DA-03
+======================================================================================
+
+Preserve trace visibility of I/O outcomes.
+
+Refused, skipped, failed, retried, recovered, or completed I/O outcomes are
+trace-visible.
+
+Trace naming, reason naming, and trace storage semantics remain governed by
+DA-03.
+
+DA-07 defines the persistence-side obligation to surface I/O outcomes to trace.
+
+DA-07 does not define the full tracing taxonomy.
+
+Trace-visible I/O outcomes may include correlation with:
+
+    - adapter
+    - AppInstance
+    - RPC
+    - capability
+    - Job
+
+where the persistence request came through those mediated surfaces.
+
+Correlation does not transfer persistence authority.
+
+
+PRESERVATION RULE 11: SAVE DATA HANDLING IS SAVE-LOCAL AND BOUNDED
+==================================================================
+
+Preserve save-data handling boundaries.
+
+Save data is discovered and loaded under DA-07 discovery/indexing limits and
+DA-09 discovery limits.
+
+Save-local copied packs or save-internal artifacts do not become part of initial
+global indexing merely because they exist in save data.
+
+Deeper save inspection occurs only when:
+
+    - a save is explicitly loaded
+    - a management tool explicitly inspects the save
+    - explicit configuration or policy enables deeper inspection
+
+Save-local visibility remains save-local unless some other authoritative
+document explicitly states otherwise.
+
+Writable SavePack access remains constrained by AppInstance ownership and
+persistence authority rules.
+
+DA-07 should not redefine SavePack identity or AppInstance lifecycle.
+
+
+PRESERVATION RULE 12: CONFIGURATION USES IOMANAGER BUT CONFIG SEMANTICS REMAIN DA-06
+====================================================================================
+
+Preserve configuration loading relationship.
+
+Configuration loading and persistence use IoManager mediation.
+
+Configuration-specific semantics are defined by DA-06.
+
+DA-07 does not redefine:
+
+    - configuration scopes
+    - defaults
+    - override semantics
+    - effectiveConfig semantics
+    - configuration migration semantics
+    - policy-file top-level structure
+
+DA-07 defines only the I/O authority and persistence-safety obligations that
+configuration obeys.
+
+
+PRESERVATION RULE 13: MIGRATORS DO NOT PROVIDE ROLLBACK BY THEMSELVES
+=====================================================================
+
+Preserve migrator and rollback semantics.
+
+Migrators may exist for:
+
+    - configuration
+    - manifests
+    - save structures
+    - future persisted artifact classes
+
+Migrators are versioned and applied sequentially toward a target compatibility
+state.
+
+Migrators are deterministic and side-effect controlled within their defined
+scope.
+
+Migrators do not provide inverse operations by themselves.
+
+Before any identity-bearing mutation is committed, IoManager creates a rollback
+point according to policy.
+
+Identity-bearing mutations include, but are not limited to:
+
+    - configuration migrations
+    - save structure changes
+    - manager-driven save edits
+    - multi-file writes that must remain internally consistent
+
+Rollback safety is provided by IoManager and DA-04 commit model, not by
+per-migrator inverse logic.
+
+
+PRESERVATION RULE 14: BACKUPS AND SNAPSHOTS ARE DURABILITY MECHANISMS, NOT TRUTH
+================================================================================
+
+Preserve backup and snapshot boundaries.
+
+IoManager supports durability mechanisms such as:
+
+    - file backups
+    - snapshots
+
+File backups are suited to small critical files and prior versions.
+
+Snapshots are suited to logically related multi-file or multi-artifact units.
+
+Policy controls:
+
+    - retention
+    - storage location
+    - cleanup behavior
+    - restoration availability
+
+Automatic rollback does not occur without explicit policy or user-visible
+consent where such consent is required.
+
+Backups and snapshots protect recoverability.
+
+Backups and snapshots do not redefine committed-state truth.
+
+Backups and snapshots do not make non-authoritative evidence authoritative.
+
+
+PRESERVATION RULE 15: STREAMING IS EXPLICIT AND STAGED
+=====================================================
+
+Preserve streaming I/O semantics.
+
+Streaming is an explicit I/O mode for large or long-lived operations.
+
+Streaming read returns a stream or async iterator.
+
+Streaming write accepts a stream and stages output incrementally.
+
+Core streaming rules:
+
+    - streaming is never implicit
+    - caller requests streaming explicitly
+    - staging is mandatory for streaming write
+    - cancellation remains safe
+
+Non-streaming kinds remain non-streaming unless explicitly extended.
+
+Example streaming kinds include:
+
+    - utf8TextStream
+    - binaryStream
+    - jsonlStream
+    - tarStream
+    - saveSnapshotStream
+
+Example names do not lock full future streaming catalog.
+
+Streaming read cancellation closes underlying handles safely.
+
+Streaming read cancellation does not create persistence side effects.
+
+Streaming write cancellation does not produce partial valid final output.
+
+Final destination update occurs only on commit.
+
+Staging artifacts remain garbage-collectable and cleanup-compatible.
+
+
+PRESERVATION RULE 16: STREAMING IS FORBIDDEN IN DETERMINISTIC EARLY PHASES
+==========================================================================
+
+Preserve streaming-forbidden phases.
+
+Streaming is not used for:
+
+    - discovery
+    - indexing
+    - manifest loading
+    - configuration schema loading
+    - default configuration loading
+    - userdata configuration loading
+    - dependency resolution
+    - activation-critical reads
+
+These phases require full deterministic materialization rather than partial
+progressive access.
+
+Do not let streaming convenience weaken early-phase determinism.
+
+
+PRESERVATION RULE 17: RECOVERY USING BACKUPS AND SNAPSHOTS IS EXPLICIT
+======================================================================
+
+Preserve recovery workflow boundaries.
+
+When user-decidable persisted data fails to load, IoManager may offer recovery
+actions such as:
+
+    - restore last known good
+    - reset to defaults where that concept exists
+    - quarantine broken data
+    - proceed without the failed data only if explicit policy allows it
+
+Recovery actions remain UI-mediated or policy-mediated according to governing
+higher documents.
+
+Recovery actions remain trace-visible.
+
+DA-17 owns user decision and policy handling semantics.
+
+DA-22 owns UI presentation surfaces.
+
+DA-28 owns RuntimeHost entry-surface and command-surface semantics where
+recovery is exposed through RuntimeHost surfaces.
+
+
+PRESERVATION RULE 18: NO BACKDOORS
+==================================
+
+Preserve no-backdoor rules.
+
+Packs do not bypass IoManager.
+
+Packs do not access arbitrary persistent paths through unrestricted runtime
+APIs.
+
+Packs do not intercept core persistence flows.
+
+Persistent I/O authority remains centralized.
+
+Adapter-executed code does not bypass IoManager.
+
+Same-language execution does not bypass IoManager.
+
+Same-process execution does not bypass IoManager.
+
+Native filesystem APIs are not a Turnix persistence authority path for
+pack-provided code or adapter-executed code.
+
+Services, capabilities, Views, RPC handlers, Jobs, and tools do not acquire
+persistence authority merely because they can request persistence-related work.
+
+
+WATCH ITEM: DA-05 PAYLOAD IDENTITY AND REACHABILITY
+===================================================
+
+Future rewrite should explicitly align DA-07 with DA-05.
+
+Preserve:
+
+    - IoManager may store and retrieve Chunk and ValueRef payload material
+    - IoManager does not define Chunk identity
+    - IoManager does not define ValueRef meaning
+    - IoManager may perform integrity checks, but corrupt payload material
+      remains non-authoritative under DA-05
+    - IoManager may perform GC, but reachability and authoritative retained roots
+      must preserve latest committed-state restoration safety
+    - physical storage mapping does not redefine logical payload identity
+
+
+WATCH ITEM: WINDOW / EXPORT / AUDIT ARTIFACTS
+=============================================
+
+Future rewrite should explicitly align DA-07 with DA-08, DA-25, and DA-26.
+
+Preserve:
+
+    - persistence of Window material does not define Window finalization
+    - persistence of WindowExport does not add authority
+    - backup/snapshot/export packaging does not convert evidence into state
+    - streaming or restoring an artifact does not imply Replay, Resume, Retry,
+      or audit workflow success
+    - missing/corrupt/unavailable material remains explicit
+
+
+WATCH ITEM: PACK-PROVIDED READER / WRITER REGISTRATION
+======================================================
+
+DA-07 allows extended providers from packs or later platform extensions, usable
+only after the providing pack is activated.
+
+Future rewrite should align this with DA-13, DA-14, DA-16, DA-23, and DA-27.
+
+Preserve:
+
+    - provider registration is explicit
+    - provider registration is trace-visible
+    - provider registration does not grant broad backend authority
+    - provider registration does not grant capability permission
+    - provider pack activation is required before use
+    - IoManager remains authority even when provider implementation is
+      pack-provided
+    - provider selection must be deterministic and scoped
+    - Turnix does not auto-load providers mid-operation
+
+
+WATCH ITEM: WORKSPACE LOCKING AND WRITABLE SAVEPACK OWNERSHIP
+=============================================================
+
+DA-07 leaves concrete workspace locking and writable ownership implementation
+open.
+
+Future rewrite should align with DA-20 and DA-28.
+
+Preserve:
+
+    - writable SavePack access is constrained by AppInstance ownership
+    - second AppInstance does not silently acquire writable SavePack ownership
+    - second RuntimeHost does not silently acquire writable workspace ownership
+    - concrete locks are implementation detail, not authority semantics
+    - failed locking cannot fake persistence success elsewhere
+
+
+WATCH ITEM: STREAMING BACKPRESSURE AND RESUMABLE STREAMING
+==========================================================
+
+DA-07 leaves streaming backpressure and resumable streaming open.
+
+Future implementation specifications should preserve:
+
+    - streaming is explicit
+    - streaming write uses staging
+    - cancellation remains safe
+    - final destination update occurs only on commit
+    - partial streaming output is not valid final output
+    - streaming remains forbidden in deterministic early phases
+
+
+WATCH ITEM: TRACE WORDING
+=========================
+
+Follow the DA-03 cross-document trace wording check.
+
+Persistence trace requirements are persistence-domain emission obligations.
+
+DA-03 owns trace substrate, retention, loss, event structure, trace DAG
+semantics, span mechanics, and trace storage semantics.
+
+Do not let DA-07 wording imply that trace evidence is committed state or that
+trace persistence is guaranteed forever.
+
+Preserve:
+
+    I/O outcomes are trace-visible.
+
+    Trace visibility does not make optional/best-effort persistence failures
+    corrupt authoritative state.
+
+    Trace loss does not redefine committed-state truth.
+
+
+REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-07 CONTENT
+=========================================================
+
+Use these as rewrite guardrails only.
+
+Do not let any component bypass IoManager for persistent I/O.
+
+Do not let same-language execution bypass IoManager.
+
+Do not let same-process execution bypass IoManager.
+
+Do not let Python pack code bypass IoManager.
+
+Do not let in-process adapter code bypass IoManager.
+
+Do not let frontend adapter code bypass IoManager.
+
+Do not let Reader / Writer providers become persistence authority roots.
+
+Do not let raw filesystem handles escape Reader / Writer boundary.
+
+Do not expose unrestricted path APIs to packs.
+
+Do not expose unrestricted path APIs to adapter-executed code.
+
+Do not auto-discover or load providers in the middle of read/write operations.
+
+Do not use pack-provided Readers/Writers during discovery or indexing.
+
+Do not use streaming I/O during discovery or indexing.
+
+Do not let root writability authorize state mutation by itself.
+
+Do not let adapter-executed code gain write authority merely because a root is
+writable.
+
+Do not silently fall back for identity-bearing data.
+
+Do not treat optional trace/log/cache failure as committed-state corruption.
+
+Do not allow recovery decisions before minimal recovery surface exists.
+
+Do not let trace visibility become trace substrate ownership.
+
+Do not let save-local copied packs become global indexing material merely
+because they exist inside save data.
+
+Do not let configuration I/O redefine configuration semantics.
+
+Do not let migrators provide rollback semantics by inverse logic alone.
+
+Do not perform automatic rollback without explicit policy or user-visible
+consent where required.
+
+Do not let streaming writes produce partial valid final output.
+
+Do not update final destination before commit.
+
+Do not let packs intercept core persistence flows.
+
+Do not let services, capabilities, Views, RPC handlers, Jobs, tools, or
+RuntimeHost surfaces acquire persistence authority merely because they request
+persistence work.
+
+Do not let DA-07 redefine DA-04 committed-state truth.
+
+Do not let DA-07 redefine DA-05 payload identity.
+
+Do not let DA-07 redefine DA-06 configuration semantics.
+
+Do not let DA-07 redefine DA-08 Window finalization.
+
+Do not let DA-07 redefine DA-16 capability permission.
+
+Do not let DA-07 redefine DA-17 decision/policy semantics.
+
+Do not let DA-07 redefine DA-20 AppInstance lifecycle.
+
+Do not let DA-07 redefine DA-23 / DA-27 adapter lifecycle and trust semantics.
+
+Do not let DA-07 redefine DA-28 RuntimeHost workspace ownership.
+
+
+CURRENT FINAL RECOMMENDATION
+============================
+
+Keep DA-07.
+
+No heavy rewrite is recommended.
+
+Recommended future edits:
+
+    - add DA-05 as payload identity / ValueRef / Chunk representation stop-line
+    - add DA-08 / DA-25 / DA-26 as Window, artifact, export, comparison, Replay,
+      Resume, Retry, and audit-workflow stop-lines
+    - add DA-24, DA-27, and DA-28 where OrchestrationUnit, adapter lifecycle, and
+      RuntimeHost workspace/command-surface boundaries are referenced
+    - preserve IoManager as sole persistent-I/O authority
+    - preserve Reader / Writer providers as format mechanics under IoManager
+      control, not authority roots
+    - preserve raw access containment
+    - preserve no-backdoor rules for packs, adapters, services, capabilities,
+      Views, RPC handlers, Jobs, tools, and native filesystem APIs
+    - preserve discovery/indexing deterministic early-phase limits
+    - preserve root writability as separate from state-mutation authority
+    - preserve identity-bearing data no-silent-fallback rule
+    - preserve backup/snapshot/rollback as durability/recovery mechanisms, not
+      truth-definition mechanisms
+    - preserve streaming as explicit, staged, cancellation-safe, and forbidden in
+      deterministic early phases
+    - leave concrete workspace locking, writable SavePack ownership
+      implementation, streaming backpressure, resumable streaming,
+      verification hooks, encryption, and physical storage mapping to later
+      implementation specifications without weakening these boundaries
+
+--- doc-meta ---
+DOC_ID: REWRITE-DA-07
+DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-07_RECOMMENDATION.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
