@@ -14,10 +14,8 @@ Loaded file metadata:
         d2f9cfc70728019683abc9c7b154b8dfe1a25c34
 
 Audit note status:
-    Consolidated Dv3 architecture rewrite recommendation.
-    Action-focused revision pass for boundary compression, RuntimeHost/
-    AppInstance/adapter/Window/PackManager ownership alignment, and stale
-    audit-report structure removal.
+    Mode 1 Dv3 architecture rewrite recommendation update.
+    Action-focused revision using Checkpoint 06.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -58,20 +56,39 @@ RuntimeHost is not:
     - capability permission
     - policy decision authority
     - committed-state authority
+    - payload representation authority
+    - configuration authority
+    - persistent-I/O authority
+    - artifact/export authority
+    - comparison authority
+    - Replay / Resume / Retry workflow authority
 
-Main required source cleanup:
+Current required source-level changes:
 
-    Align "frontend adapter" wording with Dv3 ExecutionAdapter terminology.
+    1. Align "frontend adapter" wording with Dv3 ExecutionAdapter terminology.
+
+    2. Add DA-05 / DA-06 / DA-07 stop-lines where RuntimeHost workspace
+       ownership, command surfaces, entry surfaces, retained work, save paths,
+       persistent I/O, configuration, or workspace state are mentioned.
+
+    3. Add DA-25 / DA-26 stop-lines where RuntimeHost operations, command
+       surfaces, retained work behavior, audit/export behavior, comparison,
+       Replay, Resume, Retry, or workflow traces are mentioned.
+
+    4. Clarify "resume existing state" wording so it means existing save/load
+       path, not DA-26 Resume workflow after SafePointWindow restoration.
 
 Overall recommendation:
 
-    KEEP WITH SMALL TERMINOLOGY ALIGNMENT
+    KEEP WITH SMALL TERMINOLOGY / PAYLOAD-CONFIG-PERSISTENCE /
+    ARTIFACT-WORKFLOW STOP-LINE UPDATE
 
 
 CURRENT CLASSIFICATION
 ======================
 
-KEEP WITH SMALL TERMINOLOGY ALIGNMENT
+KEEP WITH SMALL TERMINOLOGY / PAYLOAD-CONFIG-PERSISTENCE /
+ARTIFACT-WORKFLOW STOP-LINE UPDATE
 
 DA-28 should not be rewritten heavily.
 
@@ -86,7 +103,10 @@ Future edits should preserve:
     - local-first does not mean same-machine-only
     - LAN and remote exposure do not become authority
     - RuntimeHost lifecycle is distinct from AppInstance, Job, adapter,
-      transport, OrchestrationUnit, and Window lifecycle
+      transport, OrchestrationUnit, Window, artifact/export, and workflow
+      lifecycle
+    - RuntimeHost operation outcome does not define artifact/export,
+      comparison, Replay, Resume, Retry, or audit workflow outcome by default
     - RuntimeHost trace ownership is domain-specific
     - implementation shape does not define Turnix identity
 
@@ -140,7 +160,10 @@ Recommended source-level boundary:
 
     RuntimeHost does not become AppInstance, SavePack, View, ExecutionAdapter,
     transport, CLI command, Job, OrchestrationUnit, capability permission,
-    policy decision authority, committed-state authority, or Turnix identity.
+    policy decision authority, committed-state authority, payload
+    representation authority, configuration authority, persistent-I/O authority,
+    artifact/export authority, comparison authority, Replay / Resume / Retry
+    workflow authority, or Turnix identity.
 
     Entry surfaces and command surfaces request, observe, or control through
     mediated runtime paths.
@@ -156,6 +179,128 @@ Detailed ownership mapping belongs in the guardrail section, not in the source
 document.
 
 
+ACTUAL DA-28 CHANGE 3: ADD DA-05 / DA-06 / DA-07 STOP-LINES
+===========================================================
+
+DA-28 source touches:
+
+    - workspace ownership
+    - persistent I/O
+    - durable Turnix-managed state
+    - SavePack creation and loading
+    - configuration during RuntimeHost startup
+    - workspace binding
+    - retained work behavior
+    - workspace lock implementation
+    - stale ownership recovery
+
+Checkpoint 06 adds completed ownership boundaries:
+
+    DA-05 owns ValueRef, Chunk, ChunkId, payload identity, decode, integrity,
+    and committed-value representation.
+
+    DA-06 owns configuration semantics, configuration storage layout,
+    configuration migration, and policy-file placement.
+
+    DA-07 owns persistent I/O authority, root boundaries, Reader / Writer
+    providers, storage safety, backup/snapshot behavior, and streaming I/O
+    rules.
+
+Recommended source-level boundary:
+
+    RuntimeHost may bind a workspace, coordinate entry surfaces, request
+    SavePack creation or loading, and host operations that involve persisted
+    material, configuration, or committed values.
+
+    RuntimeHost does not define committed-value representation, configuration
+    semantics, configuration storage layout, persistent I/O authority, Reader /
+    Writer providers, root boundaries, filesystem rules, storage safety,
+    backup/snapshot behavior, or streaming I/O.
+
+    DA-05, DA-06, and DA-07 own those meanings.
+
+Reason:
+
+    RuntimeHost owns the running host boundary and workspace ownership
+    semantics.
+
+    RuntimeHost does not own the representation, configuration, or persistence
+    authority of the material inside the workspace.
+
+
+ACTUAL DA-28 CHANGE 4: ADD DA-25 / DA-26 STOP-LINES
+===================================================
+
+DA-28 source mentions:
+
+    - InspectTraceEvidence
+    - retained work behavior after host stop or disconnect
+    - RuntimeHostOperationRetained
+    - command result envelopes
+    - audit and export tooling paths through entry surfaces
+    - retained result or retained evidence retrieval
+
+Checkpoint 06 now defines:
+
+    DA-25 owns WindowManifest, WindowExport, Minimal Audit Bundle, optional
+    digest representation, partial export, missing material, and offline
+    inspection artifact semantics.
+
+    DA-26 owns ComparisonResult, equality modes, Replay, Resume, Retry, and
+    audit workflow semantics.
+
+Recommended source-level boundary:
+
+    RuntimeHost operations, entry surfaces, command surfaces, and host-level
+    trace evidence may request, route, expose, or observe artifact/export,
+    comparison, Replay, Resume, Retry, or audit workflow behavior.
+
+    RuntimeHost command acceptance, RuntimeHost operation completion,
+    RuntimeHost operation failure, RuntimeHost operation cancellation,
+    RuntimeHost operation detachment, RuntimeHost operation retention, host
+    stop, host crash, or host disconnect does not by itself define
+    artifact/export authority, ComparisonResult, Replay outcome, Resume outcome,
+    Retry outcome, or audit workflow outcome.
+
+    DA-25 and DA-26 own those meanings.
+
+Reason:
+
+    RuntimeHost provides entry and host-operation boundaries.
+
+    It does not own artifact/export or workflow semantics.
+
+
+ACTUAL DA-28 CHANGE 5: CLARIFY "RESUME EXISTING STATE"
+======================================================
+
+DA-28 source says:
+
+    All entry surfaces that resume existing state use the same Kernel-mediated
+    existing save path and compatibility validation path.
+
+This is understandable, but DA-26 now owns formal Resume semantics.
+
+Recommended source wording:
+
+    All entry surfaces that load or continue from existing save state use the
+    same Kernel-mediated existing save path and compatibility validation path.
+
+Or:
+
+    All entry surfaces that resume existing save state use the same
+    Kernel-mediated existing save path and compatibility validation path. This
+    does not mean DA-26 Resume after SafePointWindow restoration.
+
+Reason:
+
+    DA-28 owns common entry-surface save/load paths.
+
+    DA-26 owns Resume workflow semantics after restoration.
+
+    These meanings should not silently collapse.
+
+
 PRESERVATION RULE 1: RUNTIMEHOST DOES NOT REPLACE KERNEL
 ========================================================
 
@@ -169,8 +314,8 @@ started, exposed, coordinated, and eventually closed.
 RuntimeHost must not make non-Kernel code Kernel authority.
 
 RuntimeHost must not let command surfaces, adapters, transports, frontend
-clients, LAN clients, or PackManager surfaces bypass Kernel-owned authority
-paths.
+clients, LAN clients, PackManager surfaces, artifact/export surfaces, or
+workflow surfaces bypass Kernel-owned authority paths.
 
 
 PRESERVATION RULE 2: WORKSPACE OWNERSHIP PREVENTS SILENT MULTI-HOST MUTATION
@@ -195,6 +340,15 @@ This prevents silent multi-host mutation of durable Turnix-managed state.
 
 Concrete workspace-lock implementation belongs to implementation
 specifications, not DA-28.
+
+Workspace ownership does not bypass:
+
+    - DA-04 committed-state and transaction rules
+    - DA-05 committed-value representation
+    - DA-06 configuration semantics
+    - DA-07 persistent-I/O authority
+    - DA-20 AppInstance writable SavePack ownership
+    - DA-24 OrchestrationUnit mutation authority
 
 
 PRESERVATION RULE 3: RUNTIMEHOST IS NOT APPINSTANCE OR SAVEPACK
@@ -221,6 +375,9 @@ paths.
 This prevents CLI, browser, test, launcher, remote-client, and management paths
 from inventing separate save or AppInstance semantics.
 
+If the source keeps "resume existing state", clarify that this is existing save
+state / existing save path behavior, not DA-26 Resume.
+
 
 PRESERVATION RULE 4: STARTUP MODES ARE ENTRY WORKFLOWS
 ======================================================
@@ -245,6 +402,10 @@ are different ways to enter Turnix, not different versions of Turnix.
 
 Command syntax and launcher behavior must not become architecture.
 
+Startup mode selection does not define payload representation, configuration,
+persistence, artifact/export, comparison, Replay, Resume, Retry, or audit
+workflow semantics.
+
 
 PRESERVATION RULE 5: ENTRY SURFACES AND COMMAND SURFACES ARE NOT AUTHORITY
 ==========================================================================
@@ -268,6 +429,13 @@ A command surface does not own:
     - capability permission
     - adapter execution authorization
     - transport authority
+    - payload representation
+    - configuration semantics
+    - persistent-I/O authority
+    - artifact/export authority
+    - comparison authority
+    - Replay / Resume / Retry workflow authority
+    - audit workflow outcome
 
 CLI, launcher, browser frontend, remote client, management surface, and test
 surface must all use mediated Kernel-owned paths.
@@ -317,6 +485,9 @@ LAN exposure does not redefine:
     - capability permission
     - adapter authorization
     - transport authority
+    - persistent-I/O authority
+    - artifact/export authority
+    - Replay / Resume / Retry workflow authority
 
 Remote clients are entry surfaces or participants through mediated boundaries.
 
@@ -339,6 +510,12 @@ RuntimeHost lifecycle is distinct from:
     - adapter lifecycle
     - RPC transport lifecycle
     - Window finalization
+    - artifact/export lifecycle
+    - comparison workflow lifecycle
+    - Replay workflow lifecycle
+    - Resume workflow lifecycle
+    - Retry workflow lifecycle
+    - audit workflow lifecycle
 
 RuntimeHost command acceptance does not imply:
 
@@ -350,10 +527,33 @@ RuntimeHost command acceptance does not imply:
     - Window finalization
     - adapter readiness
     - transport success
+    - artifact/export success
+    - comparison success
+    - Replay success
+    - Resume success
+    - Retry success
+    - audit workflow success
 
 RuntimeHost operation outcome does not by itself define Job, OrchestrationUnit,
-AppInstance, adapter, transport, Window, capability, or committed-state
-outcome unless the owning workflow maps those outcomes explicitly.
+AppInstance, adapter, transport, Window, capability, committed-state,
+artifact/export, comparison, Replay, Resume, Retry, or audit workflow outcome
+unless the owning workflow maps those outcomes explicitly.
+
+RuntimeHost stop does not by itself define Job terminal outcome.
+
+RuntimeHost stop does not by itself define OrchestrationUnit terminal outcome.
+
+RuntimeHost stop does not by itself finalize a Window.
+
+RuntimeHost failure does not by itself create an AbortedWindow.
+
+RuntimeHost crash does not silently redefine committed-state meaning.
+
+RuntimeHost crash does not silently create artifact/export missing-material
+semantics.
+
+RuntimeHost crash does not silently fail Replay, Resume, Retry, comparison, or
+audit workflow work.
 
 
 PRESERVATION RULE 9: RUNTIMEHOST TRACE OWNERSHIP STAYS DOMAIN-SPECIFIC
@@ -375,15 +575,28 @@ RuntimeHost trace reasons may cover:
     - startup modes
     - host-level runtime operations
 
-RuntimeHost trace evidence does not replace trace evidence owned by committed
-state, persistent I/O, Window, capability, policy, Job, AppInstance, RPC,
-adapter, OrchestrationUnit, or PackManager domains.
+RuntimeHost trace evidence does not replace trace evidence owned by:
+
+    - committed state
+    - persistent I/O
+    - configuration
+    - Window
+    - capability
+    - policy
+    - Job
+    - AppInstance
+    - RPC
+    - adapter
+    - OrchestrationUnit
+    - PackManager
+    - artifact/export
+    - comparison / Replay / Resume / Retry / audit workflow domains
 
 Trace wording should follow the DA-03 cross-document trace wording check.
 
 
 PRESERVATION RULE 10: IMPLEMENTATION SHAPE DOES NOT DEFINE TURNIX IDENTITY
-=========================================================================
+==========================================================================
 
 Preserve DA-28's implementation-independence boundary.
 
@@ -404,6 +617,50 @@ DA-28 must not bind Turnix to:
     - command syntax as authority
 
 RuntimeHost is the running host boundary, not a concrete implementation shape.
+
+
+PRESERVATION RULE 11: RUNTIMEHOST OPERATIONS ARE HOST-LEVEL REQUESTED ACTIONS
+=============================================================================
+
+Preserve RuntimeHost operation boundaries.
+
+A RuntimeHost operation is a host-level requested action.
+
+A RuntimeHost operation may be accepted, rejected, dispatched, completed,
+failed, cancelled, superseded, detached, or retained.
+
+Those are RuntimeHost operation classifications.
+
+They do not directly define:
+
+    - Job terminal outcome
+    - OrchestrationUnit terminal outcome
+    - AppInstance lifecycle outcome
+    - adapter lifecycle outcome
+    - RPC transport outcome
+    - Window finalization
+    - committed-state truth
+    - payload representation
+    - configuration semantics
+    - persistent-I/O authority
+    - artifact/export authority
+    - ComparisonResult
+    - Replay outcome
+    - Resume outcome
+    - Retry outcome
+    - audit workflow outcome
+
+RuntimeHostOperationRetained means a host-level operation retained result or
+evidence for later retrieval under owning workflow rules.
+
+It does not define the retained result or evidence meaning by itself.
+
+DA-19 owns Job retained-result semantics where the retained result is Job-backed.
+
+DA-25 owns artifact/export retained material semantics.
+
+DA-26 owns comparison, Replay, Resume, Retry, and audit workflow retained
+evidence semantics.
 
 
 WATCH ITEM: EXECUTIONADAPTER TERMINOLOGY
@@ -430,9 +687,62 @@ Concrete workspace-lock implementation remains an implementation-spec concern.
 Do not make DA-28 depend on a specific filesystem lock, process model, socket
 model, service wrapper, database lock, or operating-system primitive.
 
+Workspace locking implementation must remain constrained by DA-04, DA-07,
+DA-20, DA-24, and DA-28.
+
+
+WATCH ITEM: EXISTING STATE / RESUME WORDING
+===========================================
+
+DA-28 uses "resume existing state" in the sense of using an existing save path.
+
+Preserve:
+
+    existing save state / existing save path behavior belongs to DA-20 / DA-28
+    creation and loading flow
+
+    DA-26 Resume is a workflow after retained SafePointWindow restoration
+
+Do not let "resume existing state" become DA-26 Resume unless DA-26 workflow
+semantics are explicitly invoked.
+
+
+WATCH ITEM: ARTIFACT / EXPORT / WORKFLOW AUTHORITY
+==================================================
+
+RuntimeHost command surfaces may later expose export, audit, comparison,
+Replay, Resume, or Retry commands.
+
+Future implementation specifications must preserve:
+
+    - DA-25 owns artifact/export semantics
+    - DA-26 owns comparison, Replay, Resume, Retry, and audit workflow semantics
+    - RuntimeHost command acceptance is not artifact/export success
+    - RuntimeHost command completion is not ComparisonResult by default
+    - RuntimeHost operation retained evidence is not evidence completeness by
+      default
+    - RuntimeHost stop/crash/disconnect does not silently decide workflow
+      outcome
+    - RuntimeHost trace evidence may correlate workflow activity but does not
+      replace workflow trace evidence
+
+
+WATCH ITEM: TRACE WORDING
+=========================
+
+Follow the DA-03 cross-document trace wording check.
+
+RuntimeHost trace requirements are RuntimeHost-domain emission obligations.
+
+DA-03 owns trace substrate, retention, loss, event structure, trace DAG
+semantics, span mechanics, and trace storage semantics.
+
+Do not let RuntimeHost trace wording imply that trace evidence is committed
+state or that trace persistence is guaranteed forever.
+
 
 REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-28 CONTENT
-=========================================================
+========================================================
 
 This section is not suggested DA-28 wording.
 
@@ -469,11 +779,23 @@ RuntimeHost-boundary guardrails:
 
     RuntimeHost does not own committed-state truth.
 
+    RuntimeHost does not own payload representation.
+
+    RuntimeHost does not own configuration semantics.
+
     RuntimeHost does not own AppInstance mutation authority.
 
     RuntimeHost does not own SavePack persistence authority.
 
     RuntimeHost does not own concrete filesystem rules.
+
+    RuntimeHost does not own artifact/export authority.
+
+    RuntimeHost does not own comparison authority.
+
+    RuntimeHost does not own Replay / Resume / Retry workflow authority.
+
+    RuntimeHost does not own audit workflow outcome.
 
     RuntimeHost does not own RPC semantics.
 
@@ -492,6 +814,17 @@ RuntimeHost-boundary guardrails:
     Command surface is not AppInstance creation authority.
 
     Command surface is not SavePack creation/loading semantics.
+
+    Command surface is not artifact/export authority.
+
+    Command surface is not Replay / Resume / Retry workflow authority.
+
+    RuntimeHost operation completion is not Job success by default.
+
+    RuntimeHost operation completion is not artifact/export success by default.
+
+    RuntimeHost operation completion is not Replay / Resume / Retry success by
+    default.
 
     Startup modes are entry workflows, not separate Turnix runtimes.
 
@@ -512,7 +845,15 @@ Owning-document guardrails:
 
     DA-04 owns authoritative committed state and transaction semantics.
 
-    DA-07 owns persistent I/O authority and concrete filesystem rules.
+    DA-05 owns ValueRef, Chunk, ChunkId, payload identity, decode, integrity,
+    and committed-value representation.
+
+    DA-06 owns configuration semantics, configuration storage layout,
+    configuration migration, and policy-file placement.
+
+    DA-07 owns persistent I/O authority, root boundaries, Reader / Writer
+    providers, persistence safety, backup/snapshot behavior, and streaming I/O
+    rules.
 
     DA-08 owns Window, SafePointWindow, AbortedWindow, and finalized runtime
     history semantics.
@@ -534,6 +875,13 @@ Owning-document guardrails:
 
     DA-24 owns OrchestrationUnit lifecycle, terminal outcomes, mutation
     authority, and single-lane AppInstance mutation semantics.
+
+    DA-25 owns Window artifacts, WindowManifests, WindowExports, Minimal Audit
+    Bundles, optional digest representation, partial export, missing material,
+    and offline inspection artifact semantics.
+
+    DA-26 owns ComparisonResult, equality modes, Replay, Resume, Retry, and
+    audit workflow semantics.
 
     DA-27 owns adapter lifecycle, trust, isolation, concrete adapter classes,
     and adapter-domain trace reason identifiers.
@@ -560,31 +908,37 @@ Keep DA-28.
 
 No heavy rewrite is recommended.
 
-Only minor terminology alignment is needed around frontend adapter wording.
+Recommended future edits:
 
-Recommended terminology direction:
-
-    ExecutionAdapter = general category.
-
-    Browser/frontend adapter = specific UI-facing realization or subtype, if
-    the term is kept at all.
-
-Preserve RuntimeHost as the running host boundary without turning it into
-Kernel, Turnix identity, AppInstance, SavePack, View, ExecutionAdapter,
-transport, CLI command, Job, OrchestrationUnit, capability permission, policy
-decision authority, committed-state authority, PackManager authority, or Window
-finalization authority.
+    - align browser/frontend adapter wording with the Dv3 ExecutionAdapter
+      umbrella term
+    - add DA-05 / DA-06 / DA-07 stop-lines where RuntimeHost workspace
+      ownership, command surfaces, entry surfaces, retained work, save paths,
+      persistent I/O, configuration, or workspace state are mentioned
+    - add DA-25 / DA-26 stop-lines where RuntimeHost operations, command
+      surfaces, retained work behavior, audit/export behavior, comparison,
+      Replay, Resume, Retry, retained evidence, or workflow traces are mentioned
+    - clarify "resume existing state" as existing save/load path behavior, not
+      DA-26 Resume
+    - preserve RuntimeHost as the running host boundary without turning it into
+      Kernel, Turnix identity, AppInstance, SavePack, View, ExecutionAdapter,
+      transport, CLI command, Job, OrchestrationUnit, capability permission,
+      policy decision authority, committed-state authority, PackManager
+      authority, Window finalization authority, artifact/export authority, or
+      Replay / Resume / Retry workflow authority
 
 Do not expand DA-28 into detailed Kernel authority, trace substrate,
-committed-state, persistent I/O, Window, capability/permission, policy, Job,
-AppInstance lifecycle, RPC/channel/transport, UI/View, ExecutionAdapter,
-OrchestrationUnit, adapter lifecycle/trust/isolation, PackManager
-graph-management, concrete CLI syntax, workspace lock implementation, or
-concrete process/socket/service/framework semantics.
+committed-state, payload representation, configuration semantics, persistent
+I/O, Window, capability/permission, policy, Job, AppInstance lifecycle,
+RPC/channel/transport, UI/View, ExecutionAdapter, OrchestrationUnit, adapter
+lifecycle/trust/isolation, PackManager graph-management, artifact/export,
+comparison, Replay, Resume, Retry, audit workflow, concrete CLI syntax,
+workspace lock implementation, or concrete process/socket/service/framework
+semantics.
 
 --- doc-meta ---
 DOC_ID: REWRITE-DA-28
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-28_RECOMMENDATION.txt
-DOC_REV: 5
-DOC_GIT: 585b950
+DOC_REV: 6
+DOC_GIT: ed6d7f6
 ----------------
