@@ -14,8 +14,8 @@ Loaded file metadata:
         962c30e99bd275543e4ddf2a3fa515fecff34fcd
 
 Audit note status:
-    First-pass Dv3 architecture rewrite recommendation.
-    Action-focused format under the compressed rewrite-recommendation rule.
+    Mode 1 Dv3 architecture rewrite recommendation update.
+    Action-focused revision using Checkpoint 06.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -40,48 +40,58 @@ Preserve the central rule:
 
     UI is presentation and interaction, not authority by itself.
 
-    View is a kernel-bound frontend runtime surface.
+    View is a Kernel-bound frontend runtime surface.
 
     Frontend runtime code is adapter-executed frontend code under DA-23.
 
     User interaction becomes meaningful only when Kernel accepts the
     corresponding command, decision, capability call, or RPC message.
 
-DA-22 must not redefine:
+Current required source-level changes:
 
-    - RPC/channel/transport semantics
-    - execution adapter boundaries
-    - RuntimeHost authority
-    - committed-state truth
-    - importing/module-loading boundaries
-    - activation lifecycle
-    - service/capability/permission semantics
-    - user decision and remembered policy semantics
-    - debugger semantics
-    - Job lifecycle
-    - AppInstance lifecycle
+    1. Add DA-05 / DA-06 / DA-07 stop-lines where UI presents, projects,
+       persists, validates, or mutates state, configuration, or stored material.
+
+    2. Add DA-25 / DA-26 stop-lines where UI/View/audit viewer/reconnect/
+       retained-update/result-retrieval wording touches artifacts, exports,
+       comparison, Replay, Resume, Retry, or audit workflows.
+
+    3. Clarify debugger UI "resume" and View closure "retried" wording so they
+       do not imply DA-26 Resume or Retry semantics unless explicitly routed
+       through DA-26.
+
+    4. Preserve the existing frontend-adapter terminology watch.
+
+    5. Preserve the existing multi-client View semantics watch.
+
+Overall recommendation:
+
+    KEEP WITH SMALL FRONTEND-ADAPTER TERMINOLOGY / MULTI-CLIENT /
+    ARTIFACT-WORKFLOW WORDING WATCH
 
 
 CURRENT CLASSIFICATION
 ======================
 
-KEEP WITH SMALL FRONTEND-ADAPTER TERMINOLOGY / MULTI-CLIENT WATCH
+KEEP WITH SMALL FRONTEND-ADAPTER TERMINOLOGY / MULTI-CLIENT /
+ARTIFACT-WORKFLOW WORDING WATCH
 
 DA-22 should not be rewritten heavily.
 
 Future edits should preserve:
 
     - UI as presentation and interaction, not authority
-    - View as kernel-bound frontend runtime surface
+    - View as Kernel-bound frontend runtime surface
     - frontend runtime code as adapter-executed code under DA-23
     - View identity distinct from AppInstance, frontend client, frontend
-      adapter, and RuntimeHost identity
+      adapter, RuntimeHost, workspace, Window, artifact/export, and workflow
+      identity
     - frontend interaction meaningful only after Kernel acceptance
     - frontend commands not authoritative merely because the user clicked,
       typed, dragged, confirmed, or interacted
     - frontend-side validation does not replace Kernel validation
     - frontend-side validation does not replace execution authorization,
-      capability permission, or policy evaluation
+      capability permission, policy evaluation, or persistence authority
     - View disconnect does not silently cancel, supersede, detach, retain, or
       discard accepted work
     - View disconnect does not silently fail frontend adapter execution
@@ -90,10 +100,157 @@ Future edits should preserve:
     - debugger UI is not debugger authority
     - presentation transforms do not mutate authoritative state by themselves
     - UI-domain trace evidence does not replace owning-domain trace evidence
+    - UI/audit-viewer surfaces do not define artifact/export authority
+    - UI/audit-viewer surfaces do not define Replay, Resume, Retry, comparison,
+      or audit workflow outcomes
+
+
+ACTUAL DA-22 CHANGE 1: ADD DA-05 / DA-06 / DA-07 STOP-LINES
+===========================================================
+
+DA-22 already says presented state is not authoritative merely because it is
+presented.
+
+Checkpoint 06 now adds clearer boundaries:
+
+    DA-05 owns ValueRef, Chunk, ChunkId, payload identity, decode, integrity,
+    and committed-value representation.
+
+    DA-06 owns configuration semantics, configuration storage layout,
+    configuration migration, and policy-file placement.
+
+    DA-07 owns persistent I/O authority, Reader / Writer provider boundaries,
+    root boundaries, persistence safety, backup/snapshot behavior, and streaming
+    I/O rules.
+
+Recommended source-level boundary:
+
+    UI may present, project, summarize, validate, or request mutation of state,
+    configuration, payload material, or persisted material.
+
+    Presentation does not change the authority class of the material.
+
+    If UI presents committed values, DA-05 still owns committed-value
+    representation and decode semantics.
+
+    If UI presents or edits configuration, DA-06 still owns configuration
+    semantics.
+
+    If UI causes persisted material to be read or written, DA-07 still owns
+    persistent-I/O authority.
+
+Reason:
+
+    DA-22 owns presentation and interaction.
+
+    DA-22 does not own committed payload representation, configuration meaning,
+    or persistent I/O authority.
+
+
+ACTUAL DA-22 CHANGE 2: ADD DA-25 / DA-26 STOP-LINES
+===================================================
+
+DA-22 mentions non-AppInstance surfaces such as audit viewer and management
+surfaces.
+
+DA-22 also mentions state snapshots, retained updates, reconnect recovery
+surfaces, and UI subscriptions.
+
+Checkpoint 06 now defines:
+
+    DA-25 owns WindowManifest, WindowExport, Minimal Audit Bundle, optional
+    digest representation, partial export, missing material, and offline
+    inspection artifact semantics.
+
+    DA-26 owns ComparisonResult, equality modes, Replay, Resume, Retry, and
+    audit workflow semantics.
+
+Recommended source-level boundary:
+
+    UI may present audit viewers, artifact viewers, comparison views,
+    Replay / Resume / Retry workflow controls, retained evidence, retained
+    updates, or export progress.
+
+    Presentation, acknowledgement, subscription delivery, reconnect delivery,
+    or user interaction does not define artifact/export authority,
+    ComparisonResult, Replay outcome, Resume outcome, Retry outcome, or audit
+    workflow outcome.
+
+    DA-25 and DA-26 own those meanings.
+
+Reason:
+
+    UI can surface those workflows.
+
+    UI must not become authority for those workflows.
+
+
+ACTUAL DA-22 CHANGE 3: CLARIFY "RESUME" AND "RETRIED" WORDING
+=============================================================
+
+DA-22 source allows debugger UI to request "resume".
+
+DA-22 source also says View closure does not by itself define whether
+AppInstance work was "retried".
+
+These are locally understandable terms, but DA-26 now gives Resume and Retry
+formal workflow meanings.
+
+Recommended future rewrite:
+
+    In debugger UI context, use:
+
+        resume / continue from debugger pause
+
+    or explicitly state:
+
+        Debugger UI resume requests are debugger-control requests under DA-18.
+        They do not mean DA-26 Resume after SafePointWindow restoration.
+
+For View closure wording, use:
+
+        View closure does not by itself define whether AppInstance work
+        committed, aborted, continued, detached, requested DA-26 Retry, or
+        requested DA-26 Resume.
+
+or:
+
+        DA-26 owns Retry and Resume workflow semantics.
+
+Reason:
+
+    DA-18 owns debugger resume/continue behavior.
+
+    DA-26 owns formal Replay / Resume / Retry workflow behavior.
+
+    DA-22 should not let ordinary UI words carry workflow semantics silently.
+
+
+ACTUAL DA-22 CHANGE 4: TRACE OWNERSHIP SHOULD INCLUDE ARTIFACT AND WORKFLOW EVIDENCE
+====================================================================================
+
+DA-22 already says UI trace evidence does not replace RPC, adapter, decision,
+RuntimeHost, capability, Job, debugger, or AppInstance trace evidence.
+
+Checkpoint 06 adds completed artifact/export and workflow documents.
+
+Recommended source-level addition:
+
+    UI trace evidence does not replace Window artifact/export trace evidence
+    owned by DA-25.
+
+    UI trace evidence does not replace comparison, Replay, Resume, Retry, or
+    audit workflow trace evidence owned by DA-26.
+
+Reason:
+
+    UI can show and request these workflows.
+
+    UI trace records presentation and interaction only.
 
 
 PRESERVATION RULE 1: UI IS PRESENTATION AND INTERACTION, NOT AUTHORITY
-=====================================================================
+======================================================================
 
 Preserve the core UI boundary.
 
@@ -113,7 +270,12 @@ UI is not policy authority by itself.
 
 UI is not persistence authority by itself.
 
-A View is a kernel-bound frontend runtime surface.
+UI is not artifact/export authority by itself.
+
+UI is not Replay, Resume, Retry, comparison, or audit workflow authority by
+itself.
+
+A View is a Kernel-bound frontend runtime surface.
 
 A View may present:
 
@@ -121,6 +283,7 @@ A View may present:
     - one tool surface
     - one debugger surface
     - one management surface
+    - one audit viewer
     - another Kernel-recognized surface class
 
 A View receives state and sends interaction through Turnix-mediated channels.
@@ -222,6 +385,12 @@ View identity is distinct from RuntimeHost identity.
 
 Frontend client identity is distinct from RuntimeHost identity.
 
+View identity is distinct from Window identity.
+
+View identity is distinct from artifact/export identity.
+
+View identity is distinct from Replay / Resume / Retry workflow identity.
+
 Concrete cookie, token, and bootstrap details belong to implementation
 specifications.
 
@@ -266,6 +435,8 @@ View readiness does not imply:
     - pack activation success
     - frontend adapter execution success beyond the View readiness condition
       itself
+    - artifact/export readiness
+    - Replay / Resume / Retry workflow readiness
 
 View disconnect is a frontend or transport condition.
 
@@ -276,15 +447,25 @@ View disconnect does not automatically:
     - deactivate the AppInstance
     - stop, fail, or close a RuntimeHost
     - discard authoritative state
+    - finalize a Window
+    - create artifact/export authority
+    - cancel Replay / Resume / Retry
+    - define audit workflow outcome
 
 If View disconnect affects accepted or in-flight work, DA-17 and DA-19 govern
 policy and Job lifecycle outcomes.
 
-If View disconnect affects frontend adapter lifecycle, DA-23 governs adapter
-lifecycle classification.
+If View disconnect affects frontend adapter lifecycle, DA-23 and DA-27 govern
+adapter lifecycle classification.
 
 If View disconnect affects RuntimeHost entry-surface behavior, DA-28 governs
 RuntimeHost lifecycle or host-operation classification.
+
+If View disconnect affects artifact/export workflow, DA-25 governs
+artifact/export semantics.
+
+If View disconnect affects comparison, Replay, Resume, Retry, or audit workflow,
+DA-26 governs workflow semantics.
 
 View closure releases the View runtime surface.
 
@@ -294,7 +475,11 @@ View closure does not by itself define whether AppInstance work:
     - aborted
     - continued
     - detached
-    - retried
+    - requested DA-26 Retry
+    - requested DA-26 Resume
+    - finalized a Window
+    - created an artifact or export
+    - completed audit workflow
 
 View closure does not by itself define RuntimeHost stop, failure, or
 command-surface outcome.
@@ -348,6 +533,12 @@ View pack interaction with backend behavior remains mediated through:
 View pack interaction with RuntimeHost control behavior remains mediated through
 DA-28-constrained entry-surface and command-surface rules.
 
+View pack interaction with artifact/export behavior remains mediated through
+DA-25-constrained workflow surfaces.
+
+View pack interaction with comparison, Replay, Resume, Retry, or audit workflow
+behavior remains mediated through DA-26-constrained workflow surfaces.
+
 View pack code must not assume another pack is activated merely because that
 pack appears in the UI.
 
@@ -359,7 +550,7 @@ UI extension points do not imply RuntimeHost control authority.
 
 
 PRESERVATION RULE 6: PRESENTED STATE IS NOT AUTHORITATIVE BY VISIBILITY
-======================================================================
+=======================================================================
 
 Preserve UI state, presentation state, and authoritative state separation.
 
@@ -372,6 +563,10 @@ UI may present:
     - progress
     - diagnostics
     - decision prompts
+    - artifact/export status
+    - comparison status
+    - Replay / Resume / Retry workflow status
+    - audit workflow status
 
 Presented state is not authoritative merely because it is presented.
 
@@ -410,9 +605,23 @@ Frontend-side validation does not replace:
     - execution authorization
     - policy evaluation
 
+If presented values are committed values, DA-05 owns committed-value
+representation and decode semantics.
+
+If presented values are configuration, DA-06 owns configuration semantics.
+
+If presentation causes persisted material to be loaded or written, DA-07 owns
+persistent-I/O authority.
+
+If presented values are artifact/export material, DA-25 owns artifact/export
+semantics.
+
+If presented values are comparison, Replay, Resume, Retry, or audit workflow
+material, DA-26 owns workflow semantics.
+
 
 PRESERVATION RULE 7: FRONTEND EVENT ORDER IS NOT COMMITTED-STATE ORDER
-=====================================================================
+======================================================================
 
 Preserve frontend event and command flow boundaries.
 
@@ -430,6 +639,10 @@ Frontend interactions may produce:
     - debugger command
     - configuration or management command
     - RuntimeHost entry-surface command
+    - artifact/export command
+    - comparison workflow command
+    - Replay / Resume / Retry workflow command
+    - audit workflow command
 
 Kernel classifies the received interaction.
 
@@ -438,8 +651,8 @@ Kernel routes the interaction through the appropriate authority surface.
 If the interaction invokes a capability, DA-16 governs capability mediation and
 permission semantics.
 
-If the interaction crosses an adapter boundary, DA-23 governs adapter boundary
-semantics.
+If the interaction crosses an adapter boundary, DA-23 and DA-27 govern adapter
+boundary and adapter lifecycle semantics.
 
 If the interaction answers a decision point, DA-17 governs decision handling.
 
@@ -456,9 +669,22 @@ If the interaction mutates committed state, DA-04 governs commit semantics.
 If the interaction persists configuration, DA-06 and DA-17 govern configuration
 and policy scope behavior.
 
+If the interaction reads or writes persistent material, DA-07 governs
+persistent-I/O authority.
+
+If the interaction controls artifact/export behavior, DA-25 governs
+artifact/export semantics.
+
+If the interaction controls comparison, Replay, Resume, Retry, or audit
+workflow behavior, DA-26 governs workflow semantics.
+
 UI event order does not by itself define committed-state order.
 
 UI event order does not by itself define RuntimeHost operation order.
+
+UI event order does not by itself define artifact/export order.
+
+UI event order does not by itself define Replay / Resume / Retry workflow order.
 
 Committed-state order is defined by relevant Kernel-owned commit and
 orchestration boundaries.
@@ -500,6 +726,10 @@ UI preserves distinctions between:
     - frontend command receipt and RuntimeHost command acceptance
     - cancellation and supersession
     - failure and Superseded
+    - debugger resume/continue and DA-26 Resume
+    - retry request and DA-26 Retry workflow
+    - artifact/export presentation and artifact/export authority
+    - comparison display and ComparisonResult authority
 
 If multiple frontend clients present the same decision point, Kernel remains the
 single arbiter of the accepted response.
@@ -524,13 +754,15 @@ Debugger UI may request:
 
     - inspection
     - pause
-    - resume
+    - resume / continue from debugger pause
     - mutation
     - cancellation
     - supersession
     - safe-point behavior
 
 only through Turnix-mediated channels.
+
+Debugger UI resume / continue does not mean DA-26 Resume.
 
 Debugger UI does not directly write committed state.
 
@@ -577,6 +809,10 @@ Presentation transforms do not change:
     - adapter semantics
     - RuntimeHost semantics
     - debugging semantics
+    - artifact/export semantics
+    - Replay / Resume / Retry workflow semantics
+    - comparison semantics
+    - audit workflow semantics
 
 If a presentation transform is persisted as user preference, that persistence
 follows configuration and policy rules defined elsewhere.
@@ -627,6 +863,10 @@ View disconnect does not silently:
     - stop RuntimeHost execution
     - fail RuntimeHost execution
     - close RuntimeHost execution
+    - finalize a Window
+    - create artifact/export authority
+    - cancel Replay / Resume / Retry
+    - define audit workflow outcome
 
 Those outcomes require policy or lifecycle authority defined in the owning
 documents.
@@ -683,12 +923,16 @@ UI trace evidence does not replace:
     - Job trace evidence
     - debugger trace evidence
     - AppInstance trace evidence
+    - Window trace evidence
+    - artifact/export trace evidence
+    - Replay / Resume / Retry workflow trace evidence
+    - committed-state trace evidence
 
 DA-03 defines the tracing substrate.
 
 DA-21 defines RPC trace correlation semantics.
 
-DA-23 defines adapter-domain trace obligations.
+DA-23 and DA-27 define adapter-domain trace obligations.
 
 DA-17 defines decision trace obligations.
 
@@ -697,6 +941,12 @@ DA-18 defines debugger trace obligations.
 DA-19 defines Job lifecycle trace obligations.
 
 DA-20 defines AppInstance trace obligations.
+
+DA-25 defines artifact/export trace obligations where artifact/export work is
+performed.
+
+DA-26 defines workflow trace obligations for comparison, Replay, Resume, Retry,
+and audit workflows.
 
 DA-28 defines RuntimeHost-domain trace obligations.
 
@@ -746,6 +996,13 @@ UI-domain trace reasons do not define:
     - debugger outcome
     - adapter outcome
     - RuntimeHost outcome
+    - Window outcome
+    - artifact/export outcome
+    - comparison outcome
+    - Replay outcome
+    - Resume outcome
+    - Retry outcome
+    - audit workflow outcome
     - committed-state mutation outcome
 
 
@@ -787,8 +1044,8 @@ Preserve:
     - Kernel resolves conflicts through normal authority, ordering, policy, and
       commit rules
     - reconnect does not imply replay of all missed frontend-local events
-    - View disconnect does not silently decide work, adapter, AppInstance, or
-      RuntimeHost outcomes
+    - View disconnect does not silently decide work, adapter, AppInstance,
+      RuntimeHost, artifact/export, or Replay / Resume / Retry outcomes
 
 
 WATCH ITEM: VIEW CREATION VS APPINSTANCE CREATION
@@ -804,6 +1061,24 @@ Future DA-20 / DA-28 / launcher specifications should preserve:
     - AppInstance creation remains Kernel-mediated
     - UI launch surfaces do not create hidden RuntimeHost startup behavior
     - UI launch surfaces do not create hidden AppInstance creation semantics
+
+
+WATCH ITEM: ARTIFACT / EXPORT / AUDIT VIEWERS
+=============================================
+
+DA-22 allows non-AppInstance surfaces such as audit viewer and management
+surfaces.
+
+Future implementation specifications should preserve:
+
+    - audit viewer UI is presentation and interaction, not audit authority
+    - artifact/export viewer UI does not define artifact/export authority
+    - visible WindowExport or Minimal Audit Bundle material does not become
+      authoritative merely because displayed
+    - missing-material display does not create missing-material semantics
+    - digest display does not make digest an identity or authority
+    - DA-25 owns artifact/export semantics
+    - DA-26 owns comparison, Replay, Resume, Retry, and audit workflow semantics
 
 
 WATCH ITEM: TRACE WORDING
@@ -854,6 +1129,10 @@ Do not let UI create hidden RuntimeHost startup behavior.
 
 Do not let UI create hidden RuntimeHost command acceptance.
 
+Do not let UI create hidden artifact/export authority.
+
+Do not let UI create hidden Replay / Resume / Retry workflow authority.
+
 Do not present transport timeout as Job timeout.
 
 Do not present Job timeout as transport timeout.
@@ -868,9 +1147,21 @@ Do not present RuntimeHost stop as View disconnect.
 
 Do not present Superseded as failure.
 
+Do not present debugger resume/continue as DA-26 Resume.
+
+Do not present Retry as reopening a closed Job.
+
+Do not present comparison display as ComparisonResult authority unless the
+result is produced by DA-26-governed comparison semantics.
+
 Do not treat visible state as authoritative merely because it is visible.
 
 Do not treat visible RuntimeHost control UI as RuntimeHost authority by itself.
+
+Do not treat visible artifact/export material as authoritative merely because it
+is visible.
+
+Do not treat visible audit material as complete merely because it is visible.
 
 Do not treat frontend-side validation as Kernel validation.
 
@@ -901,7 +1192,19 @@ Do not let View disconnect silently fail frontend adapter execution.
 
 Do not let View disconnect silently stop, fail, or close RuntimeHost execution.
 
+Do not let View disconnect silently finalize a Window.
+
+Do not let View disconnect silently create artifact/export authority.
+
+Do not let View disconnect silently cancel Replay, Resume, Retry, comparison, or
+audit workflow work.
+
 Do not let UI-domain trace reasons define owning-domain outcomes.
+
+Do not let UI-domain trace evidence replace artifact/export trace evidence.
+
+Do not let UI-domain trace evidence replace Replay / Resume / Retry workflow
+trace evidence.
 
 
 CURRENT FINAL RECOMMENDATION
@@ -913,18 +1216,29 @@ No heavy rewrite is recommended.
 
 Recommended future edits:
 
+    - add DA-05 / DA-06 / DA-07 stop-lines where UI presents, edits, validates,
+      persists, or requests mutation of committed values, configuration, or
+      persisted material
+    - add DA-25 / DA-26 stop-lines where UI, audit viewer, artifact viewer,
+      reconnect, retained update, result retrieval, comparison, Replay, Resume,
+      Retry, or audit workflow wording appears
+    - clarify debugger UI resume as debugger resume/continue from pause, not
+      DA-26 Resume
+    - clarify View closure retried/retry wording as DA-26 Retry only when routed
+      through DA-26 workflow semantics
     - keep DA-22 focused on UI, View, frontend runtime, presentation,
-      interaction, frontend adapter participation, and UI-domain trace
-      semantics
+      interaction, frontend adapter participation, and UI-domain trace semantics
     - preserve UI as presentation and interaction, not authority
     - preserve View as a Kernel-bound frontend runtime surface
     - preserve frontend runtime code as adapter-executed frontend code under
       DA-23
     - preserve frontend event flow through Kernel-mediated authority surfaces
     - preserve View identity separation from AppInstance, frontend client,
-      frontend adapter, RuntimeHost, and workspace identity
-    - preserve View lifecycle separation from AppInstance, Job, adapter,
-      RuntimeHost, and committed-state outcomes
+      frontend adapter, RuntimeHost, workspace, Window, artifact/export, and
+      workflow identity
+    - preserve View lifecycle separation from AppInstance, adapter, Job,
+      OrchestrationUnit, Window, RuntimeHost, artifact/export, Replay, Resume,
+      Retry, comparison, audit workflow, and committed-state outcomes
     - preserve decision presentation as not decision ownership
     - preserve debugger UI as not debugger authority
     - preserve frontend-side validation as UX only, not Kernel validation
@@ -932,12 +1246,13 @@ Recommended future edits:
       persisted through proper configuration/state paths
     - define concrete View registry, frontend bootstrap, frontend adapter
       binding, frontend state synchronization, UI extension catalog,
-      multi-client behavior, reconnect behavior, and component conventions later
-      without changing these authority boundaries
+      multi-client behavior, reconnect behavior, audit/artifact viewer behavior,
+      and component conventions later without changing these authority
+      boundaries
 
 --- doc-meta ---
 DOC_ID: REWRITE-DA-22
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-22_RECOMMENDATION.txt
-DOC_REV: 1
-DOC_GIT: 75bbe29
+DOC_REV: 2
+DOC_GIT: b52a3ad
 ----------------
