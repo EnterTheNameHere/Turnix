@@ -14,8 +14,8 @@ Loaded file metadata:
         3f41fcd14053d7dfbba464ac1bd9d200dfe4af7e
 
 Audit note status:
-    First-pass Dv3 architecture rewrite recommendation.
-    Action-focused format under the compressed rewrite-recommendation rule.
+    Mode 1 Dv3 architecture rewrite recommendation update.
+    Action-focused revision using Checkpoint 06.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -46,12 +46,21 @@ DA-26 consumes:
     - DA-08 Window semantics
     - DA-25 artifact and export semantics
     - DA-04 committed-state restoration boundary
+    - DA-05 payload identity, Chunk, ValueRef, decode, integrity, and retained
+      value representation boundaries where retained material is inspected or
+      compared
+    - DA-07 persistent I/O authority where workflow implementation reads,
+      writes, streams, imports, exports, or stores retained material
     - DA-19 Job lifecycle semantics
     - DA-24 OrchestrationUnit semantics
 
 DA-26 does not redefine:
 
     - committed-state truth
+    - payload identity, Chunk, ChunkId, ValueRef, decode, integrity, or retained
+      value representation contracts
+    - persistent I/O authority, Reader / Writer providers, filesystem rules, or
+      storage-root authority
     - transaction or commit mechanics
     - Window finalization
     - WindowManifest / WindowExport / Minimal Audit Bundle semantics
@@ -60,11 +69,28 @@ DA-26 does not redefine:
     - OrchestrationUnit lifecycle
     - execution adapter boundaries
 
+Current required source-level changes:
+
+    None requiring a heavy rewrite.
+
+Current recommendation-level update:
+
+    Preserve DA-05 and DA-07 stop-lines in this recommendation because DA-26
+    workflows operate over retained committed material, exported closures,
+    digest/structural comparison inputs, missing payload material, and
+    restoration inputs.
+
+Overall recommendation:
+
+    KEEP WITH SMALL REPLAY-WORDING / RESUME-POLICY /
+    PAYLOAD-IO BOUNDARY WATCH
+
 
 CURRENT CLASSIFICATION
 ======================
 
-KEEP WITH SMALL REPLAY-WORDING / RESUME-POLICY WATCH
+KEEP WITH SMALL REPLAY-WORDING / RESUME-POLICY /
+PAYLOAD-IO BOUNDARY WATCH
 
 DA-26 should not be rewritten heavily.
 
@@ -76,8 +102,16 @@ Future edits should preserve:
     - NotComparable is distinct from NotEqual
     - tools do not silently weaken equality mode after comparison failure
     - optional digests are accelerators, not identities or authority
+    - digest and structural comparison do not redefine DA-05 payload identity or
+      retained value representation
+    - workflow file/package access does not redefine DA-07 persistent I/O
+      authority
     - Replay restores retained committed state only within DA-04 restoration
       boundary
+    - Replay uses retained material whose payload/value representation remains
+      governed by DA-05
+    - Replay implementation storage and artifact access remain governed by DA-07
+      and DA-25 where applicable
     - Replay does not re-run external effects
     - Replay does not resume retained live handles
     - Resume is new work after restoration and is not deterministic in outcome
@@ -85,6 +119,98 @@ Future edits should preserve:
     - Retry does not reuse previous jobId or orchestrationUnitId
     - audit workflows do not mutate state
     - missing material remains explicit
+
+
+ACTUAL DA-26 CHANGE 1: PRESERVE DA-05 PAYLOAD / VALUE REPRESENTATION BOUNDARY
+==============================================================================
+
+DA-26 source compares retained committed key/value pairs, retained revision
+material, retained evidence closures, exported closures, optional digest
+material, missing committed-state material, and retained material needed for
+Replay restoration.
+
+Checkpoint 06 now makes DA-05 explicit enough that DA-26 rewrite guidance should
+preserve the boundary directly.
+
+Recommended source-level wording if DA-26 is touched:
+
+    DA-26 may define comparison, Replay, Resume, Retry, and audit workflow
+    claims over retained committed material, exported closures, retained
+    evidence, optional digests, and missing material.
+
+    DA-26 does not define payload identity, Chunk, ChunkId, ValueRef, decode,
+    integrity, or retained value representation contracts.
+
+    DA-05 owns those meanings.
+
+    A comparison, digest, Replay, Resume, Retry, or audit workflow does not make
+    workflow identity, export identity, digest identity, or report identity the
+    same thing as payload identity.
+
+Reason:
+
+    DA-26 owns workflow claims.
+
+    DA-05 owns retained payload and value representation semantics.
+
+    Workflow comparison may consume material represented through DA-05, but it
+    does not redefine that representation.
+
+
+ACTUAL DA-26 CHANGE 2: PRESERVE DA-07 PERSISTENT-I/O BOUNDARY
+=============================================================
+
+DA-26 source leaves concrete packaging and concrete Replay implementation steps
+open.
+
+Future workflow implementations will likely read, write, stream, import,
+export, or store retained artifacts and workflow outputs.
+
+Checkpoint 06 now makes DA-07 explicit enough that DA-26 rewrite guidance should
+preserve the boundary directly.
+
+Recommended source-level wording if DA-26 is touched:
+
+    DA-26 defines workflow semantics.
+
+    DA-26 does not define persistent I/O authority, Reader / Writer providers,
+    root boundaries, filesystem rules, storage safety, backup/snapshot
+    mechanics, streaming I/O, or concrete file access behavior.
+
+    DA-07 owns those meanings.
+
+    Workflow implementation must not bypass IoManager authority merely because
+    it is comparing, replaying, resuming, retrying, auditing, importing, or
+    exporting retained material.
+
+Reason:
+
+    DA-26 can say what workflow outcomes mean.
+
+    DA-26 should not become file-system or storage authority.
+
+
+ACTUAL DA-26 CHANGE 3: PRESERVE REPLAY / RESUME / RETRY WORDING
+===============================================================
+
+DA-26 owns the formal meanings of Replay, Resume, and Retry.
+
+Preserve the distinction:
+
+    Replay restores retained committed state and retained causal story where
+    available.
+
+    Resume attempts to continue after restoration.
+
+    Retry starts a new attempt for selected prior work or action.
+
+Do not weaken these terms into generic English.
+
+Do not let other documents use these terms without qualification when they mean
+ordinary debugger resume, UI resume, Job resume, retry as informal attempt, or
+trace replay visualization.
+
+If DA-26 itself is edited, keep the formal meanings stable.
 
 
 PRESERVATION RULE 1: WORKFLOW INPUTS DO NOT ADD AUTHORITY
@@ -124,6 +250,12 @@ A workflow does not infer authority from:
     - transport origin
 
 A workflow does not hide the authority class of material it consumes.
+
+Workflow inputs that contain retained payload references or retained value
+representations remain constrained by DA-05.
+
+Workflow inputs that are loaded, stored, imported, exported, or streamed remain
+constrained by DA-07.
 
 
 PRESERVATION RULE 2: COMPARISONRESULT IS A THREE-VALUE SEMANTIC CLAIM
@@ -183,7 +315,7 @@ defines the meaning of the result.
 
 
 PRESERVATION RULE 4: STATEEQUALITY ONLY COMPARES RETAINED COMMITTED STATE
-========================================================================
+=========================================================================
 
 Preserve StateEquality semantics.
 
@@ -211,8 +343,10 @@ StateEquality does not prove evidence equality.
 
 StateEquality does not prove execution history equality.
 
-StateEquality does not prove replayability beyond DA-04 retained committed-state
-restoration boundaries.
+StateEquality does not prove replayability beyond DA-04 retained
+committed-state restoration boundaries.
+
+StateEquality does not redefine DA-05 retained value representation.
 
 
 PRESERVATION RULE 5: STRICTSTATEEQUALITY DOES NOT SILENTLY DEGRADE
@@ -237,7 +371,7 @@ semantics unless the result is clearly identified as the weaker requested mode.
 
 
 PRESERVATION RULE 6: EVIDENCEEQUALITY IS NOT STATE EQUALITY
-==========================================================
+===========================================================
 
 Preserve EvidenceEquality semantics.
 
@@ -289,9 +423,13 @@ Do not let ExportEquality become a synonym for committed-state equality.
 
 Do not let ExportEquality become a synonym for evidence equality.
 
+Do not let ExportEquality redefine DA-05 payload identity.
+
+Do not let ExportEquality redefine DA-07 storage identity.
+
 
 PRESERVATION RULE 8: NOTCOMPARABLE IS NOT NOTEQUAL
-=================================================
+==================================================
 
 Preserve NotComparable semantics.
 
@@ -359,6 +497,12 @@ explicit coordinated revision changes that meaning.
 Digest mismatch in one equality mode does not imply mismatch in every equality
 mode.
 
+Digest computation does not redefine DA-05 payload identity, Chunk identity,
+ValueRef identity, or retained value representation.
+
+Digest computation does not redefine DA-07 storage identity or persistent I/O
+authority.
+
 
 PRESERVATION RULE 10: REPLAY IS RESTORATION, NOT RE-RUNNING
 ===========================================================
@@ -399,6 +543,10 @@ material is not deterministic restoration.
 
 Replay presentation distinguishes restored committed state from retained
 non-authoritative causal evidence.
+
+Replay retained material remains constrained by DA-05 representation contracts.
+
+Replay implementation I/O remains constrained by DA-07 persistent I/O authority.
 
 
 PRESERVATION RULE 11: RESUME IS NEW WORK AFTER RESTORATION
@@ -475,7 +623,8 @@ execution.
 Retry does not imply deterministic outcome equality with the earlier attempt.
 
 Retry remains constrained by current policy, capability, adapter, AppInstance,
-and state rules at the time of retry.
+state, configuration, persistence, artifact, and workflow rules at the time of
+retry.
 
 
 PRESERVATION RULE 13: REPLAY, RESUME, AND RETRY REMAIN DISTINCT
@@ -616,6 +765,13 @@ Missing material does not silently disappear from audit presentation.
 Workflow output identifies the selected workflow scope so that missing material
 is interpreted relative to the claim being made.
 
+Unavailable payload remains a DA-05/DA-25 material condition, not a new workflow
+identity.
+
+Missing material caused by storage, filesystem, import, export, or stream
+failure remains constrained by DA-07 and by the concrete workflow/tooling
+implementation.
+
 
 WATCH ITEM: REPLAY WORDING
 ==========================
@@ -676,7 +832,8 @@ weakening:
     - Retry is not implied by Replay
     - Retry is not implied by Resume unless Resume policy explicitly selects it
     - Retry remains constrained by current policy, capability, adapter,
-      AppInstance, and state rules
+      AppInstance, state, configuration, persistence, artifact, and workflow
+      rules
 
 
 WATCH ITEM: STRICT EQUALITY SUBMODES
@@ -690,6 +847,27 @@ Future specifications should preserve:
     - unsupported strict submodes do not silently degrade to StateEquality
     - comparison result without equality mode is incomplete
     - user-facing presentation distinguishes NotComparable from NotEqual
+
+
+WATCH ITEM: PAYLOAD / VALUE REPRESENTATION AND I/O
+==================================================
+
+DA-26 workflows operate over retained material and exported closures.
+
+Future implementation specifications must preserve:
+
+    - DA-05 owns payload identity, Chunk, ChunkId, ValueRef, decode, integrity,
+      and retained value representation contracts
+    - DA-07 owns persistent I/O authority, Reader / Writer providers, root
+      boundaries, filesystem rules, storage safety, backup/snapshot behavior,
+      and streaming I/O
+    - DA-26 owns workflow claims, not retained material representation or
+      storage authority
+    - digest computation and structural comparison must not redefine payload
+      identity or storage identity
+    - Replay restoration uses retained material but does not redefine retained
+      material representation
+    - audit output is evidence presentation, not storage truth
 
 
 WATCH ITEM: TRACE WORDING
@@ -707,7 +885,7 @@ or that trace persistence is guaranteed forever.
 
 
 REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-26 CONTENT
-=========================================================
+========================================================
 
 Use these as rewrite guardrails only.
 
@@ -739,6 +917,14 @@ Do not treat optional digests as authority.
 Do not let digest mismatch in one equality mode imply mismatch in every equality
 mode.
 
+Do not let digest computation redefine payload identity.
+
+Do not let digest computation redefine storage identity.
+
+Do not let structural comparison redefine payload identity.
+
+Do not let structural comparison redefine storage identity.
+
 Do not use Replay to mean re-running external effects.
 
 Do not use Replay to mean deterministic reconstruction of uncommitted
@@ -752,6 +938,10 @@ Do not use Replay to mean restarting retained adapter execution.
 
 Do not use Replay to mean reconnecting retained RPC channels, transports,
 Views, or frontend participants.
+
+Do not let Replay bypass DA-05 retained value representation.
+
+Do not let Replay bypass DA-07 persistent I/O authority.
 
 Do not let Resume reuse closed Job lifecycle identity.
 
@@ -779,6 +969,13 @@ Do not let DA-26 redefine DA-25 artifact/export semantics.
 
 Do not let DA-26 redefine DA-04 committed-state truth.
 
+Do not let DA-26 redefine DA-05 payload identity, ValueRef, Chunk, decode, or
+retained value representation semantics.
+
+Do not let DA-26 redefine DA-07 persistent I/O authority, Reader / Writer
+providers, filesystem rules, storage roots, backup/snapshot behavior, or
+streaming I/O.
+
 Do not let DA-26 redefine DA-19 Job lifecycle.
 
 Do not let DA-26 redefine DA-24 OrchestrationUnit lifecycle or mutation
@@ -800,18 +997,24 @@ Recommended future edits:
     - preserve NotComparable as distinct from NotEqual
     - preserve no boolean equality API
     - preserve optional digests as comparison accelerators only
+    - preserve DA-05 ownership of payload identity, Chunk, ValueRef, decode,
+      integrity, and retained value representation contracts
+    - preserve DA-07 ownership of persistent I/O authority, Reader / Writer
+      providers, storage roots, filesystem rules, backup/snapshot behavior, and
+      streaming I/O
     - preserve Replay as committed-state restoration and causal-story
       presentation, not re-running work
     - preserve Resume as explicit new work after restoration
     - preserve Retry as new work
     - preserve audit workflows as non-mutating evidence workflows
     - define strict equality submodes, workflow trace reason identifiers,
-      Replay implementation workflow, Resume policy, Retry policy, and audit UI
+      Replay implementation workflow, Resume policy, Retry policy, audit UI,
+      retained-material decoding, digest computation, and workflow I/O behavior
       later without changing these authority boundaries
 
 --- doc-meta ---
 DOC_ID: REWRITE-DA-26
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-26_RECOMMENDATION.txt
-DOC_REV: 1
-DOC_GIT: a264a12
+DOC_REV: 2
+DOC_GIT: 8904d01
 ----------------
