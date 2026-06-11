@@ -14,9 +14,8 @@ Loaded file metadata:
         00f31c5f489042a5b18db7c8c085d950338f2d47
 
 Audit note status:
-    Consolidated Dv3 architecture rewrite recommendation.
-    Action-focused revision pass for boundary compression, RPC outcome
-    stop-line, and later domain guardrail alignment.
+    Mode 1 Dv3 architecture rewrite recommendation update.
+    Action-focused revision using Checkpoint 06.
 
 Audit scope:
     This note audits architectural meaning, doctrine, and direction.
@@ -51,30 +50,27 @@ Preserve the core split:
 
     JSON = concrete envelope/schema representation
 
-Required small cleanup:
+Current required source-level changes:
 
-    Clarify that trace-visible RPC flow means RPC-domain trace emission
-    obligation where applicable, while trace retention and loss remain governed
-    by DA-03.
+    1. Clarify that trace-visible RPC flow means RPC-domain trace emission
+       obligation where applicable, while trace retention and loss remain
+       governed by DA-03.
 
-Recommended source-level stop-line:
+    2. Add or preserve a compact RPC outcome stop-line.
 
-    RPC, RPCChannel, transport, acknowledgement, request acceptance,
-    subscription delivery, timeout, disconnect, and cancellation messages are
-    communication-domain events.
-
-    They do not directly become Job, OrchestrationUnit, adapter, RuntimeHost,
-    AppInstance, Window, capability, policy, or committed-state outcomes.
+    3. Add DA-25 / DA-26 stop-lines where RPC subscription, update, result
+       retrieval, retained result, artifact, export, comparison, Replay,
+       Resume, Retry, or audit workflow wording appears.
 
 Overall recommendation:
 
-    KEEP WITH SMALL TRACE WORDING CLARIFICATION
+    KEEP WITH SMALL TRACE WORDING / DA-25 / DA-26 STOP-LINE WATCH
 
 
 CURRENT CLASSIFICATION
 ======================
 
-KEEP WITH SMALL TRACE WORDING CLARIFICATION
+KEEP WITH SMALL TRACE WORDING / DA-25 / DA-26 STOP-LINE WATCH
 
 DA-21 should not be rewritten heavily.
 
@@ -89,6 +85,10 @@ Future edits should preserve:
     - RPC does not bypass Capability, ExecutionAdapter, or RuntimeHost ownership
     - subscription delivery is not domain truth
     - transport timeout, disconnect, and cancellation are not domain outcomes
+    - retained-result retrieval flow does not define Job result semantics
+    - retained-result retrieval flow does not define artifact/export semantics
+    - retained-result retrieval flow does not define Replay / Resume / Retry
+      workflow semantics
     - RPCChannel is transport-neutral
     - RPC trace ownership is domain-specific
     - DA / IS authority split
@@ -112,7 +112,8 @@ Correct reading:
 
     RPC observability does not replace capability, decision, Job,
     OrchestrationUnit, adapter, RuntimeHost, AppInstance, debugger, Window,
-    PackManager, or committed-state trace evidence.
+    artifact/export, Replay / Resume / Retry workflow, PackManager, or
+    committed-state trace evidence.
 
 Not:
 
@@ -141,7 +142,8 @@ Recommended source-level boundary:
     communication-domain events.
 
     They do not directly become Job, OrchestrationUnit, adapter, RuntimeHost,
-    AppInstance, Window, capability, policy, or committed-state outcomes.
+    AppInstance, Window, capability, policy, artifact/export, comparison,
+    Replay, Resume, Retry, audit workflow, or committed-state outcomes.
 
     If such an event affects another domain, that domain defines the resulting
     outcome.
@@ -153,6 +155,72 @@ message-flow meaning.
 
 Detailed ownership mapping belongs in the guardrail section, not in the source
 document.
+
+
+ACTUAL DA-21 CHANGE 3: ADD DA-25 / DA-26 STOP-LINES
+===================================================
+
+DA-21 currently owns abstract RPC semantics and open questions such as
+subscription flow and retained-result retrieval flow.
+
+Checkpoint 06 now has explicit artifact and workflow ownership:
+
+    DA-25 owns WindowManifest, WindowExport, Minimal Audit Bundle, optional
+    digest representation, partial export, missing material, and offline
+    inspection artifact semantics.
+
+    DA-26 owns ComparisonResult, equality modes, Replay, Resume, Retry, and
+    audit workflow semantics.
+
+Recommended source-level boundary:
+
+    RPC may carry or correlate messages related to artifacts, exports,
+    retained results, comparison, Replay, Resume, Retry, or audit workflows.
+
+    Carrying, acknowledging, routing, subscribing to, or delivering those
+    messages does not define the artifact, export, comparison, Replay, Resume,
+    Retry, or audit workflow outcome.
+
+    DA-25 and DA-26 own those meanings.
+
+Reason:
+
+    DA-21 can define communication flow for those operations.
+
+    DA-21 must not become artifact/export or workflow authority.
+
+
+ACTUAL DA-21 CHANGE 4: RETAINED-RESULT RETRIEVAL WORDING
+========================================================
+
+DA-21 leaves open:
+
+    retained-result retrieval flow for Job-backed RPC
+
+This is valid as an RPC-flow open question, but the wording now needs a
+boundary.
+
+Recommended source-level clarification:
+
+    DA-21 may define or constrain the RPC flow used to request or deliver a
+    retained result.
+
+    DA-21 does not define whether a retained result is authoritative state,
+    artifact material, Job result material, Replay material, Resume material,
+    Retry material, or audit workflow material.
+
+    DA-19 owns Job result semantics.
+
+    DA-25 owns artifact/export semantics.
+
+    DA-26 owns Replay / Resume / Retry and audit workflow semantics.
+
+Reason:
+
+    Retained-result retrieval is a communication flow.
+
+    Retained-result meaning belongs to the owning result, artifact, or workflow
+    domain.
 
 
 PRESERVATION RULE 1: RPC IS LOGICAL BOUNDARY, NOT TRANSPORT
@@ -181,6 +249,8 @@ RPC is not:
     - Job lifecycle
     - OrchestrationUnit lifecycle
     - Window finalization
+    - artifact/export authority
+    - Replay / Resume / Retry workflow
     - final work outcome
 
 
@@ -202,6 +272,12 @@ Acknowledgement does not imply:
     - OrchestrationUnit completion
     - RuntimeHost command acceptance
     - Window finalization
+    - artifact/export creation
+    - comparison completion
+    - Replay completion
+    - Resume completion
+    - Retry completion
+    - audit workflow completion
     - committed-state mutation
 
 This prevents the bad model:
@@ -234,6 +310,8 @@ RPC routes may target:
     - RuntimeHost-facing endpoints
     - control endpoints
     - subscription endpoints
+    - artifact/export operation endpoints
+    - comparison or audit workflow endpoints
 
 But RPC routing does not:
 
@@ -247,12 +325,21 @@ But RPC routing does not:
     - expose LAN by itself
     - create OrchestrationUnits by itself
     - finalize Windows by itself
+    - create artifact/export authority
+    - create ComparisonResult by itself
+    - start Replay / Resume / Retry by itself
+    - complete audit workflow by itself
 
 Capability-routed RPC remains subject to DA-16.
 
 Adapter-facing RPC remains subject to DA-23 and DA-27.
 
 RuntimeHost control-surface RPC remains subject to DA-28.
+
+Artifact/export operation RPC remains subject to DA-25.
+
+Replay / Resume / Retry / comparison / audit workflow RPC remains subject to
+DA-26.
 
 
 PRESERVATION RULE 4: REQUEST ACCEPTANCE IS NOT FINAL SUCCESS
@@ -268,10 +355,15 @@ An RPC request may end in:
     - accepted OrchestrationUnit-backed work
     - accepted adapter-mediated work
     - accepted RuntimeHost operation
+    - accepted artifact/export operation
+    - accepted comparison or audit workflow operation
+    - accepted Replay / Resume / Retry workflow operation
     - rejected-before-Job outcome
     - rejected-before-OrchestrationUnit outcome
     - rejected-before-adapter-work outcome
     - rejected-before-RuntimeHost-operation outcome
+    - rejected-before-artifact/export-operation outcome
+    - rejected-before-workflow-operation outcome
 
 Request acceptance means the request crossed the RPC dispatch boundary and was
 accepted by the target operation.
@@ -380,6 +472,10 @@ Subscription delivery may carry:
     - adapter lifecycle updates
     - RuntimeHost operation updates
     - Window evidence updates
+    - artifact/export operation updates
+    - comparison workflow updates
+    - Replay / Resume / Retry workflow updates
+    - audit workflow updates
     - PackManager operation updates
     - other operation-defined update material
 
@@ -392,6 +488,12 @@ But subscription delivery does not by itself define:
     - RuntimeHost lifecycle
     - RuntimeHost command outcome
     - Window finalization
+    - artifact/export authority
+    - ComparisonResult
+    - Replay outcome
+    - Resume outcome
+    - Retry outcome
+    - audit workflow outcome
     - PackManager operation outcome
 
 If subscription delivery reports Job progress or terminal outcome, the reported
@@ -408,6 +510,12 @@ reported RuntimeHost meaning remains owned by DA-28.
 
 If subscription delivery reports Window state, the reported Window meaning
 remains owned by DA-08.
+
+If subscription delivery reports artifact/export state, the reported
+artifact/export meaning remains owned by DA-25.
+
+If subscription delivery reports comparison, Replay, Resume, Retry, or audit
+workflow state, the reported workflow meaning remains owned by DA-26.
 
 Unsubscribe withdraws interest in future subscription delivery.
 
@@ -439,6 +547,10 @@ Transport timeout does not automatically:
     - fail a RuntimeHost
     - fail an OrchestrationUnit
     - finalize a Window
+    - create artifact/export authority
+    - define ComparisonResult
+    - fail Replay / Resume / Retry
+    - fail an audit workflow
     - mutate committed state
 
 Transport disconnect does not automatically:
@@ -451,6 +563,9 @@ Transport disconnect does not automatically:
     - stop, fail, or close a RuntimeHost
     - finalize an ActiveWindow
     - create an AbortedWindow
+    - create missing-material semantics
+    - cancel Replay / Resume / Retry
+    - define audit workflow outcome
     - mutate committed state
 
 If accepted or in-flight work exists when transport disconnect occurs, policy
@@ -472,6 +587,12 @@ outcome affects RuntimeHost behavior.
 
 DA-08 owns Window finalization when a policy or lifecycle outcome affects
 Window state.
+
+DA-25 owns artifact/export semantics when policy affects retained artifacts or
+exports.
+
+DA-26 owns comparison, Replay, Resume, Retry, and audit workflow semantics when
+policy affects those workflows.
 
 RPC cancellation messages are requests.
 
@@ -495,6 +616,8 @@ RPCChannel does not define:
     - adapter lifecycle semantics
     - RuntimeHost lifecycle or command-surface semantics
     - Window finalization semantics
+    - artifact/export semantics
+    - Replay / Resume / Retry workflow semantics
     - committed-state semantics
 
 Concrete channel implementations adapt concrete transports into this abstract
@@ -512,6 +635,8 @@ A channel implementation does not silently transform disconnect into:
     - RuntimeHost stop, failure, or command cancellation
     - OrchestrationUnit cancellation
     - Window finalization
+    - artifact/export outcome
+    - Replay / Resume / Retry workflow outcome
     - committed-state mutation
 
 
@@ -535,6 +660,8 @@ RPC observability does not replace trace evidence owned by:
     - adapter documents
     - RuntimeHost documents
     - Window documents
+    - artifact/export documents
+    - comparison / Replay / Resume / Retry / audit workflow documents
     - PackManager documents
     - committed-state documents
 
@@ -578,13 +705,67 @@ IS documents do not redefine:
     - decision and policy semantics
     - committed-state authority
     - Window finalization
+    - artifact/export semantics
+    - ComparisonResult
+    - Replay / Resume / Retry workflow semantics
 
 If an IS document needs a semantic rule not defined here, DA-21 is updated first
 or alongside the IS document.
 
 
+WATCH ITEM: RETAINED-RESULT RETRIEVAL FLOW
+==========================================
+
+DA-21 leaves retained-result retrieval flow for Job-backed RPC open.
+
+Future design should preserve:
+
+    - retrieval flow is communication flow
+    - Job result meaning remains DA-19
+    - retained artifact/export meaning remains DA-25
+    - Replay / Resume / Retry and audit workflow meaning remains DA-26
+    - retained-result delivery is not committed-state truth by itself
+    - retained-result delivery is not Job success by itself
+    - retained-result delivery does not imply artifact completeness
+    - retained-result delivery does not imply Replay, Resume, or Retry success
+
+
+WATCH ITEM: CONCRETE RPC ENVELOPE
+=================================
+
+IS-01 should preserve DA-21 logical RPC semantics while defining concrete
+envelope fields.
+
+IS-01 must not make concrete envelope fields redefine request acceptance, Job
+lifecycle, OrchestrationUnit lifecycle, capability authority, adapter
+authority, RuntimeHost authority, Window finalization, artifact/export
+semantics, Replay / Resume / Retry workflow semantics, or committed-state truth.
+
+
+WATCH ITEM: CONCRETE WEBSOCKET FLOW
+===================================
+
+IS-02 should preserve DA-21 transport/RPC separation while defining concrete
+WebSocket flow.
+
+IS-02 must not make WebSocket connection, acknowledgement, timeout, disconnect,
+reconnect, or frame delivery redefine Job, adapter, RuntimeHost, capability,
+OrchestrationUnit, Window, policy, artifact/export, Replay, Resume, Retry,
+audit workflow, or committed-state semantics.
+
+
+WATCH ITEM: POLICY HANDLING
+===========================
+
+DA-17 should preserve policy handling for disconnect, cancellation, and
+remembered decisions.
+
+Policy may classify what happens after disconnect or cancellation request, but
+transport events must not silently become domain outcomes.
+
+
 REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-21 CONTENT
-=========================================================
+========================================================
 
 This section is not suggested DA-21 wording.
 
@@ -629,11 +810,19 @@ RPC-boundary guardrails:
 
     RPC routing is not Window finalization.
 
+    RPC routing is not artifact/export authority.
+
+    RPC routing is not Replay / Resume / Retry workflow authority.
+
     Capability-routed RPC remains capability-mediated.
 
     Adapter-facing RPC remains subject to ExecutionAdapter boundaries.
 
     RuntimeHost control-surface RPC remains subject to RuntimeHost boundaries.
+
+    Artifact/export RPC remains subject to artifact/export boundaries.
+
+    Replay / Resume / Retry workflow RPC remains subject to DA-26 boundaries.
 
     Subscription delivery is not domain truth.
 
@@ -647,6 +836,8 @@ RPC-boundary guardrails:
 
     Transport timeout is not OrchestrationUnit timeout.
 
+    Transport timeout is not Replay / Resume / Retry timeout by default.
+
     Transport disconnect is not Job cancellation.
 
     Transport disconnect is not adapter failure by default.
@@ -657,13 +848,20 @@ RPC-boundary guardrails:
 
     Transport disconnect is not Window finalization by default.
 
+    Transport disconnect is not artifact/export failure by default.
+
+    Transport disconnect is not Replay / Resume / Retry failure by default.
+
+    Transport disconnect is not audit workflow failure by default.
+
     RPC cancellation message is a request, not arbitrary execution kill.
 
     RPC observability is not committed-state authority.
 
     RPC observability does not replace capability, decision, Job,
     OrchestrationUnit, adapter, RuntimeHost, debugger, AppInstance, Window,
-    PackManager, or committed-state trace evidence.
+    artifact/export, Replay / Resume / Retry workflow, PackManager, or
+    committed-state trace evidence.
 
 Owning-document guardrails:
 
@@ -695,6 +893,13 @@ Owning-document guardrails:
     DA-24 owns OrchestrationUnit lifecycle, mutation authority, terminal
     outcomes, and OrchestrationUnit-domain trace reasons.
 
+    DA-25 owns Window artifacts, WindowManifests, WindowExports, Minimal Audit
+    Bundles, optional digest representation, partial export, missing material,
+    and offline inspection artifact semantics.
+
+    DA-26 owns ComparisonResult, equality modes, Replay, Resume, Retry, and
+    audit workflow semantics.
+
     DA-27 owns adapter lifecycle, trust, isolation, failure, disconnect, and
     adapter-domain trace semantics.
 
@@ -719,38 +924,6 @@ Local rewrite rule:
     message-flow semantics document.
 
 
-WATCH ITEM: CONCRETE RPC ENVELOPE
-=================================
-
-IS-01 should preserve DA-21 logical RPC semantics while defining concrete
-envelope fields.
-
-IS-01 must not make concrete envelope fields redefine request acceptance, Job
-lifecycle, OrchestrationUnit lifecycle, capability authority, adapter
-authority, RuntimeHost authority, Window finalization, or committed-state truth.
-
-
-WATCH ITEM: CONCRETE WEBSOCKET FLOW
-===================================
-
-IS-02 should preserve DA-21 transport/RPC separation while defining concrete
-WebSocket flow.
-
-IS-02 must not make WebSocket connection, acknowledgement, timeout, disconnect,
-reconnect, or frame delivery redefine Job, adapter, RuntimeHost, capability,
-OrchestrationUnit, Window, policy, or committed-state semantics.
-
-
-WATCH ITEM: POLICY HANDLING
-===========================
-
-DA-17 should preserve policy handling for disconnect, cancellation, and
-remembered decisions.
-
-Policy may classify what happens after disconnect or cancellation request, but
-transport events must not silently become domain outcomes.
-
-
 CURRENT FINAL RECOMMENDATION
 ============================
 
@@ -758,46 +931,40 @@ Keep DA-21.
 
 No heavy rewrite is recommended.
 
-Required small cleanup:
+Recommended future edits:
 
-    Clarify that trace-visible RPC flow means RPC-domain trace emission
-    obligation where applicable, while trace retention/loss remains governed by
-    DA-03.
-
-Add or preserve a compact source-level stop-line:
-
-    RPC, RPCChannel, transport, acknowledgement, request acceptance,
-    subscription delivery, timeout, disconnect, and cancellation messages are
-    communication-domain events.
-
-    They do not directly become Job, OrchestrationUnit, adapter, RuntimeHost,
-    AppInstance, Window, capability, policy, or committed-state outcomes.
-
-Preserve:
-
-    - RPC as logical boundary, not transport
-    - acknowledgement is not outcome
-    - routing is not authority
-    - request acceptance is not final success
-    - RPC request is not Job
-    - RPC request is not OrchestrationUnit
-    - RPC does not bypass Capability, ExecutionAdapter, or RuntimeHost ownership
-    - subscription delivery is not domain truth
-    - transport timeout, disconnect, and cancellation are not domain outcomes
-    - RPCChannel is transport-neutral
-    - RPC trace ownership is domain-specific
-    - DA / IS authority split
+    - clarify that trace-visible RPC flow means RPC-domain trace emission
+      obligation where applicable, while trace retention/loss remains governed
+      by DA-03
+    - add or preserve compact communication-domain outcome stop-line
+    - add DA-25 / DA-26 stop-lines where subscription, update, retained-result
+      retrieval, artifact/export, comparison, Replay, Resume, Retry, or audit
+      workflow wording appears
+    - preserve RPC as logical boundary, not transport
+    - preserve acknowledgement as communication handling, not outcome
+    - preserve routing as not authority
+    - preserve request acceptance as not final success
+    - preserve RPC request as not Job
+    - preserve RPC request as not OrchestrationUnit
+    - preserve RPC as not bypassing Capability, ExecutionAdapter, RuntimeHost,
+      artifact/export, or Replay / Resume / Retry workflow ownership
+    - preserve subscription delivery as not domain truth
+    - preserve transport timeout, disconnect, and cancellation as not domain
+      outcomes
+    - preserve RPCChannel as transport-neutral
+    - preserve RPC trace ownership as domain-specific
+    - preserve DA / IS authority split
 
 Do not expand DA-21 into detailed concrete JSON envelope fields, WebSocket frame
 flow, trace substrate, capability permission, user-decision policy, Job
 lifecycle, AppInstance lifecycle, OrchestrationUnit lifecycle, Window
 finalization, ExecutionAdapter lifecycle, frontend UI, RuntimeHost
-command-surface, PackManager operation, or concrete transport implementation
-semantics.
+command-surface, PackManager operation, artifact/export, comparison, Replay,
+Resume, Retry, audit workflow, or concrete transport implementation semantics.
 
 --- doc-meta ---
 DOC_ID: REWRITE-DA-21
 DOC_FILE: docs/design/rewrite_recommendations/REWRITE-DA-21_RECOMMENDATION.txt
-DOC_REV: 4
-DOC_GIT: 45e2a6a
+DOC_REV: 5
+DOC_GIT: 9531663
 ----------------
