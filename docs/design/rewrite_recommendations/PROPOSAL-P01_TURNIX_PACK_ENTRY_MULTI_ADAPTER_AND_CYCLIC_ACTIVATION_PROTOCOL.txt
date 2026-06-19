@@ -1,0 +1,1805 @@
+TURNIX PACK ENTRY, MULTI-ADAPTER ACTIVATION, AND CYCLIC DEPENDENCY PROTOCOL
+================================================================================
+
+Document status:
+    Standalone architecture design for later integration into Turnix
+    documentation.
+
+Purpose:
+    Define how Turnix loads Pack code through ExecutionAdapters, invokes Pack
+    lifecycle hooks, coordinates multiple adapters for one Pack, supports
+    ordinary dependency activation, and admits explicitly handled cyclic
+    dependency groups without pretending that an impossible total order exists.
+
+Scope:
+    This document specifies:
+
+        - the Pack activation-entry model
+        - Turnix-facing infrastructure readiness before code loading
+        - host-runtime entry evaluation
+        - three supported Pack lifecycle phases
+        - phase barriers and availability guarantees
+        - multiple ExecutionAdapters for one Pack
+        - ordinary acyclic dependency activation
+        - cyclic dependency detection and admission
+        - cyclic-group activation semantics
+        - registration publication scopes
+        - capability/service availability expectations
+        - failure and rollback limits
+        - tracing and diagnostics expectations
+        - examples of valid and invalid activation patterns
+
+Non-goals:
+    This document does not define:
+
+        - a concrete manifest schema
+        - concrete hook names as permanently locked API names
+        - one mandatory programming language
+        - one mandatory ExecutionAdapter implementation
+        - native language import semantics
+        - sandboxing
+        - capability permission policy
+        - committed-state transaction mechanics
+        - concrete RPC wire format
+        - concrete trace storage format
+        - Pack discovery or graph-building implementation details
+
+The lifecycle names used here are descriptive working names.
+
+Working hook names:
+
+    Phase 1:
+        onEntryLoaded(ctx)
+
+    Phase 2:
+        onEntriesLoaded(ctx)
+
+    Phase 3:
+        onLoad(ctx)
+
+The phase meanings are more important than the final public names.
+
+
+CORE MODEL
+==========
+
+Turnix runs Pack code through ExecutionAdapters.
+
+Pack code does not receive direct access to trusted Turnix backend internals.
+
+Pack code interacts with Turnix only through ExecutionAdapter-supported Turnix
+surfaces such as:
+
+    - PackContext
+    - RPC
+    - capability registration
+    - capability invocation
+    - permitted service-registration surfaces
+    - event registration
+    - trace emission
+    - structured result and error surfaces
+    - other explicitly supported adapter bridges
+
+Direct imports of trusted Turnix implementation modules are unsupported.
+
+A host language or in-process adapter may be unable to physically prevent every
+unsupported import or direct runtime action.
+
+Physical possibility does not create a Turnix guarantee.
+
+Physical possibility does not grant Kernel authority.
+
+Physical possibility does not make direct backend access a supported contract.
+
+The guaranteed path is always the ExecutionAdapter-supported Turnix boundary.
+
+
+TURNIX READINESS BEFORE PACK CODE IS LOADED
+===========================================
+
+Before Turnix asks an ExecutionAdapter to load any Pack activation entry, the
+Turnix-facing infrastructure required by Pack code is already operational.
+
+At minimum, Turnix is ready to:
+
+    - create and provide the appropriate PackContext
+    - receive valid capability registrations
+    - receive valid service or handler registrations where permitted
+    - route supported RPC requests
+    - accept supported capability invocations
+    - apply capability permission and policy mediation
+    - emit structured trace evidence
+    - classify and return structured errors
+    - associate registrations and calls with the current activation attempt
+    - withdraw provisional Turnix-owned registrations if activation fails
+
+It must not happen that Pack code is loaded while the capability registry, RPC
+routing, adapter bridge, PackContext system, or other required Turnix-facing
+registration surface is still booting.
+
+This guarantee means:
+
+    Turnix is ready to receive Pack participation.
+
+It does not mean:
+
+    every requested capability has already been registered.
+
+The following distinction is fundamental:
+
+    Capability system ready:
+        Turnix can accept registration and invocation requests.
+
+    Capability available:
+        the requested capability has been registered and is visible at the
+        current lifecycle barrier.
+
+The same distinction applies to services, handlers, events, and other
+Pack-provided surfaces.
+
+
+ACTIVATION ENTRY MODEL
+======================
+
+A Pack may participate through multiple ExecutionAdapters.
+
+Examples:
+
+    - JavaScript entry
+    - Python entry
+    - C# entry
+    - Lua entry
+    - another adapter-defined runtime entry
+
+Each declared adapter/runtime participation has at most one activation entry.
+
+Example conceptual declaration:
+
+    javascript:
+        entry: frontend/main.js
+
+    python:
+        entry: backend/main.py
+
+One activation entry acts as the coordinator for that adapter/runtime
+participation.
+
+The activation entry may load private implementation modules owned by the same
+Pack through the mechanism guaranteed by its ExecutionAdapter.
+
+Turnix does not automatically treat every code file as an activation entry.
+
+Turnix does not automatically call lifecycle hooks on every code file found in a
+directory.
+
+Turnix does not define a plural list of automatically loaded non-activation
+"entries" merely to preload implementation files.
+
+Executable Pack material has three distinct roles:
+
+    1. Activation entry
+
+       Loaded by Turnix through one ExecutionAdapter.
+
+       Participates in Pack lifecycle hooks.
+
+    2. Private implementation module
+
+       Loaded by Pack code as needed.
+
+       Does not participate in Pack lifecycle merely because it exists.
+
+       Is not externally addressable through Turnix by default.
+
+    3. Exported module surface
+
+       Publicly addressable through an explicitly supported mediated module
+       loading mechanism.
+
+       Is loaded on demand.
+
+       Does not receive activation lifecycle hooks merely because it is
+       exported.
+
+Only activation entries participate in the lifecycle protocol defined here.
+
+
+PACK-LOCAL MODULE BOUNDARY
+==========================
+
+A Pack may organize its private implementation files freely inside its Pack
+root, subject to its ExecutionAdapter's supported local module rules.
+
+A nested directory that contains another Pack manifest defines a child Pack root.
+
+The parent Pack's private module space stops at the child Pack boundary.
+
+Physical nesting does not grant the parent direct implementation access to child
+Pack code.
+
+Access to child Pack code is cross-Pack access.
+
+Cross-Pack access remains subject to:
+
+    - Pack visibility
+    - explicit public module export, where supported
+    - mediated resolution and loading
+    - capability or service boundaries
+    - adapter-specific support
+    - permission and policy boundaries where applicable
+
+Native language behavior does not override this Turnix contract.
+
+Turnix guarantees only its supported mediated module and capability surfaces.
+
+
+LIFECYCLE OVERVIEW
+==================
+
+The complete Pack code lifecycle has four observable moments:
+
+    Stage 0:
+        Entry evaluation by the ExecutionAdapter
+
+    Phase 1:
+        Entry-local early lifecycle hook
+
+    Phase 2:
+        All Pack entries loaded lifecycle hook
+
+    Phase 3:
+        Canonical Pack activation through onLoad(ctx)
+
+Stage 0 is unavoidable host-runtime behavior.
+
+Phases 1, 2, and 3 are Turnix-supported lifecycle phases.
+
+Most Pack creators should need only Phase 3.
+
+Phases 1 and 2 exist for advanced cross-adapter initialization, cyclic
+dependencies, and other cases that cannot be expressed safely through ordinary
+acyclic onLoad ordering.
+
+Turnix provides those phases deliberately.
+
+Turnix does not prove that advanced creator logic is correct.
+
+
+GENERAL PHASE-BARRIER RULE
+==========================
+
+Turnix guarantees phase barriers, not callback order.
+
+Callbacks in one phase may be invoked:
+
+    - sequentially
+    - concurrently
+    - in adapter-defined order
+    - in scheduler-defined order
+    - in another deterministic or non-contractual implementation order
+
+The implementation order is not part of the public guarantee unless a separate
+contract explicitly states otherwise.
+
+A callback may rely only on guarantees established by completed earlier phase
+barriers.
+
+A callback may not rely on another callback in the same phase having already
+run.
+
+A registration made during one phase becomes guaranteed available only after
+the barrier for that phase has completed for the relevant scope.
+
+Availability progression:
+
+    Module evaluation or Phase 1 registration:
+        guaranteed after the Phase 1 barrier
+
+    Phase 2 registration:
+        guaranteed after the Phase 2 barrier
+
+    Phase 3 registration:
+        guaranteed externally after successful Pack activation or successful
+        cyclic-group activation
+
+Turnix may accept a registration before its barrier.
+
+Acceptance is not the same as publication.
+
+Publication scope is defined later in this document.
+
+
+STAGE 0: ENTRY EVALUATION
+=========================
+
+The ExecutionAdapter loads or evaluates the declared activation entry.
+
+Examples:
+
+    JavaScript:
+        importing the entry module evaluates its top-level code
+
+    Python:
+        importing or executing the entry module evaluates module-level code
+
+    C#:
+        loading the assembly or script may execute runtime-defined
+        initialization
+
+    Other runtimes:
+        loading/evaluation follows the adapter's defined runtime behavior
+
+Top-level or module-level side effects may occur during entry evaluation.
+
+Turnix does not prohibit such side effects.
+
+Turnix may be unable to prevent them.
+
+Turnix discourages reliance on them.
+
+Turnix does not guarantee during entry evaluation that:
+
+    - another adapter entry of the same Pack has loaded
+    - another Pack entry has loaded
+    - a dependency has completed Phase 1
+    - a dependency has completed Phase 2
+    - a dependency has activated
+    - another entry has registered a capability
+    - another Pack has registered a capability
+    - a particular adapter runs before another adapter
+    - a particular Pack is loaded before another Pack
+
+The supported Turnix-facing adapter bridge is operational.
+
+Therefore module-level code may technically:
+
+    - register a capability
+    - register a handler
+    - emit trace evidence
+    - invoke an already available capability
+    - use another supported Turnix-facing surface
+
+The creator owns the ordering and availability risks.
+
+Module-level side effects are outside the safe ordinary activation pattern.
+
+Turnix does not guarantee that cross-adapter or cross-Pack calls made during
+entry evaluation are valid.
+
+Turnix-owned registrations made during entry evaluation are associated with the
+current activation attempt and remain provisional until later publication.
+
+
+PHASE 1: ENTRY-LOCAL EARLY HOOK
+===============================
+
+Working hook name:
+
+    onEntryLoaded(ctx)
+
+Turnix invokes Phase 1 once for each activation entry after:
+
+    - the ExecutionAdapter loaded/evaluated that entry successfully
+    - unavoidable module-level evaluation for that entry completed
+    - Turnix identified the entry's supported lifecycle hooks
+
+Phase 1 is the first supported early lifecycle phase.
+
+Typical advanced uses:
+
+    - register a minimal early capability
+    - register a minimal early service or handler where permitted
+    - initialize adapter-local state
+    - expose a surface needed by another adapter entry
+    - expose a surface needed to break a declared Pack dependency cycle
+    - perform early setup that does not depend on another entry being ready
+
+Phase 1 should not normally:
+
+    - perform ordinary Pack activation
+    - begin general application work
+    - assume another adapter entry has loaded
+    - assume another Pack's Phase 1 callback has run
+    - assume a dependency has completed Phase 2
+    - assume a dependency has activated
+    - depend on callback ordering
+    - commit persistent state merely to establish activation ordering
+
+No universal adapter order is guaranteed.
+
+Possible entry evaluation and Phase 1 orders include:
+
+    Mod1/JavaScript
+    Mod2/JavaScript
+    Mod1/Python
+    Mod2/Python
+
+or:
+
+    Mod1/Python
+    Mod2/JavaScript
+    Mod1/JavaScript
+    Mod2/Python
+
+or another order allowed by the implementation.
+
+A Phase 1 callback may use:
+
+    - Turnix-facing infrastructure
+    - already available external capabilities
+    - its own module-local state
+    - registrations made earlier only when their availability is guaranteed by
+      a completed barrier
+
+A Phase 1 callback may not rely on another Phase 1 callback in the same scope
+having already run.
+
+If an activation entry does not define the Phase 1 hook, its Phase 1
+participation is a successful no-op.
+
+
+PHASE 1 BARRIER
+===============
+
+For one ordinary Pack, the Pack Phase 1 barrier completes when:
+
+    - every declared activation entry for that Pack has loaded
+    - every declared activation entry for that Pack has completed Phase 1 or had
+      no Phase 1 handler
+
+For one cyclic dependency group, the group Phase 1 barrier completes when:
+
+    - every declared activation entry of every Pack in the group has loaded
+    - every declared activation entry of every Pack in the group has completed
+      Phase 1 or had no Phase 1 handler
+
+After the relevant Phase 1 barrier:
+
+    - all Turnix-owned registrations accepted during entry evaluation and
+      Phase 1 are known
+    - those registrations become available within the scope allowed by the
+      activation plan
+    - Phase 2 may rely on those registrations
+
+A completed Phase 1 barrier does not mean:
+
+    - the Pack is activated
+    - the cyclic group is activated
+    - Phase 2 registrations are available
+    - Phase 3 registrations are available
+    - external dependent Packs may use the Pack
+
+
+PHASE 2: ALL PACK ENTRIES LOADED HOOK
+=====================================
+
+Working hook name:
+
+    onEntriesLoaded(ctx)
+
+For an ordinary non-cyclic Pack, Turnix invokes Phase 2 only after:
+
+    - the Pack Phase 1 barrier completed
+    - every hard dependency required by the activation plan completed its
+      Phase 2 barrier
+
+For a cyclic dependency group, Turnix invokes Phase 2 only after:
+
+    - the group Phase 1 barrier completed
+    - every hard dependency outside the cyclic group completed its Phase 2
+      barrier
+
+Phase 2 is called once for each activation entry that defines the hook.
+
+Phase 2 guarantees for an ordinary Pack:
+
+    - every declared adapter entry for this Pack has loaded
+    - every entry for this Pack completed Phase 1
+    - every dependency required by the activation plan completed Phase 2
+    - all Phase 1 registrations available to this Pack are callable
+    - all dependency registrations published through their completed Phase 2
+      barriers are callable according to visibility and permission rules
+
+Phase 2 guarantees inside a cyclic dependency group:
+
+    - every activation entry of every Pack in the cyclic group has loaded
+    - every activation entry of every Pack in the group completed Phase 1
+    - every hard dependency outside the group completed Phase 2
+    - all Phase 1 registrations from group members are available within the
+      group
+    - all relevant Phase 1 and Phase 2 registrations from external dependencies
+      are available according to normal boundaries
+
+Typical advanced uses:
+
+    - coordinate Python and JavaScript participation inside one Pack
+    - call a capability registered by another adapter entry during Phase 1
+    - register a cross-adapter capability after all Pack entries exist
+    - complete a surface needed by a cyclic dependency before Phase 3
+    - validate that required early registrations exist
+    - build adapter-bridging state through supported Turnix calls
+
+There is no ordering guarantee among Phase 2 callbacks in the same scope.
+
+A Phase 2 callback may rely on Phase 1 registrations.
+
+A Phase 2 callback may not rely on another Phase 2 callback in the same scope
+having already run.
+
+If an activation entry does not define the Phase 2 hook, its Phase 2
+participation is a successful no-op.
+
+
+PHASE 2 BARRIER
+===============
+
+For one ordinary Pack, the Pack Phase 2 barrier completes when:
+
+    - every Phase 2 callback for that Pack completed successfully
+    - every entry without a Phase 2 callback was treated as a successful no-op
+
+For one cyclic dependency group, the group Phase 2 barrier completes when:
+
+    - every Phase 2 callback of every Pack in the group completed successfully
+    - every entry without a Phase 2 callback was treated as a successful no-op
+
+After the relevant Phase 2 barrier:
+
+    - all Turnix-owned registrations accepted during Phase 2 are known
+    - those registrations become available within the scope allowed by the
+      activation plan
+    - Phase 3 may rely on those registrations
+
+A completed Phase 2 barrier does not mean:
+
+    - the Pack is activated
+    - the cyclic group is activated
+    - Phase 3 callbacks have run
+    - Phase 3 registrations are externally available
+
+
+PHASE 3: CANONICAL ONLOAD ACTIVATION
+====================================
+
+Canonical hook:
+
+    onLoad(ctx)
+
+Phase 3 is the normal Pack activation hook.
+
+Most Pack creators should use only Phase 3.
+
+Typical ordinary uses:
+
+    - register the Pack's normal capabilities
+    - register actions and handlers
+    - obtain and call capabilities provided by dependencies
+    - perform normal activation setup
+    - register runtime contributions
+    - prepare the Pack for ordinary participation
+
+For an ordinary acyclic Pack, Turnix invokes Phase 3 only after:
+
+    - all entries of this Pack loaded
+    - this Pack completed Phase 1
+    - this Pack completed Phase 2
+    - every declared hard dependency has activated successfully
+
+Therefore ordinary acyclic onLoad(ctx) may assume:
+
+    - every hard dependency is Activated
+    - dependency capabilities published by successful activation are available
+    - every adapter entry of this Pack exists
+    - every Phase 1 callback of this Pack completed
+    - every Phase 2 callback of this Pack completed
+    - Phase 1 and Phase 2 registrations are available
+
+No ordering is guaranteed among multiple onLoad(ctx) callbacks belonging to
+different adapter entries of the same Pack.
+
+Example:
+
+    Python onLoad(ctx) may not assume JavaScript onLoad(ctx) already ran.
+
+    JavaScript onLoad(ctx) may not assume Python onLoad(ctx) already ran.
+
+If one adapter entry needs a same-Pack surface during onLoad(ctx), that surface
+must have been registered in Phase 1 or Phase 2.
+
+Phase 3 is not the place to create same-phase ordering dependencies between
+adapter entries.
+
+If an activation entry does not define onLoad(ctx), its Phase 3 participation is
+a successful no-op unless a separate Pack-kind or adapter contract requires the
+hook.
+
+
+PACK ACTIVATION COMPLETION
+==========================
+
+An ordinary Pack becomes Activated only after:
+
+    - every declared activation entry loaded successfully
+    - every Phase 1 callback completed successfully
+    - every Phase 2 callback completed successfully
+    - every Phase 3 onLoad(ctx) callback completed successfully
+    - activation validation completed successfully
+    - no required registration or dependency check failed
+
+Activation is atomic at the Pack boundary.
+
+A Pack is not partially Activated.
+
+A Pack with successful Python activation and failed JavaScript activation is not
+"mostly activated."
+
+No public Phase 3 registration becomes externally available merely because one
+entry completed early.
+
+After successful activation:
+
+    - the Pack's public registrations become available according to visibility,
+      capability, service, permission, and policy rules
+    - dependent Packs may begin Phase 3 according to the activation plan
+    - the Pack may participate in ordinary runtime work
+
+
+DEPENDENCY GRAPH PREPARATION
+============================
+
+Dependency graph preparation is separate from mechanical code loading.
+
+A graph-preparation component:
+
+    - resolves hard dependency edges
+    - validates graph identities
+    - detects cycles
+    - computes strongly connected components
+    - produces an accepted activation plan
+    - identifies external dependencies for each component
+    - marks cyclic and non-cyclic activation groups
+
+The graph-preparation component does not load Pack code.
+
+The graph-preparation component does not activate Packs.
+
+The mechanical loader:
+
+    - receives a concrete entry and ExecutionAdapter instruction
+    - loads/evaluates the entry
+    - reports success or failure
+    - does not decide dependency meaning
+    - does not detect or repair cycles
+    - does not choose Pack visibility
+    - does not decide activation order
+    - does not decide capability permission
+
+The activation coordinator consumes the accepted activation plan and applies the
+phase/barrier protocol.
+
+Loader execution order is not activation authority.
+
+Loading order does not define dependency order.
+
+Loading order does not define Pack activation order.
+
+
+STRONGLY CONNECTED COMPONENTS
+=============================
+
+A strongly connected component is a set of Packs where every Pack is reachable
+from every other Pack through hard dependency edges.
+
+Examples:
+
+    Self-cycle:
+
+        A depends on A
+
+    Two-Pack cycle:
+
+        A depends on B
+        B depends on A
+
+    Three-Pack cycle:
+
+        A depends on B
+        B depends on C
+        C depends on A
+
+A non-cyclic Pack is treated as a one-Pack activation component.
+
+A cyclic component is treated as one cyclic activation group.
+
+The component graph formed by collapsing strongly connected components is
+acyclic.
+
+That acyclic component graph defines the outer activation order.
+
+Dependencies outside a cyclic group retain ordinary guarantees.
+
+External dependent Packs do not begin canonical Phase 3 activation until the
+entire cyclic group has activated successfully.
+
+
+CYCLE ADMISSION RULE
+====================
+
+Canonical Phase 3 ordering alone cannot satisfy a dependency cycle.
+
+Turnix does not pretend otherwise.
+
+A cyclic dependency group is admitted only when at least one activation entry in
+the group defines a supported Phase 1 or Phase 2 handler.
+
+Accepted early handlers:
+
+    - onEntryLoaded(ctx)
+    - onEntriesLoaded(ctx)
+
+The presence of at least one early handler means:
+
+    one or more cycle participants intentionally opted into the early
+    activation protocol.
+
+It does not prove:
+
+    - the cycle is logically correct
+    - every required early capability is registered
+    - the cycle cannot deadlock
+    - every external side effect is reversible
+    - the creator selected a valid early phase
+    - one early hook is sufficient for every possible runtime path
+
+Turnix trusts creators who opt into the advanced protocol.
+
+Turnix still enforces the barriers and fails unavailable required surfaces
+explicitly.
+
+If no Pack in the cycle provides Phase 1 or Phase 2 handling, Turnix rejects the
+cycle.
+
+Suggested error classification:
+
+    UnsupportedActivationCycle
+
+Reason:
+
+    The cycle cannot be satisfied through ordinary onLoad dependency ordering,
+    and no cycle participant provided an early lifecycle handler.
+
+Turnix does not:
+
+    - guess an onLoad order
+    - retry several onLoad orders
+    - queue missing capability calls indefinitely
+    - silently weaken dependency guarantees
+    - ignore the cycle
+    - convert the cycle into optional dependencies
+
+
+CYCLE DETECTION TIMING
+======================
+
+The dependency graph identifies a cycle before code loading.
+
+However, hook presence may be discoverable only after an entry has been loaded
+and evaluated.
+
+Therefore cycle rejection for missing early handlers may occur after entry
+evaluation.
+
+If hook presence is declared in future manifest metadata, Turnix may reject an
+unsupported cycle earlier.
+
+Manifest declaration is not required by this protocol.
+
+When rejection occurs after entry evaluation:
+
+    - Turnix withdraws provisional Turnix-owned registrations
+    - Turnix aborts staged Turnix-owned state
+    - Turnix reports and traces the rejection
+    - Turnix does not claim to reverse arbitrary external side effects already
+      performed by module-level code
+
+This limitation is another reason module-level side effects are discouraged.
+
+
+CYCLIC GROUP PHASE 1
+====================
+
+For a cyclic activation group, Turnix may load entries in any order allowed by
+adapter availability and implementation scheduling.
+
+No dependency order is guaranteed inside the cycle.
+
+After all entries in the cyclic group have loaded, Turnix invokes Phase 1
+callbacks in an unspecified order.
+
+The group Phase 1 barrier completes only after every group entry:
+
+    - loaded successfully
+    - completed onEntryLoaded(ctx), or
+    - had no Phase 1 handler and completed as a no-op
+
+During cyclic Phase 1, code may:
+
+    - register a minimal early capability
+    - register a minimal early handler
+    - initialize adapter-local state
+    - expose a surface needed by later cycle phases
+
+During cyclic Phase 1, code may not safely assume:
+
+    - another group entry's Phase 1 already ran
+    - another group Pack has any early capability available
+    - any group Pack is Activated
+    - any group Pack completed Phase 2
+    - any group Pack completed onLoad(ctx)
+
+After the group Phase 1 barrier:
+
+    - all Phase 1 registrations from group members are available within the
+      cyclic group according to normal visibility and permission boundaries
+
+
+CYCLIC GROUP PHASE 2
+====================
+
+Turnix begins cyclic-group Phase 2 only after:
+
+    - the group Phase 1 barrier completed
+    - every external dependency of the group completed its required Phase 2
+      barrier
+
+Phase 2 callbacks inside the cycle may safely use:
+
+    - Phase 1 registrations from any group member
+    - Phase 1 and Phase 2 registrations from eligible external dependencies
+    - Turnix-facing adapter infrastructure
+
+Phase 2 callbacks inside the cycle may not safely use:
+
+    - another group member's Phase 2 registration before the group Phase 2
+      barrier
+    - another group member's onLoad registration
+    - an assumption that another group member is Activated
+
+After the group Phase 2 barrier:
+
+    - all Phase 2 registrations from group members are available within the
+      cyclic group
+    - every early surface intended to support cyclic Phase 3 should now exist
+
+This is the last supported availability barrier before canonical onLoad(ctx).
+
+
+CYCLIC GROUP PHASE 3
+====================
+
+Phase-3-only dependency cycles are forbidden.
+
+A cyclic group reaches Phase 3 only after successfully completing the early
+cycle protocol.
+
+Before cyclic Phase 3 begins, Turnix guarantees:
+
+    - every hard dependency outside the cyclic group is Activated
+    - every activation entry inside the group loaded
+    - every Phase 1 callback inside the group completed
+    - every Phase 2 callback inside the group completed
+    - all eligible Phase 1 registrations inside the group are available
+    - all eligible Phase 2 registrations inside the group are available
+    - Turnix-facing adapter infrastructure remains operational
+
+Turnix does not guarantee:
+
+    - any intra-cycle Pack has already completed onLoad(ctx)
+    - any intra-cycle Pack is already Activated
+    - one group Pack's onLoad(ctx) runs before another's
+    - one adapter's onLoad(ctx) runs before another adapter's
+    - a capability registered only in another onLoad(ctx) is available
+
+Therefore:
+
+    Every intra-cycle capability, service, handler, or other surface required
+    during onLoad(ctx) must have been established in Phase 1 or Phase 2.
+
+Example:
+
+    A and B form a dependency cycle.
+
+    A onLoad(ctx) calls capability B.process.
+
+    B must register B.process during Phase 1 or Phase 2.
+
+    Registering B.process only inside B onLoad(ctx) is invalid cyclic
+    activation logic because A may run first.
+
+All onLoad(ctx) callbacks in the cyclic group run with no guaranteed order.
+
+After every group onLoad(ctx) callback succeeds:
+
+    - every Pack in the group becomes Activated together
+    - public registrations become externally available together
+    - external dependents may continue activation
+
+The cyclic group is atomic at its external activation boundary.
+
+
+MISSING SURFACES DURING CYCLIC PHASE 3
+======================================
+
+If cyclic onLoad(ctx) requests an intra-cycle capability, service, handler, or
+other required surface that is not available, Turnix fails immediately.
+
+Turnix does not wait for another onLoad(ctx) callback to register it.
+
+Turnix does not suspend the request indefinitely.
+
+Turnix does not retry the same phase in another order.
+
+Suggested error classification:
+
+    CyclicDependencySurfaceNotReady
+
+Diagnostic context should include, when available:
+
+    - requesting Pack identity
+    - target Pack identity
+    - requested surface identity
+    - cyclic group identity
+    - current activation phase
+    - activation entry identity
+    - adapter identity
+    - known early registrations
+    - missing visibility or permission condition, if that is the actual cause
+
+Fail-fast behavior prevents logical deadlocks such as:
+
+    A onLoad waits for B capability.
+    B onLoad waits for A capability.
+
+Turnix provides lifecycle barriers.
+
+Turnix does not repair creator-defined cyclic logic.
+
+
+REGISTRATION PUBLICATION SCOPES
+===============================
+
+Registrations are associated with one activation attempt.
+
+Registrations may be:
+
+    - accepted
+    - provisional
+    - visible inside one Pack
+    - visible inside one cyclic group
+    - externally published
+    - withdrawn
+
+Stage 0 and Phase 1 registrations:
+
+    - are provisional
+    - become guaranteed after the relevant Phase 1 barrier
+    - may become visible to other entries of the same Pack
+    - may become visible to members of the same cyclic group when the activation
+      plan permits it
+    - are not generally published to unrelated external Packs
+
+Phase 2 registrations:
+
+    - are provisional
+    - become guaranteed after the relevant Phase 2 barrier
+    - may become visible to the same Pack and cyclic-group participants
+    - are not generally published to unrelated external Packs
+
+Phase 3 registrations:
+
+    - remain provisional until successful Pack or cyclic-group activation
+    - must not be assumed by another callback in the same Phase 3 group
+    - become externally published only after successful activation
+
+After ordinary Pack activation:
+
+    - eligible public registrations become available to later dependents and
+      runtime participants
+
+After cyclic-group activation:
+
+    - eligible public registrations of every group member become available
+      together
+
+If activation fails:
+
+    - provisional Turnix-owned registrations are withdrawn
+    - external publication does not occur
+    - later dependent activation does not begin
+
+Registration visibility still obeys:
+
+    - Pack visibility
+    - capability identity
+    - service exposure rules
+    - permission decisions
+    - policy
+    - adapter support
+    - other applicable Turnix boundaries
+
+Early publication does not bypass those boundaries.
+
+
+MULTIPLE ADAPTERS IN ONE PACK
+=============================
+
+A Pack may declare multiple activation entries, one per adapter/runtime
+participation.
+
+Example:
+
+    JavaScript entry:
+        frontend/main.js
+
+    Python entry:
+        backend/main.py
+
+Turnix does not define a universal adapter order.
+
+It may load:
+
+    JavaScript, then Python
+
+or:
+
+    Python, then JavaScript
+
+or use another implementation order.
+
+Phase 1 is entry-local.
+
+Phase 2 guarantees that all Pack entries completed Phase 1.
+
+Therefore:
+
+    JavaScript Phase 2 may call a Python capability registered in Python
+    Phase 1.
+
+    Python Phase 2 may call a JavaScript capability registered in JavaScript
+    Phase 1.
+
+Phase 3 guarantees that all Pack entries completed Phase 2.
+
+Therefore:
+
+    JavaScript onLoad(ctx) may call a Python capability registered in Python
+    Phase 1 or Phase 2.
+
+    Python onLoad(ctx) may call a JavaScript capability registered in
+    JavaScript Phase 1 or Phase 2.
+
+Neither onLoad(ctx) may assume the other onLoad(ctx) already ran.
+
+Ordinary outward-facing functionality should normally be registered during
+onLoad(ctx).
+
+Cross-adapter prerequisites required during onLoad(ctx) must be registered
+earlier.
+
+The early phases should remain exceptional tools, not mandatory ceremony for
+ordinary Packs.
+
+
+DEPENDENCIES OUTSIDE A CYCLE
+============================
+
+Acyclic dependencies retain normal guarantees.
+
+For Pack A depending on Pack B:
+
+    - B completes Phase 2 before A begins Phase 2
+    - B becomes Activated before A begins Phase 3
+    - A onLoad(ctx) may use B's activated public surfaces
+
+For a cyclic group G depending on external Pack D:
+
+    - D completes Phase 2 before G begins group Phase 2
+    - D becomes Activated before G begins group Phase 3
+
+For external Pack E depending on cyclic group G:
+
+    - E does not begin Phase 3 until every member of G activated successfully
+
+Cycles weaken guarantees only inside the cyclic group.
+
+They do not weaken the component graph outside the cycle.
+
+
+FAILURE SEMANTICS
+=================
+
+The following failures fail an ordinary Pack activation:
+
+    - activation entry load/evaluation failure
+    - unsupported entry format
+    - missing required adapter
+    - Phase 1 hook failure
+    - Phase 2 hook failure
+    - Phase 3 hook failure
+    - required early registration missing
+    - dependency activation failure
+    - capability/service registration rejection
+    - permission or policy denial where activation requires acceptance
+    - activation validation failure
+
+The following failures fail an entire cyclic activation group:
+
+    - any member entry load/evaluation failure
+    - any member Phase 1 failure
+    - any member Phase 2 failure
+    - any member Phase 3 failure
+    - missing required early cyclic surface
+    - unsupported cycle with no early handler
+    - external dependency activation failure
+    - cyclic-group validation failure
+
+On failure, Turnix:
+
+    - marks no failed Pack as Activated
+    - marks no cyclic-group member as Activated when group activation fails
+    - withdraws provisional Turnix-owned registrations
+    - aborts staged Turnix-owned state mutation
+    - prevents external dependents from activating
+    - classifies the failure
+    - emits trace evidence
+    - invokes supported cleanup/deactivation paths where available
+
+Turnix cannot guarantee reversal of:
+
+    - arbitrary network requests
+    - writes performed outside Turnix persistence authority
+    - external process side effects
+    - host-language module-level side effects
+    - direct unsupported backend access
+    - other effects performed outside Turnix-controlled boundaries
+
+Creators who perform irreversible effects before successful activation own those
+effects.
+
+Turnix guarantees cleanup only for Turnix-owned and explicitly controlled
+activation material.
+
+
+ASYNC WORK AND HOOK COMPLETION
+==============================
+
+A lifecycle hook completes only when its returned synchronous or asynchronous
+result completes according to the adapter contract.
+
+Required setup must be awaited by the hook.
+
+Starting detached background work and returning does not extend the phase
+barrier.
+
+Detached work started outside Turnix orchestration does not receive Turnix
+lifecycle guarantees by implication.
+
+A Pack must not register a capability as available while its implementation is
+still being prepared by untracked detached work.
+
+If a capability is published at a barrier, it must be callable according to the
+guarantees of that barrier.
+
+Hook timeout, cancellation, and host disconnect behavior must be explicit in the
+surrounding activation policy.
+
+No hidden retry or alternate callback order is implied.
+
+
+SERVICES, CAPABILITIES, AND EARLY PHASES
+========================================
+
+The capability and service infrastructure is operational before entry loading.
+
+All Pack registration and invocation still uses supported Turnix-mediated
+surfaces.
+
+Early phases do not grant:
+
+    - direct Kernel access
+    - direct registry object access
+    - direct backend implementation access
+    - direct committed-state mutation
+    - direct persistent-I/O authority
+    - permission bypass
+    - visibility bypass
+    - capability identity bypass
+    - service exposure bypass
+
+Same-Pack or same-cycle access may have a defined policy scope, but it remains
+mediated.
+
+A capability registered in Phase 1 or Phase 2 must be serviceable once its
+barrier publishes it.
+
+It is invalid to register a handler in Phase 1 that cannot safely receive calls
+until Phase 3.
+
+If only the identity can be registered early but implementation cannot serve
+calls, Turnix would need a separate explicit declaration/late-binding protocol.
+
+This protocol does not imply such a placeholder-registration system.
+
+Availability means callable availability, not merely reserved naming.
+
+
+PACK EXPORTS AND ACTIVATION
+===========================
+
+Exported modules are distinct from lifecycle entries.
+
+Exported modules:
+
+    - are public module surfaces
+    - are loaded on demand through a supported mediated loader
+    - do not receive Phase 1, Phase 2, or Phase 3 callbacks merely because they
+      are exported
+    - do not become hidden secondary activation entries
+    - may rely on the Pack being Activated when imported externally
+
+Private implementation modules:
+
+    - are loaded by Pack code as needed
+    - do not participate in lifecycle unless they are the declared activation
+      entry
+    - are not externally addressable by default
+
+The activation protocol guarantees that declared activation entries are loaded.
+
+It does not guarantee that every private or exported code file in the Pack has
+been evaluated.
+
+
+NATIVE LANGUAGE CYCLES
+======================
+
+Pack dependency cycles and native language module-import cycles are different
+problems.
+
+This protocol may support:
+
+    Pack A depends on Pack B.
+    Pack B depends on Pack A.
+
+It does not guarantee that native imports such as the following are valid:
+
+    A/main.py directly imports B/main.py.
+    B/main.py directly imports A/main.py.
+
+or:
+
+    A/main.js natively imports B/main.js.
+    B/main.js natively imports A/main.js.
+
+Native module-cycle behavior remains defined by:
+
+    - the programming language
+    - the ExecutionAdapter
+    - the adapter's supported local module contract
+
+Cross-Pack code access remains mediated through supported Turnix mechanisms.
+
+The early activation protocol resolves Pack lifecycle availability.
+
+It does not repair arbitrary host-language import recursion.
+
+
+TRACE AND DIAGNOSTIC OBLIGATIONS
+================================
+
+Activation behavior should be trace-visible through the tracing system used by
+the runtime.
+
+Suggested activation evidence includes:
+
+    - activation plan accepted
+    - dependency component identified
+    - cyclic group detected
+    - cyclic group admitted
+    - cyclic group rejected
+    - activation entry load requested
+    - activation entry loaded
+    - activation entry load failed
+    - Phase 1 callback started
+    - Phase 1 callback completed
+    - Phase 1 callback failed
+    - Phase 1 barrier completed
+    - Phase 2 callback started
+    - Phase 2 callback completed
+    - Phase 2 callback failed
+    - Phase 2 barrier completed
+    - Phase 3 callback started
+    - Phase 3 callback completed
+    - Phase 3 callback failed
+    - registration accepted
+    - registration published to Pack scope
+    - registration published to cyclic-group scope
+    - registration published externally
+    - registration withdrawn
+    - cyclic dependency surface unavailable
+    - Pack activation completed
+    - Pack activation failed
+    - cyclic-group activation completed
+    - cyclic-group activation failed
+    - cleanup requested
+    - cleanup completed
+    - cleanup failed
+
+Useful correlation fields include:
+
+    - activationAttemptId
+    - Pack identity
+    - activation-entry identity
+    - adapter identity
+    - dependency-component identity
+    - cyclic-group identity
+    - lifecycle phase
+    - callback identity
+    - capability/service/handler identity
+    - requesting Pack identity
+    - target Pack identity
+    - failure category
+    - cleanup result
+
+Trace evidence describes what Turnix observed.
+
+Trace evidence does not make external side effects reversible.
+
+Trace persistence and retention remain separate from activation semantics.
+
+
+SUGGESTED ERROR CATEGORIES
+==========================
+
+Names are provisional.
+
+    UnsupportedActivationCycle
+
+        A cyclic dependency group has no Phase 1 or Phase 2 handler.
+
+    CyclicDependencySurfaceNotReady
+
+        Cyclic Phase 3 requested an intra-cycle surface that was not
+        established in an earlier phase.
+
+    ActivationEntryLoadFailed
+
+        An ExecutionAdapter could not load/evaluate an activation entry.
+
+    ActivationHookFailed
+
+        A lifecycle hook raised or returned failure.
+
+    ActivationBarrierFailed
+
+        A phase barrier could not complete successfully.
+
+    ActivationRegistrationRejected
+
+        A required registration was invalid, conflicting, forbidden, or denied.
+
+    DependencyActivationFailed
+
+        A required external dependency did not activate.
+
+    ActivationCleanupFailed
+
+        Turnix-controlled cleanup after failed activation did not complete.
+
+Error reporting should preserve the underlying failure rather than flattening
+every failure into one generic activation error.
+
+
+EXAMPLE 1: ORDINARY ACYCLIC ACTIVATION
+======================================
+
+Graph:
+
+    App depends on Library.
+
+Library:
+
+    Python entry:
+        onLoad(ctx):
+            register capability library.parse
+
+App:
+
+    JavaScript entry:
+        onLoad(ctx):
+            call capability library.parse
+            register capability app.run
+
+Guaranteed flow:
+
+    1. Library entries load.
+    2. Library Phase 1 completes.
+    3. Library Phase 2 completes.
+    4. Library onLoad(ctx) completes.
+    5. Library becomes Activated.
+    6. App entries load.
+    7. App Phase 1 completes.
+    8. App Phase 2 completes.
+    9. App onLoad(ctx) runs.
+    10. library.parse is available.
+    11. App becomes Activated.
+
+The creator never needs Phase 1 or Phase 2.
+
+
+EXAMPLE 2: ONE PACK WITH PYTHON AND JAVASCRIPT
+==============================================
+
+Pack Tool has:
+
+    Python entry
+    JavaScript entry
+
+Python Phase 1:
+
+    register capability tool.backend.describe
+
+JavaScript Phase 2:
+
+    call tool.backend.describe
+    register capability tool.frontend.describe
+
+Python onLoad(ctx):
+
+    call tool.frontend.describe
+    register ordinary backend capabilities
+
+JavaScript onLoad(ctx):
+
+    register ordinary frontend capabilities
+
+Guarantees:
+
+    - JavaScript Phase 2 sees Python Phase 1 registration.
+    - Python onLoad sees JavaScript Phase 2 registration.
+    - Neither onLoad may assume the other onLoad already ran.
+    - The Pack becomes Activated only after both onLoad callbacks complete.
+
+
+EXAMPLE 3: VALID TWO-PACK CYCLE
+===============================
+
+Graph:
+
+    A depends on B.
+    B depends on A.
+
+A Phase 2:
+
+    register capability A.bootstrap
+
+B Phase 2:
+
+    register capability B.bootstrap
+
+A onLoad(ctx):
+
+    call B.bootstrap
+    register A.normal
+
+B onLoad(ctx):
+
+    call A.bootstrap
+    register B.normal
+
+Cycle admission:
+
+    Accepted because the group contains early handlers.
+
+Before cyclic Phase 3:
+
+    - A.bootstrap is available within the group.
+    - B.bootstrap is available within the group.
+    - neither A nor B is Activated.
+
+After both onLoad callbacks succeed:
+
+    - A and B become Activated together.
+    - A.normal and B.normal become externally available according to normal
+      rules.
+
+
+EXAMPLE 4: INVALID CYCLE WITHOUT EARLY HANDLERS
+===============================================
+
+Graph:
+
+    A depends on B.
+    B depends on A.
+
+A:
+
+    only onLoad(ctx)
+
+B:
+
+    only onLoad(ctx)
+
+No Phase 1 or Phase 2 handlers exist.
+
+Result:
+
+    UnsupportedActivationCycle
+
+Turnix does not guess whether A or B should activate first.
+
+
+EXAMPLE 5: INVALID CYCLE WITH TOO-LATE REGISTRATION
+===================================================
+
+Graph:
+
+    A depends on B.
+    B depends on A.
+
+A Phase 2:
+
+    performs unrelated setup
+
+A onLoad(ctx):
+
+    call B.required
+
+B onLoad(ctx):
+
+    register B.required
+
+The cycle is admitted because an early handler exists.
+
+However, B.required was not established in Phase 1 or Phase 2.
+
+If A onLoad runs first:
+
+    B.required is unavailable.
+
+Turnix fails immediately:
+
+    CyclicDependencySurfaceNotReady
+
+Turnix does not wait for B onLoad and does not retry with B first.
+
+The creator must move B.required registration into Phase 1 or Phase 2.
+
+
+EXAMPLE 6: MODULE-LEVEL SIDE EFFECT
+===================================
+
+JavaScript entry:
+
+    registerCapability("example.early", handler)
+
+    export async function onLoad(ctx) {
+        ...
+    }
+
+The registration may be accepted because Turnix-facing infrastructure is ready.
+
+However:
+
+    - another entry may not have loaded
+    - another Pack may not have loaded
+    - no dependency phase guarantee exists
+    - the registration is provisional
+    - the creator owns ordering risk
+
+Turnix discourages this pattern.
+
+Moving the registration into Phase 1 gives it a defined lifecycle barrier.
+
+
+EXAMPLE 7: EXTERNAL DEPENDENCY OF A CYCLE
+=========================================
+
+Graph:
+
+    D is external dependency.
+    A depends on D and B.
+    B depends on A.
+
+Guarantees:
+
+    - D completes Phase 2 before the A/B group begins Phase 2.
+    - D becomes Activated before the A/B group begins Phase 3.
+    - A and B may use D's activated public surfaces during onLoad.
+    - A and B may use each other's Phase 1 and Phase 2 surfaces.
+    - A and B may not depend on each other's onLoad ordering.
+
+
+CREATOR GUIDANCE
+================
+
+Ordinary creators:
+
+    Use onLoad(ctx).
+
+    Declare hard dependencies correctly.
+
+    Assume dependencies are Activated before onLoad(ctx).
+
+    Register ordinary capabilities during onLoad(ctx).
+
+    Ignore Phase 1 and Phase 2 unless a real need appears.
+
+Multiple-adapter creators:
+
+    Use Phase 1 for entry-local early surfaces.
+
+    Use Phase 2 for cross-adapter coordination after all entries exist.
+
+    Do not create ordering dependencies between onLoad callbacks.
+
+Cycle creators:
+
+    Establish every intra-cycle Phase 3 prerequisite in Phase 1 or Phase 2.
+
+    Treat early handlers as a deliberate opt-in to advanced lifecycle behavior.
+
+    Do not expect Turnix to infer a safe order.
+
+    Do not wait indefinitely for same-phase surfaces.
+
+    Keep irreversible side effects out of module evaluation and early phases
+    where possible.
+
+Library creators:
+
+    Keep activation entry separate from exported modules.
+
+    Do not turn exported modules into hidden activation entries.
+
+    Use capabilities for portable cross-language runtime operations.
+
+
+LOCKED SEMANTIC INTENT
+======================
+
+The following semantic intent should survive later integration even if public
+names change:
+
+    - Pack code uses ExecutionAdapter-supported Turnix surfaces, not direct
+      backend imports.
+
+    - Turnix-facing registration and invocation infrastructure is ready before
+      Pack entries are loaded.
+
+    - One Pack may participate through multiple adapters.
+
+    - Each adapter/runtime participation has at most one activation entry.
+
+    - Entry evaluation may execute host-runtime top-level code.
+
+    - Turnix permits but discourages reliance on module-level side effects.
+
+    - Turnix guarantees phase barriers, not callback ordering.
+
+    - Phase 1 is entry-local early registration/setup.
+
+    - Phase 2 runs after all Pack entries completed Phase 1.
+
+    - Phase 3 onLoad(ctx) is the canonical ordinary activation hook.
+
+    - Ordinary acyclic onLoad(ctx) sees all hard dependencies Activated.
+
+    - Dependency cycles are detected before activation.
+
+    - A cycle without a Phase 1 or Phase 2 handler is rejected.
+
+    - Presence of an early handler admits the cycle but does not prove it safe.
+
+    - Cyclic Phase 3 may rely only on surfaces established in earlier phases.
+
+    - Missing intra-cycle Phase 3 surfaces fail immediately.
+
+    - A cyclic group becomes Activated atomically only after every member
+      completes onLoad(ctx).
+
+    - One member's failure fails the entire cyclic group.
+
+    - Provisional Turnix-owned registrations are withdrawn on failed activation.
+
+    - Turnix does not promise to reverse effects performed outside its
+      controlled boundaries.
+
+    - Exported modules are public import surfaces, not activation entries.
+
+    - Private modules are loaded by Pack code, not automatically activated.
+
+
+OPEN NAMING AND IMPLEMENTATION QUESTIONS
+========================================
+
+The following remain intentionally open:
+
+    - final public name for Phase 1 hook
+    - final public name for Phase 2 hook
+    - exact activation state names
+    - exact manifest representation of adapter entries
+    - whether hook presence is declared in manifest metadata
+    - exact cycle-group identity format
+    - exact capability/service provisional publication mechanism
+    - exact cleanup hook model
+    - exact hook timeout and cancellation policy
+    - exact trace reason identifiers
+    - exact error class names
+    - whether callbacks in one phase run concurrently or sequentially
+    - exact adapter-specific module loading contracts
+    - exact export-map convention
+    - whether an explicit manifest cycle declaration is useful later
+
+These implementation questions must not weaken the semantic intent above.
+
+
+COMPACT PROTOCOL
+================
+
+Turnix prepares its adapter-facing runtime infrastructure before loading Pack
+code.
+
+The graph-preparation domain detects dependency cycles and produces an accepted
+activation plan.
+
+The loader mechanically loads concrete entries through concrete
+ExecutionAdapters.
+
+Entry loading order does not define dependency or activation order.
+
+Each Pack adapter entry may participate in three supported phases:
+
+    Phase 1:
+        onEntryLoaded(ctx)
+
+    Phase 2:
+        onEntriesLoaded(ctx)
+
+    Phase 3:
+        onLoad(ctx)
+
+Phase 1 runs after one entry is loaded.
+
+Phase 2 runs after all entries for the Pack completed Phase 1 and all external
+dependencies required by the plan completed Phase 2.
+
+Phase 3 is ordinary activation.
+
+For acyclic Packs, all hard dependencies are Activated before Phase 3.
+
+For cyclic groups:
+
+    - at least one member must provide Phase 1 or Phase 2 handling
+    - all group entries complete Phase 1
+    - all group entries complete Phase 2
+    - all early registrations become available inside the group
+    - no intra-cycle onLoad ordering is guaranteed
+    - every Phase 3 prerequisite must already exist from an earlier phase
+    - unavailable cyclic surfaces fail immediately
+    - the group becomes Activated only after every member succeeds
+
+Most creators use only onLoad(ctx).
+
+Advanced creators may use the early phases.
+
+Turnix provides the barriers.
+
+Creators remain responsible for the logic they place between them.
+
+--- doc-meta ---
+DOC_ID: PROPOSAL-P01
+DOC_FILE: docs/design/rewrite_recommendations/PROPOSAL-P01_TURNIX_PACK_ENTRY_MULTI_ADAPTER_AND_CYCLIC_ACTIVATION_PROTOCOL.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
