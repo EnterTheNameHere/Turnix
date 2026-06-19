@@ -22,7 +22,7 @@ Turnix-recognized execution.
 
 It defines:
 - lifecycle phase ordering and the activation boundary
-- the meaning of Activated state and PackContext authority
+- the meaning of Activated state and ModCallContext gateway authority
 - pack-level activation semantics and the canonical entrypoint
 - relationship between activation and execution adapters
 - the separation between activation and later runtime execution
@@ -98,7 +98,7 @@ Downstream Documents:
       - the pack may participate in runtime behavior
       - execution is allowed only through Turnix-controlled orchestration
         pathways
-      - PackContext defines the pack-facing authority context
+      - ModCallContext provides invocation-scoped Pack-facing gateway authority
 
 02.5. Activation is not:
       - discovery
@@ -132,7 +132,7 @@ Downstream Documents:
       6) Running or Finalized
 
 03.2. Activation is the first moment Turnix may intentionally execute pack
-      code with PackContext authority.
+      code with ModCallContext gateway authority.
 
 03.3. Execution adapter preparation may include adapter selection,
       execution authorization, adapter creation, adapter readiness, and
@@ -153,13 +153,16 @@ Downstream Documents:
 ===============================================================================
 
 04.1. When a pack is activated:
-      - Turnix creates a PackContext for that pack instance
-      - Turnix dispatches the pack's activation entrypoint
+      - Turnix has admitted the pack into executable participation
+      - every required activation entry for that pack or activation group has
+        completed according to the applicable activation plan
+      - pack code has received only Turnix-created ModCallContext values for
+        the invocations that Turnix performed
       - the pack may participate in Turnix-managed runtime behavior
 
-04.2. When the activated pack's executable artifact belongs to an adapter
-      runtime, activation dispatch occurs through the appropriate execution
-      adapter under DA-23.
+04.2. When an activated pack participates through one or more adapter
+      runtimes, activation dispatch occurs through the appropriate execution
+      adapters under DA-23.
 
 04.3. Activated packs may, for example:
       - register services
@@ -173,89 +176,117 @@ Downstream Documents:
       - the pack may appear in graphs
       - adapter selection may have occurred
       - artifact loading may have occurred
-      - pack code must not execute under Turnix authority
+      - early activation phases may have prepared provisional surfaces
+      - pack code must not execute with final Activated authority
+
+04.5. Final Activated authority is externally visible only after the pack or
+      admitted cyclic activation group crosses its activation boundary.
 
 
 ===============================================================================
-05. PACK-LEVEL ACTIVATION (LOCKED)
+05. PACK-LEVEL AND ACTIVATION-GROUP SEMANTICS (LOCKED)
 ===============================================================================
 
-05.1. Activation applies to the pack as a whole.
+05.1. Activation applies to a pack as an executable participant.
 
 05.2. Activation does not apply to:
       - individual files
       - individual modules
       - individual imports
       - individual capabilities
-      - individual adapter-loaded artifacts
+      - individual adapter-loaded artifacts by themselves
 
-05.3. A pack is either activated or not activated.
+05.3. A pack may declare more than one adapter/runtime participation.
 
-05.4. Partial, staged, deferred, or per-file activation is not defined by
-      this document.
+05.4. Each declared adapter/runtime participation has at most one activation
+      entry.
 
-05.5. Adapter loading does not create partial activation.
+05.5. One activation entry coordinates that adapter/runtime participation.
+
+05.6. A pack with multiple adapter entries is activated only when the
+      activation plan has satisfied the required entries and barriers for
+      that pack.
+
+05.7. A cyclic dependency component may be admitted as one cyclic activation
+      group only when the activation plan explicitly admits it.
+
+05.8. A cyclic activation group is atomic at its external activation boundary.
+
+05.9. Failure of one required member of an admitted cyclic activation group
+      fails the group activation.
+
+05.10. Adapter loading does not create partial activation.
 
 
 ===============================================================================
-06. PACKCONTEXT (ctx) - EXECUTION AUTHORITY (LOCKED)
+06. MODCALLCONTEXT (ctx) - EXECUTION GATEWAY (LOCKED)
 ===============================================================================
 
-06.1. Turnix provides exactly one pack-facing execution-authority context to
-      pack code:
-      PackContext (ctx).
+06.1. Turnix provides pack-facing invocation authority through
+      ModCallContext (ctx).
 
-06.2. PackContext is created only by Turnix.
+06.2. ModCallContext is created only by Turnix.
 
-06.3. PackContext is bound to exactly one pack instance.
+06.3. Each callback, activation entry, hook, event, timer, or capability
+      invocation receives a fresh ModCallContext when Pack code needs
+      platform access.
 
-06.4. PackContext represents execution authority on behalf of that pack.
+06.4. ModCallContext is bound to the acting Pack and to the invocation scope.
 
-06.5. PackContext is not a raw backend service object exposed to pack code.
+06.5. ModCallContext represents scoped gateway authority for that invocation.
 
-06.6. PackContext is not unrestricted access to Kernel internals.
+06.6. ModCallContext is not a raw backend service object exposed to Pack code.
 
-06.7. PackContext operations route through Kernel-owned boundaries.
+06.7. ModCallContext is not unrestricted access to Kernel internals.
 
-06.8. Code executing with a PackContext:
-      - executes under the authority of that pack
-      - is subject to that pack's visibility, permissions, and policy
+06.8. ModCallContext operations route through Kernel-owned boundaries.
+
+06.9. Code executing with a ModCallContext:
+      - executes under the authority of the acting Pack
+      - is subject to that Pack's visibility, permissions, and policy
       - remains constrained by capability, transaction, persistence, trace,
-        adapter, and lifecycle rules
+        adapter, lifecycle, cancellation, and deadline rules
 
-06.9. PackContext may be represented differently in different adapters.
+06.10. ModCallContext may be represented differently in different adapters.
 
-06.10. Representation difference does not change authority meaning.
+06.11. Representation difference does not change authority meaning.
 
-06.11. In-process PackContext calls do not bypass capability mediation,
+06.12. In-process ModCallContext calls do not bypass capability mediation,
        policy, transaction, trace, persistence, or lifecycle rules.
 
-06.12. Passing ctx to other code is an explicit delegation of authority.
+06.13. Pack code does not retain ModCallContext after the invocation
+       completes.
 
-06.13. The delegating pack remains fully responsible for actions performed
-       using its ctx.
+06.14. Registration records retain owner, callback, metadata, and scope.
+       They do not retain the ModCallContext that created them.
 
 
 ===============================================================================
-07. ACTIVATION ENTRYPOINT (LOCKED)
+07. ACTIVATION ENTRIES AND PHASES (LOCKED)
 ===============================================================================
 
-07.1. The sole activation entrypoint is:
+07.1. The ordinary final activation entry is:
       onLoad(ctx)
 
-07.2. Locked rules:
-      - onLoad(ctx) is called exactly once per pack instance
-      - onLoad(ctx) is called only by Turnix
+07.2. Turnix may also define earlier activation phases for adapter-local
+      initialization, cross-adapter coordination, and cyclic prerequisites.
+
+07.3. Earlier activation phases do not by themselves make the pack Activated.
+
+07.4. Locked rules:
+      - activation entries are called only by Turnix
       - ctx is always provided by Turnix
-      - failure aborts activation of that pack
+      - final activation failure aborts activation of that pack
+      - cyclic-group failure aborts the group
 
-07.3. No other function, construct, or mechanism activates a pack.
+07.5. No function, construct, or mechanism activates a pack unless the
+      Turnix activation plan recognizes it as an activation entry.
 
-07.4. Adapter implementations do not introduce alternate activation
-      entrypoints by themselves.
+07.6. Adapter implementations do not introduce alternate activation
+      semantics by themselves.
 
-07.5. Future activation entrypoints, if introduced, follow the same rules
-      and are explicitly defined by Turnix.
+07.7. Future activation entries, if introduced, follow the same rules and
+      are explicitly defined by Turnix.
 
 
 ===============================================================================
@@ -265,22 +296,29 @@ Downstream Documents:
 08.1. Activation and execution are distinct concepts.
 
 08.2. Activation:
-      - is a one-time state transition
-      - establishes PackContext authority
-      - occurs exclusively through onLoad(ctx)
-      - may dispatch through an execution adapter when applicable
+      - is a controlled state transition
+      - establishes Pack participation under Turnix orchestration
+      - uses ModCallContext for Pack-facing invocation authority
+      - may dispatch through one or more execution adapters
+      - may include admitted cyclic-group phases before final activation
 
 08.3. Execution:
       - occurs only after activation when Turnix-recognized
       - may happen multiple times
-      - occurs only when invoked by Turnix orchestration
+      - occurs through Turnix-controlled orchestration pathways
+      - may receive a fresh ModCallContext for each callback or invocation
 
-08.4. No execution mechanism activates a pack.
+08.4. Pack code may be loaded or evaluated by an adapter before final
+      activation only when the activation plan permits that preparation.
 
-08.5. No execution mechanism substitutes for onLoad(ctx).
+08.5. Adapter preparation without final activation does not make a Pack
+      Activated.
 
-08.6. Adapter execution without PackContext authority is not
-      Turnix-recognized activated execution.
+08.6. No execution mechanism substitutes for a Turnix-recognized activation
+      entry.
+
+08.7. Adapter execution without ModCallContext authority is not
+      Turnix-recognized Pack execution.
 
 
 ===============================================================================
@@ -301,7 +339,7 @@ Downstream Documents:
 09.5. Immediate execution runs outside Turnix orchestration.
 
 09.6. Code that executes immediately on import:
-      - runs without PackContext authority
+      - runs without ModCallContext gateway authority
       - is not tracked by Turnix
       - is outside lifecycle guarantees
       - is not recoverable or abortable by Turnix guarantees
@@ -374,7 +412,7 @@ Downstream Documents:
       - must not perform Turnix side effects at module top level
 
 12.2. Such code may:
-      - accept a PackContext explicitly as a parameter
+      - accept a ModCallContext explicitly as a parameter
       - execute under the authority of the caller pack that provides that ctx
 
 12.3. In that case:
@@ -384,7 +422,7 @@ Downstream Documents:
 12.4. If code requires activation-specific state of its own pack, that code
       is initialized from that pack's activation entry.
 
-12.5. Passing PackContext into activation-independent code does not change
+12.5. Passing ModCallContext into activation-independent code does not change
       the provider pack's activation state.
 
 
@@ -603,9 +641,9 @@ Downstream Documents:
 
 19.1. LOCKED:
       - activation is explicit and pack-level
-      - onLoad(ctx) is the only activation entrypoint
-      - activation establishes PackContext authority
-      - PackContext is a pack-facing authority context, not raw backend
+      - onLoad(ctx) is the ordinary final activation entrypoint
+      - activation establishes ModCallContext gateway authority
+      - ModCallContext is a pack-facing gateway context, not raw backend
         internals
       - execution is allowed only after activation when Turnix-recognized
       - adapter selection, execution authorization, adapter readiness, and
@@ -633,6 +671,6 @@ END OF DA-14 - ACTIVATION, LIFECYCLE & EXECUTION GUARANTEES
 --- doc-meta ---
 DOC_ID: DA-14
 DOC_FILE: docs/design/DA-14_ACTIVATION_LIFECYCLE_AND_EXECUTION_GUARANTEES.txt
-DOC_REV: 16
-DOC_GIT: 35f9a71
+DOC_REV: 17
+DOC_GIT: 08317f7
 ----------------
