@@ -1,0 +1,3405 @@
+TURNIX DV3 ARCHITECTURE CHECKPOINT 06
+=====================================
+
+Purpose:
+    Rehydration anchor for the Turnix Dv3 architecture audit.
+
+Status:
+    Current understanding after completing the DA document sweep for the Dv3
+    architecture documents audited so far.
+
+    This checkpoint includes the Dv3 runtime spine, state model, trace model,
+    payload/value representation, configuration, persistent I/O authority,
+    Window/finalized-history model, Window artifacts/exports, offline comparison
+    and replay/resume/retry workflows, discovery / identity / visibility /
+    resolution / import / dependency / activation chain, service/capability/
+    permission model, policy-decision handling, debugger model, Job lifecycle,
+    AppInstance lifecycle, RPC boundary, UI/View/frontend runtime, adapter
+    boundaries, OrchestrationUnit mutation authority, RuntimeHost boundary, and
+    PackManager graph-preparation model.
+
+This checkpoint is not a final specification.
+It is the current working architecture map and should be updated when later
+non-DA documents revise the model.
+
+
+CHECKPOINT 06 CHANGE SUMMARY
+============================
+
+Since Checkpoint 05, the following documents/domains were added to the audited
+map:
+
+    DA-05_PAYLOAD_IDENTITY_CHUNKS_AND_VALUEREF_REPRESENTATION.txt
+    DA-06_CONFIGURATION_SCHEMAS_AND_MIGRATION.txt
+    DA-07_FILE_IO_READERS_WRITERS_AND_PERSISTENCE_SAFETY.txt
+    DA-18_DEBUGGING_INSPECTION_AND_BREAKPOINTS.txt
+    DA-22_UI_VIEWS_AND_FRONTEND_RUNTIME.txt
+    DA-25_WINDOW_ARTIFACTS_EXPORTS_AND_AUDIT_BUNDLES.txt
+    DA-26_OFFLINE_COMPARISON_REPLAY_AND_AUDIT_WORKFLOWS.txt
+
+Major conceptual additions since Checkpoint 05:
+
+    - DA-05 confirms storage-neutral committed value representation:
+      committed values are represented through immutable ValueRefs and Chunks,
+      not live runtime object identity.
+
+    - DA-06 confirms configuration as specialized authoritative state built on
+      DA-04, not a separate state architecture. effectiveConfig is a derived
+      runtime-visible view, not a separate authoritative state class.
+
+    - DA-07 confirms IoManager as the sole persistent-I/O authority. Persistence
+      protects committed truth but does not define truth.
+
+    - DA-18 confirms debugger authority remains semantic, mediated, staged,
+      trace-visible, and constrained by the same transaction, policy, Job,
+      Window, AppInstance, adapter, and persistence boundaries as runtime work.
+
+    - DA-22 confirms UI/View/frontend runtime as presentation and interaction,
+      not authority. View lifecycle and frontend disconnect do not define
+      AppInstance, Job, adapter, RuntimeHost, transport, or committed-state
+      outcomes.
+
+    - DA-25 confirms Window artifacts, WindowExports, Minimal Audit Bundles, and
+      optional digests as retained artifact/export representation, not new
+      authority.
+
+    - DA-26 confirms equality, comparison, Replay, Resume, Retry, and audit
+      workflows as explicit workflow claims over retained finalized artifacts.
+      Replay is committed-state restoration plus retained causal story, not
+      re-running external effects. Resume and Retry are new work.
+
+Important correction since Checkpoint 05:
+
+    DA-20 currently defines AppInstance as a live runtime instance of one
+    AppPack. That is now treated as a required AppPack-backing decision, not
+    silently preserved as final universal doctrine.
+
+    Until resolved, use this safer wording:
+
+        DA-20 currently defines the AppPack-backed AppInstance lifecycle.
+
+        It remains open whether all AppInstances must be formally
+        AppPack-backed, including embedded/scripted/test usage through
+        synthetic or internal AppPacks.
+
+        Preserve the broader invariant:
+
+            Turnix runs AppInstances.
+
+            AppPack is one first-class declarative way to create an
+            AppInstance.
+
+Rewrite recommendation policy remains:
+
+    REWRITE-DA-xx_RECOMMENDATION.txt files should be compact rewrite-guidance
+    files, not long audit reports.
+
+    Recommendation files should represent current rewrite guidance, not audit
+    pass history.
+
+    Recommendation files must distinguish actual source-document changes from
+    rewrite-boundary guardrails.
+
+    Recommendation files should not be updated merely because later audited
+    documents confirm existing guidance.
+
+
+AUDITED SOURCE DOCUMENTS
+========================
+
+Audited source documents:
+
+    DA-01_PROJECT_INVARIANTS_AND_PHILOSOPHY.txt
+        DOC_REV: 10
+        DOC_GIT: 1aff0d0
+
+    DA-02_PLATFORM_CORE_CONTRACT_BOUNDARIES_AND_IMPLEMENTATION_INDEPENDENCE.txt
+        DOC_REV: 4
+        DOC_GIT: 0205d02
+
+    DA-03_TRACING_DIAGNOSTICS_AND_OBSERVABILITY.txt
+        DOC_REV: 21
+        DOC_GIT: c8cc0b8
+
+    DA-04_MEMORY_STATE_AND_AUTHORITATIVE_COMMIT_MODEL.txt
+        DOC_REV: 24
+        DOC_GIT: b7469b6
+
+    DA-05_PAYLOAD_IDENTITY_CHUNKS_AND_VALUEREF_REPRESENTATION.txt
+        DOC_REV: 3
+        DOC_GIT: 10ab9f0
+
+    DA-06_CONFIGURATION_SCHEMAS_AND_MIGRATION.txt
+        DOC_REV: 16
+        DOC_GIT: b2bb738
+
+    DA-07_FILE_IO_READERS_WRITERS_AND_PERSISTENCE_SAFETY.txt
+        DOC_REV: 16
+        DOC_GIT: 023e3de
+
+    DA-08_WINDOWS_HISTORICAL_EVIDENCE_EXPORTS_AND_OFFLINE_COMPARISON.txt
+        DOC_REV: 8
+        DOC_GIT: 68f7647
+
+    DA-09_ROOT_SYSTEM_AND_PACK_DISCOVERY_BOUNDARIES.txt
+        DOC_REV: 15
+        DOC_GIT: 21ce227
+
+    DA-10_PACK_IDENTITY_HIERARCHY_AND_VISIBILITY.txt
+        DOC_REV: 14
+        DOC_GIT: 023e3de
+
+    DA-11_GENERIC_RESOLUTION_SEMANTICS.txt
+        DOC_REV: 16
+        DOC_GIT: a428a7a
+
+    DA-12_IMPORTING_MODULE_LOADING_AND_CODE_BOUNDARIES.txt
+        DOC_REV: 17
+        DOC_GIT: 023e3de
+
+    DA-13_DEPENDENCIES_REQUIREMENTS_AND_PACK_REQUESTS.txt
+        DOC_REV: 14
+        DOC_GIT: 023e3de
+
+    DA-14_ACTIVATION_LIFECYCLE_AND_EXECUTION_GUARANTEES.txt
+        DOC_REV: 16
+        DOC_GIT: 35f9a71
+
+    DA-15_VISIBILITY_EXPORTS_AND_ACCESS_CONTROL.txt
+        DOC_REV: 14
+        DOC_GIT: 10093de
+
+    DA-16_SERVICES_CAPABILITIES_AND_PERMISSIONS.txt
+        DOC_REV: 17
+        DOC_GIT: 35c1049
+
+    DA-17_USER_INTERACTION_DECISION_POINTS_AND_POLICY_HANDLING.txt
+        DOC_REV: 13
+        DOC_GIT: f10e39e
+
+    DA-18_DEBUGGING_INSPECTION_AND_BREAKPOINTS.txt
+        DOC_REV: 18
+        DOC_GIT: d2b2648
+
+    DA-19_JOBS_LONG_RUNNING_WORK_AND_CANCELLATION.txt
+        DOC_REV: 1
+        DOC_GIT: 7b9fa01
+
+    DA-20_APPINSTANCE_LIFECYCLE_AND_RUNTIME_IDENTITY.txt
+        DOC_REV: 3
+        DOC_GIT: d892cf8
+
+    DA-21_RPC_CHANNELS_TRANSPORTS_AND_MESSAGE_FLOW.txt
+        DOC_REV: 4
+        DOC_GIT: 59104b5
+
+    DA-22_UI_VIEWS_AND_FRONTEND_RUNTIME.txt
+        DOC_REV: 4
+        DOC_GIT: 3d34ac5
+
+    DA-23_EXECUTION_BOUNDARIES_ADAPTERS_AND_CODE_RUNTIMES.txt
+        DOC_REV: 4
+        DOC_GIT: b89c21b
+
+    DA-24_ORCHESTRATION_UNITS_AND_MUTATION_AUTHORITY.txt
+        DOC_REV: 1
+        DOC_GIT: 08f870e
+
+    DA-25_WINDOW_ARTIFACTS_EXPORTS_AND_AUDIT_BUNDLES.txt
+        DOC_REV: 1
+        DOC_GIT: 7e58ff4
+
+    DA-26_OFFLINE_COMPARISON_REPLAY_AND_AUDIT_WORKFLOWS.txt
+        DOC_REV: 1
+        DOC_GIT: 3dad700
+
+    DA-27_ADAPTER_LIFECYCLE_TRUST_AND_TRACEABILITY.txt
+        DOC_REV: 1
+        DOC_GIT: 7dd025f
+
+    DA-28_RUNTIME_HOST_WORKSPACE_OWNERSHIP_AND_COMMAND_SURFACE.txt
+        DOC_REV: 1
+        DOC_GIT: e5656d5
+
+    DA-29_PACK_MANAGEMENT_CATALOG_OPERATIONS_AND_GRAPH_PREPARATION.txt
+        DOC_REV: 1
+        DOC_GIT: 1ea6c71
+
+
+REWRITE RECOMMENDATION DOCUMENT STATUS
+======================================
+
+Consolidated or drafted rewrite recommendation documents:
+
+    REWRITE-DA-01_RECOMMENDATION.txt
+        DOC_REV: 5
+        DOC_GIT: temporary-dv3-audit-note-consolidation
+
+    REWRITE-DA-02_RECOMMENDATION.txt
+        DOC_REV: 5
+        DOC_GIT: temporary-dv3-audit-note-consolidation
+
+    REWRITE-DA-03_RECOMMENDATION.txt
+        DOC_REV: 3
+        DOC_GIT: temporary-dv3-audit-note-update
+
+    REWRITE-DA-04_RECOMMENDATION.txt
+        DOC_REV: 2
+        DOC_GIT: temporary-dv3-audit-note-consolidation
+
+    REWRITE-DA-05_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-06_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-07_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-08_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-09_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-10_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-11_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-12_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-13_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-14_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-15_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-16_RECOMMENDATION.txt
+        DOC_REV: 2
+        DOC_GIT: temporary-dv3-audit-note-consolidation
+
+    REWRITE-DA-17_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-18_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-19_RECOMMENDATION.txt
+        DOC_REV: 2
+        DOC_GIT: temporary-dv3-audit-note-consolidation
+
+    REWRITE-DA-20_RECOMMENDATION.txt
+        DOC_REV: 3
+        DOC_GIT: temporary-dv3-audit-note-update
+
+    REWRITE-DA-21_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-22_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-23_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-24_RECOMMENDATION.txt
+        DOC_REV: 2
+        DOC_GIT: temporary-dv3-audit-note-consolidation
+
+    REWRITE-DA-25_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-26_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-27_RECOMMENDATION.txt
+        DOC_REV: 1
+        DOC_GIT: temporary-dv3-audit-note
+
+    REWRITE-DA-28_RECOMMENDATION.txt
+        DOC_REV: 2
+        DOC_GIT: temporary-dv3-audit-note-consolidation
+
+    REWRITE-DA-29_RECOMMENDATION.txt
+        DOC_REV: 2
+        DOC_GIT: temporary-dv3-audit-note-consolidation
+
+Note:
+    DOC_GIT values marked temporary should be replaced with committed values if
+    these files are committed to repository state later.
+
+Important excluded source:
+
+    AI_WORKFLOW_BOOTSTRAP.txt was intentionally not read.
+
+Reason:
+    It is part of the workflow system being audited separately. Reading it
+    during architecture audit would bias the review by making the assistant
+    stand inside the assumptions that may need to be challenged.
+
+
+REWRITE RECOMMENDATION COMPRESSION RULE
+=======================================
+
+Rewrite recommendation files are not audit reports.
+
+They should preserve only information needed to guide a future rewrite safely.
+
+Keep only:
+
+    - rewrite decisions
+    - required clarifications
+    - preservation rules that prevent bad rewrites
+    - source-level boundary statements that the target document itself needs
+    - watch items that affect future edits
+    - cross-document dependency notes that change local interpretation
+    - final recommendation
+    - metadata
+
+Remove:
+
+    - general praise
+    - "already nailed" sections unless converted into preservation rules
+    - long confirmations
+    - repeated doctrine already owned elsewhere
+    - stale addenda
+    - update history
+    - audit-pass history
+    - unnecessary "confirmed by later audit" text
+    - unnecessary "after the DA pass" / "after the ODA pass" / "after the IS
+      pass" text
+    - audit-report style narrative
+    - broad lists of audited documents unless they change local rewrite behavior
+
+Recommended file shape:
+
+    TURNIX DV3 AUDIT NOTE
+    =====================
+
+    Source file:
+        ...
+
+    Branch:
+        ...
+
+    Loaded file metadata:
+        DOC_REV: ...
+        DOC_GIT: ...
+        GitHub blob SHA seen by assistant:
+            ...
+
+    Audit note status:
+        ...
+
+    Audit scope:
+        ...
+
+    Important excluded source:
+        ...
+
+    SUMMARY
+    =======
+
+    CURRENT CLASSIFICATION
+    ======================
+
+    ACTUAL DA-XX CHANGE 1: ...
+    ==========================
+
+    PRESERVATION RULE 1: ...
+    ========================
+
+    WATCH ITEM: ...
+    ===============
+
+    REWRITE-BOUNDARY GUARDRAILS, NOT SUGGESTED DA-XX CONTENT
+    =========================================================
+
+    CURRENT FINAL RECOMMENDATION
+    ============================
+
+    --- doc-meta ---
+    DOC_ID: ...
+    DOC_FILE: ...
+    DOC_REV: ...
+    DOC_GIT: ...
+    ----------------
+
+
+REWRITE RECOMMENDATION PLACEMENT AND HISTORY RULES
+==================================================
+
+Rewrite recommendations should represent current rewrite guidance, not audit
+history.
+
+Checkpoints may record audit phase, consolidation history, and how the current
+architecture map was reached.
+
+Rewrite recommendation files should not encode audit-pass history as rewrite
+guidance.
+
+Avoid wording such as:
+
+    - after the DA sweep
+    - completed DA sweep
+    - post-DA-sweep
+    - after the ODA audit
+    - after the IS audit
+    - later documents confirmed
+    - this was confirmed by later audit
+
+Use current architecture wording instead.
+
+Good:
+
+    Current architecture context requires this boundary.
+
+Bad:
+
+    After the DA sweep, add this stop-line.
+
+Rewrite recommendations must distinguish:
+
+    - actual source-document changes
+    - rewrite-boundary guardrails
+
+Actual source-document changes are compact statements that should be added,
+removed, rewritten, clarified, or preserved in the target source document.
+
+Rewrite-boundary guardrails are not suggested source wording.
+
+Rewrite-boundary guardrails exist to prevent architectural drift during rewrite
+when the editor may not have every owning document loaded.
+
+For each boundary note, apply the placement test:
+
+    Source-level boundary
+        Use when the target source document itself needs a compact statement to
+        avoid being misread.
+
+    Rewrite-boundary guardrail
+        Use when the recommendation needs cross-document ownership reminders to
+        prevent the rewrite from absorbing another document's domain.
+
+If both are true, include both.
+
+Do not hide a boundary the source document needs only inside a guardrail
+section.
+
+Do not expand the source document into a mini-index of neighboring domains.
+
+The source document should state its own compact authority or ownership
+boundary.
+
+The guardrail section should explain which neighboring domains not to absorb.
+
+Do not update a rewrite recommendation merely because later audited documents
+confirm existing guidance.
+
+Update only when current architecture context changes local rewrite behavior,
+such as narrowing a warning, removing a stale warning, clarifying ownership,
+adding a real watch item, changing edit order, or preventing a likely wrong
+rewrite.
+
+
+CURRENT DV3 THESIS
+==================
+
+Turnix is a reusable runtime for persistent, local-first, traceable, stateful,
+orchestrated AI applications and adjacent runtime systems.
+
+Turnix is not primarily:
+
+    - a launcher
+    - an AppPack runner
+    - a pack format
+    - a pack manager
+    - a catalog system
+    - a graph-preparation tool
+    - a frontend/backend template
+    - a plugin loader
+    - a dynamic script runner
+    - a web app framework
+    - a convenience-first modding system
+
+Turnix is primarily:
+
+    - a runtime continuity engine
+    - a deterministic resolver
+    - a policy-driven orchestrator
+    - an explainable system
+    - a controlled execution and state boundary
+    - a host for AppInstances and other runtime-managed work
+
+Core Dv3 correction:
+
+    Turnix does not merely run AppPacks.
+
+    Turnix runs AppInstances.
+
+    AppPack is one first-class declarative way to create an AppInstance.
+
+Important DA-20 tension:
+
+    DA-20 currently defines the AppPack-backed AppInstance lifecycle.
+
+    It remains open whether every possible AppInstance must be formally
+    AppPack-backed, including embedded/scripted/test usage through synthetic or
+    internal AppPacks.
+
+    Until resolved, do not rewrite Turnix identity as "Turnix runs AppPacks."
+
+Packs remain first-class, but packs do not define the whole identity of Turnix.
+
+PackManager is an official Turnix management domain, but PackManager also does
+not define the whole identity of Turnix.
+
+
+HIGH-LEVEL RUNTIME MODEL
+========================
+
+Turnix Runtime contains or composes:
+
+    - Kernel
+    - RuntimeHost
+    - Trace substrate
+    - Memory / committed state model
+    - Payload / ValueRef / Chunk representation model
+    - Configuration / schema / migration model
+    - IoManager / persistence authority
+    - Window / finalized runtime history system
+    - Window artifact / export / Minimal Audit Bundle model
+    - Offline comparison / Replay / Resume / Retry / audit workflow model
+    - Service system
+    - Permission system
+    - Capability system
+    - Job system
+    - OrchestrationUnit system
+    - RPC / interoperability boundary
+    - transport implementations
+    - UI / View / frontend runtime system
+    - ExecutionAdapters
+    - Debugger / inspection / breakpoint system
+    - PackManager
+    - AppInstance system
+    - SavePack / durable AppInstance state system
+    - pack discovery and resolution
+    - pack identity and visibility
+    - pack visibility enforcement / access-control
+    - pack dependency and activation systems
+    - importing / module-loading boundary
+    - user decision and policy-handling system
+    - LLM pipeline / LLM driver systems
+
+Most subsystems should be independently useful where possible.
+
+Examples:
+
+    Memory can be useful without LLMs.
+    Trace can be useful without a frontend.
+    ValueRef / Chunk representation can be useful without a specific storage
+    backend.
+    Configuration can reuse memory/state representation without becoming Memory.
+    IoManager can protect persistent artifacts without defining state truth.
+    Window history can be useful without offline export.
+    WindowExport can be useful without Replay or Resume.
+    Replay can restore retained committed state without resuming live work.
+    LLMDriver can be replaceable.
+    RPC should be transport-agnostic.
+    ExecutionAdapters should be replaceable.
+    Pack system should be first-class but not mandatory for every embedded use,
+    unless the AppPack-backing decision intentionally chooses synthetic/internal
+    AppPacks for all AppInstances.
+    PackManager can help manage pack graph intent without owning activation,
+    importing, persistence, policy, or Kernel authority.
+
+Once these parts need to work together as one runtime, Kernel and RuntimeHost
+compose them under Turnix-owned lifecycle, authority, policy, orchestration, and
+state boundaries.
+
+
+AUTHORITY GUARDRAILS
+====================
+
+Preserve authority boundaries.
+
+Do not let convenience, implementation proximity, same-language execution,
+same-process execution, direct-call optimization, first-party tooling, adapter
+trust, adapter readiness, frontend presentation, debugger power, policy
+remembering, retained evidence, export packaging, digest presence, persistence
+mechanics, root writability, or RuntimeHost command surfaces collapse authority
+boundaries.
+
+Kernel owns runtime authority.
+
+RuntimeHost exposes controlled entry surfaces but is not Kernel authority.
+
+IoManager owns persistent-I/O authority but not committed-state truth.
+
+Payload identity is DA-05 representation, not filesystem or storage-container
+identity.
+
+Configuration is specialized authoritative state, not separate state
+architecture.
+
+ExecutionAdapter runs external or adapter-mediated code but is not Kernel
+authority.
+
+RPC is the logical communication boundary, not a transport.
+
+Transport carries messages but does not define authority.
+
+UI is presentation and interaction, not authority.
+
+Debugger tooling is semantic and mediated, not a raw authority bypass.
+
+Capability invocation is not automatically Job.
+
+Service object access is not capability permission.
+
+PackContext is scoped participation, not backend internals access.
+
+Discovery is candidate production, not visibility, resolution, activation,
+import, runtime loading, or runtime identity.
+
+Visibility is reference permission / eligibility-to-be-seen, not resolution,
+dependency satisfaction, activation, import, service access, capability access,
+or permission inheritance.
+
+Resolution is deterministic selection under one explicit context, not discovery,
+activation, import, PackManager repair, policy guessing, or source mixing.
+
+Importing/module loading is not activation.
+
+Activation is controlled executable participation, not import.
+
+Dependencies are hard contracts, not preferences, activation, import, capability
+permission, or advisory metadata.
+
+Advisory pack relations are metadata for PackManager/UI presentation, not hard
+dependencies, hard activation blockers, resolution constraints, or loader rules
+by themselves.
+
+Policy reduces repeated friction; it does not redefine authority.
+
+Adapter mediation is not sandboxing.
+
+Sandboxing does not grant Kernel authority.
+
+Lack of sandboxing does not grant backend implementation authority.
+
+AppInstance is runtime identity, not AppPack, SavePack, RuntimeHost, View,
+adapter, Job, Window, OrchestrationUnit, or committed state.
+
+Window retained evidence is not committed-state truth unless the retained
+material is authoritative committed material under DA-04.
+
+Artifact/export representation does not add authority.
+
+ComparisonResult does not imply replayability, resumability, or completeness.
+
+Replay is committed-state restoration plus retained causal story, not re-running
+external effects.
+
+Resume and Retry are new work.
+
+PackManager is first-party management/tooling domain, not Kernel, RuntimeHost
+authority, resolver, loader, activator, policy owner, persistence authority, or
+Turnix identity.
+
+
+KERNEL
+======
+
+Kernel is the runtime authority root.
+
+Kernel should remain intentionally small and should not become a god object.
+
+Kernel owns or coordinates:
+
+    - runtime authority
+    - root runtime context
+    - service registries
+    - AppInstance management
+    - Job management
+    - Capability registry
+    - Permission manager
+    - TraceHub / trace substrate access
+    - IoManager / persistence access
+    - adapter manager
+    - RuntimeHost connection points
+    - approved internal routing paths
+    - Kernel-mediated decision points
+
+Kernel is not:
+
+    - Memory
+    - ValueRef / Chunk representation
+    - configuration storage layout
+    - IOManager implementation
+    - LLMPipeline
+    - LLMDriver
+    - PackResolver
+    - PackManager
+    - RuntimeHost
+    - AppInstance
+    - frontend
+    - adapter
+    - application logic
+    - mod logic
+    - storage codec logic
+    - prompt logic
+    - Window finalization semantics
+    - Window export semantics
+    - comparison / Replay / Resume / Retry workflow semantics
+
+Kernel rule:
+
+    If a subsystem can work without Kernel, it should be allowed to.
+
+    If multiple subsystems need to work together as one runtime, Kernel composes
+    them and enforces the contract boundaries between them.
+
+Kernel should be small, boring, and hard to abuse.
+
+
+RUNTIMEHOST
+===========
+
+RuntimeHost is the running host boundary.
+
+RuntimeHost is not Kernel authority.
+
+RuntimeHost owns the running host boundary through which Kernel-owned authority
+is started, exposed, coordinated, and closed.
+
+RuntimeHost is not:
+
+    - Kernel
+    - AppInstance
+    - SavePack
+    - CLI
+    - ExecutionAdapter
+    - transport
+    - Job
+    - OrchestrationUnit
+    - PackManager
+    - IoManager
+    - View
+    - Turnix identity
+    - launcher identity
+    - AppInstance creation semantics owner
+    - Window finalization owner
+    - persistence authority owner by itself
+
+RuntimeHost may expose controlled entry surfaces.
+
+Entry surfaces and command surfaces can request, observe, or control runtime
+operations only through mediated paths.
+
+They do not become authority themselves.
+
+Startup modes are entry workflows, not separate runtime semantics.
+
+RuntimeHost startup modes and command surfaces must use the same
+Kernel-mediated AppInstance creation paths.
+
+Examples:
+
+    interactive host mode
+    one-shot command mode
+    serve mode
+    connect mode
+    test mode
+    launcher mode
+
+These are different ways to enter Turnix, not different Turnixes.
+
+
+LOCAL-FIRST
+===========
+
+Turnix is local-first, not local-only.
+
+Local-first does not require same-machine execution.
+
+Local-first means authoritative runtime and state remain under user-controlled
+local infrastructure.
+
+This can include:
+
+    - RuntimeHost and frontend on the same machine
+    - RuntimeHost on one LAN machine and frontend on another
+    - home server RuntimeHost with local SavePack/state ownership
+    - powerful local AI machine hosting execution while lighter clients present UI
+
+Local-first does not prohibit explicit, policy-governed:
+
+    - LAN mode
+    - server hosting
+    - remote-resource mode
+    - federated discovery
+    - remote clients
+
+But those modes must not replace local-first as the baseline authority,
+persistence model, failure model, recovery model, or SavePack ownership model.
+
+Remote or LAN access does not imply remote state authority.
+
+Remote or LAN access does not imply adapter execution authority.
+
+Remote or LAN access does not imply persistence authority.
+
+
+TRACE
+=====
+
+Trace is structured evidence.
+
+Trace is not:
+
+    - committed state
+    - logging
+    - memory
+    - persistence truth
+    - UI presentation
+    - artifact authority
+
+Trace answers:
+
+    What happened?
+    What caused what?
+    Why?
+
+Trace evidence is proof only within retained trace evidence.
+
+If an action is not present in retained trace evidence, trace cannot prove that
+it happened.
+
+If trace evidence was lost, the loss itself must be represented honestly when
+possible.
+
+Important distinction:
+
+    Domain-required trace emission:
+        A subject-owning document may require that a domain attempt to emit
+        trace evidence for meaningful actions.
+
+        This is an emission obligation.
+
+    Trace persistence / retention:
+        Trace persistence is policy-governed.
+
+        Retained trace evidence may be bounded, rotated, or lossy when loss is
+        represented honestly.
+
+    Optional diagnostic / verbose trace:
+        Development-mode or diagnostic enrichment that is best-effort and
+        non-authoritative.
+
+Trace loss weakens evidential completeness.
+
+Trace loss does not by itself change committed-state correctness.
+
+Committed-state truth is governed by DA-04, not by trace completeness.
+
+Corrected mantra:
+
+    If not traced, trace cannot prove it happened.
+
+Not:
+
+    If trace persistence failed, committed state is invalid.
+
+Trace reason ownership is domain-specific:
+
+    DA-03 = trace substrate
+    DA-04 = state / transaction trace obligations
+    DA-05 = representation / integrity / decode / reachability trace obligations
+    DA-06 = configuration trace obligations
+    DA-07 = persistence I/O outcome trace obligations
+    DA-08 = Window finalization and Window-domain trace reasons
+    DA-09 = discovery trace reasons
+    DA-11 = resolution trace reasons
+    DA-14 = activation trace reasons
+    DA-16 = capability trace reasons
+    DA-17 = decision and policy trace obligations
+    DA-18 = debugger trace obligations
+    DA-19 = Job trace reasons
+    DA-20 = AppInstance-domain trace reasons
+    DA-21 = RPC trace evidence and message-flow observability
+    DA-22 = UI / View trace reasons
+    DA-24 = OrchestrationUnit trace reasons
+    DA-25 = artifact/export trace obligations where artifact creation occurs
+    DA-26 = workflow trace obligations for comparison / Replay / Resume / Retry
+    DA-27 = adapter-domain trace reasons
+    DA-28 = RuntimeHost trace reasons
+    DA-29 = PackManager trace reasons
+
+DA-03 should not become the catalog of every domain trace reason.
+
+Cross-document trace wording rule:
+
+    When a document says trace-visible or requires trace evidence, treat that
+    as a domain trace emission obligation unless the document explicitly
+    defines stronger persistence semantics under DA-03.
+
+    Do not let trace wording imply that retained trace evidence is committed
+    state, that trace persistence is guaranteed forever, or that trace loss
+    invalidates committed-state truth.
+
+
+MEMORY AND COMMITTED STATE
+==========================
+
+Memory is not merely chat history.
+
+Memory is not merely prompt context.
+
+Memory is not authoritative merely because it is:
+
+    - resident
+    - visible
+    - active
+    - currently in use
+
+Committed state becomes authoritative only after crossing the DA-04 commit
+boundary.
+
+Correct state model:
+
+    memory = runtime representation
+    state = committed authority
+    trace = evidence / observation
+    persistence = protection
+
+DA-04 uses exactly two authority classes:
+
+    Authoritative
+    Non-authoritative
+
+Avoid introducing semi-authoritative state categories.
+
+A thing may be important, required to attempt, useful for explanation, or
+policy-required, but for committed-state truth it is either authoritative or
+non-authoritative.
+
+
+TRANSACTIONS AND COMMIT
+=======================
+
+A transaction is a temporary staging overlay.
+
+Staged mutation is not authoritative.
+
+A transaction resolves only by:
+
+    - commit
+    - abort
+
+Commit and abort are atomic.
+
+Partial propagation does not occur.
+
+A transaction does not remain half-committed.
+
+Nested transaction model:
+
+    Child transaction commits propagate into parent transactions, not directly
+    into committed layers while an enclosing transaction exists.
+
+    Only the outermost transaction commit mutates committed layers.
+
+Conflict detection:
+
+    A transaction records the base committed revision visible when a key was
+    first touched.
+
+    Commit conflicts occur when committed existence or committed revision
+    changed.
+
+    Conflicting commit fails deterministically.
+
+Turnix does not silently use:
+
+    - merge
+    - last-write-wins
+    - heuristic reconciliation
+
+Any override requires explicit user decision or explicit policy elsewhere.
+
+
+PAYLOAD IDENTITY, CHUNKS, AND VALUEREF
+======================================
+
+DA-05 defines the storage-neutral committed-value representation contract.
+
+Committed values are represented through immutable payload references rather
+than live runtime object identity.
+
+Committed state references immutable payload bytes, not runtime pointers.
+
+Runtime objects are decoded views of committed payload material.
+
+Runtime residency is an implementation detail.
+
+A committed key in a committed layer or committed configuration is
+representable at the commit boundary as:
+
+    key -> ValueRef
+
+ValueRef:
+
+    - immutable once created
+    - deterministic decoding contract for one committed value payload
+    - not a pointer to live runtime memory
+    - does not depend on transactional layers
+    - does not depend on journal completeness
+    - does not depend on trace completeness
+    - does not depend on hidden runtime side effects
+
+ValueRef forms are exactly:
+
+    - InlineValueRef
+    - ChunkValueRef
+
+Arbitrary network references and arbitrary file-path references are not ValueRef
+forms.
+
+External references, if ever introduced, do not become valid authoritative
+committed-state representation unless deterministic retrieval is explicitly
+guaranteed.
+
+Chunk:
+
+    - immutable byte sequence
+    - identified by stable ChunkId
+    - content-derived
+    - storage-neutral
+    - path-independent
+    - database-row-independent
+    - machine-independent
+    - timestamp-independent
+    - runtime-pointer-independent
+    - storage-container-independent
+
+Chunk identity is format-aware.
+
+Different encodings of the same semantic value produce different ChunkIds
+unless a later authoritative rule explicitly defines canonical equivalence.
+
+Integrity failure is explicit.
+
+Corrupt payload material is not authoritative.
+
+Decode failure is explicit.
+
+A committed value whose ValueRef cannot be decoded is not treated as valid
+authoritative content.
+
+Committed values are schemaless by default.
+
+Schema linkage is optional representation metadata.
+
+Static origin does not bypass committed representation.
+
+Payload sharing across committed state roots, Windows, manifests, traces,
+journals, exports, and audit bundles does not change authority boundaries.
+
+Reachability determines retention safety.
+
+Reachability does not redefine artifact authority.
+
+Garbage collection must not collect payload reachable from authoritative
+retained roots.
+
+DA-05 defines representation.
+
+DA-07 defines persistent I/O authority.
+
+DA-04 defines committed-state truth.
+
+
+CONFIGURATION, SCHEMAS, AND MIGRATION
+=====================================
+
+Configuration is authoritative state.
+
+Configuration is a specialized use of DA-04 state model, not a separate state
+architecture.
+
+Configuration is not:
+
+    - arbitrary JSON blobs
+    - free-form user data
+    - implicit defaults hidden in code
+
+Committed configuration is authoritative.
+
+Runtime-visible configuration views are not authoritative merely because they
+are resident or currently effective.
+
+Configuration persistence protects against loss.
+
+Configuration persistence does not define truth.
+
+Storage layout and file placement define where configuration is persisted, not
+what makes it authoritative.
+
+Configuration mutation that changes authoritative committed state follows
+normal transaction and commit rules.
+
+Configuration scopes:
+
+    - Engine
+    - Pack-global
+    - Save-bound
+
+Precedence:
+
+    Save-bound > Pack-global > Engine > Defaults
+
+Ownership:
+
+    Engine scope:
+        owned by Kernel
+
+    Pack-global scope:
+        owned by one canonicalPackId
+
+    Save-bound scope:
+        owned by one canonicalPackId inside one save context
+
+canonicalPackId for persistent configuration ownership:
+
+    resolvedAuthor + "@" + packTreeId
+
+canonicalPackId excludes version.
+
+Schemas define configuration structure, types, constraints, allowed value
+shapes, compatibility expectations, and access-level metadata when needed.
+
+Schemas are not runtime defaults.
+
+Schemas do not create authoritative values by themselves.
+
+Defaults:
+
+    - initial values only
+    - immutable input material
+    - not user configuration
+    - not mutable state
+
+Overrides:
+
+    - explicit user-authored persisted deviations from defaults
+    - loaded after defaults
+    - migrated explicitly
+    - not modified silently
+    - only user-authored persisted configuration input layer
+
+Duplicate schema/default/config files are selected, not stacked.
+
+Duplicate schema/default/config files are shadowed, not merged.
+
+Configuration materialization stages:
+
+    1) schema interpretation
+    2) defaults input
+    3) explicit override inputs
+    4) migration when required
+    5) validation of stored values
+    6) computed transforms when allowed
+    7) effectiveConfig materialization
+
+Stages 1 through 5 are gating stages.
+
+Stages 6 and 7 are runtime-view stages.
+
+effectiveConfig is final runtime-visible configuration view.
+
+effectiveConfig is not separate authoritative state class.
+
+Computed transforms operate only on effectiveConfig.
+
+Computed transforms do not mutate stored values.
+
+Configuration committed values should reuse DA-05 ValueRef / Chunk
+representation where they are stored as Turnix committed payload material.
+
+DA-06 owns configuration meaning, scopes, schema use, materialization,
+migration, storage layout, and policy-file placement.
+
+DA-17 owns decision and remembered-policy semantics.
+
+
+PERSISTENT I/O AND IOMANAGER
+============================
+
+All persistence in Turnix is centralized and mediated.
+
+IoManager is the sole authority responsible for persistent I/O.
+
+IoManager responsibilities include:
+
+    - mediating reads and writes
+    - enforcing root boundaries and permissions
+    - normalizing and validating storage targets
+    - selecting appropriate Readers and Writers
+    - classifying errors
+    - ensuring trace-visible persistence outcomes
+    - providing atomic-write guarantees where required
+    - managing backups and snapshots per policy
+    - preserving rollback points for identity-bearing mutations
+
+IoManager does not replace DA-04 state model.
+
+IoManager enforces how persistence occurs for state and other persisted
+artifacts.
+
+IoManager authority does not transfer to:
+
+    - adapters
+    - packs
+    - services
+    - Views
+    - transports
+    - RPC handlers
+    - Jobs
+    - tools
+
+merely because they can request persistence.
+
+Reader / Writer providers:
+
+    - format mechanics under IoManager control
+    - not authority roots
+    - not general backend authority surfaces for adapter-executed code
+
+Raw filesystem handles do not escape Reader / Writer boundary.
+
+Raw paths do not become part of caller runtime surface.
+
+Packs do not receive filesystem handles or unrestricted path APIs.
+
+Adapter-executed code does not receive filesystem handles or unrestricted path
+APIs as Turnix persistence authority path.
+
+Built-in provider kinds are available before discovery and indexing:
+
+    - utf8Text
+    - binary
+    - json
+    - json5
+    - jsonl
+
+Extended providers may be provided by packs or platform extensions, but:
+
+    - they register with IoManager
+    - they declare supported kinds explicitly
+    - they are not usable until providing pack is activated
+    - Turnix does not auto-discover or load providers mid-read/write operation
+
+Discovery and indexing use built-in Readers only.
+
+Discovery/indexing do not use:
+
+    - pack-provided Readers
+    - pack-provided Writers
+    - compilers
+    - transformers
+    - streaming I/O
+
+Runtime writable roots:
+
+    - userdata/
+    - saves/
+
+Runtime read-only roots:
+
+    - custom/
+    - first-party/
+    - third-party/
+
+Root writability does not by itself authorize state mutation.
+
+Adapter-executed code does not gain write authority merely because a root is
+writable.
+
+Persistent I/O errors are exactly one of:
+
+    - Unrecoverable
+    - User-decidable
+    - Optional / best-effort
+
+Identity-bearing data never uses silent fallback.
+
+Optional / best-effort failures such as logs, traces, and caches do not corrupt
+authoritative state.
+
+Before user-decidable recovery, a minimal recovery surface must exist.
+
+If the minimal recovery surface is not available, the failure is unrecoverable
+for that boot path.
+
+I/O outcomes are trace-visible.
+
+Trace visibility does not make DA-07 trace substrate owner.
+
+Save-local copied packs or save-internal artifacts do not become global indexing
+material merely because they exist in save data.
+
+Configuration persistence uses IoManager, but configuration semantics remain
+DA-06.
+
+Migrators may exist for configuration, manifests, save structures, and future
+persisted artifact classes.
+
+Migrators do not provide rollback by inverse logic.
+
+Rollback safety is provided by IoManager plus DA-04 commit model.
+
+Backups and snapshots protect recoverability.
+
+Backups and snapshots do not define truth.
+
+Streaming I/O is explicit.
+
+Streaming write uses staging.
+
+Streaming write cancellation does not produce partial valid final output.
+
+Final destination update occurs only on commit.
+
+Streaming is forbidden in deterministic early phases such as discovery,
+indexing, manifest loading, configuration schema/default/userdata loading,
+dependency resolution, and activation-critical reads.
+
+Native filesystem APIs are not Turnix persistence authority path for
+pack-provided or adapter-executed code.
+
+
+WINDOWS AND FINALIZED RUNTIME HISTORY
+=====================================
+
+Windows group bounded runtime history and retained evidence for one
+AppInstance.
+
+A Window is a bounded region of runtime history and retained evidence associated
+with one AppInstance.
+
+Windows distinguish:
+
+    - authoritative committed boundaries
+    - non-authoritative in-flight activity
+    - non-authoritative historical evidence
+
+Window kinds:
+
+    - SafePointWindow
+    - ActiveWindow
+    - AbortedWindow
+
+An AppInstance maintains one explicit ordered Window sequence.
+
+At most one ActiveWindow exists for one AppInstance at a time.
+
+If an ActiveWindow exists, it is the unique mutable tail of the Window sequence.
+
+Window ordering is explicit.
+
+Window ordering does not rely on timestamps, inference, or presentation order.
+
+Window ordering is distinct from Job lifecycle ordering.
+
+Window ordering is distinct from OrchestrationUnit lifecycle ordering.
+
+SafePointWindow:
+
+    - finalized authoritative committed boundary
+    - contains committed layers and committed config as authoritative material
+    - authoritative portion contains committed state material only
+    - transactional layer contents are not authoritative material
+    - optional retained evidence does not add authority
+    - Job reaching Succeeded does not by itself create a SafePointWindow
+    - OrchestrationUnit reaching Completed does not by itself create a
+      SafePointWindow
+    - transaction commit does not by itself create a SafePointWindow
+
+ActiveWindow:
+
+    - current in-flight region after last finalized committed boundary
+    - non-authoritative
+    - does not define committed truth
+    - may be discarded during recovery
+    - is not deterministic replay boundary
+    - may contain Pending or Running Jobs
+    - may contain non-terminal OrchestrationUnits
+    - evidence does not convert Pending or Running Jobs into replayable work
+
+AbortedWindow:
+
+    - finalized ActiveWindow that did not produce a new authoritative committed
+      boundary
+    - finalized evidence of non-commit outcome
+    - not a committed boundary
+    - does not acquire authority merely because finalized, retained, or exported
+    - Job reaching Failed, Cancelled, TimedOut, or Superseded does not by itself
+      create an AbortedWindow
+    - OrchestrationUnit reaching Failed, Cancelled, or Superseded does not by
+      itself create an AbortedWindow
+    - transaction abort does not by itself create an AbortedWindow
+
+ActiveWindow finalizes as exactly one outcome:
+
+    - SafePointWindow
+    - AbortedWindow
+
+Finalization never produces both outcomes for the same ActiveWindow.
+
+Finalization never produces partial finalized artifact.
+
+Finalization never preserves unresolved mixed state.
+
+Job terminal outcome does not by itself define Window finalization.
+
+OrchestrationUnit terminal outcome does not by itself define Window
+finalization.
+
+Transaction commit or abort does not by itself define Window finalization.
+
+Journal is:
+
+    - append-oriented
+    - non-authoritative
+    - non-blocking
+    - evidence-oriented rather than correctness-defining
+    - not state
+    - not required for correctness
+
+Journal loss does not change committed-state meaning.
+
+SafePointWindow creation modes:
+
+    - ImmediateCommitted
+    - AtQuiescence
+
+ImmediateCommitted:
+
+    - attempts SafePointWindow creation without waiting for quiescence
+    - succeeds immediately if eligible
+    - fails deterministically if not eligible
+    - does not silently degrade into waiting behavior
+
+AtQuiescence:
+
+    - attempts SafePointWindow creation only when no OrchestrationUnit is active
+      for the target AppInstance
+    - may queue explicitly until quiescence
+    - queued request is trace-visible
+    - queued request does not mean queued Job execution
+    - queued request does not alter Job lifecycle state by itself
+
+SafePointWindow creation timeout is not Job timeout.
+
+SafePointWindow creation cancellation is not Job cancellation.
+
+
+WINDOW ARTIFACTS, EXPORTS, AND AUDIT BUNDLES
+============================================
+
+DA-25 owns artifact/export/bundle semantics derived from finalized Windows.
+
+Artifact representation does not add authority.
+
+Exported form changes portability, not semantics.
+
+WindowManifest:
+
+    - immutable manifest representing exactly one finalized Window
+    - never represents ActiveWindow
+    - exactly one of SafePointWindowManifest or AbortedWindowManifest
+    - immutability preserves representation stability only
+    - manifest existence does not create authority
+
+SafePointWindowManifest:
+
+    - includes safePointWindowId
+    - includes windowType = SafePointWindow
+    - includes committedStateRoot
+    - may include traceRoot, journalRoot, revisionRoot, mabRoot by policy
+    - optional roots are non-authoritative evidence roots
+
+AbortedWindowManifest:
+
+    - includes abortedWindowId
+    - includes windowType = AbortedWindow
+    - does not define committedStateRoot
+    - represents finalized non-authoritative evidence of an aborted Window
+      region
+
+WindowExport:
+
+    - portable immutable serialization of one WindowManifest closure
+    - exactly one of SafePointWindowExport or AbortedWindowExport
+    - changes portability, not semantics
+    - does not add authority
+    - does not imply replayability
+    - does not imply resumability
+    - does not imply evidence completeness
+
+SafePointWindowExport is deterministic restoration artifact only if required
+committed-state material is present.
+
+A partial SafePointWindowExport lacking required committed material is not a
+deterministic restoration artifact.
+
+AbortedWindowExport is not restoration artifact.
+
+AbortedWindowExport is not replay proof.
+
+Minimal Audit Bundle:
+
+    - non-authoritative export artifact for audit, explanation, offline
+      inspection
+    - not authoritative state
+    - not WindowManifest
+    - not restoration artifact
+    - not replay guarantee
+    - not completeness guarantee
+
+Committed-state excerpts inside a Minimal Audit Bundle are non-authoritative
+evidence excerpts.
+
+Optional digests:
+
+    - comparison accelerators
+    - not identities
+    - not authority
+
+Offline inspection:
+
+    - reads retained artifact contents
+    - does not run Turnix orchestration logic
+    - does not control original Jobs, OrchestrationUnits, adapters, RPC
+      channels, transports, Views, or frontends
+
+Partial export and missing material must remain explicit.
+
+
+OFFLINE COMPARISON, REPLAY, RESUME, RETRY, AUDIT WORKFLOWS
+==========================================================
+
+DA-26 owns workflow claims over retained finalized Window-derived artifacts.
+
+ComparisonResult has exactly three values:
+
+    - Equal
+    - NotEqual
+    - NotComparable
+
+ComparisonResult is not boolean.
+
+ComparisonResult without equality mode is incomplete.
+
+ComparisonResult does not imply:
+
+    - replayability
+    - resumability
+    - audit completeness
+
+Equality modes are explicit.
+
+Default equality mode is StateEquality unless another mode is explicitly
+requested.
+
+StateEquality:
+
+    - compares retained committed key/value pairs only
+    - ignores non-authoritative trace/journal/audit/Job/OrchestrationUnit/
+      adapter/RPC/View/frontend evidence
+    - returns NotComparable when required committed-state material is missing
+
+StrictStateEquality:
+
+    - compares retained committed key/value pairs plus retained revision history
+      required by strict mode
+    - unsupported strict submodes return NotComparable
+    - strict comparison does not silently degrade to StateEquality
+
+EvidenceEquality:
+
+    - compares retained evidence closure
+    - does not imply state equality
+    - equality of retained Job evidence does not imply resumed or replayable Job
+      execution
+    - equality of retained OrchestrationUnit evidence does not imply resumed or
+      replayable OrchestrationUnit execution
+
+ExportEquality:
+
+    - compares exported packaged closure
+    - does not imply state equality unless selected mode includes relevant
+      committed-state closure
+    - does not imply evidence equality unless selected mode includes relevant
+      evidence closure
+
+NotComparable is distinct from NotEqual.
+
+Tools do not silently retry weaker equality mode and present the result as if it
+answered the original request.
+
+Digests accelerate comparison only.
+
+Replay:
+
+    - deterministic reconstruction of retained SafePointWindow state plus
+      retained causal story where available
+    - restores committed state within DA-04 restoration boundary
+    - does not re-run external effects
+    - does not reconstruct uncommitted ActiveWindow activity
+    - does not resume retained Job execution
+    - does not resume retained OrchestrationUnit execution
+    - does not restart retained adapter execution
+    - does not reconnect retained RPC channels, transports, Views, or frontends
+
+Resume:
+
+    - explicit attempt to continue execution after restoring retained
+      SafePointWindow
+    - new work after restoration
+    - not deterministic in outcome
+    - does not reuse closed Job identity
+    - does not reuse closed OrchestrationUnit identity
+    - does not retroactively commit prior uncommitted activity
+
+Retry:
+
+    - new orchestration attempt for a previous failed, incomplete, superseded,
+      cancelled, or intentionally retried action
+    - new work
+    - trace-visible
+    - does not reuse previous jobId when represented as Job
+    - does not reuse previous orchestrationUnitId
+    - does not reuse previous adapter execution identity
+    - not implied by Replay
+    - not implied by Resume unless Resume policy explicitly selects Retry
+
+Audit workflows:
+
+    - operate over retained evidence and artifacts
+    - do not mutate state
+    - do not require journal completeness
+    - do not assume replayability
+    - remain honest about retained gaps, pruned evidence, and incompleteness
+
+
+PACK DISCOVERY
+==============
+
+Discovery is candidate/root production.
+
+Discovery is not:
+
+    - visibility
+    - enablement
+    - selector resolution
+    - dependency satisfaction
+    - activation
+    - import
+    - runtime loading
+    - capability authority
+    - broader policy authority
+
+Discovery is strict, boring, predictable, and side-effect free.
+
+Discovery identifies candidate pack entities inside allowed roots and classifies
+them into discovered or rejected outcomes.
+
+Discovery also establishes candidate roots for non-pack categories such as
+userdata and saves.
+
+Discovery output is input to later indexing, visibility, and resolution.
+
+Discovery output is not runtime-loaded result.
+
+Root categories:
+
+    - custom/
+    - first-party/
+    - third-party/
+    - userdata/
+    - saves/
+
+userdata/ and saves/ are not content categories.
+
+SavePacks are discoverable as save entities.
+
+SavePacks are not eligible for import as normal content-root packs.
+
+Save-local pack material is a distinct nearer source context and precedes
+ordinary content-root precedence.
+
+custom does not override save-local pack material by default.
+
+Content-root precedence:
+
+    custom
+    first-party
+    third-party
+
+This precedence must not override SaveOnly, GlobalPinned, save-local copied
+material, selected graph intent, pinned SavePack graph evidence, or explicit
+AppInstance/SavePack semantics unless an authoritative document says so.
+
+
+PACK IDENTITY, VISIBILITY, AND ACCESS CONTROL
+=============================================
+
+Pack is the general container concept.
+
+Pack kinds include:
+
+    - AppPack
+    - ModPack
+    - ViewPack
+    - ContentPack
+    - SavePack
+
+Pack identity layers are distinct:
+
+    - declaredId
+    - packTreeId
+    - author
+    - version
+
+declaredId is manifest-local to its parent pack context.
+
+packTreeId is computed from hierarchy and is not filesystem-based.
+
+author is part of identity, not decoration.
+
+If author cannot be resolved through declaration or inheritance, the pack is
+invalid.
+
+Visibility answers:
+
+    Is pack A permitted to reference pack B?
+
+Visibility is permissioned reachability.
+
+Visibility is not:
+
+    - activation
+    - code loading
+    - execution order
+    - dependency satisfaction
+    - version compatibility
+    - runtime capability access
+    - runtime service access
+    - permission inheritance
+
+Visibility is evaluated during:
+
+    - dependency resolution
+    - resolvePack calls
+    - turnixImport resolution
+
+Visibility is not bypassed or deferred.
+
+Visibility is evaluated dynamically between requesting pack and target pack.
+
+Visibility is not pre-expanded into a static graph.
+
+exportNestedPacks:
+
+    - direct-child export control only
+    - not transitive
+    - not wildcard
+
+importPacksFromParent:
+
+    - parent-to-child reference visibility only
+    - does not imply export
+    - does not imply capability access
+    - does not imply service access
+    - does not imply permission inheritance
+
+Resolution source restricts visibility domain.
+
+SavePack visibility:
+
+    - SavePack is never globally visible
+    - SavePack is visible only within AppInstance context
+    - copied packs inside SavePack are visible only within that save
+    - copied packs inside SavePack are not globally visible
+    - copied packs shadow global packs of same identity within that save domain
+
+Visibility does not grant capabilities.
+
+Visibility does not grant services.
+
+A visible pack may still be unable to use another pack's capabilities or
+services.
+
+
+GENERIC RESOLUTION
+==================
+
+Resolution answers:
+
+    Which concrete pack identity satisfies this PackRequest inside the current
+    resolution context?
+
+Resolution is deterministic and side-effect free.
+
+Resolution consumes:
+
+    - one PackRequest
+    - one registry snapshot
+    - one externally supplied resolution context
+
+Resolution outputs exactly one of:
+
+    - one resolved concrete pack identity
+    - one classified resolution failure
+    - one classified ambiguity requiring external decision
+
+Resolution does not:
+
+    - rescan filesystem
+    - read manifests lazily
+    - merge manifest fragments
+    - activate packs
+    - load runtimes
+    - guess policy
+    - mutate registry snapshot
+    - trigger discovery
+    - combine partial candidate data into synthetic candidate
+
+Resolution always occurs inside one explicit resolution context.
+
+Resolver does not invent, switch, or silently mix resolution contexts.
+
+Ambiguity requires external policy or user decision.
+
+The generic resolver does not guess.
+
+
+IMPORTING AND MODULE LOADING
+============================
+
+Importing is not:
+
+    - dependency declaration
+    - resolution
+    - adapter selection
+    - execution authorization
+    - activation
+    - execution authority
+    - capability permission
+
+Native language import systems do not understand Turnix pack resolution,
+visibility, save scoping, adapter selection, execution authorization,
+activation boundaries, or execution authority.
+
+Cross-pack code access routes only through Turnix-defined mechanisms.
+
+Same host language does not imply same authority.
+
+Python pack code remains adapter-executed pack code and does not become backend
+implementation code through Python import behavior.
+
+Cross-pack native Python imports are not allowed.
+
+Python pack code interacts with other packs only through Turnix-mediated APIs.
+
+JavaScript cross-pack loading routes through:
+
+    turnixImport(selector)
+
+turnixImport is a Turnix-defined mediated loader.
+
+turnixImport is not native import().
+
+turnixImport is not:
+
+    - dependency declaration
+    - adapter selection request
+    - execution authorization request
+    - activation request
+    - capability permission request
+    - visibility override
+    - permissive loader
+    - best-effort loader
+    - version selector
+    - Kernel authority grant
+
+Importing respects concrete identity already chosen during dependency
+resolution.
+
+Importing does not reopen dependency resolution.
+
+Semver is not allowed in turnixImport selectors.
+
+Module evaluation caused by JavaScript ESM import is not Turnix-recognized
+activation.
+
+Import-time execution is not activation.
+
+Background work started outside Turnix orchestration is unsupported by Turnix
+guarantees.
+
+
+DEPENDENCIES AND PACK REQUESTS
+==============================
+
+Dependencies are hard functional contracts.
+
+Dependency meaning:
+
+    This pack cannot function correctly unless another pack exists that
+    satisfies this request.
+
+Dependencies are not preferences.
+
+Declaring dependency does not:
+
+    - load code
+    - activate pack
+    - grant visibility
+    - grant capabilities
+    - define activation order
+
+Manifest field:
+
+    packs
+
+Every entry under packs is hard dependency meaning.
+
+Dependency resolution source model:
+
+    - SaveOnly
+    - GlobalPinned
+    - GlobalNormal
+
+Every hard dependency is resolved from exactly one dependency-resolution source.
+
+Sources are mutually exclusive.
+
+The resolver does not silently mix or fall back between sources.
+
+SaveOnly:
+
+    - applies when dependency packTreeId is listed in SavePack metadata as copied
+    - only copied packs inside SavePack are eligible
+    - global registry is not consulted
+    - absence of copied pack is hard error
+
+GlobalPinned:
+
+    - applies when dependency is bound to pin in SavePack metadata
+    - only pinned concrete identity is eligible
+    - global registry only
+    - missing pinned identity is hard error
+    - pin does not imply copying or saving
+
+GlobalNormal:
+
+    - all other dependency cases
+    - global registry only
+    - SavePack content not consulted
+    - selection follows deterministic procedure
+
+GlobalNormal selection procedure:
+
+    1) version handling
+    2) author relationship ordering
+    3) root precedence: custom, first-party, third-party
+    4) final lexicographic tie-break
+
+Fingerprint requires exact concrete version.
+
+Advisory pack relations:
+
+    - supportedPacks
+    - conflictingPacks
+    - recommendedPacks
+
+Advisory relations are not hard dependencies, hard activation blockers, generic
+resolution constraints, or loader/runtime warning rules by themselves.
+
+Required roles / provided roles are dependency/resolution-layer semantics.
+
+They are not runtime capability invocation semantics.
+
+Provider registration and provider selection remain watch items.
+
+
+ACTIVATION
+==========
+
+Activation is the controlled boundary between inert metadata and
+Turnix-recognized executable participation.
+
+Activation answers:
+
+    Has Turnix intentionally brought this pack into recognized executable
+    participation under Turnix orchestration?
+
+Activation is a controlled, explicit, one-time state transition.
+
+Before activation:
+
+    - pack exists only as metadata
+    - code has no execution authority under Turnix
+    - adapter loading or native module evaluation does not make it active
+
+After activation:
+
+    - pack may participate in runtime behavior
+    - execution is allowed only through Turnix-controlled orchestration pathways
+    - PackContext defines pack-facing authority context
+
+Activation is not:
+
+    - discovery
+    - indexing
+    - dependency resolution
+    - importing
+    - adapter selection
+    - execution authorization
+    - adapter loading
+    - visibility granting
+    - capability permission
+
+Current activation entrypoint:
+
+    onLoad(ctx)
+
+Activation and execution are distinct.
+
+Execution occurs only after activation when Turnix-recognized.
+
+Execution may happen multiple times.
+
+Execution occurs only when invoked by Turnix orchestration.
+
+Adapter loading does not create partial activation.
+
+Import-time execution is unsupported by Turnix guarantees.
+
+Activation-independent library code may accept PackContext explicitly.
+
+Authority is that of the caller, not the provider.
+
+Provider pack activation state does not change merely because library code
+accepted a caller ctx.
+
+Last-known-good fallback is used only after activation failure, not during
+dependency resolution.
+
+Any later fallback behavior must remain explicit, trace-visible, policy-bound,
+and must not become silent dependency-resolution success.
+
+
+USER DECISIONS AND POLICY
+=========================
+
+Turnix does not make ambiguous decisions silently.
+
+Turnix does not delegate authority implicitly.
+
+Policy reduces repeated friction; it does not redefine authority.
+
+Decision handling exists where Turnix cannot proceed safely or deterministically
+on its own.
+
+Decision authority is Kernel-mediated.
+
+Decision-point types:
+
+    - Resolution decisions
+    - Permission decisions
+    - Recovery decisions
+    - Configuration-scope decisions
+    - Fingerprint-mismatch decisions
+    - Work-lifecycle policy decisions
+
+Permission decisions apply only to actions that:
+
+    - mutate persisted state
+    - delete persisted state
+    - intentionally cross ownership boundaries
+
+Read access is excluded from permission decisions.
+
+Reads either succeed or return NotFoundOrPermissionDenied.
+
+Remembered capability permission identity uses:
+
+    - packCanonicalId
+    - exact versioned capability id
+
+No wildcard, prefix, broader family, or versionless fallback matching exists.
+
+Remembered fingerprint-mismatch policy is keyed by:
+
+    - canonicalPackId
+    - packVersion
+    - expectedFingerprint
+    - actualFingerprint
+
+Policy evaluation order:
+
+    1) run policy
+    2) save policy
+    3) global policy
+
+Run policy overrides save policy.
+
+Save policy overrides global policy.
+
+Silent or implicit policy creation is forbidden.
+
+Policy does not:
+
+    - override ownership rules
+    - bypass access levels
+    - grant mutation rights forbidden by system rules
+    - convert Job terminal outcomes into ordinary failures
+    - treat transport timeout as Job timeout
+    - treat Job timeout as transport timeout
+    - silently create work
+    - silently cancel work
+    - silently supersede work
+    - silently detach work
+    - silently retain result
+    - silently discard result
+
+Decision pauses are scoped.
+
+Decision pause does not by itself cancel, supersede, or time out a Job.
+
+While decision is pending:
+
+    - no persisted mutation may be committed
+    - no configuration write may be finalized
+    - no SavePack mutation may complete
+    - affected Job or OrchestrationUnit may not silently cross the
+      decision-controlled boundary
+
+Work-lifecycle policy decisions may affect Jobs, OrchestrationUnits, RPC
+request handling, scheduler work, and debugger-controlled work.
+
+Work-lifecycle policy decisions do not define Job terminal states.
+
+Remembered work-lifecycle policy is not keyed by jobId alone.
+
+Policy storage location and file structure are DA-06.
+
+Policy meaning is DA-17.
+
+
+SERVICES AND CAPABILITIES
+=========================
+
+Service = runtime wiring object.
+
+A Service is not:
+
+    - permission layer
+    - capability authority
+    - adapter authority
+    - PackContext authority
+    - backend-internal exposure path to adapter-executed code
+    - cross-pack execution shortcut
+    - in-process adapter bypass
+
+Capability = named, permissioned, Turnix-mediated operation.
+
+Capability is not:
+
+    - permission itself
+    - Service
+    - Job
+    - OrchestrationUnit
+    - RPC message
+    - direct service object
+    - committed-state authority
+    - PackManager authority
+    - adapter authority
+    - execution authorization
+    - persistence authority
+
+Capability invocation may complete without creating a Job.
+
+Long-running, cancellable, progress-reporting, timeout-managed, or observable
+capability execution may create or attach to a Job.
+
+Job-backed capability execution remains capability-mediated.
+
+Capability permission is distinct from adapter execution authorization.
+
+Same process, same runtime, or same language does not bypass capability
+mediation.
+
+
+ORCHESTRATIONUNIT
+=================
+
+OrchestrationUnit is Kernel-tracked execution-authority unit.
+
+Better wording:
+
+    OrchestrationUnit authorizes and coordinates mutation flow.
+
+Not:
+
+    OrchestrationUnit is committed state authority.
+
+OrchestrationUnit is distinct from:
+
+    - AppInstance
+    - Job
+    - transaction
+    - View
+    - ExecutionAdapter
+    - RuntimeHost
+    - RPC message
+    - capability
+    - transport message
+
+OrchestrationUnit coordinates mutation authority.
+
+DA-04 still owns committed-state truth.
+
+Mutation through OrchestrationUnit still crosses:
+
+    - policy
+    - capability
+    - transaction
+    - commit
+    - persistence
+    - trace boundaries
+
+Mutation outside orchestration does not acquire Turnix guarantees by
+implication.
+
+Same-language or same-process execution does not bypass committed-state
+authority.
+
+RuntimeHost implementation code does not directly mutate committed state outside
+Kernel-owned orchestration paths.
+
+Adapter-executed code does not directly mutate committed state.
+
+Default model:
+
+    Turnix uses deterministic single-lane orchestration within one AppInstance
+    unless an explicit concurrency mode is defined elsewhere.
+
+Turnix does not execute multiple OrchestrationUnits concurrently when those units
+may mutate same AppInstance state.
+
+Awaited model calls, adapter calls, transport calls, RuntimeHost calls, or other
+I/O may suspend current unit.
+
+Suspension does not authorize another state-mutating unit to run concurrently
+inside same AppInstance unless explicit concurrency mode permits it.
+
+
+JOB
+===
+
+Job = observable lifecycle handle for requested work.
+
+Job is not:
+
+    - Promise
+    - coroutine
+    - callback
+    - thread
+    - task
+    - process
+    - model request
+    - transport message
+    - RPC request
+    - capability
+    - OrchestrationUnit
+    - transaction
+    - committed state
+    - execution mechanism
+    - result payload
+
+Job states:
+
+    - Pending
+    - Running
+    - Succeeded
+    - Failed
+    - Cancelled
+    - TimedOut
+    - Superseded
+
+Terminal states:
+
+    - Succeeded
+    - Failed
+    - Cancelled
+    - TimedOut
+    - Superseded
+
+A Job reaches exactly one terminal state.
+
+Terminal state is final.
+
+Closed Jobs are not restarted.
+
+Retry is new work unless a later document explicitly defines a retry
+relationship.
+
+Retry does not reuse previous jobId.
+
+A Job result exists only for Succeeded.
+
+Progress is observational lifecycle evidence.
+
+Progress is not authoritative mutation.
+
+A Job does not become committed state merely because it exists, runs, or reaches
+terminal outcome.
+
+A Job result envelope does not become authoritative committed state merely
+because Job succeeded.
+
+Cancellation, timeout, and supersession are distinct.
+
+Transport timeout is not Job timeout.
+
+Job timeout is not transport timeout.
+
+Superseded is first-class terminal non-error outcome.
+
+Late completion after terminal outcome:
+
+    - does not change Job terminal state
+    - does not produce Job result
+    - does not deliver reply/result
+    - may be traced as diagnostic evidence
+    - may not commit new authoritative mutation after terminal transition
+
+
+RPC AND TRANSPORT
+=================
+
+RPC is logical communication boundary.
+
+Transport is concrete carrier.
+
+WebSocket is one possible transport, not the definition of RPC.
+
+RPC / transport must not be confused with Job lifecycle or OrchestrationUnit
+outcome.
+
+A transport acknowledgement does not prove that a Job exists.
+
+A Job may exist even if creating transport later disconnects.
+
+Transport timeout does not imply Job timeout.
+
+Job timeout does not imply transport timeout.
+
+A request may be rejected before Job exists.
+
+A request may be accepted as Job.
+
+Transport failure does not by itself define Job failure, adapter failure,
+activation failure, AppInstance failure, or RuntimeHost failure.
+
+Everything outside trusted backend internals should communicate with backend
+internals through controlled boundaries:
+
+    external caller
+        -> ExecutionAdapter / entry surface
+        -> RPC / interoperability boundary
+        -> permission check
+        -> capability / orchestration / job
+        -> internal service
+
+
+UI, VIEWS, AND FRONTEND RUNTIME
+===============================
+
+UI is presentation and interaction, not authority.
+
+View is Kernel-bound frontend runtime surface.
+
+Frontend runtime code is adapter-executed frontend code under DA-23.
+
+User interaction becomes meaningful only when Kernel accepts corresponding:
+
+    - command
+    - decision
+    - capability call
+    - RPC message
+
+View identity is distinct from:
+
+    - AppInstance identity
+    - frontend client identity
+    - frontend adapter identity
+    - RuntimeHost identity
+    - workspace identity
+
+One AppInstance may have zero, one, or multiple Views depending on runtime and
+policy model.
+
+A View may exist for non-AppInstance surfaces:
+
+    - launcher
+    - PackManager
+    - configuration editor
+    - debugger
+    - audit viewer
+    - management surface
+
+View lifecycle may include:
+
+    - created
+    - bound to frontend client
+    - initialized
+    - ready
+    - disconnected
+    - reconnected
+    - closed
+
+View creation does not activate packs by itself.
+
+View creation does not create an AppInstance by itself unless explicit launcher
+or runtime workflow defines that behavior.
+
+View readiness does not imply:
+
+    - AppInstance readiness
+    - RuntimeHost readiness
+    - pack activation success
+    - Job success
+
+View disconnect does not automatically:
+
+    - cancel Jobs
+    - fail frontend adapter
+    - deactivate AppInstance
+    - stop, fail, or close RuntimeHost
+    - discard authoritative state
+    - retain/discard/detach/supersede accepted work
+
+UI-visible state is not authoritative merely because visible.
+
+Frontend-side validation is UX only.
+
+Frontend-side validation does not replace:
+
+    - Kernel validation
+    - capability permission
+    - execution authorization
+    - policy evaluation
+
+Decision presentation is not decision ownership.
+
+Debugger UI is not debugger authority.
+
+Presentation transforms do not mutate authoritative state by themselves.
+
+Multiple frontend clients do not create multiple authoritative truths for same
+View.
+
+
+EXECUTIONADAPTER AND ADAPTER LIFECYCLE
+======================================
+
+ExecutionAdapter is the Dv3 umbrella term.
+
+Frontend/browser adapter is specific UI-facing adapter realization or subtype.
+
+ExecutionAdapter runs code or surfaces outside trusted Turnix internals.
+
+Examples:
+
+    - Browser/Electron adapter
+    - Python adapter
+    - Unity/C# adapter
+    - Lua adapter
+    - C++ adapter
+    - remote process adapter
+    - test adapter
+
+Internal Turnix Python is trusted backend implementation.
+
+Pack-provided Python is external code.
+
+Pack-provided Python should not call backend internals directly merely because
+Turnix backend is written in Python.
+
+Same-language or same-process execution does not erase contract boundary.
+
+Adapter-executed mutation seeking Turnix guarantees must re-enter through:
+
+    - orchestration
+    - capability
+    - transaction
+    - commit boundaries
+
+Direct-call optimization may implement transport or dispatch optimization.
+
+Direct calls do not bypass:
+
+    - RPC-shaped authority boundary
+    - route or capability target identity
+    - permission checks
+    - lifecycle ownership
+    - trace correlation
+    - structured result and error handling
+    - OrchestrationUnit boundaries
+    - transaction and commit boundaries
+    - AppInstance and SavePack state authority
+    - RuntimeHost authority boundaries
+
+Adapter mediation is not sandboxing.
+
+Sandboxing is security isolation mechanism.
+
+An adapter may provide sandboxing.
+
+An adapter may run without strong sandboxing.
+
+Absence of sandboxing does not convert adapter-executed code into backend
+implementation code.
+
+Presence of sandboxing does not convert adapter-executed code into Kernel
+authority.
+
+Unsandboxed adapter-executed code requires explicit trust or policy treatment.
+
+Trust decision authorizes only declared trust scope.
+
+Trust decision does not grant capability permission, committed-state mutation,
+persistent I/O authority, RuntimeHost control, workspace ownership, LAN exposure,
+or command-surface acceptance unless owning docs define combined effect.
+
+Adapter lifecycle does not replace:
+
+    - pack activation lifecycle
+    - AppInstance lifecycle
+    - Job lifecycle
+    - transport lifecycle
+    - RuntimeHost lifecycle
+    - capability permission
+
+Adapter readiness does not imply pack activation success, capability permission,
+AppInstance readiness, RuntimeHost readiness, or Job success.
+
+Adapter failure/disconnect does not silently redefine Job terminal outcome,
+OrchestrationUnit lifecycle, AppInstance lifecycle, RuntimeHost lifecycle,
+Window outcome, transport outcome, or committed-state meaning.
+
+Adapter disconnect does not automatically cancel, supersede, time out, detach,
+retain, or discard Job-backed work.
+
+
+DEBUGGER / INSPECTION / BREAKPOINTS
+===================================
+
+Debugging in Turnix is semantic, intentional, observable, scoped, and mediated.
+
+Debugging operates on Turnix concepts first, not arbitrary language runtime
+internals as the primary model.
+
+Primary debugging targets include:
+
+    - packs
+    - activation
+    - pipelines
+    - memory layers
+    - capabilities
+    - Jobs when Jobs exist
+
+Semantic breakpoint classes include:
+
+    - pipeline-stage breakpoints
+    - memory breakpoints
+    - capability breakpoints
+    - Job-scoped breakpoints when Jobs exist
+
+Memory breakpoints are transaction-aware.
+
+By default, memory breakpoints trigger on committed mutations only.
+
+Writing into a transactional layer does not trigger memory breakpoint by
+default.
+
+Aborting transaction does not trigger memory breakpoint by default.
+
+Child transaction commit into parent transaction is not committed mutation.
+
+Only outermost transaction commit produces authoritative committed-mutation
+events.
+
+Breakpoint pause:
+
+    - pauses triggering execution
+    - pauses mutation-capable execution for owning AppInstance
+    - not a Job terminal outcome
+    - not AppInstance stop
+    - not Window finalization
+    - not RuntimeHost failure
+    - does not mutate state by default
+    - does not silently cancel Jobs
+    - does not silently supersede Jobs
+
+Live inspection is read-only by default.
+
+Inspection does not turn staged values into authoritative state.
+
+Debugger actions execute through Turnix-controlled RPC, capabilities, or
+equivalent mediated interfaces.
+
+Debugger tooling does not bypass orchestration.
+
+Debugger tooling does not directly mutate Job terminal state.
+
+Debugger tooling does not become Kernel authority, persistence authority, or
+committed-state authority.
+
+Controlled debugger mutation is explicit, staged, trace-visible, and subject to
+normal authority rules.
+
+Mutation while running requires manual pause or deterministic
+apply-at-safe-point semantics.
+
+Manual pause is deterministic and non-terminal.
+
+Manual pause does not silently cancel or supersede in-flight work.
+
+Debugger safe point is execution/mutation safety boundary.
+
+Debugger safe point is not automatically SafePointWindow.
+
+Debugger pause-at-safe-point does not automatically create Window finalization.
+
+Undo that affects authoritative state is new explicit debugger-initiated
+mutation.
+
+Redo history is debugger-local, ephemeral, and non-authoritative.
+
+Debugger UI does not own debugger semantics.
+
+Step modes do not redefine Job lifecycle.
+
+Debugger-originated Job control remains governed by DA-17 and DA-19.
+
+Debugger disconnect outcome is policy-governed, trace-visible, and cannot
+deadlock.
+
+
+APPINSTANCE
+===========
+
+DA-20 currently defines AppInstance as the live runtime instance of one AppPack.
+
+This is a possible narrowing of the broader Dv3 thesis that AppPack is one
+declarative way to create an AppInstance.
+
+Until resolved, treat DA-20 as the current AppPack-backed AppInstance lifecycle
+model, not as final proof that all AppInstances must be AppPack-backed.
+
+AppInstance lifecycle answers:
+
+    Which live runtime instance is active, which SavePack or save context is
+    bound to it, which participants are attached, and when does its runtime
+    authority region begin and end?
+
+AppInstance identity is distinct from:
+
+    - pack identity
+    - AppPack identity
+    - SavePack identity
+    - View identity
+    - adapter identity
+    - RPC message/channel identity
+    - Job identity
+    - OrchestrationUnit identity
+    - RuntimeHost identity
+    - workspace identity
+
+AppInstance lifecycle is distinct from:
+
+    - pack activation lifecycle
+    - execution adapter lifecycle
+    - RPC transport lifecycle
+    - Job lifecycle
+    - OrchestrationUnit lifecycle
+    - Window finalization
+    - RuntimeHost lifecycle
+
+AppInstance creation does not reopen AppPack resolution silently.
+
+An AppInstance may have one active SavePack or save context.
+
+Absence of active SavePack identity means no durable save context is bound, not
+that AppInstance identity is invalid.
+
+Active save context identifies save scope against which committed state,
+configuration, Windows, retained evidence, and save-local material are
+interpreted.
+
+SavePack identity is not AppInstance identity.
+
+Binding SavePack to AppInstance does not make adapter-executed code a SavePack
+writer.
+
+SavePack mutation occurs only through Kernel-mediated state and persistence
+authority.
+
+Authoritative mutation remains DA-04.
+
+Persistent I/O remains DA-07.
+
+Window and retained evidence behavior remains DA-08.
+
+Writable SavePack ownership:
+
+    - writable SavePack is owned by at most one running AppInstance at a time
+    - second AppInstance does not silently acquire writable ownership
+    - second RuntimeHost does not silently acquire writable ownership
+    - read-only inspection does not create writable ownership
+    - future multi-writer mode requires explicit design
+
+AppInstance active region is bounded runtime interval during which AppInstance
+is active.
+
+At most one active region exists for one AppInstance at a time.
+
+Ending active region does not by itself define whether in-flight work committed,
+aborted, retried, resumed, cancelled, superseded, detached, retained result, or
+finalized Window.
+
+Transport disconnect, View disconnect, Job terminal outcome, adapter failure,
+or frontend disconnect does not automatically stop AppInstance.
+
+AppInstance stop does not automatically define Job terminal outcome, adapter
+failure, transport failure, View failure, RuntimeHost failure, or Window
+finalization.
+
+AppInstance failure does not automatically create AbortedWindow.
+
+
+PACKMANAGER
+===========
+
+PackManager is official Turnix pack-management and graph-preparation domain.
+
+PackManager helps inspect, explain, prepare, validate, repair, and manage pack
+graph intent.
+
+PackManager is not:
+
+    - Kernel
+    - discovery
+    - generic resolution
+    - importing
+    - activation
+    - ExecutionAdapter
+    - mechanical loader
+    - capability permission
+    - persistence authority
+    - View authority
+    - policy owner
+    - AppInstance lifecycle owner
+    - SavePack authority
+    - RuntimeHost
+    - Turnix identity
+
+PackManager helps choose and explain what Turnix will try.
+
+Turnix still performs only accepted graph, activation plan, policy, and
+operation through Kernel-mediated boundaries.
+
+PackManager may prepare activation plan.
+
+PackManager does not activate packs by preparing activation plan.
+
+PackManager does not execute pack code by preparing selected graph intent.
+
+PackManager does not import code by preparing selected graph intent.
+
+PackManager does not grant PackContext authority by preparing selected graph
+intent.
+
+PackManager operations may be exposed through RuntimeHost commands,
+capabilities, RPC, Views, or test surfaces, but those surfaces remain mediated
+request surfaces.
+
+PackManager Views are presentation and interaction surfaces.
+
+PackManager UI does not own semantics it presents.
+
+PackManager writes occur only through Kernel-mediated persistence,
+configuration, transaction, and policy boundaries.
+
+PackManager does not silently mutate active AppInstance graph state.
+
+PackManager does not silently update packs active in running AppInstance.
+
+PackManager does not silently make changes to SavePack-owned copied pack graph.
+
+Repair means explicit, scoped, policy/user-mediated graph-preparation repair.
+
+Repair does not mean hidden automatic correction.
+
+
+PACKS, APPPACK, MODPACK, SAVEPACK
+=================================
+
+Pack is general distributable unit.
+
+Packs are first-class but not identity-defining.
+
+Pack types may include:
+
+    - AppPack
+    - ModPack
+    - ContentPack
+    - SavePack
+    - ViewPack
+    - possibly RuntimePack or ProviderPack later
+
+AppPack:
+
+    - application definition or launch recipe
+    - describes one declarative way to create AppInstance
+    - does not define Turnix identity
+
+AppPack may specify:
+
+    - application identity
+    - entrypoints
+    - required packs
+    - required adapters
+    - required capabilities
+    - required models/providers
+    - initial orchestration units
+    - initial memory templates
+    - UI surfaces
+    - assets
+    - default settings
+    - permission requirements
+
+Important Dv3 correction:
+
+    Turnix runs AppInstances.
+
+    AppPack describes one declarative way to create an AppInstance.
+
+An AppPack may be absent in embedded/scripted/test usage unless the
+AppPack-backing decision chooses synthetic/internal AppPacks for those usages.
+
+ModPack:
+
+    - additional behavior, content, UI, orchestration hooks, or capabilities
+    - code is external to trusted backend internals
+    - should run through ExecutionAdapters and communicate through
+      RPC/capabilities/events
+    - should not mutate backend internals directly
+
+SavePack likely represents durable state for a concrete AppInstance.
+
+Working wording:
+
+    SavePack stores durable AppInstance state.
+
+Avoid older wording:
+
+    SavePack stores durable executed state.
+
+SavePack likely contents may include:
+
+    - AppInstance identity
+    - selected AppPack identity/version when AppPack-backed
+    - resolved dependency information
+    - copied pack material
+    - pinned global dependency identities
+    - selected graph records or graph evidence
+    - settings
+    - latest committed memory/state
+    - configuration
+    - memory history, if retained
+    - runtime state
+    - user data
+    - trace references or trace snapshots, if retained by policy
+    - Window sequence / SafePointWindow / AbortedWindow references or material
+    - adapter state
+    - orchestration state
+
+SavePack specifics remain pending until SavePack documents are audited.
+
+
+LLMPIPELINE
+===========
+
+LLMPipeline is likely an OrchestrationUnit type.
+
+It is not the whole application.
+
+It should own the lifecycle of an LLM run, not provider-specific model
+communication.
+
+Likely minimal stages:
+
+    - receive input
+    - prepare input
+    - build query items
+    - filter query items
+    - build prompt
+    - call LLMDriver
+    - receive streamed response
+    - receive final response
+    - parse streamed response
+    - parse final response
+    - update query items / staged state
+    - finalize
+
+LLMPipeline should not bypass DA-04 commit rules.
+
+LLMPipeline should not know provider-specific details.
+
+LLMPipeline should probably run inside OrchestrationUnit / Job / transaction
+boundaries when it mutates Turnix state.
+
+This remains pending until LLMPipeline documents are audited.
+
+
+LLMDRIVER
+=========
+
+LLMDriver is provider-specific bridge to model backend.
+
+LLMDriver receives normalized model requests and returns stream/final response
+events.
+
+Possible drivers:
+
+    - llama.cpp
+    - Ollama
+    - OpenAI-compatible API
+    - local mock
+    - replay driver
+
+LLMDriver should not own application orchestration.
+
+LLMDriver should not decide what memory means.
+
+LLMDriver should not directly mutate AppInstance state.
+
+LLMDriver should not replace LLMPipeline.
+
+This remains pending until LLM driver/pipeline documents are audited.
+
+
+IMPORTANT PRESERVED INVARIANTS
+==============================
+
+Turnix guarantees apply only inside Turnix-owned boundaries.
+
+No guarantees outside orchestration.
+
+Mutation outside orchestration does not acquire Turnix guarantees by implication.
+
+Same-language or same-process implementation does not erase contract boundaries.
+
+Pack-provided Python is external code.
+
+Service object access does not erase contract boundaries.
+
+Capability mediation is not bypassed by same-process or same-language execution.
+
+Trace is evidence, not committed state.
+
+Committed state is governed by DA-04 commit model.
+
+Persistence protects committed state; it does not define truth.
+
+IoManager owns persistent-I/O authority, not committed-state truth.
+
+RuntimeHost is not Kernel.
+
+Command surfaces are not authority.
+
+Startup modes are not separate runtime semantics.
+
+Job is lifecycle handle, not OrchestrationUnit or execution primitive.
+
+OrchestrationUnit coordinates mutation flow, but does not bypass commit.
+
+ExecutionAdapter is the general adapter category.
+
+Adapter readiness is not activation success.
+
+Adapter failure is not Job failure by default.
+
+Adapter disconnect is not Job cancellation by default.
+
+UI is presentation and interaction, not authority.
+
+View readiness/disconnect does not define AppInstance, Job, adapter,
+RuntimeHost, or committed-state outcomes.
+
+Debugger tooling is semantic and mediated, not authority bypass.
+
+Debugger safe point is not automatically SafePointWindow.
+
+AppInstance is runtime identity, not AppPack, SavePack, RuntimeHost, View,
+adapter, Job, Window, OrchestrationUnit, or committed state.
+
+Window retained evidence is not hidden committed-state truth.
+
+SafePointWindow is committed boundary, but optional retained evidence inside it
+does not add authority.
+
+ActiveWindow is non-authoritative.
+
+AbortedWindow is non-authoritative abort evidence.
+
+WindowExport changes portability, not semantics.
+
+Minimal Audit Bundle is not authoritative state.
+
+ComparisonResult does not imply replayability, resumability, or completeness.
+
+Replay restores retained committed state and retained causal story; it does not
+re-run external effects.
+
+Resume and Retry are new work.
+
+PackManager is official tooling / graph-preparation domain, not authority root.
+
+Discovery is not resolution.
+
+Visibility is not resolution.
+
+Resolution is not activation.
+
+Importing is not activation.
+
+Dependency is not activation.
+
+Activation is not import.
+
+Policy does not redefine authority.
+
+AppPack is not Turnix identity.
+
+Turnix runs AppInstances.
+
+
+DOCUMENTS THAT CURRENTLY LOOK STRONG / KEEP
+============================================
+
+DA-01:
+    KEEP BUT UPDATE.
+    Rewrite identity to runtime-domain framing.
+    Clarify local-first.
+    Clarify trace optionality using DA-03/DA-04 model.
+    Keep pack identity general.
+
+DA-02:
+    KEEP WITH MINOR CLARIFICATION.
+    Platform identity / implementation independence is strong.
+    Preserve boundary doctrine.
+
+DA-03:
+    KEEP BUT CLARIFY TRACE EMISSION VS TRACE PERSISTENCE.
+    Trace substrate is strong.
+    Preserve cross-document trace wording check.
+
+DA-04:
+    KEEP.
+    Memory/state/commit model is strong.
+    Clarify trace-visible as emission obligation where needed.
+
+DA-05:
+    KEEP WITH SMALL EXTERNAL-REFERENCE / SCHEMA-LINKAGE WATCH.
+    Preserve storage-neutral committed-value representation.
+    Preserve ValueRef / Chunk immutability and DA-04 / DA-07 boundary.
+
+DA-06:
+    KEEP WITH SMALL POLICY-STORAGE / MIGRATION WATCH.
+    Preserve configuration as specialized authoritative state under DA-04.
+    Preserve effectiveConfig as runtime view, not authority class.
+    Preserve DA-17 ownership of policy meaning.
+
+DA-07:
+    KEEP WITH SMALL MIGRATOR / PROVIDER / RECOVERY-SURFACE WATCH.
+    Preserve IoManager as sole persistent-I/O authority.
+    Preserve persistence as protection, not truth.
+    Preserve no native filesystem authority for pack/adapted code.
+
+DA-08:
+    KEEP WITH SMALL TITLE / DA-25 / DA-26 BOUNDARY WATCH.
+    Preserve Window kinds, ordering, finalization, and Window-domain trace
+    obligations.
+    Preserve DA-04 authority over committed-state truth.
+    Preserve DA-25 / DA-26 ownership of exports, offline comparison, Replay,
+    Resume, Retry, and audit workflows.
+
+DA-09:
+    KEEP WITH SMALL PRECEDENCE WATCH.
+    Preserve discovery as side-effect-free candidate/root production only.
+    Watch content-root precedence so it does not override save-local, pinned,
+    selected graph, or explicit SavePack/AppInstance semantics.
+
+DA-10:
+    KEEP WITH SAVEPACK VISIBILITY WATCH.
+    Preserve visibility as eligibility-to-be-seen only.
+    Watch SavePack-local visibility and exportNestedPacks interaction.
+
+DA-11:
+    KEEP WITH SMALL CONTEXT / PRECEDENCE WATCH.
+    Preserve generic resolution as side-effect-free snapshot selection under
+    one explicit context.
+    Watch consumer-supplied ordering/context.
+
+DA-12:
+    KEEP WITH SMALL ONLOAD / FUTURE ENTRYPOINT WATCH.
+    Preserve importing/module loading as separate from activation, execution
+    authorization, dependency declaration, capability permission, and backend
+    authority.
+    Watch core/internal selector surfaces.
+
+DA-13:
+    KEEP WITH SMALL PROVIDER-ROLE / REGISTRATION WATCH.
+    Preserve dependencies as hard contracts and advisory relations as
+    non-binding metadata.
+    Watch provider-role registration and GlobalNormal precedence boundaries.
+
+DA-14:
+    KEEP WITH SMALL ACTIVATION-ORDER / PACKMANAGER WORDING WATCH.
+    Preserve activation as explicit pack-level executable participation with
+    PackContext authority.
+    Watch PackManager wording around activation order and any later
+    last-known-good fallback behavior.
+
+DA-15:
+    KEEP WITH SMALL DA-10 OVERLAP / PERMISSIONDENIED WORDING WATCH.
+    Preserve visibility as enforced reference reachability.
+    Preserve hard failure on visibility violation.
+    Preserve SavePack visibility and resolution-source isolation.
+    Preserve service/capability separation.
+
+DA-16:
+    KEEP WITH SMALL CLARIFICATION.
+    Service / Capability / Permission model is strong.
+    Needs small numbering cleanup around duplicate 09.1.
+    Trace wording should follow DA-03 cross-document rule.
+
+DA-17:
+    KEEP WITH SMALL WORK-LIFECYCLE KEY / CROSS-SCOPE PROMOTION WATCH.
+    Preserve Kernel-mediated decision authority.
+    Preserve exact permission and fingerprint policy keys.
+    Preserve policy as friction reduction, not authority redefinition.
+
+DA-18:
+    KEEP WITH SMALL CROSS-DOCUMENT REFERENCE / SAFE-POINT ALIGNMENT WATCH.
+    Preserve semantic debugger model and mediated debugger mutation.
+    Update Window reference to DA-08.
+    Align debugger safe-point wording with DA-08, DA-20, DA-22, DA-24.
+
+DA-19:
+    KEEP.
+    Job lifecycle model is strong.
+
+DA-20:
+    KEEP WITH REQUIRED APPPACK-BACKING DECISION / SAVEPACK WORDING WATCH.
+    Do not silently preserve one-AppPack rule as universal.
+    Resolve whether all AppInstances are AppPack-backed or AppPack-backed is
+    one creation path.
+    Replace "durable executed state" with "durable AppInstance state."
+
+DA-21:
+    KEEP WITH SMALL TRACE WORDING CLARIFICATION.
+    RPC/channel/transport/message-flow separation is strong.
+    Trace-visible RPC flow should follow DA-03 cross-document trace wording
+    check.
+
+DA-22:
+    KEEP WITH SMALL FRONTEND-ADAPTER TERMINOLOGY / MULTI-CLIENT WATCH.
+    Preserve UI/View/frontend runtime as presentation and interaction, not
+    authority.
+    Preserve View disconnect/lifecycle separation.
+    Watch multi-client and reconnect semantics.
+
+DA-23:
+    KEEP WITH SMALL TERMINOLOGY / SAVEPACK WORDING WATCH.
+    ExecutionAdapter boundary is strong.
+    Watch SavePack wording and frontend/browser adapter terminology.
+
+DA-24:
+    KEEP.
+    OrchestrationUnit / mutation authority model is strong.
+
+DA-25:
+    KEEP WITH SMALL DIGEST / PARTIAL-EXPORT TAXONOMY WATCH.
+    Preserve artifact/export/bundle representation as portability and evidence,
+    not authority.
+    Preserve MissingMaterial explicitness and digest-as-accelerator semantics.
+
+DA-26:
+    KEEP WITH SMALL REPLAY-WORDING / RESUME-POLICY WATCH.
+    Preserve ComparisonResult three-value model.
+    Preserve Replay as restoration, not re-running.
+    Preserve Resume and Retry as new work.
+
+DA-27:
+    KEEP WITH SMALL TRUST-CLASS / TRACE-WORDING WATCH.
+    Preserve adapter mediation vs sandboxing.
+    Preserve DA-23 / DA-27 / DA-28 ownership split.
+    Preserve no silent lifecycle/outcome conversion on readiness/failure/
+    disconnect.
+
+DA-28:
+    KEEP WITH SMALL TERMINOLOGY ALIGNMENT.
+    RuntimeHost boundary is strong.
+    Minor frontend-adapter / ExecutionAdapter wording alignment needed.
+
+DA-29:
+    KEEP.
+    PackManager model is strong.
+    Preserve "repair" as explicit scoped policy/user-mediated
+    graph-preparation repair, not hidden automatic correction.
+
+
+DOCUMENTS / DOMAINS TO AUDIT NEXT
+=================================
+
+DA document sweep is complete for the audited Dv3 DA set.
+
+Natural next non-DA / implementation documents:
+
+    SavePack document
+        Clarify durable AppInstance state.
+        Clarify copied packs, pinned global dependencies, graph evidence,
+        SavePack-owned copied pack graph, Window material, config material,
+        policy material, and writable ownership.
+
+    AppPack / Pack model documents
+        Clarify pack system as first-class but not Turnix identity.
+        Clarify AppPack as AppInstance recipe.
+        Resolve AppPack-backing question for embedded/scripted/test
+        AppInstances.
+
+    LLMPipeline / LLMDriver documents
+        Clarify LLMPipeline as likely OrchestrationUnit type.
+        Clarify LLMDriver as provider bridge.
+        Preserve DA-04 mutation boundaries and DA-19 Job boundaries.
+
+    IS-01 RPC message schema
+        Check RPC schema preserves DA-21 boundary.
+
+    IS-02 WebSocket Flow
+        Check WebSocket is transport only.
+        Check transport ACK/disconnect/timeout does not define Job, adapter,
+        AppInstance, RuntimeHost, or Window outcome.
+
+    RuntimeHost / Launcher / command implementation specs
+        Check RuntimeHost entry surfaces stay mediated.
+        Check launcher does not become Turnix identity.
+
+    PackManager implementation specs
+        Check repair remains explicit/scoped/policy-mediated.
+        Check selected graph preparation does not become activation/import/
+        persistence authority.
+
+    Storage / SavePack / IoManager implementation specs
+        Check DA-05 / DA-06 / DA-07 / DA-08 / DA-25 / DA-26 stack is preserved.
+
+
+CURRENT ONE-PARAGRAPH REHYDRATION
+=================================
+
+Turnix Dv3 is a runtime-domain architecture for persistent, local-first,
+traceable, stateful, orchestrated AI applications. It is not merely an AppPack
+runner, launcher, pack manager, catalog, plugin loader, or frontend/backend
+template. Turnix runs AppInstances; AppPack is one first-class declarative way
+to create one, but DA-20 currently narrows AppInstance to AppPack-backed
+lifecycle and that AppPack-backing scope remains an explicit unresolved
+decision. Kernel owns runtime authority, while RuntimeHost is only the running
+host boundary. Trace is structured evidence, not committed state. DA-04 owns
+authoritative committed-state truth through explicit transactions and commits.
+DA-05 owns storage-neutral committed-value representation through immutable
+ValueRefs and Chunks. DA-06 treats configuration as specialized authoritative
+state under DA-04, not a separate state architecture. DA-07 centralizes
+persistent I/O through IoManager; persistence protects truth but does not define
+truth. Window history groups bounded runtime history and retained evidence:
+SafePointWindow is committed boundary, ActiveWindow is non-authoritative
+in-flight history, and AbortedWindow is non-authoritative abort evidence. DA-25
+artifacts and exports package retained finalized Window material without adding
+authority. DA-26 comparison, Replay, Resume, Retry, and audit workflows make
+explicit workflow claims over retained artifacts; Replay restores retained
+committed state and causal story but does not re-run external effects, while
+Resume and Retry are new work. Discovery finds candidate pack/root material but
+does not define visibility, resolution, activation, import, or runtime loading.
+Visibility is enforced reference permission, not resolution, dependency
+satisfaction, service access, or capability access. Resolution is deterministic
+snapshot selection under one explicit context, not policy guessing or source
+mixing. Importing is not activation. Dependencies are hard contracts, not
+activation or advisory metadata. Activation is explicit pack-level executable
+participation with PackContext authority. UI/View/frontend runtime is
+presentation and interaction, not authority. Debugging is semantic, mediated,
+staged, trace-visible, and cannot bypass transaction, persistence, Job,
+Window, AppInstance, adapter, or policy boundaries. User decisions are
+Kernel-mediated and policy reduces friction without redefining authority.
+OrchestrationUnit coordinates mutation flow but cannot bypass commit. Job is an
+observable lifecycle handle for requested work, not an OrchestrationUnit,
+transaction, RPC request, capability, execution primitive, or committed state.
+Service is runtime wiring; Capability is named, permissioned, Turnix-mediated
+operation. ExecutionAdapter is the general adapter category; same-language or
+same-process execution does not erase boundaries. Adapter readiness/failure/
+disconnect does not silently define Job, AppInstance, RuntimeHost, Window,
+transport, or committed-state outcomes. Pack-provided Python is external code.
+RPC is logical communication boundary; transport is only carrier. PackManager is
+the official pack-management and graph-preparation domain, but it does not
+become Kernel, resolver, activator, importer, loader, capability permission,
+persistence, View, AppInstance, SavePack, RuntimeHost, policy, or Turnix
+identity. Turnix guarantees apply only inside Turnix-owned orchestration,
+transaction, capability, persistence, policy, trace, and authority boundaries.
+
+--- doc-meta ---
+DOC_ID: ANCHOR-06
+DOC_FILE: docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
