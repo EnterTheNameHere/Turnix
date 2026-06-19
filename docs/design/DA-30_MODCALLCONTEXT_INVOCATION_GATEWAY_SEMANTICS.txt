@@ -1,0 +1,259 @@
+===============================================================================
+DESIGN AREA DA-30 - MODCALLCONTEXT INVOCATION GATEWAY SEMANTICS
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines ModCallContext as the invocation-scoped gateway object supplied to
+Pack callbacks and capability-facing pack code.
+
+Purpose:
+--------
+This document defines the identity, lifetime, bindings, authority limits, and
+cross-document relationships of ModCallContext.
+
+It defines:
+- ModCallContext as a first-class Turnix type
+- invocation-scoped and Pack-bound gateway semantics
+- fresh context creation for each callback or invocation
+- bindings that may be carried by a context
+- non-retention after callback completion
+- registration behavior for callbacks and metadata
+- relationships to ExecutionAdapter, Pack code, Kernel authority, Memory,
+  configuration, trace, capabilities, events, timers, and processing hooks
+
+It does NOT define:
+- Session as a core Turnix concept
+- ExecutionAdapter lifecycle or trust policy
+- Memory commit rules
+- capability grant policy
+- event or timer schemas
+- trace record serialization
+
+Upstream Documents:
+-------------------
+- CMR-01
+- CMR-02
+- CMR-03
+- CMR-04
+- CMR-05
+- DA-01
+- DA-02
+- DA-03
+- DA-04
+- DA-14
+- DA-16
+- DA-19
+- DA-20
+- DA-23
+- DA-24
+
+
+===============================================================================
+01. DOCUMENT ROLE
+===============================================================================
+
+01.1. ModCallContext is a first-class Turnix type.
+
+01.2. ModCallContext is the gateway object delivered by the platform to Pack
+      code for a specific callback, entry call, hook call, or
+      capability-facing invocation.
+
+01.3. ModCallContext gives Pack code access only to operations granted for the
+      current invocation.
+
+01.4. ModCallContext is not Kernel authority.
+
+01.5. ModCallContext is not a Session.
+
+01.6. The core model does not define Session as an identity required for Pack
+      callbacks, ApplicationRuns, Jobs, Events, Timers, or capabilities.
+
+
+===============================================================================
+02. LIFETIME AND RETENTION
+===============================================================================
+
+02.1. A fresh ModCallContext is created for each callback or invocation that
+      requires Pack-facing platform access.
+
+02.2. The context is invocation-scoped.
+
+02.3. Pack code does not retain a ModCallContext after the callback or
+      invocation completes.
+
+02.4. A retained context is invalid after callback completion even when the
+      hosting language can still reference the object.
+
+02.5. Registrations retain owner identity, callback identity, metadata, and
+      scope.
+
+02.6. Registrations do not retain the old ModCallContext.
+
+02.7. When a registration later fires, the platform constructs a new context
+      for that callback invocation.
+
+
+===============================================================================
+03. REQUIRED BINDINGS
+===============================================================================
+
+03.1. A ModCallContext is bound to the acting Pack.
+
+03.2. When applicable, a ModCallContext is bound to:
+      - Application
+      - ApplicationRun
+      - invocation identity
+      - cause
+      - OrchestrationUnit
+      - Transaction
+      - Job
+      - ProcessingRun
+      - lifecycle phase
+      - Event
+      - Timer
+      - capability invocation
+      - cancellation and deadline state
+      - granted operations
+
+03.3. Bindings are present only when meaningful for the current invocation.
+
+03.4. Absence of a binding means that the current invocation has no authority
+      or identity for that concept.
+
+03.5. A ModCallContext never fabricates missing authority merely to provide a
+      convenient API shape.
+
+
+===============================================================================
+04. AUTHORITY MODEL
+===============================================================================
+
+04.1. Kernel authority remains in the Kernel and platform-controlled services.
+
+04.2. Pack code receives only the gateway operations exposed through the
+      current ModCallContext.
+
+04.3. Gateway operations are constrained by the acting Pack, granted
+      capabilities, current lifecycle phase, OrchestrationUnit, Transaction,
+      cancellation state, and deadline state.
+
+04.4. A ModCallContext can request Memory reads or mutations only through the
+      rules owned by DA-04 and DA-24.
+
+04.5. A ModCallContext can use capability operations only through the rules
+      owned by DA-16.
+
+04.6. A ModCallContext can observe or contribute trace evidence only through
+      the trace authority and schemas owned by DA-03 and the applicable IS
+      documents.
+
+04.7. A ModCallContext does not grant raw file access, transport access,
+      adapter control, debugger control, or host command access unless a
+      separate granted operation exposes that access.
+
+
+===============================================================================
+05. EXECUTION ADAPTER RELATIONSHIP
+===============================================================================
+
+05.1. ExecutionAdapters host Pack code and deliver callbacks under the
+      execution-boundary rules owned by DA-23.
+
+05.2. The platform may represent ModCallContext differently across host
+      languages and adapters.
+
+05.3. Representation differences do not change ModCallContext meaning.
+
+05.4. An ExecutionAdapter does not own ModCallContext authority.
+
+05.5. The adapter conveys the context to Pack code and enforces lifetime and
+      boundary requirements assigned to that adapter.
+
+05.6. Same-language Pack code does not bypass ModCallContext merely because it
+      shares a language with platform implementation code.
+
+
+===============================================================================
+06. STATE, CONFIGURATION, AND TRACE RELATIONSHIPS
+===============================================================================
+
+06.1. ModCallContext may expose Memory accessors when the invocation has
+      appropriate state authority.
+
+06.2. ModCallContext may expose configuration accessors when the invocation is
+      allowed to read or update configuration under DA-06.
+
+06.3. ModCallContext may expose trace helpers for the current invocation.
+
+06.4. Trace helpers record evidence and diagnostics.
+
+06.5. Trace helpers do not make trace records committed-state authority.
+
+06.6. ModCallContext does not combine Memory, configuration, and trace into a
+      single state authority.
+
+
+===============================================================================
+07. EVENTS, TIMERS, AND PROCESSING HOOKS
+===============================================================================
+
+07.1. Event callbacks receive a context bound to the Event and cause that
+      triggered the callback.
+
+07.2. Timer callbacks receive a context bound to the Timer and cause that
+      triggered the callback.
+
+07.3. Processing hooks receive a context bound to the ProcessingRun, lifecycle
+      phase, and relevant OrchestrationUnit when those bindings exist.
+
+07.4. Event, Timer, and processing registrations retain callback metadata and
+      scope rather than retaining an old context object.
+
+07.5. Cancellation and deadline state are visible through the context when the
+      current invocation is cancellable or deadline-bound.
+
+
+===============================================================================
+08. STOP-LINES
+===============================================================================
+
+08.1. This document does not define Application, ApplicationRun, or AppPack
+      identity beyond the bindings a context may carry.
+
+08.2. This document does not define resolved pack graph construction,
+      activation-plan schemas, or pack-entry selection.
+
+08.3. This document does not define committed-state storage, durable-save
+      layout, Window retention, artifact export, Replay, Resume, or Retry.
+
+08.4. This document does not define UI rendering, RPC transport schemas,
+      RuntimeHost command syntax, catalog operations, or PackManager behavior.
+
+
+===============================================================================
+09. OPEN ISSUES
+===============================================================================
+
+09.1. OPEN: concrete host-language API shapes remain implementation
+      specification work.
+
+09.2. OPEN: exact context field names, serialization behavior for trace helper
+      output, and adapter-specific invalidation mechanisms remain outside this
+      document.
+
+
+===============================================================================
+END OF DA-30 - MODCALLCONTEXT INVOCATION GATEWAY SEMANTICS
+===============================================================================
+
+--- doc-meta ---
+DOC_ID: DA-30
+DOC_FILE: docs/design/DA-30_MODCALLCONTEXT_INVOCATION_GATEWAY_SEMANTICS.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
