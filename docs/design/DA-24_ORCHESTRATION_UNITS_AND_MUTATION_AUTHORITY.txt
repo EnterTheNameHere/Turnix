@@ -10,8 +10,8 @@ Description:
 ------------
 Defines Orchestration Units as kernel-tracked execution-authority units,
 their mutation boundary, terminal outcomes, relationship to transactions,
-Jobs, Windows, AppInstances, RPC, capabilities, execution adapters, and
-RuntimeHost operations, and the single-lane AppInstance mutation rule.
+Jobs, Windows, ApplicationRuns, RPC, capabilities, execution adapters, and
+RuntimeHost operations, and the single-lane ApplicationRun mutation rule.
 
 This document owns Orchestration Unit lifecycle and mutation-authority
 semantics. It consumes the memory, state, and transaction model defined by
@@ -29,13 +29,13 @@ It defines:
   state
 - relationship between Orchestration Units and Jobs
 - relationship between Orchestration Units and Windows
-- relationship between Orchestration Units and AppInstances
+- relationship between Orchestration Units and ApplicationRuns
 - relationship between Orchestration Units, capabilities, RPC, and
   execution adapters
 - relationship between Orchestration Units and RuntimeHost operations
 - Orchestration Unit terminal outcomes
 - Superseded outcome semantics
-- deterministic single-lane AppInstance mutation orchestration
+- deterministic single-lane ApplicationRun mutation orchestration
 - Orchestration Unit trace reason ownership
 - adapter-executed mutation re-entry boundaries
 - RuntimeHost-operation mutation re-entry boundaries
@@ -49,7 +49,7 @@ It does NOT define:
 - debugger pause, breakpoint, or execution-control behavior (see DA-18)
 - Job lifecycle, Job timeout, Job cancellation, or Job result semantics
   (see DA-19)
-- AppInstance lifecycle or runtime identity semantics (see DA-20)
+- ApplicationRun lifecycle or runtime identity semantics (see DA-20)
 - RPC, channel, or transport semantics (see DA-21)
 - UI, View, or frontend runtime semantics (see DA-22)
 - execution adapter boundary semantics (see DA-23)
@@ -123,14 +123,14 @@ Downstream Documents:
            Job, and Window semantics?"
 
 02.2. An Orchestration Unit is a kernel-tracked execution unit that may be
-      permitted to mutate Turnix-managed state within an AppInstance.
+      permitted to mutate Turnix-managed state within an ApplicationRun.
 
 02.3. An Orchestration Unit is an execution-authority unit.
 
 02.4. Orchestration Unit authority is not general backend authority.
 
 02.5. Orchestration Unit authority is scoped by:
-      - AppInstance identity
+      - ApplicationRun identity
       - capability and permission boundaries when applicable
       - transaction and commit boundaries when mutation occurs
       - adapter boundaries when work originates from adapter-executed code
@@ -157,6 +157,15 @@ Downstream Documents:
 02.11. Later sections of this document refine and apply these rules.
        They do not weaken them.
 
+02.13. An Orchestration Unit owns or coordinates a mutation flow. It does not
+       give arbitrary contained code direct committed-state authority.
+
+02.14. Orchestration Unit outcome does not define Replay, Resume, Retry,
+       ComparisonResult, artifact/export authority, or audit workflow outcome.
+       Payload, configuration, migration, persistent I/O, durable save, and
+       recovery implications remain owned by DA-04, DA-05, DA-06, and DA-07.
+
+
 
 ===============================================================================
 03. ORCHESTRATION UNIT IDENTITY AND SCOPE
@@ -165,7 +174,7 @@ Downstream Documents:
 03.1. orchestrationUnitId identifies one Orchestration Unit.
 
 03.2. orchestrationUnitId is distinct from:
-      - appInstanceId
+      - applicationRunId
       - jobId
       - transactionId
       - viewId
@@ -175,8 +184,8 @@ Downstream Documents:
       - RPC message identity
       - capability identity
 
-03.3. An Orchestration Unit has one owning AppInstance when it mutates or
-      may mutate AppInstance state.
+03.3. An Orchestration Unit has one owning ApplicationRun when it mutates or
+      may mutate ApplicationRun state.
 
 03.4. An Orchestration Unit may be created for non-mutating orchestrated
       work when the owning workflow requires lifecycle, trace, or policy
@@ -191,7 +200,7 @@ Downstream Documents:
       - adapter-mediated request
       - RuntimeHost operation
       - RuntimeHost command-surface request
-      - AppInstance lifecycle operation
+      - ApplicationRun lifecycle operation
 
 03.6. Such relation is correlation and ownership evidence. It does not
       collapse those identities into the Orchestration Unit identity.
@@ -236,7 +245,7 @@ Downstream Documents:
 
 04.10. Orchestration Unit authority does not bypass capability permission,
        policy decisions, adapter boundaries, RuntimeHost boundaries,
-       AppInstance lifecycle, or persistent I/O authority.
+       ApplicationRun lifecycle, or persistent I/O authority.
 
 04.11. Direct backend implementation code may create and run Orchestration
        Units only through Kernel-owned orchestration paths.
@@ -267,7 +276,7 @@ Downstream Documents:
         state
       - a tooling-initiated mutation transaction
       - configuration mutation request processing
-      - AppInstance lifecycle work that may mutate state
+      - ApplicationRun lifecycle work that may mutate state
       - migration work that changes authoritative state
 
 05.2. Example kinds do not lock the complete future Orchestration Unit
@@ -361,7 +370,7 @@ Downstream Documents:
 ===============================================================================
 
 08.1. Orchestration Unit outcomes occur inside the current active runtime
-      region when an AppInstance active region exists.
+      region when an ApplicationRun active region exists.
 
 08.2. Transaction commit or abort evidence may contribute to later Window
       evidence.
@@ -386,33 +395,33 @@ Downstream Documents:
 
 
 ===============================================================================
-09. RELATION TO APPINSTANCES
+09. RELATION TO APPLICATIONRUNS
 ===============================================================================
 
-09.1. AppInstance lifecycle and runtime identity are defined by DA-20.
+09.1. ApplicationRun lifecycle and runtime identity are defined by DA-20.
 
-09.2. An Orchestration Unit that mutates AppInstance state operates inside
-      the owning AppInstance authority context.
+09.2. An Orchestration Unit that mutates ApplicationRun state operates inside
+      the owning ApplicationRun authority context.
 
-09.3. appInstanceId is distinct from orchestrationUnitId.
+09.3. applicationRunId is distinct from orchestrationUnitId.
 
-09.4. AppInstance lifecycle outcome does not by itself define
+09.4. ApplicationRun lifecycle outcome does not by itself define
       Orchestration Unit terminal outcome.
 
 09.5. Orchestration Unit terminal outcome does not by itself define
-      AppInstance lifecycle outcome.
+      ApplicationRun lifecycle outcome.
 
-09.6. AppInstance active-region boundaries provide runtime containment for
+09.6. ApplicationRun active-region boundaries provide runtime containment for
       Orchestration Unit execution.
 
-09.7. AppInstance active-region end does not silently convert open
+09.7. ApplicationRun active-region end does not silently convert open
       Orchestration Units into successful completed work.
 
-09.8. If AppInstance lifecycle affects active Orchestration Units, that
+09.8. If ApplicationRun lifecycle affects active Orchestration Units, that
       effect is explicit and trace-visible.
 
 09.9. RuntimeHost operations that create, start, stop, bind, migrate, or
-      recover AppInstance state use AppInstance lifecycle semantics from
+      recover ApplicationRun state use ApplicationRun lifecycle semantics from
       DA-20 and Orchestration Unit mutation authority from this document
       when mutation-bearing work is involved.
 
@@ -552,21 +561,21 @@ Downstream Documents:
 
 
 ===============================================================================
-13. SINGLE-LANE APPINSTANCE ORCHESTRATION
+13. SINGLE-LANE APPLICATIONRUN ORCHESTRATION
 ===============================================================================
 
 13.1. Turnix uses a deterministic single-lane orchestration model within one
-      AppInstance unless an explicit concurrency mode is defined elsewhere.
+      ApplicationRun unless an explicit concurrency mode is defined elsewhere.
 
-13.2. Within one AppInstance, Turnix does not execute multiple
+13.2. Within one ApplicationRun, Turnix does not execute multiple
       Orchestration Units concurrently when those units may mutate the same
-      AppInstance state.
+      ApplicationRun state.
 
 13.3. Awaited input/output, model calls, adapter calls, RuntimeHost calls,
       or transport calls may suspend the current unit.
 
 13.4. Suspension does not authorize another state-mutating unit to run
-      concurrently in the same AppInstance unless an explicit concurrency
+      concurrently in the same ApplicationRun unless an explicit concurrency
       mode permits that behavior.
 
 13.5. Work started outside Turnix orchestration remains outside Turnix
@@ -584,14 +593,14 @@ Downstream Documents:
 13.9. Adapter suspension, adapter disconnect, transport behavior, frontend
       behavior, RuntimeHost command-surface behavior, or RuntimeHost
       entry-surface behavior does not authorize concurrent state-mutating
-      orchestration within the same AppInstance.
+      orchestration within the same ApplicationRun.
 
-13.10. Adapter-mediated mutation follows the same single-lane AppInstance
+13.10. Adapter-mediated mutation follows the same single-lane ApplicationRun
        orchestration rule unless an explicit concurrency mode defines
        otherwise.
 
 13.11. RuntimeHost-operation-mediated mutation follows the same single-lane
-       AppInstance orchestration rule unless an explicit concurrency mode
+       ApplicationRun orchestration rule unless an explicit concurrency mode
        defines otherwise.
 
 13.12. Future concurrency modes must define:
@@ -669,7 +678,7 @@ Downstream Documents:
 15.1. Orchestration Unit trace evidence records enough context, when
       available, to explain:
       - orchestrationUnitId
-      - appInstanceId
+      - applicationRunId
       - runtimeHostId when applicable
       - RuntimeHost operation identity when applicable
       - owner or caller identity when available
@@ -689,7 +698,7 @@ Downstream Documents:
       available, to explain:
       - orchestrationUnitId
       - transactionId
-      - appInstanceId
+      - applicationRunId
       - runtimeHostId when applicable
       - transaction operation
       - commit or abort outcome when applicable
@@ -745,7 +754,7 @@ Downstream Documents:
       - Orchestration Unit completion treated as SafePointWindow creation
       - Orchestration Unit failure treated as AbortedWindow creation
       - concurrent state-mutating Orchestration Units inside one
-        AppInstance unless an explicit concurrency mode defines that
+        ApplicationRun unless an explicit concurrency mode defines that
         behavior
 
 
@@ -775,7 +784,7 @@ Downstream Documents:
 
 18.1. LOCKED:
       - Orchestration Unit is a kernel-tracked execution-authority unit
-      - Orchestration Unit identity is distinct from AppInstance, Job,
+      - Orchestration Unit identity is distinct from ApplicationRun, Job,
         transaction, View, adapter, RuntimeHost, RPC message, and capability
         identity
       - mutation outside orchestration does not acquire Turnix guarantees by
@@ -784,7 +793,7 @@ Downstream Documents:
         commit rules
       - Orchestration Units, Jobs, and transactions remain distinct
       - Orchestration Unit outcome does not by itself define Job terminal
-        outcome, transaction outcome, AppInstance outcome, adapter outcome,
+        outcome, transaction outcome, ApplicationRun outcome, adapter outcome,
         RuntimeHost outcome, or Window finalization
       - transaction commit or abort does not by itself define Orchestration
         Unit outcome
@@ -810,12 +819,12 @@ Downstream Documents:
         and commit boundaries
       - same-language or same-process execution does not bypass committed-
         state authority
-      - AppInstance mutation follows deterministic single-lane orchestration
+      - ApplicationRun mutation follows deterministic single-lane orchestration
         unless another mode is explicitly defined elsewhere
       - adapter suspension, adapter disconnect, transport behavior,
         frontend behavior, RuntimeHost command-surface behavior, or
         RuntimeHost entry-surface behavior does not authorize concurrent
-        state-mutating orchestration within the same AppInstance
+        state-mutating orchestration within the same ApplicationRun
       - DA-24 owns Orchestration Unit trace reason identifiers
       - DA-28 owns RuntimeHost-domain trace reason identifiers
       - DA-03 owns the trace substrate, not Orchestration Unit lifecycle
@@ -833,6 +842,6 @@ END OF DA-24 - ORCHESTRATION UNITS AND MUTATION AUTHORITY
 --- doc-meta ---
 DOC_ID: DA-24
 DOC_FILE: docs/design/DA-24_ORCHESTRATION_UNITS_AND_MUTATION_AUTHORITY.txt
-DOC_REV: 1
-DOC_GIT: 08f870e
+DOC_REV: 2
+DOC_GIT: 7454f98
 ----------------
