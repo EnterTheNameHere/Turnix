@@ -13,9 +13,10 @@ entry surfaces, startup-mode meaning, command-surface authority boundaries,
 local-first deployment interpretation, runtime-host trace reason ownership, and
 shared runtime operation composition.
 
-This document owns runtime-host semantics. It consumes Kernel authority ordering,
-AppInstance lifecycle, RPC, UI/View, adapter, Orchestration Unit, persistence,
-capability, Job, and policy semantics defined by earlier design areas.
+This document owns runtime-host semantics. It consumes Kernel authority
+ordering, ApplicationRun lifecycle, RPC, UI/View, adapter, Orchestration Unit,
+persistence, capability, Job, and policy semantics defined by earlier design
+areas.
 
 Purpose:
 --------
@@ -24,8 +25,9 @@ This document defines what Turnix is when it is running as a host.
 It defines:
 - RuntimeHost as the running Turnix host boundary
 - runtimeHostId as runtime host correlation identity
-- relationship between RuntimeHost, Kernel, workspace, AppInstance, SavePack,
-  View, adapter, RPC, Job, Orchestration Unit, and command surfaces
+- relationship between RuntimeHost, Kernel, workspace, ApplicationRun,
+  durable save, View, adapter, RPC, Job, Orchestration Unit, and command
+  surfaces
 - workspace ownership at runtime-host level
 - local-first deployment interpretation for same-machine and LAN use
 - startup mode meaning
@@ -47,12 +49,12 @@ It does NOT define:
 - user decision and remembered policy semantics (see DA-17)
 - Job lifecycle, timeout, cancellation, progress, or result semantics
   (see DA-19)
-- AppInstance lifecycle or runtime identity semantics (see DA-20)
+- ApplicationRun lifecycle or runtime identity semantics (see DA-20)
 - RPC, channel, and transport semantics (see DA-21)
 - UI, View, and frontend runtime semantics (see DA-22)
 - execution adapter authority boundaries (see DA-23)
 - Orchestration Unit lifecycle, terminal outcomes, mutation authority, or
-  single-lane AppInstance mutation semantics (see DA-24)
+  single-lane ApplicationRun mutation semantics (see DA-24)
 - adapter lifecycle, trust, isolation, concrete adapter classes, or adapter-
   domain trace reason identifiers (see DA-27)
 - concrete CLI command syntax
@@ -142,9 +144,9 @@ Downstream Documents:
 02.8. RuntimeHost does not grant authority by deployment shape, process
       location, command syntax, network exposure, or implementation framework.
 
-02.9. RuntimeHost is not an AppInstance.
+02.9. RuntimeHost is not an ApplicationRun.
 
-02.10. RuntimeHost is not a SavePack.
+02.10. RuntimeHost is not a durable save.
 
 02.11. RuntimeHost is not a View.
 
@@ -159,11 +161,20 @@ Downstream Documents:
 02.16. RuntimeHost is not an Orchestration Unit.
 
 02.17. RuntimeHost provides the host-level boundary in which Kernel-owned
-       workspace binding, AppInstance loading, View exposure, adapter
+       workspace binding, ApplicationRun loading, View exposure, adapter
        participation, RPC communication, Jobs, decisions, orchestration,
        tracing, and persistence may occur under their owning documents.
 
 02.18. Later sections refine and apply these rules. They do not weaken them.
+
+02.19. RuntimeHost workspace ownership, command surfaces, entry surfaces,
+       retained work, save paths, persistent I/O, configuration, and workspace
+       state do not redefine DA-05, DA-06, or DA-07 authority.
+
+02.20. RuntimeHost operations, command surfaces, retained work behavior,
+       audit/export behavior, comparison, Replay, Resume, Retry, and workflow
+       traces do not define DA-25 or DA-26 semantics.
+
 
 
 ===============================================================================
@@ -184,8 +195,8 @@ Downstream Documents:
       - workspace identity
       - process identity
       - AppPack identity
-      - SavePack identity
-      - appInstanceId
+      - durable save identity
+      - applicationRunId
       - viewId
       - frontend client identity
       - adapter identity
@@ -205,7 +216,7 @@ Downstream Documents:
       - process identity when available
       - active Kernel or KernelContext identity when such identity is defined
       - active entry surface identities when applicable
-      - active AppInstance identities when applicable
+      - active ApplicationRun identities when applicable
       - active View identities when applicable
       - active adapter identities when applicable
 
@@ -278,15 +289,15 @@ Downstream Documents:
 
 05.9. Stale ownership recovery is explicit, policy-governed, and trace-visible.
 
-05.10. Read-only inspection of a workspace or SavePack may be allowed by
+05.10. Read-only inspection of a workspace or durable save may be allowed by
        explicit tooling, audit, export, or policy rules.
 
 05.11. Read-only inspection does not create writable workspace ownership.
 
-05.12. Workspace ownership does not grant adapters direct SavePack write
+05.12. Workspace ownership does not grant adapters direct durable save write
        authority.
 
-05.13. Workspace ownership does not bypass AppInstance writable SavePack
+05.13. Workspace ownership does not bypass ApplicationRun writable durable save
        ownership rules under DA-20.
 
 05.14. Workspace ownership does not bypass persistent I/O authority under
@@ -306,26 +317,26 @@ Downstream Documents:
 06. RELATION TO APPINSTANCES AND SAVEPACKS
 ===============================================================================
 
-06.1. RuntimeHost may load zero, one, or multiple AppInstances according to
+06.1. RuntimeHost may load zero, one, or multiple ApplicationRuns according to
       policy and implementation support.
 
-06.2. Loading an AppInstance does not make runtimeHostId equal to
-      appInstanceId.
+06.2. Loading an ApplicationRun does not make runtimeHostId equal to
+      applicationRunId.
 
-06.3. A RuntimeHost operation that requests AppInstance creation follows
-      DA-20 AppInstance creation semantics.
+06.3. A RuntimeHost operation that requests ApplicationRun creation follows
+      DA-20 ApplicationRun creation semantics.
 
 06.4. A RuntimeHost operation that creates a new save context follows the
-      DA-20 new save path and the owning SavePack generation rules when such
-      rules are defined.
+      DA-20 new save path and the owning durable save generation rules when
+      such rules are defined.
 
 06.5. A RuntimeHost operation that loads an existing save context follows the
       DA-20 existing save path and compatibility validation rules.
 
-06.6. All entry surfaces that create a new SavePack or save context use the
+06.6. All entry surfaces that create a new durable save or save context use the
       same Kernel-mediated new save path.
 
-06.7. All entry surfaces that resume existing state use the same Kernel-
+06.7. All entry surfaces that load existing state use the same Kernel-
       mediated existing save path and compatibility validation path.
 
 06.8. Save creation is not owned by CLI.
@@ -340,18 +351,18 @@ Downstream Documents:
        even when requested through a command surface, View, frontend client,
        test surface, or remote client.
 
-06.13. A writable SavePack remains owned by at most one running AppInstance at
-       a time under DA-20.
+06.13. A writable durable save remains owned by at most one running
+       ApplicationRun at a time under DA-20.
 
-06.14. RuntimeHost workspace ownership does not make RuntimeHost the SavePack
-       writer.
+06.14. RuntimeHost workspace ownership does not make RuntimeHost the durable
+       save writer.
 
 06.15. RuntimeHost workspace ownership does not make adapter-executed code a
-       SavePack writer.
+       durable save writer.
 
-06.16. RuntimeHost may host multiple AppInstances, but AppInstance mutation
-       still follows DA-24 single-lane rules inside each AppInstance unless an
-       explicit concurrency mode defines otherwise.
+06.16. RuntimeHost may host multiple ApplicationRuns, but ApplicationRun
+       mutation still follows DA-24 single-lane rules inside each
+       ApplicationRun unless an explicit concurrency mode defines otherwise.
 
 
 ===============================================================================
@@ -361,9 +372,9 @@ Downstream Documents:
 07.1. Startup modes are entry workflows over shared Kernel-mediated runtime
       operations.
 
-07.2. Startup modes do not define independent AppInstance, SavePack, adapter,
-      RPC, capability, policy, persistence, Orchestration Unit, Job, View, or
-      trace semantics.
+07.2. Startup modes do not define independent ApplicationRun, durable save,
+      adapter, RPC, capability, policy, persistence, Orchestration Unit, Job,
+      View, or trace semantics.
 
 07.3. A command surface may select, compose, or request runtime operations.
 
@@ -385,13 +396,13 @@ Downstream Documents:
       - ConnectRuntimeHost
       - DiscoverExistingRuntimeHost
       - ResolveAppPack
-      - CreateSavePack
-      - LoadSavePack
-      - ValidateSavePackCompatibility
+      - Createdurable save
+      - Loaddurable save
+      - Validatedurable saveCompatibility
       - BindSaveContext
-      - CreateAppInstance
-      - StartAppInstance
-      - StopAppInstance
+      - CreateApplicationRun
+      - StartApplicationRun
+      - StopApplicationRun
       - CreateView
       - BindFrontendClient
       - CreateEntrySurface
@@ -435,7 +446,7 @@ Downstream Documents:
 07.16. That relationship does not collapse runtimeHostId, runtime operation
        identity, or orchestrationUnitId into one identity.
 
-07.17. AppInstance mutation follows deterministic single-lane orchestration
+07.17. ApplicationRun mutation follows deterministic single-lane orchestration
        under DA-24 unless another authoritative concurrency mode explicitly
        defines different behavior.
 
@@ -471,8 +482,8 @@ Downstream Documents:
       host.
 
 08.8. Test mode means Turnix uses controlled test surfaces without weakening
-      runtime, adapter, AppInstance, SavePack, orchestration, capability,
-      policy, persistence, or trace boundaries.
+      runtime, adapter, ApplicationRun, durable save, orchestration,
+      capability, policy, persistence, or trace boundaries.
 
 08.9. Launcher mode means Turnix uses a user-facing launcher surface to select
       or request runtime operations.
@@ -484,8 +495,8 @@ Downstream Documents:
        defined as a client or control surface.
 
 08.12. A startup mode may fail when required workspace ownership, host
-       connection, policy, adapter, RPC, persistence, or AppInstance conditions
-       are not satisfied.
+       connection, policy, adapter, RPC, persistence, or ApplicationRun
+       conditions are not satisfied.
 
 08.13. Startup mode failure is explicit and trace-visible.
 
@@ -543,7 +554,7 @@ Downstream Documents:
 
 09.16. Entry surface readiness does not imply RuntimeHost readiness.
 
-09.17. RuntimeHost readiness does not imply AppInstance readiness.
+09.17. RuntimeHost readiness does not imply ApplicationRun readiness.
 
 09.18. RuntimeHost readiness does not imply adapter readiness.
 
@@ -561,12 +572,12 @@ Downstream Documents:
       - stop host
       - connect to host
       - run AppPack
-      - create SavePack
-      - load SavePack
+      - create durable save
+      - load durable save
       - list packs
       - list AppPacks
-      - list SavePacks
-      - list AppInstances
+      - list durable saves
+      - list ApplicationRuns
       - inspect host
       - inspect trace evidence
       - inspect policy decisions
@@ -584,7 +595,7 @@ Downstream Documents:
 10.5. Command completion is not Job success unless the command contract defines
       that relationship through the owning Job workflow.
 
-10.6. A command that requests AppInstance creation follows DA-20.
+10.6. A command that requests ApplicationRun creation follows DA-20.
 
 10.7. A command that communicates through RPC follows DA-21.
 
@@ -603,8 +614,8 @@ Downstream Documents:
 10.14. A command that creates, observes, cancels, or retrieves Job-backed work
        follows DA-19.
 
-10.15. A command that is rejected before AppInstance creation does not create
-       a partial AppInstance.
+10.15. A command that is rejected before ApplicationRun creation does not
+       create a partial ApplicationRun.
 
 10.16. A command that is rejected before Job-backed work exists does not
        create a Job terminal outcome.
@@ -644,7 +655,7 @@ Downstream Documents:
       RuntimeHost.
 
 11.9. A second RuntimeHost does not silently claim results, Jobs, Views,
-      adapters, or AppInstances owned by another RuntimeHost.
+      adapters, or ApplicationRuns owned by another RuntimeHost.
 
 11.10. Existing-host discovery, host connection, host unreachable handling,
        stale-owner recovery, and host handoff implementation details belong to
@@ -663,7 +674,7 @@ Downstream Documents:
 12.3. Valid local-first forms include:
       - same-machine RuntimeHost and frontend
       - LAN machine hosting RuntimeHost with another machine as frontend
-      - home server hosting RuntimeHost and SavePack state
+      - home server hosting RuntimeHost and durable save state
       - powerful local AI machine hosting RuntimeHost-adjacent execution with a
         lighter client presentation surface
 
@@ -739,7 +750,7 @@ Downstream Documents:
 13.12. closed means RuntimeHost identity has been released and is no longer
        usable for new runtime work.
 
-13.13. RuntimeHost lifecycle is distinct from AppInstance lifecycle.
+13.13. RuntimeHost lifecycle is distinct from ApplicationRun lifecycle.
 
 13.14. RuntimeHost lifecycle is distinct from View lifecycle.
 
@@ -762,7 +773,7 @@ Downstream Documents:
 
 13.23. RuntimeHost crash does not silently redefine committed-state meaning.
 
-13.24. If RuntimeHost lifecycle affects AppInstances, Jobs, Views, adapters,
+13.24. If RuntimeHost lifecycle affects ApplicationRuns, Jobs, Views, adapters,
        Orchestration Units, decisions, or Windows, the relationship is explicit,
        policy-governed where applicable, and trace-visible.
 
@@ -899,9 +910,9 @@ Downstream Documents:
       - entry surface identity when applicable
       - client identity when applicable
       - LAN or remote exposure scope when applicable
-      - appInstanceId when applicable
+      - applicationRunId when applicable
       - active AppPack identity when applicable
-      - active SavePack identity when applicable
+      - active durable save identity when applicable
       - viewId when applicable
       - adapter kind when applicable
       - adapter instance identity when applicable
@@ -952,7 +963,8 @@ Downstream Documents:
       - policy decision identity when applicable
       - recovery result when applicable
 
-15.6. RuntimeHost trace evidence does not replace AppInstance trace evidence.
+15.6. RuntimeHost trace evidence does not replace ApplicationRun trace
+      evidence.
 
 15.7. RuntimeHost trace evidence does not replace adapter trace evidence.
 
@@ -985,7 +997,7 @@ Downstream Documents:
        - concrete LAN pairing and authentication flow
        - concrete stale ownership recovery flow
        - concrete host discovery flow
-       - concrete host shutdown policy for active AppInstances
+       - concrete host shutdown policy for active ApplicationRuns
        - concrete retained work behavior after host stop or disconnect
        - concrete workspace lock implementation
        - concrete runtime-host trace field schema
@@ -999,7 +1011,7 @@ Downstream Documents:
        - startup modes as shared runtime operation compositions
        - entry surfaces as non-authority surfaces
        - LAN exposure as explicit and policy-governed
-       - AppInstance lifecycle
+       - ApplicationRun lifecycle
        - adapter execution authority
        - RPC, transport, capability, policy, Job, Orchestration Unit, Window,
          persistence, or committed-state semantics
@@ -1015,9 +1027,9 @@ Downstream Documents:
 
 17.1. The following are not supported:
       - treating RuntimeHost as Kernel authority replacement
-      - treating RuntimeHost identity as AppInstance identity
+      - treating RuntimeHost identity as ApplicationRun identity
       - treating RuntimeHost identity as workspace identity
-      - treating RuntimeHost identity as SavePack identity
+      - treating RuntimeHost identity as durable save identity
       - treating RuntimeHost identity as adapter identity
       - treating RuntimeHost identity as RPC message identity
       - treating RuntimeHost identity as Job identity
@@ -1045,12 +1057,12 @@ Downstream Documents:
       - silently taking over stale workspace ownership
       - silently downgrading to read-only workspace behavior without explicit
         policy or tooling mode
-      - silently creating a separate SavePack creation path for a specific
+      - silently creating a separate durable save creation path for a specific
         startup mode
-      - silently creating a separate SavePack loading path for a specific
+      - silently creating a separate durable save loading path for a specific
         startup mode
-      - silently creating a separate AppInstance creation path for a specific
-        startup mode
+      - silently creating a separate ApplicationRun creation path for a
+        specific startup mode
       - mutation-bearing host operations bypassing Orchestration Unit,
         transaction, capability, policy, persistence, or trace boundaries
 
@@ -1074,7 +1086,7 @@ Downstream Documents:
       - exact stale ownership recovery flow
       - exact host discovery flow
       - exact host unreachable behavior
-      - exact host shutdown policy for active AppInstances
+      - exact host shutdown policy for active ApplicationRuns
       - exact retained work behavior after host stop, disconnect, or crash
       - exact runtime-host trace field schema
       - exact service or daemon wrapper behavior
@@ -1093,9 +1105,9 @@ Downstream Documents:
       - RuntimeHost is the running Turnix host boundary.
       - RuntimeHost binds a workspace or runtime scope and exposes controlled
         entry surfaces.
-      - RuntimeHost is distinct from Kernel, workspace, AppInstance, SavePack,
-        View, adapter, transport, RPC message, Job, Orchestration Unit,
-        transaction, and decision identity.
+      - RuntimeHost is distinct from Kernel, workspace, ApplicationRun,
+        durable save, View, adapter, transport, RPC message, Job,
+        Orchestration Unit, transaction, and decision identity.
       - Kernel owns authority.
       - RuntimeHost does not replace Kernel authority.
       - RuntimeHost deployment shape does not redefine Kernel authority.
@@ -1108,11 +1120,11 @@ Downstream Documents:
       - Test surface does not weaken runtime authority boundaries.
       - Runtime startup modes are entry workflows over shared Kernel-mediated
         runtime operations.
-      - Startup modes do not define independent SavePack, AppInstance, adapter,
-        RPC, capability, policy, persistence, Orchestration Unit, Job, View, or
-        trace semantics.
-      - SavePack creation and SavePack loading use the same Kernel-mediated
-        paths regardless of entry surface.
+      - Startup modes do not define independent durable save, ApplicationRun,
+        adapter, RPC, capability, policy, persistence, Orchestration Unit,
+        Job, View, or trace semantics.
+      - durable save creation and durable save loading use the same
+        Kernel-mediated paths regardless of entry surface.
       - A writable workspace is owned by at most one RuntimeHost at a time
         unless a later authoritative multi-host design defines another mode.
       - A second RuntimeHost does not silently acquire writable workspace
@@ -1121,10 +1133,10 @@ Downstream Documents:
         visible.
       - Local-first does not require same-machine execution.
       - LAN exposure is explicit and policy-governed.
-      - RuntimeHost lifecycle is distinct from AppInstance, View, adapter, RPC
-        transport, Job, and Orchestration Unit lifecycle.
+      - RuntimeHost lifecycle is distinct from ApplicationRun, View, adapter,
+        RPC transport, Job, and Orchestration Unit lifecycle.
       - RuntimeHost stop or crash does not by itself define committed-state,
-        Job, Window, adapter, AppInstance, or Orchestration Unit outcome.
+        Job, Window, adapter, ApplicationRun, or Orchestration Unit outcome.
       - Mutation-bearing runtime-host operations enter Kernel-mediated
         orchestration, capability, policy, transaction, persistence, and trace
         boundaries.
@@ -1144,6 +1156,6 @@ END OF DA-28 - RUNTIME HOST, WORKSPACE OWNERSHIP AND COMMAND SURFACE
 --- doc-meta ---
 DOC_ID: DA-28
 DOC_FILE: docs/design/DA-28_RUNTIME_HOST_WORKSPACE_OWNERSHIP_AND_COMMAND_SURFACE.txt
-DOC_REV: 1
-DOC_GIT: e5656d5
+DOC_REV: 2
+DOC_GIT: e747e09
 ----------------
