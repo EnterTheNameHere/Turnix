@@ -1,0 +1,2918 @@
+TURNIX STANDALONE RUNTIME PLATFORM MODEL
+========================================
+
+Status:
+    Standalone architecture synthesis.
+
+Purpose:
+    Define the current Turnix runtime-platform model without depending on older
+    documents, previous implementation structure, browser-derived assumptions,
+    or legacy naming.
+
+This document consolidates the current design around:
+
+    - TurnixRuntime and Kernel authority
+    - RuntimeHost
+    - Workspace and local ownership
+    - AppPack and other Pack definitions
+    - Application and ApplicationRun
+    - SaveBundle persistence
+    - ExecutionAdapter
+    - ModCallContext
+    - OrchestrationUnit
+    - Job
+    - Transaction
+    - ProcessingPipeline and ProcessingRun
+    - Capability
+    - Hook
+    - Event
+    - Timer
+    - View
+    - Memory, configuration, I/O, tracing, and journal boundaries
+    - synthetic and direct-local AppPack creation
+    - multi-adapter Pack activation
+    - cyclic dependency activation
+    - removal of Session from the Turnix core model
+
+Some names remain working names.
+
+Where a name remains provisional, the responsibility and semantic boundary are
+still intended to remain stable.
+
+
+FOUNDATIONAL PRINCIPLES
+=======================
+
+Turnix is a runtime domain.
+
+It is not defined by:
+
+    - one programming language
+    - one frontend technology
+    - one transport
+    - one launch mode
+    - one Pack layout
+    - one model provider
+    - one operating-system process shape
+    - one browser tab
+    - one application
+    - one Workspace
+    - one current implementation
+
+Turnix provides controlled runtime authority, deterministic boundaries,
+persistent application continuity, staged processing, explicit orchestration,
+and explainable state transitions.
+
+Convenience does not erase authority boundaries.
+
+The following do not become authority merely because they are useful, close to
+the runtime, first-party, same-language, or same-process:
+
+    - RuntimeHost
+    - ExecutionAdapter
+    - PackManager
+    - RPC
+    - transport
+    - View
+    - frontend client
+    - command surface
+    - direct-call optimization
+    - Pack code
+    - ModCallContext
+
+Kernel owns runtime authority.
+
+RuntimeHost exposes controlled entry and command surfaces but is not Kernel
+authority.
+
+ExecutionAdapter runs adapter-mediated Pack code but is not Kernel authority.
+
+RPC is a logical communication boundary.
+
+Transport carries messages but does not define authority.
+
+Pack code interacts with Turnix only through supported mediated surfaces.
+
+Direct access to trusted Turnix backend internals is unsupported.
+
+
+CORE TYPE MAP
+=============
+
+The central current model is:
+
+    TurnixRuntime
+        one runtime authority domain
+
+    Kernel
+        trusted runtime authority root
+
+    RuntimeHost
+        running host boundary and controlled entry surface
+
+    Workspace
+        one managed local environment opened by the runtime
+
+    AppPack
+        reusable application definition
+
+    Application
+        one durable application individual
+
+    ApplicationRun
+        one live execution period of that durable Application
+
+    SaveBundle
+        durable persistence closure of the Application
+
+    ExecutionAdapter
+        adapter boundary that loads and runs Pack code
+
+    ModCallContext
+        invocation-scoped Pack-bound gateway into Turnix
+
+    OrchestrationUnit
+        bounded execution and mutation-authority context
+
+    Job
+        observable lifecycle handle for work
+
+    Transaction
+        staged mutation boundary
+
+    ProcessingPipeline
+        reusable staged input-to-output procedure
+
+    ProcessingRun
+        one execution of a ProcessingPipeline
+
+    Capability
+        explicit mediated operation interface
+
+    Hook
+        controlled ambient participation in a ProcessingPipeline stage
+
+    Event
+        cheap semantic notification
+
+    Timer
+        scheduled source of new orchestrated work
+
+    View
+        presentation and interaction surface
+
+    Memory
+        authoritative state and transaction domain
+
+    Configuration
+        scoped configuration domain
+
+    IoManager
+        managed file and persistent-I/O authority
+
+    Trace
+        structured runtime evidence
+
+    Journal
+        retained non-authoritative history/evidence
+
+
+TURNIXRUNTIME
+=============
+
+A TurnixRuntime is one runtime authority domain.
+
+One TurnixRuntime may host zero or more active Applications.
+
+Architecturally:
+
+    TurnixRuntime
+        |
+        +-- Kernel
+        +-- RuntimeHost
+        +-- one open Workspace
+        +-- zero or more ApplicationRuns
+
+Each active Application receives application-scoped runtime contexts.
+
+Shared infrastructure may include:
+
+    - Kernel
+    - RuntimeHost
+    - Workspace roots
+    - Pack catalogs
+    - ExecutionAdapter implementations
+    - processor/provider implementations
+    - RPC infrastructure
+    - trace infrastructure
+    - hardware resources
+
+Shared infrastructure does not imply shared application state or shared
+application authority.
+
+Applications inside one runtime remain isolated by:
+
+    - application identity
+    - accepted Pack graph
+    - Memory context
+    - configuration context
+    - transaction scope
+    - OrchestrationUnits
+    - Jobs
+    - ProcessingRuns
+    - hooks
+    - timers
+    - Views
+    - SaveBundle binding
+    - trace correlation
+
+Multiple TurnixRuntime instances may exist independently on one machine or
+network.
+
+Each runtime is its own:
+
+    - authority domain
+    - lifecycle domain
+    - trust domain
+    - configuration-effective domain
+    - failure domain
+    - runtime registry domain
+
+Cross-runtime communication is explicit.
+
+There is no implicit:
+
+    - shared Kernel
+    - shared live registry
+    - cross-runtime capability invocation
+    - automatic runtime discovery
+    - runtime federation
+    - shared orchestration
+    - shared application ownership
+
+The normal user is expected to need one runtime.
+
+Additional runtimes remain possible for:
+
+    - development isolation
+    - testing
+    - incompatible runtime versions
+    - hard trust separation
+    - separate operating-system identities
+    - different network exposure
+    - failure containment
+    - independent deployment
+
+
+KERNEL
+======
+
+Kernel owns trusted runtime authority.
+
+Kernel coordinates and mediates:
+
+    - Application creation and loading
+    - application-scoped domain construction
+    - Pack activation
+    - OrchestrationUnits
+    - transactions
+    - capability routing
+    - permissions and policy
+    - ExecutionAdapter bindings
+    - ProcessingRuns
+    - Jobs
+    - timers
+    - Views
+    - tracing
+    - persistence coordination
+
+Kernel should not become one monolithic implementation object.
+
+Kernel means the trusted authority set required to preserve Turnix semantics.
+
+Application data does not become "Kernel state" merely because Kernel
+coordinates the domain that owns it.
+
+
+RUNTIMEHOST
+===========
+
+RuntimeHost is the running host boundary through which Kernel-owned authority is
+started, exposed, coordinated, and closed.
+
+RuntimeHost may expose:
+
+    - startup commands
+    - Workspace opening
+    - Application creation
+    - SaveBundle loading
+    - Pack inspection
+    - graph preparation requests
+    - application start/stop commands
+    - frontend/RPC endpoints
+    - read-only inspection surfaces
+
+RuntimeHost is not:
+
+    - Kernel
+    - Application
+    - SaveBundle
+    - AppPack
+    - PackManager
+    - ExecutionAdapter
+    - transport
+    - Job
+    - OrchestrationUnit
+    - View
+    - Turnix identity itself
+
+Command surfaces request or observe behavior.
+
+They do not become authority merely because they are official entry points.
+
+
+WORKSPACE
+=========
+
+Workspace is a named managed local environment opened by one TurnixRuntime.
+
+Workspace is not merely one directory.
+
+It is a logical mapping of storage roles to concrete roots and policies.
+
+A Workspace may define roots for:
+
+    - first-party Packs
+    - third-party Packs
+    - custom Packs
+    - SaveBundles
+    - userdata
+    - Workspace configuration
+    - indexes/catalogs
+    - temporary material
+    - staging material
+    - caches
+    - shared read-only resources
+
+The default Workspace name and identity is:
+
+    default
+
+Additional named Workspaces are allowed.
+
+Users who do not need separate environments may use only "default" and never
+interact with Workspace selection.
+
+One TurnixRuntime may have at most one Workspace open.
+
+One Workspace may have at most one writable TurnixRuntime owner.
+
+Two Workspaces may share immutable or read-only roots, such as:
+
+    - installed first-party Packs
+    - installed third-party Packs
+    - model files
+    - immutable assets
+    - content-addressed immutable objects where publication is safe
+
+Writable roots should normally remain Workspace-specific:
+
+    - userdata
+    - SaveBundles
+    - mutable custom content
+    - Workspace configuration
+    - temporary material
+    - mutable indexes
+
+Persisted "engine-wide" configuration should normally be understood as
+Workspace configuration unless it is genuinely installation-wide.
+
+Runtime-effective configuration may be assembled from:
+
+    - installation defaults
+    - Workspace configuration
+    - launch arguments
+    - environment
+    - temporary runtime overrides
+
+Installation-wide mutable configuration should remain rare and should have a
+separate owner if it exists.
+
+
+WORKSPACE OWNERSHIP CLAIM
+=========================
+
+Writable Workspace ownership is represented by a claim file.
+
+Working filename:
+
+    .turnix-lock
+
+or another reserved Workspace control filename.
+
+The claim file is metadata and ownership evidence.
+
+It should not rely on a lifetime-held file handle as the sole correctness
+mechanism.
+
+The claim records at least:
+
+    workspaceId
+    machineId
+    runtimeId
+    coordinatorProcessId
+    coordinatorProcessStartIdentity
+    ownerToken
+    openedAt
+    formatVersion
+
+Identity roles:
+
+    workspaceId
+        stable identity of the Workspace
+
+    machineId
+        identity of the machine that created the claim
+
+    runtimeId
+        identity of one TurnixRuntime execution
+
+    coordinatorProcessId
+        operating-system process representing that runtime execution
+
+    coordinatorProcessStartIdentity
+        distinguishes a concrete process lifetime from PID reuse
+
+    ownerToken
+        unpredictable identity of one ownership claim
+
+    openedAt
+        informational timestamp only
+
+Timestamp does not establish identity or liveness.
+
+A runtimeId is created for one runtime execution.
+
+It is not loaded from Workspace configuration and is not reused across runtime
+executions.
+
+One runtimeId has exactly one coordinator process.
+
+The coordinator process identity does not change during that runtime execution.
+
+No process-handoff protocol exists.
+
+A different coordinator process requires a different runtimeId.
+
+
+WORKSPACE CLAIM ACQUISITION
+===========================
+
+When opening a Workspace writable:
+
+    1. Determine the intended workspaceId.
+    2. Attempt atomic creation of the claim file.
+    3. If creation succeeds, write the identity tuple.
+    4. Retain the ownerToken in runtime-owned state.
+    5. Continue Workspace opening.
+    6. If creation fails because the file exists, read it read-only.
+    7. Compare identity fields.
+    8. Choose success, rejection, or recovery according to the identity tuple.
+
+Decision model:
+
+Case A: no claim exists
+
+    Atomically create a new claim.
+
+Case B: all identities match the current coordinator
+
+    workspaceId matches
+    machineId matches
+    runtimeId matches
+    process identity matches
+    ownerToken matches
+
+    This is an idempotent repeated Workspace-open operation by the same
+    coordinator.
+
+    Return the existing Workspace binding.
+
+Case C: workspaceId matches, machineId matches, runtimeId differs
+
+    Another runtime execution previously or currently owns the same Workspace.
+
+    If that ownership is currently known to be active:
+        reject writable opening
+
+    If the previous ownership is no longer active:
+        enter recovery
+
+Case D: workspaceId matches, machineId matches, runtimeId matches,
+        coordinator process identity differs
+
+    This is an internal runtime identity invariant violation.
+
+    The current process must not:
+
+        - replace the claim
+        - delete the claim
+        - take over the Workspace
+        - enter ordinary recovery
+        - write into the Workspace
+
+    It fails closed.
+
+    Working error category:
+
+        RuntimeOwnershipInvariantViolation
+
+Case E: workspaceId differs
+
+    The mutable root belongs to another Workspace identity.
+
+    Reject automatic adoption.
+
+    Working error category:
+
+        WorkspaceIdentityMismatch
+
+Case F: machineId differs
+
+    The Workspace or claim has moved, been copied, or is being accessed from
+    another machine.
+
+    Initial local-only semantics should reject writable opening unless a future
+    explicit import/adoption workflow is defined.
+
+If a stale claim cannot be replaced, moved, or deleted safely, writable
+recovery is blocked.
+
+Read-only inspection may remain possible through immutable published
+generations.
+
+The Workspace model does not imply general inter-runtime or inter-Workspace
+management.
+
+
+APPPACK
+=======
+
+AppPack is a reusable application definition.
+
+It defines the minimum information required to:
+
+    - create a new Application
+    - restore an existing Application
+    - validate compatibility
+    - prepare the required Pack graph
+    - bind required ExecutionAdapters
+    - activate application code
+    - run the application generator
+    - identify migration requirements
+
+AppPack may also contain advisory metadata.
+
+Advisory metadata may include:
+
+    - descriptions
+    - recommended Packs
+    - recommended processors/providers
+    - presentation metadata
+    - optional Views
+    - suggested settings
+
+Advisory metadata is not required application identity.
+
+AppPack may define:
+
+    - canonical Pack identity
+    - version
+    - activation entries
+    - generator entry
+    - dependencies
+    - required capabilities
+    - required adapters
+    - configuration conventions
+    - migration declarations
+    - default View definitions
+    - other application-definition material
+
+AppPack is a Pack.
+
+Application is not a Pack.
+
+SaveBundle is not a Pack.
+
+
+APPLICATION
+===========
+
+Application is one durable application individual created from an AppPack or
+another accepted AppDefinition source.
+
+Application receives a stable:
+
+    applicationId
+
+The applicationId is created once and persists across:
+
+    - runtime shutdown
+    - later loading
+    - multiple ApplicationRuns
+    - SaveBundle generations
+    - accepted AppPack version migrations
+
+Loading a SaveBundle does not create a new Application.
+
+It creates a new ApplicationRun of the same Application.
+
+Conceptually:
+
+    AppPack
+        |
+        | generator
+        v
+    Application A
+        applicationId = A
+        |
+        +-- ApplicationRun 1
+        +-- ApplicationRun 2
+        +-- ApplicationRun 3
+
+A deliberate clone/fork creates a new Application with a new applicationId.
+
+Provenance may record:
+
+    forkedFromApplicationId
+    forkedFromGenerationId
+
+A separate lineage identity is not required unless future workflows prove that
+applicationId plus provenance is insufficient.
+
+
+APPLICATIONRUN
+==============
+
+ApplicationRun is one live execution period of an Application.
+
+Working name:
+
+    ApplicationRun
+
+Possible alternatives may later include:
+
+    AppRun
+    ActiveApplication
+    RuntimeApplication
+
+ApplicationRun receives a new:
+
+    applicationRunId
+
+Each time the same Application is loaded again, it receives a new
+applicationRunId.
+
+ApplicationRun composes application-scoped runtime contexts such as:
+
+    - Memory context
+    - configuration context
+    - accepted Pack graph context
+    - SaveBundle binding
+    - Window/history manager
+    - trace context
+    - journal context
+    - Hook registry
+    - timer registry
+    - Job registry
+    - ProcessingRun registry
+    - View registry
+    - ExecutionAdapter bindings
+    - application-data context
+    - OrchestrationUnit scheduling
+
+ApplicationRun is live runtime state.
+
+It is not serialized as one object.
+
+When the run ends:
+
+    - live adapters are closed
+    - live Views detach
+    - live Jobs become terminal or are aborted
+    - live OrchestrationUnits end
+    - live ProcessingRuns end
+    - live RPC channels close
+    - applicationId remains durable
+    - SaveBundle remains durable
+
+
+SAVEBUNDLE
+==========
+
+SaveBundle is the durable persistence closure of one Application.
+
+It preserves:
+
+    - applicationId
+    - AppDefinition/AppPack binding
+    - accepted concrete Pack graph
+    - authoritative committed application state
+    - save-bound configuration
+    - save-bound policy
+    - generated application-owned static material
+    - application data
+    - retained finalized history
+    - retained trace/journal evidence
+    - copied or embedded Pack material
+    - compatibility and migration evidence
+    - current published generation
+
+SaveBundle is loadable.
+
+SaveBundle does not load itself.
+
+Kernel coordinates rehydration by supplying retained material to the owning
+domains.
+
+SaveBundle is not:
+
+    - AppPack
+    - Application
+    - ApplicationRun
+    - RuntimeHost
+    - PackManager
+    - resolver
+    - activator
+    - ExecutionAdapter
+    - capability authority
+    - policy authority
+    - transaction authority
+    - live process snapshot
+    - arbitrary writable directory
+    - Job store
+    - OrchestrationUnit store
+
+SaveBundle may physically contain Packs.
+
+That does not make SaveBundle itself a Pack.
+
+
+SAVEBUNDLE LOGICAL CONTENT
+==========================
+
+Logical shape:
+
+    SaveBundle
+    |
+    +-- identity
+    |   +-- applicationId
+    |   +-- bundle format version
+    |   +-- current generation
+    |   +-- provenance
+    |
+    +-- AppDefinition binding
+    |   +-- origin definition
+    |   +-- current accepted definition
+    |   +-- generator identity/version
+    |   +-- compatibility/migration level
+    |
+    +-- selected graph
+    |   +-- concrete Pack identities
+    |   +-- versions
+    |   +-- fingerprints
+    |   +-- dependency edges
+    |   +-- copied Pack bindings
+    |   +-- pinned external bindings
+    |
+    +-- authoritative state
+    |   +-- committed Memory root
+    |   +-- committed revision root
+    |   +-- save-bound configuration root
+    |   +-- save-bound policy root
+    |   +-- generated static-data root
+    |   +-- application-data root
+    |
+    +-- finalized runtime history
+    |   +-- Window sequence root
+    |   +-- SafePointWindow roots
+    |   +-- AbortedWindow roots
+    |
+    +-- retained evidence
+    |   +-- trace root
+    |   +-- journal root
+    |   +-- Job/OrchestrationUnit evidence
+    |   +-- audit material
+    |
+    +-- retained Pack/application material
+    |   +-- copied Packs
+    |   +-- synthetic AppDefinition source
+    |   +-- portable assets
+    |
+    +-- optional material
+        +-- caches
+        +-- previews
+        +-- indexes
+        +-- diagnostic exports
+
+Each domain owns the meaning of its retained material.
+
+SaveBundle is the persistence carrier.
+
+It does not replace semantic ownership.
+
+
+SAVEBUNDLE GENERATIONS
+======================
+
+SaveBundle has one stable Application identity and a sequence of published
+generations.
+
+Each generation is immutable after publication.
+
+Conceptually:
+
+    SaveBundle root
+        applicationId
+        headGenerationId
+
+    SaveGeneration
+        generationId
+        parentGenerationId
+        AppDefinitionBindingRoot
+        selectedGraphRoot
+        committedStateRoot
+        configRoot
+        policyRoot
+        staticDataRoot
+        applicationDataRoot
+        WindowSequenceRoot
+        traceRoot
+        journalRoot
+
+Publishing a generation is atomic.
+
+If publication of generation 43 fails:
+
+    generation 42 remains current
+
+Incomplete staging is not authoritative.
+
+Only a published generation may be used as an authoritative restoration head.
+
+A read-only inspector should bind to one published generation rather than
+reading mutable staging material.
+
+
+SAVEBUNDLE OWNERSHIP
+====================
+
+A writable SaveBundle may use an ownership claim similar to Workspace ownership.
+
+The claim may record:
+
+    applicationId
+    workspaceId
+    machineId
+    runtimeId
+    coordinatorProcessId
+    applicationRunId
+    ownerToken
+    openedAt
+
+One Application/SaveBundle may have at most one writable active ApplicationRun.
+
+A second runtime may:
+
+    - inspect a published generation read-only
+    - clone/fork the Application
+    - open it after ownership is released
+    - enter recovery after validated stale ownership
+
+It may not become a second writer.
+
+The architecture does not introduce inter-runtime SaveBundle coordination.
+
+
+SAVEBUNDLE LOADING
+==================
+
+Loading occurs in phases.
+
+Phase A: inspect
+
+    1. Locate SaveBundle.
+    2. Parse root manifest.
+    3. Validate format and integrity.
+    4. Read applicationId.
+    5. Read current published generation.
+    6. Read AppDefinition binding.
+    7. Read accepted graph evidence.
+
+Phase B: reconstruct requirements
+
+    8. Locate embedded, copied, pinned, and external Pack material.
+    9. Validate concrete identities and fingerprints.
+    10. Validate required ExecutionAdapters.
+    11. Validate compatibility/migration level.
+    12. Prepare user/policy decisions if needed.
+    13. Prepare migration if needed.
+
+Phase C: acquire ownership
+
+    14. Acquire writable SaveBundle ownership.
+    15. Confirm no other active writable ApplicationRun owns applicationId.
+    16. Allocate new applicationRunId.
+
+Phase D: construct runtime contexts
+
+    Kernel creates application-scoped:
+
+        - Memory context
+        - configuration context
+        - graph context
+        - history/Window manager
+        - trace context
+        - journal context
+        - Hook registry
+        - timer registry
+        - Job registry
+        - ProcessingRun registry
+        - View registry
+        - adapter bindings
+        - application-data context
+
+Phase E: rehydrate domains
+
+    Memory restores committed state.
+
+    Configuration restores save-bound values and recomputes effective config.
+
+    Policy restores save-scoped remembered decisions.
+
+    Static/application data attaches retained roots.
+
+    Window/history restores finalized history and latest safe boundary.
+
+    Trace/journal attach retained evidence and begin new run segments.
+
+    Graph context installs the accepted concrete graph.
+
+Phase F: activate
+
+    17. Bind ExecutionAdapters.
+    18. Load Pack activation entries.
+    19. Run Pack activation phases.
+    20. Create default Views or wait for clients.
+    21. Open a new active runtime-history region.
+    22. Mark ApplicationRun ready.
+
+Live handles are never restored.
+
+New runtime objects are created.
+
+
+PACK
+====
+
+Pack is a reusable definition, content, extension, or executable-participation
+unit.
+
+Pack kinds may include:
+
+    - AppPack
+    - ModPack
+    - ContentPack
+    - ViewPack, if retained
+    - other explicitly defined Pack kinds
+
+A Pack root is identified by its Pack manifest.
+
+A child directory containing another Pack manifest defines a child Pack root.
+
+Pack-local module space stops at child Pack-root boundaries.
+
+Physical nesting does not grant direct implementation access across Pack
+boundaries.
+
+Discovery produces Pack candidates.
+
+Discovery does not itself define:
+
+    - visibility
+    - resolution
+    - activation
+    - importing
+    - runtime loading
+    - capability authority
+    - runtime identity
+
+PackManager may prepare graph intent and management operations.
+
+PackManager does not become:
+
+    - Kernel
+    - resolver
+    - loader
+    - activator
+    - policy owner
+    - persistence authority
+    - Application lifecycle owner
+    - Turnix identity
+
+
+SYNTHETIC AND DIRECT-LOCAL APPPACKS
+==================================
+
+Scripts and runtime tests are lightweight AppPack creation surfaces.
+
+They are not separate execution species.
+
+Possible AppDefinition source classes include:
+
+    - DiscoveredAppPack
+    - DirectLocalAppPack
+    - SyntheticScriptAppPack
+    - SyntheticTestAppPack
+    - InternalAppPack
+
+All create normal Applications and ApplicationRuns when persistence/runtime use
+requires them.
+
+SyntheticScriptAppPack:
+
+    - wraps one supplied code file
+    - infers or receives an ExecutionAdapter
+    - uses that file as its activation entry
+    - creates a normal Application runtime path
+    - uses normal ModCallContext
+    - uses normal OrchestrationUnits
+    - uses normal ProcessingRuns
+    - uses normal Memory/config/capability/trace boundaries
+
+The initial synthetic-script configuration behavior is:
+
+    config: []
+
+That means conventional configuration discovery is disabled.
+
+This is the current provisional default, not a permanently locked invariant.
+
+It remains until practical script/test usage demonstrates that neighbouring
+conventional configuration is materially useful without making one-file
+execution environmentally surprising.
+
+A direct-local AppPack is created by explicitly running:
+
+    - a Pack manifest
+    - or a directory containing the Pack manifest
+
+The manifest parent becomes a scoped direct-local Pack root.
+
+Normal Pack conventions apply inside that root.
+
+The root is not inserted into global Workspace roots.
+
+It does not alter global precedence.
+
+It does not discover siblings outside the root.
+
+Paths may not escape the root.
+
+A directory without a Pack manifest is not inferred as a Pack.
+
+
+PACK CONVENTIONS
+================
+
+Principle:
+
+    Manifest declares architecture.
+
+    Stable conventions discover repetitive structure.
+
+A good convention is:
+
+    - stable
+    - reserved
+    - deterministic
+    - documented
+    - inspectable
+    - non-ambiguous
+
+Bad magic is:
+
+    - guessed
+    - environment-dependent
+    - silently merged
+    - order-sensitive
+    - difficult to explain
+
+For configuration:
+
+    config field absent
+        use documented conventional configuration discovery
+
+    config field present with a non-empty list
+        disable convention
+        use exactly the listed sources
+
+    config field present as an empty list
+        disable configuration loading
+
+Explicit and conventional configuration are not merged.
+
+Manifest parsing occurs before configuration-source selection.
+
+Conventions exist for developer ergonomics, not for executing configuration
+before the manifest is understood.
+
+
+EXECUTIONADAPTER
+================
+
+ExecutionAdapter is the boundary that loads and runs external or
+adapter-mediated Pack code.
+
+ExecutionAdapter may support:
+
+    - JavaScript
+    - Python
+    - C#
+    - Lua
+    - remote process execution
+    - test execution
+    - another explicitly defined runtime
+
+ExecutionAdapter is not Kernel authority.
+
+Same language does not imply same authority.
+
+Same process does not imply same authority.
+
+Direct-call optimization must preserve the same logical boundary as RPC or
+another explicit boundary.
+
+ExecutionAdapter supplies Pack code only with supported Turnix-facing surfaces.
+
+It does not expose trusted backend internals.
+
+Pack code may physically perform unsupported host-language behavior.
+
+Physical possibility does not become a Turnix guarantee.
+
+
+PACK ACTIVATION ENTRIES
+=======================
+
+A Pack may participate through multiple ExecutionAdapters.
+
+Each adapter/runtime participation has at most one activation entry.
+
+Example:
+
+    Python entry
+    JavaScript entry
+    C# entry
+
+One activation entry coordinates that adapter/runtime participation.
+
+Turnix does not automatically activate every code file.
+
+Executable Pack material has three roles:
+
+    Activation entry
+        loaded by Turnix
+        participates in lifecycle callbacks
+
+    Private implementation module
+        loaded by Pack code
+        not externally addressable by default
+        does not receive lifecycle callbacks merely because it exists
+
+    Exported module
+        public mediated module surface
+        loaded on demand
+        not an activation entry
+
+A plural "entries" list used only to preload files is not required.
+
+Loading a module may execute top-level code, so preloading is behavior.
+
+
+PACK ACTIVATION PHASES
+======================
+
+Turnix-facing infrastructure is fully operational before Pack code is loaded.
+
+At that point Turnix can receive:
+
+    - capability registrations
+    - capability requests
+    - permitted handler registrations
+    - RPC calls
+    - trace events
+    - structured failures
+    - other supported adapter-mediated operations
+
+Lifecycle moments:
+
+    Stage 0
+        activation-entry evaluation by ExecutionAdapter
+
+    Phase 1
+        onEntryLoaded(ctx)
+
+    Phase 2
+        onEntriesLoaded(ctx)
+
+    Phase 3
+        onLoad(ctx)
+
+Names for Phase 1 and Phase 2 remain working names.
+
+Stage 0:
+
+    Host-runtime module-level code may execute.
+
+    Turnix permits but discourages relying on top-level side effects.
+
+    No cross-adapter or dependency readiness is guaranteed.
+
+Phase 1:
+
+    Runs after one entry loaded.
+
+    Intended for:
+
+        - adapter-local initialization
+        - minimal early capability registration
+        - minimal early handler registration
+        - surfaces required by another adapter
+        - surfaces required to handle a dependency cycle
+
+Phase 2:
+
+    Runs after all activation entries for the Pack completed Phase 1.
+
+    Intended for:
+
+        - cross-adapter coordination
+        - use of Phase 1 registrations
+        - registration of surfaces required during onLoad
+        - completion of cyclic prerequisites
+
+Phase 3:
+
+    Canonical ordinary Pack activation.
+
+    Most creators should use only onLoad(ctx).
+
+General rule:
+
+    Turnix guarantees phase barriers, not callback ordering.
+
+    A callback may rely only on guarantees established by completed earlier
+    phase barriers.
+
+    A callback may not rely on another callback in the same phase having
+    already run.
+
+Availability progression:
+
+    Stage 0 / Phase 1 registration
+        guaranteed after Phase 1 barrier
+
+    Phase 2 registration
+        guaranteed after Phase 2 barrier
+
+    Phase 3 registration
+        externally published after successful activation
+
+
+CYCLIC PACK ACTIVATION
+======================
+
+Dependency graph preparation detects strongly connected components.
+
+A cyclic dependency group is admitted only if at least one activation entry in
+the group defines a supported Phase 1 or Phase 2 handler.
+
+A cycle with no early handler is rejected.
+
+Working error:
+
+    UnsupportedActivationCycle
+
+Presence of an early handler means the creators intentionally opted into the
+advanced cycle protocol.
+
+It does not prove the cycle is correct.
+
+For a cyclic group:
+
+    1. Load all activation entries.
+    2. Complete group-wide Phase 1.
+    3. Run group Phase 2.
+    4. Complete group-wide Phase 2.
+    5. Run onLoad callbacks with no intra-cycle ordering guarantee.
+    6. Activate the group atomically after all succeed.
+
+Before cyclic Phase 3:
+
+    - all external hard dependencies are Activated
+    - all group entries loaded
+    - all group Phase 1 callbacks completed
+    - all group Phase 2 callbacks completed
+    - all early registrations are available within permitted scope
+
+Every intra-cycle surface required during onLoad must already exist from
+Phase 1 or Phase 2.
+
+Turnix does not wait for another onLoad to provide it.
+
+Missing early cyclic surfaces fail immediately.
+
+Working error:
+
+    CyclicDependencySurfaceNotReady
+
+One member failure fails the entire cyclic activation group.
+
+Turnix withdraws provisional Turnix-owned registrations and aborts controlled
+staged mutation.
+
+Turnix does not guarantee reversal of arbitrary effects performed outside
+Turnix-controlled boundaries.
+
+
+MODCALLCONTEXT
+==============
+
+ModCallContext is a first-class Turnix type.
+
+Working name:
+
+    ModCallContext
+
+Possible future alternatives:
+
+    PackCallContext
+    PackInvocationContext
+
+Definition:
+
+    ModCallContext is the invocation-scoped, Pack-bound gateway through which
+    adapter-executed mod/Pack code interacts with Turnix.
+
+Every Turnix invocation of Pack code receives a fresh ModCallContext as its first
+parameter.
+
+Examples:
+
+    onLoad(ctx, ...)
+    onEntryLoaded(ctx, ...)
+    onEntriesLoaded(ctx, ...)
+    eventHandler(ctx, event)
+    processingHook(ctx, stage)
+    timerHandler(ctx, timer)
+    capabilityHandler(ctx, request)
+
+ModCallContext is bound to:
+
+    - acting Pack
+    - Application
+    - ApplicationRun
+    - invocation
+    - cause/correlation
+    - current OrchestrationUnit, when present
+    - current transaction, when present
+    - current Job, when present
+    - current ProcessingRun, when present
+    - current ProcessingPipeline stage, when present
+    - current Event, Timer, capability invocation, or lifecycle phase
+    - cancellation and deadline
+    - stage-specific granted operations
+
+Session is not present.
+
+Session has been removed from the Turnix core model.
+
+ModCallContext must not be retained after callback completion.
+
+The context may become invalid when:
+
+    - callback ends
+    - OrchestrationUnit ends
+    - transaction commits or aborts
+    - ProcessingRun advances stage
+    - Job becomes terminal
+    - cancellation scope ends
+    - permission scope changes
+
+Registrations retain:
+
+    - owner Pack
+    - callback endpoint
+    - registration metadata
+    - registration scope
+
+Registrations do not retain the ModCallContext that created them.
+
+Later callbacks always receive a new context.
+
+
+MODCALLCONTEXT FACADES
+======================
+
+Current proposed shape:
+
+    ctx
+    |
+    +-- identity
+    +-- current
+    +-- execution
+    |
+    +-- memory
+    +-- config
+    +-- permissions
+    +-- capabilities
+    +-- jobs
+    +-- hooks
+    +-- processing
+    +-- events
+    +-- timers
+    +-- resources
+    +-- io
+    +-- trace
+
+Explicitly absent:
+
+    ctx.kernel
+    ctx.runtimeHost
+    ctx.services
+    ctx.journal
+    ctx.rawFilesystem
+    ctx.transaction.commit
+    ctx.job.setTerminalState
+    ctx.sessions
+
+ModCallContext exposes Pack-facing mediated facades.
+
+It does not expose backend service objects.
+
+
+CTX.IDENTITY
+============
+
+Read-only identity information may include:
+
+    applicationId
+    applicationRunId
+    actingPackId
+    invocationId
+
+Optional correlation identifiers may be exposed through read-only descriptors.
+
+Pack code cannot replace actingPackId or applicationId.
+
+
+CTX.CURRENT
+===========
+
+Read-only current bindings may include:
+
+    current OrchestrationUnit
+    current transaction
+    current Job
+    current ProcessingRun
+    current ProcessingPipeline stage
+    current Event
+    current Timer
+    current lifecycle phase
+    current View, when relevant
+
+Absent concepts remain absent.
+
+Turnix does not invent a context object merely because another subsystem once
+used to provide it.
+
+
+CTX.EXECUTION
+=============
+
+Execution facade may expose:
+
+    - cancellation state
+    - deadline
+    - causation
+    - parent invocation
+    - throwIfCancelled()
+    - supported child-work requests
+
+It does not expose raw OrchestrationUnit internals.
+
+Ordinary Pack code does not directly commit the transaction or mark Jobs
+terminal.
+
+
+CTX.MEMORY
+==========
+
+Memory facade provides scoped authoritative-state access.
+
+At minimum:
+
+    - read
+    - write
+    - delete
+    - contains
+    - query/list where permitted
+
+Possible scopes:
+
+    application
+        application-wide state
+
+    pack
+        acting Pack's application-local namespace
+
+Writes stage into the current transaction.
+
+They do not directly change committed state.
+
+If the callback is read-only, write operations are absent or rejected.
+
+Session-relative Memory does not exist in the core platform.
+
+
+CTX.CONFIG
+==========
+
+Configuration facade may expose:
+
+    effective
+        read effective config for the acting Pack
+
+    save
+        read/write save-bound config for the acting Pack in this Application
+
+    global
+        read/write Pack-global config where permitted
+
+    engine/workspace
+        read permitted Workspace/runtime configuration
+
+Configuration writes remain scoped and transactional where they affect
+authoritative Application state.
+
+The acting Pack does not gain another Pack's private configuration.
+
+
+CTX.PERMISSIONS
+===============
+
+Permissions facade may expose:
+
+    - check current decision
+    - request permission
+    - list decisions relevant to the acting Pack
+
+A permission request may suspend the current OrchestrationUnit.
+
+The runtime and UI remain responsive.
+
+View may present the decision but does not own it.
+
+
+CTX.CAPABILITIES
+================
+
+Capabilities facade may expose:
+
+    - register
+    - unregister
+    - invoke/request
+    - inspect available public descriptors
+    - list registrations owned by the acting Pack
+
+Capability registration and invocation are attributed automatically to the
+acting Pack and current Application.
+
+Awaiting capability completion suspends the current work.
+
+It does not block the runtime.
+
+Capability is an explicit semantic operation interface.
+
+Capability provider identity may vary.
+
+Service objects remain internal runtime wiring.
+
+
+CTX.JOBS
+========
+
+Job is an observable lifecycle handle.
+
+Jobs facade may expose:
+
+    - request/start observable work
+    - inspect visible Jobs
+    - list acting Pack's active Jobs
+    - observe progress
+    - await terminal result
+    - cancel owned/controllable Jobs
+
+Pack code does not directly assign terminal Job state.
+
+Many APIs may create Jobs automatically.
+
+Direct Job creation is useful for Pack-owned long-running work.
+
+
+CTX.HOOKS
+=========
+
+Hooks facade may expose:
+
+    - register
+    - unregister
+    - list acting Pack's active hook registrations
+    - inspect current hook invocation
+
+Hook registration identifies:
+
+    - owner Pack
+    - ProcessingPipeline type
+    - ProcessingStage
+    - callback endpoint
+    - scope
+    - participation policy
+    - ordering constraints if supported later
+
+Hook registration normally affects future ProcessingRuns.
+
+It does not retroactively join the currently executing ProcessingRun unless a
+specific current-run mechanism is defined.
+
+
+CTX.PROCESSING
+==============
+
+Processing facade provides the simple and advanced processor-call APIs.
+
+Simple form:
+
+    result = await ctx.processing.run(...)
+
+Turnix handles:
+
+    - child execution scope
+    - ProcessingRun creation
+    - ProcessingPipeline selection
+    - hook-plan snapshot
+    - staged temporary state
+    - streaming
+    - retry/restart
+    - cancellation
+    - structured errors
+    - nested transaction
+    - Job creation when needed
+
+Possible operations:
+
+    run
+        await one ProcessingRun and receive final result
+
+    start
+        begin a ProcessingRun and return a streaming/progress/control handle
+
+    get
+        inspect a visible ProcessingRun
+
+    list
+        list acting Pack's or visible active ProcessingRuns
+
+    current
+        access current run/stage when inside a hook
+
+    registerPipeline
+        register a Pack-defined ProcessingPipeline where allowed
+
+    registerProcessor
+        register a processor implementation where that responsibility belongs
+
+Request options may include:
+
+    - processor type
+    - pipeline type
+    - input
+    - cooperative or isolated participation
+    - streaming preference
+    - retry policy
+    - timeout
+    - raw-result retention policy
+    - application-defined context references
+
+No Session parameter exists as a core concept.
+
+
+CTX.EVENTS
+==========
+
+Events are cheap semantic notifications.
+
+Events facade may expose:
+
+    - emit
+    - subscribe
+    - unsubscribe
+    - list acting Pack's subscriptions
+    - inspect current Event
+
+Ordinary Event semantics:
+
+    - fan-out notification
+    - no result returned to producer from listeners
+    - emitted payload is not transformed by listeners
+    - no listener ordering guarantee
+    - listener failure does not retroactively fail completed producer work
+    - listeners receive fresh ModCallContexts
+    - handlers may schedule their own work
+
+Emit acceptance does not mean all listeners completed.
+
+Lifecycle callbacks are not Events.
+
+Processing hooks are not Events.
+
+Distinction:
+
+    Lifecycle callback
+        Turnix needs the Pack code to run as part of lifecycle semantics
+
+    Hook
+        a ProcessingRun allows controlled participation
+
+    Event
+        something happened; react independently if interested
+
+
+CTX.TIMERS
+==========
+
+Timers facade may expose:
+
+    - schedule once
+    - schedule recurring
+    - cancel
+    - inspect
+    - list acting Pack's active timers
+    - pause/resume if later supported
+
+Timer registration records:
+
+    - owner Pack
+    - Application
+    - schedule
+    - callback endpoint
+    - lifetime
+    - persistence policy
+    - overlap policy
+    - missed-trigger policy
+
+A Timer does not retain an old ModCallContext.
+
+When it fires:
+
+    Timer
+        -> scheduler
+            -> new OrchestrationUnit
+                -> fresh ModCallContext
+
+Persistent timers are Application state.
+
+Run-scoped timers disappear when ApplicationRun ends.
+
+
+CTX.RESOURCES
+=============
+
+Resources facade provides mediated read-only access to Pack-authored material.
+
+Possible operations:
+
+    - readText
+    - readBinary
+    - list
+    - inspect metadata
+    - resolve logical Pack-local resource
+
+Resources may include:
+
+    - prompts
+    - templates
+    - schemas
+    - assets
+    - static authored data
+
+Resources facade avoids using broad persistent I/O merely to read Pack-owned
+files.
+
+
+CTX.IO
+======
+
+I/O remains a design area requiring more detail.
+
+Core boundary:
+
+    Pack code does not receive unrestricted raw filesystem access.
+
+I/O should use logical scoped references.
+
+Possible scopes:
+
+    - Pack resources
+    - Application data
+    - SaveBundle data
+    - Pack-global userdata
+    - explicitly granted external paths
+
+All writes remain:
+
+    - permission checked
+    - root constrained
+    - IoManager mediated
+    - trace-visible
+    - atomic/staged where required
+
+Direct SaveBundle-directory mutation is forbidden.
+
+
+CTX.TRACE
+=========
+
+Trace facade may expose:
+
+    - startSpan
+    - event
+    - endSpan
+
+A span handle may provide scoped event and completion operations.
+
+Turnix automatically correlates trace evidence with:
+
+    - applicationId
+    - applicationRunId
+    - actingPackId
+    - invocationId
+    - OrchestrationUnit
+    - Job
+    - ProcessingRun
+    - ProcessingStage
+    - Event
+    - Timer
+    - cause
+
+Pack code supplies domain metadata and result/reason information.
+
+Pack code does not forge runtime correlation identity.
+
+Trace is evidence.
+
+Trace is not committed state.
+
+
+NO CTX.JOURNAL
+==============
+
+Ordinary Pack code does not receive a general journal facade.
+
+Journal is runtime/domain-generated retained evidence.
+
+Pack needs are covered by:
+
+    ctx.trace.event
+        runtime/diagnostic evidence
+
+    ctx.events.emit
+        semantic notification
+
+    ctx.memory.write
+        staged authoritative state
+
+    ctx.io.write
+        retained artifact/data
+
+A future domain may define a narrow typed journal operation.
+
+No generic append-anything journal is exposed now.
+
+
+NO CTX.SERVICES
+===============
+
+Ordinary Pack code does not receive raw service objects.
+
+Service objects are trusted internal runtime wiring.
+
+Pack code:
+
+    provides operations by registering capability handlers
+
+    consumes operations by invoking capabilities
+
+An internal trusted context may access services.
+
+ModCallContext does not.
+
+
+SESSION REMOVAL
+===============
+
+Session is removed from the Turnix core architecture.
+
+Locked consequences:
+
+    - no Session
+    - no MainSession
+    - no HiddenSession
+    - no TemporarySession
+    - no SessionRegistry
+    - no ctx.sessions
+    - no Session-owned ProcessingPipeline
+    - no View-owned Session
+    - no Session-based RPC routing
+    - no mandatory Session for LLM or processor calls
+
+Responsibilities formerly carried by Session are reassigned.
+
+Persistent conversational or interaction continuity:
+
+    application-defined committed state
+
+Examples:
+
+    - Conversation
+    - InteractionThread
+    - CharacterDialogue
+    - DocumentThread
+    - NarratorContext
+    - another AppPack-defined object
+
+Temporary interaction context:
+
+    OrchestrationUnit- or ProcessingRun-scoped state
+
+Private/hidden processing:
+
+    ProcessingRun participation and visibility policy
+
+Pipeline ownership:
+
+    ProcessingPipeline definition and ProcessingRun execution
+
+Browser/frontend routing:
+
+    View, frontend binding, RPC routing
+
+Memory access:
+
+    ModCallContext bound to Application and current transaction
+
+A ProcessingRun may carry application-defined context references.
+
+Turnix does not interpret those references as a universal Session type.
+
+
+VIEW
+====
+
+View is a presentation and interaction surface.
+
+View may:
+
+    - display Application state
+    - display one or more application-defined interaction objects
+    - display ProcessingRun progress and streams
+    - display Jobs
+    - send user input
+    - present permission decisions
+    - expose debugging/management UI
+    - bind frontend clients
+    - reconnect after frontend reload
+
+View does not own:
+
+    - Application identity
+    - Session
+    - ProcessingPipeline
+    - ProcessingRun
+    - committed Memory
+    - processor execution
+    - mutation authority
+    - RPC authority
+    - SaveBundle
+
+A View may be destroyed while:
+
+    - Application remains active
+    - ProcessingRun continues according to policy
+    - Jobs continue
+    - application-defined interaction state remains committed
+
+A new View may attach later.
+
+ViewPack may remain as a Pack containing UI implementation/assets.
+
+If retained, ViewPack does not restore the old View-owned backend architecture.
+
+
+ORCHESTRATIONUNIT
+=================
+
+OrchestrationUnit is one bounded execution-authority context.
+
+It coordinates:
+
+    - which code is currently running
+    - mutation authority
+    - transaction participation
+    - cancellation
+    - failure propagation
+    - sequencing
+    - safe suspension while awaiting external work
+    - child work
+    - commit or abort outcome
+
+OrchestrationUnit is not persistent application continuity.
+
+It is bounded work.
+
+Examples:
+
+    - handle one user command
+    - process one Event handler
+    - run one Timer callback
+    - perform Pack activation work
+    - execute one migration
+    - coordinate one or more ProcessingRuns
+    - run one capability handler
+
+One OrchestrationUnit may contain several ProcessingRuns.
+
+A ProcessingRun may create attached child work.
+
+Detached work outside Turnix orchestration does not receive Turnix guarantees by
+implication.
+
+
+TRANSACTION
+===========
+
+Transaction stages intended authoritative mutation.
+
+Memory/config/application-state writes through ModCallContext enter the current
+transaction.
+
+Nested child work may use nested transactions.
+
+Conceptually:
+
+    child transaction succeeds
+        merge into parent transaction
+
+    child transaction aborts
+        discard child mutations
+
+    parent transaction commits
+        state becomes authoritative
+
+ProcessingRun completion does not automatically commit Application state.
+
+The owning OrchestrationUnit decides commit/abort according to its contract.
+
+
+JOB
+===
+
+Job is the observable lifecycle representation of work.
+
+Job may expose:
+
+    - identity
+    - status
+    - progress
+    - cancellation
+    - result
+    - error
+    - parent/child relations
+    - supersession
+    - timeout
+
+Job is not the execution-authority object.
+
+OrchestrationUnit executes/coordinately owns work.
+
+Job makes work observable and controllable.
+
+Live Job handles are not restored from SaveBundle.
+
+Retained Job evidence may be persisted.
+
+
+PROCESSINGPIPELINE
+==================
+
+ProcessingPipeline is a reusable staged procedure around an input-to-output
+processor operation.
+
+Examples:
+
+    - LLM generation
+    - speech recognition
+    - speech synthesis
+    - image generation
+    - translation
+    - embedding
+    - reranking
+    - OCR
+    - audio processing
+    - code execution
+    - document conversion
+    - Pack-defined processors
+
+LLM is a special processor type.
+
+It is not a special authority domain.
+
+ProcessingPipeline defines:
+
+    - stages
+    - stage input/output contracts
+    - Hook participation points
+    - whether a stage may mutate
+    - whether a stage may reject
+    - whether retry/restart is allowed
+    - streaming behavior
+    - validation behavior
+    - finalization behavior
+
+Old "Pipeline" definition becomes ProcessingPipeline.
+
+
+PROCESSINGRUN
+=============
+
+ProcessingRun is one execution of a ProcessingPipeline.
+
+Old "PipelineRun" becomes ProcessingRun.
+
+ProcessingRun owns temporary staged processing state such as:
+
+    - raw input
+    - current transformed input
+    - processor request
+    - raw stream
+    - current transformed stream
+    - raw final output
+    - current transformed output
+    - Hook contributions
+    - attempt history
+    - retry/restart state
+    - validation results
+    - errors
+    - cancellation
+    - temporary metadata
+
+Raw and transformed representations remain distinct.
+
+Example:
+
+    rawResponse
+        exact processor material
+
+    currentResponse
+        response after permitted transformations
+
+ProcessingRun state is temporary and non-authoritative until explicitly staged
+into an Application transaction.
+
+ProcessingRun may:
+
+    - complete
+    - retry
+    - restart from a defined stage
+    - abort
+    - be cancelled
+    - fail
+    - be superseded
+
+ProcessingRun may be associated with application-defined context references.
+
+It does not require Session.
+
+
+PROCESSINGRUN PARTICIPATION POLICY
+==================================
+
+Public/hidden behavior belongs to ProcessingRun policy.
+
+Initial modes may include:
+
+    Cooperative
+        eligible registered Hooks participate
+
+    Isolated
+        only explicitly selected participants and mandatory platform
+        infrastructure participate
+
+Underlying policy dimensions may later include:
+
+    - observability
+    - Hook participation
+    - mutation permission
+    - raw input/output access
+
+Turnix should not encode:
+
+    hidden = nobody can observe anything
+
+or:
+
+    public = everybody may change everything
+
+Stage and policy contracts determine allowed participation.
+
+
+HOOK
+====
+
+Hook is controlled ambient participation in a ProcessingPipeline stage.
+
+A Hook may be allowed to:
+
+    - observe
+    - transform
+    - reject
+    - request retry
+    - add metadata
+    - validate
+    - redirect according to stage contract
+
+ProcessingRun normally waits for required Hook completion.
+
+Hook failure may affect the ProcessingRun.
+
+Hooks are not Events.
+
+Hook ordering should not silently depend on registration order.
+
+Primary ordering tool:
+
+    correct stage design
+
+Example:
+
+    RawStreamReceived
+        immutable observation
+
+    TransformStream
+        controlled transformation
+
+    StreamDelivered
+        observation after transformations
+
+If finer ordering is ever required, explicit before/after constraints may be
+added carefully.
+
+A Hook callback receives a fresh ModCallContext bound to:
+
+    - Hook-owning Pack
+    - Application
+    - ApplicationRun
+    - ProcessingRun
+    - ProcessingStage
+    - OrchestrationUnit
+    - transaction
+    - cause/correlation
+
+The Hook does not borrow the original requester's authority.
+
+
+CAPABILITY
+==========
+
+Capability is an explicit mediated operation interface.
+
+The caller knows the operation contract.
+
+The caller does not need to know the concrete provider.
+
+Capability may be:
+
+    - immediate
+    - asynchronous
+    - Job-backed
+    - ProcessingPipeline-backed
+
+Capability is the invocation boundary.
+
+ProcessingPipeline is an optional staged execution mechanism used by the
+capability implementation where needed.
+
+Examples:
+
+    config.get
+        likely no ProcessingPipeline
+
+    file.read
+        possibly simple async capability
+
+    llm.generate
+        likely starts an LLM ProcessingRun
+
+    image.generate
+        likely starts an image ProcessingRun
+
+Capability and ProcessingPipeline are complementary.
+
+
+IMPORT
+======
+
+Import is intentional concrete implementation coupling.
+
+Import means:
+
+    I require this concrete Pack/module export surface.
+
+Import differs from Capability:
+
+    Import
+        concrete provider identity and exported module surface
+
+    Capability
+        abstract operation interface, provider may vary
+
+Cross-Pack import remains mediated by Turnix-supported loading.
+
+Pack visibility and export rules apply.
+
+Direct native imports across Pack boundaries are not Turnix guarantees.
+
+
+EVENT
+=====
+
+Event is a cheap semantic notification.
+
+Event means:
+
+    Something happened.
+
+Interested Packs may react independently.
+
+Event does not mean:
+
+    - lifecycle barrier
+    - result interception
+    - payload transformation
+    - required validation
+    - capability request
+
+Event handlers receive fresh ModCallContexts and normally execute through new
+OrchestrationUnits.
+
+Listener failure does not retroactively undo completed producer work.
+
+If the producer requires participation before completion, use:
+
+    - Hook
+    - Capability
+    - explicit orchestration/workflow
+
+not Event.
+
+
+TIMER
+=====
+
+Timer is a scheduled source of new orchestrated work.
+
+Timer firing creates:
+
+    - new OrchestrationUnit
+    - new transaction when mutation is allowed
+    - fresh ModCallContext
+
+Timer does not call arbitrary code from a scheduler thread with stale authority.
+
+Timer persistence is explicit.
+
+Possible lifetimes:
+
+    - Application persistent
+    - ApplicationRun
+    - OrchestrationUnit
+
+Possible policies:
+
+    - overlap
+    - missed trigger
+    - cancellation
+    - retry
+    - one-shot
+    - recurring
+
+
+MEMORY
+======
+
+Memory owns authoritative Application state semantics.
+
+Memory defines:
+
+    - committed state
+    - layers
+    - transactions
+    - staged mutation
+    - commit
+    - abort
+    - revision identity
+    - conflict detection
+    - restoration roots
+
+Application is the logical owner of application state.
+
+ApplicationRun has the live Memory context.
+
+SaveBundle carries committed Memory roots.
+
+ModCallContext provides scoped access.
+
+SaveBundle does not decide what committed.
+
+Trace does not decide what committed.
+
+
+CONFIGURATION
+=============
+
+Configuration is split by scope.
+
+Possible scopes:
+
+    Installation defaults
+        read-only or separately managed
+
+    Workspace configuration
+        persistent for one Workspace
+
+    Runtime-effective configuration
+        assembled for one runtime execution
+
+    Pack-global configuration
+        shared by one Pack across Applications where permitted
+
+    Save-bound Application configuration
+        persistent inside SaveBundle
+
+    Save-bound Pack configuration
+        persistent for one Pack inside one Application
+
+Effective config is computed.
+
+It is not automatically a separate authority class.
+
+Configuration conventions may simplify Pack authoring.
+
+Configuration writes through ModCallContext follow the owning scope.
+
+
+STATIC AND APPLICATION DATA
+===========================
+
+Static/data categories must remain distinct.
+
+Pack-authored immutable data:
+
+    - assets
+    - prompts
+    - schemas
+    - templates
+    - base content
+
+Owned by Pack.
+
+Normally retained in Pack.
+
+Generated immutable Application data:
+
+    - generated world baseline
+    - generated scenario material
+    - generated corpus
+    - generated initial definitions
+
+Owned by Application.
+
+Retained in SaveBundle.
+
+Application data:
+
+    - user documents
+    - images
+    - audio
+    - generated artifacts
+    - world data
+    - large application-owned payloads
+
+Managed through Application data context and IoManager.
+
+Retained in SaveBundle or referenced managed storage.
+
+Cache data:
+
+    - derived indexes
+    - thumbnails
+    - regenerable embeddings
+    - compiled cache
+
+Non-authoritative unless explicitly defined otherwise.
+
+
+TRACE
+=====
+
+Trace is structured runtime evidence.
+
+Trace may contain:
+
+    - spans
+    - events
+    - causal links
+    - loss evidence
+    - activation evidence
+    - OrchestrationUnit evidence
+    - Job evidence
+    - ProcessingRun evidence
+    - capability evidence
+    - timer/event evidence
+    - persistence evidence
+
+Trace is not committed state.
+
+Trace retention may be bounded or lossy when loss is represented honestly.
+
+Trace loss weakens evidential completeness.
+
+Trace loss does not change committed-state truth.
+
+
+JOURNAL
+=======
+
+Journal is retained non-authoritative history/evidence.
+
+Journal may record:
+
+    - domain operations
+    - state transition evidence
+    - recovery evidence
+    - ordered runtime history
+
+Journal is not exposed as a generic Pack append API.
+
+Journal persistence failure does not invalidate committed Memory state.
+
+Journal may be physically retained inside or referenced by SaveBundle.
+
+
+VIEW AND FRONTEND
+=================
+
+View is not the Application loop.
+
+View is not the processor execution context.
+
+View is not the state owner.
+
+Frontend clients attach to Views or other explicitly exposed presentation
+surfaces through RPC.
+
+Two browser tabs do not need to own separate backend Sessions.
+
+They may:
+
+    - attach to the same View
+    - attach to different Views
+    - observe the same Application state
+    - observe different presentation surfaces
+    - reconnect after reload
+
+Frontend-side state may remain ephemeral.
+
+Durable state remains in Application domains.
+
+
+EVENT SOURCES FOR MOD CODE
+==========================
+
+Pack/mod code may receive execution opportunities through:
+
+    - lifecycle callbacks
+    - capability handlers
+    - ProcessingPipeline Hooks
+    - Event subscriptions
+    - Timers
+    - explicit imports/calls
+    - state-change notifications where explicitly defined
+    - Job/ProcessingRun completion callbacks
+    - View/user commands
+
+Every Turnix callback receives a fresh ModCallContext.
+
+Every mutation-capable callback executes through an OrchestrationUnit.
+
+No callback receives permanent backend authority.
+
+
+STATE OWNERSHIP SUMMARY
+=======================
+
+Application identity:
+
+    semantic owner
+        Application lifecycle domain
+
+    runtime owner
+        ApplicationRun
+
+    persistence carrier
+        SaveBundle
+
+Committed Memory:
+
+    semantic owner
+        Memory domain
+
+    logical owner
+        Application
+
+    runtime owner
+        Application Memory context
+
+    persistence carrier
+        SaveBundle committed-state roots
+
+Configuration:
+
+    semantic owner
+        Configuration domain
+
+    runtime owner
+        scoped config contexts
+
+    persistence carrier
+        Workspace config, Pack-global config, or SaveBundle according to scope
+
+Selected Pack graph:
+
+    semantic preparation
+        PackManager/resolution domains
+
+    runtime owner
+        Application graph context
+
+    persistence carrier
+        SaveBundle selected-graph record
+
+Trace:
+
+    semantic owner
+        Trace domain
+
+    runtime owner
+        runtime/application trace contexts
+
+    persistence carrier
+        retained trace store referenced or embedded by SaveBundle
+
+Journal:
+
+    semantic owner
+        journal/history domain
+
+    runtime owner
+        journal writer/context
+
+    persistence carrier
+        retained journal store referenced or embedded by SaveBundle
+
+Application data:
+
+    semantic owner
+        Application or owning subsystem
+
+    runtime owner
+        Application data context
+
+    persistence carrier
+        SaveBundle or managed referenced storage
+
+Views:
+
+    semantic owner
+        presentation domain
+
+    runtime owner
+        ApplicationRun View registry
+
+    persistence carrier
+        only explicitly persistent presentation preferences
+
+Jobs and OrchestrationUnits:
+
+    live runtime ownership only
+
+    persistence
+        evidence/descriptors only, never live handles
+
+
+LOCKED DECISIONS
+================
+
+The following decisions are treated as locked for this platform model:
+
+    1. Session is removed from the Turnix core architecture.
+
+    2. There is no MainSession, HiddenSession, TemporarySession,
+       SessionRegistry, or ctx.sessions.
+
+    3. Persistent interaction continuity is Application-defined committed
+       state.
+
+    4. View does not own backend interaction context or processor execution.
+
+    5. ProcessingPipeline defines staged processor behavior.
+
+    6. ProcessingRun is one execution of a ProcessingPipeline.
+
+    7. OrchestrationUnit owns bounded execution and mutation authority.
+
+    8. Job is the observable lifecycle handle, not execution authority.
+
+    9. ModCallContext is a first-class invocation-scoped Pack-bound gateway.
+
+    10. Every Turnix callback into Pack code receives a fresh ModCallContext as
+        its first parameter.
+
+    11. ModCallContext is not retained after callback completion.
+
+    12. Pack code interacts with Turnix only through supported mediated
+        surfaces.
+
+    13. ctx.services and generic ctx.journal are not exposed to ordinary Pack
+        code.
+
+    14. Event is notification, Hook is controlled processing participation, and
+        lifecycle callback is lifecycle protocol.
+
+    15. Capability is explicit interface coupling.
+
+    16. Import is concrete implementation coupling.
+
+    17. One TurnixRuntime may host zero or more active Applications.
+
+    18. One TurnixRuntime may have at most one Workspace open.
+
+    19. One Workspace may have at most one writable TurnixRuntime owner.
+
+    20. The default Workspace name is "default".
+
+    21. A runtimeId identifies one runtime execution.
+
+    22. One runtimeId has exactly one coordinator process.
+
+    23. No implicit process handoff exists.
+
+    24. Same runtimeId with a different coordinator process identity is an
+        invariant violation and fails closed.
+
+    25. SaveBundle is not a Pack.
+
+    26. Application is durable and preserves applicationId across runs.
+
+    27. ApplicationRun is live and receives a new applicationRunId per run.
+
+    28. SaveBundle persists domain-owned material but does not become semantic
+        owner of every retained domain.
+
+    29. Synthetic scripts use normal Application/ExecutionAdapter/
+        ModCallContext/Orchestration semantics.
+
+    30. Turnix guarantees activation phase barriers, not callback order.
+
+    31. Cyclic Pack activation requires early lifecycle handling.
+
+    32. Missing intra-cycle Phase 3 prerequisites fail immediately.
+
+    33. Direct backend imports are unsupported.
+
+    34. Trace is evidence, not committed state.
+
+    35. Live Jobs, OrchestrationUnits, adapters, Views, RPC channels, and
+        ProcessingRuns are not restored as live objects.
+
+
+PROVISIONAL OR OPEN ITEMS
+=========================
+
+The following remain open or working-name questions:
+
+    - final name for ModCallContext
+    - final name for ApplicationRun
+    - final Workspace claim filename
+    - final SaveBundle root-manifest filename
+    - final names for Phase 1 and Phase 2 activation hooks
+    - exact ViewPack future
+    - exact ctx.io URI/reference model
+    - exact ProcessingRun participation-policy schema
+    - exact Hook ordering constraints, if any
+    - exact timer persistence and missed-trigger policies
+    - exact SaveBundle ownership marker format
+    - exact Workspace recovery workflow
+    - exact callback timeout and cancellation policy
+    - exact Pack export-map convention
+    - exact internal trusted context name
+    - exact Application-defined interaction-object conventions
+    - whether synthetic-script config convention is useful after real use
+    - whether one runtime ever needs multiple Workspaces
+    - whether cross-runtime coordination is ever needed
+
+Open items must not weaken the locked responsibility boundaries.
+
+
+COMPACT PLATFORM SUMMARY
+========================
+
+TurnixRuntime hosts many Applications inside one runtime authority domain.
+
+RuntimeHost exposes controlled entry surfaces.
+
+Workspace provides one managed local environment with one writable runtime
+owner.
+
+AppPack defines how an Application is created or restored.
+
+Application is the durable individual.
+
+ApplicationRun is one live execution of that Application.
+
+SaveBundle preserves the durable closure needed for restoration.
+
+ExecutionAdapter runs Pack code through supported boundaries.
+
+Every callback into Pack code receives a fresh ModCallContext.
+
+ModCallContext routes Pack operations to scoped Memory, configuration,
+permissions, capabilities, Jobs, Hooks, processing, Events, Timers, resources,
+I/O, and tracing.
+
+OrchestrationUnit owns bounded work and mutation authority.
+
+Transaction stages authoritative mutation.
+
+Job exposes observable work lifecycle.
+
+ProcessingPipeline defines staged processor behavior.
+
+ProcessingRun performs one processor operation.
+
+Hook participates in producing a result.
+
+Event announces that something happened.
+
+Timer schedules new orchestrated work.
+
+View presents and interacts.
+
+Session does not exist in the core model.
+
+Application-defined committed state provides interaction continuity where an
+application needs it.
+
+SaveBundle stores domain-owned durable material without becoming the owner of
+every domain.
+
+Kernel remains the trusted authority that coordinates the whole runtime while
+preserving those boundaries.
+
+--- doc-meta ---
+DOC_ID: PROPOSAL-P02
+DOC_FILE: docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
