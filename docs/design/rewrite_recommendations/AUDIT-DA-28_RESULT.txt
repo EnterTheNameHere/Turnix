@@ -1,0 +1,782 @@
+==============================================================================
+AUDIT RESULT - DA-28 RUNTIME HOST, WORKSPACE OWNERSHIP AND COMMAND SURFACE
+==============================================================================
+
+Document status:
+    Audit result for assistant-editor use.
+
+Target document:
+    docs/design/DA-28_RUNTIME_HOST_WORKSPACE_OWNERSHIP_AND_COMMAND_SURFACE.txt
+
+Recommendation file:
+    docs/design/rewrite_recommendations/REWRITE-DA-28_RECOMMENDATION.txt
+
+Audit source stack:
+    docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P01_TURNIX_PACK_ENTRY_MULTI_ADAPTER_AND_CYCLIC_ACTIVATION_PROTOCOL.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    docs/design/DA-28_RUNTIME_HOST_WORKSPACE_OWNERSHIP_AND_COMMAND_SURFACE.txt
+    docs/design/rewrite_recommendations/REWRITE-DA-28_RECOMMENDATION.txt
+
+Audit posture:
+    Semantic architecture audit, not formatting audit.
+
+    Use CMR references as normal upstream/index material only.
+
+    Do not treat CMR files as semantic architecture authority for this audit.
+
+==============================================================================
+01. VERDICT
+==============================================================================
+
+Recommendation verdict:
+    Mostly yes, with stale-terminology correction and one additional ownership
+    clarification from Proposal P02.
+
+Document verdict:
+    Keep with terminology and ownership-boundary fixes.
+
+DA-28 is architecturally strong.
+
+The recommendation file correctly says DA-28 should not receive a heavy rewrite.
+It correctly preserves RuntimeHost as the running Turnix host boundary, startup
+modes as entry workflows, command surfaces as non-authority entry surfaces,
+local-first as not same-machine-only, LAN exposure as explicit and
+policy-governed, and RuntimeHost lifecycle/trace as separate from other domain
+outcomes.
+
+The candidate DA-28 already integrated many of the recommendation's stop-lines:
+
+    - RuntimeHost is not Kernel authority.
+    - RuntimeHost is not ApplicationRun.
+    - RuntimeHost is not View, adapter, transport, CLI command, Job, or
+      OrchestrationUnit.
+    - Startup modes do not define independent runtime semantics.
+    - Entry surfaces and command surfaces are not authority by themselves.
+    - RuntimeHost lifecycle does not define Job, OrchestrationUnit, Window,
+      adapter, RPC transport, ApplicationRun, or committed-state outcomes by
+      itself.
+    - LAN exposure is explicit and policy-governed.
+    - Implementation shape does not define Turnix identity.
+
+However, DA-28 still carries some older vocabulary and one authority ambiguity:
+
+    - durable save / save context should be aligned with SaveBundle.
+    - AppInstance/SavePack language remains in the recommendation and should not
+      be copied forward.
+    - Orchestration Unit should align with OrchestrationUnit terminology unless
+      the repository deliberately keeps the spaced display form.
+    - Browser/frontend adapter wording should not make FrontendAdapter the
+      umbrella adapter concept.
+    - RuntimeHost workspace ownership should be clarified as host-boundary
+      coordination of Kernel/TurnixRuntime Workspace ownership, not an
+      independent authority root owned by RuntimeHost alone.
+
+Primary conclusion:
+    Keep DA-28, but revise it against Proposal P02 before accepting it as final
+    Dv3 text.
+
+==============================================================================
+02. WHAT DA-28 GETS RIGHT
+==============================================================================
+
+02.1. RuntimeHost boundary is strong
+------------------------------------
+
+DA-28 correctly defines RuntimeHost as the running host boundary that binds a
+workspace or runtime scope, exposes controlled entry surfaces, and coordinates
+access to Kernel-owned authority.
+
+It correctly says RuntimeHost does not replace Kernel authority and does not
+grant authority merely by deployment shape, process location, command syntax,
+network exposure, or implementation framework.
+
+Preserve this.
+
+02.2. RuntimeHost identity separation is strong
+-----------------------------------------------
+
+DA-28 correctly separates runtimeHostId from workspace identity, process
+identity, AppPack identity, ApplicationRun identity, View identity, adapter
+identity, RPC message identity, channel identity, transport identity, capability
+identity, Job identity, OrchestrationUnit identity, transaction identity, and
+policy decision identity.
+
+Preserve this separation.
+
+Revise stale terms inside the identity list:
+
+    durable save identity
+        -> SaveBundle identity, when the durable persistence closure is meant
+
+02.3. Workspace ownership guardrails are strong
+-----------------------------------------------
+
+DA-28 correctly says a writable workspace is not silently multi-owned, a second
+RuntimeHost does not silently acquire writable ownership, ownership evidence is
+not ignored, stale-owner recovery is explicit, and read-only inspection does not
+create writable ownership.
+
+Preserve these rules.
+
+Add the Proposal P02 clarification that Workspace writable ownership belongs to
+one TurnixRuntime/Kernel authority domain. RuntimeHost coordinates and exposes
+the host boundary around that ownership; it should not be read as an independent
+owner that can bypass Kernel or TurnixRuntime authority.
+
+02.4. Startup mode model is strong
+----------------------------------
+
+DA-28 correctly treats startup modes as entry workflows over shared
+Kernel-mediated runtime operations, not separate runtime semantics.
+
+Preserve this.
+
+02.5. Command and entry surfaces are correctly non-authority
+-----------------------------------------------------------
+
+DA-28 correctly says command receipt is not command acceptance, command
+acceptance is not command completion, command completion is not Job success by
+default, and rejected commands do not create partial ApplicationRuns, Jobs,
+adapter failures, or OrchestrationUnit outcomes.
+
+Preserve this.
+
+02.6. Local-first / LAN exposure model is strong
+------------------------------------------------
+
+DA-28 correctly says local-first does not require same-machine execution and
+that LAN exposure is explicit and policy-governed.
+
+Preserve this.
+
+02.7. Trace ownership is mostly correct
+---------------------------------------
+
+DA-28 correctly owns RuntimeHost-domain trace reason identifiers while leaving
+trace substrate semantics to DA-03 and other domain trace evidence to their
+owning documents.
+
+Preserve this, but update trace context vocabulary to current Dv3 names.
+
+==============================================================================
+03. MAJOR REQUIRED FIX: ALIGN WITH PROPOSAL P02 TERMINOLOGY
+==============================================================================
+
+The latest Dv3 model uses these names:
+
+    TurnixRuntime
+    Kernel
+    RuntimeHost
+    Workspace
+    Application
+    ApplicationRun
+    SaveBundle
+    ExecutionAdapter
+    ModCallContext
+    OrchestrationUnit
+    Job
+    View
+
+DA-28 already uses ApplicationRun in many places, which is good.
+
+The remaining stale or ambiguous terms need cleanup.
+
+03.1. durable save / save context -> SaveBundle / existing save state
+---------------------------------------------------------------------
+
+The current DA-28 uses phrases such as:
+
+    durable save
+    durable save identity
+    durable save state
+    durable save writer
+    durable save creation
+    durable save loading
+    save context
+
+These phrases are understandable, but Proposal P02 gives the more precise
+current term:
+
+    SaveBundle:
+        durable persistence closure of one Application
+
+Revise DA-28 to use SaveBundle where it refers to durable Application
+persistence closure, retained state, loading existing state, or one writable
+persistence ownership target.
+
+Use softer user-facing phrases such as "existing save state" only when the
+intent is to describe a user-facing operation category, not the architecture
+identity.
+
+Suggested model:
+
+    RuntimeHost may request Application creation, SaveBundle creation,
+    SaveBundle loading, ApplicationRun creation, and ApplicationRun start/stop
+    through Kernel-mediated runtime operations.
+
+    SaveBundle creation/loading is not owned by CLI, browser launcher,
+    frontend, test surface, remote client, or RuntimeHost command syntax.
+
+    A writable SaveBundle may be owned by at most one active ApplicationRun
+    under SaveBundle/Application rules.
+
+Do not classify SaveBundle as a Pack.
+
+03.2. AppInstance in the recommendation must not be copied forward
+------------------------------------------------------------------
+
+The recommendation still uses AppInstance heavily. The DA-28 candidate mostly
+uses ApplicationRun, which is better.
+
+For revised DA-28:
+
+    Application:
+        use when the durable application individual is meant.
+
+    ApplicationRun:
+        use when the live runtime incarnation is meant.
+
+Do not reintroduce AppInstance unless the project explicitly declares it as a
+legacy alias elsewhere.
+
+03.3. SavePack in the recommendation must not be copied forward
+---------------------------------------------------------------
+
+The recommendation still uses SavePack. Translate it to SaveBundle where it
+means durable application persistence closure.
+
+Do not copy SavePack into revised DA-28.
+
+03.4. Orchestration Unit -> OrchestrationUnit
+---------------------------------------------
+
+The current DA-28 uses "Orchestration Unit" with a space in many places.
+The current source stack uses OrchestrationUnit as the first-class type name.
+
+Recommendation:
+    Use OrchestrationUnit as the type name.
+
+If the project keeps spaced display wording for readability, define that it is a
+display spelling for the OrchestrationUnit type. Otherwise, standardize to
+OrchestrationUnit.
+
+03.5. frontend adapter wording
+------------------------------
+
+The recommendation correctly flags browser/frontend adapter wording.
+
+Avoid making FrontendAdapter the umbrella adapter concept.
+
+Preferred wording:
+
+    Browser frontend is a UI/frontend surface into RuntimeHost, mediated by the
+    relevant ExecutionAdapter, RPC, and frontend runtime boundaries.
+
+or:
+
+    Browser frontend is a frontend surface exposed through an ExecutionAdapter or
+    frontend-specific adapter realization.
+
+Do not let "frontend adapter" replace ExecutionAdapter as the general category.
+
+==============================================================================
+04. MAJOR REQUIRED FIX: RUNTIMEHOST AND WORKSPACE OWNERSHIP
+==============================================================================
+
+Proposal P02 says:
+
+    A TurnixRuntime is one runtime authority domain.
+
+    Architecturally, TurnixRuntime contains Kernel, RuntimeHost, one open
+    Workspace, and zero or more ApplicationRuns.
+
+    One TurnixRuntime may have at most one Workspace open.
+
+    One Workspace may have at most one writable TurnixRuntime owner.
+
+    RuntimeHost is the running host boundary through which Kernel-owned authority
+    is started, exposed, coordinated, and closed.
+
+DA-28 currently frames workspace ownership as RuntimeHost ownership:
+
+    A RuntimeHost that owns a writable workspace is the host-level owner of that
+    workspace while the ownership remains valid.
+
+That is not necessarily wrong, but it can be misread as RuntimeHost being an
+independent authority root separate from TurnixRuntime/Kernel.
+
+Required clarification:
+
+    RuntimeHost coordinates and exposes the host boundary for writable Workspace
+    ownership held by the running TurnixRuntime/Kernel authority domain.
+
+    RuntimeHost does not own Workspace authority independently of Kernel.
+
+    RuntimeHost command surfaces and entry surfaces cannot acquire, override,
+    downgrade, recover, or release Workspace ownership except through the
+    Kernel-mediated RuntimeHost/Workspace ownership path.
+
+    Workspace ownership protects mutable Workspace roots from silent multi-runtime
+    or multi-host mutation.
+
+Recommended replacement direction:
+
+    A RuntimeHost may participate in acquiring and releasing writable Workspace
+    ownership for its TurnixRuntime.
+
+    The writable Workspace has at most one owning TurnixRuntime/Kernel authority
+    domain at a time.
+
+    RuntimeHost records and exposes host-level ownership evidence, but it does
+    not become a separate authority root over Workspace mutation.
+
+Keep DA-28 focused on semantic ownership and leave concrete claim-file rules to
+implementation specs or Workspace ownership specs, except where source-stack
+truth needs a stop-line.
+
+Do not copy the entire Proposal P02 claim-file protocol into DA-28.
+
+==============================================================================
+05. SECONDARY FIXES
+==============================================================================
+
+05.1. Runtime operation names contain malformed spacing
+------------------------------------------------------
+
+The current runtime operation list includes names such as:
+
+    Createdurable save
+    Loaddurable save
+    Validatedurable saveCompatibility
+
+These look like generated concatenation artifacts.
+
+Replace them with readable semantic categories, not final API names:
+
+    CreateSaveBundle
+    LoadSaveBundle
+    ValidateSaveBundleCompatibility
+
+or with prose:
+
+    Create SaveBundle
+    Load SaveBundle
+    Validate SaveBundle compatibility
+
+Since the section says operation names are semantic categories, either style is
+acceptable, but do not keep malformed names.
+
+05.2. DA-25 / DA-26 stop-lines are already partially integrated
+---------------------------------------------------------------
+
+DA-28 already says RuntimeHost operations and workflow traces do not define
+DA-25 or DA-26 semantics.
+
+Keep this.
+
+Make sure the revised file consistently says RuntimeHost operation completion,
+failure, cancellation, detachment, retention, stop, crash, or disconnect does not
+by itself define:
+
+    - artifact/export success
+    - missing-material semantics
+    - ComparisonResult
+    - Replay outcome
+    - Resume outcome
+    - Retry outcome
+    - audit workflow outcome
+
+unless the owning workflow maps that outcome explicitly.
+
+05.3. `resume existing state` wording seems already improved
+------------------------------------------------------------
+
+The recommendation warned against "resume existing state" because DA-26 owns
+formal Resume semantics.
+
+The candidate DA-28 now uses "load existing state" and "existing save path" in
+many places, which is better.
+
+Keep avoiding "resume existing state" unless it explicitly says it is not DA-26
+Resume.
+
+05.4. Trace context vocabulary needs SaveBundle alignment
+---------------------------------------------------------
+
+RuntimeHost trace context currently includes:
+
+    active durable save identity
+
+Prefer:
+
+    SaveBundle identity when applicable
+
+If user-facing command wording still says "save", separate that from the
+architectural identity.
+
+05.5. Open questions should include ownership-claim source split
+----------------------------------------------------------------
+
+DA-28 already leaves concrete workspace lock implementation open.
+
+Add or preserve an open question for exact ownership split between:
+
+    - RuntimeHost semantics
+    - Workspace ownership implementation
+    - claim-file / lock-file implementation
+    - RuntimeHost command/entry-surface implementation
+
+This avoids DA-28 absorbing the full Workspace claim protocol.
+
+==============================================================================
+06. WHAT TO PRESERVE FROM CURRENT DA-28
+==============================================================================
+
+Preserve these boundaries almost unchanged, except terminology migration:
+
+    - RuntimeHost is the running Turnix host boundary.
+    - RuntimeHost starts, exposes, coordinates, and closes access to
+      Kernel-owned authority.
+    - RuntimeHost does not replace Kernel authority.
+    - RuntimeHost deployment shape does not grant authority.
+    - RuntimeHost identity is distinct from Workspace, Application,
+      ApplicationRun, SaveBundle, View, ExecutionAdapter, transport, RPC, Job,
+      OrchestrationUnit, transaction, capability, and policy identity.
+    - Startup modes are entry workflows over shared Kernel-mediated runtime
+      operations.
+    - Startup modes do not create independent runtime semantics.
+    - Entry surfaces and command surfaces are not authority.
+    - Command receipt is not command acceptance.
+    - Command acceptance is not command completion.
+    - Command completion is not Job success by default.
+    - Rejected commands do not create partial ApplicationRuns, Jobs, adapter
+      failures, or OrchestrationUnit outcomes.
+    - A second RuntimeHost does not silently acquire writable Workspace ownership.
+    - Stale ownership recovery is explicit, policy-governed, and trace-visible.
+    - Local-first does not require same-machine execution.
+    - LAN exposure is explicit and policy-governed.
+    - LAN or remote access does not imply remote state authority.
+    - RuntimeHost lifecycle is distinct from ApplicationRun, View,
+      ExecutionAdapter, RPC transport, Job, OrchestrationUnit, and Window
+      lifecycle.
+    - RuntimeHost stop/crash/failure does not by itself define committed-state,
+      Job, Window, adapter, ApplicationRun, OrchestrationUnit, artifact/export,
+      comparison, Replay, Resume, Retry, or audit workflow outcomes.
+    - RuntimeHost-domain trace reason identifiers remain DA-28-owned.
+    - DA-03 owns trace substrate.
+    - Implementation shape does not define Turnix identity.
+
+==============================================================================
+07. WHAT TO ADD OR CHANGE IN THE REVISED DA-28
+==============================================================================
+
+07.1. Add current Dv3 terminology note
+--------------------------------------
+
+Add a compact note near the document role or interpretation section:
+
+    DA-28 uses current Dv3 type names:
+
+        TurnixRuntime
+        RuntimeHost
+        Workspace
+        Application
+        ApplicationRun
+        SaveBundle
+        ExecutionAdapter
+        OrchestrationUnit
+        View
+
+    Older terms such as AppInstance and SavePack are not used unless explicitly
+    declared as legacy aliases elsewhere.
+
+07.2. Adjust document description and purpose
+---------------------------------------------
+
+Replace durable save / save context language with SaveBundle where the
+durable persistence closure is meant.
+
+Keep user-facing save wording only where the command surface category is being
+explained, and clarify that the architecture identity is SaveBundle.
+
+07.3. Adjust Workspace ownership section
+----------------------------------------
+
+Add the TurnixRuntime/Kernel ownership clarification from section 04 of this
+audit.
+
+Do not make RuntimeHost a standalone Workspace authority root.
+
+07.4. Adjust Application and SaveBundle relation section
+--------------------------------------------------------
+
+Current section title:
+
+    RELATION TO APPINSTANCES AND SAVEPACKS
+
+Replace with something like:
+
+    RELATION TO APPLICATIONS, APPLICATIONRUNS, AND SAVEBUNDLES
+
+Define the split:
+
+    Application:
+        durable application individual
+
+    ApplicationRun:
+        live runtime incarnation hosted by the TurnixRuntime/RuntimeHost
+
+    SaveBundle:
+        durable persistence closure loaded or created through Kernel-mediated
+        paths
+
+07.5. Adjust runtime operation categories
+-----------------------------------------
+
+Replace malformed operation names and stale save wording.
+
+Possible list entries:
+
+    ResolveWorkspace
+    BindWorkspace
+    AcquireWorkspaceOwnership
+    ReleaseWorkspaceOwnership
+    StartRuntimeHost
+    StopRuntimeHost
+    ConnectRuntimeHost
+    DiscoverExistingRuntimeHost
+    ResolveAppPack
+    CreateApplication
+    CreateSaveBundle
+    LoadSaveBundle
+    ValidateSaveBundleCompatibility
+    BindSaveBundle
+    CreateApplicationRun
+    StartApplicationRun
+    StopApplicationRun
+    CreateView
+    BindFrontendClient
+    CreateEntrySurface
+    CloseEntrySurface
+    SelectExecutionAdapter
+    ActivateDeclaredArtifact
+    ClassifyCommand
+    DispatchCommand
+    ExposeLanSurface
+    CloseLanSurface
+    InspectRuntimeHost
+    InspectTraceEvidence
+    InspectPolicyDecisions
+
+These names are still semantic categories, not final API names.
+
+07.6. Adjust command categories
+-------------------------------
+
+Replace:
+
+    create durable save
+    load durable save
+    list durable saves
+
+with:
+
+    create SaveBundle
+    load SaveBundle
+    list SaveBundles
+
+or with user-facing wording plus architectural clarification:
+
+    create save / SaveBundle
+    load save / SaveBundle
+    list saves / SaveBundles
+
+Avoid ambiguous bare "durable save" if SaveBundle identity is meant.
+
+07.7. Adjust trace context vocabulary
+-------------------------------------
+
+Replace:
+
+    active durable save identity
+
+with:
+
+    SaveBundle identity when applicable
+
+Preserve ApplicationRun identity where live runtime context is meant.
+
+07.8. Adjust locked summary
+---------------------------
+
+Replace:
+
+    durable save
+
+with:
+
+    SaveBundle
+
+where architecture identity is meant.
+
+Keep user-facing save wording only if paired with SaveBundle or if the section is
+explicitly about commands visible to users.
+
+==============================================================================
+08. SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as a starting pass. Context still matters.
+
+    durable save identity
+        -> SaveBundle identity
+
+    durable save state
+        -> SaveBundle state / existing save state, depending on context
+
+    durable save writer
+        -> SaveBundle writer / writable SaveBundle owner, depending on context
+
+    durable save creation
+        -> SaveBundle creation
+
+    durable save loading
+        -> SaveBundle loading
+
+    create durable save
+        -> create SaveBundle
+
+    load durable save
+        -> load SaveBundle
+
+    list durable saves
+        -> list SaveBundles
+
+    BindSaveContext
+        -> BindSaveBundle
+
+    Createdurable save
+        -> CreateSaveBundle
+
+    Loaddurable save
+        -> LoadSaveBundle
+
+    Validatedurable saveCompatibility
+        -> ValidateSaveBundleCompatibility
+
+    AppInstance
+        -> Application or ApplicationRun, depending on durable-vs-live meaning
+
+    SavePack
+        -> SaveBundle
+
+    Execution adapter
+        -> ExecutionAdapter when used as the first-class type name
+
+    Orchestration Unit
+        -> OrchestrationUnit when used as the first-class type name
+
+    Browser frontend is a frontend surface or frontend adapter into RuntimeHost
+        -> Browser frontend is a UI/frontend surface into RuntimeHost, mediated by
+           the relevant ExecutionAdapter, RPC, and frontend runtime boundaries.
+
+==============================================================================
+09. ACCEPTANCE CONDITIONS FOR THE REVISED DA-28
+==============================================================================
+
+A revised DA-28 is acceptable when all of the following are true:
+
+    - It preserves RuntimeHost as the running Turnix host boundary.
+
+    - It preserves Kernel as runtime authority owner.
+
+    - It preserves RuntimeHost as non-Kernel and non-authority by deployment
+      shape.
+
+    - It clarifies that RuntimeHost coordinates Workspace ownership for the
+      owning TurnixRuntime/Kernel authority domain rather than becoming an
+      independent Workspace authority root.
+
+    - It preserves one writable owner for a Workspace unless a future explicit
+      multi-host design defines otherwise.
+
+    - It preserves explicit stale-owner recovery.
+
+    - It uses Application and ApplicationRun correctly.
+
+    - It uses SaveBundle where durable application persistence closure is meant.
+
+    - It avoids stale AppInstance and SavePack terms unless explicitly declared
+      as legacy aliases elsewhere.
+
+    - It uses ExecutionAdapter as the umbrella adapter type.
+
+    - It keeps startup modes as entry workflows, not separate runtime semantics.
+
+    - It keeps entry surfaces and command surfaces as non-authority request /
+      observation / interaction surfaces.
+
+    - It preserves command receipt, acceptance, dispatch, completion, failure,
+      cancellation, detachment, and retention as host-operation categories that
+      do not automatically define other domain outcomes.
+
+    - It preserves local-first as user-controlled local infrastructure, not
+      same-machine-only and not internet/cloud identity.
+
+    - It preserves LAN exposure as explicit and policy-governed.
+
+    - It preserves RuntimeHost lifecycle as distinct from ApplicationRun, View,
+      ExecutionAdapter, RPC transport, Job, OrchestrationUnit, Window,
+      artifact/export, comparison, Replay, Resume, Retry, and audit workflow
+      lifecycles.
+
+    - It preserves RuntimeHost-domain trace reason ownership without replacing
+      other domains' trace evidence.
+
+    - It keeps DA-05 / DA-06 / DA-07 / DA-25 / DA-26 stop-lines.
+
+    - It keeps concrete command syntax, lock files, sockets, process markers,
+      LAN pairing, local bind defaults, host discovery, retained work behavior,
+      service wrappers, containers, virtual machines, and trace field schemas
+      open for implementation specifications.
+
+==============================================================================
+10. FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep DA-28.
+
+Do not perform a heavy conceptual rewrite.
+
+Do perform a terminology and ownership-boundary alignment rewrite against
+Proposal P02.
+
+Use the REWRITE-DA-28 recommendation as mostly valid preservation guidance, but
+translate its stale terminology into the current Dv3 model.
+
+The revised DA-28 should still feel like the same document: RuntimeHost owns
+running-host boundary semantics, Workspace ownership at the host boundary,
+startup modes, entry surfaces, command surfaces, local-first and LAN exposure,
+RuntimeHost lifecycle, and RuntimeHost-domain trace reasons.
+
+The revised DA-28 should not become a Workspace claim implementation spec,
+SaveBundle spec, Application lifecycle spec, Kernel spec, ExecutionAdapter spec,
+View spec, RPC spec, Job spec, OrchestrationUnit spec, artifact/export spec,
+Replay/Resume/Retry spec, or concrete CLI/socket/process/service/framework spec.
+
+The main work is to align vocabulary and clarify authority boundaries so the
+otherwise strong RuntimeHost document does not fossilize pre-P02 terminology or
+make RuntimeHost appear to own Workspace authority independently of
+TurnixRuntime/Kernel.
+
+==============================================================================
+END OF AUDIT RESULT - DA-28
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-DA-28
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-DA-28_RESULT.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
