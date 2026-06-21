@@ -1,0 +1,777 @@
+==============================================================================
+TURNIX DV3 DOCUMENTATION AUDIT RESULT - IS-04 RUNTIME HOST COMMAND SURFACE
+==============================================================================
+
+Document title:
+    IS-04 - Runtime Host Command Surface
+
+Target IS path:
+    docs/design/IS-04_RUNTIME_HOST_COMMAND_SURFACE.txt
+
+Branch:
+    CODEX_Dv3
+
+Target file metadata loaded by assistant:
+    DOC_ID: IS-04
+    DOC_FILE: docs/design/IS-04_RUNTIME_HOST_COMMAND_SURFACE.txt
+    DOC_REV: 1
+    DOC_GIT: 797b7f8
+    GitHub blob SHA seen by assistant:
+        453a1370ea6d11f535ff9f582b4a08184b88302e
+
+Audit result file:
+    docs/design/rewrite_recommendations/AUDIT-IS-04_RESULT.txt
+
+Audit scope:
+    Audit only the assigned implementation specification file.
+
+    IS files do not have rewrite recommendation files. No REWRITE-IS-04 file was
+    read or expected.
+
+    CMR-04 was not reread for IS-04 because the IS-04 path had already been
+    identified from the Canonical Index in this conversation.
+
+Source stack used:
+    - docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+    - docs/CMR-04_CANONICAL_INDEX_TURNIX_SPECIFICATION.txt
+      only as prior index evidence for the IS-04 path
+    - docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    - docs/design/IS-04_RUNTIME_HOST_COMMAND_SURFACE.txt
+
+Recommendation file status:
+    Not applicable. IS files do not have rewrite recommendation files.
+
+Recommendation verdict:
+    Not applicable.
+
+IS document verdict:
+    Keep with targeted terminology, operation-mapping, and authority-boundary
+    fixes.
+
+    IS-04 is a useful concrete implementation specification for RuntimeHost
+    command-surface behavior. Its separation of command receipt, normalization,
+    classification, acceptance, dispatch, completion, failure, Job outcomes,
+    OrchestrationUnit outcomes, workspace ownership, and RuntimeHost operation
+    outcomes is valuable and should be preserved.
+
+    The main required fixes are current-model terminology updates around
+    AppInstance / SavePack and stronger prevention of command surfaces becoming
+    authority or creating separate semantics for Application, ApplicationRun,
+    SaveBundle, adapter, Job, or workspace behavior.
+
+==============================================================================
+WHAT THE DOCUMENT GETS RIGHT
+==============================================================================
+
+1. Correct implementation-specification scope.
+
+    IS-04 correctly defines concrete RuntimeHost command-surface flow, command
+    category classification, command identity, command acceptance and dispatch,
+    result envelopes, command-to-runtime-operation mapping, and trace mapping.
+
+    It does not try to define concrete shell syntax, parser implementation,
+    terminal rendering, LAN pairing, authentication, or RuntimeHost doctrine.
+
+2. Good command/authority separation.
+
+    The document says a command surface is not Kernel authority by itself and
+    command syntax does not define authority.
+
+    This is the most important local invariant and should be preserved.
+
+3. Good command lifecycle separation.
+
+    IS-04 clearly separates:
+
+        - command receipt from command acceptance
+        - command acceptance from command completion
+        - command completion from Job success by default
+        - command failure from Job failure by default
+        - command failure from OrchestrationUnit failure by default
+        - command cancellation from Job or OrchestrationUnit cancellation by
+          default
+
+4. Good routing to owning domains.
+
+    The dispatch section correctly sends different command effects through their
+    owning documents:
+
+        - RPC through DA-21
+        - View/frontend behavior through DA-22
+        - adapter execution through DA-23 and DA-27
+        - mutation through DA-04 and DA-24
+        - persistent I/O through DA-07
+        - capabilities through DA-16
+        - policy through DA-17
+        - Jobs through DA-19
+        - workspace ownership through IS-03
+
+5. Good command-result envelope stop-lines.
+
+    The command result envelope is clearly a command-handling result, not a
+    replacement for Job terminal state, OrchestrationUnit terminal state,
+    AppInstance lifecycle outcome, adapter lifecycle outcome, or RuntimeHost
+    operation result unless the command contract explicitly defines such a
+    projection.
+
+6. Good workspace ownership separation.
+
+    IS-04 correctly says commands requiring writable workspace ownership use
+    IS-03 and that command acceptance does not imply workspace ownership
+    acquisition.
+
+7. Good trace mapping.
+
+    IS-04 maps command receipt, classification, acceptance, rejection, dispatch,
+    completion, failure, cancellation, and RuntimeHost operation handling to
+    DA-28 trace reasons while preserving that command trace evidence does not
+    replace RuntimeHost, Job, OrchestrationUnit, or workspace ownership trace
+    evidence.
+
+8. Good open-question discipline.
+
+    The document leaves concrete command identifiers, runtimeOperationId
+    representation, result JSON schema, parser structure, CLI syntax, terminal
+    output, extension mechanism, result retention, Job-handle surface,
+    subscription surface, error class names, and help text open.
+
+==============================================================================
+MAJOR SEMANTIC RISKS
+==============================================================================
+
+1. AppInstance terminology is superseded by Application / ApplicationRun.
+
+    IS-04 still uses AppInstance in several places:
+
+        - constrained by RPC, AppInstance, adapter, Job, OrchestrationUnit...
+        - AppInstance lifecycle or runtime identity semantics
+        - commandId distinct from appInstanceId
+        - command may correlate with appInstanceId
+        - classification does not create an AppInstance
+        - command acceptance does not mean AppInstance creation succeeded
+        - command that requests AppInstance creation follows DA-20
+        - CreateAppInstance / StartAppInstance runtime-operation mapping
+        - command result envelope includes appInstanceId
+        - commandStatus does not redefine AppInstance lifecycle outcome
+        - trace context includes appInstanceId
+        - AppInstance creation semantics in unsupported list
+        - AppInstance boundary in unsupported bypass list
+        - locked summary includes appInstanceId and DA-20 boundary preservation
+
+    Current source-stack correction:
+        Proposal P02 defines:
+
+            Application
+                durable application individual
+
+            ApplicationRun
+                one live execution period of an Application
+
+    Required consequence for IS-04:
+        Replace AppInstance with Application and/or ApplicationRun according to
+        the local meaning.
+
+        Likely translation:
+
+            appInstanceId
+                -> applicationId and/or applicationRunId
+
+            AppInstance creation
+                -> Application creation when creating a durable application
+                   individual
+                -> ApplicationRun creation/start when loading/running an existing
+                   Application
+
+            AppInstance runtime identity
+                -> Application identity and ApplicationRun identity
+
+            AppInstance lifecycle outcome
+                -> ApplicationRun lifecycle outcome when live execution is meant
+
+2. SavePack terminology is superseded by SaveBundle.
+
+    IS-04 still uses SavePack in command categories, runtime-operation mapping,
+    error categories, and unsupported-semantics text.
+
+    Current source-stack correction:
+        Proposal P02 defines SaveBundle as the durable persistence closure of one
+        Application. SaveBundle is not a Pack, not an Application, not an
+        ApplicationRun, not a RuntimeHost, not a live process snapshot, not a Job
+        store, and not authority by itself.
+
+    Required consequence for IS-04:
+        Replace SavePack with SaveBundle.
+
+        Likely command category translations:
+
+            CreateSavePack
+                -> CreateSaveBundle
+
+            LoadSavePack
+                -> LoadSaveBundle
+
+            ListSavePacks
+                -> ListSaveBundles
+
+            CommandSavePackNotFound
+                -> CommandSaveBundleNotFound
+
+            CommandSavePackIncompatible
+                -> CommandSaveBundleIncompatible
+
+        Do not let command naming imply that SaveBundle is a Pack or that command
+        surfaces define separate SaveBundle semantics.
+
+3. RunAppPack mapping currently mixes old model stages.
+
+    The RunAppPack mapping includes:
+
+        - CreateSavePack or LoadSavePack
+        - ValidateSavePackCompatibility
+        - BindSaveContext
+        - CreateAppInstance
+        - StartAppInstance
+        - CreateView when a view is requested
+
+    Current source-stack correction:
+        AppPack is a reusable application definition.
+        Application is the durable application individual.
+        Loading a SaveBundle creates a new ApplicationRun of the same
+        Application.
+        SaveBundle is the durable persistence closure.
+
+    Required consequence for IS-04:
+        Recast the operation mapping into current runtime terms.
+
+        Safer conceptual mapping:
+
+            RunAppPack may map to:
+                - ResolveWorkspace
+                - AcquireWorkspaceOwnership when host ownership is required
+                - ResolveAppPack / accepted AppDefinition source
+                - CreateApplication or locate existing Application when required
+                - CreateSaveBundle or LoadSaveBundle when required
+                - ValidateSaveBundleCompatibility
+                - BindSaveBundle or bind Application persistence context
+                - CreateApplicationRun
+                - StartApplicationRun
+                - CreateView when a View is requested
+
+        The exact operation names may stay open, but the semantic model should no
+        longer be AppInstance / SavePack / SaveContext.
+
+4. RuntimeHost command surface must not become Kernel or TurnixRuntime authority.
+
+    IS-04 correctly says a command surface is not Kernel authority by itself.
+
+    Additional current-source-stack risk:
+        RuntimeHost is the running host boundary through which Kernel-owned
+        authority is started, exposed, coordinated, and closed. RuntimeHost is not
+        Kernel, Application, SaveBundle, transport, Job, OrchestrationUnit, View,
+        or Turnix identity itself.
+
+    Required consequence for IS-04:
+        Preserve and strengthen the stop-line that command surfaces request,
+        observe, or route behavior. They do not own Kernel authority,
+        TurnixRuntime identity, Application identity, ApplicationRun lifecycle,
+        SaveBundle authority, workspace ownership, adapter authority, Job
+        lifecycle, or committed-state mutation.
+
+5. commandStatus includes lifecycle-looking outcomes.
+
+    commandStatus includes completed, failed, cancelled, detached, and retained.
+    The document already says these do not redefine Job, OrchestrationUnit,
+    AppInstance, or adapter lifecycle outcomes.
+
+    Required correction:
+        Translate AppInstance to ApplicationRun and preserve the stop-lines.
+
+        Also clarify that detached/retained are command-surface statuses only
+        unless an owning workflow maps them to Job, RuntimeHost operation,
+        retained result, or subscription behavior.
+
+6. Command dispatch to multiple runtime operations needs aggregation semantics.
+
+    IS-04 allows a command to map to zero, one, or multiple runtime operations,
+    and says result shape is represented by the command result envelope.
+
+    Risk:
+        Multiple operation outcomes can be collapsed into one command result in a
+        way that hides partial failure, detached work, retained evidence, or
+        downstream operation identity.
+
+    Required correction:
+        Add or preserve a stop-line:
+
+            A command result envelope may summarize multiple runtime operations,
+            but it must not erase distinguishable downstream operation outcomes,
+            Job handles, policy decisions, workspace ownership errors, adapter
+            outcomes, or trace correlation when those distinctions are available
+            and relevant.
+
+7. Command permission/principal boundary should be explicit.
+
+    IS-04 lists policy denial and permission denial, and dispatch to capability
+    follows DA-16. That is good.
+
+    Risk:
+        Command input, CLI flags, remote client request fields, or frontend
+        interaction metadata could be read as authority-bearing.
+
+    Required correction:
+        Add a compact stop-line:
+
+            Command input, source relation, entry-surface identity, and normalized
+            arguments are evidence for classification and policy checks. They do
+            not let the caller forge Kernel authority, acting Pack identity,
+            Application identity, ApplicationRun identity, workspace ownership,
+            capability permission, or adapter authorization.
+
+8. Command category list should not become final CLI/API names.
+
+    IS-04 already says category names define semantic categories, not final CLI
+    command names. Preserve this.
+
+    Required correction:
+        When renaming SavePack/AppInstance categories, keep them as semantic
+        categories, not locked CLI spelling.
+
+9. Command extension mechanism remains open.
+
+    UnknownCommand is rejected unless a later extension mechanism defines
+    explicit handling. This is good.
+
+    Required correction:
+        Preserve this. Do not allow command extension to become implicit dynamic
+        dispatch or permission bypass.
+
+10. Trace context appInstanceId must become current identity fields.
+
+    Trace context and command result envelope list appInstanceId.
+
+    Required correction:
+        Replace with applicationId and/or applicationRunId where relevant.
+
+==============================================================================
+OBSOLETE-PRESERVATION RISKS
+==============================================================================
+
+1. Do not preserve AppInstance as current terminology.
+
+    Translate AppInstance to Application or ApplicationRun according to the local
+    meaning.
+
+2. Do not preserve SavePack or SaveContext as current command-surface terms.
+
+    Translate SavePack to SaveBundle and replace BindSaveContext with a current
+    persistence/application context binding term.
+
+3. Do not preserve CreateAppInstance / StartAppInstance operation names as final
+   current-model names.
+
+    Translate to CreateApplication, CreateApplicationRun, StartApplicationRun, or
+    equivalent current names depending on actual semantics.
+
+4. Do not preserve ListAppInstances.
+
+    Replace with ListApplications, ListApplicationRuns, or both, depending on
+    whether durable applications or live runs are listed.
+
+5. Do not preserve CommandSavePackNotFound / CommandSavePackIncompatible.
+
+    Translate to SaveBundle terminology.
+
+6. Do not preserve a command surface as its own semantic authority.
+
+    Command surfaces are entry/request/reporting surfaces. They do not own the
+    semantics of the work they request.
+
+==============================================================================
+PROCESS-METADATA LEAKAGE RISKS
+==============================================================================
+
+No major process-metadata leakage was found in IS-04.
+
+The final rewritten IS should still avoid saying "V3", "new design", "latest
+model", "rewrite", "audit", "Codex", "candidate", "seed", or similar process
+framing as ordinary specification language.
+
+Audit files may mention source-stack and proposal history. The final IS should
+state the current model directly.
+
+==============================================================================
+REQUIRED FIXES
+==============================================================================
+
+1. Replace AppInstance terminology.
+
+    Replace appInstanceId with applicationId and/or applicationRunId.
+
+    Replace AppInstance creation/lifecycle/runtime identity with Application and
+    ApplicationRun terminology.
+
+2. Replace SavePack terminology.
+
+    Replace SavePack with SaveBundle in command categories, mappings, error
+    categories, and unsupported-semantics text.
+
+3. Recast command categories.
+
+    Suggested semantic category translations:
+
+        RunAppPack
+            likely still valid if it means "run an application definition from
+            an AppPack," but its mapped operations must use Application /
+            ApplicationRun / SaveBundle terms.
+
+        CreateSavePack
+            -> CreateSaveBundle
+
+        LoadSavePack
+            -> LoadSaveBundle
+
+        ListSavePacks
+            -> ListSaveBundles
+
+        ListAppInstances
+            -> ListApplications and/or ListApplicationRuns
+
+4. Recast runtime operation mapping.
+
+    Replace old operation names such as:
+
+        CreateSavePack
+        LoadSavePack
+        ValidateSavePackCompatibility
+        BindSaveContext
+        CreateAppInstance
+        StartAppInstance
+
+    with current concepts such as:
+
+        CreateSaveBundle
+        LoadSaveBundle
+        ValidateSaveBundleCompatibility
+        BindSaveBundle or bind Application persistence context
+        CreateApplication
+        CreateApplicationRun
+        StartApplicationRun
+
+    Exact operation names may remain implementation-facing, but semantic meaning
+    must match the current model.
+
+5. Add command-input anti-forgery stop-line.
+
+    Add wording that command input, source relation, entry-surface identity, and
+    normalized arguments are evidence for classification and policy checks only.
+    They do not let the caller forge Kernel authority, acting Pack identity,
+    Application identity, ApplicationRun identity, workspace ownership,
+    capability permission, or adapter authorization.
+
+6. Preserve command lifecycle stop-lines.
+
+    Keep the distinctions between receipt, acceptance, dispatch, completion,
+    failure, cancellation, Job outcome, OrchestrationUnit outcome, adapter
+    outcome, RuntimeHost operation outcome, and workspace ownership outcome.
+
+7. Clarify multi-operation command results.
+
+    Add wording that a command result envelope may summarize multiple runtime
+    operations, but it must not erase distinguishable downstream operation
+    outcomes, Job handles, policy decisions, workspace ownership errors, adapter
+    outcomes, or trace correlation when those distinctions are available and
+    relevant.
+
+8. Update command result envelope fields.
+
+    Replace appInstanceId with applicationId and/or applicationRunId.
+
+    Consider whether runtimeOperationId should be plural or accompanied by a
+    list/summary field when a command maps to multiple operations. Keep exact JSON
+    schema open if unresolved.
+
+9. Preserve UnknownCommand rejection.
+
+    UnknownCommand remains rejected unless a later explicit extension mechanism
+    defines handling. Do not allow implicit dynamic command dispatch.
+
+10. Preserve open questions.
+
+    Keep exact commandId representation, runtimeOperationId representation,
+    command result schema, parser structure, CLI syntax, terminal output,
+    extension mechanism, result retention behavior, command-to-Job handle
+    surface, subscription surface, error classes, and help text open unless a
+    later source resolves them.
+
+==============================================================================
+SUGGESTED REWRITE STRUCTURE
+==============================================================================
+
+Keep the existing structure.
+
+Suggested targeted structure changes:
+
+    1. Update Description / Purpose / It does NOT define sections to current
+       Application / ApplicationRun / SaveBundle terminology.
+
+    2. Keep Core Concept, but add the command-input anti-forgery stop-line.
+
+    3. Update Command Identity and Correlation to replace appInstanceId with
+       applicationId and applicationRunId.
+
+    4. Update Command Category Classification to rename old AppInstance/SavePack
+       categories.
+
+    5. Keep Acceptance/Rejection and Dispatch sections, but update current model
+       terminology and preserve stop-lines.
+
+    6. Update Runtime Operation Mapping to current Application / ApplicationRun /
+       SaveBundle operations.
+
+    7. Update Command Result Envelope fields and stop-lines.
+
+    8. Preserve Relation to Jobs, Relation to OrchestrationUnits, Relation to
+       Workspace Ownership, Trace Mapping, Error Categories, Unsupported,
+       Open Questions, and Locked Summary sections.
+
+    9. Update Locked Summary to remove AppInstance / SavePack wording and to
+       preserve command-surface non-authority.
+
+Do not turn IS-04 into DA-28, DA-19, DA-20, DA-21, DA-22, DA-23, DA-24, DA-27,
+IS-03, or a general CLI design document.
+
+==============================================================================
+SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as concrete rewrite hints, not mandatory exact final wording.
+
+1. Description / constraint paragraph
+
+    Current risk:
+        constrained by RPC, AppInstance, adapter, Job, Orchestration Unit,
+        workspace ownership, policy, persistence, and committed-state documents
+
+    Safer wording:
+        constrained by RPC, Application, ApplicationRun, SaveBundle, adapter,
+        Job, OrchestrationUnit, workspace ownership, policy, persistence, and
+        committed-state documents
+
+2. It does NOT define section
+
+    Current risk:
+        AppInstance lifecycle or runtime identity semantics
+
+    Safer wording:
+        Application lifecycle, Application identity, ApplicationRun lifecycle, or
+        ApplicationRun identity semantics
+
+3. Command identity
+
+    Current risk:
+        appInstanceId
+
+    Safer wording:
+        applicationId
+        applicationRunId
+
+4. Command category classification
+
+    Current risk:
+        CreateSavePack
+        LoadSavePack
+        ListSavePacks
+        ListAppInstances
+
+    Safer wording:
+        CreateSaveBundle
+        LoadSaveBundle
+        ListSaveBundles
+        ListApplications
+        ListApplicationRuns
+
+5. Classification stop-line
+
+    Current risk:
+        Classification does not create an AppInstance.
+
+    Safer wording:
+        Classification does not create an Application or ApplicationRun.
+
+6. Acceptance stop-line
+
+    Current risk:
+        Command acceptance does not mean AppInstance creation succeeded.
+
+    Safer wording:
+        Command acceptance does not mean Application creation,
+        ApplicationRun creation, or ApplicationRun start succeeded.
+
+7. Dispatch
+
+    Current risk:
+        A command that requests AppInstance creation follows DA-20.
+
+    Safer wording:
+        A command that requests Application creation or ApplicationRun creation /
+        start follows the owning lifecycle documents.
+
+8. RunAppPack mapping
+
+    Current risk:
+        CreateSavePack or LoadSavePack
+        ValidateSavePackCompatibility
+        BindSaveContext
+        CreateAppInstance
+        StartAppInstance
+
+    Safer wording:
+        CreateSaveBundle or LoadSaveBundle
+        ValidateSaveBundleCompatibility
+        BindSaveBundle or bind Application persistence context
+        CreateApplication when needed
+        CreateApplicationRun
+        StartApplicationRun
+
+9. Result envelope
+
+    Current risk:
+        appInstanceId when applicable
+
+    Safer wording:
+        applicationId when applicable
+        applicationRunId when applicable
+
+10. commandStatus stop-line
+
+    Current risk:
+        commandStatus does not redefine AppInstance lifecycle outcome.
+
+    Safer wording:
+        commandStatus does not redefine Application lifecycle or ApplicationRun
+        lifecycle outcome.
+
+11. Error categories
+
+    Current risk:
+        CommandSavePackNotFound
+        CommandSavePackIncompatible
+
+    Safer wording:
+        CommandSaveBundleNotFound
+        CommandSaveBundleIncompatible
+
+12. Unsupported list
+
+    Current risk:
+        silently creating separate SavePack creation semantics for one command
+        surface
+        silently creating separate AppInstance creation semantics for one command
+        surface
+        command dispatch bypassing ... AppInstance ... boundaries
+
+    Safer wording:
+        silently creating separate SaveBundle creation semantics for one command
+        surface
+        silently creating separate Application or ApplicationRun creation
+        semantics for one command surface
+        command dispatch bypassing ... Application, ApplicationRun, SaveBundle ...
+        boundaries
+
+13. Locked Summary
+
+    Current risk:
+        commandId is distinct from ... appInstanceId ...
+
+    Safer wording:
+        commandId is distinct from ... applicationId, applicationRunId ...
+
+==============================================================================
+ACCEPTANCE CONDITIONS FOR FINAL REWRITTEN IS-04
+==============================================================================
+
+Accept the rewritten IS-04 only if all of the following are true:
+
+1. It remains an implementation specification for concrete RuntimeHost
+   command-surface behavior.
+
+2. It does not redefine RuntimeHost, TurnixRuntime, Kernel, Workspace,
+   Application, ApplicationRun, SaveBundle, committed-state, persistence, policy,
+   Job, OrchestrationUnit, Window, adapter, RPC, View, LAN, authentication, CLI
+   syntax, parser implementation, or terminal rendering semantics.
+
+3. All AppInstance and appInstanceId terminology has been translated to
+   Application, ApplicationRun, applicationId, and/or applicationRunId according
+   to meaning.
+
+4. All SavePack terminology has been translated to SaveBundle terminology.
+
+5. Command categories are semantic categories, not final CLI/API names.
+
+6. UnknownCommand remains rejected unless a later explicit extension mechanism
+   defines handling.
+
+7. Command input, source relation, entry-surface identity, normalized arguments,
+   and command syntax cannot be read as authority grants or identity-forging
+   mechanisms.
+
+8. Command surfaces do not become Kernel authority, TurnixRuntime identity,
+   Application identity, ApplicationRun lifecycle authority, SaveBundle
+   authority, workspace ownership, adapter authority, Job lifecycle authority, or
+   committed-state mutation authority.
+
+9. Command receipt, acceptance, dispatch, completion, failure, cancellation,
+   Job outcome, OrchestrationUnit outcome, adapter outcome, RuntimeHost operation
+   outcome, and workspace ownership outcome remain distinct.
+
+10. Runtime operation mapping does not create separate independent semantics for
+    Application creation, ApplicationRun creation/start, SaveBundle creation/load,
+    workspace ownership, adapter execution, capability invocation, Job handling,
+    or persistence.
+
+11. Command result envelopes do not replace downstream RuntimeHost operation,
+    Job, OrchestrationUnit, adapter, workspace ownership, policy, trace, or
+    committed-state evidence.
+
+12. Multi-operation command results preserve distinguishable downstream outcomes
+    and correlation when those distinctions are available and relevant.
+
+13. Command trace evidence remains evidence only and does not replace RuntimeHost,
+    Job, OrchestrationUnit, workspace ownership, adapter, or committed-state
+    evidence.
+
+14. Open questions remain open unless a later source resolves them.
+
+==============================================================================
+FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep IS-04 with targeted terminology, operation-mapping, and authority-boundary
+fixes.
+
+Do not rewrite the whole document.
+
+Do not expand this implementation specification into DA-28 RuntimeHost doctrine,
+DA-19 Job lifecycle doctrine, DA-20 Application/ApplicationRun lifecycle doctrine,
+DA-21 RPC doctrine, DA-22 View doctrine, DA-23/DA-27 adapter doctrine, DA-24
+OrchestrationUnit doctrine, IS-03 workspace ownership mechanics, or a general CLI
+syntax document.
+
+Translate obsolete AppInstance / SavePack wording into current Application /
+ApplicationRun / SaveBundle terminology. Recast command categories and operation
+mapping to current runtime concepts. Strengthen command-input anti-forgery and
+multi-operation result stop-lines while preserving the existing command lifecycle,
+Job, OrchestrationUnit, workspace ownership, RuntimeHost operation, and trace
+separation guarantees.
+
+==============================================================================
+END OF AUDIT-IS-04 RESULT
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-IS-04-RESULT
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-IS-04_RESULT.txt
+DOC_REV: 1
+DOC_GIT: temp
+----------------
