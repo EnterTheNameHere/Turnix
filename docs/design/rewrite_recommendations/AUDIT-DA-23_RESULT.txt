@@ -1,0 +1,795 @@
+==============================================================================
+AUDIT RESULT - DA-23 EXECUTION BOUNDARIES, ADAPTERS AND CODE RUNTIMES
+==============================================================================
+
+Document status:
+    Audit result for assistant-editor use.
+
+Target document:
+    docs/design/DA-23_EXECUTION_BOUNDARIES_ADAPTERS_AND_CODE_RUNTIMES.txt
+
+Recommendation file:
+    docs/design/rewrite_recommendations/REWRITE-DA-23_RECOMMENDATION.txt
+
+Audit source stack:
+    docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P01_TURNIX_PACK_ENTRY_MULTI_ADAPTER_AND_CYCLIC_ACTIVATION_PROTOCOL.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    docs/design/DA-23_EXECUTION_BOUNDARIES_ADAPTERS_AND_CODE_RUNTIMES.txt
+    docs/design/rewrite_recommendations/REWRITE-DA-23_RECOMMENDATION.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-30_RESULT.txt
+
+Audit posture:
+    Semantic architecture audit, not formatting audit.
+
+    Use CMR references as normal upstream/index material only.
+
+    Do not treat CMR files as semantic architecture authority for this audit.
+
+==============================================================================
+01. VERDICT
+==============================================================================
+
+Recommendation verdict:
+    Partial.
+
+    The recommendation correctly preserves the DA-23 execution-boundary model,
+    but it is stale in the same pre-P02 terminology layer as DA-28 and DA-29.
+
+Document verdict:
+    Keep with targeted rewrite.
+
+DA-23 is architecturally strong and should not receive a heavy conceptual
+rewrite.
+
+The candidate already improves over its recommendation in one major way:
+
+    It uses ModCallContext instead of PackContext in the target document.
+
+However, DA-23 still needs targeted changes before it is accepted as current Dv3
+text:
+
+    - durable save / save wording should be aligned with SaveBundle.
+    - ApplicationRun should be described as the live execution of an Application,
+      not as simply AppPack loaded with a save.
+    - ModCallContext lifetime wording must be aligned with DA-30: the context
+      object itself is not retained beyond the invocation.
+    - DA-23 should add a P01-aware boundary for activation entries,
+      multi-adapter Pack participation, private implementation modules, exported
+      module surfaces, and phase/barrier protocol ownership.
+    - DA-23 should not absorb DA-14/P01 activation lifecycle details, but it
+      should prevent execution-boundary text from contradicting them.
+    - frontend adapter wording should remain a subtype/specific realization, not
+      the general adapter concept.
+    - Orchestration Unit should align with OrchestrationUnit terminology unless
+      the project deliberately preserves the spaced display spelling.
+
+Primary conclusion:
+    Keep DA-23's execution-boundary authority model, but rewrite targeted
+    terminology and add P01/DA-30 alignment stop-lines.
+
+==============================================================================
+02. WHAT DA-23 GETS RIGHT
+==============================================================================
+
+02.1. Kernel authority boundary is strong
+-----------------------------------------
+
+DA-23 correctly says Kernel owns authority and that Kernel authority is not
+delegated merely because code runs in the same process, same language,
+in-process transport, frontend, RuntimeHost entry surface, or declared Pack code.
+
+Preserve this.
+
+02.2. ExecutionAdapter boundary is strong
+-----------------------------------------
+
+DA-23 correctly defines an execution adapter as a Turnix-managed environment
+capable of loading and executing declared Pack code.
+
+It correctly says an adapter is a boundary participant, not authority by itself.
+
+It correctly says execution location does not define authority, RuntimeHost
+deployment location does not define adapter authority, and adapter mediation does
+not imply sandboxing.
+
+Preserve this.
+
+02.3. Code artifact phase separation is strong
+----------------------------------------------
+
+DA-23 correctly separates recognition, declaration, binding, permission,
+activation, and execution.
+
+It correctly says no phase silently implies a later phase.
+
+Preserve this.
+
+02.4. Pack code versus backend implementation code is strong
+------------------------------------------------------------
+
+DA-23 correctly says Pack-provided Python is not backend implementation code
+merely because the backend implementation is Python, and Pack-provided
+JavaScript is not frontend authority merely because it runs in a browser.
+
+It correctly says native language convenience does not bypass Turnix boundaries.
+
+Preserve this.
+
+02.5. RPC-shaped execution boundary is strong
+---------------------------------------------
+
+DA-23 correctly says adapter-executed code communicates with Kernel authority
+through an RPC-shaped boundary and that RPC-shaped does not mean WebSocket,
+networked, or tied to one concrete transport.
+
+It correctly says direct in-process calls can be a transport/dispatch
+optimization but do not bypass capability routing, permission checks, lifecycle
+ownership, trace correlation, structured errors, OrchestrationUnit boundaries,
+transaction boundaries, ApplicationRun state authority, or RuntimeHost authority
+boundaries.
+
+Preserve this.
+
+02.6. DA-27 and DA-28 stop-lines are strong
+-------------------------------------------
+
+DA-23 correctly says DA-27 owns adapter lifecycle/trust/isolation/concrete
+adapter classes and DA-28 owns RuntimeHost identity, workspace ownership,
+startup modes, entry surfaces, command surfaces, and RuntimeHost-domain trace
+context.
+
+Preserve this.
+
+==============================================================================
+03. MAJOR REQUIRED FIX: CURRENT DV3 TERMINOLOGY
+==============================================================================
+
+The recommendation still uses:
+
+    PackContext
+    AppInstance
+    SavePack
+
+The current Dv3 source stack uses:
+
+    ModCallContext
+    Application
+    ApplicationRun
+    SaveBundle
+
+The DA-23 candidate already uses ModCallContext, but it still uses older save
+wording and some older terminology in surrounding boundaries.
+
+03.1. durable save -> SaveBundle
+--------------------------------
+
+Replace bare architectural uses of:
+
+    durable save
+    durable save storage
+    durable save persistence
+    durable save state
+    writable save
+    save context
+
+with SaveBundle-based wording when the durable persistence closure is meant.
+
+Recommended model:
+
+    SaveBundle is the durable persistence closure of one Application.
+
+    SaveBundle persists accepted Application state, accepted Pack graph evidence,
+    retained Pack material, configuration/policy material, retained history, and
+    compatibility evidence according to its owning documents.
+
+    Adapter-executed code does not own the SaveBundle merely because its work
+    affects persisted state.
+
+    Writable SaveBundle mutation remains Kernel-mediated and constrained by
+    Memory, Transaction, IoManager, ApplicationRun, and SaveBundle ownership
+    rules.
+
+Do not use SavePack unless a separate legacy alias or older document explicitly
+requires it.
+
+03.2. ApplicationRun relationship needs correction
+--------------------------------------------------
+
+Current DA-23 says:
+
+    ApplicationRun is the live runtime identity created by loading an AppPack
+    with a save.
+
+This should be revised.
+
+Proposal P02 says Application is the durable application individual and
+ApplicationRun is one live execution period of that Application. A SaveBundle
+load creates a new ApplicationRun of the same Application.
+
+Recommended replacement direction:
+
+    Application is the durable application individual.
+
+    ApplicationRun is one live runtime incarnation of that Application.
+
+    AppPack is a reusable application definition or one AppDefinition source.
+
+    SaveBundle stores the durable persistence closure used to restore an
+    Application and create a new ApplicationRun.
+
+    Adapter-executed code participates in an ApplicationRun through the
+    Kernel-owned authority model.
+
+If a formula is retained, prefer:
+
+    AppDefinition/AppPack binding + Application + SaveBundle/runtime context
+        -> ApplicationRun
+
+or avoid the formula and use prose.
+
+03.3. ModCallContext terminology is good, but lifetime wording must be fixed
+----------------------------------------------------------------------------
+
+DA-23 already uses ModCallContext, which is correct.
+
+However, the current text says:
+
+    ModCallContext authority does not outlive the lifecycle boundary that created
+    it unless an explicit retained handle model is defined.
+
+This is risky after DA-30.
+
+DA-30 says ModCallContext itself is invocation-scoped and retained contexts are
+invalid after callback/invocation completion. Registrations retain callback
+metadata, not the old context object. Future retained handles, if any, are not
+retained ModCallContexts.
+
+Replace with something like:
+
+    ModCallContext is invocation-scoped.
+
+    The context object itself does not outlive the callback, lifecycle phase,
+    hook, event, timer, capability call, or ProcessingRun stage that created it.
+
+    If a later retained-handle model exists, that handle is a separate mediated
+    object with its own authority and lifetime. It is not a retained
+    ModCallContext.
+
+    Registrations store owner Pack, callback endpoint, registration scope, and
+    metadata, not the ModCallContext object.
+
+03.4. Add DA-30 as owning document for ModCallContext semantics
+---------------------------------------------------------------
+
+DA-23 should own abstract execution-boundary authority and may summarize the
+ModCallContext boundary.
+
+DA-30 now owns ModCallContext invocation gateway semantics.
+
+Add DA-30 to upstream / stop-line references.
+
+Recommended boundary:
+
+    DA-23 defines why adapter-executed Pack code receives only mediated
+    gateway participation.
+
+    DA-30 defines ModCallContext lifetime, facades, absent surfaces, retention
+    rules, and invocation-scoped gateway semantics.
+
+    DA-23 must not redefine the ModCallContext API shape.
+
+==============================================================================
+04. MAJOR REQUIRED FIX: PROPOSAL P01 ALIGNMENT
+==============================================================================
+
+Proposal P01 updates the activation-entry and multi-adapter lifecycle model.
+
+DA-23 should not absorb all of P01 because DA-14 / activation documents own the
+activation lifecycle protocol.
+
+However, DA-23 owns execution-boundary semantics and therefore should include
+enough P01-aware stop-lines to prevent execution-boundary drift.
+
+04.1. Activation entry versus code file versus exported module
+-------------------------------------------------------------
+
+DA-23 already says code must be declared, but it should explicitly align with
+P01's three executable-material roles:
+
+    Activation entry:
+        loaded by Turnix through one ExecutionAdapter and participates in Pack
+        lifecycle hooks.
+
+    Private implementation module:
+        loaded by Pack code as needed; not automatically lifecycle participant;
+        not externally addressable by default.
+
+    Exported module surface:
+        publicly addressable only through an explicitly supported mediated
+        module-loading mechanism; loaded on demand; does not receive lifecycle
+        callbacks merely because it is exported.
+
+This belongs in DA-23 as execution-boundary protection, not as full activation
+protocol detail.
+
+Add a compact section or paragraph:
+
+    DA-23 distinguishes declared activation entries from private implementation
+    modules and exported module surfaces.
+
+    Recognition or declaration of code material does not mean every code file is
+    an activation entry.
+
+    Only declared activation entries are loaded by Turnix for lifecycle
+    participation.
+
+    Private and exported modules remain governed by DA-12, adapter-local module
+    contracts, and mediated cross-Pack access rules.
+
+04.2. Multiple ExecutionAdapters for one Pack
+---------------------------------------------
+
+P01 says one Pack may have multiple declared activation entries, one per
+adapter/runtime participation, and no universal adapter order is guaranteed.
+
+DA-23 should add a boundary statement:
+
+    A Pack may declare multiple adapter/runtime participations.
+
+    Each declared adapter/runtime participation has at most one activation entry
+    for lifecycle coordination.
+
+    ExecutionAdapter load/evaluation order is not activation authority and does
+    not define dependency order or lifecycle callback order.
+
+    Cross-adapter prerequisites required during onLoad(ctx) must be established
+    through earlier lifecycle phases defined by the activation protocol.
+
+Do not duplicate the full phase/barrier rules in DA-23.
+
+04.3. Turnix-facing infrastructure readiness
+--------------------------------------------
+
+P01 says Turnix-facing infrastructure must be operational before an
+ExecutionAdapter loads activation entries.
+
+DA-23 should include this as an execution-boundary requirement:
+
+    Before Turnix asks an ExecutionAdapter to load a Pack activation entry, the
+    mediated Turnix-facing surfaces required for valid Pack participation are
+    ready to receive supported registration, invocation, RPC, trace, structured
+    error, and ModCallContext interactions.
+
+    This readiness means Turnix can receive Pack participation.
+
+    It does not mean every requested capability or service is already available.
+
+This is important because otherwise top-level module evaluation could occur while
+registries/gateways are half-booted.
+
+04.4. Stage 0 / module-level side effects
+-----------------------------------------
+
+P01 says entry evaluation is unavoidable host-runtime behavior and may cause
+module-level side effects, but Turnix discourages relying on them and cannot
+reverse arbitrary external side effects.
+
+DA-23 should include a boundary statement:
+
+    ExecutionAdapter entry evaluation may run host-language top-level code.
+
+    Top-level side effects are not the safe ordinary activation pattern.
+
+    Turnix guarantees cleanup only for Turnix-owned and explicitly controlled
+    activation material.
+
+    Unsupported module-level side effects do not become Turnix guarantees,
+    Kernel authority, or reversible state.
+
+04.5. Cyclic activation belongs mainly to activation docs
+--------------------------------------------------------
+
+DA-23 should not define the full cyclic activation protocol.
+
+It may include a stop-line:
+
+    DA-23 recognizes that activation plans may include cyclic activation groups
+    and multi-adapter phase barriers.
+
+    DA-14 / activation documents own the phase/barrier protocol, cycle admission,
+    cyclic-group activation, error categories, registration publication, and
+    activation failure semantics.
+
+    DA-23 owns only the execution-boundary implications: ExecutionAdapters load
+    declared entries, communicate through mediated Turnix surfaces, and do not
+    become authority because the activation graph is cyclic or multi-adapter.
+
+==============================================================================
+05. SECONDARY FIXES
+==============================================================================
+
+05.1. Replace Orchestration Unit with OrchestrationUnit
+-------------------------------------------------------
+
+DA-23 uses Orchestration Unit with a space in several places.
+
+The current Dv3 type name is OrchestrationUnit.
+
+Use OrchestrationUnit unless the project deliberately keeps the spaced spelling
+as a display alias.
+
+05.2. Frontend adapter wording
+------------------------------
+
+DA-23 uses frontend adapters in the browser/frontend section.
+
+This is acceptable only if frontend adapter means a specific realization or
+subtype. It must not replace ExecutionAdapter as the umbrella type.
+
+Suggested wording:
+
+    Browser JavaScript Pack code may run in a frontend-facing ExecutionAdapter
+    realization.
+
+or:
+
+    Browser JavaScript Pack code may run in a frontend/browser adapter as a
+    specific ExecutionAdapter realization.
+
+05.3. `state access surfaces` should not hide DA-30 facade boundaries
+---------------------------------------------------------------------
+
+DA-23 says ModCallContext may expose state access surfaces when allowed.
+
+This is acceptable as a summary, but DA-30 should own the detailed facade model.
+
+Add a stop-line:
+
+    DA-23 does not define the ModCallContext facade set.
+
+    DA-30 owns ModCallContext memory/config/resources/io/trace/capability/job/
+    hook/processing/event/timer facade semantics and explicitly absent surfaces.
+
+05.4. Update no-backend-access wording
+--------------------------------------
+
+Preserve the current rule that adapter-executed code receives no general backend
+access.
+
+Strengthen it with DA-30 absences only as a reference:
+
+    Adapter-executed Pack code does not receive ctx.kernel, ctx.runtimeHost,
+    ctx.services, ctx.journal, ctx.rawFilesystem, ctx.transaction.commit,
+    ctx.job.setTerminalState, or ctx.sessions merely because it runs through an
+    ExecutionAdapter.
+
+This can either be included in DA-23 or left to DA-30, but DA-23 should at least
+point to DA-30 for the exact absence list.
+
+05.5. DA-25 / DA-26 stop-lines are valid
+----------------------------------------
+
+The recommendation correctly asks to preserve DA-25 / DA-26 boundaries.
+
+The candidate already includes some of this.
+
+Keep the rule:
+
+    Adapter execution acceptance, success, failure, disconnect, or direct-call
+    dispatch does not by itself define artifact/export authority,
+    ComparisonResult, Replay outcome, Resume outcome, Retry outcome, or audit
+    workflow outcome.
+
+05.6. Trace wording should remain DA-03-compatible
+--------------------------------------------------
+
+Keep DA-23 trace wording as emission/correlation obligations and avoid implying
+trace retention or committed-state authority.
+
+Do not repeat all DA-03 doctrine.
+
+==============================================================================
+06. WHAT TO PRESERVE FROM CURRENT DA-23
+==============================================================================
+
+Preserve these boundaries almost unchanged, except terminology and P01/DA-30
+alignment:
+
+    - Kernel owns authority.
+    - ExecutionAdapters execute declared Pack code.
+    - Transports carry messages.
+    - RPC defines the logical communication boundary.
+    - Capabilities define what adapter-executed code may do.
+    - RuntimeHost exposes controlled entry surfaces under DA-28.
+    - Host language does not grant backend authority.
+    - Same process does not grant backend authority.
+    - Direct backend authority is not a valid authority path for Pack code.
+    - Recognition does not imply declaration.
+    - Declaration does not imply binding success.
+    - Binding does not imply execution permission.
+    - Permission does not imply activation success.
+    - Activation dispatch does not imply execution success.
+    - Execution success does not imply committed-state mutation.
+    - Execution success does not imply RuntimeHost command acceptance,
+      RuntimeHost operation success, or Workspace ownership change.
+    - Declared executable code remains subject to adapter binding, permission,
+      activation, capability, and policy checks.
+    - Pack-provided code is not backend implementation code.
+    - Pack-provided code is not frontend authority.
+    - Pack-provided code is not RuntimeHost authority.
+    - Pack-provided code receives controlled participation through
+      ModCallContext, capability calls, RPC-shaped messages, and declared
+      lifecycle entrypoints.
+    - ModCallContext exposes scoped participation, not general backend access.
+    - RPC-shaped boundary is not equivalent to WebSocket.
+    - RPC-shaped boundary is not necessarily networked.
+    - Transport does not define authority.
+    - Direct-call optimization does not bypass authority.
+    - Native language imports cannot bypass Turnix semantics.
+    - Capability permission remains Kernel-mediated.
+    - Adapter execution acceptance is not Job success.
+    - Adapter execution failure is not Job failure by default.
+    - Adapter disconnect is not Job cancellation by default.
+    - Adapter execution failure is not OrchestrationUnit failure by default.
+    - Browser/frontend state is not authoritative Application/ApplicationRun
+      state.
+    - DA-27 and DA-28 do not weaken DA-23 authority boundaries.
+
+==============================================================================
+07. WHAT TO ADD OR CHANGE IN THE REVISED DA-23
+==============================================================================
+
+07.1. Add current Dv3 terminology note
+--------------------------------------
+
+Add a compact note near the document role or interpretation section:
+
+    DA-23 uses current Dv3 type names:
+
+        Application
+        ApplicationRun
+        SaveBundle
+        ExecutionAdapter
+        ModCallContext
+        OrchestrationUnit
+        RuntimeHost
+        View
+
+    Older terms such as AppInstance, SavePack, and PackContext are not used
+    unless explicitly declared as legacy aliases elsewhere.
+
+07.2. Add DA-30 to upstream and stop-lines
+------------------------------------------
+
+DA-23 should reference DA-30 as the owner of detailed ModCallContext invocation
+gateway semantics.
+
+Add DA-30 to upstream documents and relevant `It does NOT define` text.
+
+07.3. Add P01-aware activation-entry boundary
+---------------------------------------------
+
+Add compact wording that says:
+
+    - Turnix loads declared activation entries through ExecutionAdapters.
+    - A Pack may have multiple adapter/runtime participations.
+    - Each declared adapter/runtime participation has at most one activation
+      entry for lifecycle coordination.
+    - Private implementation modules and exported module surfaces are not hidden
+      activation entries.
+    - ExecutionAdapter load order does not define activation order.
+    - DA-14 / activation documents own the lifecycle phases, barriers, cyclic
+      activation group semantics, and activation success/failure semantics.
+
+07.4. Fix ModCallContext lifetime wording
+-----------------------------------------
+
+Replace the retained-handle sentence as described in section 03.3.
+
+The context object itself is not retained.
+
+Any retained handle is a separate mediated object, not ModCallContext.
+
+07.5. Fix ApplicationRun / SaveBundle relation section
+------------------------------------------------------
+
+Current section title:
+
+    RELATION TO APPPACK, APPLICATIONRUN, AND RUNTIMEHOST
+
+Consider changing to:
+
+    RELATION TO APPPACK, APPLICATION, APPLICATIONRUN, SAVEBUNDLE, AND RUNTIMEHOST
+
+Do not let this section become DA-20 or SaveBundle specification.
+
+Keep it focused on execution-boundary authority.
+
+07.6. Fix direct-call authority list
+------------------------------------
+
+Replace durable save authority with SaveBundle authority.
+
+Ensure direct-call optimization preserves:
+
+    - ApplicationRun state authority
+    - SaveBundle persistence authority
+    - OrchestrationUnit boundaries
+    - Transaction and commit boundaries
+    - ModCallContext boundary
+    - RuntimeHost boundaries
+
+07.7. Keep exact schema and API shapes open
+-------------------------------------------
+
+Do not define concrete executable artifact declaration schema, adapter binding
+schema, ModCallContext API shape, language-specific ModCallContext shape,
+direct-call implementation, adapter route taxonomy, manifest entry syntax, RPC
+wire schema, concrete WebSocket flow, or adapter implementation details.
+
+==============================================================================
+08. SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as a starting pass. Context still matters.
+
+    PackContext
+        -> ModCallContext
+
+    AppInstance
+        -> Application or ApplicationRun, depending on durable-vs-live meaning
+
+    SavePack
+        -> SaveBundle
+
+    durable save storage
+        -> SaveBundle persistence
+
+    durable save state
+        -> SaveBundle state / persisted Application state, depending on context
+
+    writable save
+        -> writable SaveBundle
+
+    save context
+        -> SaveBundle binding / existing save state, depending on context
+
+    AppPack + Application + runtime context -> ApplicationRun
+        -> AppDefinition/AppPack binding + Application + SaveBundle/runtime
+           context -> ApplicationRun
+        or replace with prose
+
+    ApplicationRun is the live runtime identity created by loading an AppPack with a save
+        -> ApplicationRun is one live runtime incarnation of an Application;
+           loading a SaveBundle creates a new ApplicationRun of the same
+           Application.
+
+    ModCallContext authority does not outlive the lifecycle boundary that created it unless an explicit retained handle model is defined
+        -> ModCallContext is invocation-scoped and the context object itself does
+           not outlive the callback/invocation/stage that created it. Any future
+           retained handle is a separate mediated object, not a retained
+           ModCallContext.
+
+    Orchestration Unit
+        -> OrchestrationUnit when used as the first-class type name
+
+    frontend adapter
+        -> frontend-facing ExecutionAdapter realization, when used as a subtype
+
+==============================================================================
+09. ACCEPTANCE CONDITIONS FOR THE REVISED DA-23
+==============================================================================
+
+A revised DA-23 is acceptable when all of the following are true:
+
+    - It preserves Kernel authority as not implied by execution location,
+      language, process, transport, frontend, RuntimeHost entry surface, or Pack
+      code declaration.
+
+    - It preserves ExecutionAdapter as the umbrella execution-boundary type.
+
+    - It preserves adapter mediation as distinct from sandboxing.
+
+    - It preserves code artifact phase separation.
+
+    - It preserves explicit declaration requirements for executable Pack code.
+
+    - It preserves Pack-provided code versus trusted backend implementation code.
+
+    - It uses ModCallContext and defers detailed ModCallContext semantics to
+      DA-30.
+
+    - It removes stale PackContext wording.
+
+    - It uses Application, ApplicationRun, and SaveBundle correctly.
+
+    - It avoids stale AppInstance and SavePack wording unless explicitly declared
+      as legacy aliases elsewhere.
+
+    - It clarifies that ModCallContext itself is not retained past invocation;
+      future retained handles are separate mediated objects.
+
+    - It adds P01-aware activation-entry, multi-adapter, private module, and
+      exported module boundaries without absorbing full activation lifecycle
+      semantics.
+
+    - It preserves RPC-shaped boundary as not WebSocket and not necessarily
+      networked.
+
+    - It preserves direct-call optimization as not authority bypass.
+
+    - It preserves native imports as unable to bypass Turnix semantics.
+
+    - It preserves capability permission as Kernel-mediated.
+
+    - It preserves policy decisions as scoped and non-broadening.
+
+    - It preserves transport as not authority.
+
+    - It preserves adapter-executed work as not becoming Job,
+      OrchestrationUnit, Window, RuntimeHost, artifact/export, comparison,
+      Replay, Resume, Retry, or audit workflow outcome by default.
+
+    - It preserves browser/frontend state as non-authoritative.
+
+    - It keeps DA-27 and DA-28 ownership stop-lines.
+
+    - It keeps DA-25 and DA-26 workflow stop-lines.
+
+    - It keeps exact schema/API/implementation details open.
+
+==============================================================================
+10. FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep DA-23.
+
+Do not perform a heavy conceptual rewrite.
+
+Do perform a terminology and source-stack alignment rewrite against Proposal P01,
+Proposal P02, and DA-30.
+
+Use the REWRITE-DA-23 recommendation as valid preservation guidance, but do not
+copy its stale PackContext/AppInstance/SavePack vocabulary into the revised
+file.
+
+DA-23 should remain the abstract execution-boundary authority document:
+
+    - declared Pack code execution
+    - ExecutionAdapter boundary participation
+    - code artifact phases
+    - Pack code versus backend implementation code
+    - ModCallContext as mediated participation gateway, with details deferred to
+      DA-30
+    - RPC-shaped execution boundary
+    - direct-call optimization boundary
+    - relation to DA-14, DA-27, DA-28, DA-25, and DA-26
+
+DA-23 should not become:
+
+    - full activation lifecycle protocol
+    - cyclic activation protocol
+    - concrete manifest schema
+    - concrete adapter lifecycle specification
+    - ModCallContext API specification
+    - SaveBundle specification
+    - Application lifecycle specification
+    - RuntimeHost command-surface specification
+    - RPC/WebSocket implementation specification
+    - capability permission specification
+    - persistence or configuration specification
+
+The main work is to preserve the strong execution-boundary model while aligning
+it with current Dv3 names and ensuring P01/DA-30 do not get contradicted.
+
+==============================================================================
+END OF AUDIT RESULT - DA-23
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-DA-23
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-DA-23_RESULT.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
