@@ -1,0 +1,716 @@
+==============================================================================
+TURNIX DV3 DOCUMENTATION AUDIT RESULT - IS-03 WORKSPACE OWNERSHIP AND HOST LOCKING
+==============================================================================
+
+Document title:
+    IS-03 - Workspace Ownership and Host Locking
+
+Target IS path:
+    docs/design/IS-03_WORKSPACE_OWNERSHIP_AND_HOST_LOCKING.txt
+
+Branch:
+    CODEX_Dv3
+
+Target file metadata loaded by assistant:
+    DOC_ID: IS-03
+    DOC_FILE: docs/design/IS-03_WORKSPACE_OWNERSHIP_AND_HOST_LOCKING.txt
+    DOC_REV: 1
+    DOC_GIT: b7e42a9
+    GitHub blob SHA seen by assistant:
+        103c97b8d3691f53124ff417a9dd49389dfa6220
+
+Audit result file:
+    docs/design/rewrite_recommendations/AUDIT-IS-03_RESULT.txt
+
+Audit scope:
+    Audit only the assigned implementation specification file.
+
+    IS files do not have rewrite recommendation files. No REWRITE-IS-03 file was
+    read or expected.
+
+    CMR-04 was not reread for IS-03 because the IS-03 path had already been
+    identified from the Canonical Index in this conversation.
+
+Source stack used:
+    - docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+    - docs/CMR-04_CANONICAL_INDEX_TURNIX_SPECIFICATION.txt
+      only as prior index evidence for the IS-03 path
+    - docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    - docs/design/IS-03_WORKSPACE_OWNERSHIP_AND_HOST_LOCKING.txt
+
+Recommendation file status:
+    Not applicable. IS files do not have rewrite recommendation files.
+
+Recommendation verdict:
+    Not applicable.
+
+IS document verdict:
+    Keep with targeted terminology, identity, and authority-boundary fixes.
+
+    IS-03 is a useful concrete implementation specification for workspace
+    ownership records, host-lock acquisition, second-owner rejection,
+    stale-owner recovery, read-only inspection, release, malformed-record
+    handling, trace mapping, and implementation error categories.
+
+    It should not be rewritten from scratch. Its core flow is valuable.
+
+    The main required fixes are caused by current-model drift around
+    AppInstance / SavePack terminology and by a possible identity conflation
+    between RuntimeHost, TurnixRuntime, runtime execution identity, and the
+    coordinator operating-system process.
+
+==============================================================================
+WHAT THE DOCUMENT GETS RIGHT
+==============================================================================
+
+1. Correct implementation-specification scope.
+
+    IS-03 correctly defines concrete workspace ownership record behavior and
+    host-lock flow rather than trying to redefine RuntimeHost, Kernel,
+    committed-state, persistence, RPC, OrchestrationUnit, command-surface, LAN,
+    authentication, or process-supervision semantics.
+
+2. Strong writable-owner invariant.
+
+    The document clearly says that one RuntimeHost must not silently become a
+    second writable owner of the same workspace.
+
+    It requires existing ownership evidence to be read, classified, and handled
+    explicitly instead of silently overwritten.
+
+3. Good distinction between ownership evidence and authority.
+
+    The document repeatedly says the ownership record and host lock do not create
+    Kernel authority, committed-state mutation authority, adapter write
+    authority, Job outcome, Window finalization, or automatic state repair.
+
+4. Good direct-write stop-lines.
+
+    IS-03 correctly states that Pack-provided code and adapter-executed code do
+    not write the ownership record directly.
+
+5. Good malformed-record handling.
+
+    Malformed ownership records are not silently treated as absent, stale, or
+    normalized. This is a strong and important safety property.
+
+6. Good stale-owner recovery model.
+
+    Stale-owner detection is not takeover. Stale-owner recovery is explicit,
+    policy-governed where policy is available, trace-visible, and uses
+    persistence-safe write behavior.
+
+7. Good read-only inspection separation.
+
+    Read-only inspection is explicitly an accessMode, not writable ownershipMode.
+    It does not create writable ownership, does not write committed state, does
+    not release another owner, and does not repair malformed ownership evidence.
+
+8. Good trace/evidence separation.
+
+    IS-03 maps implementation behavior to RuntimeHost trace reasons while also
+    saying trace evidence does not replace the ownership record and the ownership
+    record does not replace trace evidence.
+
+9. Good open-question discipline.
+
+    The document leaves concrete identifier representations, heartbeat values,
+    OS liveness checks, migration behavior, exception class names, and JSON schema
+    publication format open instead of falsely finalizing them.
+
+==============================================================================
+MAJOR SEMANTIC RISKS
+==============================================================================
+
+1. AppInstance / SavePack terminology is superseded by Application /
+   ApplicationRun / SaveBundle.
+
+    IS-03 repeatedly uses older wording:
+
+        - DA-20 AppInstance writable SavePack ownership
+        - AppInstance lifecycle or writable SavePack ownership semantics
+        - AppInstance writable SavePack ownership
+        - writable AppInstance or SavePack state
+        - AppInstance stop outcome
+        - adapter SavePack write authority
+
+    Current source-stack correction:
+        Proposal P02 defines:
+
+            Application
+                durable application individual
+
+            ApplicationRun
+                one live execution period of an Application
+
+            SaveBundle
+                durable persistence closure of the Application
+
+    Required consequence for IS-03:
+        Replace AppInstance / SavePack wording with current terms.
+
+        Use Application when the document means durable application identity or
+        committed application state.
+
+        Use ApplicationRun when the document means live runtime execution.
+
+        Use SaveBundle when the document means the durable persistence closure.
+
+        Avoid calling SaveBundle a Pack, a writable directory, a Job store, or an
+        authority source.
+
+2. Workspace owner identity may conflate RuntimeHost with TurnixRuntime.
+
+    IS-03 describes ownership as RuntimeHost workspace ownership and uses
+    runtimeHostId as the owner identity field.
+
+    Current source-stack correction:
+        Proposal P02 says RuntimeHost is the running host boundary through which
+        Kernel-owned authority is started, exposed, coordinated, and closed.
+        RuntimeHost is not Kernel, Application, SaveBundle, transport, Job,
+        OrchestrationUnit, View, or Turnix identity itself.
+
+        Proposal P02 also says Workspace is opened by one TurnixRuntime and one
+        Workspace may have at most one writable TurnixRuntime owner.
+
+    Required consequence for IS-03:
+        The ownership record must distinguish, or explicitly define the relation
+        between:
+
+            workspaceId
+                stable Workspace identity
+
+            runtimeId
+                one TurnixRuntime execution identity
+
+            runtimeHostId
+                the RuntimeHost / command-surface host identity, if retained
+
+            coordinatorProcessId
+                OS process representing that runtime execution
+
+            coordinatorProcessStartIdentity
+                process lifetime identity, to avoid PID reuse ambiguity
+
+            ownerToken / ownerNonce
+                unpredictable identity of one ownership claim
+
+        If runtimeHostId remains in the schema, the final document must state
+        whether it is an alias for runtime execution identity or a distinct host
+        boundary identity. Do not let RuntimeHost become TurnixRuntime identity
+        merely because it exposes the workspace-opening command surface.
+
+3. The ownership record path is more concrete than Proposal P02's working path.
+
+    IS-03 locks the initial path:
+
+        .turnix/runtime-host/owner.json
+
+    Proposal P02 described a working filename such as .turnix-lock or another
+    reserved Workspace control filename.
+
+    This is not automatically wrong because IS documents may define concrete
+    implementation details. IS-03 also says the path may be revised by later
+    implementation specification when migration and compatibility rules are
+    defined.
+
+    Required consequence for IS-03:
+        Keep the concrete path only if the intent is to make IS-03 the concrete
+        implementation owner of that path.
+
+        Preserve the migration/compatibility escape hatch.
+
+        Do not imply that the path itself is the architecture-level ownership
+        authority. The path is a concrete representation of ownership evidence.
+
+4. Atomic creation / race safety is under-specified.
+
+    IS-03 says the RuntimeHost checks for existing ownership evidence before
+    claiming writable ownership, writes a new record if none exists, and verifies
+    the written record.
+
+    Risk:
+        A check-then-write flow can be misimplemented as non-atomic. The document
+        says persistence-safe write behavior is used, but the acquisition section
+        should explicitly require an atomic claim step or equivalent exclusive
+        create/compare-and-verify sequence.
+
+    Required consequence for IS-03:
+        Add a stop-line that writable ownership acquisition must not rely on an
+        unsafe check-then-overwrite sequence.
+
+        The implementation must use atomic creation, exclusive creation,
+        compare-and-swap-equivalent behavior, or another DA-07-constrained
+        persistence-safe ownership-claim mechanism.
+
+5. Heartbeat/liveness evidence needs process-start identity or equivalent.
+
+    IS-03 includes processId and heartbeatAtUtc, and says stale heartbeat or
+    missing process is not sufficient by itself to authorize silent takeover.
+
+    That is good. However, the field list does not include a coordinator process
+    start identity, boot/session identity, or equivalent field to distinguish PID
+    reuse.
+
+    Required consequence for IS-03:
+        Either add a field such as processStartIdentity /
+        coordinatorProcessStartIdentity, or explicitly leave it as an open field
+        in the representation questions.
+
+        Without this, processId evidence may be too weak for same-machine stale
+        owner classification.
+
+6. Read-only inspection output rule needs to remain outside the inspected
+   workspace by default.
+
+    IS-03 allows optional local tool output outside the inspected workspace or
+    inside the workspace only when a later policy defines safe inspection output.
+
+    This is good. Preserve it.
+
+    Required consequence for IS-03:
+        Do not weaken this into "read-only inspection may write reports in the
+        inspected workspace" without a separate inspection-session record or
+        explicit policy-defined safe output location.
+
+7. Unknown-field preservation is useful but should not imply schema authority.
+
+    IS-03 says unknown fields are preserved by tooling that rewrites the record
+    only when preservation is explicitly supported, and ignored for authority
+    decisions unless a later schema version defines their meaning.
+
+    This is good.
+
+    Required consequence for IS-03:
+        Keep this behavior. Do not allow unknown fields to affect ownership,
+        recovery, policy, identity, stale-owner classification, or authority.
+
+8. Trace mapping should not imply trace is sufficient authority.
+
+    The target already says trace evidence does not replace the ownership record
+    and ownership record does not replace trace evidence.
+
+    Required consequence for IS-03:
+        Preserve this distinction. RuntimeHost trace reasons explain ownership
+        events; they do not create writable ownership or repair missing ownership
+        evidence.
+
+9. DA-20 reference must be translated or re-scoped.
+
+    IS-03 currently treats DA-20 as the owner of AppInstance writable SavePack
+    ownership. In the current source stack, P02 supersedes the old naming model.
+
+    Required consequence for IS-03:
+        If DA-20 remains referenced, phrase it through current Application /
+        ApplicationRun / SaveBundle terminology, or refer to the later accepted
+        lifecycle/persistence owner without preserving obsolete terminology.
+
+==============================================================================
+OBSOLETE-PRESERVATION RISKS
+==============================================================================
+
+1. Do not preserve AppInstance as current terminology.
+
+    Translate to Application or ApplicationRun according to meaning.
+
+2. Do not preserve SavePack as the durable persistence closure term.
+
+    Translate to SaveBundle. Use SaveBundle as durable persistence closure of an
+    Application, not as a Pack, authority object, arbitrary writable directory,
+    or live process snapshot.
+
+3. Do not preserve "AppInstance writable SavePack ownership" as a compound
+   current concept.
+
+    Split it into current responsibilities:
+
+        Workspace writable ownership
+            host/runtime-level claim over Workspace mutable roots
+
+        SaveBundle writable ownership
+            durable application persistence ownership / one writable active
+            ApplicationRun, where applicable
+
+        ApplicationRun lifecycle
+            live run state and live handles
+
+        Application committed state
+            DA-04-governed authority
+
+4. Do not preserve runtimeHostId as the only owner identity if the current model
+   needs runtimeId / coordinator process / owner token separation.
+
+5. Do not preserve stale heartbeat as sufficient recovery proof.
+
+    IS-03 already gets this right. Keep it.
+
+==============================================================================
+PROCESS-METADATA LEAKAGE RISKS
+==============================================================================
+
+No major process-metadata leakage was found in IS-03.
+
+The final rewritten IS should still avoid saying "V3", "new design", "latest
+model", "rewrite", "audit", "Codex", "candidate", "seed", or similar process
+framing as ordinary specification language.
+
+Audit files may mention source-stack and proposal history. The final IS should
+state the current model directly.
+
+==============================================================================
+REQUIRED FIXES
+==============================================================================
+
+1. Replace AppInstance / SavePack terminology.
+
+    Replace examples:
+
+        AppInstance writable SavePack ownership
+        writable AppInstance or SavePack state
+        AppInstance stop outcome
+        adapter SavePack write authority
+
+    with current terminology such as:
+
+        Application / ApplicationRun / SaveBundle ownership and lifecycle
+        writable SaveBundle ownership, where applicable
+        ApplicationRun stop outcome
+        adapter-mediated SaveBundle or application-data write authority, where
+        a higher owner defines such authority
+
+2. Split Workspace ownership from SaveBundle ownership.
+
+    Add or preserve a direct stop-line:
+
+        Workspace ownership is host/runtime-level ownership of Workspace mutable
+        roots. It does not grant SaveBundle writable ownership, ApplicationRun
+        lifecycle authority, committed-state mutation authority, or adapter write
+        authority.
+
+3. Clarify ownership identity fields.
+
+    Reconsider the ownership record field list:
+
+        runtimeHostId
+        processId
+        hostMachineId
+        ownerNonce
+
+    against the current identity tuple:
+
+        workspaceId
+        machineId
+        runtimeId
+        coordinatorProcessId
+        coordinatorProcessStartIdentity
+        ownerToken
+        openedAt
+        formatVersion
+
+    The final schema does not have to use the exact P02 names, but it must carry
+    the same distinctions or explicitly explain equivalent names.
+
+4. Add process-lifetime identity or leave it explicitly open.
+
+    Add a field such as processStartIdentity or coordinatorProcessStartIdentity,
+    or include this as an explicit open representation decision.
+
+    This is needed because processId alone does not protect against PID reuse.
+
+5. Strengthen atomic acquisition wording.
+
+    Add:
+
+        Ownership acquisition must not use unsafe check-then-overwrite behavior.
+        Claim creation must use atomic creation, exclusive creation,
+        compare-and-swap-equivalent behavior, or another DA-07-constrained
+        persistence-safe ownership-claim mechanism.
+
+6. Preserve the malformed-record rule.
+
+    Keep:
+
+        A malformed ownership record is not silently treated as absent.
+
+    Also preserve that malformed records block silent writable ownership and may
+    be replaced only through explicit recovery policy or manual repair tooling.
+
+7. Preserve read-only inspection boundaries.
+
+    Keep read-only inspection as accessMode, not writable ownershipMode.
+
+    Keep the rule that read-only inspection does not write committed state,
+    SaveBundle state, the ownership record, or ownership release/repair effects.
+
+8. Preserve direct-write exclusions.
+
+    Keep:
+
+        Pack-provided code does not write this record directly.
+        Adapter-executed code does not write this record directly.
+
+9. Preserve path migration escape hatch.
+
+    If .turnix/runtime-host/owner.json remains the concrete initial path, keep
+    the statement that a later implementation specification may revise it only
+    with migration and compatibility rules.
+
+10. Keep open questions open.
+
+    Keep exact identifier representations, accessMode representation, heartbeat
+    interval, stale threshold, OS liveness behavior, recovery prompt text,
+    migration behavior, exception class names, and JSON schema publication format
+    open unless a later source has resolved them.
+
+==============================================================================
+SUGGESTED REWRITE STRUCTURE
+==============================================================================
+
+Keep the existing structure.
+
+Suggested targeted structure changes:
+
+    1. Update Description / Purpose / It does NOT define sections to current
+       Application / ApplicationRun / SaveBundle terminology.
+
+    2. Keep Core Concept, but change the old AppInstance/SavePack stop-lines into
+       Workspace / SaveBundle / ApplicationRun / committed-state stop-lines.
+
+    3. Keep Ownership Record Location, but clarify that the concrete path is a
+       representation of ownership evidence, not architecture-level authority.
+
+    4. Update Ownership Record Fields to distinguish runtimeId,
+       runtimeHostId if retained, coordinator process identity, process lifetime
+       identity, machine identity, workspaceId, and ownerToken/ownerNonce.
+
+    5. Strengthen Ownership Acquisition Flow with atomic-claim wording.
+
+    6. Preserve Second-Owner Rejection, Heartbeat, Stale-Owner Detection,
+       Recovery, Read-Only Inspection, Release, Crash, Malformed Record, Trace
+       Mapping, Error Categories, Not Supported, Open Questions, and Locked
+       Summary sections.
+
+    7. Update Locked Summary to remove AppInstance/SavePack terminology and to
+       preserve Workspace / SaveBundle / ApplicationRun separation.
+
+Do not turn IS-03 into DA-28, DA-20, DA-07, DA-04, or a general persistence
+architecture document.
+
+==============================================================================
+SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as concrete rewrite hints, not mandatory exact final wording.
+
+1. Description / scope paragraph
+
+    Current risk:
+        DA-20 AppInstance writable SavePack ownership
+
+    Safer wording:
+        Application / ApplicationRun / SaveBundle writable ownership and
+        lifecycle semantics, as owned by the current lifecycle and persistence
+        documents
+
+2. It does NOT define section
+
+    Current risk:
+        AppInstance lifecycle or writable SavePack ownership semantics
+
+    Safer wording:
+        Application lifecycle, ApplicationRun lifecycle, or SaveBundle writable
+        ownership semantics
+
+3. Core Concept
+
+    Current risk:
+        The ownership record and host lock do not create AppInstance writable
+        SavePack ownership.
+
+    Safer wording:
+        The ownership record and host lock do not create SaveBundle writable
+        ownership, ApplicationRun lifecycle authority, or Application committed
+        state.
+
+4. Core Concept
+
+    Current risk:
+        AppInstance writable SavePack ownership remains governed by DA-20.
+
+    Safer wording:
+        Application, ApplicationRun, and SaveBundle ownership/lifecycle semantics
+        remain governed by their higher design documents.
+
+5. Acquisition failure
+
+    Current risk:
+        Ownership acquisition failure does not create a partial AppInstance.
+
+    Safer wording:
+        Ownership acquisition failure does not create a partial ApplicationRun,
+        does not load a SaveBundle, and does not commit Application state.
+
+6. Second-owner rejection
+
+    Current risk:
+        The new RuntimeHost does not create writable AppInstance or SavePack
+        state for the already-owned workspace.
+
+    Safer wording:
+        The new RuntimeHost does not create writable Application state,
+        ApplicationRun state, or SaveBundle write ownership for the already-owned
+        workspace.
+
+7. Stale-owner recovery
+
+    Current risk:
+        Recovery acceptance does not grant AppInstance writable SavePack
+        ownership.
+
+    Safer wording:
+        Recovery acceptance does not grant SaveBundle writable ownership,
+        ApplicationRun lifecycle authority, or Application committed-state
+        mutation authority.
+
+8. Read-only inspection
+
+    Current risk:
+        Read-only inspection does not write SavePack state.
+
+    Safer wording:
+        Read-only inspection does not write SaveBundle material, Application
+        committed state, ownership records, or mutable Workspace roots except for
+        explicitly policy-defined inspection output.
+
+9. Release
+
+    Current risk:
+        Ownership release does not by itself define AppInstance stop outcome.
+
+    Safer wording:
+        Ownership release does not by itself define ApplicationRun stop outcome,
+        Application lifecycle outcome, or SaveBundle publication outcome.
+
+10. What is explicitly not supported
+
+    Current risk:
+        using workspace ownership as AppInstance writable SavePack ownership
+        using workspace ownership as adapter SavePack write authority
+        treating ownership release as AppInstance stop success
+
+    Safer wording:
+        using workspace ownership as SaveBundle writable ownership
+        using workspace ownership as adapter SaveBundle or application-data write
+        authority
+        treating ownership release as ApplicationRun stop success
+
+11. Locked Summary
+
+    Current risk:
+        Workspace ownership does not grant AppInstance writable SavePack
+        ownership.
+
+    Safer wording:
+        Workspace ownership does not grant SaveBundle writable ownership,
+        ApplicationRun lifecycle authority, or Application committed-state
+        mutation authority.
+
+12. Ownership fields
+
+    Current risk:
+        runtimeHostId as sole owner identity
+
+    Safer wording:
+        The ownership record distinguishes the Workspace identity, TurnixRuntime
+        execution identity, RuntimeHost/entry boundary identity if retained,
+        coordinator process identity, process lifetime identity, machine identity,
+        and owner token/nonce.
+
+==============================================================================
+ACCEPTANCE CONDITIONS FOR FINAL REWRITTEN IS-03
+==============================================================================
+
+Accept the rewritten IS-03 only if all of the following are true:
+
+1. It remains an implementation specification for concrete Workspace ownership
+   and host-lock behavior.
+
+2. It does not redefine RuntimeHost, TurnixRuntime, Kernel, Workspace, SaveBundle,
+   Application, ApplicationRun, committed-state, persistence, policy, Job,
+   Window, adapter, RPC, LAN, authentication, or process-supervision semantics.
+
+3. All AppInstance and SavePack terminology has been translated to Application,
+   ApplicationRun, and SaveBundle according to meaning.
+
+4. Workspace ownership is clearly separated from SaveBundle writable ownership,
+   ApplicationRun lifecycle authority, Application committed-state mutation,
+   and adapter write authority.
+
+5. The owner identity fields distinguish Workspace identity, runtime execution
+   identity, RuntimeHost/entry-surface identity if retained, coordinator process
+   identity, process lifetime identity or equivalent, machine identity, and
+   owner token/nonce.
+
+6. runtimeHostId is not allowed to imply that RuntimeHost is TurnixRuntime
+   identity, Kernel authority, Application identity, or SaveBundle authority.
+
+7. Ownership acquisition cannot be implemented as unsafe check-then-overwrite.
+   The final text requires atomic creation, exclusive creation,
+   compare-and-swap-equivalent behavior, or another DA-07-constrained
+   persistence-safe ownership-claim mechanism.
+
+8. Existing ownership evidence is never silently overwritten.
+
+9. Malformed ownership evidence is never silently treated as absent, stale, or
+   normalized.
+
+10. Stale heartbeat, missing process, or liveness uncertainty never authorizes
+    silent takeover by itself.
+
+11. Stale-owner recovery remains explicit, policy-governed where policy exists,
+    trace-visible, and persistence-safe.
+
+12. Read-only inspection remains accessMode, not writable ownershipMode, and does
+    not create or update writable ownership records unless a later explicit
+    inspection-session record defines that behavior.
+
+13. Pack-provided code and adapter-executed code still cannot directly write the
+    ownership record.
+
+14. The concrete ownership-record path remains either explicitly owned by IS-03
+    as an implementation path with migration/compatibility escape hatch, or is
+    revised to match a later accepted ownership-path source.
+
+15. Trace evidence remains evidence only. Trace does not replace the ownership
+    record, and the ownership record does not replace trace evidence.
+
+==============================================================================
+FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep IS-03 with targeted terminology, identity, and authority-boundary fixes.
+
+Do not rewrite the whole document.
+
+Do not expand this implementation specification into DA-28 RuntimeHost doctrine,
+DA-20 lifecycle doctrine, DA-07 persistence doctrine, DA-04 committed-state
+doctrine, or a general SaveBundle architecture document.
+
+Translate obsolete AppInstance / SavePack wording into current Application /
+ApplicationRun / SaveBundle terminology. Clarify the ownership identity tuple so
+RuntimeHost does not become TurnixRuntime identity by accident. Strengthen atomic
+ownership acquisition wording while preserving the existing malformed-record,
+second-owner rejection, stale-owner recovery, read-only inspection, and trace
+separation guarantees.
+
+==============================================================================
+END OF AUDIT-IS-03 RESULT
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-IS-03-RESULT
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-IS-03_RESULT.txt
+DOC_REV: 1
+DOC_GIT: temp
+----------------
