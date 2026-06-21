@@ -1,0 +1,821 @@
+==============================================================================
+AUDIT RESULT - DA-30 MODCALLCONTEXT INVOCATION GATEWAY SEMANTICS
+==============================================================================
+
+Document status:
+    Audit result for assistant-editor use.
+
+Target document:
+    docs/design/DA-30_MODCALLCONTEXT_INVOCATION_GATEWAY_SEMANTICS.txt
+
+Audit source stack:
+    docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P01_TURNIX_PACK_ENTRY_MULTI_ADAPTER_AND_CYCLIC_ACTIVATION_PROTOCOL.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    docs/design/DA-30_MODCALLCONTEXT_INVOCATION_GATEWAY_SEMANTICS.txt
+
+Recommendation file:
+    None. DA-30 is a newly-created candidate document, so there is no matching
+    REWRITE-DA-30_RECOMMENDATION.txt file to assess.
+
+CMR note:
+    The presence of CMR files in the upstream-document list is acceptable.
+    Do not use CMR documents as semantic authority for this audit. If CMR-04 is
+    needed later, use it only as an index to locate document identifiers and
+    filenames.
+
+Audit posture:
+    This is a semantic architecture audit, not a formatting/linting audit.
+    The editor should look for misinterpretation risk, boundary drift,
+    accidental reintroduction of Session, accidental exposure of backend
+    internals, and insufficiently protected authority boundaries.
+
+==============================================================================
+01. VERDICT
+==============================================================================
+
+DA-30 is a valid seed document, but it is too thin for the responsibility it is
+trying to carry.
+
+Keep the file and rewrite/expand it.
+
+Do not reject the document concept.
+
+Do not accept the current content as sufficient.
+
+The current file correctly establishes the basic ModCallContext idea:
+
+    - ModCallContext is first-class.
+    - ModCallContext is invocation-scoped.
+    - ModCallContext is Pack-bound.
+    - A fresh context is created per callback/invocation.
+    - A retained context is invalid after callback completion.
+    - Registrations retain owner/callback metadata, not an old context object.
+    - ModCallContext is not Kernel authority.
+    - ModCallContext is not Session.
+    - Missing bindings are not fabricated for API convenience.
+
+However, the current file does not yet protect enough of the intended Dv3
+architecture. It can still be misread as a generic context object with some
+bindings rather than the Pack-facing mediated gateway with explicit facades and
+explicitly absent authority surfaces.
+
+Primary conclusion:
+    Rewrite DA-30 into a stronger compact specification.
+
+==============================================================================
+02. MAJOR SEMANTIC RISKS
+==============================================================================
+
+02.1. The current document underspecifies the gateway shape
+-----------------------------------------------------------
+
+The current DA-30 says that ModCallContext is a gateway and carries bindings,
+but it does not show the intended ctx facade shape from Proposal P02.
+
+This omission leaves room for later implementers or assistant editors to invent
+surfaces such as:
+
+    ctx.services
+    ctx.journal
+    ctx.sessions
+    ctx.kernel
+    ctx.runtimeHost
+    ctx.rawFilesystem
+    ctx.transaction.commit
+    ctx.job.setTerminalState
+
+Those surfaces contradict the intended platform model.
+
+DA-30 should include the conceptual facade shape from Proposal P02:
+
+    ctx
+    |
+    +-- identity
+    +-- current
+    +-- execution
+    |
+    +-- memory
+    +-- config
+    +-- permissions
+    +-- capabilities
+    +-- jobs
+    +-- hooks
+    +-- processing
+    +-- events
+    +-- timers
+    +-- resources
+    +-- io
+    +-- trace
+
+DA-30 should also include an explicit absence list:
+
+    ctx.kernel
+    ctx.runtimeHost
+    ctx.services
+    ctx.journal
+    ctx.rawFilesystem
+    ctx.transaction.commit
+    ctx.job.setTerminalState
+    ctx.sessions
+
+The absence list is not decorative. It prevents the most likely architecture
+regressions.
+
+02.2. Processing hook binding currently uses the wrong concept
+--------------------------------------------------------------
+
+The current DA-30 says processing hooks receive a context bound to:
+
+    ProcessingRun, lifecycle phase, and relevant OrchestrationUnit
+
+This is semantically risky.
+
+Processing hooks are bound to a ProcessingRun and a ProcessingPipeline stage.
+
+"Lifecycle phase" belongs to Pack lifecycle concepts such as entry loading and
+ordinary activation. Using that term for processing hooks can blur two separate
+models:
+
+    Pack lifecycle callback:
+        onEntryLoaded(ctx), onEntriesLoaded(ctx), onLoad(ctx)
+
+    Processing hook callback:
+        hook participation in one ProcessingRun stage
+
+Replace the processing-hook sentence with language like:
+
+    Processing hooks receive a context bound to the ProcessingRun,
+    ProcessingPipeline stage, and relevant OrchestrationUnit when those bindings
+    exist.
+
+This change is required.
+
+02.3. The file does not sufficiently define facade responsibilities
+-------------------------------------------------------------------
+
+DA-30 does not need to duplicate all of Proposal P02, but it needs enough
+responsibility detail to prevent misinterpretation.
+
+The rewritten DA-30 should add compact sections for these facades:
+
+    identity
+    current
+    execution
+    memory
+    config
+    permissions
+    capabilities
+    jobs
+    hooks
+    processing
+    events
+    timers
+    resources
+    io
+    trace
+
+Each section should define the boundary, not implementation API names.
+
+02.4. The file does not explicitly block ctx.services
+-----------------------------------------------------
+
+Proposal P02 states that ordinary Pack code does not receive raw service
+objects. Service objects are trusted internal runtime wiring. Pack code provides
+operations by registering capability handlers and consumes operations by
+invoking capabilities.
+
+DA-30 currently says Kernel authority remains in Kernel/platform services, but
+that is too indirect.
+
+Add a clear section:
+
+    ModCallContext does not expose ctx.services.
+
+    Ordinary Pack code does not receive raw service objects.
+
+    Internal services remain trusted runtime wiring.
+
+    Pack code uses capabilities, hooks, events, timers, processing, memory,
+    configuration, resources, I/O, and trace through mediated facades.
+
+02.5. The file does not explicitly block ctx.journal
+----------------------------------------------------
+
+Proposal P02 states that ordinary Pack code does not receive a generic journal
+facade. Journal is runtime/domain-generated retained evidence.
+
+DA-30 should include:
+
+    ModCallContext does not expose a generic ctx.journal facade.
+
+    Pack needs are covered through trace, events, memory, and mediated I/O.
+
+    A future domain may define a narrow typed journal operation, but DA-30 does
+    not expose append-anything journal access.
+
+This prevents journal from becoming a backdoor state/evidence surface.
+
+02.6. The file does not explicitly block ctx.sessions
+-----------------------------------------------------
+
+The current file correctly says ModCallContext is not a Session and the core
+model does not define Session as required for Pack callbacks, ApplicationRuns,
+Jobs, Events, Timers, or capabilities.
+
+That is good, but not quite enough.
+
+DA-30 should include a dedicated Session-removal section:
+
+    Session is not present in ModCallContext.
+
+    ModCallContext does not expose ctx.sessions.
+
+    Session-relative Memory does not exist in the core platform.
+
+    Processing calls do not require a Session parameter.
+
+    Application-defined interaction continuity belongs to Application state,
+    not to a core Session type.
+
+This protects the locked Session removal decision.
+
+02.7. The file does not separate resources from I/O
+---------------------------------------------------
+
+Proposal P02 separates Pack-authored read-only resources from broader mediated
+I/O.
+
+DA-30 should include this distinction.
+
+Recommended meaning:
+
+    ctx.resources:
+        mediated read-only access to Pack-authored resources such as prompts,
+        templates, schemas, assets, and static authored data.
+
+    ctx.io:
+        mediated scoped I/O for Application data, SaveBundle data,
+        Pack-global userdata, and explicitly granted external paths.
+
+    Direct raw filesystem access is not exposed.
+
+    Direct SaveBundle-directory mutation is not exposed.
+
+Without this distinction, future code or documentation may use ctx.io as a
+broad raw-filesystem escape hatch or use it for simple Pack-resource reads.
+
+02.8. The file does not define capabilities/jobs/hooks/processing strongly enough
+--------------------------------------------------------------------------------
+
+DA-30 mentions these domains, but it does not give enough guardrails.
+
+Add compact semantics:
+
+Capabilities:
+    Capability registration and invocation are attributed to the acting Pack and
+    current Application. Capability provider identity may vary. Service objects
+    remain internal runtime wiring.
+
+Jobs:
+    Job is an observable lifecycle handle. Pack code does not directly assign
+    terminal Job state.
+
+Hooks:
+    Hook registrations are owned by the acting Pack. They normally affect future
+    ProcessingRuns. They do not retroactively join a currently executing
+    ProcessingRun unless a specific current-run mechanism exists.
+
+Processing:
+    ctx.processing.run/start creates or controls ProcessingRuns through Turnix.
+    Turnix handles ProcessingRun creation, ProcessingPipeline selection,
+    hook-plan snapshot, temporary staged state, streaming, retry/restart,
+    cancellation, structured errors, nested transaction, and Job creation where
+    needed.
+
+02.9. The file does not define Event/Timer semantics strongly enough
+--------------------------------------------------------------------
+
+The current file says Event and Timer callbacks receive contexts. That is true,
+but too shallow.
+
+Add compact semantics:
+
+Events:
+    Events are cheap semantic notifications. Listeners receive fresh
+    ModCallContexts. Event listeners do not transform the emitted payload and do
+    not return a result used by the producer. Listener failure does not
+    retroactively fail completed producer work.
+
+Timers:
+    Timer registrations retain owner Pack, Application, schedule, callback
+    endpoint, lifetime, and policy metadata. A Timer does not retain an old
+    ModCallContext. When it fires, the scheduler creates new orchestrated work
+    and a fresh ModCallContext.
+
+This prevents Event and Timer from being mistaken for lifecycle protocol,
+blocking workflow, or retained-context mechanisms.
+
+02.10. The phrase "capability-facing pack code" is unclear
+-----------------------------------------------------------
+
+The phrase can be misread.
+
+Replace it with clearer language:
+
+    Pack code invoked by Turnix, including lifecycle handlers, event handlers,
+    timer handlers, processing hooks, and capability handlers.
+
+or:
+
+    Pack callbacks and handlers invoked by Turnix.
+
+Avoid "capability-facing" unless a separate term is later defined.
+
+==============================================================================
+03. REQUIRED REWRITE STRUCTURE
+==============================================================================
+
+Rewrite DA-30 using this structure or an equivalent structure with the same
+coverage.
+
+    01. Document role
+    02. Lifetime and retention
+    03. Identity and current bindings
+    04. Authority model
+    05. Facade shape
+    06. Explicitly absent surfaces
+    07. ExecutionAdapter relationship
+    08. Memory, configuration, resources, I/O, and trace
+    09. Capabilities, Jobs, Hooks, and Processing
+    10. Events and Timers
+    11. Session removal
+    12. Stop-lines
+    13. Open issues
+
+The rewrite may preserve the current DA-30 heading style and upstream document
+list.
+
+The rewrite should remain a DA document, not a full implementation
+specification.
+
+The rewrite should not copy all of Proposal P02 verbatim, but it should carry
+all semantically protective boundaries needed to prevent drift.
+
+==============================================================================
+04. REQUIRED CONTENT BY SECTION
+==============================================================================
+
+04.1. Document role
+-------------------
+
+Keep and strengthen the current role:
+
+    ModCallContext is a first-class Turnix type.
+
+    ModCallContext is the invocation-scoped, Pack-bound gateway through which
+    Pack code invoked by Turnix interacts with the platform.
+
+    Pack code receives only operations exposed by the current context and
+    granted for the current invocation.
+
+    ModCallContext is not Kernel authority.
+
+    ModCallContext is not Session.
+
+Use examples of Turnix-invoked Pack code:
+
+    onLoad(ctx, ...)
+    onEntryLoaded(ctx, ...)
+    onEntriesLoaded(ctx, ...)
+    eventHandler(ctx, event)
+    timerHandler(ctx, timer)
+    processingHook(ctx, stage)
+    capabilityHandler(ctx, request)
+
+04.2. Lifetime and retention
+----------------------------
+
+Preserve the existing rules and make them more explicit:
+
+    A fresh ModCallContext is created for each callback or invocation that needs
+    Pack-facing platform access.
+
+    Pack code does not retain a ModCallContext after the callback or invocation
+    completes.
+
+    If host-language references survive, the context is still invalid after
+    completion.
+
+    A context may also become invalid when the OrchestrationUnit ends, the
+    Transaction commits or aborts, the ProcessingRun advances stage, the Job
+    becomes terminal, the cancellation scope ends, or permission scope changes.
+
+    Registrations retain owner identity, callback endpoint, metadata, and
+    registration scope.
+
+    Registrations do not retain the old context object.
+
+    Later callbacks receive a new context.
+
+04.3. Identity and current bindings
+-----------------------------------
+
+Define identity and current bindings separately.
+
+Identity may include:
+
+    applicationId
+    applicationRunId
+    actingPackId
+    invocationId
+    correlation/cause descriptors
+
+Current bindings may include:
+
+    OrchestrationUnit
+    Transaction
+    Job
+    ProcessingRun
+    ProcessingPipeline stage
+    lifecycle phase
+    Event
+    Timer
+    capability invocation
+    View, when relevant
+    cancellation/deadline state
+    granted operations
+
+Bindings are present only when meaningful for the invocation.
+
+Absence of a binding means the invocation has no authority or identity for that
+concept.
+
+A missing binding is not fabricated for convenience.
+
+04.4. Authority model
+---------------------
+
+Preserve and strengthen:
+
+    Kernel authority remains in Kernel and platform-controlled services.
+
+    ModCallContext exposes mediated operations only.
+
+    Gateway operations are constrained by acting Pack, current Application,
+    current ApplicationRun, granted capabilities, lifecycle phase,
+    OrchestrationUnit, Transaction, cancellation state, deadline state, and
+    stage-specific permissions.
+
+    ModCallContext does not grant raw file access, raw transport access,
+    adapter control, debugger control, host command access, direct SaveBundle
+    mutation, or backend service access unless a separate mediated operation
+    explicitly exposes a narrow controlled behavior.
+
+04.5. Facade shape
+------------------
+
+Add the conceptual ctx shape.
+
+Recommended text:
+
+    The exact host-language API shape remains implementation work, but the
+    conceptual Pack-facing facade set is:
+
+        identity
+        current
+        execution
+        memory
+        config
+        permissions
+        capabilities
+        jobs
+        hooks
+        processing
+        events
+        timers
+        resources
+        io
+        trace
+
+    Representation differences across adapters do not change the meaning.
+
+04.6. Explicitly absent surfaces
+--------------------------------
+
+Add a dedicated section with explicit absences:
+
+    ModCallContext does not expose:
+
+        ctx.kernel
+        ctx.runtimeHost
+        ctx.services
+        ctx.journal
+        ctx.rawFilesystem
+        ctx.transaction.commit
+        ctx.job.setTerminalState
+        ctx.sessions
+
+Explain why:
+
+    These absences prevent Pack code from bypassing Kernel authority,
+    OrchestrationUnit authority, transaction ownership, Job lifecycle ownership,
+    Session removal, and I/O mediation.
+
+04.7. ExecutionAdapter relationship
+-----------------------------------
+
+Preserve current intent:
+
+    ExecutionAdapters host Pack code and deliver callbacks under DA-23.
+
+    Adapter representation may vary by host language.
+
+    Representation differences do not change ModCallContext semantics.
+
+    ExecutionAdapter does not own ModCallContext authority.
+
+    Same-language Pack code does not bypass ModCallContext merely because it
+    shares a language with platform implementation code.
+
+This section is already mostly good.
+
+04.8. Memory, configuration, resources, I/O, and trace
+------------------------------------------------------
+
+Add/strengthen:
+
+Memory:
+    ctx.memory provides scoped authoritative-state access only when the current
+    invocation has state authority. Writes stage into the current Transaction.
+    Writes do not directly change committed state. Read-only callbacks either
+    lack write operations or receive rejected writes.
+
+Configuration:
+    ctx.config provides scoped configuration access. Effective configuration,
+    save-bound configuration, Pack-global configuration, and workspace/runtime
+    configuration are distinct scopes. The acting Pack does not gain another
+    Pack's private configuration.
+
+Resources:
+    ctx.resources provides mediated read-only access to Pack-authored resources.
+
+I/O:
+    ctx.io provides mediated scoped I/O. It does not expose unrestricted raw
+    filesystem access. Direct SaveBundle-directory mutation is not exposed.
+
+Trace:
+    ctx.trace records evidence and diagnostics correlated with the current
+    invocation. Trace does not become committed-state authority. Pack code does
+    not forge runtime correlation identity.
+
+Keep the existing line that ModCallContext does not combine Memory,
+configuration, and trace into a single state authority.
+
+04.9. Capabilities, Jobs, Hooks, and Processing
+-----------------------------------------------
+
+Add compact boundary descriptions:
+
+Capabilities:
+    ctx.capabilities provides mediated registration, invocation, and inspection
+    where allowed. Registration and invocation are attributed to the acting Pack
+    and current Application. Capability provider identity may vary. Service
+    objects remain internal runtime wiring.
+
+Jobs:
+    ctx.jobs exposes observable work lifecycle operations where allowed. Job is
+    an observable lifecycle handle. Pack code does not directly set terminal Job
+    state.
+
+Hooks:
+    ctx.hooks exposes registration and current-hook inspection where allowed.
+    Hook registrations retain owner Pack, pipeline/stage identity, callback
+    endpoint, scope, and participation policy. Hook registration normally
+    affects future ProcessingRuns and does not retroactively join a current run
+    unless a specific current-run mechanism is defined.
+
+Processing:
+    ctx.processing provides processor-call APIs such as run/start/current where
+    allowed. It creates or controls ProcessingRuns through Turnix. It handles
+    ProcessingPipeline selection, hook-plan snapshot, temporary staged state,
+    streaming, retry/restart, cancellation, structured errors, nested
+    transaction, and Job creation where needed. No Session parameter exists as a
+    core concept.
+
+04.10. Events and Timers
+------------------------
+
+Rewrite current section into stronger semantics:
+
+Events:
+    Event callbacks receive a fresh context bound to the Event and cause.
+    Events are cheap semantic notifications. Event listeners do not transform
+    the emitted payload and do not return a producer-used result. Listener order
+    is not guaranteed. Listener failure does not retroactively fail completed
+    producer work.
+
+Timers:
+    Timer callbacks receive a fresh context bound to the Timer and cause. Timer
+    registrations retain owner Pack, Application, schedule, callback endpoint,
+    lifetime, and policy metadata. Timer registrations do not retain old
+    contexts. Timer firing creates new orchestrated work.
+
+Processing hooks:
+    Processing hooks belong with ProcessingRun/ProcessingPipeline-stage
+    semantics, not Event/Timer semantics. If kept in this section, use
+    ProcessingPipeline stage, not lifecycle phase.
+
+04.11. Session removal
+----------------------
+
+Add a dedicated section:
+
+    Session is not present in ModCallContext.
+
+    ctx.sessions does not exist.
+
+    The core model does not define Session as required for Pack callbacks,
+    ApplicationRuns, Jobs, Events, Timers, capabilities, ProcessingRuns, or
+    Views.
+
+    Persistent conversational or interaction continuity belongs to
+    Application-defined committed state.
+
+    Temporary interaction context belongs to OrchestrationUnit- or
+    ProcessingRun-scoped state.
+
+    Private/hidden processing belongs to ProcessingRun participation and
+    visibility policy.
+
+04.12. Stop-lines
+-----------------
+
+Keep the existing stop-lines and add explicit stop-lines for:
+
+    - host-language API shapes
+    - concrete serialization of context objects
+    - exact permission-grant policy
+    - exact Event and Timer schemas
+    - exact ProcessingRun participation-policy schema
+    - exact I/O URI/reference model
+    - exact adapter invalidation mechanism
+
+Keep the current stop-line that DA-30 does not define Application,
+ApplicationRun, or AppPack identity beyond the bindings a context may carry.
+
+04.13. Open issues
+------------------
+
+Keep current open issues and add:
+
+    - exact facade method names remain implementation/specification work
+    - exact ctx.io reference model remains future design/specification work
+    - exact current-run hook participation mechanism remains future work if
+      needed
+    - exact adapter-specific invalidation behavior remains adapter-specific
+      implementation/specification work
+
+==============================================================================
+05. SPECIFIC TEXT FIXES
+==============================================================================
+
+Fix this concept:
+
+    OLD:
+        Processing hooks receive a context bound to the ProcessingRun,
+        lifecycle phase, and relevant OrchestrationUnit when those bindings
+        exist.
+
+    NEW:
+        Processing hooks receive a context bound to the ProcessingRun,
+        ProcessingPipeline stage, and relevant OrchestrationUnit when those
+        bindings exist.
+
+Clarify this phrase:
+
+    OLD:
+        capability-facing pack code
+
+    NEW OPTIONS:
+        Pack code invoked by Turnix, including capability handlers
+
+        or
+
+        Pack callbacks and handlers invoked by Turnix
+
+Add explicit absences:
+
+    ctx.kernel
+    ctx.runtimeHost
+    ctx.services
+    ctx.journal
+    ctx.rawFilesystem
+    ctx.transaction.commit
+    ctx.job.setTerminalState
+    ctx.sessions
+
+Add explicit separation:
+
+    ctx.resources is for Pack-authored read-only resources.
+
+    ctx.io is for mediated scoped I/O.
+
+    Neither exposes raw unrestricted filesystem access.
+
+Add explicit Session removal:
+
+    no Session
+    no ctx.sessions
+    no Session-relative Memory
+    no mandatory Session parameter for ProcessingRuns
+
+==============================================================================
+06. ACCEPTANCE CONDITIONS FOR THE REWRITTEN DA-30
+==============================================================================
+
+A revised DA-30 is acceptable when all of the following are true:
+
+    - It still identifies ModCallContext as first-class, invocation-scoped, and
+      Pack-bound.
+
+    - It says every Turnix callback into Pack code receives a fresh context.
+
+    - It says retained contexts are invalid after callback/invocation
+      completion.
+
+    - It says registrations retain owner/callback metadata and scope, not the
+      old context object.
+
+    - It keeps ModCallContext separate from Kernel authority.
+
+    - It keeps ModCallContext separate from Session.
+
+    - It includes identity/current/execution/facade structure.
+
+    - It explicitly blocks ctx.kernel, ctx.runtimeHost, ctx.services,
+      ctx.journal, ctx.rawFilesystem, ctx.transaction.commit,
+      ctx.job.setTerminalState, and ctx.sessions.
+
+    - It includes resources versus I/O distinction.
+
+    - It states that direct SaveBundle-directory mutation is not exposed.
+
+    - It states trace is evidence and not committed-state authority.
+
+    - It states Job terminal state is not directly assigned by ordinary Pack
+      code.
+
+    - It states processing hooks bind to ProcessingPipeline stage, not lifecycle
+      phase.
+
+    - It states Hook registration normally affects future ProcessingRuns rather
+      than the current run unless a specific current-run mechanism exists.
+
+    - It states Events are cheap semantic notifications, not hooks or lifecycle
+      callbacks.
+
+    - It states Timers create fresh orchestrated work and fresh context.
+
+    - It keeps the stop-lines so DA-30 does not take over Application identity,
+      AppPack identity, SaveBundle layout, Memory commit rules, activation-plan
+      schema, UI rendering, RPC transport schemas, or RuntimeHost command
+      syntax.
+
+==============================================================================
+07. FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Rewrite DA-30 before accepting it as part of the Dv3 design set.
+
+Use ANCHOR-06 as the base architecture map.
+
+Use PROPOSAL-P02 as the primary source for ModCallContext, facade shape,
+Session removal, ProcessingRun interaction, Event/Timer semantics, resources,
+I/O, trace, and absent surfaces.
+
+Use PROPOSAL-P01 only where Pack lifecycle and Processing/Hook/Event boundary
+language risks confusion with activation phases.
+
+Do not expand DA-30 into a full implementation API specification.
+
+Do not use this audit to enforce formatting style beyond preserving the
+repository's normal document shape.
+
+Do preserve the current CMR upstream references if that is the project index
+convention.
+
+Do make the semantic boundaries explicit enough that a later assistant editor
+cannot accidentally reintroduce Session, ctx.services, ctx.journal,
+ctx.rawFilesystem, or direct Kernel access through ModCallContext.
+
+==============================================================================
+END OF AUDIT RESULT - DA-30
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-DA-30
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-DA-30_RESULT.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
