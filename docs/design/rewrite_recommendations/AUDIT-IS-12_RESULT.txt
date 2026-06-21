@@ -1,0 +1,837 @@
+==============================================================================
+TURNIX DV3 DOCUMENTATION AUDIT RESULT - IS-12 PACKMANAGER COMMAND AND OPERATION SURFACE
+==============================================================================
+
+Document title:
+    IS-12 - PackManager Command and Operation Surface
+
+Target IS path:
+    docs/design/IS-12_PACKMANAGER_COMMAND_AND_OPERATION_SURFACE.txt
+
+Branch:
+    CODEX_Dv3
+
+Target file metadata loaded by assistant:
+    DOC_ID: IS-12
+    DOC_FILE: docs/design/IS-12_PACKMANAGER_COMMAND_AND_OPERATION_SURFACE.txt
+    DOC_REV: 1
+    DOC_GIT: e4446ac
+    GitHub blob SHA seen by assistant:
+        498c38063a7bd3714848dafb6da2a1d5faa4de4c
+
+Audit result file:
+    docs/design/rewrite_recommendations/AUDIT-IS-12_RESULT.txt
+
+Audit scope:
+    Audit only the assigned implementation specification file.
+
+    IS files do not have rewrite recommendation files. No REWRITE-IS-12 file was
+    read or expected.
+
+    CMR-04 was not reread for IS-12 because the IS-12 path had already been
+    identified from the Canonical Index in this conversation.
+
+Source stack used:
+    - docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+    - docs/CMR-04_CANONICAL_INDEX_TURNIX_SPECIFICATION.txt
+      only as prior index evidence for the IS-12 path
+    - docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    - docs/design/IS-09_RUNTIME_CATALOG_AND_PACK_LISTING_OPERATIONS.txt
+    - docs/design/IS-11_RESOLVED_PACK_GRAPH_AND_ACTIVATION_PLAN_SCHEMA.txt
+    - docs/design/IS-12_PACKMANAGER_COMMAND_AND_OPERATION_SURFACE.txt
+
+Recommendation file status:
+    Not applicable. IS files do not have rewrite recommendation files.
+
+Recommendation verdict:
+    Not applicable.
+
+IS document verdict:
+    Keep with targeted terminology, operation-surface, source-management,
+    decision-handoff, and authority-boundary fixes.
+
+    IS-12 is a useful concrete implementation specification for PackManager
+    operation request/response envelopes and operation access from RuntimeHost
+    commands, RPC requests, Views, Launcher, tools, tests, and future remote
+    clients. It should not be rewritten from scratch.
+
+    Its strongest invariant is correct: entry surfaces request PackManager work
+    through one mediated operation model without becoming PackManager authority.
+    Operation acceptance is distinct from completion, and operation completion is
+    distinct from activation success, ApplicationRun success, Job success, and
+    persistence success unless an operation contract explicitly defines a
+    projection.
+
+    Required fixes are targeted: replace obsolete SavePack, AppInstance, and
+    PackContext terminology; align graph-check and repair operations with
+    SaveBundle / Application / ApplicationRun terminology; preserve decision
+    handoff through DA-17; and keep placeholder source-management operations from
+    becoming concrete package, internet, install, update, remove, verification,
+    or index protocols.
+
+==============================================================================
+WHAT THE DOCUMENT GETS RIGHT
+==============================================================================
+
+1. Correct implementation-specification scope.
+
+    IS-12 correctly defines PackManager operation request and response envelopes,
+    shared context/status fields, graph preparation, activation-plan preparation,
+    graph checks, repair suggestions, graph acceptance/supersession,
+    source-management placeholder surfaces, entry-surface mapping, decision
+    handoff, Job-backed operation boundaries, failure categories, and trace
+    correlation.
+
+    It does not attempt to define root discovery, pack identity/visibility,
+    PackRequest resolution, import/module loading, dependency semantics,
+    activation lifecycle, capability execution, policy/decision semantics, Job
+    lifecycle, Application/ApplicationRun lifecycle, SaveBundle binding, RPC,
+    UI/View runtime, adapter authority, RuntimeHost lifecycle, PackManager
+    doctrine, catalog listing envelopes, Default Launcher behavior,
+    ResolvedPackGraph/ActivationPlan fields, concrete package protocols, CLI
+    syntax, JSON-RPC/WebSocket fields, or browser layout.
+
+2. Strong entry-surface unification.
+
+    RuntimeHost commands, RPC requests, capability-mediated requests, Views,
+    Launcher, tools, tests, and remote clients use the same operation semantics.
+
+    Entry surface does not define operation authority. Different surfaces may use
+    different projections, syntax, or presentation, but those differences do not
+    change operation meaning.
+
+3. Strong request/response non-authority boundary.
+
+    The request envelope does not authorize access by itself.
+
+    The response envelope does not grant runtime authority.
+
+    OperationContext does not grant authority by itself.
+
+4. Good operation status boundaries.
+
+    Operation acceptance is distinct from operation completion.
+
+    operationStatus is not Job terminal outcome, activation outcome, or lifecycle
+    outcome. If an operation is Job-backed, Job lifecycle semantics remain owned
+    by DA-19.
+
+5. Good graph and plan operation boundaries.
+
+    PreparePackGraph output can produce a ResolvedPackGraph, but that graph does
+    not activate packs and does not guarantee activation success.
+
+    PrepareActivationPlan output can produce an ActivationPlan, but that plan does
+    not activate packs and does not guarantee activation success.
+
+6. Good graph acceptance/supersession boundaries.
+
+    AcceptPackGraph does not activate packs and does not write save state unless
+    the owning workflow explicitly performs an authorized persistence operation.
+
+    SupersedePackGraph records replacement but does not roll back already
+    committed state.
+
+7. Good repair suggestion boundary.
+
+    SuggestSavePackGraphRepair produces repair suggestions and does not apply
+    repair by itself. A repair suggestion is not an applied repair and does not
+    mutate persistence state.
+
+8. Good source-management placeholder boundary.
+
+    SearchPackSources, InstallPack, UpdatePack, RemovePack, VerifyPackSource, and
+    RefreshPackSourceIndex are placeholder operation surfaces. The document says
+    these placeholders define operation-surface shape only and do not define
+    concrete internet, index, package, verification, or installation protocols.
+
+9. Good decision handoff.
+
+    PackManager operations may require decisions, but DA-17 owns decision
+    semantics. A decision record does not resolve itself. PackManager does not
+    silently remember decisions.
+
+10. Good Job-backed operation boundary.
+
+    PackManager operations may be Job-backed when long-running, cancellable,
+    progress-reporting, timeout-managed, or otherwise requiring Job lifecycle
+    semantics. RPC request acceptance remains distinct from Job success.
+
+11. Good trace boundary.
+
+    PackManager operations remain trace-visible. PackManager-domain trace reasons
+    are owned by DA-29. Operation trace evidence does not replace catalog,
+    resolution, dependency, activation, capability, Job, RuntimeHost, persistence,
+    decision, Application, or ApplicationRun evidence.
+
+12. Good open-question discipline.
+
+    Exact identifiers, capability identifiers, JSON Schema format, profile
+    vocabularies, source-management protocol split, package source identity,
+    source trust vocabulary, progress/Job handle representation, repair
+    application operation, CLI syntax, RPC mapping, and View operation binding
+    remain open.
+
+==============================================================================
+MAJOR SEMANTIC RISKS
+==============================================================================
+
+1. SavePack terminology is superseded by SaveBundle.
+
+    IS-12 uses SavePack throughout:
+
+        - CheckSavePackGraph
+        - SuggestSavePackGraphRepair
+        - SavePack graph checks
+        - SavePack graph repair
+        - SavePack visibility semantics
+        - SavePack binding behavior
+        - savePackId
+        - includeSavePackGraphEvidence
+        - savePackGraphStatus
+        - SavePackGraphCheckFailed
+        - CheckSavePackGraph loading or migrating SavePacks
+        - selected or checked SavePack graph evidence
+
+    Current source-stack correction:
+        Proposal P02 defines SaveBundle as the durable persistence closure of one
+        Application. SaveBundle is not a Pack, not Application, not
+        ApplicationRun, not RuntimeHost, not live process snapshot, not arbitrary
+        writable directory, not Job store, and not authority by itself.
+
+    Required consequence for IS-12:
+        Translate SavePack to SaveBundle where the meaning is durable persistence
+        closure, save identity, stored graph evidence, copied/pinned retained pack
+        material, compatibility evidence, repair evidence, or export/bundling
+        context.
+
+        Likely replacements:
+
+            CheckSavePackGraph
+                -> CheckSaveBundleGraph
+
+            SuggestSavePackGraphRepair
+                -> SuggestSaveBundleGraphRepair
+
+            savePackId
+                -> saveBundleId
+
+            includeSavePackGraphEvidence
+                -> includeSaveBundleGraphEvidence
+
+            savePackGraphStatus
+                -> saveBundleGraphStatus
+
+            SavePackGraphCheckFailed
+                -> SaveBundleGraphCheckFailed
+
+        If operation names are already treated as schema vocabulary and cannot be
+        renamed immediately, mark old names as compatibility aliases and define
+        their current meaning through SaveBundle.
+
+2. AppInstance terminology is superseded by Application / ApplicationRun.
+
+    IS-12 uses AppInstance in operation completion semantics, operationContext,
+    activationContext, failure/status boundaries, trace evidence, and locked
+    summary.
+
+    Current source-stack correction:
+        Proposal P02 defines Application as the durable application individual and
+        ApplicationRun as one live execution period of an Application.
+
+    Required consequence for IS-12:
+        Replace AppInstance with Application and/or ApplicationRun according to
+        meaning.
+
+        Likely replacements:
+
+            appInstanceId
+                -> applicationId and/or applicationRunId
+
+            AppInstance success
+                -> Application lifecycle success and/or ApplicationRun lifecycle
+                   success; usually ApplicationRun when live runtime success is
+                   meant
+
+            AppInstance lifecycle outcome
+                -> ApplicationRun lifecycle outcome where live operation context
+                   is meant
+
+            activationContext AppInstance
+                -> Application/ApplicationRun context
+
+3. PackContext and onLoad(ctx) terminology is superseded by ModCallContext and
+   current activation-callback wording.
+
+    IS-12 excludes activation lifecycle, onLoad(ctx), and PackContext authority.
+    Current architecture replaces PackContext with ModCallContext as an
+    invocation-scoped Pack-bound gateway.
+
+    Required consequence for IS-12:
+        Replace PackContext with ModCallContext or precise activation-time
+        invocation-context wording.
+
+        Replace onLoad(ctx) examples with a general stop-line:
+
+            PackManager operation surfaces do not invoke Pack activation
+            callbacks, construct ModCallContext, load executable Pack code, or
+            call adapter execution entry points.
+
+4. OperationContext must not become identity-forging authority.
+
+    IS-12 correctly says operationContext does not grant authority by itself.
+
+    Risk:
+        Since operationContext may include runtimeHostId, workspaceId, appPackId,
+        savePackId, appInstanceId, viewId, commandId, rpcMessageId,
+        capabilityIdentity, jobId, and orchestrationUnitId, a caller might treat
+        these IDs as authority-bearing.
+
+    Required consequence for IS-12:
+        Add a stronger anti-forgery stop-line:
+
+            Caller-provided operationContext fields are correlation and requested
+            context evidence only until validated by the receiving boundary. They
+            do not let the caller forge RuntimeHost authority, workspace
+            ownership, Application identity, ApplicationRun identity, SaveBundle
+            identity, View authority, command authority, RPC authority, capability
+            permission, Job identity, OrchestrationUnit authority, PackManager
+            authority, policy approval, or persistence authority.
+
+5. Operation completion projection needs downstream evidence guardrail.
+
+    IS-12 says operation completion is distinct from activation success,
+    AppInstance success, Job success, or persistence success unless the operation
+    contract explicitly defines that relationship.
+
+    Required consequence for IS-12:
+        Translate AppInstance and preserve the projection boundary.
+
+        A PackManager operation response may summarize downstream records, but it
+        must not replace ResolvedPackGraph, ActivationPlan, Job, activation,
+        adapter, RuntimeHost, ApplicationRun, persistence, decision, or trace
+        evidence unless the owning document defines that projection.
+
+6. AcceptPackGraph persistence mode can be overread as persistence authority.
+
+    IS-12 says AcceptPackGraph records graph acceptance and does not write
+    SavePack state unless the owning workflow explicitly performs an authorized
+    persistence operation. Good.
+
+    Required consequence:
+        Translate SavePack to SaveBundle and preserve that AcceptPackGraph does
+        not by itself persist, bind, mutate, load, migrate, activate, or publish
+        state unless an owning authorized workflow does so.
+
+7. Source-management placeholders are high-risk if over-expanded.
+
+    Install/update/remove/verify/refresh operation surfaces are listed, but the
+    document says they define shape only and do not define concrete protocols.
+
+    Required consequence:
+        Preserve and strengthen that placeholder operations do not define:
+
+            internet access
+            package registry/index protocol
+            trust model
+            verification protocol
+            installation transaction behavior
+            root write permission
+            rollback semantics
+            package source authenticity
+            external network permission
+
+        Source-management writes require explicit policy, permission,
+        persistence, and trace handling.
+
+8. Decision records must not self-apply or broaden authority.
+
+    IS-12 says a decision record does not resolve itself and PackManager does not
+    silently remember decisions.
+
+    Required consequence:
+        Preserve this and add if needed that decisions do not silently broaden
+        scope, become remembered policy, grant capabilities, approve adapter
+        execution, authorize source-management writes, or mutate persistence
+        unless DA-17 and the owning operation explicitly define that effect.
+
+9. Repair suggestions must not become applied repair or safe graph guarantees.
+
+    IS-12 already says repair suggestion is not applied repair and does not
+    mutate SavePack state.
+
+    Required consequence:
+        Translate SavePack to SaveBundle and preserve that repair suggestions do
+        not make a graph safe, do not apply repair, do not mutate persistence, and
+        do not bypass dependency, policy, or capability boundaries.
+
+10. Job-backed operations need retained-result / cancellation boundary.
+
+    IS-12 already routes Job lifecycle to DA-19.
+
+    Required consequence:
+        Preserve that PackManager operation acceptance, RPC acceptance, command
+        acceptance, and Job creation are separate. Cancellation/timeout/progress
+        reporting are Job-domain unless an operation contract explicitly maps
+        them.
+
+11. Trace evidence must remain evidence only.
+
+    IS-12 already says operation trace evidence does not replace other trace
+    evidence.
+
+    Required consequence:
+        Translate AppInstance to Application/ApplicationRun and preserve that
+        operation trace evidence cannot replace catalog, resolution, dependency,
+        activation, capability, Job, RuntimeHost, Application, ApplicationRun,
+        SaveBundle, persistence, decision, or source-management evidence.
+
+==============================================================================
+OBSOLETE-PRESERVATION RISKS
+==============================================================================
+
+1. Do not preserve SavePack as current terminology.
+
+    Translate to SaveBundle according to meaning.
+
+2. Do not preserve CheckSavePackGraph / SuggestSavePackGraphRepair as current
+   operation names unless explicitly marked compatibility aliases.
+
+3. Do not preserve savePackId, savePackGraphStatus, or SavePackGraphCheckFailed.
+
+    Translate to SaveBundle-aware names or current save-bound graph terminology.
+
+4. Do not preserve AppInstance / appInstanceId.
+
+    Translate to Application / ApplicationRun / applicationId / applicationRunId
+    according to meaning.
+
+5. Do not preserve PackContext or onLoad(ctx) as current activation vocabulary.
+
+    Translate to ModCallContext and activation-callback wording.
+
+6. Do not preserve placeholder source-management operations as real package
+   protocols.
+
+    They are operation-surface placeholders only.
+
+==============================================================================
+PROCESS-METADATA LEAKAGE RISKS
+==============================================================================
+
+No major process-metadata leakage was found in IS-12.
+
+The final rewritten IS should still avoid saying "V3", "new design", "latest
+model", "rewrite", "audit", "Codex", "candidate", "seed", or similar process
+framing as ordinary specification language.
+
+Audit files may mention source-stack and proposal history. The final IS should
+state the current model directly.
+
+==============================================================================
+REQUIRED FIXES
+==============================================================================
+
+1. Replace SavePack terminology.
+
+    Replace:
+
+        SavePack
+        CheckSavePackGraph
+        SuggestSavePackGraphRepair
+        savePackId
+        includeSavePackGraphEvidence
+        savePackGraphStatus
+        SavePackGraphCheckFailed
+        SavePack graph check / repair / migration wording
+
+    with SaveBundle terminology or current save-bound graph terminology.
+
+2. Replace AppInstance terminology.
+
+    Replace:
+
+        AppInstance success
+        AppInstance lifecycle outcome
+        appInstanceId
+        AppInstance context
+        AppInstance trace evidence
+
+    with Application and/or ApplicationRun terminology according to meaning.
+
+3. Replace PackContext / onLoad(ctx) wording.
+
+    Replace with ModCallContext and activation-callback / adapter-entry wording.
+
+    Suggested wording:
+
+        PackManager operation surfaces do not invoke Pack activation callbacks,
+        construct ModCallContext, load executable Pack code, or call adapter
+        execution entry points.
+
+4. Update operationContext fields.
+
+    Replace savePackId and appInstanceId with saveBundleId, applicationId, and/or
+    applicationRunId.
+
+5. Update PreparePackGraph input.
+
+    Replace savePackId and includeSavePackGraphEvidence with SaveBundle-aware
+    fields.
+
+    Preserve that PreparePackGraph input does not resolve authority by itself.
+
+6. Update PrepareActivationPlan input.
+
+    Replace activationContext AppInstance / SavePack with Application /
+    ApplicationRun / SaveBundle.
+
+    Preserve that PrepareActivationPlan input and output do not activate packs.
+
+7. Update Check/Suggest graph operations.
+
+    Rename or compatibility-scope CheckSavePackGraph and
+    SuggestSavePackGraphRepair to SaveBundle graph check/repair semantics.
+
+    Preserve that check output is evidence only and does not mutate SaveBundle
+    state.
+
+    Preserve that repair suggestions are not applied repair.
+
+8. Update AcceptPackGraph wording.
+
+    Replace SavePack state with SaveBundle state.
+
+    Preserve that AcceptPackGraph does not activate packs and does not persist or
+    mutate SaveBundle state unless an owning workflow explicitly performs an
+    authorized persistence operation.
+
+9. Add operationContext anti-forgery guardrail.
+
+    Add wording that caller-provided operationContext fields are correlation and
+    requested-context evidence only until validated, and do not let the caller
+    forge authority or identity.
+
+10. Strengthen source-management placeholder boundary.
+
+    Preserve and strengthen that source-management placeholders do not define
+    concrete internet, package, index, trust, verification, install/update/remove,
+    transaction, rollback, external-network, or root-write behavior.
+
+11. Preserve decision handoff boundaries.
+
+    Keep decisions owned by DA-17. Decision records do not resolve themselves,
+    are not silently remembered, and do not silently broaden authority.
+
+12. Preserve Job-backed operation boundaries.
+
+    Keep Job lifecycle semantics owned by DA-19. Operation acceptance, RPC
+    acceptance, command acceptance, Job creation, Job success, cancellation,
+    timeout, and progress remain distinct unless explicitly mapped.
+
+13. Preserve trace boundaries.
+
+    Translate AppInstance to Application/ApplicationRun and keep operation trace
+    evidence from replacing owning-domain evidence.
+
+14. Preserve open questions.
+
+    Keep exact identifiers, capability IDs, JSON Schema, profile vocabularies,
+    source-management protocol split, package source identity, source trust,
+    progress/Job handle representation, repair application operation, CLI syntax,
+    RPC mapping, and View operation binding open unless later authoritative
+    sources resolve them.
+
+==============================================================================
+SUGGESTED REWRITE STRUCTURE
+==============================================================================
+
+Keep the existing structure.
+
+Suggested targeted structure changes:
+
+    1. Update Description / Purpose / It does NOT define sections to current
+       SaveBundle / Application / ApplicationRun / ModCallContext terminology.
+
+    2. Keep Core Concept, but translate AppInstance success and add the
+       operationContext anti-forgery stop-line.
+
+    3. Update Operation Names to SaveBundle terminology or mark old SavePack names
+       as compatibility aliases.
+
+    4. Keep Request Envelope, Response Envelope, Operation Status, Decision
+       Handoff, Entry Surface Mapping, Job-backed Operation Boundary, Trace,
+       Relation to Implementation Specifications, Unsupported, Open Questions,
+       and Locked Summary.
+
+    5. Update Operation Context fields to current identifiers.
+
+    6. Update PreparePackGraph and PrepareActivationPlan inputs to current
+       SaveBundle / Application / ApplicationRun context terms.
+
+    7. Rename or compatibility-scope CheckSavePackGraph,
+       SuggestSavePackGraphRepair, and related fields to SaveBundle graph check /
+       repair.
+
+    8. Preserve source-management placeholders but add stronger protocol/non-
+       authority guardrails.
+
+Do not turn IS-12 into DA-09 discovery, DA-10 pack identity/visibility, DA-11
+PackRequest resolution, DA-13 dependency semantics, DA-14 activation lifecycle,
+DA-16 capability execution, DA-17 policy/decision doctrine, DA-19 Job lifecycle,
+DA-20 Application/ApplicationRun lifecycle, DA-29 PackManager doctrine, IS-09
+catalog envelope schema, IS-11 graph schema, package source/index protocol,
+install/update/remove protocol, verification protocol, CLI syntax, RPC mapping,
+or PackManager View behavior.
+
+==============================================================================
+SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as concrete rewrite hints, not mandatory exact final wording.
+
+1. Description / operation list
+
+    Current risk:
+        SavePack graph checks
+        SuggestSavePackGraphRepair
+        CheckSavePackGraph
+
+    Safer wording:
+        SaveBundle graph checks
+        SuggestSaveBundleGraphRepair
+        CheckSaveBundleGraph
+
+    If operation names are kept for compatibility, add:
+        The legacy operation spelling refers to SaveBundle graph evidence.
+
+2. It does NOT define section
+
+    Current risk:
+        activation lifecycle, onLoad(ctx), or PackContext authority
+        AppInstance lifecycle or SavePack binding behavior
+
+    Safer wording:
+        activation lifecycle, activation callback invocation, or ModCallContext
+        authority
+        Application lifecycle, ApplicationRun lifecycle, or SaveBundle binding /
+        loading behavior
+
+3. Core Concept
+
+    Current risk:
+        operation completion is distinct from activation success, AppInstance
+        success, Job success, or persistence success
+
+    Safer wording:
+        operation completion is distinct from activation success, ApplicationRun
+        success, Job success, or persistence success
+
+4. Operation Context
+
+    Current risk:
+        savePackId
+        appInstanceId
+
+    Safer wording:
+        saveBundleId
+        applicationId
+        applicationRunId
+
+5. PreparePackGraph input
+
+    Current risk:
+        savePackId
+        includeSavePackGraphEvidence
+
+    Safer wording:
+        saveBundleId
+        includeSaveBundleGraphEvidence
+
+6. PrepareActivationPlan input
+
+    Current risk:
+        activationContext identifies RuntimeHost, AppInstance, AppPack, SavePack,
+        workspace, adapter, and View context
+
+    Safer wording:
+        activationContext identifies RuntimeHost, Application, ApplicationRun,
+        AppPack or AppDefinition source, SaveBundle, Workspace, adapter, and View
+        context
+
+7. Check graph operation
+
+    Current risk:
+        CheckSavePackGraph does not load, bind, or migrate the SavePack by itself.
+
+    Safer wording:
+        CheckSaveBundleGraph does not load, bind, or migrate the SaveBundle by
+        itself.
+
+8. Repair operation
+
+    Current risk:
+        A repair suggestion does not mutate SavePack state.
+
+    Safer wording:
+        A repair suggestion does not mutate SaveBundle state.
+
+9. Accept graph operation
+
+    Current risk:
+        AcceptPackGraph does not write SavePack state unless...
+
+    Safer wording:
+        AcceptPackGraph does not write SaveBundle state unless the owning workflow
+        explicitly performs an authorized persistence operation.
+
+10. Failure categories
+
+    Current risk:
+        SavePackGraphCheckFailed
+
+    Safer wording:
+        SaveBundleGraphCheckFailed
+
+11. Job-backed operation boundary
+
+    Current risk:
+        SavePack graph repair may be Job-backed...
+
+    Safer wording:
+        SaveBundle graph repair may be Job-backed...
+
+12. Trace context
+
+    Current risk:
+        savePackId when applicable
+        Operation trace evidence does not replace ... AppInstance ... evidence
+
+    Safer wording:
+        saveBundleId when applicable
+        Operation trace evidence does not replace ... Application,
+        ApplicationRun ... evidence
+
+13. Unsupported list
+
+    Current risk:
+        CheckSavePackGraph loading or migrating SavePacks
+
+    Safer wording:
+        CheckSaveBundleGraph loading, binding, migrating, or mutating SaveBundles
+
+==============================================================================
+ACCEPTANCE CONDITIONS FOR FINAL REWRITTEN IS-12
+==============================================================================
+
+Accept the rewritten IS-12 only if all of the following are true:
+
+1. It remains an implementation specification for PackManager operation request /
+   response surfaces.
+
+2. It does not redefine discovery, root scanning, pack identity, pack visibility,
+   PackRequest resolution, importing, module loading, dependency semantics,
+   provider/advisory semantics, activation lifecycle, capability execution,
+   policy/decision semantics, Job lifecycle, Application lifecycle,
+   ApplicationRun lifecycle, SaveBundle binding/storage, RPC, UI/View runtime,
+   adapter authority, RuntimeHost lifecycle, PackManager doctrine, catalog
+   envelopes, graph/activation-plan schema, package protocols, CLI syntax,
+   JSON-RPC/WebSocket mapping, or browser layout.
+
+3. All SavePack terminology has been translated to SaveBundle terminology or
+   explicitly scoped compatibility aliases.
+
+4. All AppInstance terminology has been translated to Application and/or
+   ApplicationRun terminology according to meaning.
+
+5. All PackContext / onLoad(ctx) terminology has been translated to
+   ModCallContext and current activation-callback wording.
+
+6. Entry surfaces remain non-authoritative. Commands, RPC requests, Views,
+   Launcher, tools, tests, and remote clients do not become PackManager authority
+   by reaching this operation surface.
+
+7. Caller-provided operationContext fields cannot forge RuntimeHost authority,
+   workspace ownership, Application identity, ApplicationRun identity, SaveBundle
+   identity, View authority, command authority, RPC authority, capability
+   permission, Job identity, OrchestrationUnit authority, PackManager authority,
+   policy approval, or persistence authority.
+
+8. Operation acceptance, operation completion, Job success, activation success,
+   ApplicationRun success, persistence success, command acceptance, and RPC
+   acceptance remain distinct unless an owning operation contract explicitly maps
+   them.
+
+9. PreparePackGraph and PrepareActivationPlan produce or attempt to produce IS-11
+   records only; they do not activate packs, execute code, grant capability
+   permission, grant adapter authorization, or guarantee activation success.
+
+10. SaveBundle graph check output remains evidence only and does not load, bind,
+    migrate, mutate, or repair SaveBundle state.
+
+11. Repair suggestions remain suggestions only and do not apply repair, mutate
+    persistence, make graphs safe, or bypass dependency/policy/capability
+    boundaries.
+
+12. AcceptPackGraph records acceptance and does not activate packs or persist /
+    mutate SaveBundle state unless an owning workflow performs an authorized
+    persistence operation.
+
+13. SupersedePackGraph does not roll back already committed state.
+
+14. Source-management placeholder operations remain placeholders and do not define
+    internet, package, index, trust, verification, install/update/remove,
+    transaction, rollback, external-network, or root-write protocols.
+
+15. Source-management writes require explicit policy, permission, persistence, and
+    trace handling.
+
+16. Decision records do not resolve themselves, are not silently remembered, and
+    do not silently broaden authority.
+
+17. Job-backed operation behavior remains governed by DA-19 and capability-
+    mediated Job-backed behavior remains governed by DA-16.
+
+18. Operation trace evidence remains evidence only and does not replace owning
+    catalog, resolution, dependency, activation, capability, Job, RuntimeHost,
+    Application, ApplicationRun, SaveBundle, persistence, decision, or
+    source-management evidence.
+
+19. Open questions remain open unless a later authoritative source resolves them.
+
+==============================================================================
+FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep IS-12 with targeted terminology, operation-surface, source-management,
+decision-handoff, and authority-boundary fixes.
+
+Do not rewrite the whole document.
+
+Do not expand this implementation specification into discovery, pack identity,
+PackRequest resolution, dependency semantics, activation lifecycle, capability
+execution, policy/decision doctrine, Job lifecycle, Application/ApplicationRun
+lifecycle, SaveBundle lifecycle/storage, PackManager doctrine, catalog envelopes,
+graph schema, package source/index protocol, install/update/remove protocol,
+verification protocol, CLI syntax, RPC mapping, or PackManager View behavior.
+
+Translate obsolete SavePack / AppInstance / PackContext / onLoad(ctx) wording into
+current SaveBundle / Application / ApplicationRun / ModCallContext and activation-
+callback terminology. Preserve the single mediated operation model, entry-surface
+non-authority, operationContext anti-forgery, operation status boundaries,
+PreparePackGraph and PrepareActivationPlan non-execution, SaveBundle graph check
+and repair non-mutation, AcceptPackGraph non-activation, source-management
+placeholder limits, decision handoff, Job-backed operation boundary, trace-evidence
+boundary, and all open questions.
+
+==============================================================================
+END OF AUDIT-IS-12 RESULT
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-IS-12-RESULT
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-IS-12_RESULT.txt
+DOC_REV: 1
+DOC_GIT: temp
+----------------
