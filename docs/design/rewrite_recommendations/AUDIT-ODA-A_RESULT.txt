@@ -1,0 +1,476 @@
+==============================================================================
+TURNIX DV3 DOCUMENTATION AUDIT RESULT - ODA-A
+==============================================================================
+
+Document title:
+    OPTIONAL DESIGN AREA ODA-A - MINIMAL BOOTSTRAP & ERROR UI SUBSYSTEM
+
+Target ODA path:
+    docs/design/ODA-A_MINIMAL_BOOTSTRAP_AND_ERROR_UI_SUBSYSTEM.txt
+
+Branch:
+    CODEX_Dv3
+
+Loaded target file metadata:
+    DOC_REV: 8
+    DOC_GIT: ad877cc
+    GitHub blob SHA seen by assistant:
+        3ca2298dc07247c425ed31d5c623096886ed03b8
+
+Audit result status:
+    Direct ODA audit result.
+    ODA files do not have rewrite recommendation files.
+
+Source stack used:
+    - docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+    - docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P01_TURNIX_PACK_ENTRY_MULTI_ADAPTER_AND_CYCLIC_ACTIVATION_PROTOCOL.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    - docs/design/ODA-A_MINIMAL_BOOTSTRAP_AND_ERROR_UI_SUBSYSTEM.txt
+
+Recommendation file:
+    None.
+
+Recommendation verdict:
+    Not applicable because ODA files do not have rewrite recommendation files.
+
+ODA document verdict:
+    Keep with small fixes.
+
+==============================================================================
+SUMMARY
+==============================================================================
+
+ODA-A is a useful optional subsystem document. Its core purpose is valid: Turnix
+needs a minimal bootstrap/error presentation path for blocking startup failures
+that occur before normal application-facing surfaces are available.
+
+The document mostly preserves the right boundaries:
+
+    - minimal error UI is not normal UI
+    - presentation technology does not define authority
+    - frontend bootstrap code is not Kernel authority
+    - UI acknowledgement and transport acknowledgement do not imply recovery
+      success
+    - recovery actions come from Kernel-owned authority, not from the UI
+    - pack-based early UI and LLM-assisted recovery remain open and optional
+
+The required changes are small but semantically important. The document still
+uses older AppPack/AppInstance wording in several places, overstates the Ring-1
+availability guarantee slightly, and should tighten a few authority and I/O
+phrases so the minimal UI does not accidentally become a hidden View, RuntimeHost,
+PackManager, raw filesystem, or recovery-authority surface.
+
+==============================================================================
+WHAT THE DOCUMENT GETS RIGHT
+==============================================================================
+
+1. The role boundary is strong.
+
+    The minimal UI exists to display blocking/fatal errors, present
+    Kernel-supplied choices, and return a user decision. It does not own the
+    meaning of the action, does not own recovery authority, and does not become a
+    normal View runtime surface.
+
+2. The frontend authority boundary is mostly correct.
+
+    The document explicitly says Ring-1 frontend code remains frontend adapter
+    code rather than Kernel authority. It also says browser-based minimal UI is
+    not Kernel state authority.
+
+3. The communication boundary is mostly correct.
+
+    UI acknowledgement and transport acknowledgement are both separated from
+    recovery success. Recovery outcome remains owned by the Kernel-owned recovery
+    path.
+
+4. The failure-mode section preserves important lifecycle separation.
+
+    UI disconnect does not automatically imply Job failure, adapter failure, or
+    committed-state change.
+
+5. The open sections are appropriately open.
+
+    Pack-based error UI and LLM-assisted guidance are not presented as required
+    current architecture. Their optional/open status should be preserved.
+
+==============================================================================
+MAJOR SEMANTIC RISKS
+==============================================================================
+
+1. Current naming/model drift: AppPack/AppInstance wording is stale in this ODA.
+
+    Proposal P02 changes the current platform model to Application,
+    ApplicationRun, SaveBundle, AppPack/AppDefinition, and Pack activation. The
+    ODA still says or implies older terms such as:
+
+        - normal appPack activation
+        - normal appPack user-interface behavior
+        - before any appPack is active
+        - appInstance creation
+        - AppInstance lifecycle meaning remains owned by DA-20
+        - Ring-1 completion does not imply AppInstance readiness
+
+    Required correction:
+        Rewrite these into current Application / ApplicationRun / AppPack or
+        Pack-activation terms.
+
+    Suggested meaning:
+        ODA-A operates before normal Pack activation, normal Application-facing
+        View surfaces, and ApplicationRun readiness. It must not preserve the old
+        model where AppInstance is the primary current identity term.
+
+2. Ring-1 availability is slightly over-guaranteed.
+
+    Section 08 says that once Ring 1 is complete, the Kernel may assume that a
+    minimal decision surface exists and execution may pause safely for decision
+    handling.
+
+    That is directionally right, but too absolute unless it is qualified by the
+    later failure-mode section. Ring-1 completion means the bootstrap decision
+    surface has been established for use. It does not guarantee continued
+    frontend availability, future reconnect success, or that every blocking
+    recovery decision will definitely be deliverable through UI.
+
+    Required correction:
+        Say the Kernel may attempt to use the minimal decision surface once Ring
+        1 is complete, and may pause Kernel-mediated work at a decision point
+        according to policy. If the minimal UI is unavailable, disconnected, or
+        times out, Section 10 fallback/failure handling applies.
+
+3. "Kernel-originated" errors should become "Kernel-mediated" or
+   "Kernel-classified" errors.
+
+    Section 06 says Kernel-originated blocking errors are sent to the minimal UI.
+    That can be misread as only the Kernel itself detecting the error. Early
+    failures may be detected by IoManager, RuntimeHost startup code,
+    configuration loading, manifest loading, discovery, adapter preparation, or
+    other startup subsystems.
+
+    The important boundary is not physical origin. The important boundary is
+    that the error is classified, shaped, authorized, and acted on through a
+    Kernel-owned or Kernel-mediated recovery path.
+
+    Required correction:
+        Replace "Kernel-originated blocking errors" with "Kernel-mediated
+        blocking errors" or "blocking errors classified through the
+        Kernel-owned recovery path".
+
+4. Early configuration wording should align with Workspace/runtime-effective
+   configuration.
+
+    The examples and independence list use older broad wording such as
+    "corrupted global config" and "user config". P02 reframes ordinary mutable
+    engine-wide configuration as Workspace configuration unless it is genuinely
+    installation-wide, and runtime-effective configuration may be assembled from
+    defaults, Workspace configuration, launch arguments, environment, and
+    temporary runtime overrides.
+
+    Required correction:
+        Replace broad "global config" wording with Workspace/runtime
+        configuration wording where appropriate. Keep installation-wide config
+        only where the document intentionally means installation-wide material.
+
+5. "Open logs directory" can imply a raw filesystem escape if left too loose.
+
+    The supported actions list includes "Open logs directory". That is useful,
+    but the final document should clarify that this is a Kernel/RuntimeHost-owned
+    host action or diagnostic-opening request. It must not imply that the minimal
+    UI receives unrestricted raw filesystem authority or a general file browser
+    capability.
+
+    Required correction:
+        Reword this action as something like "Open diagnostics/logs through a
+        controlled host action".
+
+6. Ring-1 implementation examples should stay examples, not locked asset names.
+
+    Ring 1 currently lists serving index.html and bootstrap.js. That is probably
+    fine as an implementation example, but the section heading says LOCKED
+    CONCEPT. The exact filenames should not become architecture.
+
+    Required correction:
+        Keep Ring 1 locked as the conceptual minimal bootstrap/error subsystem,
+        but phrase index.html/bootstrap.js as example static assets, not required
+        canonical filenames.
+
+7. Early diagnostics/trace wording is under-specified.
+
+    The document defines error envelopes and logging but does not explicitly say
+    how early failures relate to trace/diagnostic evidence. During Ring 0, the
+    trace substrate may not be fully available, so the ODA should not promise
+    full retained trace evidence. But it should preserve the Dv3 invariant that
+    meaningful errors and recovery choices are represented as structured
+    diagnostic evidence where the available bootstrap substrate permits.
+
+    Required correction:
+        Add a compact diagnostics rule: early blocking errors, presented actions,
+        selected decisions, fallback outcomes, and unavailable-UI outcomes should
+        emit structured trace/diagnostic evidence when the relevant substrate is
+        available. Loss or absence of early trace evidence weakens evidence, but
+        does not by itself redefine committed-state correctness.
+
+==============================================================================
+OBSOLETE-PRESERVATION RISKS
+==============================================================================
+
+The main obsolete-preservation risk is old AppInstance/AppPack wording.
+
+Do not preserve AppInstance as the current primary identity term merely because
+older DA documents used it. Translate into the P02 model:
+
+    AppPack
+        reusable application definition
+
+    Application
+        durable application individual
+
+    ApplicationRun
+        live execution period of an Application
+
+    SaveBundle
+        durable persistence closure
+
+For this ODA, the most relevant current terms are:
+
+    - normal Pack activation
+    - Application creation/loading
+    - ApplicationRun readiness
+    - normal Application View surfaces
+    - AppPack-defined application behavior, where the definition source matters
+
+The document should not imply that the minimal bootstrap UI belongs to an
+ApplicationRun or is a normal View of an Application.
+
+==============================================================================
+PROCESS-METADATA LEAKAGE RISKS
+==============================================================================
+
+No major final-document process leakage was found.
+
+The document does not appear to talk about Codex, rewrite history, candidate
+status, or old/new design history as ordinary architecture.
+
+The terms LOCKED and OPEN are acceptable as design-status markers if the user
+wants them retained. They are not the same as rewrite-process metadata. However,
+LOCKED headings should not accidentally lock implementation examples such as
+specific static filenames.
+
+==============================================================================
+REQUIRED FIXES
+==============================================================================
+
+Fix 1: Replace stale AppPack/AppInstance wording.
+
+    Replace:
+        before normal appPack activation
+
+    With:
+        before normal Pack activation, Application-facing View surfaces, or
+        ApplicationRun readiness
+
+    Replace:
+        normal appPack user-interface behavior
+
+    With:
+        normal Application/View user-interface behavior
+
+    Replace:
+        before any appPack is active
+
+    With:
+        before any normal Pack activation has succeeded or any ApplicationRun is
+        ready
+
+    Replace:
+        appInstance creation
+
+    With:
+        Application creation/loading and ApplicationRun creation/readiness
+
+    Replace:
+        AppInstance lifecycle meaning remains owned by DA-20
+
+    With a current ownership statement such as:
+        Application and ApplicationRun lifecycle meaning belongs to the current
+        lifecycle/runtime-identity design area.
+
+    Replace:
+        Ring-1 completion does not imply AppInstance readiness
+
+    With:
+        Ring-1 completion does not imply ApplicationRun readiness.
+
+Fix 2: Qualify Ring-1 UI availability.
+
+    Add or rewrite Section 08 to say:
+
+        Ring-1 completion means the minimal bootstrap decision surface has been
+        established for use. It does not guarantee continued frontend
+        availability, successful reconnect, or successful recovery. If the
+        minimal UI is unavailable, disconnects, or times out, the fallback and
+        failure rules in Section 10 apply.
+
+Fix 3: Make error authority Kernel-mediated, not necessarily Kernel-originated.
+
+    Replace:
+        Kernel-originated blocking errors are sent to the minimal UI
+
+    With:
+        Blocking errors classified through the Kernel-owned recovery path are
+        sent to the minimal UI
+
+    Or:
+        Kernel-mediated blocking errors are sent to the minimal UI
+
+Fix 4: Align configuration terminology.
+
+    Replace broad "global config" wording with:
+
+        Workspace/runtime configuration
+
+    Use "installation-wide configuration" only when the failure really belongs
+    to installation-wide material.
+
+    Keep the minimal UI independent of user-authored configuration, but say this
+    as:
+
+        independent of Workspace/user-authored configuration
+
+Fix 5: Reword diagnostics/log opening.
+
+    Replace:
+        Open logs directory
+
+    With:
+        Open diagnostics/logs through a controlled host action
+
+    Add a stop-line:
+        This does not grant the minimal UI unrestricted filesystem authority.
+
+Fix 6: Keep Ring-1 asset filenames non-normative.
+
+    Replace:
+        serving index.html
+        serving bootstrap.js
+
+    With:
+        serving minimal bootstrap UI assets, such as an HTML shell or bootstrap
+        script when that presentation technology is used
+
+Fix 7: Add early diagnostics rule.
+
+    Add a compact subsection near Section 06 or Section 10:
+
+        Early blocking errors, presented actions, selected decisions, fallback
+        outcomes, unavailable-UI outcomes, and abort outcomes should emit
+        structured trace or diagnostic evidence when the relevant bootstrap
+        substrate is available. Early trace/diagnostic loss weakens evidence but
+        does not by itself redefine committed-state correctness.
+
+==============================================================================
+SUGGESTED REWRITE STRUCTURE
+==============================================================================
+
+The current structure can remain.
+
+Suggested section-level edits only:
+
+    01. Interpretation Basis
+        Keep.
+
+    02. Core Problem
+        Translate AppPack/AppInstance/config wording into current terms.
+
+    03. Bootstrap Rings
+        Keep conceptual rings.
+        Make static filenames examples only.
+        Translate Ring 2 from appInstance creation to Application/ApplicationRun.
+
+    04. Minimal Error UI Purpose
+        Keep.
+        Optionally call it a bootstrap decision surface, not a normal View.
+
+    05. Error UI Characteristics
+        Keep.
+        Translate user config wording to Workspace/user-authored configuration.
+
+    06. Error Communication Model
+        Change Kernel-originated to Kernel-mediated or Kernel-classified.
+        Add diagnostics/trace note.
+
+    07. Supported User Actions
+        Reword Open logs directory to controlled host action.
+
+    08. UI Availability Guarantee
+        Rewrite to avoid over-guaranteeing continued availability.
+
+    09. Multi-Frontend Handling
+        Keep.
+
+    10. Failure Modes
+        Keep.
+        Tie it explicitly to Section 08 availability qualification.
+
+    11. Optional Pack-Based Error UI
+        Keep open.
+        Preserve strong boundaries against normal Pack activation, discovery,
+        RPC, adapter, and authority drift.
+
+    12. LLM-Assisted Recovery
+        Keep open and optional.
+
+    13. What This Area Does Not Do
+        Keep.
+
+    14. Locked Summary
+        Update terminology and Ring-1 availability wording.
+
+==============================================================================
+ACCEPTANCE CONDITIONS FOR THE FINAL ODA-A REWRITE
+==============================================================================
+
+The final rewritten ODA-A is acceptable when:
+
+    - it no longer uses AppInstance as the current primary runtime identity term
+    - it uses Application / ApplicationRun / AppPack / Pack activation according
+      to the current P02 model
+    - it does not imply the minimal bootstrap UI is a normal View or normal
+      Application UI
+    - it does not imply the minimal UI owns recovery authority
+    - it does not imply UI acknowledgement or transport acknowledgement means
+      recovery success
+    - it does not overpromise continued Ring-1 UI availability
+    - it preserves fallback behavior when minimal UI is unavailable, disconnected,
+      timed out, or unsafe
+    - it does not expose raw filesystem authority through diagnostics/log actions
+    - it keeps pack-based early UI and LLM-assisted recovery open and optional
+    - it treats exact Ring-1 static asset names as examples, not locked
+      architecture
+    - it includes a compact trace/diagnostic evidence rule without promising
+      guaranteed trace persistence during earliest bootstrap
+    - it contains no rewrite/history/Codex/process framing as final architecture
+      text
+
+==============================================================================
+FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep ODA-A. Apply a small terminology and boundary pass. Do not rewrite the whole
+document into a different subsystem. The document's core architecture is useful;
+the main task is to translate old AppInstance/AppPack phrasing into the current
+Application/ApplicationRun model, qualify Ring-1 availability, and tighten the
+minimal UI so it remains a Kernel-mediated bootstrap decision surface rather than
+a hidden normal View, PackManager, RuntimeHost, raw filesystem, or recovery
+authority surface.
+
+==============================================================================
+END OF AUDIT RESULT - ODA-A
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-ODA-A
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-ODA-A_RESULT.txt
+DOC_REV: 1
+DOC_GIT: temp
+----------------
