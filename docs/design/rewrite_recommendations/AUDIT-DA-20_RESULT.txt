@@ -1,0 +1,879 @@
+==============================================================================
+AUDIT RESULT - DA-20 APPLICATION / APPLICATIONRUN LIFECYCLE AND RUNTIME IDENTITY
+==============================================================================
+
+Document status:
+    Audit result for assistant-editor use.
+
+Target document:
+    docs/design/DA-20_APPINSTANCE_LIFECYCLE_AND_RUNTIME_IDENTITY.txt
+
+Recommendation file:
+    docs/design/rewrite_recommendations/REWRITE-DA-20_RECOMMENDATION.txt
+
+Audit source stack:
+    docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P01_TURNIX_PACK_ENTRY_MULTI_ADAPTER_AND_CYCLIC_ACTIVATION_PROTOCOL.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    docs/design/DA-20_APPINSTANCE_LIFECYCLE_AND_RUNTIME_IDENTITY.txt
+    docs/design/rewrite_recommendations/REWRITE-DA-20_RECOMMENDATION.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-14_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-23_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-27_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-28_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-29_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-30_RESULT.txt
+
+Audit posture:
+    Semantic architecture audit, not formatting audit.
+
+    Use CMR references as normal upstream/index material only.
+
+    Do not treat CMR files as semantic architecture authority for this audit.
+
+==============================================================================
+01. VERDICT
+==============================================================================
+
+Recommendation verdict:
+    Obsolete in its main naming/model question, but still useful as preservation
+    guidance.
+
+Document verdict:
+    Rename and rewrite substantially around current Dv3 terminology.
+
+DA-20 is conceptually important and should be kept as the Application /
+ApplicationRun lifecycle and runtime identity document.
+
+However, the current file still has an old identity layer embedded in its
+filename, title, and save-context language.
+
+The body already moved partway toward the current P02 model:
+
+    - applicationId is durable Application identity.
+    - applicationRunId is live runtime execution identity.
+    - Application is the durable application individual.
+    - ApplicationRun is one live execution period of an Application.
+    - Session is not a core runtime identity.
+
+Those parts are directionally correct.
+
+The remaining problems are serious enough that DA-20 should not be accepted as a
+small terminology patch:
+
+    - The file path and title still say AppInstance.
+    - The old recommendation's main open question has been resolved by P02:
+      scripts/tests/direct-local/internal usage create normal Applications and
+      ApplicationRuns through synthetic/direct-local/internal AppPack sources.
+    - The document still says an Application is created from an AppPack in a way
+      that may be too narrow if AppDefinition binding is the intended generic
+      source concept.
+    - The document still says a save stores durable executed state for an AppPack.
+      P02 now defines SaveBundle as the durable persistence closure of an
+      Application.
+    - The document still uses save/save context/writable save/active save
+      identity where SaveBundle should carry the architecture identity.
+    - The locked summary says ApplicationRun is a live runtime instance of one
+      AppPack, which is stale and should be replaced.
+    - Trace reason names still include SaveBinding. That may remain as
+      user-facing shorthand, but if architecture identity is meant, SaveBundle
+      binding is the better term.
+
+Primary conclusion:
+    Rename the document and rewrite around Application, ApplicationRun,
+    AppDefinition/AppPack binding, and SaveBundle.
+
+==============================================================================
+02. FILE AND TITLE RENAME
+==============================================================================
+
+The document filename itself should be updated.
+
+Current path:
+
+    docs/design/DA-20_APPINSTANCE_LIFECYCLE_AND_RUNTIME_IDENTITY.txt
+
+Recommended new path:
+
+    docs/design/DA-20_APPLICATION_APPLICATIONRUN_LIFECYCLE_AND_RUNTIME_IDENTITY.txt
+
+Alternative if shorter title is preferred:
+
+    docs/design/DA-20_APPLICATION_LIFECYCLE_AND_RUNTIME_IDENTITY.txt
+
+Recommended title:
+
+    DESIGN AREA DA-20 - APPLICATION AND APPLICATIONRUN LIFECYCLE & RUNTIME IDENTITY
+
+Reason:
+    The old title fossilizes AppInstance even though the document body and P02
+    already moved to Application/ApplicationRun.
+
+    Keeping AppInstance in the filename will cause retrieval, index, and later
+    assistant edits to keep dragging the old term forward.
+
+If the repository wants a transitional alias, the index may point old AppInstance
+references to the renamed DA-20. The DA-20 source text should not keep
+AppInstance as the primary current type name unless the project explicitly
+chooses to preserve AppInstance as an alias.
+
+==============================================================================
+03. RECOMMENDATION FILE ASSESSMENT
+==============================================================================
+
+The REWRITE-DA-20 recommendation was useful before P02. It correctly protected:
+
+    - runtime identity distinct from Pack identity
+    - runtime identity distinct from save identity
+    - optional persistence binding
+    - single-writer durable-state ownership
+    - lifecycle separation from activation, adapters, Jobs, Views, RPC,
+      RuntimeHost, Windows, PackManager, artifact/export, Replay/Resume/Retry,
+      and committed state
+    - no partially valid runtime identity after creation failure
+    - trace evidence as correlation, not ownership transfer
+
+Those preservation points still matter.
+
+However, the recommendation is stale in its main decision point.
+
+It asks the editor to choose between:
+
+    Model A:
+        all AppInstances are formally AppPack-backed
+
+    Model B:
+        AppPack-backed AppInstances are normal product path, but not the only
+        creation path
+
+Proposal P02 effectively resolves this in a better form:
+
+    Scripts and runtime tests are lightweight AppPack creation surfaces.
+
+    Possible AppDefinition source classes include DiscoveredAppPack,
+    DirectLocalAppPack, SyntheticScriptAppPack, SyntheticTestAppPack, and
+    InternalAppPack.
+
+    All create normal Applications and ApplicationRuns when persistence/runtime
+    use requires them.
+
+Therefore the revised DA-20 should not preserve the old undecided question as a
+major open issue.
+
+The current model is:
+
+    Application:
+        durable application individual
+
+    ApplicationRun:
+        one live execution period of that Application
+
+    AppPack / AppDefinition source:
+        reusable or synthetic application definition source used to create or
+        restore the Application
+
+    SaveBundle:
+        durable persistence closure of the Application
+
+The old recommendation remains useful only after translating:
+
+    AppInstance -> Application / ApplicationRun depending on meaning
+    appInstanceId -> applicationId or applicationRunId depending on meaning
+    SavePack -> SaveBundle
+    PackContext -> ModCallContext
+
+==============================================================================
+04. WHAT DA-20 GETS RIGHT
+==============================================================================
+
+04.1. Durable identity versus live run identity
+----------------------------------------------
+
+DA-20 correctly distinguishes:
+
+    applicationId:
+        durable Application identity
+
+    applicationRunId:
+        live runtime execution identity
+
+Preserve this distinction.
+
+This is the central identity split.
+
+04.2. ApplicationRun as live runtime boundary
+---------------------------------------------
+
+DA-20 correctly says ApplicationRun is one live execution period of an
+Application.
+
+Preserve this.
+
+ApplicationRun is the live region where activation, state mutation, Windows,
+capabilities, Views, adapters, debugging, tracing, ProcessingRuns,
+OrchestrationUnits, timers, hooks, and Jobs may occur.
+
+04.3. Identity separation is strong
+-----------------------------------
+
+DA-20 correctly separates ApplicationRun identity from Pack, Application, View,
+adapter, RPC, Job, RuntimeHost, and Workspace identity.
+
+Preserve and extend this to include:
+
+    SaveBundle identity
+    Window identity
+    artifact/export identity
+    Replay/Resume/Retry/audit workflow identity
+    ProcessingRun identity
+    OrchestrationUnit identity
+
+04.4. Session removal is correctly present
+------------------------------------------
+
+DA-20 correctly says Session is not a core runtime identity.
+
+Preserve this, and strengthen it if needed:
+
+    Session does not identify Application.
+
+    Session does not identify ApplicationRun.
+
+    View does not own Session.
+
+    ProcessingRun does not require Session.
+
+04.5. Lifecycle separation is strong
+------------------------------------
+
+DA-20 correctly says ApplicationRun lifecycle does not define Job terminal
+outcome, Window finalization outcome, adapter lifecycle outcome, transport
+outcome, RuntimeHost outcome, committed state, DA-25 artifact/export, or DA-26
+workflow outcomes.
+
+Preserve this.
+
+04.6. RuntimeHost startup/command surface boundary is strong
+------------------------------------------------------------
+
+DA-20 correctly says RuntimeHost startup modes and command surfaces use the same
+ApplicationRun creation paths rather than defining separate creation semantics.
+
+Preserve this, but align with DA-28 / P02 wording.
+
+04.7. Participant separation is strong
+--------------------------------------
+
+DA-20 correctly says adapters, Views, frontend clients, transports, Jobs,
+Windows, and other participants do not become the ApplicationRun and do not own
+ApplicationRun state merely by participating.
+
+Preserve this.
+
+==============================================================================
+05. MAJOR REQUIRED FIX: APPLICATION / APPLICATIONRUN / APPPACK MODEL
+==============================================================================
+
+05.1. Replace AppInstance as current name
+-----------------------------------------
+
+Do not use AppInstance as the current primary type name in DA-20.
+
+If an alias is desired, add a short note:
+
+    Older notes may use AppInstance for what is now split into Application and
+    ApplicationRun.
+
+    Use Application for the durable individual.
+
+    Use ApplicationRun for one live runtime incarnation.
+
+Do not make the alias the main document title or filename.
+
+05.2. Application is not merely created from AppPack
+---------------------------------------------------
+
+Current DA-20 says:
+
+    Application is one durable application individual created from an AppPack or
+    from another explicitly defined application creation source.
+
+This is close, but should be aligned with P02's AppDefinition source classes.
+
+Recommended direction:
+
+    Application is one durable application individual created from an
+    AppDefinition binding.
+
+    AppPack is the normal reusable application definition source.
+
+    DirectLocalAppPack, SyntheticScriptAppPack, SyntheticTestAppPack, and
+    InternalAppPack are also AppDefinition/AppPack source classes when those
+    entry paths are used.
+
+    Scripts and runtime tests are lightweight AppPack creation surfaces, not
+    separate execution species.
+
+This removes the old uncertainty without implying that Turnix only runs ordinary
+discovered AppPacks.
+
+05.3. ApplicationRun should not have exactly one active AppPack identity as its only model
+-----------------------------------------------------------------------------------------
+
+Current DA-20 says:
+
+    An ApplicationRun has exactly one active AppPack identity.
+
+This is too narrow unless `AppPack identity` is broadened to include all
+AppDefinition source classes.
+
+Recommended replacement:
+
+    An ApplicationRun has one active Application identity.
+
+    An ApplicationRun has one active AppDefinition/AppPack binding for the
+    Application being run, including synthetic, direct-local, test, or internal
+    AppDefinition sources when those are used.
+
+    The ApplicationRun does not silently change its active Application identity
+    or AppDefinition binding during its lifetime.
+
+    Switching to another AppDefinition/AppPack binding creates a new
+    Application, fork, migration, or explicitly defined transition according to
+    owning documents; it does not silently mutate the existing ApplicationRun.
+
+05.4. Creation paths should start from Application creation/loading, not just AppPack resolution
+-----------------------------------------------------------------------------------------------
+
+Current DA-20 says ApplicationRun creation begins only after an AppPack identity
+has been resolved.
+
+Revise to:
+
+    ApplicationRun creation begins only after Turnix has resolved or reconstructed
+    the Application and its accepted AppDefinition/AppPack binding.
+
+For new Applications:
+
+    Turnix resolves the AppDefinition/AppPack source, creates a new Application
+    identity, prepares a SaveBundle if persistence is requested or required, and
+    creates an ApplicationRun.
+
+For existing Applications:
+
+    Turnix inspects and loads a SaveBundle, validates the Application identity,
+    AppDefinition binding, accepted graph evidence, compatibility, and ownership,
+    then creates a new ApplicationRun.
+
+This aligns with P02's SaveBundle loading phases.
+
+==============================================================================
+06. MAJOR REQUIRED FIX: SAVEBUNDLE REPLACES SAVE / SAVEPACK AS ARCHITECTURE IDENTITY
+==============================================================================
+
+06.1. Replace save context identity with SaveBundle identity
+-----------------------------------------------------------
+
+Current DA-20 uses:
+
+    save
+    save identity
+    active save identity
+    save context
+    writable save
+    save-local material
+    save generation
+    new save path
+    existing save path
+
+For architecture identity, use:
+
+    SaveBundle
+    SaveBundle identity
+    SaveBundle binding
+    writable SaveBundle ownership
+    SaveBundle generation
+    SaveBundle-local material, if needed
+    SaveBundle creation path
+    SaveBundle loading path
+
+User-facing command wording may still say save, but the DA should define the
+architectural object as SaveBundle.
+
+06.2. Replace `save stores durable executed state for an AppPack`
+-----------------------------------------------------------------
+
+Current DA-20 says:
+
+    save stores durable executed state for an AppPack.
+
+Replace with:
+
+    SaveBundle is the durable persistence closure of one Application.
+
+    It preserves the Application identity, accepted AppDefinition/AppPack
+    binding, selected/accepted Pack graph evidence, committed state,
+    save-bound configuration and policy material, generated static/application
+    data, finalized Window history, retained evidence, and retained Pack or
+    application material according to owning documents.
+
+Do not make DA-20 define the full SaveBundle storage format. That belongs to
+SaveBundle/persistence documents or implementation specs.
+
+06.3. Writable SaveBundle ownership
+-----------------------------------
+
+Replace:
+
+    A writable save is owned by at most one running ApplicationRun at a time.
+
+with:
+
+    A writable SaveBundle may be owned by at most one active writable
+    ApplicationRun at a time.
+
+Preserve:
+
+    - no silent multi-writer mutation
+    - read-only inspection may be allowed by explicit tooling/audit/export/policy
+    - read-only inspection does not create writable ownership
+    - future multi-writer mode requires an explicit authoritative design
+
+06.4. SaveBundle loading and ownership phases
+---------------------------------------------
+
+DA-20 should not copy all P02 loading phases, but it should align with them.
+
+DA-20 can say:
+
+    Loading an existing Application from a SaveBundle includes inspection,
+    requirement reconstruction, ownership acquisition where writable use is
+    requested, runtime context construction, domain rehydration, activation, and
+    ApplicationRun readiness.
+
+    DA-20 owns the ApplicationRun identity and lifecycle part of that process.
+
+    SaveBundle format, generation publication, retained material, and
+    persistence storage details remain owned by SaveBundle and persistence
+    documents.
+
+==============================================================================
+07. TRACE AND REASON IDENTIFIER ALIGNMENT
+==============================================================================
+
+07.1. Trace reason names
+------------------------
+
+Current DA-20 trace reasons include:
+
+    ApplicationRunSaveBindingStarted
+    ApplicationRunSaveBindingSucceeded
+    ApplicationRunSaveBindingFailed
+
+These can remain if `Save` is retained as user-facing shorthand, but the text
+should define that they mean SaveBundle binding in architecture terms.
+
+Preferred if renaming is still cheap:
+
+    ApplicationRunSaveBundleBindingStarted
+    ApplicationRunSaveBundleBindingSucceeded
+    ApplicationRunSaveBundleBindingFailed
+
+If the shorter names are kept, add:
+
+    SaveBinding trace names refer to SaveBundle binding in the current Dv3 model.
+
+07.2. Trace context
+-------------------
+
+Replace:
+
+    active application or save identity
+
+with:
+
+    applicationId
+    SaveBundle identity when applicable
+    AppDefinition/AppPack binding identity when applicable
+    accepted graph identity when applicable
+    applicationRunId
+
+ApplicationRun trace evidence should not replace:
+
+    activation trace
+    adapter trace
+    RPC trace
+    Job trace
+    OrchestrationUnit trace
+    Window finalization evidence
+    RuntimeHost trace
+    PackManager trace
+    DA-25 artifact/export trace
+    DA-26 Replay/Resume/Retry/audit workflow trace
+    committed-state trace
+    persistent-I/O evidence
+
+07.3. ApplicationRun-domain trace evidence is correlation
+---------------------------------------------------------
+
+Preserve:
+
+    DA-20 owns ApplicationRun-domain trace reason identifiers.
+
+    DA-03 owns trace substrate.
+
+    DA-20 trace evidence is correlation and lifecycle evidence, not committed
+    state, SaveBundle truth, or workflow outcome.
+
+==============================================================================
+08. STOP-LINES TO PRESERVE OR ADD
+==============================================================================
+
+DA-20 should explicitly avoid owning:
+
+    - DA-03 trace substrate, span mechanics, trace DAG, retention, loss
+    - DA-04 committed state and transaction semantics
+    - DA-05 payload identity and committed-value representation
+    - DA-06 configuration semantics and migration
+    - DA-07 persistent I/O authority and filesystem/root boundaries
+    - DA-08 Window, SafePointWindow, AbortedWindow, and finalized runtime history
+    - DA-14 activation lifecycle and ModCallContext activation participation
+    - DA-16 service/capability/permission semantics
+    - DA-17 user decision and remembered policy semantics
+    - DA-19 Job lifecycle and retained-result semantics
+    - DA-21 RPC/channel/transport semantics
+    - DA-22 UI/View/frontend runtime semantics
+    - DA-23 execution adapter boundary
+    - DA-24 OrchestrationUnit lifecycle and mutation authority
+    - DA-25 artifact/export semantics
+    - DA-26 ComparisonResult, Replay, Resume, Retry, and audit workflow semantics
+    - DA-27 adapter lifecycle/trust/isolation
+    - DA-28 RuntimeHost/Workspace/command/local-first/LAN semantics
+    - DA-29 PackManager graph-preparation and catalog operation semantics
+    - DA-30 ModCallContext invocation gateway details
+    - SaveBundle storage format and generation-publication mechanics
+
+DA-20 may name these concepts only to preserve Application/ApplicationRun
+identity and lifecycle boundaries.
+
+==============================================================================
+09. WHAT TO PRESERVE FROM CURRENT DA-20
+==============================================================================
+
+Preserve these boundaries, but rewrite with current names:
+
+    - applicationId identifies one durable Application.
+    - applicationRunId identifies one live ApplicationRun.
+    - applicationRunId is stable for the lifetime of one ApplicationRun.
+    - applicationRunId is not reused for a different ApplicationRun during the
+      same Kernel/TurnixRuntime run.
+    - Application identity is distinct from ApplicationRun identity.
+    - ApplicationRun identity is distinct from Pack identity.
+    - ApplicationRun identity is distinct from SaveBundle identity.
+    - ApplicationRun identity is distinct from View identity.
+    - ApplicationRun identity is distinct from adapter identity.
+    - ApplicationRun identity is distinct from RPC/channel/transport identity.
+    - ApplicationRun identity is distinct from Job identity.
+    - ApplicationRun identity is distinct from OrchestrationUnit identity.
+    - ApplicationRun identity is distinct from Window identity.
+    - ApplicationRun identity is distinct from RuntimeHost and Workspace identity.
+    - Session is not a core runtime identity.
+    - New Application creation and existing Application loading are distinct
+      creation/loading paths.
+    - RuntimeHost startup modes and command surfaces use Kernel-mediated
+      Application/ApplicationRun creation/loading paths.
+    - Writable SaveBundle has at most one active writable ApplicationRun owner.
+    - Read-only inspection does not create writable ownership.
+    - Multi-writer SaveBundle behavior is not defined without future explicit
+      design.
+    - ApplicationRun lifecycle phases are externally meaningful but do not define
+      other domain outcomes.
+    - ApplicationRun active region has begin/end boundaries.
+    - Ending active region does not by itself define commit, abort,
+      cancellation, supersession, detachment, retained result, Window
+      finalization, artifact/export, Replay, Resume, Retry, or audit workflow.
+    - Pack activation occurs inside or in relation to ApplicationRun but remains
+      DA-14-owned.
+    - Adapter participation does not make adapter the ApplicationRun.
+    - View/frontend/RPC/transport/Job participation does not own ApplicationRun
+      lifecycle.
+    - Windows may be associated with one ApplicationRun, but DA-08 owns Window
+      finalization.
+    - DA-20 owns ApplicationRun-domain trace reason identifiers, not trace
+      substrate.
+
+==============================================================================
+10. WHAT TO ADD OR CHANGE IN THE REVISED DA-20
+==============================================================================
+
+10.1. Rename file and title
+---------------------------
+
+Use the recommendation from section 02.
+
+10.2. Add current Dv3 terminology note
+--------------------------------------
+
+Add near the top:
+
+    This document uses the current Dv3 split:
+
+        Application:
+            durable application individual
+
+        ApplicationRun:
+            one live execution period of that Application
+
+        SaveBundle:
+            durable persistence closure of that Application
+
+    Older notes may use AppInstance for a combined concept. DA-20 no longer uses
+    AppInstance as the primary current type name.
+
+10.3. Rewrite relation to AppPack
+---------------------------------
+
+Replace the current AppPack section with AppDefinition/AppPack binding language.
+
+Mention synthetic/direct-local/test/internal AppPack sources as P02 model, but do
+not define their full mechanics.
+
+10.4. Rewrite relation to Application and SaveBundle
+----------------------------------------------------
+
+Replace the current save context section with Application/SaveBundle binding.
+
+Do not let DA-20 become the SaveBundle storage specification.
+
+10.5. Rewrite creation paths
+----------------------------
+
+Use paths such as:
+
+    - new Application from AppDefinition/AppPack source
+    - existing Application from SaveBundle
+    - fork/clone/new Application from existing Application generation, if the
+      source stack wants it here or leaves it to SaveBundle docs
+
+At minimum, avoid saying only "new save path" and "existing save path" as the
+primary DA-20 paths.
+
+10.6. Rewrite lifecycle phase names that mention save binding
+-------------------------------------------------------------
+
+Change:
+
+    save binding
+
+into:
+
+    SaveBundle binding
+
+or:
+
+    persistence binding
+
+If user-facing save remains, define the architecture term explicitly.
+
+10.7. Update locked summary
+---------------------------
+
+The locked summary currently says:
+
+    ApplicationRun is a live runtime instance of one AppPack.
+
+Replace with:
+
+    ApplicationRun is one live execution period of one Application.
+
+    ApplicationRun has an active Application identity and an active
+    AppDefinition/AppPack binding.
+
+    ApplicationRun may be bound to a SaveBundle when durable persistence is
+    requested or required.
+
+==============================================================================
+11. SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as a starting pass. Context still matters.
+
+    DA-20_APPINSTANCE_LIFECYCLE_AND_RUNTIME_IDENTITY.txt
+        -> DA-20_APPLICATION_APPLICATIONRUN_LIFECYCLE_AND_RUNTIME_IDENTITY.txt
+
+    DESIGN AREA DA-20 - APPINSTANCE LIFECYCLE & RUNTIME IDENTITY
+        -> DESIGN AREA DA-20 - APPLICATION AND APPLICATIONRUN LIFECYCLE & RUNTIME IDENTITY
+
+    AppInstance
+        -> Application when durable individual is meant
+        -> ApplicationRun when live runtime incarnation is meant
+        -> Application / ApplicationRun split when both are meant
+
+    appInstanceId
+        -> applicationId when durable individual identity is meant
+        -> applicationRunId when live run identity is meant
+
+    save
+        -> SaveBundle when architecture identity/persistence closure is meant
+        -> save / SaveBundle only when user-facing wording is useful
+
+    save context
+        -> SaveBundle binding / persistence binding
+
+    active save identity
+        -> SaveBundle identity when applicable
+
+    writable save
+        -> writable SaveBundle
+
+    save stores durable executed state for an AppPack
+        -> SaveBundle is the durable persistence closure of one Application
+
+    new save path
+        -> new Application / SaveBundle creation path
+
+    existing save path
+        -> existing Application / SaveBundle loading path
+
+    save generation behavior
+        -> SaveBundle/Application initialization behavior, or AppDefinition-defined
+           initialization behavior, depending on exact meaning
+
+    An ApplicationRun has exactly one active AppPack identity.
+        -> An ApplicationRun has one active Application identity and one active
+           AppDefinition/AppPack binding for that Application.
+
+    ApplicationRun is a live runtime instance of one AppPack
+        -> ApplicationRun is one live execution period of one Application.
+
+    RuntimeHost startup modes and command surfaces use the ApplicationRun creation paths defined in this section
+        -> RuntimeHost startup modes and command surfaces use the Kernel-mediated
+           Application/ApplicationRun creation and SaveBundle loading paths
+           defined or referenced in this section.
+
+==============================================================================
+12. ACCEPTANCE CONDITIONS FOR THE REVISED DA-20
+==============================================================================
+
+A revised DA-20 is acceptable when all of the following are true:
+
+    - The file title and filename no longer use AppInstance as the primary current
+      concept.
+
+    - It uses Application for durable application identity.
+
+    - It uses ApplicationRun for one live runtime incarnation.
+
+    - It uses SaveBundle for durable persistence closure.
+
+    - It explains older AppInstance terminology only as an alias or historical
+      note if needed.
+
+    - It removes stale SavePack wording.
+
+    - It explains AppDefinition/AppPack binding without implying only ordinary
+      discovered AppPacks can create Applications.
+
+    - It reflects P02's synthetic/direct-local/test/internal AppPack source model.
+
+    - It keeps Application identity distinct from ApplicationRun identity.
+
+    - It keeps ApplicationRun identity distinct from Pack, SaveBundle, View,
+      adapter, RPC/channel/transport, Job, OrchestrationUnit, Window,
+      RuntimeHost, Workspace, artifact/export, and DA-26 workflow identity.
+
+    - It keeps Session out of the core runtime identity model.
+
+    - It keeps RuntimeHost startup and command surfaces from defining separate
+      creation semantics.
+
+    - It defines writable SaveBundle single-writer semantics without defining the
+      concrete claim-file implementation.
+
+    - It allows read-only inspection without writable ownership.
+
+    - It keeps multi-writer SaveBundle behavior undefined unless future explicit
+      design defines it.
+
+    - It keeps ApplicationRun lifecycle separate from activation, adapter,
+      transport, View, Job, OrchestrationUnit, Window, RuntimeHost, PackManager,
+      artifact/export, Replay, Resume, Retry, audit workflow, and committed-state
+      outcomes.
+
+    - It keeps DA-14/P01 as owner of activation lifecycle and final Activated
+      state.
+
+    - It keeps DA-23/DA-27 as owner of adapter execution/lifecycle boundaries.
+
+    - It keeps DA-28 as owner of RuntimeHost/Workspace/command/local-first/LAN
+      semantics.
+
+    - It keeps DA-30 as owner of ModCallContext invocation gateway details.
+
+    - It updates trace context and trace reason descriptions to SaveBundle and
+      Application/ApplicationRun terminology.
+
+    - It keeps trace evidence as correlation/evidence, not committed-state truth
+      or workflow outcome.
+
+    - It keeps exact identifier representation, SaveBundle format, compatibility
+      validation schema, restart behavior, retained-result behavior, and concrete
+      lifecycle API names open for later specifications.
+
+==============================================================================
+13. FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Rename and rewrite DA-20 substantially around the current P02 identity model.
+
+Do not keep AppInstance as the document's primary name.
+
+Do not preserve the old recommendation's unresolved AppPack-backing question as
+current uncertainty; P02 resolves the model through Application/ApplicationRun and
+synthetic/direct-local/test/internal AppPack source classes.
+
+Use REWRITE-DA-20 as preservation guidance only after translating its stale
+terminology.
+
+The revised DA-20 should remain the Application/ApplicationRun lifecycle and
+runtime identity document:
+
+    - durable Application identity
+    - live ApplicationRun identity
+    - AppDefinition/AppPack binding
+    - SaveBundle binding and ownership at the lifecycle level
+    - ApplicationRun creation/loading paths
+    - ApplicationRun active region
+    - ApplicationRun participant separation
+    - ApplicationRun-domain trace reasons and correlation evidence
+
+DA-20 should not become:
+
+    - AppPack definition/source specification
+    - SaveBundle storage-format specification
+    - Workspace ownership claim implementation
+    - RuntimeHost command-surface specification
+    - activation lifecycle protocol
+    - ExecutionAdapter lifecycle/trust specification
+    - ModCallContext specification
+    - View/UI specification
+    - Job specification
+    - OrchestrationUnit specification
+    - artifact/export specification
+    - Replay/Resume/Retry/audit workflow specification
+    - committed-state or persistent-I/O authority specification
+
+The main work is to keep DA-20's strong runtime-identity boundaries while
+migrating fully out of the AppInstance/SavePack layer into the
+Application/ApplicationRun/SaveBundle model.
+
+==============================================================================
+END OF AUDIT RESULT - DA-20
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-DA-20
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-DA-20_RESULT.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
