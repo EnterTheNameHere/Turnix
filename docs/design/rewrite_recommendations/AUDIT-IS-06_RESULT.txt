@@ -1,0 +1,606 @@
+==============================================================================
+TURNIX DV3 DOCUMENTATION AUDIT RESULT - IS-06 RUNTIME HOST LAN AND CLIENT CONNECTIONS
+==============================================================================
+
+Document title:
+    IS-06 - Runtime Host LAN and Client Connections
+
+Target IS path:
+    docs/design/IS-06_RUNTIME_HOST_LAN_AND_CLIENT_CONNECTIONS.txt
+
+Branch:
+    CODEX_Dv3
+
+Target file metadata loaded by assistant:
+    DOC_ID: IS-06
+    DOC_FILE: docs/design/IS-06_RUNTIME_HOST_LAN_AND_CLIENT_CONNECTIONS.txt
+    DOC_REV: 1
+    DOC_GIT: a11a252
+    GitHub blob SHA seen by assistant:
+        4f27b1123ef02b02394e088877ff161e3e711463
+
+Audit result file:
+    docs/design/rewrite_recommendations/AUDIT-IS-06_RESULT.txt
+
+Audit scope:
+    Audit only the assigned implementation specification file.
+
+    IS files do not have rewrite recommendation files. No REWRITE-IS-06 file was
+    read or expected.
+
+    CMR-04 was not reread for IS-06 because the IS-06 path had already been
+    identified from the Canonical Index in this conversation.
+
+Source stack used:
+    - docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+    - docs/CMR-04_CANONICAL_INDEX_TURNIX_SPECIFICATION.txt
+      only as prior index evidence for the IS-06 path
+    - docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    - docs/design/IS-06_RUNTIME_HOST_LAN_AND_CLIENT_CONNECTIONS.txt
+
+Recommendation file status:
+    Not applicable. IS files do not have rewrite recommendation files.
+
+Recommendation verdict:
+    Not applicable.
+
+IS document verdict:
+    Keep with targeted terminology and security/authority-boundary fixes.
+
+    IS-06 is a useful concrete implementation specification for RuntimeHost
+    local bind behavior, LAN exposure request flow, remote-client classification,
+    connection acceptance/rejection, disconnect/reconnect separation, startup-mode
+    relation, command-surface relation, RPC/transport relation, trace mapping, and
+    connection error categories.
+
+    It should not be rewritten from scratch. The document already preserves the
+    critical invariant that connection, authentication, command acceptance,
+    capability permission, user identity, and state authority are distinct.
+
+    Required fixes are narrow: translate obsolete AppInstance terminology,
+    strengthen anti-forgery language around client/authentication/principal
+    metadata, and preserve conservative LAN/remote exposure defaults.
+
+==============================================================================
+WHAT THE DOCUMENT GETS RIGHT
+==============================================================================
+
+1. Correct implementation-specification scope.
+
+    IS-06 correctly defines concrete LAN exposure and client-connection behavior
+    without defining RuntimeHost semantics, Kernel authority, committed state,
+    persistence, Application / ApplicationRun lifecycle, RPC/channel/transport,
+    View/frontend runtime, adapter authority, OrchestrationUnit mutation,
+    workspace ownership mechanics, command-surface flow, startup-mode flow,
+    cryptographic protocol, token format, certificate format, firewall
+    configuration, WebSocket frame flow, or browser bootstrap flow.
+
+2. Strong connection/authority separation.
+
+    The document clearly says client connection is not command acceptance,
+    capability permission, user identity, or state authority.
+
+3. Strong LAN exposure default.
+
+    The document correctly makes LAN exposure explicit and policy-governed.
+
+    localOnly is the default bind scope unless a later implementation
+    specification defines a different default without weakening DA-28 LAN
+    exposure semantics.
+
+    lanExplicit is never selected silently.
+
+4. Strong remoteExplicit reserve.
+
+    remoteExplicit is reserved for future entry surfaces reachable beyond LAN,
+    has no enabled behavior in this document, and requires later authoritative
+    security and deployment design before any implementation may treat it as
+    available.
+
+5. Good pairing/authentication separation.
+
+    Pairing is distinct from authentication. Authentication is distinct from
+    capability permission. Pairing success and authentication success do not grant
+    capability permission or committed-state mutation authority by themselves.
+
+6. Good client disconnect separation.
+
+    Client disconnect does not automatically stop RuntimeHost, cancel Jobs, fail
+    OrchestrationUnits, fail adapters, discard command results, or replay all
+    missed client-local events.
+
+7. Good relationship to startup modes and command surfaces.
+
+    Startup modes that expose entry surfaces use IS-05. Connected clients that
+    submit commands use IS-04. Startup mode selection does not itself expose LAN
+    surfaces or accept clients. Client connection acceptance is not command
+    receipt.
+
+8. Good RPC/transport boundary.
+
+    Client connections may use RPC over concrete transports, but DA-21 owns
+    abstract RPC/channel/transport semantics and IS-02 owns concrete WebSocket RPC
+    flow when WebSocket is used.
+
+    Transport connection is not RuntimeHost authority, transport disconnect is
+    not RuntimeHost failure, transport timeout is not Job timeout, RPC
+    acknowledgement is not command success, and RPC acknowledgement is not
+    capability permission.
+
+9. Good trace/evidence separation.
+
+    IS-06 maps entry-surface, LAN exposure, and remote-client behavior to DA-28
+    trace reasons while preserving that client connection trace evidence does not
+    replace RuntimeHost lifecycle, RPC, UI, command, Job, OrchestrationUnit,
+    adapter, AppInstance, transaction, or Window evidence.
+
+==============================================================================
+MAJOR SEMANTIC RISKS
+==============================================================================
+
+1. AppInstance terminology is superseded by Application / ApplicationRun.
+
+    IS-06 still uses AppInstance in several places:
+
+        - AppInstance lifecycle or runtime identity semantics
+        - local-only exposure does not imply AppInstance readiness
+        - LAN exposure enabled does not imply AppInstance readiness
+        - connection acceptance does not imply AppInstance readiness
+        - client connection trace evidence does not replace AppInstance evidence
+
+    Current source-stack correction:
+        Proposal P02 defines:
+
+            Application
+                durable application individual
+
+            ApplicationRun
+                one live execution period of an Application
+
+    Required consequence for IS-06:
+        Replace AppInstance with Application and/or ApplicationRun according to
+        local meaning.
+
+        In this document, most readiness wording probably means ApplicationRun
+        readiness, because it concerns live reachable entry surfaces and live
+        connection behavior.
+
+        Trace/evidence wording should mention Application and/or ApplicationRun
+        evidence where relevant.
+
+2. Authenticated principal metadata can be overread as authority.
+
+    IS-06 allows a client connection record to include authenticated principal
+    when available. It also says authentication success does not grant capability
+    permission or committed-state mutation authority by itself.
+
+    This is good, but a final rewrite should also make clear that client-supplied
+    fields do not create that principal.
+
+    Required correction:
+        Add a stop-line:
+
+            Client-provided connection metadata, remote endpoint summaries,
+            frontend client identity, pairing identity, and authentication claims
+            are inputs to classification, authentication, policy, and trace
+            correlation only. They do not let the client forge user identity,
+            authenticated principal, Kernel authority, RuntimeHost authority,
+            Application identity, ApplicationRun identity, workspace ownership,
+            capability permission, command authority, adapter authorization, or
+            committed-state mutation authority.
+
+3. Frontend client identity must not equal View, user, or authority identity.
+
+    IS-06 distinguishes frontend client identity from user identity and from
+    clientConnectionId. Preserve that distinction.
+
+    Required correction:
+        Add or preserve wording that frontend client identity is correlation /
+        client-side identity evidence only unless a higher authentication and
+        View/client-binding owner maps it to an authenticated principal or View
+        relationship.
+
+4. localOnly boundaries are intentionally abstract and should remain explicit.
+
+    IS-06 says localOnly means reachable only through local machine boundaries
+    defined by the implementation. Exact local bind behavior remains open.
+
+    Risk:
+        A later rewrite might collapse localOnly into a specific implementation
+        such as loopback TCP, named pipe, Unix socket, browser origin, or local
+        file IPC without defining the security assumptions.
+
+    Required correction:
+        Keep exact local bind behavior open unless a later implementation source
+        defines it. If a concrete local binding is added, preserve the localOnly
+        security boundary and document the assumptions.
+
+5. LAN exposure enabled must not imply pairing/authentication success.
+
+    IS-06 already states this. Preserve it.
+
+    Required correction:
+        Keep LAN exposure as reachability only. It is not authentication,
+        pairing, command acceptance, capability permission, ApplicationRun
+        readiness, state authority, or policy approval for later commands.
+
+6. remoteExplicit must remain disabled here.
+
+    IS-06 correctly reserves remoteExplicit for future design and gives it no
+    enabled behavior.
+
+    Required correction:
+        Do not make remoteExplicit active in this document. Do not imply internet
+        exposure is a configuration toggle. Require later authoritative security
+        and deployment design.
+
+7. Reconnect wording must not imply Replay/Resume semantics.
+
+    IS-06 says reconnect may receive a fresh snapshot, retained result surface,
+    generation update, or implementation-defined recovery surface, while concrete
+    reconnect flow belongs to later implementation specifications.
+
+    Required correction:
+        Preserve that reconnect does not imply replay of all missed client-local
+        events, retained result retrieval, command result replacement, Job resume,
+        RPC replay, or state synchronization unless a higher owner and concrete
+        transport/client specification define it.
+
+8. Command detachment on disconnect must remain workflow-owned.
+
+    IS-06 correctly says client disconnect may detach a command from the waiting
+    client only when the owning command workflow defines detachment or retained
+    result behavior, and disconnect does not silently convert command outcome to
+    failure.
+
+    Required correction:
+        Preserve this. Do not let connection behavior define command, Job, or
+        RuntimeHost operation outcomes.
+
+9. Trace reasons must remain evidence, not authority.
+
+    IS-06 trace mapping is useful, but trace evidence should not be read as
+    connection acceptance, authentication, capability permission, user identity,
+    state mutation, or command acceptance.
+
+    Required correction:
+        Preserve the existing trace/evidence replacement stop-lines and translate
+        AppInstance to Application/ApplicationRun.
+
+10. Open questions must remain security-sensitive.
+
+    IS-06 leaves exact clientConnectionId representation, entry surface identity,
+    local/LAN bind behavior, remote endpoint summary, pairing flow,
+    authentication flow, token/certificate format, reconnect flow, retained result
+    retrieval after reconnect, browser bootstrap interaction, firewall guidance,
+    error class names, and transport-specific schema open.
+
+    Required correction:
+        Keep those open unless later sources resolve them. Do not let this IS
+        accidentally finalize cryptographic, authentication, certificate,
+        firewall, or browser bootstrap behavior.
+
+==============================================================================
+OBSOLETE-PRESERVATION RISKS
+==============================================================================
+
+1. Do not preserve AppInstance as current terminology.
+
+    Translate to Application or ApplicationRun according to meaning.
+
+2. Do not preserve AppInstance readiness.
+
+    In this document, use ApplicationRun readiness when the live runtime surface
+    is meant.
+
+3. Do not preserve AppInstance evidence in trace replacement text.
+
+    Translate to Application and/or ApplicationRun evidence.
+
+4. Do not preserve any implied internet-ready behavior.
+
+    remoteExplicit remains reserved and disabled here.
+
+5. Do not preserve reconnect as implicit replay/resume.
+
+    Reconnect is connection recovery only unless later owners define replay,
+    resume, retained result retrieval, or state synchronization.
+
+==============================================================================
+PROCESS-METADATA LEAKAGE RISKS
+==============================================================================
+
+No major process-metadata leakage was found in IS-06.
+
+The final rewritten IS should still avoid saying "V3", "new design", "latest
+model", "rewrite", "audit", "Codex", "candidate", "seed", or similar process
+framing as ordinary specification language.
+
+Audit files may mention source-stack and proposal history. The final IS should
+state the current model directly.
+
+==============================================================================
+REQUIRED FIXES
+==============================================================================
+
+1. Replace AppInstance terminology.
+
+    Replace AppInstance lifecycle/runtime identity and readiness/evidence wording
+    with Application and/or ApplicationRun terminology.
+
+    Likely replacements:
+
+        AppInstance readiness
+            -> ApplicationRun readiness
+
+        AppInstance lifecycle or runtime identity semantics
+            -> Application lifecycle, Application identity, ApplicationRun
+               lifecycle, or ApplicationRun identity semantics
+
+        AppInstance evidence
+            -> Application and/or ApplicationRun evidence
+
+2. Add client-metadata anti-forgery stop-line.
+
+    Add wording that client-provided connection metadata, remote endpoint
+    summaries, frontend client identity, pairing identity, and authentication
+    claims are classification / authentication / policy / trace-correlation
+    inputs only.
+
+    They do not let a client forge user identity, authenticated principal, Kernel
+    authority, RuntimeHost authority, Application identity, ApplicationRun
+    identity, workspace ownership, capability permission, command authority,
+    adapter authorization, or committed-state mutation authority.
+
+3. Preserve LAN exposure defaults.
+
+    Keep localOnly as default unless later implementation specification changes
+    it without weakening DA-28 semantics.
+
+    Keep lanExplicit never selected silently.
+
+    Keep remoteExplicit disabled in this document.
+
+4. Preserve pairing/authentication separation.
+
+    Keep pairing distinct from authentication.
+
+    Keep authentication distinct from capability permission.
+
+    Keep pairing/authentication success from granting capability permission or
+    committed-state mutation authority by itself.
+
+5. Preserve connection/command separation.
+
+    Keep:
+
+        client connection is not command acceptance
+        client connection acceptance is not command receipt
+        command receipt/classification/acceptance/dispatch/completion/failure /
+        cancellation are defined by IS-04
+
+6. Preserve disconnect/reconnect boundaries.
+
+    Keep:
+
+        client disconnect does not automatically stop RuntimeHost, cancel Jobs,
+        fail OrchestrationUnits, fail adapters, discard command results, or
+        convert command outcome to failure.
+
+    Add or preserve:
+
+        reconnect does not imply replay, resume, retained result retrieval, or
+        missed-event delivery unless later owners define those behaviors.
+
+7. Preserve transport boundaries.
+
+    Keep:
+
+        transport connection is not RuntimeHost authority
+        transport disconnect is not RuntimeHost failure
+        transport timeout is not Job timeout
+        RPC acknowledgement is not command success or capability permission
+
+8. Preserve security-sensitive open questions.
+
+    Keep concrete pairing, authentication, token/certificate, firewall, reconnect,
+    browser bootstrap, and transport-specific schema details open unless later
+    authoritative sources resolve them.
+
+==============================================================================
+SUGGESTED REWRITE STRUCTURE
+==============================================================================
+
+Keep the existing structure.
+
+Suggested targeted structure changes:
+
+    1. Update Description / Purpose / It does NOT define sections to current
+       Application / ApplicationRun terminology.
+
+    2. Keep Core Concept, but add the client-metadata anti-forgery stop-line.
+
+    3. Keep Bind Scope Categories and preserve conservative localOnly,
+       lanExplicit, and remoteExplicit behavior.
+
+    4. Keep Local-Only Exposure and LAN Exposure sections, translating
+       AppInstance readiness to ApplicationRun readiness.
+
+    5. Keep Remote Client Identity and Classification, but explicitly distinguish
+       clientConnectionId, frontend client identity, user identity, authenticated
+       principal, commandId, channel identity, and transport identity.
+
+    6. Keep Pairing and Authentication Placeholders; do not fill in concrete
+       security protocol details here.
+
+    7. Keep Client Disconnect and Reconnect; add the reconnect non-replay /
+       non-resume guardrail.
+
+    8. Preserve Relation to Startup Modes, Command Surfaces, RPC/Transports,
+       Trace Mapping, Error Categories, Unsupported, Open Questions, and Locked
+       Summary sections.
+
+    9. Update Locked Summary to remove AppInstance wording and preserve LAN /
+       remote conservative defaults.
+
+Do not turn IS-06 into DA-28, DA-21, IS-02, IS-04, IS-05, DA-22, a LAN pairing
+specification, an authentication protocol, a firewall guide, a browser bootstrap
+specification, or a concrete WebSocket frame-flow specification.
+
+==============================================================================
+SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as concrete rewrite hints, not mandatory exact final wording.
+
+1. It does NOT define section
+
+    Current risk:
+        AppInstance lifecycle or runtime identity semantics
+
+    Safer wording:
+        Application lifecycle, Application identity, ApplicationRun lifecycle, or
+        ApplicationRun identity semantics
+
+2. Local-only exposure
+
+    Current risk:
+        Local-only exposure does not imply AppInstance readiness.
+
+    Safer wording:
+        Local-only exposure does not imply ApplicationRun readiness.
+
+3. LAN exposure
+
+    Current risk:
+        LAN exposure enabled does not imply AppInstance readiness.
+
+    Safer wording:
+        LAN exposure enabled does not imply ApplicationRun readiness.
+
+4. Connection acceptance
+
+    Current risk:
+        Connection acceptance does not imply AppInstance readiness.
+
+    Safer wording:
+        Connection acceptance does not imply ApplicationRun readiness.
+
+5. Trace evidence
+
+    Current risk:
+        Client connection trace evidence does not replace ... AppInstance ...
+        evidence.
+
+    Safer wording:
+        Client connection trace evidence does not replace ... Application,
+        ApplicationRun ... evidence.
+
+6. Client-metadata guardrail
+
+    Add:
+        Client-provided connection metadata, remote endpoint summaries, frontend
+        client identity, pairing identity, and authentication claims are inputs to
+        classification, authentication, policy, and trace correlation only. They
+        do not let the client forge user identity, authenticated principal,
+        Kernel authority, RuntimeHost authority, Application identity,
+        ApplicationRun identity, workspace ownership, capability permission,
+        command authority, adapter authorization, or committed-state mutation
+        authority.
+
+7. Reconnect guardrail
+
+    Add:
+        Reconnect does not imply replay of missed events, Job resume, command
+        replay, retained result retrieval, or state synchronization unless an
+        owning workflow and concrete transport/client specification define that
+        behavior.
+
+==============================================================================
+ACCEPTANCE CONDITIONS FOR FINAL REWRITTEN IS-06
+==============================================================================
+
+Accept the rewritten IS-06 only if all of the following are true:
+
+1. It remains an implementation specification for concrete RuntimeHost LAN
+   exposure and client-connection behavior.
+
+2. It does not redefine RuntimeHost, TurnixRuntime, Kernel, Workspace,
+   Application, ApplicationRun, SaveBundle, committed-state, persistence, policy,
+   Job, OrchestrationUnit, Window, adapter, RPC, View, command surface, startup
+   mode, LAN pairing, authentication protocol, cryptographic protocol,
+   certificate format, token format, firewall behavior, WebSocket frame flow, or
+   browser bootstrap semantics.
+
+3. All AppInstance terminology has been translated to Application and/or
+   ApplicationRun according to meaning.
+
+4. localOnly remains the conservative default unless a later implementation
+   specification changes it without weakening DA-28 LAN exposure semantics.
+
+5. lanExplicit is never selected silently.
+
+6. remoteExplicit has no enabled behavior in this document and still requires a
+   later authoritative security and deployment design.
+
+7. LAN exposure remains explicit and policy-governed.
+
+8. Connection, authentication, pairing, command receipt, command acceptance,
+   capability permission, user identity, state authority, RuntimeHost authority,
+   and ApplicationRun readiness remain distinct.
+
+9. Client-provided metadata cannot be read as an authority grant or
+   identity-forging mechanism.
+
+10. Pairing and authentication remain distinct, and neither grants capability
+    permission or committed-state mutation authority by itself.
+
+11. Client disconnect does not automatically stop RuntimeHost, cancel Jobs, fail
+    OrchestrationUnits, fail adapters, discard command results, or convert command
+    outcome to failure.
+
+12. Reconnect does not imply replay, resume, retained result retrieval, missed
+    event delivery, or state synchronization unless later owners define those
+    behaviors.
+
+13. RPC and transport behavior remains governed by DA-21 and transport-specific
+    implementation specifications such as IS-02 for WebSocket.
+
+14. Trace evidence remains evidence only and does not replace RuntimeHost, RPC,
+    UI, command, Job, OrchestrationUnit, adapter, Application, ApplicationRun,
+    transaction, or Window evidence.
+
+15. Security-sensitive open questions remain open unless later authoritative
+    sources resolve them.
+
+==============================================================================
+FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep IS-06 with targeted terminology and security/authority-boundary fixes.
+
+Do not rewrite the whole document.
+
+Do not expand this implementation specification into DA-28 RuntimeHost doctrine,
+DA-21 RPC/transport doctrine, IS-02 WebSocket flow, IS-04 command-surface flow,
+IS-05 startup-mode flow, DA-22 View/frontend doctrine, a LAN pairing protocol, an
+authentication protocol, a cryptographic protocol, a firewall guide, a browser
+bootstrap specification, or a concrete WebSocket frame-flow specification.
+
+Translate obsolete AppInstance wording into current Application/ApplicationRun
+terminology. Strengthen client-metadata anti-forgery and reconnect non-replay
+stop-lines while preserving the existing localOnly / lanExplicit / remoteExplicit,
+pairing/authentication, connection/command, transport/RPC, disconnect, and trace
+separation guarantees.
+
+==============================================================================
+END OF AUDIT-IS-06 RESULT
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-IS-06-RESULT
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-IS-06_RESULT.txt
+DOC_REV: 1
+DOC_GIT: temp
+----------------
