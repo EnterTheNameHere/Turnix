@@ -1,0 +1,830 @@
+==============================================================================
+TURNIX DV3 DOCUMENTATION AUDIT RESULT - IS-09 RUNTIME CATALOG AND PACK LISTING OPERATIONS
+==============================================================================
+
+Document title:
+    IS-09 - Runtime Catalog and Pack Listing Operations
+
+Target IS path:
+    docs/design/IS-09_RUNTIME_CATALOG_AND_PACK_LISTING_OPERATIONS.txt
+
+Branch:
+    CODEX_Dv3
+
+Target file metadata loaded by assistant:
+    DOC_ID: IS-09
+    DOC_FILE: docs/design/IS-09_RUNTIME_CATALOG_AND_PACK_LISTING_OPERATIONS.txt
+    DOC_REV: 1
+    DOC_GIT: e913e81
+    GitHub blob SHA seen by assistant:
+        4abc72e2b984c614268ef4b6b76915213bd65cdc
+
+Audit result file:
+    docs/design/rewrite_recommendations/AUDIT-IS-09_RESULT.txt
+
+Audit scope:
+    Audit only the assigned implementation specification file.
+
+    IS files do not have rewrite recommendation files. No REWRITE-IS-09 file was
+    read or expected.
+
+    CMR-04 was not reread for IS-09 because the IS-09 path had already been
+    identified from the Canonical Index in this conversation.
+
+Source stack used:
+    - docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+    - docs/CMR-04_CANONICAL_INDEX_TURNIX_SPECIFICATION.txt
+      only as prior index evidence for the IS-09 path
+    - docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    - docs/design/IS-09_RUNTIME_CATALOG_AND_PACK_LISTING_OPERATIONS.txt
+
+Recommendation file status:
+    Not applicable. IS files do not have rewrite recommendation files.
+
+Recommendation verdict:
+    Not applicable.
+
+IS document verdict:
+    Keep with targeted terminology, catalog-boundary, and authority-boundary
+    fixes.
+
+    IS-09 is a useful concrete implementation specification for RuntimeHost and
+    PackManager catalog/listing operations. It should not be rewritten from
+    scratch.
+
+    Its strongest invariant is correct: ListPacks is read-only catalog access.
+    Listing does not discover, resolve, select, activate, import, grant
+    visibility, grant capability permission, grant execution authorization, or
+    grant persistence authority.
+
+    Required fixes are targeted: replace obsolete SavePack and AppInstance
+    terminology, clarify the relationship between pack listing and SaveBundle /
+    Application / ApplicationRun concepts, preserve the boundary between catalog
+    summaries and owning semantics, and prevent projections, filters,
+    diagnostics, paths, stale cache, cursors, or entry surfaces from becoming
+    authority.
+
+==============================================================================
+WHAT THE DOCUMENT GETS RIGHT
+==============================================================================
+
+1. Correct implementation-specification scope.
+
+    IS-09 correctly defines concrete pack listing operation contracts rather than
+    defining root discovery, filesystem scanning, pack identity, hierarchy,
+    visibility, PackRequest resolution, importing, module loading, dependency
+    semantics, activation, capability execution, policy, Application lifecycle,
+    SaveBundle binding, RPC, UI, command surfaces, PackManager doctrine, resolved
+    graph schema, activation-plan schema, package install/update/delete, CLI
+    syntax, JSON-RPC envelope fields, WebSocket envelope fields, or browser
+    component layout.
+
+2. Strong ListPacks primitive.
+
+    The document correctly identifies ListPacks as the shared concrete listing
+    primitive and treats kind-specific list operations as filtered forms of
+    ListPacks.
+
+3. Strong read-only catalog boundary.
+
+    Listing is read-only catalog access. It does not perform discovery,
+    PackRequest resolution, graph selection, activation-plan creation, importing,
+    activation, or authority grant.
+
+4. Good request-envelope boundary.
+
+    A request envelope does not authorize access by itself. The entry surface
+    remains subject to RuntimeHost, capability, RPC, policy, and permission rules
+    where applicable.
+
+5. Good filter/sort/pagination/projection boundaries.
+
+    Filters restrict results without changing pack identity or visibility
+    meaning. Filters cannot make invisible packs visible unless the catalog
+    context and policy permit diagnostic visibility.
+
+    Sorting is deterministic but does not select a graph or imply resolution
+    winner selection.
+
+    Pagination does not change the total ordered result set, and cursors do not
+    grant access outside the original permitted catalog context.
+
+    Projection controls result verbosity only and does not change listing
+    semantics.
+
+6. Good response and item projection boundary.
+
+    Response envelopes do not grant runtime authority.
+
+    Pack catalog items are listing projections, not pack definitions. They do not
+    replace manifests, discovery records, resolution candidates, selected graph
+    records, or activation records.
+
+7. Good summary boundary.
+
+    Visibility summary does not grant visibility. Visibility meaning remains
+    owned by DA-10.
+
+    Compatibility summary is advisory unless an owning operation or policy turns
+    it into a graph-selection decision. Compatibility summary does not replace
+    dependency resolution, activation, or policy semantics.
+
+    Dependency summary is not dependency resolution. Dependency semantics remain
+    owned by DA-13.
+
+    Advisory summary does not create hard dependency semantics.
+
+8. Good entry-surface discipline.
+
+    CLI, RuntimeHost command, Launcher, PackManager View, remote client,
+    application View, AI buddy surface, and test surface usage route to the same
+    ListPacks operation semantics.
+
+    CLI syntax, Launcher UI, PackManager View layout, remote transport, and test
+    harness access do not define separate listing semantics.
+
+9. Good trace boundary.
+
+    ListPacks remains trace-visible. PackManager-domain trace reasons are owned
+    by DA-29, and serialized trace records use IS-08 when serialized through the
+    shared trace record envelope.
+
+10. Good open-question discipline.
+
+    Exact request IDs, workspace IDs, catalog item IDs, canonical pack IDs,
+    source identities, version range filters, text search matching, cursor format,
+    page sizes, filters, vocabularies, CLI syntax, RPC envelope mapping, and JSON
+    Schema publication remain open.
+
+==============================================================================
+MAJOR SEMANTIC RISKS
+==============================================================================
+
+1. SavePack terminology is superseded by SaveBundle.
+
+    IS-09 uses SavePack throughout:
+
+        - SavePack listings
+        - ListSavePacks
+        - SavePack kind filter
+        - SavePack visibility semantics
+        - SavePack binding behavior
+        - savePackId
+        - savePackSummary
+        - SavePack compatibility check
+        - SavePack-specific listing fields
+        - SavePack loading / migration
+
+    Current source-stack correction:
+        Proposal P02 defines SaveBundle as the durable persistence closure of one
+        Application. SaveBundle is not a Pack, not an Application, not an
+        ApplicationRun, not a RuntimeHost, not a live process snapshot, not a Job
+        store, and not authority by itself.
+
+    Required consequence for IS-09:
+        Translate SavePack terminology to SaveBundle where the listed thing is a
+        durable persistence closure or save identity.
+
+        Likely replacements:
+
+            ListSavePacks
+                -> ListSaveBundles, if this operation lists durable save bundles
+
+            SavePack listing fields
+                -> SaveBundle listing fields
+
+            savePackId
+                -> saveBundleId
+
+            savePackSummary
+                -> saveBundleSummary
+
+            includeSavePackSummary
+                -> includeSaveBundleSummary
+
+            compatibility against SavePack
+                -> compatibility against SaveBundle
+
+        If any old SavePack naming is intentionally kept as a compatibility alias,
+        mark it explicitly as compatibility terminology, not current architecture.
+
+2. AppInstance terminology is superseded by Application / ApplicationRun.
+
+    IS-09 uses AppInstance in several places:
+
+        - AppInstance lifecycle or SavePack binding behavior
+        - appInstanceId in catalogContext
+        - appInstance scope
+        - AppInstance context
+        - compatibility context using AppInstance
+        - savePackSummary bind to AppInstance
+        - activeInAppInstanceId
+        - failure/status not AppInstance lifecycle outcome
+        - trace context appInstanceId
+        - listing trace evidence does not replace AppInstance evidence
+        - locked summary appInstanceId
+
+    Current source-stack correction:
+        Proposal P02 defines Application as the durable application individual
+        and ApplicationRun as one live execution period of an Application.
+
+    Required consequence for IS-09:
+        Replace AppInstance with Application and/or ApplicationRun according to
+        local meaning.
+
+        Likely replacements:
+
+            appInstanceId
+                -> applicationId and/or applicationRunId
+
+            appInstance scope
+                -> application scope and/or applicationRun scope
+
+            activeInAppInstanceId
+                -> activeInApplicationRunId
+
+            AppInstance lifecycle outcome
+                -> Application lifecycle outcome and/or ApplicationRun lifecycle
+                   outcome; usually ApplicationRun when live activation/runtime
+                   state is meant
+
+            SavePack bound to AppInstance
+                -> SaveBundle bound to Application or loaded into an
+                   ApplicationRun, depending on the exact lifecycle model.
+
+3. Pack-kind model may incorrectly treat SaveBundle as a Pack.
+
+    IS-09 defines pack kind names including SavePack and presents ListSavePacks
+    as a pack-kind-specific operation.
+
+    Current source-stack correction:
+        SaveBundle replaces SavePack as durable persistence closure and is not a
+        Pack.
+
+    Required consequence for IS-09:
+        Decide whether save listings still belong in a generic pack catalog, or
+        whether they should be a sibling catalog operation for SaveBundle records.
+
+        Safe options:
+
+            Option A:
+                Keep ListPacks for actual Pack kinds only:
+                    AppPack, ModPack, ViewPack, ContentPack
+                Add ListSaveBundles as a sibling operation, not a filtered
+                ListPacks form.
+
+            Option B:
+                Keep ListSaveBundles in this document as a catalog/listing
+                operation but explicitly state that SaveBundle entries are not
+                Pack descriptors and are included through a catalog projection,
+                not as a Pack kind.
+
+        Do not leave SaveBundle as a Pack kind unless later source material
+        intentionally defines a compatibility abstraction that treats it that way.
+
+4. AppPack as application-definition source may be too narrow.
+
+    IS-09 frequently uses AppPack context and lists AppPacks as startup
+    candidates. P02 allows applications to be created from an AppPack or another
+    accepted AppDefinition source.
+
+    Required consequence for IS-09:
+        Keep AppPack listing for actual AppPacks, but avoid implying that every
+        Application must originate from an AppPack.
+
+        Consider adding appDefinitionSourceId or appDefinitionSourceKind if the
+        catalog needs to list or filter accepted non-AppPack AppDefinition
+        sources.
+
+5. selectedState and active state may overstate runtime truth.
+
+    selectedState contains selectedStatus, selectedGraphId, activeInAppInstanceId,
+    and pendingChangeStatus.
+
+    The document already says selectedState is catalog evidence and does not
+    mutate selected graph state.
+
+    Required consequence for IS-09:
+        Preserve that boundary and translate activeInAppInstanceId to current
+        ApplicationRun identity.
+
+        Add or preserve that selectedState is a catalog summary, not authoritative
+        runtime state, activation state, committed state, or current graph owner
+        unless the owning graph/runtime document maps it.
+
+6. Compatibility summaries must not become graph-resolution decisions.
+
+    IS-09 already says compatibility summary is advisory unless an owning
+    operation or policy turns it into a graph-selection decision.
+
+    Required consequence for IS-09:
+        Preserve this. Do not let ListPacks decide graph resolution,
+        dependency resolution, activation eligibility, SaveBundle migration,
+        or policy decisions by itself.
+
+7. Diagnostic visibility needs a privacy/authority stop-line.
+
+    IS-09 allows includeInvalid, includeShadowed, includeDiagnostics, and
+    diagnostic visibility where catalog context and policy permit it.
+
+    Required consequence for IS-09:
+        Add or preserve wording that diagnostic inclusion may reveal normally
+        hidden, invalid, rejected, or source/path details only when policy and
+        catalog context permit it. Diagnostic projection does not bypass
+        visibility, policy, privacy, path exposure, or source trust boundaries.
+
+8. Path/source fields need file-access and authenticity guardrails.
+
+    sourcePath records a path only when path exposure is permitted. Source fields
+    do not prove authenticity and do not grant authority.
+
+    Required consequence for IS-09:
+        Preserve this and add if needed:
+
+            sourcePath is catalog evidence only. It does not grant filesystem
+            access, prove current path existence, or authorize direct reads.
+
+9. Stale cache / fresh catalog wording must not imply rescan.
+
+    IS-09 already says requireFreshCatalog does not imply filesystem rescan
+    unless an explicit rescan operation has been requested and accepted.
+
+    Required consequence for IS-09:
+        Preserve this. Listing is not discovery and not rescan.
+
+10. Counts-only and partial results need completeness guardrails.
+
+    Counts summarize the catalog operation result. Counts do not replace item
+    records when item records are required. Partial listing does not silently
+    become complete listing.
+
+    Required consequence for IS-09:
+        Preserve this. Counts-only, partial, or projected responses must not be
+        presented as complete catalog truth unless the profile/operation says so.
+
+11. Entry surfaces must not own catalog semantics.
+
+    IS-09 already gets this right.
+
+    Required consequence for IS-09:
+        Preserve that CLI, Launcher, PackManager View, remote clients, application
+        Views, AI buddy surfaces, and tests all use the same ListPacks semantics.
+        Surface labels, aliases, layout, transport, and test harness behavior do
+        not create separate catalog truth.
+
+12. Trace evidence must remain evidence only.
+
+    IS-09 correctly says diagnostics do not replace trace evidence and listing
+    trace evidence does not replace discovery, resolution, dependency,
+    activation, capability, RuntimeHost, AppInstance, or persistence trace
+    evidence.
+
+    Required consequence for IS-09:
+        Translate AppInstance to Application/ApplicationRun and preserve the trace
+        evidence boundary.
+
+==============================================================================
+OBSOLETE-PRESERVATION RISKS
+==============================================================================
+
+1. Do not preserve SavePack as current terminology.
+
+    Translate to SaveBundle according to meaning.
+
+2. Do not preserve SavePack as a Pack kind unless a later compatibility layer
+   explicitly keeps that abstraction.
+
+3. Do not preserve ListSavePacks as a filtered ListPacks form if SaveBundle is no
+   longer a Pack.
+
+    Prefer ListSaveBundles as a sibling catalog operation or explicitly define
+    save-bundle catalog entries as non-Pack projections.
+
+4. Do not preserve savePackId / savePackSummary / includeSavePackSummary.
+
+    Translate to saveBundleId / saveBundleSummary / includeSaveBundleSummary, or
+    a more precise current persistence field name.
+
+5. Do not preserve AppInstance / appInstanceId / activeInAppInstanceId.
+
+    Translate to Application / ApplicationRun / applicationId / applicationRunId /
+    activeInApplicationRunId according to meaning.
+
+6. Do not preserve AppPack as universal application-definition identity if
+   accepted non-AppPack AppDefinition sources remain supported.
+
+7. Do not preserve catalog summaries as owning semantics.
+
+    Summaries are projections and evidence, not the owning truth.
+
+==============================================================================
+PROCESS-METADATA LEAKAGE RISKS
+==============================================================================
+
+No major process-metadata leakage was found in IS-09.
+
+The final rewritten IS should still avoid saying "V3", "new design", "latest
+model", "rewrite", "audit", "Codex", "candidate", "seed", or similar process
+framing as ordinary specification language.
+
+Audit files may mention source-stack and proposal history. The final IS should
+state the current model directly.
+
+==============================================================================
+REQUIRED FIXES
+==============================================================================
+
+1. Replace SavePack terminology.
+
+    Replace:
+
+        SavePack
+        ListSavePacks
+        savePackId
+        includeSavePackSummary
+        savePackSummary
+        compatibleSavePackId
+        active SavePack / copied SavePack wording
+
+    with SaveBundle terminology or with a current non-Pack save listing term.
+
+2. Decide whether save entries are Pack catalog entries.
+
+    If SaveBundle is not a Pack, update the operation model so SaveBundle listing
+    is not described as kindFilter containing SavePack.
+
+    Either split ListSaveBundles from ListPacks, or explicitly define SaveBundle
+    catalog entries as non-Pack catalog projections handled by the same listing
+    surface.
+
+3. Replace AppInstance terminology.
+
+    Replace:
+
+        AppInstance lifecycle
+        appInstanceId
+        appInstance scope
+        AppInstance context
+        activeInAppInstanceId
+        AppInstance trace evidence
+
+    with Application and/or ApplicationRun terminology.
+
+4. Update catalogContext fields and scopes.
+
+    Review:
+
+        appPackId
+        savePackId
+        appInstanceId
+        appPack scope
+        savePack scope
+        appInstance scope
+
+    against current terms:
+
+        appPackId when actual AppPack context is meant
+        appDefinitionSourceId / appDefinitionSourceKind when non-AppPack sources
+        may exist
+        saveBundleId when persistence closure is meant
+        applicationId when durable Application is meant
+        applicationRunId when live run context is meant
+
+5. Update compatibility context fields.
+
+    Replace SavePack/AppInstance compatibility context wording with SaveBundle,
+    Application, and/or ApplicationRun terminology.
+
+    Preserve that compatibility summary is advisory unless an owning operation or
+    policy turns it into a graph-selection decision.
+
+6. Update selectedState fields.
+
+    Replace activeInAppInstanceId with activeInApplicationRunId or another current
+    run-state field.
+
+    Preserve that selectedState is catalog evidence and does not mutate selected
+    graph state.
+
+7. Strengthen diagnostic visibility boundary.
+
+    Add or preserve wording that includeInvalid, includeShadowed,
+    includeDiagnostics, includePaths, and source/provenance projections reveal
+    extra information only when catalog context, policy, visibility, and privacy
+    rules permit it.
+
+8. Strengthen source path boundary.
+
+    Add or preserve wording that sourcePath is catalog evidence only. It does not
+    grant filesystem access, prove current path existence, or authorize direct
+    reads.
+
+9. Preserve stale-cache / fresh-catalog boundary.
+
+    Keep requireFreshCatalog from implying filesystem rescan unless a separate
+    rescan operation is requested and accepted.
+
+10. Preserve partial/counts boundaries.
+
+    Keep partial results from being presented as complete results.
+
+    Keep counts-only responses from replacing item records when item records are
+    required.
+
+11. Preserve entry-surface unification.
+
+    Keep all entry surfaces routing to the same ListPacks or catalog/listing
+    semantics. Do not let CLI, Launcher, PackManager View, remote client,
+    application View, AI buddy surface, or test surface create separate catalog
+    truth.
+
+12. Preserve trace boundary.
+
+    Translate AppInstance to Application/ApplicationRun and preserve that listing
+    trace evidence does not replace discovery, resolution, dependency,
+    activation, capability, RuntimeHost, Application, ApplicationRun, SaveBundle,
+    or persistence trace evidence.
+
+==============================================================================
+SUGGESTED REWRITE STRUCTURE
+==============================================================================
+
+Keep the existing structure unless the SaveBundle correction requires splitting
+SaveBundle listing out of the Pack-kind-specific operations section.
+
+Suggested targeted structure changes:
+
+    1. Update Description / Purpose / It does NOT define sections to current
+       Application / ApplicationRun / SaveBundle terminology.
+
+    2. In Operation Names, decide whether ListSaveBundles is a sibling operation
+       or a non-Pack catalog projection. Do not leave SaveBundle as a Pack kind
+       without explicit compatibility rationale.
+
+    3. Update Request Envelope and Catalog Context fields to current identifiers.
+
+    4. Update Filters to remove SavePack as a Pack kind if SaveBundle is not a
+       Pack.
+
+    5. Keep Sorting, Pagination, Projection, Options, Response Envelope,
+       Result Status, Pack Catalog Item, Pack Identity, Display, Source,
+       Visibility, Dependency, Advisory, Warnings, Diagnostics, Counts, Failure,
+       Entry Surface, Trace, Unsupported, Open Questions, and Locked Summary.
+
+    6. Rename SavePack Summary section to SaveBundle Summary or split it into a
+       separate SaveBundle listing item section.
+
+    7. Update Compatibility Summary and Selected State sections to current
+       Application / ApplicationRun / SaveBundle identifiers.
+
+    8. Add stronger diagnostic visibility, sourcePath, partial-result,
+       counts-only, and trace-evidence guardrails.
+
+Do not turn IS-09 into DA-09 discovery, DA-10 pack identity/visibility, DA-11
+PackRequest resolution, DA-13 dependency semantics, DA-14 activation lifecycle,
+DA-16 capability execution, DA-17 policy, DA-20 Application/ApplicationRun
+lifecycle, DA-29 PackManager doctrine, resolved graph schema, activation-plan
+schema, package management protocol, CLI specification, RPC envelope schema, or
+browser component layout.
+
+==============================================================================
+SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as concrete rewrite hints, not mandatory exact final wording.
+
+1. Description
+
+    Current risk:
+        pack-kind filters for AppPack and SavePack listings
+
+    Safer wording:
+        pack-kind filters for Pack listings and SaveBundle listing context where
+        SaveBundle catalog entries are included by the operation
+
+2. Purpose list
+
+    Current risk:
+        ListAppPacks, ListSavePacks, ListViewPacks, ListContentPacks, and
+        ListModPacks as filtered forms of ListPacks
+
+    Safer wording:
+        ListAppPacks, ListViewPacks, ListContentPacks, and ListModPacks as
+        filtered forms of ListPacks, and ListSaveBundles as a SaveBundle catalog
+        listing operation if SaveBundle listing is supported here
+
+3. It does NOT define section
+
+    Current risk:
+        AppInstance lifecycle or SavePack binding behavior
+
+    Safer wording:
+        Application lifecycle, ApplicationRun lifecycle, or SaveBundle binding /
+        loading behavior
+
+4. Operation names
+
+    Current risk:
+        ListSavePacks is equivalent to ListPacks with kindFilter containing
+        SavePack.
+
+    Safer wording:
+        ListSaveBundles lists SaveBundle catalog entries when the catalog context
+        permits them. SaveBundle entries are durable persistence-closure entries,
+        not Pack descriptors, unless a later compatibility layer defines a Pack-
+        shaped projection.
+
+5. Catalog context
+
+    Current risk:
+        savePackId
+        appInstanceId
+        appInstance scope
+
+    Safer wording:
+        saveBundleId
+        applicationId
+        applicationRunId
+        application scope
+        applicationRun scope
+
+6. Access mode
+
+    Current risk:
+        saveCompatibilityCheck means the request supports SavePack compatibility
+        or repair inspection.
+
+    Safer wording:
+        saveCompatibilityCheck means the request supports SaveBundle compatibility
+        or repair inspection.
+
+7. Projection
+
+    Current risk:
+        includeSavePackSummary
+
+    Safer wording:
+        includeSaveBundleSummary
+
+8. Pack catalog item
+
+    Current risk:
+        savePackSummary contains SavePack-specific fields
+
+    Safer wording:
+        saveBundleSummary contains SaveBundle-specific fields when the item is a
+        SaveBundle catalog entry or when a Pack listing includes related
+        SaveBundle summary evidence.
+
+9. Compatibility summary
+
+    Current risk:
+        compatibilityContext records which AppPack, SavePack, AppInstance,
+        workspace, or graph context was used
+
+    Safer wording:
+        compatibilityContext records which AppPack, AppDefinition source,
+        SaveBundle, Application, ApplicationRun, Workspace, or graph context was
+        used
+
+10. SavePack Summary section
+
+    Current risk:
+        savePackSummary does not load the SavePack.
+        savePackSummary does not bind a SavePack to an AppInstance.
+
+    Safer wording:
+        saveBundleSummary does not load the SaveBundle.
+        saveBundleSummary does not bind a SaveBundle to an Application or
+        ApplicationRun.
+
+11. Selected state
+
+    Current risk:
+        activeInAppInstanceId identifies an AppInstance using the pack.
+
+    Safer wording:
+        activeInApplicationRunId identifies an ApplicationRun using the pack when
+        available.
+
+12. Trace context
+
+    Current risk:
+        appInstanceId when applicable
+        AppInstance trace evidence
+
+    Safer wording:
+        applicationId and/or applicationRunId when applicable
+        Application / ApplicationRun trace evidence
+
+13. Unsupported list
+
+    Current risk:
+        treating SavePack listing as SavePack loading
+        treating SavePack listing as SavePack migration
+
+    Safer wording:
+        treating SaveBundle listing as SaveBundle loading
+        treating SaveBundle listing as SaveBundle migration
+
+==============================================================================
+ACCEPTANCE CONDITIONS FOR FINAL REWRITTEN IS-09
+==============================================================================
+
+Accept the rewritten IS-09 only if all of the following are true:
+
+1. It remains an implementation specification for concrete runtime catalog and
+   listing operation contracts.
+
+2. It does not redefine discovery, root scanning, pack identity, pack hierarchy,
+   visibility, PackRequest resolution, importing, module loading, dependency
+   semantics, activation lifecycle, capability execution, policy, Application,
+   ApplicationRun, SaveBundle lifecycle/binding, RPC, UI/View, RuntimeHost
+   command surfaces, PackManager doctrine, resolved graph schema, activation-plan
+   schema, package management protocol, CLI syntax, JSON-RPC/WebSocket envelope,
+   or browser component layout.
+
+3. All SavePack terminology has been translated to SaveBundle terminology or
+   explicitly scoped compatibility aliases.
+
+4. SaveBundle is not treated as a Pack unless a later compatibility abstraction
+   explicitly defines that projection.
+
+5. ListSaveBundles is either a sibling catalog operation or a clearly defined
+   non-Pack catalog projection, not a stale filtered ListPacks SavePack kind.
+
+6. All AppInstance terminology has been translated to Application and/or
+   ApplicationRun terminology according to meaning.
+
+7. AppPack listing does not imply every Application must originate from an
+   AppPack if accepted non-AppPack AppDefinition sources remain supported.
+
+8. Listing remains read-only catalog access.
+
+9. Listing does not perform discovery, filesystem rescan, PackRequest resolution,
+   dependency resolution, graph selection, activation-plan creation, importing,
+   activation, capability permission, execution authorization, persistence
+   authority, SaveBundle loading, or SaveBundle migration.
+
+10. Request envelopes, catalogContext, filters, sort, page, projection, options,
+    cursors, result statuses, counts, diagnostics, and trace links do not grant
+    authority.
+
+11. Filters, projections, diagnostics, includeInvalid, includeShadowed,
+    includePaths, and source/provenance fields do not bypass visibility, policy,
+    privacy, path exposure, or source trust boundaries.
+
+12. sourcePath is catalog evidence only and does not grant filesystem access,
+    prove current file existence, or authorize direct reads.
+
+13. Compatibility, dependency, advisory, visibility, selectedState, and SaveBundle
+    summaries remain summaries/projections and do not replace their owning
+    semantics.
+
+14. Partial, counts-only, projected, stale-cache, or diagnostic responses are not
+    presented as complete catalog truth unless the profile/operation explicitly
+    defines that meaning.
+
+15. All entry surfaces route through the same catalog/listing semantics and do
+    not create separate catalog truth.
+
+16. Trace evidence remains evidence only and does not replace owning-domain trace
+    evidence.
+
+17. Open questions remain open unless a later authoritative source resolves them.
+
+==============================================================================
+FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep IS-09 with targeted terminology, catalog-boundary, and authority-boundary
+fixes.
+
+Do not rewrite the whole document unless the SaveBundle correction requires a
+small structural split between Pack listing and SaveBundle listing.
+
+Do not expand this implementation specification into discovery, root scanning,
+pack identity, pack visibility, PackRequest resolution, dependency semantics,
+activation, capability execution, policy, Application/ApplicationRun lifecycle,
+SaveBundle lifecycle, PackManager doctrine, resolved graph schema, activation-plan
+schema, package management protocol, CLI syntax, RPC envelope schema, or browser
+component layout.
+
+Translate obsolete SavePack / AppInstance wording into current SaveBundle /
+Application / ApplicationRun terminology. Decide explicitly whether SaveBundle
+listing is a sibling catalog operation or a non-Pack projection. Preserve the
+read-only listing invariant, summary-not-authority invariant, entry-surface
+unification, path/diagnostic visibility boundaries, partial/counts boundaries,
+stale-cache boundaries, and trace-evidence boundaries.
+
+==============================================================================
+END OF AUDIT-IS-09 RESULT
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-IS-09-RESULT
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-IS-09_RESULT.txt
+DOC_REV: 1
+DOC_GIT: temp
+----------------
