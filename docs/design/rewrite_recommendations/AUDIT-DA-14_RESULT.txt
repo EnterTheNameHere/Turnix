@@ -1,0 +1,837 @@
+==============================================================================
+AUDIT RESULT - DA-14 ACTIVATION, LIFECYCLE AND EXECUTION GUARANTEES
+==============================================================================
+
+Document status:
+    Audit result for assistant-editor use.
+
+Target document:
+    docs/design/DA-14_ACTIVATION_LIFECYCLE_AND_EXECUTION_GUARANTEES.txt
+
+Recommendation file:
+    docs/design/rewrite_recommendations/REWRITE-DA-14_RECOMMENDATION.txt
+
+Audit source stack:
+    docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P01_TURNIX_PACK_ENTRY_MULTI_ADAPTER_AND_CYCLIC_ACTIVATION_PROTOCOL.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    docs/design/DA-14_ACTIVATION_LIFECYCLE_AND_EXECUTION_GUARANTEES.txt
+    docs/design/rewrite_recommendations/REWRITE-DA-14_RECOMMENDATION.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-23_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-30_RESULT.txt
+
+Audit posture:
+    Semantic architecture audit, not formatting audit.
+
+    Use CMR references as normal upstream/index material only.
+
+    Do not treat CMR files as semantic architecture authority for this audit.
+
+==============================================================================
+01. VERDICT
+==============================================================================
+
+Recommendation verdict:
+    Partial.
+
+    The recommendation correctly preserves the old DA-14 activation boundary, but
+    it predates Proposal P01 and still uses PackContext/AppInstance vocabulary.
+    It does not catch the largest new issue: DA-14 must now distinguish final
+    Activated state from the broader activation process that includes entry
+    evaluation, Phase 1, Phase 2, and Phase 3.
+
+Document verdict:
+    Rewrite substantially, while preserving the core activation boundary.
+
+DA-14 is still conceptually valuable, but it needs a real P01 integration pass.
+It should not merely receive small wording edits.
+
+Current DA-14 already includes some P01 ideas:
+
+    - multiple adapter/runtime participation
+    - at most one activation entry per adapter/runtime participation
+    - cyclic activation groups
+    - early activation phases
+    - fresh ModCallContext per callback/invocation
+    - registration records do not retain ModCallContext
+
+However, the document still contains older or conflicting statements:
+
+    - Activation is described as a single one-time state transition in a way that
+      can conflict with multi-phase activation.
+    - It says activation is the first moment Turnix may intentionally execute
+      Pack code with ModCallContext authority, but P01 allows Phase 1 and Phase 2
+      callbacks before final Activated state.
+    - It still treats onLoad(ctx) as the ordinary final activation entrypoint but
+      does not fully define Phase 1 and Phase 2 semantics.
+    - JavaScript entry/entries sections preserve old manifest-field thinking and
+      can conflict with P01's role split between activation entry, private
+      implementation module, and exported module surface.
+    - Explicitly open questions still list staged/phased activation even though
+      P01 intentionally defines a phased activation protocol.
+    - Trace and failure language still says pack instance in places; current Dv3
+      should use Pack identity, activation attempt, activation entry, component,
+      cyclic group, Application/ApplicationRun where relevant.
+
+Primary conclusion:
+    Rewrite DA-14 around the P01 activation protocol. Keep the activation
+    boundary, but split "activation process" from "Activated state".
+
+==============================================================================
+02. WHAT DA-14 GETS RIGHT
+==============================================================================
+
+02.1. Activation boundary remains important
+-------------------------------------------
+
+DA-14 correctly says activation is not discovery, indexing, resolution,
+importing, adapter selection, execution authorization, adapter loading,
+visibility granting, or capability permission.
+
+Preserve this.
+
+02.2. Pack-level activation remains important
+---------------------------------------------
+
+DA-14 correctly says activation applies to a Pack as an executable participant,
+not to individual files, modules, imports, capabilities, or adapter-loaded
+artifacts by themselves.
+
+Preserve this, but update it for P01:
+
+    A Pack may have multiple declared activation entries.
+
+    The Pack or cyclic group becomes externally Activated only after all required
+    entries and phase barriers succeed.
+
+    Adapter entry loading does not create partial external activation.
+
+02.3. ModCallContext section is mostly good
+-------------------------------------------
+
+The current DA-14 correctly uses ModCallContext, not PackContext.
+
+It correctly says ModCallContext is created only by Turnix, fresh per callback or
+invocation, bound to acting Pack and invocation scope, not raw backend service,
+not unrestricted Kernel access, and not retained by registration records.
+
+Preserve this, but defer detailed ModCallContext semantics to DA-30.
+
+02.4. Activation and execution separation remains important
+----------------------------------------------------------
+
+DA-14 correctly says activation and execution are distinct concepts and that
+later runtime execution may happen many times through Turnix-controlled
+orchestration pathways.
+
+Preserve this, but revise the pre-final-activation wording to allow P01's
+supported early lifecycle phases.
+
+02.5. Immediate execution warning remains important
+---------------------------------------------------
+
+DA-14 correctly says immediate execution and top-level side effects do not
+activate a Pack and are outside Turnix guarantees.
+
+Preserve this, but align it with P01's Stage 0 language:
+
+    Entry evaluation may technically run host-language top-level code.
+
+    That module-level execution is unavoidable host-runtime behavior, not a safe
+    ordinary activation pattern, and Turnix guarantees cleanup only for
+    Turnix-owned/provisional activation material.
+
+02.6. resolvePack / ensureActivated distinction is useful
+---------------------------------------------------------
+
+DA-14 correctly separates resolvePack from ensureActivated.
+
+Preserve the distinction, but avoid concrete API finality if these are not final
+public API names.
+
+==============================================================================
+03. MAJOR REQUIRED FIX: SPLIT ACTIVATION PROCESS FROM ACTIVATED STATE
+==============================================================================
+
+Current DA-14 says:
+
+    Activation is a controlled, explicit, one-time state transition.
+
+That is still useful, but it is incomplete after Proposal P01.
+
+P01 defines a multi-phase activation protocol:
+
+    Stage 0:
+        Entry evaluation by the ExecutionAdapter.
+
+    Phase 1:
+        onEntryLoaded(ctx), working name.
+
+    Phase 2:
+        onEntriesLoaded(ctx), working name.
+
+    Phase 3:
+        onLoad(ctx), canonical final activation.
+
+The external state transition to Activated occurs after the activation protocol
+succeeds, not at the first early callback.
+
+Required distinction:
+
+    Activation process:
+        the Turnix-controlled process of preparing and attempting to bring a Pack
+        or cyclic activation group into executable participation.
+
+    Activated state:
+        the externally visible state reached only after all required activation
+        entries, phase callbacks, dependency checks, validation, and publication
+        rules have succeeded.
+
+    Final activation boundary:
+        the point where the Pack or admitted cyclic activation group becomes
+        externally Activated and its public registrations become available
+        according to visibility, capability, service, permission, and policy
+        rules.
+
+Rewrite the document so "activation" is not used ambiguously.
+
+Recommended pattern:
+
+    Before the activation process:
+        Pack metadata may exist; Pack code has no Turnix-recognized executable
+        participation.
+
+    During the activation process:
+        Turnix may load declared activation entries, run entry evaluation, invoke
+        Phase 1/Phase 2/Phase 3 callbacks, accept provisional registrations, and
+        prepare cyclic-group surfaces under strict phase/barrier rules.
+
+    After successful activation:
+        the Pack or cyclic group is externally Activated.
+
+    If activation fails:
+        the Pack or cyclic group is not Activated, provisional Turnix-owned
+        registrations are withdrawn, staged Turnix-owned state is aborted where
+        applicable, and failure is explicit and trace-visible.
+
+==============================================================================
+04. MAJOR REQUIRED FIX: "FIRST MOMENT" STATEMENT
+==============================================================================
+
+Current DA-14 says:
+
+    Activation is the first moment Turnix may intentionally execute pack code
+    with ModCallContext gateway authority.
+
+This is now misleading.
+
+Under P01, Turnix may intentionally invoke Phase 1 and Phase 2 callbacks with
+ModCallContext before the Pack reaches final externally visible Activated state.
+
+Replace the statement with a more precise one:
+
+    The activation process is the first Turnix-supported context in which Turnix
+    may intentionally invoke declared Pack activation-entry code with
+    ModCallContext gateway authority.
+
+    Final Activated state is reached only after the required activation protocol
+    completes successfully.
+
+    Early Phase 1 and Phase 2 callbacks are activation-process participation, not
+    final Activated authority.
+
+This fix is required.
+
+==============================================================================
+05. MAJOR REQUIRED FIX: INTEGRATE P01 PHASE/BARRIER PROTOCOL
+==============================================================================
+
+DA-14 owns activation lifecycle semantics. It should integrate the P01 protocol
+more directly than DA-23.
+
+Add or rewrite sections for:
+
+    - activation entry model
+    - Turnix-facing infrastructure readiness before entry loading
+    - Stage 0 entry evaluation
+    - Phase 1 early entry-local hook
+    - Phase 1 barrier
+    - Phase 2 all entries loaded hook
+    - Phase 2 barrier
+    - Phase 3 canonical onLoad activation
+    - ordinary Pack activation completion
+    - cyclic group admission
+    - cyclic group Phase 1 / Phase 2 / Phase 3
+    - registration publication scopes
+    - multiple adapters in one Pack
+    - failure semantics
+    - asynchronous hook completion
+    - exported modules versus activation entries
+    - native language cycles versus Pack dependency cycles
+
+DA-14 does not need every example from P01, but it should own the actual
+activation-lifecycle semantics.
+
+05.1. Turnix-facing infrastructure readiness
+--------------------------------------------
+
+Before Turnix asks an ExecutionAdapter to load any Pack activation entry, the
+Turnix-facing infrastructure required by Pack code is operational.
+
+Minimum readiness includes:
+
+    - ModCallContext creation
+    - capability registration and invocation surfaces
+    - permitted handler/service registration surfaces
+    - RPC routing
+    - permission and policy mediation
+    - structured trace evidence
+    - structured errors
+    - activation-attempt association for provisional registrations
+    - withdrawal of provisional Turnix-owned registrations if activation fails
+
+This readiness means Turnix can receive Pack participation.
+
+It does not mean every requested capability is already available.
+
+05.2. Stage 0 entry evaluation
+------------------------------
+
+Entry evaluation is the unavoidable host-runtime moment when the ExecutionAdapter
+loads or evaluates a declared activation entry.
+
+Top-level/module-level side effects may occur.
+
+Turnix may be unable to prevent them.
+
+Turnix discourages reliance on them.
+
+They are not the safe ordinary activation pattern.
+
+Turnix-owned registrations made during entry evaluation are provisional and
+associated with the current activation attempt.
+
+05.3. Phase 1 / Phase 2 / Phase 3
+---------------------------------
+
+Use P01's working phase names unless the project later renames them:
+
+    Phase 1:
+        onEntryLoaded(ctx)
+
+    Phase 2:
+        onEntriesLoaded(ctx)
+
+    Phase 3:
+        onLoad(ctx)
+
+The phase names are working names; the phase meanings matter more than the final
+public names.
+
+Phase 1 and Phase 2 exist for advanced cross-adapter initialization, cyclic
+prerequisites, and cases ordinary acyclic onLoad ordering cannot safely express.
+
+Most Pack creators should need only Phase 3.
+
+05.4. Phase barriers, not callback order
+----------------------------------------
+
+Add the core P01 guarantee:
+
+    Turnix guarantees phase barriers, not callback order.
+
+A callback may rely only on completed earlier phase barriers.
+
+A callback may not rely on another callback in the same phase having already run.
+
+Registrations accepted during one phase become guaranteed available only after
+the relevant barrier completes and only within the allowed publication scope.
+
+05.5. Registration publication scopes
+-------------------------------------
+
+DA-14 should define or reference the activation-publication scopes:
+
+    - accepted
+    - provisional
+    - visible inside one Pack
+    - visible inside one cyclic group
+    - externally published
+    - withdrawn
+
+Stage 0 and Phase 1 registrations become guaranteed after the relevant Phase 1
+barrier.
+
+Phase 2 registrations become guaranteed after the relevant Phase 2 barrier.
+
+Phase 3 registrations become externally published only after successful Pack or
+cyclic-group activation.
+
+If activation fails, provisional Turnix-owned registrations are withdrawn and
+external publication does not occur.
+
+05.6. Multiple adapters in one Pack
+-----------------------------------
+
+A Pack may declare multiple adapter/runtime participations.
+
+Each declared adapter/runtime participation has at most one activation entry.
+
+No universal adapter order is guaranteed.
+
+Neither same-Pack onLoad(ctx) callback may assume another adapter's onLoad(ctx)
+has already run.
+
+Cross-adapter prerequisites required during onLoad(ctx) must be registered in
+Phase 1 or Phase 2.
+
+05.7. Ordinary Pack activation completion
+-----------------------------------------
+
+An ordinary non-cyclic Pack becomes Activated only after:
+
+    - every declared activation entry loaded successfully
+    - every Phase 1 callback completed successfully or no-op
+    - every Phase 2 callback completed successfully or no-op
+    - every Phase 3 onLoad(ctx) callback completed successfully or no-op where
+      allowed
+    - activation validation completed successfully
+    - no required registration or dependency check failed
+
+Activation is atomic at the Pack boundary.
+
+A Pack with one successful adapter entry and one failed required adapter entry is
+not mostly activated.
+
+05.8. Cyclic dependency groups
+------------------------------
+
+DA-14 should integrate the P01 cyclic activation model.
+
+A cyclic dependency group is admitted only when at least one activation entry in
+the group defines a supported Phase 1 or Phase 2 handler.
+
+Presence of at least one early handler means a cycle participant intentionally
+opted into the early protocol.
+
+It does not prove the cycle is logically correct.
+
+If no Pack in the cycle provides Phase 1 or Phase 2 handling, Turnix rejects the
+cycle.
+
+Suggested error classification:
+
+    UnsupportedActivationCycle
+
+Cyclic Phase 3 begins only after:
+
+    - every external hard dependency is Activated
+    - every group entry loaded
+    - every group Phase 1 completed
+    - every group Phase 2 completed
+    - all eligible Phase 1 and Phase 2 group registrations are available
+
+During cyclic Phase 3, no intra-cycle onLoad order is guaranteed.
+
+Any surface needed during cyclic onLoad(ctx) must have been established in Phase
+1 or Phase 2.
+
+Missing surface during cyclic Phase 3 fails immediately.
+
+Suggested error classification:
+
+    CyclicDependencySurfaceNotReady
+
+The cyclic group is externally Activated atomically only after every group
+onLoad(ctx) succeeds.
+
+05.9. Async hook completion
+---------------------------
+
+A lifecycle hook completes only when its synchronous or asynchronous result
+completes according to the adapter contract.
+
+Required setup must be awaited by the hook.
+
+Starting detached background work and returning does not extend the phase
+barrier.
+
+A Pack must not publish a capability at a barrier while its implementation is
+still being prepared by untracked detached work.
+
+05.10. Failure semantics
+------------------------
+
+On activation failure, Turnix:
+
+    - marks no failed Pack as Activated
+    - marks no cyclic-group member as Activated when group activation fails
+    - withdraws provisional Turnix-owned registrations
+    - aborts staged Turnix-owned state mutation where applicable
+    - prevents external dependents from activating
+    - classifies the failure
+    - emits trace evidence
+    - invokes supported cleanup/deactivation paths where available
+
+Turnix cannot guarantee reversal of arbitrary external side effects outside
+Turnix-controlled boundaries.
+
+==============================================================================
+06. MAJOR REQUIRED FIX: REMOVE OLD JAVASCRIPT ENTRY/ENTRIES MODEL
+==============================================================================
+
+Current DA-14 has JavaScript-specific sections:
+
+    runtimes.javascript.entry
+    runtimes.javascript.entries
+
+This is stale relative to P01.
+
+P01 says Turnix does not define a plural list of automatically loaded
+non-activation "entries" merely to preload implementation files.
+
+The revised DA-14 should avoid locking this old manifest shape.
+
+Replace JavaScript-specific `entry` / `entries` sections with adapter-neutral
+activation-entry roles:
+
+    Activation entry:
+        loaded by Turnix through one ExecutionAdapter and participates in the
+        activation lifecycle.
+
+    Private implementation module:
+        loaded by Pack code as needed through the adapter's supported local
+        module rules; not lifecycle participant merely because it exists.
+
+    Exported module surface:
+        public mediated module surface loaded on demand; does not receive
+        activation lifecycle callbacks merely because it is exported.
+
+If JavaScript examples remain, they should be examples only and must not imply a
+final manifest schema.
+
+Do not preserve `runtimes.javascript.entries` as a canonical architectural field
+unless the project explicitly decides to keep it as a manifest convention outside
+P01.
+
+==============================================================================
+07. TERMINOLOGY ALIGNMENT
+==============================================================================
+
+07.1. PackContext -> ModCallContext
+-----------------------------------
+
+DA-14 already uses ModCallContext, which is good.
+
+The recommendation still uses PackContext. Do not copy that stale term forward.
+
+07.2. AppInstance / pack instance
+---------------------------------
+
+The recommendation and DA-14 trace section use pack instance / AppInstance-era
+language.
+
+Use current Dv3 identities where relevant:
+
+    Pack identity
+    activationAttemptId
+    activation-entry identity
+    adapter identity
+    dependency-component identity
+    cyclic-group identity
+    Application identity when relevant
+    ApplicationRun identity when relevant
+
+Avoid AppInstance unless explicitly retained as a legacy alias elsewhere.
+
+07.3. OrchestrationUnit
+-----------------------
+
+Use OrchestrationUnit as the current first-class type name unless the repository
+keeps the spaced display spelling deliberately.
+
+==============================================================================
+08. WHAT TO PRESERVE FROM CURRENT DA-14
+==============================================================================
+
+Preserve these boundaries, but rewrite them around P01 and current Dv3 terms:
+
+    - Activation is executable participation under Turnix orchestration.
+    - Activation is not discovery, indexing, dependency resolution, importing,
+      adapter selection, execution authorization, adapter loading, visibility
+      granting, capability permission, RuntimeHost authority, Job terminal
+      outcome, OrchestrationUnit terminal outcome, Window finalization,
+      committed-state mutation, native immediate execution, or background-work
+      guarantee.
+    - Activation applies to a Pack as an executable participant, not to files,
+      modules, imports, capabilities, or adapter-loaded artifacts by themselves.
+    - Final Activated authority is externally visible only after the Pack or
+      admitted cyclic activation group crosses its activation boundary.
+    - ModCallContext is created by Turnix, fresh per invocation, and not retained
+      by registrations.
+    - Activation and later runtime execution are distinct.
+    - Immediate execution and top-level side effects are unsupported as
+      activation authority.
+    - Activation-independent code may use a caller-provided ModCallContext under
+      caller authority without activating the provider Pack.
+    - resolvePack does not activate or load code.
+    - ensureActivated ensures activation and returns diagnostics/metadata, not
+      code, symbols, or adapter internals.
+    - Execution started outside Turnix orchestration is unsupported.
+    - Activation trace evidence is activation-domain evidence and does not own
+      the trace substrate.
+    - Activation failure is explicit, visible, and does not silently fall back.
+    - NotActivatedError must not be swallowed.
+
+==============================================================================
+09. WHAT TO ADD OR CHANGE IN THE REVISED DA-14
+==============================================================================
+
+09.1. Add current P01 activation protocol structure
+---------------------------------------------------
+
+Add the sections listed in section 05 of this audit.
+
+09.2. Reword lifecycle phases
+-----------------------------
+
+The current lifecycle list:
+
+    Discovery
+    Indexing
+    Resolution
+    Execution adapter preparation
+    Activation
+    Running or Finalized
+
+can remain as the outer lifecycle, but Activation must be expanded internally
+into the P01 activation process.
+
+Do not say Activation is simply one callback.
+
+Do not say final activation happens at entry evaluation.
+
+09.3. Replace JavaScript-specific manifest field lock-in
+--------------------------------------------------------
+
+Remove or demote `runtimes.javascript.entry` and `runtimes.javascript.entries`
+from architectural rules.
+
+Use adapter-neutral activation-entry/private-module/exported-module language.
+
+09.4. Update open questions
+---------------------------
+
+Remove or revise:
+
+    staged or phased activation
+
+because P01 now defines Phase 1/Phase 2/Phase 3 semantics.
+
+Remaining open questions may include:
+
+    - final public names for Phase 1 and Phase 2 hooks
+    - exact manifest schema for declaring activation entries and hooks
+    - exact adapter-mediated activation diagnostics
+    - activation retry semantics, if any
+    - category-based activation ordering, if still desired
+    - exact cleanup/deactivation hooks, if any
+    - exact timeout/cancellation policy for activation hooks
+
+09.5. Update trace reasons
+--------------------------
+
+Current DA-14 trace reasons are too coarse after P01.
+
+Add or leave open more precise activation evidence categories:
+
+    ActivationPlanAccepted
+    ActivationComponentIdentified
+    CyclicGroupDetected
+    CyclicGroupAdmitted
+    CyclicGroupRejected
+    ActivationEntryLoadRequested
+    ActivationEntryLoaded
+    ActivationEntryLoadFailed
+    ActivationPhase1Started
+    ActivationPhase1Completed
+    ActivationPhase1Failed
+    ActivationPhase1BarrierCompleted
+    ActivationPhase2Started
+    ActivationPhase2Completed
+    ActivationPhase2Failed
+    ActivationPhase2BarrierCompleted
+    ActivationPhase3Started
+    ActivationPhase3Completed
+    ActivationPhase3Failed
+    ActivationRegistrationAccepted
+    ActivationRegistrationPublishedToPackScope
+    ActivationRegistrationPublishedToCyclicGroupScope
+    ActivationRegistrationPublishedExternally
+    ActivationRegistrationWithdrawn
+    CyclicDependencySurfaceNotReady
+    PackActivationCompleted
+    PackActivationFailed
+    CyclicGroupActivationCompleted
+    CyclicGroupActivationFailed
+
+The exact final names may remain open, but DA-14 should no longer imply a single
+ActivationEntrypointInvoked event is enough for P01-level diagnostics.
+
+==============================================================================
+10. SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as a starting pass. Context still matters.
+
+    Activation is a controlled, explicit, one-time state transition.
+        -> Successful activation is the controlled external state transition
+           from inert/non-activated Pack to externally Activated Pack or cyclic
+           group. The activation process may contain Stage 0, Phase 1, Phase 2,
+           and Phase 3 before that external state transition is complete.
+
+    Activation is the first moment Turnix may intentionally execute pack code with ModCallContext gateway authority.
+        -> The activation process is the first Turnix-supported context in which
+           Turnix may intentionally invoke declared Pack activation-entry code
+           with ModCallContext gateway authority. Final Activated state is reached
+           only after the required activation protocol completes successfully.
+
+    The ordinary final activation entry is onLoad(ctx).
+        -> The canonical Phase 3 activation hook is onLoad(ctx). Phase 1 and
+           Phase 2 are supported early lifecycle phases for advanced
+           cross-adapter and cyclic activation needs.
+
+    Future activation entries, if introduced...
+        -> Future lifecycle hook names or activation-entry declaration forms, if
+           introduced, preserve the same Turnix-defined ModCallContext,
+           phase/barrier, and activation-publication boundaries.
+
+    runtimes.javascript.entries
+        -> remove as canonical architecture, or describe only as a legacy/example
+           manifest convention if intentionally retained outside P01.
+
+    pack instance
+        -> Pack identity / activation attempt / ApplicationRun, depending on
+           exact meaning
+
+    staged or phased activation [as open question]
+        -> remove or replace with open questions about exact phase hook names,
+           declaration schema, timeout/cancellation, and retry policy
+
+==============================================================================
+11. ACCEPTANCE CONDITIONS FOR THE REVISED DA-14
+==============================================================================
+
+A revised DA-14 is acceptable when all of the following are true:
+
+    - It preserves activation as recognized executable participation under Turnix
+      orchestration.
+
+    - It distinguishes activation process from final externally visible
+      Activated state.
+
+    - It integrates P01 Stage 0 / Phase 1 / Phase 2 / Phase 3 meanings.
+
+    - It states Turnix guarantees phase barriers, not same-phase callback order.
+
+    - It defines ordinary Pack activation completion and cyclic-group activation
+      completion.
+
+    - It defines or references registration publication scopes.
+
+    - It handles multiple adapter/runtime participations for one Pack.
+
+    - It states cross-adapter prerequisites needed during onLoad(ctx) must be
+      established in Phase 1 or Phase 2.
+
+    - It admits cyclic dependency groups only through explicit early phase
+      handling and fails unsupported cycles.
+
+    - It includes failure semantics for activation entry load failure, hook
+      failure, registration rejection, dependency activation failure, unsupported
+      cycle, missing cyclic surface, and cleanup limits.
+
+    - It preserves ModCallContext as fresh invocation-scoped context and defers
+      detailed facade semantics to DA-30.
+
+    - It removes stale PackContext terminology.
+
+    - It avoids AppInstance-era wording unless explicitly declared as a legacy
+      alias elsewhere.
+
+    - It removes or demotes JavaScript-specific `entry` / `entries` architecture
+      lock-in.
+
+    - It keeps private implementation modules and exported module surfaces
+      distinct from activation entries.
+
+    - It preserves immediate execution / module-level side effects as unsupported
+      activation authority.
+
+    - It keeps resolvePack and ensureActivated separate.
+
+    - It keeps ensureActivated from returning code, symbols, module namespaces,
+      or adapter internals.
+
+    - It keeps activation failure visible and prevents silent fallback.
+
+    - It keeps NotActivatedError from being swallowed.
+
+    - It keeps trace wording DA-03-compatible and does not make trace evidence
+      committed-state authority.
+
+    - It does not become generic resolution, dependency source selection,
+      importing/module-loading, ExecutionAdapter trust/isolation, concrete
+      manifest schema, concrete RPC schema, capability permission, policy, Job,
+      OrchestrationUnit, ApplicationRun, SaveBundle, View, RuntimeHost, PackManager,
+      artifact/export, or Replay/Resume/Retry specification.
+
+==============================================================================
+12. FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Rewrite DA-14 substantially around Proposal P01.
+
+Do not discard DA-14's original activation boundary.
+
+Do not keep the old single-callback mental model.
+
+The revised DA-14 should become the owner of the activation lifecycle protocol:
+
+    - inert metadata versus activation process versus final Activated state
+    - activation entries
+    - Stage 0 entry evaluation
+    - Phase 1 / Phase 2 / Phase 3 lifecycle callbacks
+    - phase barriers
+    - registration publication scopes
+    - multiple adapter/runtime participations
+    - cyclic dependency group admission and activation
+    - activation failure and cleanup limits
+    - activation trace obligations
+    - NotActivatedError and ensureActivated semantics
+
+Use Proposal P01 as the main source.
+
+Use Proposal P02 and DA-30 for current type names and ModCallContext lifetime
+semantics.
+
+Use REWRITE-DA-14 as preservation guidance only. Do not copy its stale
+PackContext/AppInstance vocabulary or its pre-P01 "future phased activation"
+assumptions.
+
+Keep DA-14 from absorbing DA-23, DA-27, DA-28, DA-29, DA-30, DA-25, or DA-26.
+
+The main work is to make DA-14 compatible with the new multi-phase activation
+protocol without losing the hard boundary that only Turnix-recognized activation
+creates executable Pack participation.
+
+==============================================================================
+END OF AUDIT RESULT - DA-14
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-DA-14
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-DA-14_RESULT.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
