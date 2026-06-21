@@ -1,0 +1,852 @@
+==============================================================================
+TURNIX DV3 DOCUMENTATION AUDIT RESULT - IS-11 RESOLVED PACK GRAPH AND ACTIVATION PLAN SCHEMA
+==============================================================================
+
+Document title:
+    IS-11 - Resolved Pack Graph and Activation Plan Schema
+
+Target IS path:
+    docs/design/IS-11_RESOLVED_PACK_GRAPH_AND_ACTIVATION_PLAN_SCHEMA.txt
+
+Branch:
+    CODEX_Dv3
+
+Target file metadata loaded by assistant:
+    DOC_ID: IS-11
+    DOC_FILE: docs/design/IS-11_RESOLVED_PACK_GRAPH_AND_ACTIVATION_PLAN_SCHEMA.txt
+    DOC_REV: 1
+    DOC_GIT: 60f13c0
+    GitHub blob SHA seen by assistant:
+        5b09d3c6a8e68518c00395f92bd703257244fa93
+
+Audit result file:
+    docs/design/rewrite_recommendations/AUDIT-IS-11_RESULT.txt
+
+Audit scope:
+    Audit only the assigned implementation specification file.
+
+    IS files do not have rewrite recommendation files. No REWRITE-IS-11 file was
+    read or expected.
+
+    CMR-04 was not reread for IS-11 because the IS-11 path had already been
+    identified from the Canonical Index in this conversation.
+
+Source stack used:
+    - docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+    - docs/CMR-04_CANONICAL_INDEX_TURNIX_SPECIFICATION.txt
+      only as prior index evidence for the IS-11 path
+    - docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    - docs/design/IS-09_RUNTIME_CATALOG_AND_PACK_LISTING_OPERATIONS.txt
+    - docs/design/IS-11_RESOLVED_PACK_GRAPH_AND_ACTIVATION_PLAN_SCHEMA.txt
+
+Recommendation file status:
+    Not applicable. IS files do not have rewrite recommendation files.
+
+Recommendation verdict:
+    Not applicable.
+
+IS document verdict:
+    Keep with targeted terminology, graph-intent, activation-boundary, and
+    persistence-boundary fixes.
+
+    IS-11 is a useful concrete implementation specification for ResolvedPackGraph
+    and ActivationPlan records. It should not be rewritten from scratch.
+
+    Its strongest invariant is correct: ResolvedPackGraph is selected graph intent
+    and ActivationPlan is ordering/readiness intent. Neither record performs
+    discovery, generic resolution, importing, activation, capability permission,
+    execution authorization, or persistence authority.
+
+    Required fixes are targeted: replace obsolete SavePack, AppInstance, and
+    PackContext terminology; align graph context and save graph evidence with
+    SaveBundle / Application / ApplicationRun terminology; preserve the boundary
+    between evidence/intent records and owning runtime behavior; and ensure
+    activation-plan readiness/order groups cannot be read as actual activation,
+    concurrency permission, adapter authorization, or lifecycle success.
+
+==============================================================================
+WHAT THE DOCUMENT GETS RIGHT
+==============================================================================
+
+1. Correct implementation-specification scope.
+
+    IS-11 correctly defines record shapes for selected graph and activation-plan
+    handoff without defining root discovery, pack identity/visibility, generic
+    PackRequest resolution, import/module loading, dependency/provider/advisory
+    semantics, activation lifecycle, capability execution, policy, Job lifecycle,
+    Application lifecycle, SaveBundle binding, RPC, UI/View runtime, adapter
+    authority, RuntimeHost lifecycle, PackManager boundaries, concrete catalog
+    envelopes, Default Launcher behavior, activation executor implementation,
+    package management protocol, or JSON Schema publication format.
+
+2. Strong record-type boundary.
+
+    ResolvedPackGraph records selected graph intent.
+
+    ActivationPlan records activation ordering and readiness derived from one
+    ResolvedPackGraph.
+
+    One ResolvedPackGraph may have zero, one, or multiple ActivationPlans over
+    time. Each ActivationPlan references exactly one ResolvedPackGraph.
+
+3. Strong non-execution boundary.
+
+    ResolvedPackGraph is not discovery, generic resolution, importing, or
+    activation.
+
+    ActivationPlan is not activation, does not call onLoad(ctx), and does not
+    create authority by itself.
+
+    Selected pack entries are not manifests, not executable code, and do not
+    activate packs.
+
+4. Good evidence/intent boundary.
+
+    The records are evidence and intent records. They do not grant permission or
+    authority by themselves.
+
+    Mechanical loaders, importers, adapter artifact loaders, and activation
+    executors consume or reference these records only through their own authority
+    boundaries.
+
+5. Good graph-status and plan-status boundaries.
+
+    graphStatus is not activation outcome, not Job terminal outcome, and not
+    lifecycle outcome.
+
+    activationPlanStatus is not activation outcome and not Job terminal outcome.
+
+6. Good dependency/provider/advisory boundaries.
+
+    Dependency edges record evidence and do not perform resolution by themselves.
+
+    Provider-role semantics remain owned by DA-13.
+
+    Advisory evidence does not create hard dependency semantics or activation
+    failure by itself.
+
+7. Good accepted-override boundaries.
+
+    Accepted overrides do not make risky graphs safe, do not grant capability
+    permission unless DA-16 and DA-17 explicitly define that effect, and do not
+    grant adapter execution authorization.
+
+8. Good source-evidence boundary.
+
+    Source evidence does not prove authenticity by itself and does not grant
+    authority.
+
+9. Good readiness and blocker boundaries.
+
+    Ready does not guarantee activation success.
+
+    Blockers do not perform decision handling by themselves and do not become
+    activation failure unless activation is attempted or the owning workflow
+    classifies the plan as failed.
+
+10. Good ordering/concurrency boundary.
+
+    Activation order preparation does not activate packs. Groups do not imply
+    concurrent activation unless a future authoritative concurrency mode defines
+    that behavior.
+
+11. Good stored-graph evidence boundary.
+
+    Stored graph records do not guarantee that the same pack material is
+    currently available and do not bypass fresh dependency resolution where DA-13
+    requires fresh resolution.
+
+12. Good trace boundary.
+
+    ResolvedPackGraph and ActivationPlan creation remain trace-visible. Graph and
+    activation-plan trace references do not replace the underlying trace records.
+
+13. Good open-question discipline.
+
+    Exact identifier formats, graph hashing, JSON Schema publication, storage
+    layouts, activation executor envelopes, validation/readiness vocabularies,
+    ordering evidence, warning/diagnostic vocabularies, and export/bundling
+    representation remain open.
+
+==============================================================================
+MAJOR SEMANTIC RISKS
+==============================================================================
+
+1. SavePack terminology is superseded by SaveBundle.
+
+    IS-11 uses SavePack throughout:
+
+        - SavePack graph evidence
+        - SavePack visibility semantics
+        - SavePack binding behavior
+        - SavePack graph storage specifications
+        - graphContext savePackId
+        - SavePack graph references
+        - SaveCopiedPack / SavePinnedPack
+        - SaveOnly source model
+        - NewSaveCreation / ExistingSaveLoad / SaveCompatibilityCheck /
+          SaveRepair / SaveExport
+        - SavePackGraphMismatch
+        - stored SavePack graph evidence
+
+    Current source-stack correction:
+        Proposal P02 defines SaveBundle as the durable persistence closure of one
+        Application. SaveBundle is not a Pack, not Application, not
+        ApplicationRun, not RuntimeHost, not live process snapshot, not arbitrary
+        writable directory, not Job store, and not authority by itself.
+
+    Required consequence for IS-11:
+        Translate SavePack to SaveBundle where the meaning is durable persistence
+        closure, save identity, stored graph evidence, copied/pinned retained pack
+        material, compatibility evidence, repair evidence, or export/bundling
+        context.
+
+        Likely replacements:
+
+            savePackId
+                -> saveBundleId
+
+            savePackGraphReferences
+                -> saveBundleGraphReferences
+
+            SavePackGraphMismatch
+                -> SaveBundleGraphMismatch
+
+            SavePack graph storage layout
+                -> SaveBundle graph storage layout
+
+            SaveCopiedPack / SavePinnedPack
+                -> SaveBundleCopiedPack / SaveBundlePinnedPack, or copied/pinned
+                   pack references retained by a SaveBundle
+
+            SaveOnly
+                -> SaveBundleOnly or save-bound source model, depending on final
+                   DA-13 terminology
+
+        Do not preserve SavePack as current terminology unless explicitly scoped
+        as compatibility alias.
+
+2. AppInstance terminology is superseded by Application / ApplicationRun.
+
+    IS-11 uses AppInstance in graph context, status boundaries, activation
+    context, trace links, and unsupported/locked summaries.
+
+    Current source-stack correction:
+        Proposal P02 defines Application as the durable application individual and
+        ApplicationRun as one live execution period of an Application.
+
+    Required consequence for IS-11:
+        Replace AppInstance with Application and/or ApplicationRun according to
+        meaning.
+
+        Likely replacements:
+
+            appInstanceId
+                -> applicationId and/or applicationRunId
+
+            AppInstance lifecycle outcome
+                -> Application lifecycle outcome and/or ApplicationRun lifecycle
+                   outcome; usually ApplicationRun where live runtime state is
+                   meant
+
+            AppInstance operation evidence
+                -> Application/ApplicationRun lifecycle or operation evidence
+
+            activationContext AppInstance
+                -> Application/ApplicationRun context
+
+3. PackContext terminology is superseded by ModCallContext / invocation-scoped
+   Pack gateway terminology.
+
+    IS-11 says ActivationPlan does not create PackContext authority and activation
+    entries do not grant PackContext authority.
+
+    Current source-stack correction:
+        P02 replaces PackContext with ModCallContext as invocation-scoped
+        Pack-bound gateway. It must not be retained and does not exist just
+        because graph/plan records mention a pack.
+
+    Required consequence for IS-11:
+        Replace PackContext with ModCallContext or more precise activation-time
+        invocation context terminology.
+
+        Safer wording:
+
+            ActivationPlan does not create ModCallContext authority, retained Pack
+            gateway authority, adapter authority, capability permission, or
+            execution authorization.
+
+        Activation entries may later be used by activation workflows to decide
+        what gets activated, but entries do not themselves create invocation
+        contexts or authority.
+
+4. onLoad(ctx) wording may preserve old activation callback shape.
+
+    IS-11 says ActivationPlan does not call onLoad(ctx). If DA-14 has been or will
+    be updated away from old PackContext/onLoad wording, this final IS should not
+    fossilize the old callback signature as current activation API.
+
+    Required consequence for IS-11:
+        Keep the stop-line that ActivationPlan is not activation and does not
+        invoke activation callbacks, but phrase callback examples through the
+        accepted DA-14 vocabulary.
+
+        Safe wording:
+
+            ActivationPlan does not invoke Pack activation callbacks, construct
+            ModCallContext, load executable Pack code, or call adapter execution
+            entry points.
+
+5. Pack-kind and SaveBundle interaction must align with IS-09.
+
+    IS-11 selectedPacks are selected pack entries, but SaveBundle is not a Pack.
+    SaveBundle graph references are persistence evidence, not selected pack
+    entries.
+
+    Required consequence for IS-11:
+        Preserve selectedPacks as Pack entries only.
+
+        SaveBundle graph evidence should reference copied/pinned Pack material
+        retained by a SaveBundle without making the SaveBundle itself a selected
+        Pack entry.
+
+6. GraphPurpose names should be updated to SaveBundle terminology.
+
+    NewSaveCreation, ExistingSaveLoad, SaveCompatibilityCheck, SaveRepair, and
+    SaveExport are mostly generic enough, but their descriptions currently refer
+    to SavePack.
+
+    Required consequence for IS-11:
+        Either keep the user-facing generic "Save" purpose names and update their
+        descriptions to SaveBundle, or rename the purpose values if schema
+        vocabulary is not yet locked.
+
+7. Accepted override scope vocabulary includes save.
+
+    decisionScope records run, save, global, graph, test, or another defined
+    scope.
+
+    This may be acceptable as user-facing generic "save" scope, but if it is a
+    schema field tied to durable persistence identity, it should align with
+    SaveBundle.
+
+    Required consequence for IS-11:
+        Clarify whether save means user-facing save scope or SaveBundle scope. If
+        schema identity is meant, prefer SaveBundle scope terminology.
+
+8. Valid / Ready / Prepared statuses need to remain non-execution.
+
+    IS-11 already says Valid does not mean packs will activate successfully and
+    Ready does not guarantee activation success.
+
+    Required consequence for IS-11:
+        Preserve this strongly. Prepared, Valid, Ready, and activation order are
+        preparation evidence only, not activation success, adapter success, Job
+        success, ApplicationRun readiness, capability availability, or execution
+        authorization.
+
+9. Source evidence and path exposure need file-access guardrails.
+
+    IS-11 says sourcePath records a path only when path exposure is permitted and
+    source evidence does not prove authenticity or grant authority.
+
+    Required consequence for IS-11:
+        Add or preserve wording that sourcePath is evidence only. It does not
+        grant filesystem access, prove current file existence, or authorize direct
+        reads.
+
+10. Stored graph evidence must not become silent fallback.
+
+    IS-11 already says stored graph evidence does not prove current material
+    exists and does not bypass fresh dependency resolution where DA-13 requires
+    it.
+
+    Required consequence for IS-11:
+        Preserve this and translate SavePack to SaveBundle.
+
+11. Activation order groups must not imply concurrency.
+
+    IS-11 already says groups do not imply concurrent activation unless a future
+    authoritative concurrency mode defines that behavior.
+
+    Required consequence for IS-11:
+        Preserve this. Do not allow group structure to become scheduling,
+        parallelism, adapter lifecycle, or OrchestrationUnit execution authority.
+
+12. Extension fields must remain non-semantic.
+
+    IS-11 reserves extensions for implementation-defined fields that do not
+    redefine the schema.
+
+    Required consequence:
+        Preserve this. Extension fields must not redefine graph identity,
+        activation plan identity, dependency semantics, activation ordering,
+        persistence authority, or accepted override meaning.
+
+==============================================================================
+OBSOLETE-PRESERVATION RISKS
+==============================================================================
+
+1. Do not preserve SavePack as current terminology.
+
+    Translate to SaveBundle according to meaning.
+
+2. Do not preserve savePackId or savePackGraphReferences.
+
+    Translate to saveBundleId and saveBundleGraphReferences or another precise
+    current persistence-field name.
+
+3. Do not preserve SavePackGraphMismatch.
+
+    Translate to SaveBundleGraphMismatch or a current compatibility/fallback
+    failure category.
+
+4. Do not preserve AppInstance / appInstanceId.
+
+    Translate to Application / ApplicationRun / applicationId / applicationRunId
+    according to meaning.
+
+5. Do not preserve PackContext as current terminology.
+
+    Translate to ModCallContext or activation-time invocation context wording.
+
+6. Do not preserve onLoad(ctx) as a fixed current activation API if DA-14 no
+   longer owns that exact callback signature.
+
+7. Do not preserve SaveBundle as a selected pack.
+
+    SaveBundle may contain or retain Pack material; it is not itself a Pack.
+
+==============================================================================
+PROCESS-METADATA LEAKAGE RISKS
+==============================================================================
+
+No major process-metadata leakage was found in IS-11.
+
+The final rewritten IS should still avoid saying "V3", "new design", "latest
+model", "rewrite", "audit", "Codex", "candidate", "seed", or similar process
+framing as ordinary specification language.
+
+Audit files may mention source-stack and proposal history. The final IS should
+state the current model directly.
+
+==============================================================================
+REQUIRED FIXES
+==============================================================================
+
+1. Replace SavePack terminology.
+
+    Replace:
+
+        SavePack
+        savePackId
+        savePackGraphReferences
+        SavePack graph references
+        SavePack graph storage layout
+        SavePackGraphMismatch
+        SaveCopiedPack / SavePinnedPack if current schema vocabulary permits
+
+    with SaveBundle terminology or current save-bound graph evidence terminology.
+
+2. Replace AppInstance terminology.
+
+    Replace:
+
+        AppInstance lifecycle
+        appInstanceId
+        AppInstance context
+        AppInstance operation evidence
+
+    with Application and/or ApplicationRun terminology according to meaning.
+
+3. Replace PackContext terminology.
+
+    Replace:
+
+        PackContext authority
+
+    with:
+
+        ModCallContext authority, retained Pack gateway authority, activation
+        callback authority, adapter authority, or capability authority according
+        to local meaning.
+
+4. Rephrase onLoad(ctx) stop-lines.
+
+    Keep the stop-line that ActivationPlan is not activation, but avoid freezing
+    an outdated callback signature.
+
+    Suggested wording:
+
+        ActivationPlan does not invoke Pack activation callbacks, construct
+        ModCallContext, load executable Pack code, or call adapter execution entry
+        points.
+
+5. Update graphContext fields.
+
+    Replace savePackId and appInstanceId with saveBundleId, applicationId, and/or
+    applicationRunId.
+
+6. Update activationContext fields.
+
+    Replace AppInstance / SavePack with Application / ApplicationRun / SaveBundle.
+
+7. Update SavePack graph references section.
+
+    Rename to SaveBundle graph references or save-bound graph references.
+
+    Preserve that these references do not load, bind, or mutate SaveBundle state.
+
+8. Update graph purpose descriptions.
+
+    Keep generic purpose names if desired, but descriptions should refer to
+    SaveBundle rather than SavePack.
+
+9. Preserve evidence/intent boundaries.
+
+    Keep ResolvedPackGraph and ActivationPlan from becoming discovery,
+    resolution, import, activation, capability permission, execution
+    authorization, persistence authority, ApplicationRun lifecycle outcome, Job
+    outcome, or adapter outcome.
+
+10. Preserve status/readiness boundaries.
+
+    Keep Prepared, Valid, Ready, Blocked, Partial, Failed, and Superseded statuses
+    from redefining activation, Job, ApplicationRun, adapter, OrchestrationUnit,
+    RuntimeHost, capability, or persistence outcomes.
+
+11. Strengthen source path boundary.
+
+    Add or preserve wording that sourcePath is evidence only and does not grant
+    filesystem access, prove current file existence, or authorize direct reads.
+
+12. Preserve stored graph evidence boundaries.
+
+    Translate SavePack to SaveBundle and preserve that stored graph evidence does
+    not prove current pack material exists and does not bypass fresh dependency
+    resolution when DA-13 requires it.
+
+13. Preserve accepted override boundaries.
+
+    Keep accepted overrides from making risky graphs safe, granting capability
+    permission, granting adapter authorization, or silently resolving hard
+    dependency failures outside governing dependency/policy rules.
+
+14. Preserve activation order group boundaries.
+
+    Keep groups from implying concurrency, scheduling authority, adapter
+    lifecycle authority, or OrchestrationUnit execution authority unless a later
+    authoritative concurrency mode defines that behavior.
+
+15. Preserve open questions.
+
+    Keep concrete identifiers, hashing/fingerprinting, JSON Schema publication,
+    storage layouts, activation executor envelope, validation/readiness
+    vocabularies, ordering evidence, warning/diagnostic vocabularies, and
+    export/bundling representation open unless later authoritative sources
+    resolve them.
+
+==============================================================================
+SUGGESTED REWRITE STRUCTURE
+==============================================================================
+
+Keep the existing structure.
+
+Suggested targeted structure changes:
+
+    1. Update Description / Purpose / It does NOT define sections to current
+       SaveBundle / Application / ApplicationRun / ModCallContext terminology.
+
+    2. Keep Core Concept, but replace PackContext/onLoad(ctx) wording with
+       current activation-callback / ModCallContext stop-lines.
+
+    3. Keep Record Types, but translate SavePack storage to SaveBundle storage.
+
+    4. Update ResolvedPackGraph top-level fields and graphContext fields.
+
+    5. Update Graph Purpose descriptions to SaveBundle terminology.
+
+    6. Keep Graph Status, Selected Pack Entry, Selection Role, Selection Source,
+       Dependency Edge, Provider Role Choice, Advisory Evidence, Accepted
+       Override, Source Evidence, Validation, ActivationPlan fields, Activation
+       Plan Status, Activation Entry, Activation Role, Activation Order,
+       Activation Order Group, Readiness, Blocker, Failure Categories, Trace,
+       Relation to Implementation Specifications, Unsupported, Open Questions,
+       and Locked Summary sections.
+
+    7. Rename SavePack Graph References to SaveBundle Graph References or
+       Save-Bound Graph References.
+
+    8. Update activationContext to Application / ApplicationRun / SaveBundle.
+
+    9. Add or preserve sourcePath and stored-graph-evidence guardrails.
+
+Do not turn IS-11 into DA-09 discovery, DA-10 pack identity/visibility, DA-11
+PackRequest resolution, DA-13 dependency semantics, DA-14 activation lifecycle,
+DA-16 capability execution, DA-17 policy/decision doctrine, DA-19 Job lifecycle,
+DA-20 Application/ApplicationRun lifecycle, DA-29 PackManager doctrine, activation
+executor implementation, package management protocol, JSON Schema publication, or
+SaveBundle storage layout.
+
+==============================================================================
+SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as concrete rewrite hints, not mandatory exact final wording.
+
+1. Description
+
+    Current risk:
+        SavePack graph evidence
+
+    Safer wording:
+        SaveBundle graph evidence or save-bound graph evidence
+
+2. It does NOT define section
+
+    Current risk:
+        activation lifecycle, onLoad(ctx), or PackContext authority
+        AppInstance lifecycle or SavePack binding behavior
+
+    Safer wording:
+        activation lifecycle, activation callback invocation, or ModCallContext
+        authority
+        Application lifecycle, ApplicationRun lifecycle, or SaveBundle binding /
+        loading behavior
+
+3. Core Concept
+
+    Current risk:
+        ActivationPlan does not call onLoad(ctx).
+        ActivationPlan does not create PackContext authority.
+
+    Safer wording:
+        ActivationPlan does not invoke Pack activation callbacks, construct
+        ModCallContext, load executable Pack code, or call adapter execution entry
+        points.
+
+4. Record Types
+
+    Current risk:
+        A ResolvedPackGraph may be stored as SavePack graph evidence...
+
+    Safer wording:
+        A ResolvedPackGraph may be stored as SaveBundle graph evidence when a
+        SaveBundle workflow owns that storage.
+
+5. Top-level fields
+
+    Current risk:
+        savePackGraphReferences
+
+    Safer wording:
+        saveBundleGraphReferences
+
+6. graphContext
+
+    Current risk:
+        savePackId
+        appInstanceId
+
+    Safer wording:
+        saveBundleId
+        applicationId
+        applicationRunId
+
+7. Graph purpose descriptions
+
+    Current risk:
+        NewSaveCreation means the graph was prepared for a new SavePack...
+        SaveCompatibilityCheck means the graph was prepared to inspect SavePack
+        compatibility.
+        SaveExport means the graph was prepared for SavePack export...
+
+    Safer wording:
+        NewSaveCreation means the graph was prepared for a new SaveBundle or
+        accepted persistence context.
+        SaveCompatibilityCheck means the graph was prepared to inspect SaveBundle
+        compatibility.
+        SaveExport means the graph was prepared for SaveBundle export or bundle
+        analysis.
+
+8. Selection role
+
+    Current risk:
+        SaveCopiedPack
+        SavePinnedPack
+
+    Safer wording:
+        SaveBundleCopiedPack
+        SaveBundlePinnedPack
+
+    or non-schema-breaking wording:
+        copied pack retained by SaveBundle
+        pinned pack retained by SaveBundle
+
+9. SavePack Graph References section
+
+    Current risk:
+        SavePack graph references do not load or bind a SavePack.
+        SavePack graph references do not mutate SavePack state by themselves.
+
+    Safer wording:
+        SaveBundle graph references do not load or bind a SaveBundle.
+        SaveBundle graph references do not mutate SaveBundle state by themselves.
+
+10. activationContext
+
+    Current risk:
+        RuntimeHost, AppInstance, AppPack, SavePack, workspace, and adapter
+        context
+
+    Safer wording:
+        RuntimeHost, Application, ApplicationRun, AppPack or AppDefinition source,
+        SaveBundle, Workspace, and adapter context
+
+11. Activation role
+
+    Current risk:
+        activationRole does not grant PackContext authority.
+
+    Safer wording:
+        activationRole does not grant ModCallContext authority, adapter authority,
+        capability permission, or execution authorization.
+
+12. Trace
+
+    Current risk:
+        SavePack graph evidence
+        AppInstance operation evidence
+
+    Safer wording:
+        SaveBundle graph evidence
+        Application/ApplicationRun operation evidence
+
+13. Relation to SavePack Storage
+
+    Current risk:
+        RELATION TO SAVEPACK STORAGE
+
+    Safer wording:
+        RELATION TO SAVEBUNDLE GRAPH STORAGE
+
+14. Unsupported list
+
+    Current risk:
+        treating activation entries as PackContext authority
+        treating stored SavePack graph evidence as proof that current pack material
+        exists
+
+    Safer wording:
+        treating activation entries as ModCallContext authority, adapter authority,
+        capability permission, or execution authorization
+        treating stored SaveBundle graph evidence as proof that current pack
+        material exists
+
+==============================================================================
+ACCEPTANCE CONDITIONS FOR FINAL REWRITTEN IS-11
+==============================================================================
+
+Accept the rewritten IS-11 only if all of the following are true:
+
+1. It remains an implementation specification for ResolvedPackGraph and
+   ActivationPlan record shapes.
+
+2. It does not redefine discovery, root scanning, pack identity, pack visibility,
+   PackRequest resolution, importing, module loading, dependency semantics,
+   provider-role semantics, advisory semantics, activation lifecycle, capability
+   execution, policy/decision semantics, Job lifecycle, Application lifecycle,
+   ApplicationRun lifecycle, SaveBundle binding/storage, RPC, UI/View runtime,
+   adapter authority, RuntimeHost lifecycle, PackManager doctrine, catalog
+   operation schema, Default Launcher behavior, activation executor behavior,
+   package management protocol, JSON Schema publication, or export/bundling
+   format.
+
+3. All SavePack terminology has been translated to SaveBundle terminology or
+   explicitly scoped compatibility aliases.
+
+4. All AppInstance terminology has been translated to Application and/or
+   ApplicationRun terminology according to meaning.
+
+5. All PackContext terminology has been translated to ModCallContext or current
+   activation/invocation-context terminology.
+
+6. onLoad(ctx) wording does not fossilize an outdated activation API. The final
+   text says ActivationPlan does not invoke activation callbacks or create
+   invocation authority.
+
+7. ResolvedPackGraph remains selected graph intent/evidence, not discovery,
+   generic resolution, importing, activation, capability permission, execution
+   authorization, persistence authority, or lifecycle outcome.
+
+8. ActivationPlan remains ordering/readiness intent/evidence, not activation,
+   callback invocation, executable code loading, adapter execution, capability
+   permission, execution authorization, or lifecycle outcome.
+
+9. Selected pack entries remain Pack projections, not manifests, executable code,
+   activation records, or SaveBundles.
+
+10. SaveBundle graph evidence does not load, bind, or mutate SaveBundle state and
+    does not prove current pack material exists.
+
+11. Stored graph evidence does not bypass fresh dependency resolution where DA-13
+    requires fresh resolution.
+
+12. Prepared, Valid, Ready, Blocked, Partial, Failed, and Superseded statuses do
+    not redefine activation, Job, ApplicationRun, adapter, OrchestrationUnit,
+    RuntimeHost, capability, or persistence outcomes.
+
+13. Accepted overrides do not make risky graphs safe, grant capability permission,
+    grant adapter authorization, or silently resolve hard dependency failures
+    outside governing dependency/policy rules.
+
+14. Source evidence and sourcePath remain evidence only and do not grant
+    authority, prove authenticity by themselves, grant filesystem access, prove
+    current path existence, or authorize direct reads.
+
+15. Activation order groups do not imply concurrency, scheduling authority,
+    adapter lifecycle authority, or OrchestrationUnit execution authority unless
+    a later authoritative concurrency mode defines that behavior.
+
+16. Graph and activation-plan trace references do not replace underlying trace
+    records.
+
+17. Extension fields do not redefine this schema or owning-domain semantics.
+
+18. Open questions remain open unless a later authoritative source resolves them.
+
+==============================================================================
+FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep IS-11 with targeted terminology, graph-intent, activation-boundary, and
+persistence-boundary fixes.
+
+Do not rewrite the whole document.
+
+Do not expand this implementation specification into discovery, root scanning,
+pack identity, pack visibility, PackRequest resolution, dependency semantics,
+activation lifecycle, capability execution, policy, Job lifecycle, Application /
+ApplicationRun lifecycle, SaveBundle lifecycle/storage, PackManager doctrine,
+activation executor behavior, package management, JSON Schema publication, or
+export/bundling format.
+
+Translate obsolete SavePack / AppInstance / PackContext wording into current
+SaveBundle / Application / ApplicationRun / ModCallContext terminology. Preserve
+that ResolvedPackGraph and ActivationPlan are intent/evidence records, not
+runtime execution or authority. Preserve the non-activation, non-resolution,
+non-permission, non-execution, source-evidence, stored-graph-evidence,
+accepted-override, readiness/status, ordering/group, trace-reference, and open-
+question boundaries.
+
+==============================================================================
+END OF AUDIT-IS-11 RESULT
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-IS-11-RESULT
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-IS-11_RESULT.txt
+DOC_REV: 1
+DOC_GIT: temp
+----------------
