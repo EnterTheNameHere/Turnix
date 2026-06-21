@@ -1,0 +1,557 @@
+==============================================================================
+TURNIX DV3 DOCUMENTATION AUDIT RESULT - ODA-E
+==============================================================================
+
+Document title:
+    OPTIONAL DESIGN AREA ODA-E - CROSS-PACK PERMISSIONS, STATE ACCESS,
+    MUTATION & AUTHORITY
+
+Target ODA path:
+    docs/design/ODA-E_CROSS_PACK_PERMISSIONS_STATE_ACCESS_MUTATION_AND_AUTHORITY.txt
+
+Branch:
+    CODEX_Dv3
+
+Loaded target file metadata:
+    DOC_REV: 9
+    DOC_GIT: e676424
+    GitHub blob SHA seen by assistant:
+        5bdc121df2947b5d0b0413677ed9ab64e0d8c3d2
+
+Audit result status:
+    Direct ODA audit result.
+    ODA files do not have rewrite recommendation files.
+
+Source stack used:
+    - docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+    - docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P01_TURNIX_PACK_ENTRY_MULTI_ADAPTER_AND_CYCLIC_ACTIVATION_PROTOCOL.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    - docs/CMR-04_CANONICAL_INDEX_TURNIX_SPECIFICATION.txt, used only to carry
+      forward the ODA-E path identified in the ODA index
+    - docs/design/ODA-E_CROSS_PACK_PERMISSIONS_STATE_ACCESS_MUTATION_AND_AUTHORITY.txt
+
+Recommendation file:
+    None.
+
+Recommendation verdict:
+    Not applicable because ODA files do not have rewrite recommendation files.
+
+ODA document verdict:
+    Keep with important boundary fixes.
+
+==============================================================================
+SUMMARY
+==============================================================================
+
+ODA-E contains a useful optional model for cross-pack state access, mutation,
+observation, redaction, and derived-value handling. Its central instinct is good:
+state access should be explicit, mutation authority should be separate from read
+access, adapter mediation should not grant state authority, and diagnostic/export
+surfaces should be redacted by default where appropriate.
+
+The document also has several strong boundaries already:
+
+    - it does not attempt sandboxing hostile local behavior
+    - adapter identity is not state ownership identity
+    - frontend client identity is not state ownership identity
+    - RPC peer identity is not state ownership identity
+    - adapter-mediated writes remain subject to write-authority rules
+    - in-process adapter calls do not bypass write authority
+    - computed/effective values do not become authoritative stored state merely
+      because they are transported
+    - transported frontend/adapter values do not become public by themselves
+
+The main fixes are authority-boundary corrections and current-model terminology.
+The final rewrite should avoid treating Kernel as ordinary state storage, replace
+SavePack/AppInstance wording, avoid raw "without ctx" access language, clarify
+that trace is evidence rather than enforcement authority, and keep Pack-owned
+state as namespace/ownership metadata mediated by runtime authority rather than
+raw Pack authority.
+
+==============================================================================
+WHAT THE DOCUMENT GETS RIGHT
+==============================================================================
+
+1. Cross-pack mutation is explicit.
+
+    The document correctly rejects implicit override behavior. When Pack B
+    modifies state owned by Pack A, the target owner domain, permission model,
+    and trace outcome are explicit.
+
+2. Read authority and write authority are separated.
+
+    The document correctly treats mutation and deletion as write-class operations
+    requiring authority.
+
+3. Adapter mediation is not authority.
+
+    The document repeatedly says adapter-mediated access does not grant adapter
+    state authority and that adapter identity is not ownership identity.
+
+4. Redaction defaults are useful.
+
+    PRIVATE and INTERNAL values being redacted by default in normal surfaces,
+    traces, and exports is a good leak-minimizing default, as long as it does not
+    claim secrecy from the local user.
+
+5. Computed values are correctly non-persistent.
+
+    Computed/effective layers are not ownership scopes, are not persisted
+    directly, and do not become authoritative stored state merely because they are
+    transported.
+
+==============================================================================
+MAJOR SEMANTIC RISKS
+==============================================================================
+
+1. Kernel-as-state-owner wording is too broad.
+
+    ODA-E says every state key has exactly one authority owner and that the owner
+    is either the Kernel or a specific Pack. This is useful as a simplified
+    optional model, but it can conflict with the current architecture if read
+    literally.
+
+    Current architecture distinguishes Kernel authority, Memory/state ownership,
+    configuration ownership, IoManager persistence authority, Pack participation,
+    Application/ApplicationRun identity, and committed-state truth. Kernel is the
+    runtime authority root and coordinator, but that does not mean every
+    Kernel-scoped value is ordinary state owned and stored by Kernel as a data
+    bucket.
+
+    Required correction:
+        Treat Kernel-owned state as Kernel-mediated runtime/domain state or
+        runtime-owned state whose owning domain is Kernel-controlled. Do not make
+        Kernel a generic storage bucket.
+
+    Suggested wording:
+        Each governed state key has one owning authority domain. The domain may
+        be Kernel-mediated runtime state, a Pack-owned namespace, or another
+        owning domain defined by higher-authority documents. This optional model
+        discusses Kernel-mediated and Pack-owned cases, but it does not replace
+        DA-04, DA-06, DA-07, DA-16, DA-17, or lifecycle ownership.
+
+2. Pack ownership must not become raw Pack authority.
+
+    ODA-E reasonably says a Pack can own Pack-global or save-bound keys. The
+    final wording must keep ownership as namespace/domain ownership mediated by
+    runtime authority and ModCallContext/API boundaries, not as raw backend
+    authority held by Pack code.
+
+    Required correction:
+        Say Pack-owned state is owned in the Turnix state model, but Pack code
+        reads or mutates it only through mediated APIs, granted permissions,
+        owning-domain rules, transactions, and commit boundaries.
+
+3. "Accessible without ctx" is unsafe wording.
+
+    Section 05.1 says Kernel scope is accessible without ctx where the higher API
+    permits that. In the current model, Pack code should not rely on raw Kernel
+    access, ctx.kernel, runtimeHost, raw services, or raw filesystem. Access must
+    be through authorized runtime, host, diagnostic, or mediated API surfaces.
+
+    Required correction:
+        Replace "accessible without ctx" with wording that distinguishes Pack
+        invocation access from host/runtime/admin access.
+
+    Suggested wording:
+        Kernel-mediated runtime state is accessed only through authorized APIs.
+        Pack code accesses state through ModCallContext or another explicitly
+        provided mediated surface. Host or diagnostic tools may use separate
+        controlled command/API surfaces, but those surfaces do not grant Pack code
+        raw Kernel authority.
+
+4. SavePack and AppInstance terminology is stale.
+
+    ODA-E uses SavePacks and AppInstance in state scopes, trace correlation, and
+    relation-to-other-documents sections.
+
+    Required correction:
+        Replace SavePack with SaveBundle where durable persistence closure is
+        meant. Replace AppInstance with Application and/or ApplicationRun
+        according to meaning.
+
+    Suggested replacements:
+
+        shared across all SavePacks
+
+    should become:
+
+        shared across Applications or SaveBundle generations where the owning
+        persistence/configuration model permits that sharing
+
+    and:
+
+        Save-bound state access remains constrained by AppInstance and SavePack
+        binding rules
+
+    should become:
+
+        Save-bound state access remains constrained by Application,
+        ApplicationRun, SaveBundle, and accepted Pack graph binding rules.
+
+5. Scope/storage wording needs current Workspace/Application/SaveBundle alignment.
+
+    The document says Kernel and Pack-global state are stored in userdata in this
+    model, and Pack-local save-bound state is stored in a SavePack. This is too
+    storage-specific and stale.
+
+    Required correction:
+        Let DA-04, DA-06, DA-07, Workspace, and SaveBundle documents own actual
+        storage layout. ODA-E should describe logical scopes and access semantics,
+        not final storage locations.
+
+    Suggested wording:
+        Scope names describe logical authority and access boundaries. Physical or
+        durable storage location is owned by the higher state, configuration,
+        persistence, Workspace, and SaveBundle documents.
+
+6. PUBLIC/PROTECTED/PRIVATE/INTERNAL are useful but must not replace visibility,
+   permission, capability, dependency, or discovery semantics.
+
+    Access levels are good as optional state-key metadata. But final wording must
+    prevent them from becoming Pack visibility, import permission, dependency
+    satisfaction, capability permission, service access, or execution authority.
+
+    Required correction:
+        Add a boundary that access-level metadata governs state read/write
+        handling only inside this optional model. It does not grant Pack
+        visibility, resolution, import, activation, service access, capability
+        invocation, or adapter execution rights.
+
+7. "Users may inspect all state through kernel tools" is too broad.
+
+    The document correctly says it does not claim secrecy from the user, but
+    "all state" and "kernel tools" can overstate availability and authority.
+    Some state may be absent, pruned, corrupt, encrypted, external, unmounted,
+    not retained, or only reachable through owning diagnostic/export rules.
+
+    Required correction:
+        Say user-controlled diagnostic/admin tooling may inspect retained state
+        and evidence through authorized surfaces where the owning documents make
+        that material available. Default redaction still applies to normal
+        surfaces, traces, and exports unless explicitly overridden through an
+        allowed path.
+
+8. Trace is evidence, not enforcement authority.
+
+    The LOCKED summary says "trace-first enforcement." This risks making trace
+    sound like the enforcement mechanism or authority source. Current architecture
+    treats trace as structured evidence, not committed state, memory, logging,
+    persistence truth, UI presentation, or artifact authority.
+
+    Required correction:
+        Replace "trace-first enforcement" with "trace-emitting enforcement" or
+        "trace-backed diagnostics." Enforcement is performed by the owning
+        authority path; trace records evidence of the decision and outcome.
+
+9. Error reproducibility is overpromised.
+
+    Section 15 says errors remain traceable, explainable, and reproducible. This
+    should be qualified. Trace retention is policy-governed and may be incomplete;
+    external conditions and non-retained inputs can prevent reproduction.
+
+    Required correction:
+        Say errors emit or retain structured evidence where the owning tracing
+        and retention policies support it. Reproducibility is claimed only where
+        retained evidence and owning workflow semantics support reproduction.
+
+10. Watchers and computed handlers must not mutate outside orchestration.
+
+    The open questions already include whether watcher logic may mutate state
+    directly or only through normal orchestrated paths. The final rewrite should
+    answer the boundary even if the exact API remains open.
+
+    Required correction:
+        Watcher, observer, and computed-handler logic may not bypass ordinary
+        authority, transaction, orchestration, trace, permission, or commit
+        boundaries. Any mutation they trigger is new mediated work, not direct
+        hidden mutation.
+
+==============================================================================
+OBSOLETE-PRESERVATION RISKS
+==============================================================================
+
+The main obsolete-preservation risks are SavePack, AppInstance, and raw ctx
+access language.
+
+Do not preserve these as current architecture merely because the ODA source uses
+them. Translate into the current model:
+
+    Application
+        durable application individual
+
+    ApplicationRun
+        one live execution period of that Application
+
+    SaveBundle
+        durable persistence closure of the Application
+
+    SaveBundle generation
+        immutable published restoration head containing accepted graph and
+        retained state/evidence roots
+
+    ModCallContext
+        fresh, scoped, Pack-bound invocation gateway for Pack participation
+
+    authorized runtime/host/admin surface
+        controlled non-Pack-facing access surface, not raw Kernel authority
+
+The final ODA-E should keep the cross-pack permission model, but it should not
+keep old identity/storage wording that conflicts with the current runtime model.
+
+==============================================================================
+PROCESS-METADATA LEAKAGE RISKS
+==============================================================================
+
+No major final-document process leakage was found.
+
+The target document does not appear to mention Codex, rewrite history, candidate
+status, or old/new design as ordinary architecture.
+
+The LOCKED / OPEN markers are acceptable design-status markers if retained. They
+should not lock stale SavePack/AppInstance terminology or broad Kernel-state
+wording.
+
+==============================================================================
+REQUIRED FIXES
+==============================================================================
+
+Fix 1: Reword state ownership away from Kernel-as-generic-store.
+
+    Replace:
+
+        every state key has exactly one authority owner; the owner is either the
+        kernel or a specific pack
+
+    With:
+
+        every governed state key has one owning authority domain. This optional
+        model describes Kernel-mediated runtime/domain state and Pack-owned
+        namespaces, while higher-authority documents own final state, memory,
+        configuration, lifecycle, persistence, and permission semantics.
+
+Fix 2: Replace raw "without ctx" wording.
+
+    Replace:
+
+        accessible without ctx where the higher API permits that
+
+    With:
+
+        accessible only through authorized APIs. Pack code uses ModCallContext or
+        another explicitly provided mediated surface; host/runtime/admin tooling
+        may use separate controlled surfaces without granting raw Kernel authority
+        to Pack code.
+
+Fix 3: Replace SavePack/AppInstance terminology.
+
+    Replace SavePack with SaveBundle where durable persistence closure is meant.
+    Replace AppInstance with Application and/or ApplicationRun according to
+    meaning.
+
+    Example replacement:
+
+        Save-bound state access remains constrained by AppInstance and SavePack
+        binding rules.
+
+    should become:
+
+        Save-bound state access remains constrained by Application,
+        ApplicationRun, SaveBundle, and accepted Pack graph binding rules.
+
+Fix 4: Make scopes logical rather than storage-layout definitions.
+
+    Add:
+
+        Scope names define logical ownership and access boundaries. Physical or
+        durable storage location is owned by the higher state, configuration,
+        Workspace, persistence, and SaveBundle documents.
+
+Fix 5: Keep access levels inside their lane.
+
+    Add:
+
+        PUBLIC, PROTECTED, PRIVATE, and INTERNAL govern state-key read/write and
+        redaction behavior inside this optional model. They do not grant Pack
+        visibility, dependency satisfaction, import permission, activation,
+        service access, capability invocation, adapter execution authorization,
+        persistence authority, or lifecycle authority by themselves.
+
+Fix 6: Qualify user inspection.
+
+    Replace broad "Users may inspect all state through kernel tools" wording
+    with:
+
+        User-controlled diagnostic or admin tooling may inspect retained state and
+        evidence through authorized surfaces where owning documents make that
+        material available. Normal surfaces, traces, and exports keep redaction
+        defaults unless an allowed path explicitly includes the value.
+
+Fix 7: Replace "trace-first enforcement."
+
+    Replace:
+
+        trace-first enforcement
+
+    With:
+
+        trace-emitting enforcement
+
+    or:
+
+        trace-backed diagnostics and auditability
+
+    Add:
+
+        Trace records evidence of access decisions and outcomes. Trace is not the
+        enforcement authority, committed-state truth, or persistence authority.
+
+Fix 8: Qualify reproducibility.
+
+    Replace absolute reproducibility wording with:
+
+        Errors emit or retain structured evidence where owning tracing and
+        retention policies support it. Reproducibility is claimed only where the
+        retained evidence and owning workflow semantics support reproduction.
+
+Fix 9: Add watcher/computed-handler authority boundary.
+
+    Add:
+
+        Watcher, observer, and computed-handler logic may not bypass ordinary
+        authority, transaction, orchestration, permission, trace, or commit
+        boundaries. Any mutation they trigger is mediated work, not direct hidden
+        mutation.
+
+Fix 10: Clarify adapter/RPC/frontend correlation evidence.
+
+    Preserve that adapter, RPC, frontend, and ApplicationRun correlation evidence
+    remains evidence. It does not redefine state ownership, access authority,
+    committed-state truth, or lifecycle authority.
+
+==============================================================================
+SUGGESTED REWRITE STRUCTURE
+==============================================================================
+
+The current structure can remain, but several sections need boundary edits.
+
+Suggested section-level edits:
+
+    01. Interpretation Basis
+        Keep.
+
+    02. Core Intent
+        Keep. Preserve non-sandboxing, non-secrecy, mistake-prevention framing.
+
+    03. What This Document Governs
+        Keep, but update AppInstance and storage vocabulary where needed.
+
+    04. State Ownership Model
+        Reword from Kernel/Pack-only owner phrasing to owning authority domains.
+        Preserve adapter/frontend/RPC identities are not ownership identities.
+
+    05. State Scopes
+        Rewrite scopes as logical scopes, not final storage layout.
+        Replace SavePack/AppInstance terms.
+        Replace raw "without ctx" wording.
+
+    06. Access Levels
+        Keep access levels, but add boundaries against visibility, capability,
+        dependency, import, activation, service, and adapter authority.
+
+    07. Read Authority vs Write Authority
+        Keep the read/write split.
+        Preserve no silent fallback and no unauthorized mutation.
+
+    08. Mutation Rules
+        Keep, but clarify IoManager is persistence authority, not committed-state
+        truth. Preserve orchestration, transaction, and commit boundaries.
+
+    09. Computed and Derived Values
+        Keep. Preserve computed values are not stored state.
+        Add handler authority boundary if not placed later.
+
+    10. Reaction and Observation
+        Keep additive observation.
+        Add watcher/observer mutation boundary.
+
+    11. Cross-Pack Intentional Modification
+        Keep. Preserve explicit cooperation and adapter-as-boundary wording.
+
+    12. Enumeration and Discoverability
+        Keep. Preserve enumeration is explicit and redacted by authority rules.
+
+    13. User Visibility and Default Redaction
+        Qualify broad user inspection and kernel-tool wording.
+
+    14. Trace and Audit Requirements
+        Replace AppInstance with ApplicationRun/Application where applicable.
+        Preserve trace redaction and evidence boundaries.
+
+    15. Failure Semantics
+        Qualify reproducibility through retained evidence and owning workflow
+        semantics.
+
+    16. Relation to Other Documents
+        Replace DA-20/AppInstance wording with current lifecycle/runtime-identity
+        wording.
+
+    17. Open Questions
+        Keep most open questions, but add the non-bypass boundary for watcher and
+        computed-handler mutation.
+
+    18. Locked Summary
+        Replace "trace-first enforcement" and stale terminology.
+
+==============================================================================
+ACCEPTANCE CONDITIONS FOR THE FINAL ODA-E REWRITE
+==============================================================================
+
+The final rewritten ODA-E is acceptable when:
+
+    - it does not treat Kernel as a generic storage bucket
+    - it treats Pack-owned state as mediated state-domain ownership, not raw Pack
+      backend authority
+    - it replaces SavePack with SaveBundle where durable persistence closure is
+      meant
+    - it replaces AppInstance with Application and/or ApplicationRun according to
+      meaning
+    - it removes or qualifies raw "without ctx" access language
+    - it keeps scopes logical rather than final storage-layout definitions
+    - it preserves read/write separation and guarded mutation
+    - it preserves adapter, RPC, frontend, and transport boundaries
+    - it keeps PUBLIC/PROTECTED/PRIVATE/INTERNAL inside state-key access/redaction
+      semantics rather than visibility/capability/import/activation authority
+    - it qualifies user inspection through authorized diagnostic/admin surfaces
+    - it treats trace as evidence, not enforcement authority or committed-state
+      truth
+    - it qualifies reproducibility through retained evidence and owning workflow
+      semantics
+    - it prevents watcher, observer, and computed-handler logic from bypassing
+      orchestration, transaction, permission, trace, and commit boundaries
+    - it contains no rewrite/history/Codex/process framing as final architecture
+      text
+
+==============================================================================
+FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep ODA-E, but perform a careful authority-boundary cleanup. The optional
+cross-pack state-access model is valuable and should not be discarded. The final
+rewrite should preserve explicit ownership, read/write separation, guarded
+mutation, redaction defaults, adapter/RPC/frontend boundary statements, and
+computed-value non-persistence, while replacing stale SavePack/AppInstance terms,
+removing raw "without ctx" wording, avoiding Kernel-as-storage wording, and
+replacing "trace-first enforcement" with trace-as-evidence language.
+
+==============================================================================
+END OF AUDIT RESULT - ODA-E
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-ODA-E
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-ODA-E_RESULT.txt
+DOC_REV: 1
+DOC_GIT: temp
+----------------
