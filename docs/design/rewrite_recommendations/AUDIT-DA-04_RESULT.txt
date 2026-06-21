@@ -1,0 +1,887 @@
+==============================================================================
+AUDIT RESULT - DA-04 MEMORY, STATE AND AUTHORITATIVE COMMIT MODEL
+==============================================================================
+
+Document status:
+    Audit result for assistant-editor use.
+
+Target document:
+    docs/design/DA-04_MEMORY_STATE_AND_AUTHORITATIVE_COMMIT_MODEL.txt
+
+Recommendation file:
+    docs/design/rewrite_recommendations/REWRITE-DA-04_RECOMMENDATION.txt
+
+Audit source stack:
+    docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P01_TURNIX_PACK_ENTRY_MULTI_ADAPTER_AND_CYCLIC_ACTIVATION_PROTOCOL.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    docs/design/DA-04_MEMORY_STATE_AND_AUTHORITATIVE_COMMIT_MODEL.txt
+    docs/design/rewrite_recommendations/REWRITE-DA-04_RECOMMENDATION.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-03_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-05_RESULT.txt, if present later
+    docs/design/rewrite_recommendations/AUDIT-DA-06_RESULT.txt, if present later
+    docs/design/rewrite_recommendations/AUDIT-DA-07_RESULT.txt, if present later
+    docs/design/rewrite_recommendations/AUDIT-DA-08_RESULT.txt, if present later
+    docs/design/rewrite_recommendations/AUDIT-DA-18_RESULT.txt, if present later
+    docs/design/rewrite_recommendations/AUDIT-DA-19_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-20_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-23_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-24_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-25_RESULT.txt, if present later
+    docs/design/rewrite_recommendations/AUDIT-DA-26_RESULT.txt, if present later
+    docs/design/rewrite_recommendations/AUDIT-DA-27_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-28_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-29_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-30_RESULT.txt
+
+Audit posture:
+    Semantic architecture audit, not formatting audit.
+
+    Use CMR references as normal upstream/index material only.
+
+    Do not treat CMR files as semantic architecture authority for this audit.
+
+    This audit follows the checkpoint rewrite posture: preserve architecture
+    boundaries, not obsolete terminology or historical design layers.
+
+==============================================================================
+01. VERDICT
+==============================================================================
+
+Recommendation verdict:
+    Mostly correct, with terminology translation required.
+
+    The recommendation correctly preserves DA-04's central model: committed state
+    is authoritative truth; runtime memory, transaction staging, trace, progress,
+    tool views, debugger views, UI/View presentation, frontend state, adapter
+    state, RuntimeHost command output, PackManager presentation, Job lifecycle
+    state, OrchestrationUnit lifecycle state, capability invocation records, RPC
+    acknowledgements, diagnostic output, Window evidence, journal evidence,
+    artifact/export packaging, comparison output, Replay reports, Resume attempts,
+    and Retry attempts do not become committed-state authority unless relevant
+    material crosses the DA-04 commit boundary.
+
+    The recommendation still uses stale PackContext and AppInstance wording in
+    guardrails and refers to durable save / SavePack-local copied material. Those
+    should be translated to ModCallContext, Application/ApplicationRun, and
+    SaveBundle/persistence terminology where they must be named.
+
+Document verdict:
+    Keep with targeted terminology and stop-line fixes.
+
+DA-04 is architecturally strong and already contains much of the desired trace and
+commit-authority separation.
+
+No heavy conceptual rewrite is recommended.
+
+The main required fixes are:
+
+    - remove Session from memory-layer and nested-transaction examples because
+      Session has been removed from Turnix core
+    - use ProcessingPipeline / ProcessingRun or OrchestrationUnit wording instead
+      of pipeline-session inheritance where that is the intended concept
+    - normalize OrchestrationUnit naming where the canonical first-class type is
+      meant
+    - translate durable save / SavePack-related wording to SaveBundle/persistence
+      wording
+    - ensure trace-visible means state/transaction trace emission obligation, not
+      retained-trace persistence guarantee and not committed-state authority
+    - add or preserve a compact committed-state stop-line covering UI, debugger,
+      Job, OrchestrationUnit, RuntimeHost, PackManager, artifacts/exports,
+      comparison, Replay, Resume, Retry, and audit workflow outputs
+    - preserve DA-04 as owner of committed-state truth and transaction semantics
+    - avoid final-document version/process metadata leakage
+
+Primary conclusion:
+    Keep DA-04. Apply a small targeted cleanup pass, not a rewrite. The largest
+    semantic cleanup is removing Session-era examples from the transaction/layer
+    discussion and translating persistence wording to SaveBundle/persistence.
+
+==============================================================================
+01A. OBSOLETE-PRESERVATION CHECK
+==============================================================================
+
+DA-04 should not keep older terminology as a historical artifact.
+
+Specifically, the rewrite should not preserve:
+
+    - Session as a Turnix core state/memory owner
+    - child session as a nested transaction/pipeline example
+    - MainSession / HiddenSession / TemporarySession / SessionRegistry language
+    - ctx.sessions or Session-owned pipeline/memory assumptions
+    - AppInstance as runtime identity vocabulary
+    - PackContext as Pack-facing mutation or state authority vocabulary
+    - SavePack as durable persistence vocabulary
+    - durable save as an undefined substitute for SaveBundle/persistence
+    - Orchestration Unit as a separate informal concept where OrchestrationUnit is
+      the canonical type name
+    - trace as committed state
+    - trace persistence as required for committed-state correctness
+    - persistence as defining committed-state truth
+    - artifact/export/workflow material as committed-state authority by packaging
+      or presentation
+    - semi-authoritative / soft-authoritative / diagnostic-authoritative authority
+      classes
+
+If legacy names appear in explanatory examples, they should be translated to
+canonical terms or scoped as compatibility aliases.
+
+Canonical translations:
+
+    AppInstance -> ApplicationRun where live runtime lifecycle is meant
+    AppInstance -> Application where durable application identity is meant
+    PackContext -> ModCallContext where Pack-facing gateway authority is meant
+    SavePack -> SaveBundle where durable persistence closure is meant
+    durable save -> SaveBundle or durable Application persistence closure where
+        that is the intended architecture object
+    Orchestration Unit -> OrchestrationUnit when the first-class type is meant
+
+The useful part of the old recommendation is not old wording. The useful part is
+the committed-state authority split:
+
+    Committed state is authority. Everything else is staging, observation,
+    presentation, representation support, lifecycle state, tooling output,
+    artifact/export packaging, workflow output, or diagnostic evidence unless it
+    crosses the DA-04 commit boundary.
+
+==============================================================================
+01B. DOCUMENT-METADATA LEAKAGE CHECK
+==============================================================================
+
+The final DA-04 document should read as architecture documentation, not as audit,
+version, or rewrite-process metadata.
+
+Do not include statements such as:
+
+    - This is V3 design.
+    - In V3, Session was removed.
+    - The new design uses ApplicationRun.
+    - This rewrite clarified trace-visible wording.
+    - Unlike V2, SaveBundle replaces SavePack.
+    - Codex kept Session wording.
+    - This audit decided that trace is not state.
+    - DA-04 was rewritten because of the audit.
+
+Those facts may be useful in audit files, branch notes, migration notes,
+compatibility notes, changelogs, or editor instructions. They do not belong in
+the architecture document itself.
+
+The final DA-04 should simply define memory, committed state, authority classes,
+identity/revision terms, memory layers, transactions, nested transactions, commit
+and abort, conflict detection, state/transaction trace obligations, relation to
+OrchestrationUnit, persistence as protection, static-data mutation intent,
+revision/GC, tooling-initiated mutation constraints, committed-state restoration
+boundary, migration commit rules, non-requirements, open questions, and locked
+summary.
+
+==============================================================================
+02. WHAT DA-04 GETS RIGHT
+==============================================================================
+
+02.1. Committed state is authoritative truth
+--------------------------------------------
+
+DA-04 correctly says runtime memory and committed state are distinct.
+
+It correctly says runtime memory is not authoritative merely because it is
+resident, visible, active, or currently in use.
+
+It correctly says committed state is authoritative only because it crossed the
+explicit commit boundary defined by DA-04.
+
+Preserve this.
+
+02.2. Observation is not authority
+----------------------------------
+
+DA-04 correctly says observational material may explain what happened but does
+not define committed truth.
+
+It correctly says Turnix does not treat observation as authority and does not
+require observational completeness for committed-state correctness.
+
+Preserve this.
+
+02.3. Trace-visible mutation wording is already mostly correct
+--------------------------------------------------------------
+
+DA-04 already says trace-visible mutation means state and transaction domains
+have a trace emission obligation, retained trace evidence is not required for
+committed-state correctness, and trace evidence does not become committed-state
+authority.
+
+Preserve this and align all later `trace-visible` wording with that meaning.
+
+02.4. Authority classes are binary
+----------------------------------
+
+DA-04 correctly distinguishes exactly two authority classes:
+
+    - Authoritative
+    - Non-authoritative
+
+Preserve this.
+
+Do not introduce semi-authoritative, soft-authoritative, diagnostic-authoritative,
+trace-authoritative-for-state, lifecycle-authoritative-for-state, artifact-
+authoritative, comparison-authoritative, or replay-authoritative categories.
+
+02.5. Transaction model is strong
+---------------------------------
+
+DA-04 correctly defines transaction as temporary staging overlay, with staged
+mutation not authoritative until commit.
+
+It correctly says commit and abort are atomic and partial propagation does not
+occur.
+
+Preserve this.
+
+02.6. Conflict detection is strong
+----------------------------------
+
+DA-04 correctly uses baseRevisionId and committed revision comparison for
+conflict detection when committing into committed layers.
+
+It correctly rejects silent merge, last-write-wins, heuristic reconciliation,
+fallback, guesswork, or convenience behavior.
+
+Preserve this.
+
+02.7. Persistence protects truth but does not define truth
+---------------------------------------------------------
+
+DA-04 correctly says persistence protects committed state against loss, but
+persistence does not define what state truth is.
+
+Preserve this and translate durable save wording to SaveBundle/persistence where
+needed.
+
+02.8. Patch versus Copy is strong
+---------------------------------
+
+DA-04 correctly says static data is read-only by default and mutation intent is
+explicitly Patch or Copy.
+
+It correctly forbids silently substituting Patch for Copy or Copy for Patch.
+
+Preserve this.
+
+02.9. Latest committed state remains restorable
+-----------------------------------------------
+
+DA-04 correctly says state garbage collection may remove older revisions and
+unreachable historical committed states, but must not remove data required to
+reconstruct the latest committed state for each committed key.
+
+Preserve this.
+
+02.10. Tooling does not bypass commit authority
+-----------------------------------------------
+
+DA-04 correctly says tooling-originated mutation occurs inside a transaction and
+follows the same commit/abort rules as runtime mutation.
+
+Preserve this and keep debugger/management UI behavior in their owning documents.
+
+02.11. Restoration boundary is strong
+-------------------------------------
+
+DA-04 correctly says deterministic restoration covers committed state, not
+uncommitted runtime activity, external side effects, pending Job execution,
+active OrchestrationUnit execution, adapter state, RuntimeHost output, UI/View
+state as committed truth, Window evidence as committed truth, artifact/export
+material as committed truth, comparison output, or Resume/Retry outcome from
+prior evidence.
+
+Preserve this.
+
+02.12. Migration commit rule is strong
+--------------------------------------
+
+DA-04 correctly says migration that changes authoritative committed state occurs
+as normal orchestrated work inside a transaction, is abortable, and does not
+bypass the normal commit boundary.
+
+Preserve this.
+
+==============================================================================
+03. MAJOR REQUIRED FIX: REMOVE SESSION-ERA EXAMPLES
+==============================================================================
+
+The target DA-04 still contains Session-era wording:
+
+    Example layer kinds include:
+        - session
+
+and:
+
+    If a pipeline run creates or enters a child session while an enclosing
+    pipeline run is active, the child session inherits the enclosing
+    transactional view.
+
+Session has been removed from Turnix core. DA-04 should not preserve Session as a
+core memory owner or nested transaction example.
+
+03.1. Memory layer example correction
+-------------------------------------
+
+Replace the example layer list with canonical concepts such as:
+
+    - kernel-global
+    - applicationRun
+    - view, if View-local presentation state is intentionally represented as a
+      memory layer but remains non-authoritative unless committed through DA-04
+    - orchestrationUnit or transaction scope, if that is the intended staging
+      layer
+    - transactional
+
+Do not include `session` unless it is explicitly scoped as a legacy compatibility
+or external application-level concept.
+
+03.2. Nested transaction wording correction
+-------------------------------------------
+
+Replace child-session wording with ProcessingRun / OrchestrationUnit / child
+transaction wording depending on intended meaning.
+
+Suggested replacement:
+
+    If orchestrated work creates or enters a child transaction while an enclosing
+    transaction is active, the child transaction inherits the enclosing
+    transactional view.
+
+or:
+
+    If a ProcessingRun or OrchestrationUnit enters a child transaction while an
+    enclosing transaction is active, reads resolve first-match from the child
+    transaction downward through the inherited stack.
+
+Do not imply Session-owned pipeline, Session-owned memory, or ctx.sessions.
+
+03.3. Preserve the transaction semantics
+----------------------------------------
+
+The semantics to preserve are:
+
+    - child transaction inherits enclosing transactional view
+    - reads resolve from child transaction downward through inherited stack
+    - writes target child transaction
+    - child commit propagates into parent transaction
+    - child transaction does not commit directly into committed layers while an
+      enclosing transaction exists
+    - only outermost transaction commit mutates committed layers
+
+Only the Session vocabulary needs replacement.
+
+==============================================================================
+04. REQUIRED TRACE WORDING STOP-LINE
+==============================================================================
+
+DA-04 should preserve and possibly repeat the DA-03 trace wording rule:
+
+    State and transaction trace obligations are emission obligations.
+
+    Trace retention and loss are governed by DA-03.
+
+    Loss of trace evidence affects evidential completeness, not committed-state
+    correctness.
+
+    Trace evidence does not become committed-state authority.
+
+This prevents two opposite errors:
+
+    - treating trace evidence as committed-state authority
+    - treating lossy trace persistence as permission to skip state/transaction
+      trace emission obligations
+
+DA-04 owns state/transaction trace emission obligations.
+
+DA-03 owns trace substrate, event structure, DAG semantics, span mechanics,
+retention, pruning, and loss.
+
+==============================================================================
+05. REQUIRED COMMITTED-STATE STOP-LINE
+==============================================================================
+
+DA-04 should contain or preserve a compact committed-state stop-line.
+
+Recommended wording:
+
+    Committed state is authoritative state.
+
+    Runtime memory, transactional staging layers, trace, progress, tool views,
+    debugger views, UI/View presentation, frontend state, adapter state,
+    RuntimeHost command-surface output, PackManager presentation, Job lifecycle
+    state, OrchestrationUnit lifecycle state, capability invocation records, RPC
+    acknowledgement, diagnostic output, Window evidence, journal evidence,
+    retained historical evidence, artifact packaging, export packaging, Minimal
+    Audit Bundle material, comparison output, Replay reports, Resume attempts,
+    Retry attempts, and audit workflow reports are not committed-state authority
+    unless their relevant material is committed through the DA-04 commit model.
+
+    Persistence protects committed truth but does not define truth.
+
+    Trace explains or reports what happened where evidence is retained; trace
+    does not define committed truth.
+
+This belongs in DA-04 because DA-04 owns committed-state authority.
+
+==============================================================================
+06. PAYLOAD / CONFIGURATION / PERSISTENCE BOUNDARIES
+==============================================================================
+
+DA-04 should preserve these ownership boundaries:
+
+    DA-05 owns payload identity, Chunk, ChunkId, ValueRef, decode, integrity, and
+    reachability representation.
+
+    Payload material participates in committed-state restoration only when it is
+    retained authoritative material referenced by committed state.
+
+    DA-06 owns configuration scopes, schemas, defaults, overrides,
+    effectiveConfig, materialization, migration, storage layout, and policy-file
+    placement.
+
+    Committed configuration is authoritative when committed through DA-04.
+
+    effectiveConfig is a runtime-visible derived view, not a separate authority
+    class.
+
+    DA-07 owns persistent I/O authority.
+
+    SaveBundle/persistence documents own durable persistence closure, retained
+    material, SaveBundle storage, persistence compatibility, and recovery details.
+
+    Persistence protects committed truth but does not define committed truth.
+
+DA-04 may name those domains to protect committed-state authority, but it should
+not define their detailed behavior.
+
+==============================================================================
+07. ARTIFACT / EXPORT / WORKFLOW BOUNDARIES
+==============================================================================
+
+DA-04 should preserve these boundaries:
+
+    DA-08 owns Window kinds and Window finalization.
+
+    SafePointWindow contains committed boundary material, but optional retained
+    evidence inside it does not add committed-state authority.
+
+    DA-25 owns WindowManifest, WindowExport, Minimal Audit Bundle, digest,
+    partial export, missing-material artifact semantics, and offline inspection
+    artifact semantics.
+
+    Artifact/export representation does not add committed-state authority.
+
+    DA-26 owns ComparisonResult, equality modes, Replay, Resume, Retry, and audit
+    workflow semantics.
+
+    ComparisonResult does not define committed-state truth.
+
+    Replay restores retained committed state within DA-04 boundaries; it does not
+    create new committed truth by itself and does not re-run external effects.
+
+    Resume and Retry are new work and do not retroactively commit prior
+    uncommitted activity.
+
+Do not let artifacts, exports, digests, comparison output, Replay reports, Resume
+attempts, Retry attempts, or audit reports become committed-state authority by
+presentation or packaging.
+
+==============================================================================
+08. TOOLING / ADAPTER / HOST BOUNDARIES
+==============================================================================
+
+DA-04 should preserve these boundaries:
+
+    Tooling may inspect through controlled surfaces.
+
+    Tooling-originated mutation uses the same transaction and commit model as
+    runtime mutation.
+
+    Debugger mutation that affects authoritative state still uses DA-04
+    transaction and commit rules.
+
+    Adapter-executed mutation seeking Turnix guarantees re-enters through
+    orchestration, capability, transaction, and commit boundaries before becoming
+    authoritative.
+
+    Same-language or same-process execution does not bypass committed-state
+    authority.
+
+    ModCallContext does not expose unrestricted committed-state mutation.
+
+    RuntimeHost command surfaces do not directly mutate committed state.
+
+    PackManager views, repair suggestions, graph preparation, and management
+    operations do not directly mutate committed state.
+
+    Debugger or management tooling must use the same transaction/commit model
+    when initiating state mutation.
+
+Replace stale PackContext wording with ModCallContext where gateway authority is
+meant.
+
+==============================================================================
+09. ORCHESTRATIONUNIT AND JOB BOUNDARIES
+==============================================================================
+
+DA-04 should preserve these boundaries:
+
+    DA-19 owns Job lifecycle, Job result, Job timeout, Job cancellation, progress,
+    retained result, late completion, and Job trace semantics.
+
+    Job lifecycle state is not committed state.
+
+    Job result payloads become authoritative only if their relevant material is
+    committed through the owning state/transaction domain.
+
+    DA-24 owns OrchestrationUnit lifecycle, mutation-authority ownership,
+    terminal outcomes, single-lane ApplicationRun orchestration, and
+    OrchestrationUnit trace reason ownership.
+
+    OrchestrationUnit existence or lifecycle state is not committed state.
+
+    OrchestrationUnit coordinates mutation flow, but does not bypass the DA-04
+    commit boundary.
+
+    OrchestrationUnit terminal outcome does not by itself define transaction
+    commit or abort.
+
+    Transaction commit or abort does not by itself define OrchestrationUnit
+    terminal outcome.
+
+Normalize `Orchestration Unit` to `OrchestrationUnit` when the first-class type is
+meant.
+
+==============================================================================
+10. WHAT TO PRESERVE FROM CURRENT DA-04
+==============================================================================
+
+Preserve these boundaries, but translate stale Session/AppInstance/PackContext /
+SavePack terminology where present:
+
+    - Runtime memory and committed state are distinct.
+    - Only committed state is authoritative.
+    - Runtime memory is not authoritative merely because it is resident, visible,
+      active, or currently in use.
+    - Observational material explains but does not define committed truth.
+    - Turnix does not require observational completeness for committed-state
+      correctness.
+    - Trace-visible state mutation means state/transaction trace emission
+      obligation.
+    - Retained trace evidence is not required for committed-state correctness.
+    - Trace evidence does not become committed-state authority.
+    - Payload representation, effectiveConfig, UI/View presentation, debugger
+      views, artifact/export packaging, comparison output, Replay reports,
+      Resume attempts, and Retry attempts are not committed state unless the
+      relevant material is committed through DA-04.
+    - Authority classes remain exactly Authoritative and Non-authoritative.
+    - Transactions stage speculative mutation.
+    - A transaction resolves only by commit or abort.
+    - Commit and abort are atomic.
+    - Partial propagation does not occur.
+    - Nested transaction commits propagate into parent transactions while an
+      enclosing transaction exists.
+    - Only outermost transaction commit mutates committed layers.
+    - Commit conflict detection applies when committing into committed layers.
+    - Silent merge, last-write-wins, heuristic reconciliation, fallback,
+      guesswork, or convenience behavior do not occur.
+    - Static-data mutation intent remains explicitly Patch or Copy.
+    - Revision retention is policy-driven but cannot remove material required to
+      reconstruct latest committed state.
+    - Tooling-originated state mutation follows normal transaction/commit rules.
+    - Committed-state restoration does not reconstruct uncommitted runtime
+      activity or external side effects.
+    - Migration that changes authoritative state is transactional and abortable.
+
+==============================================================================
+11. WHAT TO ADD OR CHANGE IN THE REVISED DA-04
+==============================================================================
+
+11.1. Add canonical terminology note
+------------------------------------
+
+Add a compact note near the interpretation or concept section:
+
+    DA-04 uses canonical architecture names:
+
+        ApplicationRun:
+            one live execution period of an Application
+
+        OrchestrationUnit:
+            bounded work/mutation authority context
+
+        ModCallContext:
+            invocation-scoped Pack-facing gateway into Turnix
+
+        SaveBundle:
+            durable persistence closure of an Application
+
+    Older notes may use Session, AppInstance, PackContext, or SavePack. DA-04
+    does not use those names as primary architecture terms unless a compatibility
+    note explicitly says so.
+
+Do not write this as "V3 names", "new names", or "after the rewrite".
+
+11.2. Remove Session examples
+-----------------------------
+
+Remove `session` from memory-layer examples unless explicitly scoped as a legacy
+or external concept.
+
+Replace child-session transaction wording with child-transaction,
+ProcessingRun, or OrchestrationUnit wording.
+
+11.3. Normalize OrchestrationUnit naming
+----------------------------------------
+
+Use OrchestrationUnit where the first-class type is meant.
+
+11.4. Translate durable save wording
+------------------------------------
+
+Replace vague durable save wording with SaveBundle/persistence wording where the
+durable persistence closure is meant.
+
+11.5. Replace PackContext wording if present later
+--------------------------------------------------
+
+If PackContext appears in DA-04 examples or guardrails, replace it with
+ModCallContext where invocation gateway authority is meant.
+
+11.6. Keep exact implementation details open
+--------------------------------------------
+
+Do not define exact concrete transaction API shape, transaction trace payload
+taxonomy, retained revision policy shape, payload representation format,
+configuration schema, persistent I/O provider implementation, SaveBundle storage
+format, artifact/export format, comparison algorithm, Replay/Resume/Retry
+workflow protocol, or ModCallContext facade shape in DA-04 unless an owning
+implementation specification fixes them.
+
+==============================================================================
+12. SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as a starting pass. Context still matters.
+
+    session
+        -> remove from core memory-layer examples unless explicitly scoped as
+           legacy or external
+
+    child session
+        -> child transaction, ProcessingRun, or OrchestrationUnit, depending on
+           intended meaning
+
+    If a pipeline run creates or enters a child session while an enclosing
+    pipeline run is active
+        -> If orchestrated work creates or enters a child transaction while an
+           enclosing transaction is active
+        -> or: If a ProcessingRun or OrchestrationUnit enters a child transaction
+           while an enclosing transaction is active
+
+    Orchestration Unit
+        -> OrchestrationUnit when the first-class type is meant
+
+    AppInstance
+        -> ApplicationRun where live runtime lifecycle is meant
+        -> Application where durable application identity is meant
+
+    PackContext
+        -> ModCallContext where Pack-facing gateway authority is meant
+
+    durable save
+        -> SaveBundle / durable Application persistence closure, where that is
+           the intended architecture object
+
+    durable save persistence does not make adapters durable save writers
+        -> SaveBundle/persistence authority does not make adapters SaveBundle or
+           persistence writers
+
+    trace-visible
+        -> state/transaction trace emission obligation, with trace retention and
+           loss governed by DA-03
+
+    current Dv3 terminology / current Dv3 type names / current Dv3 names
+        -> canonical architecture terminology / canonical architecture type names
+
+    Any final-document wording like "In V3, Session was removed..."
+        -> replace with direct architecture language such as "Session is not a
+           DA-04 core memory-layer owner."
+
+==============================================================================
+13. ACCEPTANCE CONDITIONS FOR THE REVISED DA-04
+==============================================================================
+
+A revised DA-04 is acceptable when all of the following are true:
+
+    - It preserves committed state as authoritative truth.
+
+    - It preserves runtime memory and committed state as distinct.
+
+    - It preserves observation, trace, journals, UI, tooling, debugger views,
+      artifacts, exports, comparison output, Replay reports, Resume attempts, and
+      Retry attempts as non-authoritative unless relevant material is committed
+      through DA-04.
+
+    - It preserves exactly two authority classes: Authoritative and
+      Non-authoritative.
+
+    - It does not introduce semi-authoritative or soft-authoritative categories.
+
+    - It preserves trace-visible state mutation as trace emission obligation, not
+      trace persistence guarantee and not committed-state authority.
+
+    - It preserves trace retention/loss as DA-03-owned.
+
+    - It preserves loss of trace evidence as affecting evidential completeness,
+      not committed-state correctness.
+
+    - It removes Session as a core memory-layer or nested-transaction example
+      unless explicitly scoped as legacy or external.
+
+    - It preserves transaction staging, commit, abort, atomicity, and nested
+      transaction propagation semantics.
+
+    - It preserves deterministic conflict detection and no silent merge / no
+      last-write-wins / no heuristic reconciliation.
+
+    - It preserves Patch versus Copy mutation intent for static data.
+
+    - It preserves latest committed-state restoration as protected from garbage
+      collection that would remove required authoritative material.
+
+    - It preserves tooling-originated mutation as using the same transaction and
+      commit model as runtime mutation.
+
+    - It preserves committed-state restoration as not reconstructing uncommitted
+      runtime activity or external side effects.
+
+    - It preserves migration that changes authoritative state as transactional and
+      abortable.
+
+    - It keeps DA-05 as owner of payload identity, Chunk, ChunkId, ValueRef,
+      decode, integrity, and reachability representation.
+
+    - It keeps DA-06 as owner of configuration scopes, schema, materialization,
+      migration, effectiveConfig, and policy-file placement.
+
+    - It keeps DA-07 as owner of persistent I/O authority.
+
+    - It keeps SaveBundle/persistence documents as owner of durable persistence
+      closure, SaveBundle storage, retained material, persistence compatibility,
+      and recovery details.
+
+    - It keeps DA-08 as owner of Window finalization and runtime history
+      semantics.
+
+    - It keeps DA-18 as owner of debugger pause, breakpoint, safe-point,
+      inspection, and execution-control behavior.
+
+    - It keeps DA-19 as owner of Job lifecycle, Job result, Job timeout, Job
+      cancellation, progress, retained result, and late completion semantics.
+
+    - It keeps DA-20 as owner of Application/ApplicationRun lifecycle.
+
+    - It keeps DA-23 / DA-27 as owner of ExecutionAdapter and adapter lifecycle
+      semantics.
+
+    - It keeps DA-24 as owner of OrchestrationUnit lifecycle, mutation-authority
+      ownership, terminal outcomes, single-lane ApplicationRun orchestration, and
+      OrchestrationUnit trace reason ownership.
+
+    - It keeps DA-25 as owner of artifact/export semantics.
+
+    - It keeps DA-26 as owner of comparison, Replay, Resume, Retry, and audit
+      workflow semantics.
+
+    - It keeps DA-28 as owner of RuntimeHost lifecycle, workspace ownership,
+      command surfaces, and RuntimeHost-domain trace semantics.
+
+    - It keeps DA-29 as owner of PackManager catalog, graph-preparation, repair,
+      View, write, and PackManager-domain trace semantics.
+
+    - It keeps DA-30 as owner of ModCallContext gateway semantics and absent
+      surfaces.
+
+    - It does not define exact concrete transaction API shape, transaction trace
+      payload taxonomy, retained revision policy shape, payload representation,
+      configuration schema, persistent I/O provider implementation, SaveBundle
+      storage format, artifact/export format, comparison algorithm,
+      Replay/Resume/Retry workflow protocol, or ModCallContext facade shape.
+
+    - It does not mention audit provenance, rewrite process, old/new design, V3,
+      Codex, candidate status, or branch history as ordinary architecture text.
+
+==============================================================================
+14. FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep DA-04.
+
+Do not perform a heavy conceptual rewrite.
+
+Do perform targeted terminology and stop-line fixes:
+
+    - remove Session from core memory-layer and nested-transaction examples
+    - replace child-session wording with child-transaction, ProcessingRun, or
+      OrchestrationUnit wording as appropriate
+    - normalize OrchestrationUnit naming
+    - translate durable save / SavePack wording to SaveBundle/persistence wording
+    - translate AppInstance and PackContext wording if present
+    - preserve trace-visible as state/transaction trace emission obligation, not
+      retained-trace persistence guarantee
+    - preserve the committed-state stop-line against UI, debugger, Job,
+      OrchestrationUnit, RuntimeHost, PackManager, artifact/export, comparison,
+      Replay, Resume, Retry, and audit workflow outputs
+
+Use REWRITE-DA-04 only as translated boundary-preservation guidance. Do not copy
+process metadata or obsolete wording into the final DA.
+
+Do not include audit/source metadata or version/process framing in the final
+DA-04 documentation. The final DA-04 should not say this is V3 design, in V3,
+new design, old design, rewritten design, created by Codex, decided by audit, or
+part of a rewrite-history process.
+
+DA-04 should remain the authoritative memory, state, transaction, commit,
+conflict-detection, persistence-as-protection, static mutation intent, revision
+retention, tooling mutation constraint, restoration boundary, and migration commit
+rule document.
+
+DA-04 should not become:
+
+    - trace substrate specification
+    - payload representation specification
+    - configuration schema or migration implementation specification
+    - persistent I/O authority specification
+    - SaveBundle storage/recovery specification
+    - Window lifecycle/finalization specification
+    - debugger execution-control specification
+    - Job lifecycle specification
+    - Application/ApplicationRun lifecycle specification
+    - ExecutionAdapter or adapter lifecycle specification
+    - OrchestrationUnit lifecycle specification
+    - RuntimeHost specification
+    - PackManager operation specification
+    - artifact/export specification
+    - comparison / Replay / Resume / Retry / audit workflow specification
+    - ModCallContext specification
+    - concrete transaction API or retained revision policy implementation spec
+
+The main work is to preserve DA-04's strong committed-state authority model while
+removing Session-era examples and tightening terminology around OrchestrationUnit,
+ApplicationRun, SaveBundle, and ModCallContext.
+
+==============================================================================
+END OF AUDIT RESULT - DA-04
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-DA-04
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-DA-04_RESULT.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
