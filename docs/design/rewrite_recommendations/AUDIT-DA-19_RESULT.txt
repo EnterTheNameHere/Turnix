@@ -1,0 +1,861 @@
+==============================================================================
+AUDIT RESULT - DA-19 JOBS, LONG-RUNNING WORK AND CANCELLATION
+==============================================================================
+
+Document status:
+    Audit result for assistant-editor use.
+
+Target document:
+    docs/design/DA-19_JOBS_LONG_RUNNING_WORK_AND_CANCELLATION.txt
+
+Recommendation file:
+    docs/design/rewrite_recommendations/REWRITE-DA-19_RECOMMENDATION.txt
+
+Audit source stack:
+    docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P01_TURNIX_PACK_ENTRY_MULTI_ADAPTER_AND_CYCLIC_ACTIVATION_PROTOCOL.txt
+    docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    docs/design/DA-19_JOBS_LONG_RUNNING_WORK_AND_CANCELLATION.txt
+    docs/design/rewrite_recommendations/REWRITE-DA-19_RECOMMENDATION.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-04_RESULT.txt, if present later
+    docs/design/rewrite_recommendations/AUDIT-DA-08_RESULT.txt, if present later
+    docs/design/rewrite_recommendations/AUDIT-DA-14_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-16_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-17_RESULT.txt, if present later
+    docs/design/rewrite_recommendations/AUDIT-DA-20_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-21_RESULT.txt, if present later
+    docs/design/rewrite_recommendations/AUDIT-DA-24_RESULT.txt, if present later
+    docs/design/rewrite_recommendations/AUDIT-DA-25_RESULT.txt, if present later
+    docs/design/rewrite_recommendations/AUDIT-DA-26_RESULT.txt, if present later
+    docs/design/rewrite_recommendations/AUDIT-DA-27_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-28_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-29_RESULT.txt
+    docs/design/rewrite_recommendations/AUDIT-DA-30_RESULT.txt
+
+Audit posture:
+    Semantic architecture audit, not formatting audit.
+
+    Use CMR references as normal upstream/index material only.
+
+    Do not treat CMR files as semantic architecture authority for this audit.
+
+    This audit follows the checkpoint rewrite posture: preserve architecture
+    boundaries, not obsolete terminology or historical design layers.
+
+==============================================================================
+01. VERDICT
+==============================================================================
+
+Recommendation verdict:
+    Mostly correct, with terminology translation required.
+
+    The recommendation correctly preserves DA-19's central model: Job is an
+    observable lifecycle handle for requested work, not the execution primitive;
+    Job identity is separate from RPC request identity, OrchestrationUnit
+    identity, ApplicationRun identity, adapter identity, RuntimeHost identity,
+    Window identity, artifact/export identity, workflow identity, and result
+    payload identity; Job terminal states are final and exclusive; result exists
+    only for Succeeded; progress is observational; cancellation, timeout,
+    supersession, late completion, RPC/transport relation, and capability/Job
+    relation remain separate.
+
+    The recommendation still uses stale AppInstance and PackContext wording in
+    guardrails. Translate these to Application/ApplicationRun and ModCallContext
+    where the concepts must be named.
+
+Document verdict:
+    Keep with small but important fixes.
+
+DA-19 is architecturally strong and already reflects much of the current model.
+
+No heavy conceptual rewrite is recommended.
+
+The main required fixes are:
+
+    - add or preserve a compact Job lifecycle stop-line
+    - use OrchestrationUnit as the canonical type name where the first-class
+      runtime work/mutation authority concept is meant
+    - correct ownership wording that places OrchestrationUnit outcomes under DA-04
+    - keep DA-04 as transaction/committed-state owner and DA-24 as
+      OrchestrationUnit owner
+    - make Retry wording direct: Retry is new work and does not reuse the previous
+      jobId
+    - clarify that Job resume / continuation after pause is not DA-26 Resume
+      after SafePointWindow restoration
+    - add DA-25 / DA-26 stop-lines where artifact/export, comparison, Replay,
+      Resume, Retry, or audit workflows are named
+    - preserve result-only-for-Succeeded envelope discipline
+    - avoid final-document version/process metadata leakage
+
+Primary conclusion:
+    Keep DA-19 as the Job lifecycle, long-running work, cancellation, timeout,
+    supersession, progress, pause-at-safe-point, execution-stop, and Job-domain
+    trace document. Apply targeted stop-line and terminology fixes only.
+
+==============================================================================
+01A. OBSOLETE-PRESERVATION CHECK
+==============================================================================
+
+DA-19 should not keep older terminology as a historical artifact.
+
+Specifically, the rewrite should not preserve:
+
+    - AppInstance as runtime identity vocabulary
+    - PackContext authority where ModCallContext gateway authority is meant
+    - Orchestration Unit as a separate or informal concept if OrchestrationUnit is
+      the first-class canonical type name
+    - Job terminal outcome as OrchestrationUnit terminal outcome
+    - Job terminal outcome as transaction commit/abort
+    - Job terminal outcome as Window finalization
+    - Job terminal outcome as artifact/export authority
+    - Job terminal outcome as Replay, Resume, Retry, comparison, or audit workflow
+      outcome
+    - Retry as reuse/reopening/continuation of the previous jobId
+    - Job resume/continue from pause as DA-26 Resume workflow
+    - non-success metadata smuggled into Job result
+
+If a legacy alias is intentionally retained, DA-19 should say so explicitly and
+should still state the canonical architecture term as primary.
+
+Otherwise, the old terms should be removed or translated.
+
+The useful part of the old recommendation is not the old terminology. The useful
+part is the Job boundary:
+
+    Job is an observable lifecycle handle. It is not execution authority,
+    OrchestrationUnit authority, committed state, transaction outcome, RPC
+    lifecycle, adapter lifecycle, RuntimeHost outcome, PackManager outcome,
+    artifact/export authority, or DA-26 workflow outcome.
+
+==============================================================================
+01B. DOCUMENT-METADATA LEAKAGE CHECK
+==============================================================================
+
+The final DA-19 document should read as architecture documentation, not as audit,
+version, or rewrite-process metadata.
+
+Do not include statements such as:
+
+    - This is V3 design.
+    - In V3, AppInstance became ApplicationRun.
+    - The new design uses DA-26 for Retry.
+    - This rewrite changed Job/Retry wording.
+    - Unlike V2, Retry is new work.
+    - Codex kept AppInstance wording.
+    - This audit decided to use OrchestrationUnit.
+    - DA-19 was rewritten because of the audit.
+
+Those facts may be useful in audit files, branch notes, migration notes,
+compatibility notes, changelogs, or editor instructions. They do not belong in
+the architecture document itself.
+
+The final DA-19 should simply define Job identity, Job lifecycle states,
+terminal outcomes, result/error ownership, progress, cancellation, timeout,
+supersession, late completion, safe-point pause, Job-domain trace reasons, and
+cross-domain stop-lines.
+
+==============================================================================
+02. WHAT DA-19 GETS RIGHT
+==============================================================================
+
+02.1. Job as observable lifecycle handle
+----------------------------------------
+
+DA-19 correctly defines Job as an explicit lifecycle object and observable
+request/work handle for requested work.
+
+It correctly says Job may represent short or long-running work and may exist
+before any underlying execution mechanism exists.
+
+Preserve this.
+
+02.2. Job is not execution primitive
+------------------------------------
+
+DA-19 correctly says Job is not merely a Promise, coroutine, callback, thread,
+task, process, model request, or transport message.
+
+It correctly says runtime primitives may implement Jobs, but those primitives do
+not define Job lifecycle semantics.
+
+Preserve this.
+
+02.3. Job identity separation is strong
+---------------------------------------
+
+DA-19 correctly separates jobId from RPC request identity, OrchestrationUnit
+identity, underlying execution identity, result payload identity, and concrete
+identifier encoding.
+
+Preserve and extend this to explicitly include:
+
+    - Application/ApplicationRun identity
+    - adapter identity
+    - RuntimeHost identity
+    - Window identity
+    - artifact/export identity
+    - Replay/Resume/Retry workflow identity
+    - PackManager operation identity
+
+02.4. Job ownership and correlation is useful
+---------------------------------------------
+
+DA-19 correctly allows correlation identifiers to vary by Job origin and says
+missing optional correlation identifiers do not invalidate the Job.
+
+Preserve this.
+
+02.5. Job / OrchestrationUnit / transaction split is strong
+-----------------------------------------------------------
+
+DA-19 correctly distinguishes:
+
+    Job:
+        observable lifecycle handle
+
+    OrchestrationUnit:
+        execution-authority / work authority unit
+
+    Transaction:
+        mutation staging and commit boundary
+
+Preserve this, but correct the ownership stop-line so OrchestrationUnit outcomes
+are not assigned to DA-04.
+
+02.6. Job lifecycle states are strong
+-------------------------------------
+
+DA-19 correctly defines Pending, Running, Succeeded, Failed, Cancelled,
+TimedOut, and Superseded.
+
+It correctly says Succeeded, Failed, Cancelled, TimedOut, and Superseded are
+terminal, and that a terminal state is final.
+
+Preserve this.
+
+02.7. Result and non-success metadata split is strong
+-----------------------------------------------------
+
+DA-19 correctly says Job result exists only for Succeeded and is absent for
+Failed, Cancelled, TimedOut, and Superseded.
+
+Preserve this strongly.
+
+02.8. Progress is observational
+-------------------------------
+
+DA-19 correctly says progress is observational lifecycle evidence, not
+authoritative mutation, and progress updates do not commit authoritative state by
+themselves.
+
+Preserve this.
+
+02.9. Cancellation split is strong
+----------------------------------
+
+DA-19 correctly distinguishes cancellation request, cancellation outcome, and
+underlying execution-stop attempt/result.
+
+It correctly says cancellation is explicit, intentional, and not failure.
+
+Preserve this.
+
+02.10. Timeout split is strong
+------------------------------
+
+DA-19 correctly separates Job timeout from RPC transport timeout and says TimedOut
+is distinct from Cancelled and Failed.
+
+Preserve this.
+
+02.11. Superseded is strong
+---------------------------
+
+DA-19 correctly defines Superseded as explicit, intentional, non-error,
+non-failure, non-timeout, terminal, and not a rollback mechanism.
+
+Preserve this.
+
+02.12. Late completion safety is strong
+---------------------------------------
+
+DA-19 correctly says late completion after terminal outcome does not change the
+Job terminal state, does not produce a Job result, does not deliver a late reply
+or result, and may only be traced as diagnostic evidence.
+
+Preserve this.
+
+02.13. Job-domain trace ownership is mostly strong
+--------------------------------------------------
+
+DA-19 correctly owns Job-domain trace reason identifiers and says DA-03 owns the
+trace substrate.
+
+Preserve this and ensure trace emission does not imply retained trace storage or
+committed-state truth.
+
+02.14. RPC / transport / Job split is strong
+--------------------------------------------
+
+DA-19 correctly says transport acknowledgement does not prove Job existence,
+transport timeout is not Job timeout, Job timeout is not transport timeout, and
+request acceptance is not final Job success.
+
+Preserve this.
+
+02.15. Capability / Job split is strong
+---------------------------------------
+
+DA-19 correctly says capability invocation may complete without creating a Job,
+long-running capability execution may create or attach to a Job, and Job-backed
+capability execution remains capability-mediated.
+
+Preserve this.
+
+==============================================================================
+03. MAJOR REQUIRED FIX: ORCHESTRATIONUNIT OWNERSHIP
+==============================================================================
+
+DA-19 currently says:
+
+    Orchestration Unit outcomes and transaction outcomes remain owned by DA-04.
+
+This is not correct under the current architecture terminology.
+
+Correct split:
+
+    DA-24 owns OrchestrationUnit lifecycle, mutation-authority ownership, and
+    execution-authority coordination.
+
+    DA-04 owns authoritative committed state and transaction semantics.
+
+Recommended replacement:
+
+    OrchestrationUnit lifecycle and outcome semantics remain owned by DA-24.
+
+    Transaction commit, abort, rollback, and committed-state truth remain owned by
+    DA-04.
+
+    A Job terminal outcome does not automatically complete, fail, commit, abort,
+    or roll back an OrchestrationUnit or a transaction.
+
+Also replace spaced `Orchestration Unit` with `OrchestrationUnit` where the
+first-class type name is meant.
+
+==============================================================================
+04. RETRY / RESUME / CONTINUE WORDING
+==============================================================================
+
+04.1. Retry wording
+-------------------
+
+DA-19 currently says:
+
+    Retry is modeled as new work unless a later document explicitly defines a
+    retry relationship.
+
+and:
+
+    A retry does not reuse the previous jobId.
+
+The second rule is correct. The first should be more direct now that DA-26 owns
+Retry workflow semantics.
+
+Recommended replacement:
+
+    Retry is new work.
+
+    Retry does not reuse the previous jobId.
+
+    A Retry workflow may reference earlier Job evidence to explain why the new
+    attempt exists, but that reference does not reopen, resume, continue, or
+    restart the earlier Job lifecycle.
+
+    DA-26 owns Retry workflow semantics.
+
+This keeps DA-19's jobId rule precise without requiring DA-19 to define workflow
+relationships.
+
+04.2. Resume / continued wording
+--------------------------------
+
+DA-19 currently uses both continued and resume-like wording for paused Jobs.
+
+This is locally understandable, but DA-26 gives Resume a formal workflow meaning.
+
+Recommended wording:
+
+    A paused-at-safe-point Job may later continue from that pause.
+
+or:
+
+    A paused-at-safe-point Job may receive a Job control event that continues its
+    existing lifecycle.
+
+If the word resume is retained, add a stop-line:
+
+    Job continuation from pause is not DA-26 Resume after SafePointWindow
+    restoration.
+
+DA-19 owns Job pause/control lifecycle events. DA-26 owns Replay / Resume / Retry
+workflow semantics.
+
+==============================================================================
+05. REQUIRED JOB LIFECYCLE STOP-LINE
+==============================================================================
+
+DA-19 should include or preserve a compact source-level boundary.
+
+Recommended boundary:
+
+    Job is an observable lifecycle handle for requested work.
+
+    Job lifecycle state does not directly define underlying execution state,
+    OrchestrationUnit outcome, transaction commit or abort, committed-state truth,
+    Window finalization, ApplicationRun lifecycle, adapter lifecycle, RuntimeHost
+    lifecycle, PackManager operation outcome, RPC request outcome, transport
+    outcome, artifact/export authority, comparison outcome, Replay outcome,
+    Resume outcome, Retry outcome, or audit-workflow outcome.
+
+    If a Job outcome affects another domain, that domain defines the resulting
+    consequence.
+
+    Correlation between a Job and another domain outcome must be explicit.
+
+This belongs in DA-19 because DA-19 owns Job lifecycle and Job-domain trace
+reason semantics.
+
+Do not expand DA-19 into the detailed lifecycle documents for all those domains.
+
+==============================================================================
+06. RESULT / ERROR / ENVELOPE WATCH
+==============================================================================
+
+DA-19 correctly says:
+
+    A Job result exists only for Succeeded.
+
+This must remain strong when later concrete result/error/envelope specs are
+written.
+
+Do not let concrete envelopes smuggle these into `result`:
+
+    - partial output
+    - diagnostic metadata
+    - cancellation metadata
+    - timeout metadata
+    - supersession metadata
+    - retained artifact metadata
+    - comparison metadata
+    - Replay / Resume / Retry workflow metadata
+    - audit workflow metadata
+
+Recommended later convention:
+
+    result = successful result only
+
+    failure / cancellation / timeout / supersession / diagnostic / partial /
+    workflow / artifact data = separate metadata or event structures
+
+This prevents non-success terminal states from quietly becoming partial success.
+
+==============================================================================
+07. TRACE WORDING FIX
+==============================================================================
+
+DA-19 should preserve Job-domain trace obligations but follow DA-03 trace wording.
+
+Correct reading:
+
+    Job trace evidence is required as a domain emission obligation where Job
+    lifecycle events occur.
+
+Not:
+
+    Trace persistence is guaranteed forever.
+
+Not:
+
+    Job correctness depends on retained Job trace evidence.
+
+Suggested wording:
+
+    Job-domain trace evidence is required as an emission obligation where Job
+    lifecycle events occur. Trace representation, retention, pruning, and loss
+    remain governed by DA-03.
+
+Trace evidence does not become committed state, Job result, Window finalization,
+artifact/export authority, Replay/Resume/Retry workflow outcome, comparison
+outcome, or audit workflow outcome by itself.
+
+==============================================================================
+08. REQUIRED OWNER STOP-LINES
+==============================================================================
+
+DA-19 should stay the Job lifecycle and identity document.
+
+It may name other domains to preserve stop-lines, but it should not define their
+detailed behavior.
+
+Recommended owner mapping:
+
+    DA-03 owns trace substrate, trace DAG semantics, trace storage, trace
+    retention, trace pruning, and trace loss.
+
+    DA-04 owns authoritative committed state and transaction semantics.
+
+    DA-08 owns Window, ActiveWindow, SafePointWindow, AbortedWindow, and finalized
+    runtime history semantics.
+
+    DA-14 owns Pack activation lifecycle and activation failure semantics.
+
+    DA-16 owns Service, Capability, permission, capability invocation, and
+    Job-backed capability semantics.
+
+    DA-17 owns user decision and remembered policy semantics.
+
+    DA-18 owns debugger UI layout, safe-point pause controls, breakpoint, and
+    execution-control behavior.
+
+    DA-20 owns Application/ApplicationRun lifecycle and runtime identity.
+
+    DA-21 owns RPC lifecycle, channel, transport, timeout, disconnect, and logical
+    communication semantics.
+
+    DA-23 owns abstract ExecutionAdapter boundary semantics.
+
+    DA-24 owns OrchestrationUnit lifecycle, mutation-authority ownership, and
+    execution-authority coordination.
+
+    DA-25 owns Window artifacts, WindowManifests, WindowExports, Minimal Audit
+    Bundles, optional digest representation, partial export, missing material,
+    and offline inspection artifact semantics.
+
+    DA-26 owns ComparisonResult, equality modes, Replay, Resume, Retry, and audit
+    workflow semantics.
+
+    DA-27 owns adapter lifecycle, trust, isolation, failure, disconnect, and
+    adapter-domain trace semantics.
+
+    DA-28 owns RuntimeHost command-surface and host-boundary semantics.
+
+    DA-29 owns PackManager graph-management semantics.
+
+    DA-30 owns ModCallContext gateway semantics and absent surfaces.
+
+    IS-01 and IS-02 own concrete RPC message schemas and transport behavior.
+
+DA-19 may name these concepts when needed to protect Job lifecycle and Job
+identity boundaries, but it should not define their detailed behavior.
+
+==============================================================================
+09. WHAT TO PRESERVE FROM CURRENT DA-19
+==============================================================================
+
+Preserve these boundaries, but rewrite stale terminology and ownership wording
+where present:
+
+    - Job is an observable lifecycle handle for requested work.
+    - Job is not the execution primitive.
+    - Job identity is distinct from RPC request identity.
+    - Job identity is distinct from OrchestrationUnit identity.
+    - Job identity is distinct from Application/ApplicationRun identity.
+    - Job identity is distinct from adapter identity.
+    - Job identity is distinct from RuntimeHost identity.
+    - Job identity is distinct from result payload identity.
+    - Job identity is distinct from Window identity.
+    - Job identity is distinct from artifact/export identity.
+    - Job identity is distinct from Replay / Resume / Retry workflow identity.
+    - Job lifecycle is distinct from underlying execution lifecycle.
+    - Job lifecycle is distinct from ApplicationRun lifecycle.
+    - Job lifecycle is distinct from adapter lifecycle.
+    - Job lifecycle is distinct from RuntimeHost lifecycle.
+    - Job lifecycle is distinct from Replay / Resume / Retry workflow lifecycle.
+    - Job primary states are Pending, Running, Succeeded, Failed, Cancelled,
+      TimedOut, and Superseded.
+    - Succeeded, Failed, Cancelled, TimedOut, and Superseded are terminal.
+    - Terminal state is final.
+    - Closed Jobs are not restarted.
+    - Retry is new work.
+    - Retry does not reuse the previous jobId.
+    - Queued is a Pending phase/event, not a terminal state.
+    - Paused-at-safe-point is non-terminal.
+    - Job continuation from pause is not DA-26 Resume workflow.
+    - Job result exists only for Succeeded.
+    - Cancelled is intentional and not failure.
+    - TimedOut is explicit and distinct from Cancelled and Failed.
+    - Superseded is a first-class non-error terminal outcome.
+    - Superseded does not roll back already committed state.
+    - Cancellation request and cancellation outcome are distinct.
+    - Cancellation before execution begins does not require execution-stop.
+    - Job terminal outcome and execution-stop outcome remain distinct.
+    - Late completion after terminal outcome is ignored for Job outcome/result.
+    - Progress is observational and not authoritative mutation.
+    - Safe-point pause is explicit and non-terminal.
+    - Job-domain trace reason identifiers are DA-19-owned.
+    - DA-03 owns trace substrate, not Job lifecycle semantics.
+    - Capability invocation is not automatically Job.
+    - Job-backed capability execution remains capability-mediated.
+    - RPC request acceptance is not final Job success.
+    - Transport acknowledgement does not prove Job existence.
+    - OrchestrationUnit existence does not imply Job success.
+    - Transaction commit/abort is not controlled by Job terminal state.
+
+==============================================================================
+10. WHAT TO ADD OR CHANGE IN THE REVISED DA-19
+==============================================================================
+
+10.1. Add canonical terminology note
+------------------------------------
+
+Add a compact note near the interpretation or concept section:
+
+    DA-19 uses canonical architecture names:
+
+        Job:
+            observable lifecycle handle for requested work
+
+        OrchestrationUnit:
+            bounded work/mutation authority context
+
+        ApplicationRun:
+            one live execution period of an Application
+
+        ModCallContext:
+            invocation-scoped Pack-facing gateway into Turnix
+
+    Older notes may use AppInstance, PackContext, or Orchestration Unit. DA-19
+    does not use those names as primary architecture terms unless a compatibility
+    note explicitly says so.
+
+Do not write this as "V3 names", "new names", or "after the rewrite".
+
+10.2. Correct OrchestrationUnit ownership wording
+-------------------------------------------------
+
+Replace the statement that Orchestration Unit outcomes are DA-04-owned.
+
+Use the split from section 03 of this audit.
+
+10.3. Update Retry wording
+--------------------------
+
+Make Retry wording direct:
+
+    Retry is new work.
+
+    Retry does not reuse the previous jobId.
+
+    DA-26 owns Retry workflow semantics.
+
+    A Retry workflow may reference earlier Job evidence, but does not reopen the
+    earlier Job lifecycle.
+
+10.4. Clarify Job continuation from pause
+-----------------------------------------
+
+Avoid bare `resume` where it could be confused with DA-26 Resume.
+
+Prefer `continue from pause` or explicitly state that Job continuation from pause
+is not DA-26 Resume.
+
+10.5. Add DA-25 / DA-26 stop-lines
+----------------------------------
+
+Add the stop-lines from section 08 where Job wording touches artifact/export,
+comparison, Replay, Resume, Retry, or audit workflows.
+
+10.6. Keep exact implementation details open
+--------------------------------------------
+
+Do not define exact jobId encoding, result envelope shape, error envelope shape,
+progress payload, subscription behavior, retained-result behavior, RPC envelope
+shape, cancellation refusal taxonomy, execution-stop failure taxonomy, Job-backed
+capability API, or retry relationship representation in DA-19 unless an owning
+implementation specification explicitly fixes them.
+
+==============================================================================
+11. SPECIFIC PHRASE REPLACEMENTS
+==============================================================================
+
+Use these as a starting pass. Context still matters.
+
+    AppInstance
+        -> ApplicationRun where live runtime lifecycle is meant
+        -> Application where durable identity is meant
+
+    AppInstance lifecycle
+        -> ApplicationRun lifecycle
+
+    Orchestration Unit
+        -> OrchestrationUnit when the first-class type is meant
+
+    Orchestration Unit outcomes and transaction outcomes remain owned by DA-04
+        -> OrchestrationUnit lifecycle/outcome semantics remain owned by DA-24.
+           Transaction commit/abort and committed-state truth remain owned by DA-04.
+
+    Retry is modeled as new work unless a later document explicitly defines a retry relationship
+        -> Retry is new work. Retry does not reuse the previous jobId. DA-26 owns
+           Retry workflow semantics.
+
+    A paused-at-safe-point Job may later resume
+        -> A paused-at-safe-point Job may later continue from that pause
+        -> or explicitly add: this is not DA-26 Resume after SafePointWindow restoration
+
+    PackContext authority
+        -> ModCallContext gateway authority
+
+    DA-14 owns pack activation semantics and PackContext authority
+        -> DA-14 owns Pack activation lifecycle semantics. DA-30 owns
+           ModCallContext gateway semantics.
+
+    current Dv3 terminology / current Dv3 type names / current Dv3 names
+        -> canonical architecture terminology / canonical architecture type names
+
+    Any final-document wording like "In V3, Job..."
+        -> replace with direct architecture language such as "Job..."
+
+==============================================================================
+12. ACCEPTANCE CONDITIONS FOR THE REVISED DA-19
+==============================================================================
+
+A revised DA-19 is acceptable when all of the following are true:
+
+    - It preserves Job as observable lifecycle handle, not execution primitive.
+
+    - It preserves Job identity as distinct from RPC request identity.
+
+    - It preserves Job identity as distinct from OrchestrationUnit identity.
+
+    - It preserves Job identity as distinct from Application/ApplicationRun
+      identity.
+
+    - It preserves Job identity as distinct from adapter, RuntimeHost, Window,
+      artifact/export, workflow, and result payload identity.
+
+    - It preserves Job / OrchestrationUnit / Transaction separation.
+
+    - It keeps OrchestrationUnit lifecycle/outcome semantics DA-24-owned.
+
+    - It keeps transaction commit/abort and committed-state truth DA-04-owned.
+
+    - It preserves final and exclusive terminal states.
+
+    - It preserves closed Jobs as not restarted.
+
+    - It preserves Retry as new work that does not reuse the previous jobId.
+
+    - It prevents Job continuation from pause from being confused with DA-26
+      Resume workflow.
+
+    - It preserves result only for Succeeded.
+
+    - It prevents failure/cancellation/timeout/supersession/diagnostic/artifact/
+      workflow metadata from being smuggled into Job result.
+
+    - It preserves progress as observational evidence, not authoritative mutation.
+
+    - It preserves cancellation request / cancellation outcome / execution-stop
+      attempt split.
+
+    - It preserves Job timeout versus transport timeout separation.
+
+    - It preserves Superseded as terminal non-error outcome.
+
+    - It preserves late completion as unable to change terminal outcome or create
+      a Job result.
+
+    - It preserves Job-domain trace reason ownership without replacing DA-03 trace
+      substrate/retention/loss semantics.
+
+    - It preserves RPC / transport / Job separation.
+
+    - It preserves Capability / Job relation as optional and mediated.
+
+    - It preserves Job-backed capability execution as capability-mediated.
+
+    - It adds or preserves DA-25 / DA-26 stop-lines for artifact/export,
+      comparison, Replay, Resume, Retry, and audit workflows.
+
+    - It keeps DA-20 as owner of Application/ApplicationRun lifecycle.
+
+    - It keeps DA-28 as owner of RuntimeHost behavior.
+
+    - It keeps DA-29 as owner of PackManager outcomes.
+
+    - It keeps DA-30 as owner of ModCallContext gateway semantics and absent
+      surfaces.
+
+    - It keeps exact jobId representation, result envelope, error envelope,
+      progress payload, subscription behavior, retained-result behavior, RPC
+      envelope, cancellation refusal taxonomy, execution-stop failure taxonomy,
+      and Job-backed capability API open unless an owning implementation
+      specification fixes them.
+
+    - It does not mention audit provenance, rewrite process, old/new design, V3,
+      Codex, candidate status, or branch history as ordinary architecture text.
+
+==============================================================================
+13. FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep DA-19.
+
+Do not perform a heavy conceptual rewrite.
+
+Do perform targeted stop-line and terminology fixes:
+
+    - use OrchestrationUnit as the canonical type name
+    - keep OrchestrationUnit outcomes DA-24-owned and transaction outcomes DA-04-owned
+    - update Retry wording to direct DA-26-compatible wording
+    - clarify Job continuation from pause versus DA-26 Resume
+    - add DA-25 / DA-26 stop-lines where artifact/export and workflow meanings are
+      mentioned
+    - translate stale AppInstance / PackContext wording where present
+
+Use REWRITE-DA-19 only as translated boundary-preservation guidance. Do not keep
+it as an obsolete historical artifact and do not copy its stale AppInstance or
+PackContext vocabulary into the rewritten DA.
+
+Do not include audit/source metadata or version/process framing in the final
+DA-19 documentation. The final DA-19 should not say this is V3 design, in V3,
+new design, old design, rewritten design, created by Codex, decided by audit, or
+part of a rewrite-history process.
+
+DA-19 should remain the Job lifecycle, long-running work, cancellation, timeout,
+supersession, progress, pause-at-safe-point, execution-stop, and Job-domain trace
+document.
+
+DA-19 should not become:
+
+    - trace substrate specification
+    - committed-state or transaction specification
+    - Window lifecycle/finalization specification
+    - activation lifecycle specification
+    - Service/Capability/permission specification
+    - user decision/remembered policy specification
+    - debugger UI/breakpoint specification
+    - Application/ApplicationRun lifecycle specification
+    - RPC/transport specification
+    - adapter lifecycle specification
+    - OrchestrationUnit lifecycle specification
+    - RuntimeHost specification
+    - PackManager operation specification
+    - artifact/export specification
+    - comparison / Replay / Resume / Retry / audit workflow specification
+    - concrete Job result/error/progress/RPC/envelope implementation specification
+
+The main work is to preserve DA-19's strong Job lifecycle model while tightening
+cross-domain stop-lines and aligning terminology with OrchestrationUnit,
+ApplicationRun, ModCallContext, DA-25, and DA-26 ownership boundaries.
+
+==============================================================================
+END OF AUDIT RESULT - DA-19
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-DA-19
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-DA-19_RESULT.txt
+DOC_REV: 1
+DOC_GIT: 0000000
+----------------
