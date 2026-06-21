@@ -1,0 +1,510 @@
+==============================================================================
+TURNIX DV3 DOCUMENTATION AUDIT RESULT - ODA-B
+==============================================================================
+
+Document title:
+    OPTIONAL DESIGN AREA ODA-B - DEVELOPMENT, DIAGNOSTICS & OBSERVABILITY
+
+Target ODA path:
+    docs/design/ODA-B_DEVELOPMENT_DIAGNOSTICS_AND_OBSERVABILITY.txt
+
+Branch:
+    CODEX_Dv3
+
+Loaded target file metadata:
+    DOC_REV: 12
+    DOC_GIT: fd499bd
+    GitHub blob SHA seen by assistant:
+        b3cee29b1042c776f0fcbda294b287638a729517
+
+Audit result status:
+    Direct ODA audit result.
+    ODA files do not have rewrite recommendation files.
+
+Source stack used:
+    - docs/design/rewrite_recommendations/AUDIT-INSTRUCTIONS_checkpoint.txt
+    - docs/design/rewrite_recommendations/ANCHOR-06_checkpoint.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P01_TURNIX_PACK_ENTRY_MULTI_ADAPTER_AND_CYCLIC_ACTIVATION_PROTOCOL.txt
+    - docs/design/rewrite_recommendations/PROPOSAL-P02_TURNIX_STANDALONE_RUNTIME_PLATFORM_MODEL.txt
+    - docs/CMR-04_CANONICAL_INDEX_TURNIX_SPECIFICATION.txt, used only to locate
+      the ODA-B path
+    - docs/design/ODA-B_DEVELOPMENT_DIAGNOSTICS_AND_OBSERVABILITY.txt
+
+Recommendation file:
+    None.
+
+Recommendation verdict:
+    Not applicable because ODA files do not have rewrite recommendation files.
+
+ODA document verdict:
+    Keep with small fixes.
+
+==============================================================================
+SUMMARY
+==============================================================================
+
+ODA-B is a useful optional observability/tooling document. Its core architecture
+is sound: developer-facing diagnostics consume trace and related system evidence,
+but they do not define trace schemas, trace retention, authority boundaries,
+debugger semantics, adapter semantics, RPC semantics, or runtime correctness.
+
+The document already contains several good stop-lines:
+
+    - ODA-B does not define DA-03 trace semantics.
+    - Tooling distinguishes missing evidence from evidence of absence.
+    - Tooling does not fabricate reasons or causal links.
+    - Trace persistence remains policy-driven and best-effort under DA-03.
+    - Development-mode diagnostics do not change runtime correctness semantics.
+    - Tooling warnings do not grant authority, permission, or persistence rights.
+
+The required fixes are local. The document still contains AppInstance-era naming,
+uses a risky phrase "authority evidence", slightly overstates later trace
+queryability, and has an OPEN replay/post-mortem section that must not collide
+with DA-26 Replay semantics.
+
+==============================================================================
+WHAT THE DOCUMENT GETS RIGHT
+==============================================================================
+
+1. ODA-B correctly treats observability as tooling, not authority.
+
+    The target document says optional diagnostics improve explainability and
+    maintainability without adding runtime correctness semantics. This is the
+    right scope for an Optional Design Area.
+
+2. The DA-03 ownership boundary is mostly strong.
+
+    ODA-B repeatedly says it consumes trace evidence and does not define trace
+    event schemas, trace reasons, span rules, retention, pruning, or trace loss
+    semantics.
+
+3. Missing evidence is handled correctly in several places.
+
+    The document distinguishes missing evidence from evidence of absence and
+    tells tooling not to guess when evidence is incomplete.
+
+4. The authority boundaries around adapters, RPC, capability reporting, and UI
+   diagnostics are mostly correct.
+
+    The document avoids turning reports into adapter authority, capability
+    authority, or runtime authority.
+
+5. Development-mode versus production-mode diagnostics are separated.
+
+    Development mode may be more verbose and stricter, but the document says
+    those enhancements do not change runtime correctness semantics.
+
+==============================================================================
+MAJOR SEMANTIC RISKS
+==============================================================================
+
+1. Current naming/model drift: AppInstance wording is stale.
+
+    Proposal P02 makes Application and ApplicationRun the current identity model.
+    AppInstance is no longer the current primary runtime identity term for final
+    rewritten documents.
+
+    ODA-B still uses AppInstance in several places, including:
+
+        - adapter, RPC, capability, and AppInstance diagnostic expectations
+        - AppInstance lifecycle semantics
+        - AppInstance lifecycle trace domain
+        - AppInstance outcomes in the trace viewer
+        - AppInstanceActiveSpan
+        - AppInstance identity and lifecycle evidence
+        - adapter/RPC/AppInstance correlation
+        - AppInstance lifecycle authority
+        - adapter/RPC/AppInstance diagnostics in the locked summary
+
+    Required correction:
+        Translate AppInstance wording into Application / ApplicationRun wording
+        where the current model requires it.
+
+    Suggested local replacement pattern:
+        Use Application for durable application identity and ApplicationRun for
+        live runtime execution/lifecycle evidence.
+
+    For example:
+        AppInstance lifecycle evidence
+
+    should become:
+        Application and ApplicationRun lifecycle evidence
+
+    or, where only live lifecycle is meant:
+        ApplicationRun lifecycle evidence
+
+2. The phrase "authority evidence" is dangerous.
+
+    Section 02.5 says diagnostic tooling consumes authority evidence. That phrase
+    can imply that evidence itself is authority, or that tooling can determine
+    authority merely by presenting evidence.
+
+    Current architecture distinguishes:
+
+        - committed-state authority
+        - trace evidence
+        - retained non-authoritative evidence
+        - diagnostic presentation
+
+    Required correction:
+        Replace "authority evidence" with wording such as:
+
+            Diagnostic tooling consumes trace evidence, retained system evidence,
+            and authorized read-only views of relevant authoritative state where
+            such access is available. It does not become authority by presenting
+            that material.
+
+    Keep the important point, but do not create a new "authority evidence" class.
+
+3. Trace queryability is slightly overpromised.
+
+    Section 06.2 says trace evidence remains queryable later through structured
+    access. Section 06.3 correctly says trace persistence is policy-driven and
+    best-effort under DA-03.
+
+    These should be aligned. Only retained trace evidence remains queryable.
+    Lost, pruned, dropped, corrupt, or unexported trace evidence is not queryable
+    merely because ODA-B tooling wants it.
+
+    Required correction:
+        Replace the absolute queryability statement with:
+
+            Retained trace evidence remains queryable later through structured
+            access where the retention policy preserved it.
+
+        Keep the incompleteness rule that tooling surfaces missing evidence
+        explicitly and does not guess.
+
+4. "Every meaningful decision should be traceable" needs DA-03 wording discipline.
+
+    Section 03.2 says every meaningful decision should be traceable,
+    attributable, and reproducible where evidence permits. That is directionally
+    right for ODA-B, but the wording should avoid implying guaranteed trace
+    persistence or guaranteed reproducibility.
+
+    Required correction:
+        Make the statement an emission/tooling expectation, not a persistence
+        guarantee.
+
+    Suggested wording:
+        Meaningful decisions should emit or retain enough structured evidence to
+        be traceable and attributable where the relevant owning domain and trace
+        retention policy support that evidence. Reproducibility is claimed only
+        where the retained evidence and owning workflow semantics support it.
+
+5. The OPEN replay/post-mortem section risks colliding with DA-26 Replay.
+
+    Section 15 says future tooling may support replaying activation with the same
+    inputs. DA-26 owns Replay as a specific workflow claim over retained
+    SafePointWindow-derived artifacts. Replay restores retained committed state
+    and causal story; it does not re-run external effects. Resume and Retry are
+    new work.
+
+    ODA-B should not introduce a second unqualified "replay" concept for
+    activation diagnostics.
+
+    Required correction:
+        Rename or qualify this section so it does not imply DA-26 Replay.
+
+    Suggested wording:
+        Future tooling may support diagnostic re-run, simulation, comparison, or
+        post-mortem inspection of activation using retained inputs and evidence.
+        Such tooling is not DA-26 Replay unless it satisfies DA-26's Replay
+        semantics, and it does not imply deterministic restoration, resumed work,
+        re-run external effects, or authority over activation outcomes.
+
+6. Snapshot wording needs ApplicationRun and authority-boundary tightening.
+
+    Section 14 says optional tooling may snapshot memory layers and AppInstance
+    identity/lifecycle evidence. The section does correctly say snapshots do not
+    create new authority semantics and distinguish authoritative state from
+    non-authoritative evidence.
+
+    Required correction:
+        Translate AppInstance to Application/ApplicationRun.
+        Clarify that snapshots may include read-only diagnostic views or retained
+        evidence of Memory, transactions, ApplicationRun, View, adapter, and RPC
+        state, but snapshot packaging does not turn staged or diagnostic material
+        into committed authority.
+
+7. Error levels should not define correctness categories owned elsewhere.
+
+    Section 13 says ERROR means correctness was violated or a blocking failure
+    occurred. This is mostly useful, but ODA-B is optional tooling and should not
+    become the owner of domain correctness classification.
+
+    Required correction:
+        Say ODA-B tooling may surface ERROR for a blocking failure, an
+        owning-domain-classified correctness violation, or a diagnostic condition
+        mapped from owning-domain evidence. ODA-B does not define the underlying
+        correctness violation by labeling it ERROR.
+
+==============================================================================
+OBSOLETE-PRESERVATION RISKS
+==============================================================================
+
+The main obsolete-preservation risk is AppInstance terminology.
+
+Do not preserve AppInstance as the current primary identity term merely because
+older source documents used it. Translate into the current platform model:
+
+    Application
+        durable application individual
+
+    ApplicationRun
+        one live execution period of that Application
+
+    SaveBundle
+        durable persistence closure of the Application
+
+For ODA-B, most diagnostic wording should use one of:
+
+    - Application lifecycle evidence, when durable identity or continuity is meant
+    - ApplicationRun lifecycle evidence, when live runtime execution is meant
+    - Application/ApplicationRun correlation, when both identity layers matter
+    - SaveBundle evidence, when retained persistence closure or saved generations
+      are involved
+
+Do not keep AppInstance as a compatibility/history note inside final ODA-B unless
+the user explicitly wants historical or migration material.
+
+==============================================================================
+PROCESS-METADATA LEAKAGE RISKS
+==============================================================================
+
+No major final-document process leakage was found.
+
+The target document does not appear to mention Codex, rewrite history, candidate
+status, or old/new design as ordinary architecture.
+
+The LOCKED / OPTIONAL / OPEN status markers are acceptable design-status markers
+if retained. They should not be used to lock stale terminology, duplicate DA-03,
+or redefine DA-26 workflow names.
+
+==============================================================================
+REQUIRED FIXES
+==============================================================================
+
+Fix 1: Replace stale AppInstance wording.
+
+    Replace diagnostic references to AppInstance with Application and/or
+    ApplicationRun according to meaning.
+
+    Examples:
+
+        AppInstance lifecycle semantics
+
+    should become:
+
+        Application and ApplicationRun lifecycle semantics
+
+    or:
+
+        ApplicationRun lifecycle semantics
+
+    depending on whether durable identity or live runtime execution is meant.
+
+    Replace:
+
+        AppInstanceActiveSpan
+
+    with a current equivalent such as:
+
+        ApplicationRun span
+
+    unless a later trace schema defines a different exact name.
+
+Fix 2: Remove "authority evidence" as a phrase.
+
+    Replace:
+
+        Diagnostic tooling consumes authority evidence.
+
+    With:
+
+        Diagnostic tooling consumes trace evidence, retained system evidence,
+        and authorized read-only views of relevant authoritative state where such
+        access is available. It does not become authority by presenting that
+        material.
+
+Fix 3: Qualify trace queryability.
+
+    Replace:
+
+        Trace evidence remains queryable later through structured access.
+
+    With:
+
+        Retained trace evidence remains queryable later through structured
+        access where the relevant retention policy preserved it.
+
+Fix 4: Convert traceability wording into DA-03-compatible wording.
+
+    Replace any absolute implication that every meaningful decision is always
+    traceable with an emission/retention-aware statement:
+
+        Meaningful decisions should emit or retain enough structured evidence to
+        be traceable and attributable where the owning domain and trace retention
+        policy support that evidence.
+
+    Keep the current rule that missing evidence is not evidence of absence.
+
+Fix 5: Rename or qualify the replay/post-mortem section.
+
+    Replace:
+
+        REPLAY AND POST-MORTEM
+
+    With one of:
+
+        DIAGNOSTIC RE-RUN AND POST-MORTEM
+        POST-MORTEM INSPECTION AND DIAGNOSTIC RE-RUN
+
+    Add a stop-line:
+
+        This is not DA-26 Replay unless the workflow satisfies DA-26 Replay
+        semantics. Diagnostic re-run or simulation is new work and does not
+        re-run external effects as part of deterministic Replay.
+
+Fix 6: Tighten snapshot authority wording.
+
+    Add or preserve:
+
+        Snapshot packaging does not make staged, diagnostic, exported, retained,
+        or presentation material authoritative. Authoritative state remains
+        authoritative only through the owning state/commit model.
+
+    Translate snapshot targets into current terms:
+
+        Application identity and ApplicationRun lifecycle evidence
+
+    rather than:
+
+        AppInstance identity and lifecycle evidence
+
+Fix 7: Make diagnostic levels presentation classifications.
+
+    Add a compact boundary:
+
+        ODA-B diagnostic levels classify how tooling presents evidence. They do
+        not define the underlying domain outcome, authority violation, Job
+        result, adapter failure, RPC failure, or committed-state correctness.
+
+==============================================================================
+SUGGESTED REWRITE STRUCTURE
+==============================================================================
+
+The current structure can remain. Only local edits are required.
+
+Suggested section-level edits:
+
+    01. Interpretation Basis
+        Keep.
+
+    02. Core Problem
+        Replace "authority evidence".
+
+    03. Observability Principle
+        Keep, but qualify traceability and reproducibility through retained
+        evidence and owning-domain semantics.
+
+    04. Trace System Foundation
+        Keep. Preserve DA-03 ownership boundary.
+
+    05. Trace Domains
+        Translate AppInstance lifecycle to Application/ApplicationRun lifecycle.
+
+    06. Trace Visibility
+        Replace absolute later queryability with retained-evidence queryability.
+
+    07. Trace Viewer
+        Translate AppInstance outcomes to Application/ApplicationRun outcomes.
+        Preserve no-fabrication rules.
+
+    08. Pack Resolution Explanations
+        Keep. Preserve DA-11 ownership of resolution semantics.
+
+    09. Capability Usage Reporting
+        Translate AppInstanceActiveSpan to ApplicationRun span or other current
+        trace-schema-neutral wording.
+
+    10. Activation Order Diagnostics
+        Keep. Preserve DA-14/P01 activation-boundary wording.
+
+    11. Runtime Safety Warnings
+        Keep. Optionally update "timers not owned by the kernel" to current
+        timer ownership wording if a later timer document has more specific
+        terminology. Do not make warnings correctness errors unless owning
+        documents classify them as such.
+
+    12. Development-Mode Behavior
+        Keep. Preserve that diagnostics mode does not change runtime semantics.
+
+    13. Error, Warning, and Info Levels
+        Keep presentation levels, but add the boundary that levels do not define
+        underlying domain outcomes.
+
+    14. State Snapshots
+        Translate AppInstance to Application/ApplicationRun.
+        Tighten snapshot authority wording.
+
+    15. Replay and Post-Mortem
+        Rename or qualify as diagnostic re-run/post-mortem to avoid DA-26 Replay
+        confusion.
+
+    16. What This Area Does Not Do
+        Translate AppInstance lifecycle authority to Application/ApplicationRun
+        lifecycle authority.
+
+    17. Locked Summary
+        Translate AppInstance diagnostics to Application/ApplicationRun
+        diagnostics and preserve DA-03/authority stop-lines.
+
+==============================================================================
+ACCEPTANCE CONDITIONS FOR THE FINAL ODA-B REWRITE
+==============================================================================
+
+The final rewritten ODA-B is acceptable when:
+
+    - it no longer uses AppInstance as the current primary runtime identity term
+    - it uses Application and ApplicationRun according to the current platform
+      model
+    - it does not introduce an "authority evidence" category
+    - it treats trace evidence as evidence, not committed state or authority
+    - it says only retained trace evidence is later queryable
+    - it preserves the distinction between missing evidence and evidence of
+      absence
+    - it preserves DA-03 ownership of trace schemas, reasons, retention, pruning,
+      and trace loss semantics
+    - it preserves DA-11 ownership of resolution semantics and DA-14/P01 ownership
+      of activation semantics
+    - it does not let diagnostic levels define underlying domain outcomes
+    - it does not turn snapshots into authority
+    - it does not use unqualified "Replay" in a way that collides with DA-26
+    - it keeps diagnostic re-run/simulation/post-mortem tooling optional/open
+    - it does not imply diagnostics, trace viewer UI, reports, or snapshots grant
+      adapter, RPC, capability, persistence, Kernel, or committed-state authority
+    - it contains no rewrite/history/Codex/process framing as final architecture
+      text
+
+==============================================================================
+FINAL EDITOR INSTRUCTION
+==============================================================================
+
+Keep ODA-B. Apply a terminology and boundary cleanup pass rather than a full
+rewrite. The document's architecture is useful and mostly well-scoped. The main
+tasks are to translate AppInstance-era wording into Application/ApplicationRun,
+remove the dangerous "authority evidence" phrase, make trace queryability depend
+on retained evidence, and prevent the open replay/post-mortem section from
+colliding with DA-26 Replay semantics.
+
+==============================================================================
+END OF AUDIT RESULT - ODA-B
+==============================================================================
+
+--- doc-meta ---
+DOC_ID: AUDIT-ODA-B
+DOC_FILE: docs/design/rewrite_recommendations/AUDIT-ODA-B_RESULT.txt
+DOC_REV: 1
+DOC_GIT: temp
+----------------
