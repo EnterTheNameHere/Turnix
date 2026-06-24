@@ -10,42 +10,47 @@ EVOLVING
 Description:
 ------------
 Defines the architectural relationship between Turnix platform truth,
-platform core, RuntimeHost boundaries, adapters, interoperability envelopes,
-and replaceable implementation layers.
+platform core, Kernel authority, RuntimeHost boundaries, adapters,
+interoperability envelopes, official tooling, and replaceable implementation
+layers.
 
 Purpose:
 --------
-This document defines how Turnix remains one platform even when its current
-implementation stack, host-language realizations, RuntimeHost realization,
-execution adapters, transports, or first-party modular components change over
-time.
+This document defines how Turnix remains one platform when implementation
+languages, RuntimeHost realizations, ExecutionAdapter strategies, transports,
+official tooling, storage mechanisms, or first-party modular components change
+over time.
 
 It defines:
 - platform identity and architectural scope
 - platform core and guarantee source
 - contract boundaries
-- first-party modularity
+- first-party modularity and official tooling boundaries
 - RuntimeHost boundary position
 - adapter boundaries and host-language realization
-- execution adapter authority boundaries
+- service, capability, and ModCallContext boundary rules
 - interoperability envelope role
 - implementation independence and replaceability
+- compact ownership stop-lines for neighboring domains
 
 It does NOT define:
 - concrete RPC schemas
 - concrete transport protocols
 - concrete frontend rendering rules
 - concrete language adapter internals
-- pack loading or activation mechanics in detail
+- concrete pack loading or activation mechanics
 - concrete execution adapter protocols
 - payload identity, ValueRef, Chunk, or storage representation details
 - configuration schemas, migrations, or file layouts
 - persistent I/O provider, Reader, Writer, or backup mechanics
 - UI, View, frontend runtime, debugger, or breakpoint mechanics
-- Window artifact, export, comparison, Replay, Resume, Retry, or audit
-  workflow mechanics
+- Window artifact, export, comparison, Replay, Resume, Retry, or retained-
+  evidence workflow mechanics
 - concrete RuntimeHost commands, workspace ownership mechanics, or entry-
   surface implementation details
+- detailed Application, ApplicationRun, AppDefinition/AppPack, or SaveBundle
+  lifecycle semantics
+- detailed ModCallContext facade semantics
 
 Upstream Documents:
 ------------------
@@ -79,53 +84,71 @@ Upstream Documents:
 ===============================================================================
 
 02.1. Turnix platform truth is defined by contracts, guarantees,
-      orchestration semantics, and continuity behavior rather than by any
-      specific implementation language, framework, or current runtime
-      stack.
+      orchestration semantics, authority boundaries, and continuity behavior.
 
-02.2. The current implementation stack is a realization of Turnix rather
+02.2. Turnix platform truth is not defined by any specific implementation
+      language, framework, transport, current runtime stack, or process shape.
+
+02.3. The current implementation stack is a realization of Turnix rather
       than the identity of Turnix.
 
-02.3. Backend language, frontend technology, RuntimeHost realization,
+02.4. Backend language, frontend technology, RuntimeHost realization,
       adapter strategy, transport, or current implementation vehicle do not
       by themselves define what Turnix is.
 
-02.4. Turnix remains one platform even when different technical layers are
+02.5. Turnix remains one platform when different technical layers are
       implemented in different languages.
 
-02.5. Architectural scope in this document includes:
+02.6. Architectural scope in this document includes:
       - platform core
+      - Kernel authority position
       - contract boundaries
       - first-party modular components
+      - official tooling boundaries
       - RuntimeHost boundary position
       - host-language adapters
-      - execution adapters
+      - ExecutionAdapters
+      - services and capabilities at a high level
+      - ModCallContext at a high level
       - interoperability envelopes
 
-02.6. Architectural scope in this document excludes concrete schema,
+02.7. Architectural scope in this document excludes concrete schema,
       adapter-protocol, RuntimeHost command, workspace ownership, entry-
       surface, transport, payload, configuration, persistent I/O, UI,
       debugger, artifact, export, comparison, Replay, Resume, Retry, and
-      audit workflow details. Those details belong in later DA or IS
-      documents.
+      retained-evidence workflow details.
 
-02.7. Runtime authority follows the project-level ordering defined by
-      DA-01:
-      - Kernel owns authority
-      - RuntimeHost exposes controlled entry surfaces
-      - adapters execute declared pack code
-      - transports carry messages
-      - RPC defines the logical communication boundary
-      - capabilities define what code may do
-      - Memory and Transaction own committed state
-      - ApplicationRun binds live runtime identity
-      - durable save persistence stores accepted Application state
+02.8. Runtime authority follows this high-level ordering:
+      - Kernel owns runtime authority.
+      - RuntimeHost exposes controlled entry and command surfaces.
+      - ExecutionAdapters run adapter-mediated Pack code.
+      - Transports carry messages.
+      - RPC defines the logical communication boundary.
+      - Services provide runtime wiring objects.
+      - Capabilities define mediated operation interfaces.
+      - OrchestrationUnits coordinate mutation authority.
+      - Transactions stage mutation before commit.
+      - Committed-state domains own authoritative committed state.
+      - Application identifies one durable application individual.
+      - ApplicationRun binds one live runtime execution period.
+      - Durable save persistence stores accepted Application state and
+        associated persistence material.
 
-02.8. This ordering is architectural and survives implementation
+02.9. This ordering is architectural and survives implementation
       replacement.
 
-02.9. RuntimeHost is a running host boundary in this ordering, not the
-      Kernel authority owner.
+02.10. RuntimeHost is a running host boundary in this ordering.
+
+02.11. RuntimeHost is not the Kernel authority owner.
+
+02.12. Reusable AppDefinition/AppPack material may define or contribute to
+       Application and ApplicationRun creation where the owning creation model
+       says so.
+
+02.13. AppDefinition/AppPack material is not Turnix platform identity.
+
+02.14. This document does not decide every possible ApplicationRun backing
+       form.
 
 
 ===============================================================================
@@ -137,6 +160,7 @@ Upstream Documents:
 03.2. The platform core defines:
       - orchestration semantics
       - boundary semantics
+      - authority semantics
       - continuity expectations
       - contract meaning
       - guarantee meaning
@@ -145,25 +169,37 @@ Upstream Documents:
       of platform truth.
 
 03.4. A component belongs to the platform core when its semantics are
-      required to preserve platform truth rather than merely to realize it
-      in one implementation environment.
+      required to preserve platform truth rather than merely to realize it in
+      one implementation environment.
 
-03.5. RuntimeHost realizations, adapters, envelopes, transports, and host-
-      language realizations do not redefine the meaning established by the
-      platform core.
+03.5. RuntimeHost realizations, adapters, envelopes, transports, official
+      tooling, and host-language realizations do not redefine the meaning
+      established by the platform core.
 
 03.6. If platform guarantee meaning changes, the change is architectural
       rather than a mere implementation refactor.
 
 03.7. The Kernel is the runtime authority owner within the runtime
-      architecture defined by later design areas.
+      architecture.
 
-03.8. Kernel authority may be realized by replaceable implementation code,
-      but the authority meaning is platform-semantic rather than accidental
+03.8. Kernel authority may be realized by replaceable implementation code.
+
+03.9. Kernel authority meaning is platform-semantic rather than accidental
       implementation privilege.
 
-03.9. RuntimeHost may expose, bind, or host controlled entry surfaces, but
-      RuntimeHost realization does not replace Kernel authority.
+03.10. RuntimeHost may expose, bind, or host controlled entry surfaces.
+
+03.11. RuntimeHost realization does not replace Kernel authority.
+
+03.12. The platform core is not equivalent to:
+       - one package
+       - one process
+       - one module
+       - one language
+       - one service object
+       - one RuntimeHost realization
+       - all first-party tooling
+       - all official implementation code
 
 
 ===============================================================================
@@ -175,36 +211,49 @@ Upstream Documents:
 
 04.2. A contract boundary defines:
       - what a component may rely on
-      - what a component must provide
+      - what a component provides
       - what meanings remain stable across implementations
       - what outcomes are guaranteed or not guaranteed
+      - which authority boundary remains preserved
 
-04.3. Contract meaning remains primary. Internal realization remains
-      secondary.
+04.3. Contract meaning remains primary.
 
-04.4. If an implementation change preserves contract meaning, platform
-      truth remains preserved.
+04.4. Internal realization remains secondary.
 
-04.5. If an implementation change alters contract meaning, guarantee
-      behavior, or boundary truth, the change is a platform-semantic
-      change rather than a mere implementation substitution.
+04.5. If an implementation change preserves contract meaning, platform truth
+      remains preserved.
 
-04.6. Contract boundaries are part of platform architecture. They are not
-      decorative documentation.
+04.6. If an implementation change alters contract meaning, guarantee
+      behavior, or boundary truth, the change is a platform-semantic change
+      rather than a mere implementation substitution.
 
-04.7. Same-language or same-process implementation does not erase a
-      contract boundary.
+04.7. Contract boundaries are part of platform architecture.
 
-04.8. In-process calls may realize a boundary only when they preserve the
-      same contract meaning that an explicit boundary would have provided.
+04.8. Contract boundaries are not decorative documentation.
 
-04.9. RuntimeHost entry-surface, command-surface, and workspace ownership
-      boundaries remain contract boundaries even when realized inside the
-      same process or host-language runtime.
+04.9. Same-language implementation does not erase a contract boundary.
+
+04.10. Same-process implementation does not erase a contract boundary.
+
+04.11. Same-runtime implementation does not erase a contract boundary.
+
+04.12. In-process calls may realize a boundary only when they preserve the
+       same contract meaning that an explicit boundary would have provided.
+
+04.13. Direct-call optimization may optimize dispatch mechanics.
+
+04.14. Direct-call optimization does not bypass authority, permission,
+       lifecycle, trace, structured error, capability, transaction, commit,
+       Application, ApplicationRun, SaveBundle, RuntimeHost, or
+       OrchestrationUnit boundaries.
+
+04.15. RuntimeHost entry-surface, command-surface, and workspace ownership
+       boundaries remain contract boundaries even when realized inside the
+       same process or host-language runtime.
 
 
 ===============================================================================
-05. FIRST-PARTY MODULARITY
+05. FIRST-PARTY MODULARITY AND OFFICIAL TOOLING
 ===============================================================================
 
 05.1. Modularity in Turnix applies to creator-provided extensions and to
@@ -217,6 +266,9 @@ Upstream Documents:
       - LLM-facing components
       - adapters
       - RuntimeHost-facing tools or surfaces
+      - PackManager surfaces
+      - debugger surfaces
+      - export or comparison tools
       - other platform-realized subsystems
 
 05.3. Modularity does not remove the existence of a platform core.
@@ -225,17 +277,35 @@ Upstream Documents:
       remaining constrained by platform contracts and guarantees.
 
 05.5. First-party modularity is acceptable only when contract truth,
-      orchestration semantics, and boundary discipline remain preserved.
+      orchestration semantics, authority boundaries, and boundary discipline
+      remain preserved.
 
 05.6. Replaceable first-party realization does not imply replaceable
       platform meaning.
 
-05.7. A first-party module that executes pack code remains constrained by
+05.7. A first-party module that executes Pack code remains constrained by
       execution-boundary semantics rather than by implementation proximity.
 
 05.8. A first-party module that exposes RuntimeHost control remains
       constrained by RuntimeHost boundary semantics rather than by
       implementation proximity.
+
+05.9. Official tooling may inspect, list, explain, prepare graph intent,
+      present risks, request decisions, expose Views, expose commands, expose
+      capabilities, create artifacts, compare retained material, or request
+      retained-evidence workflows.
+
+05.10. Official tooling does not become Kernel authority merely because it is
+       official.
+
+05.11. Official tooling does not become RuntimeHost authority merely because
+       it is official.
+
+05.12. Official tooling does not become discovery authority, resolver, loader,
+       activator, persistence authority, View authority, debugger authority,
+       artifact authority, policy owner, Application lifecycle owner,
+       ApplicationRun lifecycle owner, SaveBundle authority, committed-state
+       authority, or Turnix identity merely because it is official.
 
 
 ===============================================================================
@@ -249,6 +319,7 @@ Upstream Documents:
       - platform meaning
       - contract truth
       - boundary semantics
+      - authority boundaries
       - guarantee expectations
 
 06.3. A host-language adapter may adapt syntax, calling style, or surface
@@ -262,171 +333,360 @@ Upstream Documents:
       guarantee, the limitation is made explicit rather than hidden behind
       host-language convenience.
 
-06.6. Host-language convenience does not take precedence over contract
-      truth or boundary truth.
+06.6. Host-language convenience does not take precedence over contract truth
+      or boundary truth.
 
 06.7. Creator-facing cross-language coherence is constrained further by
       Design Doctrine documents that define language-facing doctrine.
 
 06.8. Same host language does not imply same authority.
 
-06.9. Pack-provided code is not platform core implementation code merely
-      because it is written in the same language as the platform core.
+06.9. Same operating-system process does not imply same authority.
 
-06.10. Execution adapter semantics are defined by DA-23.
+06.10. Pack-provided code is not platform core implementation code merely
+       because it is written in the same language as the platform core.
 
-06.11. RuntimeHost semantics are defined by DA-28.
+06.11. ExecutionAdapter is the general adapter category for external or
+       adapter-mediated code execution.
 
-06.12. Host-language adaptation does not bypass execution adapter,
-       activation, capability, persistence, ApplicationRun, RuntimeHost,
-       workspace ownership, or command-surface boundaries.
+06.12. ExecutionAdapter semantics are defined outside this document.
+
+06.13. RuntimeHost semantics are defined outside this document.
+
+06.14. Host-language adaptation does not bypass ExecutionAdapter,
+       activation, capability, persistence, Application, ApplicationRun,
+       SaveBundle, RuntimeHost, workspace ownership, or command-surface
+       boundaries.
+
+06.15. Pack code interacts with Turnix through supported mediated surfaces.
+
+06.16. Direct access from Pack code to trusted Turnix backend internals is not
+       a supported Turnix contract.
+
+06.17. Physical possibility in a host language does not create a Turnix
+       guarantee.
+
+06.18. Physical possibility in a host language does not grant Kernel
+       authority.
 
 
 ===============================================================================
-07. INTEROPERABILITY ENVELOPE ROLE
+07. SERVICES, CAPABILITIES, AND MODCALLCONTEXT BOUNDARIES
 ===============================================================================
 
-07.1. Turnix requires interoperability mechanisms for communication across
+07.1. Services are runtime wiring objects.
+
+07.2. A Service does not become capability permission.
+
+07.3. A Service does not become execution authorization.
+
+07.4. A Service does not become Kernel authority.
+
+07.5. Capabilities are named, versioned, permissioned, Turnix-mediated
+      operation interfaces.
+
+07.6. Capability permission does not become execution authorization.
+
+07.7. Capability invocation does not automatically create a Job.
+
+07.8. Job-backed capability execution remains capability-mediated.
+
+07.9. Same process, same runtime, same language, or direct-call optimization
+      does not bypass capability mediation.
+
+07.10. ModCallContext is scoped Pack participation in Turnix.
+
+07.11. ModCallContext is not unrestricted backend internals access.
+
+07.12. ModCallContext does not expose filesystem authority by default.
+
+07.13. ModCallContext does not expose committed-state mutation except through
+       mediated state and transaction surfaces.
+
+07.14. ModCallContext does not grant capability invocation unless the
+       capability boundary permits the invocation.
+
+07.15. ModCallContext does not grant RuntimeHost control authority.
+
+07.16. ModCallContext does not grant Kernel authority.
+
+07.17. Detailed Service, Capability, Permission, and ModCallContext semantics
+       belong to their owning design areas.
+
+
+===============================================================================
+08. INTEROPERABILITY ENVELOPE, RPC, AND TRANSPORT
+===============================================================================
+
+08.1. Turnix requires interoperability mechanisms for communication across
       execution domains, host-language boundaries, adapter boundaries,
       RuntimeHost entry-surface boundaries, or architectural layers.
 
-07.2. An interoperability envelope carries structured interaction across
-      such boundaries.
+08.2. An interoperability envelope carries structured interaction across such
+      boundaries.
 
-07.3. The interoperability envelope exists to preserve:
+08.3. The interoperability envelope exists to preserve:
       - boundary clarity
       - request and response meaning
       - tracing and observability
       - permission and capability semantics
       - continuity-safe interaction
+      - structured result and error handling
 
-07.4. The interoperability envelope is an architectural boundary rather
-      than incidental transport plumbing.
+08.4. The interoperability envelope is an architectural boundary rather than
+      incidental transport plumbing.
 
-07.5. RPC is the design-area realization of the logical communication
-      boundary in the current runtime architecture.
+08.5. RPC is the logical communication boundary in the runtime architecture.
 
-07.6. Transport is the concrete carrier of messages and does not define the
-      authority meaning of the envelope.
+08.6. Transport is the concrete carrier of messages.
 
-07.7. RuntimeHost command-surface messages may use interoperability
-      envelopes, but the envelope does not define RuntimeHost authority.
+08.7. Transport does not define the authority meaning of the envelope.
 
-07.8. Concrete message schemas, transport protocols, and wire details are
-      not defined in this document.
+08.8. RuntimeHost command-surface messages may use interoperability
+      envelopes.
 
-07.9. Later DA and IS documents may define those concrete details, but the
-      architectural role of the envelope remains constrained by this
-      design area.
+08.9. The envelope does not define RuntimeHost authority.
+
+08.10. A transport acknowledgement does not prove Job creation.
+
+08.11. Request acceptance does not prove handler completion.
+
+08.12. Handler execution does not prove adapter execution success unless the
+       owning execution boundary reports that outcome.
+
+08.13. RuntimeHost operation acceptance does not prove final work outcome.
+
+08.14. Job creation, Job lifecycle, handler execution, adapter execution,
+       RuntimeHost operation, and final work outcome remain distinct.
+
+08.15. Concrete message schemas, transport protocols, and wire details are not
+       defined in this document.
 
 
 ===============================================================================
-08. IMPLEMENTATION INDEPENDENCE AND REPLACEABILITY
+09. IMPLEMENTATION INDEPENDENCE AND REPLACEABILITY
 ===============================================================================
 
-08.1. Current implementation choices are pragmatic and may change.
+09.1. Implementation choices are pragmatic and may change.
 
-08.2. Turnix platform truth remains valid across implementation
-      replacement when platform contracts and guarantees remain preserved.
+09.2. Turnix platform truth remains valid across implementation replacement
+      when platform contracts and guarantees remain preserved.
 
-08.3. Backend replacement does not change Turnix identity when platform
+09.3. Backend replacement does not change Turnix identity when platform
       contracts and guarantees remain preserved.
 
-08.4. Frontend replacement does not change Turnix identity when creator-
-      facing contract meaning and platform guarantees remain preserved.
+09.4. Frontend replacement does not change Turnix identity when creator-facing
+      contract meaning and platform guarantees remain preserved.
 
-08.5. RuntimeHost realization replacement does not change Turnix identity
+09.5. RuntimeHost realization replacement does not change Turnix identity
       when workspace ownership, entry-surface, command-surface, lifecycle,
       trace, and authority boundary semantics remain preserved.
 
-08.6. Adapter replacement does not change Turnix identity when boundary
+09.6. Adapter replacement does not change Turnix identity when boundary
       semantics and contract truth remain preserved.
 
-08.7. Transport replacement does not change Turnix identity when logical
+09.7. Transport replacement does not change Turnix identity when logical
       boundary semantics and contract truth remain preserved.
 
-08.8. Payload storage, configuration layout, persistent I/O backend,
-      frontend runtime, debugger surface, artifact format, export format,
-      comparison tool, Replay tool, Resume tool, Retry tool, audit tool, or
-      first-party management tool replacement does not change Turnix identity
-      when the owning contracts and guarantees remain preserved.
+09.8. Payload storage replacement does not change Turnix identity when owning
+      representation contracts remain preserved.
 
-08.9. A replaceable implementation layer does not by itself possess
-      authority to redefine platform meaning.
+09.9. Configuration layout replacement does not change Turnix identity when
+      owning configuration contracts remain preserved.
 
-08.10. Implementation independence is not an aesthetic goal. It is a
-       consequence of contract primacy and architectural truth.
+09.10. Persistent I/O backend replacement does not change Turnix identity when
+       owning persistence contracts remain preserved.
 
-08.11. If platform truth does not survive implementation replacement, the
+09.11. Frontend runtime replacement does not change Turnix identity when UI
+       and View contracts remain preserved.
+
+09.12. Debugger surface replacement does not change Turnix identity when
+       debugger contracts remain preserved.
+
+09.13. Artifact format or export format replacement does not change Turnix
+       identity when owning artifact and export contracts remain preserved.
+
+09.14. Comparison, Replay, Resume, Retry, or retained-evidence tooling
+       replacement does not change Turnix identity when owning workflow
+       contracts remain preserved.
+
+09.15. First-party management tooling replacement does not change Turnix
+       identity when owning contracts remain preserved.
+
+09.16. A replaceable implementation layer does not by itself possess authority
+       to redefine platform meaning.
+
+09.17. Implementation independence is not an aesthetic goal.
+
+09.18. Implementation independence is a consequence of contract primacy and
+       architectural truth.
+
+09.19. If platform truth does not survive implementation replacement, the
        architecture relied too heavily on implementation accident.
 
 
 ===============================================================================
-09. EXPLICIT EXCLUSIONS AND NON-GOALS
+10. OWNERSHIP STOP-LINES FOR NEIGHBORING DOMAINS
 ===============================================================================
 
-09.1. This design area does not treat the current backend language as the
+10.1. DA-02 may name neighboring domains to protect implementation
+      independence.
+
+10.2. DA-02 does not define detailed behavior for neighboring domains.
+
+10.3. DA-03 owns trace substrate, retention, loss, trace event structure, and
+      span semantics.
+
+10.4. DA-04 owns committed-state truth, transactions, and commit boundaries.
+
+10.5. DA-05 owns payload identity, Chunk, ChunkId, ValueRef, decode,
+      integrity, and retained-root reachability.
+
+10.6. DA-06 owns configuration, schema, materialization, migration, and
+      policy storage placement.
+
+10.7. DA-07 owns IoManager, persistent-I/O authority, Reader and Writer
+      providers, root boundaries, and persistence safety.
+
+10.8. DA-08 owns Window, SafePointWindow, ActiveWindow, AbortedWindow, and
+      finalized runtime history semantics.
+
+10.9. DA-09 owns root and discovery semantics.
+
+10.10. Discovery is candidate production.
+
+10.11. Discovery is not resolution, activation, import, runtime loading, or
+       runtime identity.
+
+10.12. DA-10 owns pack identity, hierarchy, and visibility semantics.
+
+10.13. DA-11 owns generic resolution semantics.
+
+10.14. DA-12 owns importing, module loading, and code-boundary semantics.
+
+10.15. DA-13 owns dependency, requirement, and dependency-graph semantics.
+
+10.16. DA-14 owns activation lifecycle and execution guarantees.
+
+10.17. DA-16 owns Services, Capabilities, and Permissions.
+
+10.18. DA-17 owns user decision and remembered policy semantics.
+
+10.19. DA-18 owns debugger, inspection, breakpoint, manual-pause,
+       safe-point, and debugger mutation semantics.
+
+10.20. DA-19 owns Job lifecycle, timeout, cancellation, progress, result, and
+       terminal outcome semantics.
+
+10.21. DA-20 owns Application and ApplicationRun lifecycle and runtime
+       identity semantics.
+
+10.22. DA-21 owns RPC, channel, and transport semantics.
+
+10.23. DA-22 owns UI, View, frontend runtime, and frontend presentation
+       semantics.
+
+10.24. DA-23 and DA-27 own ExecutionAdapter boundaries, same-language
+       execution, same-process execution, direct-call optimization, adapter
+       lifecycle, trust, and isolation semantics.
+
+10.25. DA-24 owns OrchestrationUnit mutation-authority semantics.
+
+10.26. DA-25 owns Window artifact, WindowExport, retained-evidence bundle,
+       optional digest, and offline-inspection artifact semantics.
+
+10.27. DA-26 owns comparison, ComparisonResult, Replay, Resume, Retry, and
+       retained-evidence workflow semantics.
+
+10.28. DA-28 owns RuntimeHost, workspace ownership, startup mode, command
+       surface, local-first, and LAN exposure semantics.
+
+10.29. DA-29 owns PackManager semantics.
+
+10.30. DA-30 owns ModCallContext facade semantics where Pack invocation
+       context is in scope.
+
+
+===============================================================================
+11. EXPLICIT EXCLUSIONS AND NON-GOALS
+===============================================================================
+
+11.1. This design area does not treat the current backend language as the
       identity of Turnix.
 
-09.2. This design area does not treat the current frontend stack as the
+11.2. This design area does not treat the current frontend stack as the
       identity of Turnix.
 
-09.3. This design area does not treat native host-language convention as
+11.3. This design area does not treat native host-language convention as
       superior to Turnix contracts or guarantees.
 
-09.4. This design area does not treat interoperability envelopes as mere
+11.4. This design area does not treat interoperability envelopes as mere
       incidental wiring.
 
-09.5. This design area does not treat modularity as permission to weaken
+11.5. This design area does not treat modularity as permission to weaken
       platform guarantees or boundary discipline.
 
-09.6. This design area does not define exact loader, adapter, protocol,
+11.6. This design area does not define exact loader, adapter, protocol,
       RuntimeHost, workspace ownership, command-surface, or transport
       mechanics.
 
-09.7. This design area does not treat FastAPI, WebSocket, browser
-      JavaScript, Python, CLI, subprocesses, containers, network topology,
-      launcher surfaces, or LAN clients as platform identity.
+11.7. This design area does not treat FastAPI, WebSocket, browser JavaScript,
+      Python, CLI, subprocesses, containers, network topology, launcher
+      surfaces, or LAN clients as platform identity.
 
-09.8. This design area does not treat direct calls as authority-valid merely
+11.8. This design area does not treat direct calls as authority-valid merely
       because they are convenient.
 
-09.9. This design area does not treat RuntimeHost realization as Kernel
+11.9. This design area does not treat RuntimeHost realization as Kernel
       authority by itself.
 
-09.10. This design area does not treat AppPack, Application, or
+11.10. This design area does not treat AppDefinition/AppPack, Application, or
        ApplicationRun identity as platform identity by itself.
 
-09.11. This design area does not decide whether every ApplicationRun is
-       necessarily AppPack-backed. Runtime identity creation rules belong to
-       DA-20 and later runtime-creation specifications.
+11.11. This design area does not decide whether every ApplicationRun is
+       necessarily AppDefinition/AppPack-backed.
 
-09.12. This design area does not define payload representation,
+11.12. Runtime identity creation rules belong to the owning lifecycle and
+       runtime-creation specifications.
+
+11.13. This design area does not define SaveBundle persistence closure
+       semantics.
+
+11.14. This design area does not define payload representation,
        configuration layout, persistent I/O provider behavior, UI rendering,
        debugger behavior, artifact packaging, export behavior, comparison,
-       Replay, Resume, Retry, or audit workflows.
+       Replay, Resume, Retry, or retained-evidence workflows.
+
+11.15. This design area does not define detailed PackManager, discovery,
+       resolution, importing, activation, service, capability, Job,
+       OrchestrationUnit, ExecutionAdapter, RuntimeHost, UI, View, debugger,
+       Application, ApplicationRun, AppDefinition/AppPack, or SaveBundle
+       mechanics.
 
 
 ===============================================================================
-10. WHY THIS AREA EXISTS
+12. WHY THIS AREA EXISTS
 ===============================================================================
 
-10.1. This area exists to prevent Turnix architecture from collapsing into
-      current implementation choices, framework assumptions, or
-      host-language accident.
+12.1. This area exists to prevent Turnix architecture from collapsing into
+      current implementation choices, framework assumptions, host-language
+      accident, or official-tooling convenience.
 
-10.2. Without this area, later specifications risk treating current
-      technical realization as platform identity.
+12.2. Without this area, specifications risk treating current technical
+      realization as platform identity.
 
-10.3. Without this area, later specifications also risk weakening:
+12.3. Without this area, specifications also risk weakening:
       - contract truth
+      - Kernel authority meaning
       - RuntimeHost boundary meaning
       - adapter accountability
+      - service and capability separation
+      - ModCallContext scope
       - interoperability boundary meaning
       - first-party modularity discipline
       - implementation independence
 
-10.4. This document anchors the architectural distinction between platform
+12.4. This document anchors the architectural distinction between platform
       truth and implementation realization.
 
 
@@ -438,6 +698,6 @@ IMPLEMENTATION INDEPENDENCE
 --- doc-meta ---
 DOC_ID: DA-02
 DOC_FILE: docs/design/DA-02_PLATFORM_CORE_CONTRACT_BOUNDARIES_AND_IMPLEMENTATION_INDEPENDENCE.txt
-DOC_REV: 5
-DOC_GIT: 3f819b0
+DOC_REV: 6
+DOC_GIT: 8580ede
 ----------------
