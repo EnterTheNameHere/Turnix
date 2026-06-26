@@ -8,12 +8,13 @@ EVOLVING
 
 Description:
 ------------
-Defines Orchestration Units as kernel-tracked execution-authority units,
+Defines OrchestrationUnits as kernel-tracked execution-authority units,
 their mutation boundary, terminal outcomes, relationship to transactions,
-Jobs, Windows, ApplicationRuns, RPC, capabilities, execution adapters, and
-RuntimeHost operations, and the single-lane ApplicationRun mutation rule.
+Jobs, Windows, ApplicationRuns, RPC, capabilities, execution adapters,
+RuntimeHost operations, PackManager-triggered work, and the single-lane
+ApplicationRun mutation rule.
 
-This document owns Orchestration Unit lifecycle and mutation-authority
+This document owns OrchestrationUnit lifecycle and mutation-authority
 semantics. It consumes the memory, state, and transaction model defined by
 DA-04.
 
@@ -23,39 +24,56 @@ This document defines how Turnix identifies and controls execution that may
 mutate Turnix-managed state.
 
 It defines:
-- Orchestration Unit meaning and identity role
-- mutation authority boundaries for Orchestration Units
-- relationship between Orchestration Units, transactions, and committed
-  state
-- relationship between Orchestration Units and Jobs
-- relationship between Orchestration Units and Windows
-- relationship between Orchestration Units and ApplicationRuns
-- relationship between Orchestration Units, capabilities, RPC, and
-  execution adapters
-- relationship between Orchestration Units and RuntimeHost operations
-- Orchestration Unit terminal outcomes
+- OrchestrationUnit meaning and identity role
+- mutation authority boundaries for OrchestrationUnits
+- relationship between OrchestrationUnits, transactions, and committed state
+- relationship between OrchestrationUnits and Jobs
+- relationship between OrchestrationUnits and Windows
+- relationship between OrchestrationUnits and ApplicationRuns
+- relationship between OrchestrationUnits, capabilities, RPC, and execution
+  adapters
+- relationship between OrchestrationUnits and RuntimeHost operations
+- relationship between OrchestrationUnits and PackManager-triggered work
+- OrchestrationUnit terminal outcomes
 - Superseded outcome semantics
 - deterministic single-lane ApplicationRun mutation orchestration
-- Orchestration Unit trace reason ownership
+- OrchestrationUnit trace reason ownership
 - adapter-executed mutation re-entry boundaries
 - RuntimeHost-operation mutation re-entry boundaries
 
 It does NOT define:
 - memory, state, transaction, or commit mechanics (see DA-04)
-- trace event structure, trace DAG semantics, or span mechanics (see DA-03)
+- committed-value representation, ValueRef, Chunk, ChunkId, payload identity,
+  decode, or integrity semantics (see DA-05)
+- configuration semantics, configuration storage layout, configuration
+  migration, or policy-file placement (see DA-06)
+- persistent-I/O authority, root boundaries, Reader/Writer providers,
+  backup/snapshot behavior, or streaming I/O rules (see DA-07)
+- trace event structure, trace DAG semantics, trace retention, trace loss, or
+  span mechanics (see DA-03)
 - Window finalization semantics (see DA-08)
+- Window artifact, WindowExport, Minimal Audit Bundle, optional digest,
+  partial export, missing-material, or offline inspection semantics
+  (see DA-25)
+- comparison, Replay, Resume, Retry, or audit workflow semantics (see DA-26)
 - service, capability, or permission semantics (see DA-16)
 - user decision and remembered policy semantics (see DA-17)
 - debugger pause, breakpoint, or execution-control behavior (see DA-18)
 - Job lifecycle, Job timeout, Job cancellation, or Job result semantics
   (see DA-19)
-- ApplicationRun lifecycle or runtime identity semantics (see DA-20)
+- Application or ApplicationRun lifecycle or runtime identity semantics
+  (see DA-20)
 - RPC, channel, or transport semantics (see DA-21)
 - UI, View, or frontend runtime semantics (see DA-22)
 - execution adapter boundary semantics (see DA-23)
+- adapter lifecycle, trust, isolation, failure, disconnect, or adapter-domain
+  trace semantics (see DA-27)
 - RuntimeHost identity, workspace ownership, startup modes, entry surfaces,
   command-surface semantics, or RuntimeHost trace reason identifiers
   (see DA-28)
+- PackManager catalog, management, or graph-preparation semantics (see DA-29)
+- SaveBundle storage, retained material, durable Application persistence
+  closure, compatibility, or recovery details
 
 Upstream Documents:
 ------------------
@@ -68,6 +86,9 @@ Upstream Documents:
 - DA-02
 - DA-03
 - DA-04
+- DA-05
+- DA-06
+- DA-07
 - DA-08
 - DA-16
 - DA-17
@@ -76,7 +97,11 @@ Upstream Documents:
 - DA-21
 - DA-22
 - DA-23
+- DA-25
+- DA-26
+- DA-27
 - DA-28
+- DA-29
 
 Downstream Documents:
 --------------------
@@ -89,7 +114,11 @@ Downstream Documents:
 - DA-21
 - DA-22
 - DA-23
+- DA-25
+- DA-26
+- DA-27
 - DA-28
+- DA-29
 - IS-01
 - IS-02
 
@@ -107,8 +136,11 @@ Downstream Documents:
 01.3. The CORE META-RULES documents define the general rule language and
       interpretation model used by this document.
 
-01.4. This document defines Orchestration Unit lifecycle and mutation-
+01.4. This document defines OrchestrationUnit lifecycle and mutation-
       authority semantics within that shared interpretation model.
+
+01.5. This document uses OrchestrationUnit, ApplicationRun, and SaveBundle as
+      canonical architecture type names where those concepts are named.
 
 
 ===============================================================================
@@ -122,14 +154,23 @@ Downstream Documents:
            orchestration, transaction, capability, adapter, RuntimeHost,
            Job, and Window semantics?"
 
-02.2. An Orchestration Unit is a kernel-tracked execution unit that may be
+02.2. An OrchestrationUnit is a kernel-tracked execution unit that may be
       permitted to mutate Turnix-managed state within an ApplicationRun.
 
-02.3. An Orchestration Unit is an execution-authority unit.
+02.3. An OrchestrationUnit is an execution-authority unit.
 
-02.4. Orchestration Unit authority is not general backend authority.
+02.4. OrchestrationUnit authority is scoped authority to own or coordinate a
+      mutation flow.
 
-02.5. Orchestration Unit authority is scoped by:
+02.5. OrchestrationUnit authority is not general backend authority.
+
+02.6. OrchestrationUnit authority is not direct committed-state authority for
+      arbitrary contained code.
+
+02.7. OrchestrationUnit authority does not replace DA-04 transaction and
+      commit boundaries.
+
+02.8. OrchestrationUnit authority is scoped by:
       - ApplicationRun identity
       - capability and permission boundaries when applicable
       - transaction and commit boundaries when mutation occurs
@@ -137,43 +178,47 @@ Downstream Documents:
       - RuntimeHost boundaries when work originates from runtime-host
         operations or command surfaces
       - policy and decision boundaries when applicable
+      - persistent-I/O boundaries when persistence is involved
 
-02.6. Work started outside Turnix orchestration is not an Orchestration Unit
+02.9. Work started outside Turnix orchestration is not an OrchestrationUnit
       until it re-enters through orchestration boundaries.
 
-02.7. Turnix guarantees apply only to work that occurs within Turnix
-      orchestration boundaries or re-enters through them.
+02.10. Turnix guarantees apply only to work that occurs within Turnix
+       orchestration boundaries or re-enters through them.
 
-02.8. Mutation outside orchestration does not acquire Turnix guarantees by
-      implication.
+02.11. Mutation outside orchestration does not acquire Turnix guarantees by
+       implication.
 
-02.9. Same-language or same-process execution does not bypass
-      Orchestration Unit authority rules.
+02.12. Same-language or same-process execution does not bypass
+       OrchestrationUnit authority rules.
 
-02.10. RuntimeHost startup modes, entry surfaces, and command surfaces do
-       not bypass Orchestration Unit authority rules when they perform or
-       may perform mutation-bearing work.
+02.13. RuntimeHost startup modes, entry surfaces, and command surfaces do
+       not bypass OrchestrationUnit authority rules when they perform or may
+       perform mutation-bearing work.
 
-02.11. Later sections of this document refine and apply these rules.
+02.14. PackManager-triggered graph or lifecycle operations do not bypass
+       OrchestrationUnit authority rules when they perform or may perform
+       mutation-bearing work.
+
+02.15. OrchestrationUnit outcome does not define Replay, Resume, Retry,
+       ComparisonResult, artifact/export authority, or audit workflow outcome.
+
+02.16. Payload, configuration, migration, persistent I/O, SaveBundle storage,
+       durable persistence, and recovery implications remain owned by their
+       own documents and domains.
+
+02.17. Later sections of this document refine and apply these rules.
        They do not weaken them.
 
-02.13. An Orchestration Unit owns or coordinates a mutation flow. It does not
-       give arbitrary contained code direct committed-state authority.
-
-02.14. Orchestration Unit outcome does not define Replay, Resume, Retry,
-       ComparisonResult, artifact/export authority, or audit workflow outcome.
-       Payload, configuration, migration, persistent I/O, durable save, and
-       recovery implications remain owned by DA-04, DA-05, DA-06, and DA-07.
-
-
 
 ===============================================================================
-03. ORCHESTRATION UNIT IDENTITY AND SCOPE
+03. ORCHESTRATIONUNIT IDENTITY AND SCOPE
 ===============================================================================
 
-03.1. orchestrationUnitId identifies one Orchestration Unit.
+03.1. orchestrationUnitId identifies one OrchestrationUnit.
 
 03.2. orchestrationUnitId is distinct from:
+      - applicationId
       - applicationRunId
       - jobId
       - transactionId
@@ -181,17 +226,18 @@ Downstream Documents:
       - adapter identity
       - runtimeHostId
       - RuntimeHost operation identity
+      - PackManager operation identity
       - RPC message identity
       - capability identity
 
-03.3. An Orchestration Unit has one owning ApplicationRun when it mutates or
+03.3. An OrchestrationUnit has one owning ApplicationRun when it mutates or
       may mutate ApplicationRun state.
 
-03.4. An Orchestration Unit may be created for non-mutating orchestrated
-      work when the owning workflow requires lifecycle, trace, or policy
+03.4. An OrchestrationUnit may be created for non-mutating orchestrated work
+      when the owning workflow requires lifecycle, trace, or policy
       boundaries.
 
-03.5. An Orchestration Unit may have a parent or cause relation to:
+03.5. An OrchestrationUnit may have a parent or cause relation to:
       - capability invocation
       - RPC message
       - Job
@@ -200,61 +246,66 @@ Downstream Documents:
       - adapter-mediated request
       - RuntimeHost operation
       - RuntimeHost command-surface request
+      - PackManager operation
       - ApplicationRun lifecycle operation
 
 03.6. Such relation is correlation and ownership evidence. It does not
-      collapse those identities into the Orchestration Unit identity.
+      collapse those identities into the OrchestrationUnit identity.
 
-03.7. Orchestration Unit identity is used for lifecycle and causal trace
+03.7. OrchestrationUnit identity is used for lifecycle and causal trace
       evidence.
 
-03.8. Orchestration Unit identity does not define committed-state identity.
+03.8. OrchestrationUnit identity does not define committed-state identity.
 
-03.9. Orchestration Unit identity does not define RuntimeHost identity or
+03.9. OrchestrationUnit identity does not define RuntimeHost identity or
       RuntimeHost operation identity.
+
+03.10. OrchestrationUnit identity does not define PackManager operation
+       identity.
 
 
 ===============================================================================
 04. MUTATION AUTHORITY BOUNDARY
 ===============================================================================
 
-04.1. An Orchestration Unit may mutate Turnix-managed state only through
-      the state and transaction rules defined by DA-04.
+04.1. An OrchestrationUnit may mutate Turnix-managed state only through the
+      state and transaction rules defined by DA-04.
 
-04.2. A mutation-bearing Orchestration Unit may open or enter a transaction.
+04.2. A mutation-bearing OrchestrationUnit may open or enter a transaction.
 
-04.3. A non-mutating Orchestration Unit does not require a transaction.
+04.3. A non-mutating OrchestrationUnit does not require a transaction.
 
-04.4. Staged mutation inside an Orchestration Unit is not authoritative
-      merely because the Orchestration Unit exists.
+04.4. Staged mutation inside an OrchestrationUnit is not authoritative merely
+      because the OrchestrationUnit exists.
 
 04.5. Staged mutation becomes authoritative only by commit under DA-04.
 
-04.6. An Orchestration Unit outcome does not by itself define transaction
+04.6. An OrchestrationUnit outcome does not by itself define transaction
       commit or abort.
 
 04.7. A transaction commit or abort does not by itself define the
-      Orchestration Unit outcome.
+      OrchestrationUnit outcome.
 
-04.8. An Orchestration Unit outcome does not convert already committed
+04.8. An OrchestrationUnit outcome does not convert already committed
       authoritative mutation into uncommitted mutation.
 
-04.9. If committed state must be changed after an Orchestration Unit is
-      cancelled, failed, or superseded, that change is a later
-      authoritative mutation.
+04.9. If committed state must be changed after an OrchestrationUnit is
+      cancelled, failed, or superseded, that change is a later authoritative
+      mutation.
 
-04.10. Orchestration Unit authority does not bypass capability permission,
+04.10. OrchestrationUnit authority does not bypass capability permission,
        policy decisions, adapter boundaries, RuntimeHost boundaries,
-       ApplicationRun lifecycle, or persistent I/O authority.
+       ApplicationRun lifecycle, persistent-I/O authority, or SaveBundle
+       persistence boundaries.
 
-04.11. Direct backend implementation code may create and run Orchestration
-       Units only through Kernel-owned orchestration paths.
+04.11. Direct backend implementation code may create and run
+       OrchestrationUnits only through Kernel-owned orchestration paths.
 
-04.12. Pack-provided code does not create Orchestration Unit authority by
+04.12. Pack-provided code does not create OrchestrationUnit authority by
        direct backend import, direct state mutation, or direct filesystem
        access.
 
-04.13. RuntimeHost implementation code does not create Orchestration Unit
+04.13. RuntimeHost implementation code does not create OrchestrationUnit
        authority by host-local mutation, command-surface convenience, or
        workspace access outside Kernel-owned orchestration paths.
 
@@ -262,34 +313,66 @@ Downstream Documents:
        through orchestration, capability, transaction, policy, persistence,
        and commit boundaries before mutation becomes authoritative.
 
+04.15. PackManager-triggered work that seeks Turnix mutation guarantees
+       re-enters through orchestration, capability, transaction, policy,
+       persistence, and commit boundaries before mutation becomes
+       authoritative.
+
+04.16. OrchestrationUnit may coordinate mutation-bearing work that affects
+       committed values, configuration, migration, or persisted material.
+
+04.17. DA-24 defines OrchestrationUnit mutation-authority coordination.
+
+04.18. DA-05 defines committed-value representation.
+
+04.19. DA-06 defines configuration semantics and migration meaning where
+       configuration is involved.
+
+04.20. DA-07 defines persistent-I/O authority.
+
+04.21. SaveBundle storage, retained material, durable Application persistence
+       closure, compatibility, and recovery details remain outside this
+       document's authority.
+
+04.22. OrchestrationUnit existence, execution, completion, failure,
+       cancellation, supersession, suspension, or trace evidence does not
+       bypass the domains named in this section.
+
 
 ===============================================================================
-05. EXAMPLE ORCHESTRATION UNIT KINDS
+05. EXAMPLE ORCHESTRATIONUNIT KINDS
 ===============================================================================
 
-05.1. Example Orchestration Units include:
+05.1. Example OrchestrationUnits include:
       - a pipeline run, including its stage callbacks
       - a capability handler invocation
       - an adapter-mediated capability handler invocation
       - a RuntimeHost operation that may mutate Turnix-managed state
       - a RuntimeHost command-surface request that may mutate Turnix-managed
         state
+      - a PackManager-triggered graph or lifecycle operation that may mutate
+        Turnix-managed state
       - a tooling-initiated mutation transaction
       - configuration mutation request processing
       - ApplicationRun lifecycle work that may mutate state
       - migration work that changes authoritative state
+      - artifact/export work that requires mutation authority
+      - comparison, Replay, Resume, Retry, or audit workflow work that
+        requires mutation authority
 
-05.2. Example kinds do not lock the complete future Orchestration Unit
-      catalog.
+05.2. Example kinds do not lock the complete future OrchestrationUnit catalog.
 
-05.3. The document or workflow that owns a concrete Orchestration Unit class
+05.3. The document or workflow that owns a concrete OrchestrationUnit class
       may define narrower behavior compatible with this document.
 
-05.4. A concrete Orchestration Unit class does not weaken the general
+05.4. A concrete OrchestrationUnit class does not weaken the general
       mutation-authority boundary defined here.
 
-05.5. A RuntimeHost operation being listed as an example Orchestration Unit
-      cause does not make every RuntimeHost operation an Orchestration Unit.
+05.5. A RuntimeHost operation being listed as an example OrchestrationUnit
+      cause does not make every RuntimeHost operation an OrchestrationUnit.
+
+05.6. A PackManager operation being listed as an example OrchestrationUnit
+      cause does not make every PackManager operation an OrchestrationUnit.
 
 
 ===============================================================================
@@ -298,33 +381,36 @@ Downstream Documents:
 
 06.1. A transaction is a mutation staging and commit boundary under DA-04.
 
-06.2. An Orchestration Unit is an execution-authority unit.
+06.2. An OrchestrationUnit is an execution-authority unit.
 
-06.3. Orchestration Units and transactions are related but distinct.
+06.3. OrchestrationUnits and transactions are related but distinct.
 
-06.4. An Orchestration Unit may open, commit, or abort transactions under
+06.4. An OrchestrationUnit may open, commit, or abort transactions under
       DA-04.
 
-06.5. A Completed Orchestration Unit may commit a transaction when the unit
+06.5. A Completed OrchestrationUnit may commit a transaction when the unit
       produced authoritative mutation.
 
-06.6. A Completed Orchestration Unit may produce no authoritative mutation.
+06.6. A Completed OrchestrationUnit may produce no authoritative mutation.
 
-06.7. A Completed Orchestration Unit may abort or discard transactional
+06.7. A Completed OrchestrationUnit may abort or discard transactional
       staging when successful execution required no authoritative mutation.
 
-06.8. A Failed Orchestration Unit aborts or discards open transactional
+06.8. A Failed OrchestrationUnit aborts or discards open transactional
       staging according to transaction rules.
 
-06.9. A Cancelled Orchestration Unit aborts or discards open transactional
+06.9. A Cancelled OrchestrationUnit aborts or discards open transactional
       staging according to transaction rules.
 
-06.10. A Superseded Orchestration Unit aborts or discards open
-       transactional staging according to transaction rules.
+06.10. A Superseded OrchestrationUnit aborts or discards open transactional
+       staging according to transaction rules.
 
 06.11. Child transaction propagation remains governed by DA-04.
 
 06.12. Authoritative commit conflict detection remains governed by DA-04.
+
+06.13. Transaction trace evidence remains distinct from OrchestrationUnit
+       trace evidence.
 
 
 ===============================================================================
@@ -333,65 +419,93 @@ Downstream Documents:
 
 07.1. A Job is an observable lifecycle handle.
 
-07.2. An Orchestration Unit is an execution-authority unit.
+07.2. An OrchestrationUnit is an execution-authority unit.
 
 07.3. A transaction is a mutation staging and commit boundary.
 
-07.4. Orchestration Units, Jobs, and transactions remain distinct.
+07.4. OrchestrationUnits, Jobs, and transactions remain distinct.
 
-07.5. An Orchestration Unit may be associated with a Job.
+07.5. An OrchestrationUnit may be associated with a Job.
 
-07.6. An Orchestration Unit may execute without being associated with a Job.
+07.6. An OrchestrationUnit may execute without being associated with a Job.
 
-07.7. A Job may coordinate more than one Orchestration Unit only when the
+07.7. A Job may coordinate more than one OrchestrationUnit only when the
       Job-owning or workflow-owning design explicitly defines that
       coordination.
 
-07.8. An Orchestration Unit outcome does not by itself define Job terminal
+07.8. An OrchestrationUnit outcome does not by itself define Job terminal
       outcome.
 
-07.9. A Job terminal outcome does not by itself define Orchestration Unit
+07.9. A Job terminal outcome does not by itself define OrchestrationUnit
       outcome.
 
 07.10. RuntimeHost operation outcome does not by itself define Job terminal
        outcome.
 
-07.11. Job timeout is not Orchestration Unit Superseded.
+07.11. PackManager operation outcome does not by itself define Job terminal
+       outcome.
 
-07.12. Job cancellation is not Orchestration Unit cancellation unless the
-       owning workflow maps the request to an Orchestration Unit outcome.
+07.12. Job timeout is not OrchestrationUnit Superseded.
 
-07.13. DA-19 owns Job lifecycle, Job timeout, Job cancellation, progress,
+07.13. Job cancellation is not OrchestrationUnit cancellation unless the
+       owning workflow maps the request to an OrchestrationUnit outcome.
+
+07.14. DA-19 owns Job lifecycle, Job timeout, Job cancellation, progress,
        retained result, and late completion semantics.
 
+07.15. OrchestrationUnit outcome does not define retained-result retrieval,
+       artifact/export material, Replay, Resume, Retry, or audit workflow
+       outcome.
+
 
 ===============================================================================
-08. RELATION TO WINDOWS
+08. RELATION TO WINDOWS AND WINDOW-DERIVED ARTIFACTS
 ===============================================================================
 
-08.1. Orchestration Unit outcomes occur inside the current active runtime
+08.1. OrchestrationUnit outcomes occur inside the current active runtime
       region when an ApplicationRun active region exists.
 
 08.2. Transaction commit or abort evidence may contribute to later Window
       evidence.
 
-08.3. Orchestration Unit outcome evidence may contribute to later Window
+08.3. OrchestrationUnit outcome evidence may contribute to later Window
       evidence.
 
-08.4. Orchestration Unit Completed does not mean a SafePointWindow was
+08.4. OrchestrationUnit evidence may contribute to later audit material.
+
+08.5. OrchestrationUnit Completed does not mean a SafePointWindow was
       created.
 
-08.5. Orchestration Unit Failed, Cancelled, or Superseded does not mean an
+08.6. OrchestrationUnit Failed, Cancelled, or Superseded does not mean an
       AbortedWindow was created.
 
-08.6. RuntimeHost operation outcome does not by itself create a
+08.7. RuntimeHost operation outcome does not by itself create a
       SafePointWindow or AbortedWindow.
 
-08.7. SafePointWindow and AbortedWindow finalization remain owned by DA-08.
+08.8. PackManager operation outcome does not by itself create a
+      SafePointWindow or AbortedWindow.
 
-08.8. Retained Orchestration Unit evidence inside finalized Window evidence
-      remains non-authoritative evidence unless it is also committed state
-      under DA-04.
+08.9. SafePointWindow and AbortedWindow finalization remain owned by DA-08.
+
+08.10. Retained OrchestrationUnit evidence inside finalized Window evidence
+       remains non-authoritative evidence unless it is also committed state
+       under DA-04.
+
+08.11. OrchestrationUnit evidence does not by itself define Window artifact,
+       WindowExport, Minimal Audit Bundle, digest, partial export, missing
+       material, ComparisonResult, Replay outcome, Resume outcome, Retry
+       outcome, or audit workflow outcome.
+
+08.12. OrchestrationUnit terminal outcome does not by itself create
+       artifact/export authority.
+
+08.13. OrchestrationUnit Completed does not by itself mean artifact/export
+       completed.
+
+08.14. DA-25 owns artifact/export semantics.
+
+08.15. DA-26 owns comparison, Replay, Resume, Retry, and audit workflow
+       semantics.
 
 
 ===============================================================================
@@ -400,30 +514,36 @@ Downstream Documents:
 
 09.1. ApplicationRun lifecycle and runtime identity are defined by DA-20.
 
-09.2. An Orchestration Unit that mutates ApplicationRun state operates inside
+09.2. An OrchestrationUnit that mutates ApplicationRun state operates inside
       the owning ApplicationRun authority context.
 
 09.3. applicationRunId is distinct from orchestrationUnitId.
 
-09.4. ApplicationRun lifecycle outcome does not by itself define
-      Orchestration Unit terminal outcome.
+09.4. Application identity is distinct from OrchestrationUnit identity.
 
-09.5. Orchestration Unit terminal outcome does not by itself define
+09.5. ApplicationRun lifecycle outcome does not by itself define
+      OrchestrationUnit terminal outcome.
+
+09.6. OrchestrationUnit terminal outcome does not by itself define
       ApplicationRun lifecycle outcome.
 
-09.6. ApplicationRun active-region boundaries provide runtime containment for
-      Orchestration Unit execution.
+09.7. ApplicationRun active-region boundaries provide runtime containment for
+      OrchestrationUnit execution.
 
-09.7. ApplicationRun active-region end does not silently convert open
-      Orchestration Units into successful completed work.
+09.8. ApplicationRun active-region end does not silently convert open
+      OrchestrationUnits into successful completed work.
 
-09.8. If ApplicationRun lifecycle affects active Orchestration Units, that
+09.9. If ApplicationRun lifecycle affects active OrchestrationUnits, that
       effect is explicit and trace-visible.
 
-09.9. RuntimeHost operations that create, start, stop, bind, migrate, or
-      recover ApplicationRun state use ApplicationRun lifecycle semantics from
-      DA-20 and Orchestration Unit mutation authority from this document
-      when mutation-bearing work is involved.
+09.10. RuntimeHost operations that create, start, stop, bind, migrate, or
+       recover ApplicationRun state use ApplicationRun lifecycle semantics
+       from DA-20 and OrchestrationUnit mutation authority from this document
+       when mutation-bearing work is involved.
+
+09.11. SaveBundle loading, persistence, recovery, and retained-material
+       handling do not by themselves define OrchestrationUnit terminal
+       outcome.
 
 
 ===============================================================================
@@ -434,41 +554,61 @@ Downstream Documents:
 
 10.2. RPC, channel, and transport semantics are defined by DA-21.
 
-10.3. A capability invocation may create or enter an Orchestration Unit when
+10.3. A capability invocation may create or enter an OrchestrationUnit when
       the invocation performs orchestrated work.
 
-10.4. An RPC message may cause a capability invocation that creates or
-      enters an Orchestration Unit.
+10.4. An RPC message may cause a capability invocation that creates or enters
+      an OrchestrationUnit.
 
 10.5. A RuntimeHost command or operation may cause a capability invocation,
       RPC message, or Kernel-owned workflow that creates or enters an
-      Orchestration Unit.
+      OrchestrationUnit.
 
-10.6. RPC message identity remains distinct from orchestrationUnitId.
+10.6. A PackManager operation may cause a capability invocation, RPC message,
+      or Kernel-owned workflow that creates or enters an OrchestrationUnit.
 
-10.7. Capability identity remains distinct from orchestrationUnitId.
+10.7. RPC message identity remains distinct from orchestrationUnitId.
 
-10.8. RuntimeHost operation identity remains distinct from
+10.8. Capability identity remains distinct from orchestrationUnitId.
+
+10.9. RuntimeHost operation identity remains distinct from
       orchestrationUnitId.
 
-10.9. RPC transport acknowledgement does not imply Orchestration Unit
-      completion.
+10.10. PackManager operation identity remains distinct from
+       orchestrationUnitId.
 
-10.10. RPC transport timeout does not imply Orchestration Unit failure,
-       cancellation, or supersession.
-
-10.11. RuntimeHost command acceptance does not imply Orchestration Unit
+10.11. RPC transport acknowledgement does not imply OrchestrationUnit
        completion.
 
-10.12. RuntimeHost operation completion does not by itself define
-       Orchestration Unit terminal outcome unless the owning workflow maps
+10.12. RPC transport timeout does not imply OrchestrationUnit failure,
+       cancellation, or supersession.
+
+10.13. RuntimeHost command acceptance does not imply OrchestrationUnit
+       completion.
+
+10.14. RuntimeHost operation completion does not by itself define
+       OrchestrationUnit terminal outcome unless the owning workflow maps
        those outcomes explicitly.
 
-10.13. Capability permission approval does not imply successful
-       Orchestration Unit completion.
+10.15. PackManager operation completion does not by itself define
+       OrchestrationUnit terminal outcome unless the owning workflow maps
+       those outcomes explicitly.
 
-10.14. Orchestration Unit trace evidence may include parent capability,
-       RPC message, and RuntimeHost operation identity when available.
+10.16. Capability permission approval does not imply successful
+       OrchestrationUnit completion.
+
+10.17. Capability permission approval does not grant committed-state
+       authority by itself.
+
+10.18. Capability permission approval does not grant persistent-I/O authority
+       by itself.
+
+10.19. Capability permission approval does not grant artifact/export or
+       workflow authority by itself.
+
+10.20. OrchestrationUnit trace evidence may include parent capability,
+       RPC message, RuntimeHost operation, and PackManager operation identity
+       when available.
 
 
 ===============================================================================
@@ -477,149 +617,230 @@ Downstream Documents:
 
 11.1. Execution adapter boundary semantics are defined by DA-23.
 
-11.2. Adapter-executed code does not mutate committed state directly.
+11.2. Adapter lifecycle, trust, isolation, failure, disconnect, and adapter-
+      domain trace semantics are defined by DA-27.
 
-11.3. Adapter-executed mutation seeking Turnix guarantees re-enters through
+11.3. Adapter-executed code does not mutate committed state directly.
+
+11.4. Adapter-executed mutation seeking Turnix guarantees re-enters through
       orchestration, capability, transaction, and commit boundaries before
       becoming authoritative.
 
-11.4. Same-language or same-process execution does not bypass committed-
-      state authority.
+11.5. Same-language or same-process execution does not bypass committed-state
+      authority.
 
-11.5. Direct in-process calls may carry a mutation request, but they do not
+11.6. Same-language or same-process execution does not bypass
+      OrchestrationUnit authority rules.
+
+11.7. Direct in-process calls may carry a mutation request, but they do not
       become mutation authority by themselves.
 
-11.6. Adapter readiness does not imply Orchestration Unit completion.
+11.8. Adapter readiness does not imply OrchestrationUnit completion.
 
-11.7. Adapter failure does not by itself define Orchestration Unit terminal
+11.9. Adapter failure does not by itself define OrchestrationUnit terminal
       outcome.
 
-11.8. Orchestration Unit failure does not by itself define adapter failure.
+11.10. OrchestrationUnit failure does not by itself define adapter failure.
 
-11.9. RuntimeHost entry-surface readiness does not imply Orchestration Unit
-      completion.
+11.11. RuntimeHost entry-surface readiness does not imply OrchestrationUnit
+       completion.
 
-11.10. RuntimeHost operation failure does not by itself define adapter
+11.12. RuntimeHost operation failure does not by itself define adapter
        failure.
 
-11.11. If adapter lifecycle affects an Orchestration Unit, the relationship
-       is explicit and trace-visible.
+11.13. If adapter lifecycle affects an OrchestrationUnit, the relationship is
+       explicit and trace-visible.
 
-11.12. If an Orchestration Unit affects adapter lifecycle, the relationship
-       is explicit and trace-visible.
+11.14. If an OrchestrationUnit affects adapter lifecycle, the relationship is
+       explicit and trace-visible.
+
+11.15. Adapter execution acceptance does not mean committed-value
+       representation, configuration, persistence, artifact/export, or
+       workflow success.
 
 
 ===============================================================================
-12. ORCHESTRATION UNIT OUTCOMES
+12. RELATION TO RUNTIMEHOST AND PACKMANAGER OPERATIONS
 ===============================================================================
 
-12.1. An Orchestration Unit reaches exactly one terminal outcome.
+12.1. RuntimeHost identity, workspace ownership, startup-mode semantics,
+      entry-surface semantics, command-surface semantics, RuntimeHost
+      operation trace reason ownership, and RuntimeHost trace context are
+      defined by DA-28.
 
-12.2. Orchestration Unit terminal outcomes are:
+12.2. PackManager catalog, management, graph-preparation, and management-
+      operation semantics are defined by DA-29.
+
+12.3. RuntimeHost command surfaces request or observe runtime behavior.
+
+12.4. RuntimeHost command surfaces do not become OrchestrationUnit authority
+      merely because they are official entry points.
+
+12.5. PackManager surfaces request, prepare, or manage pack graph intent and
+      management operations.
+
+12.6. PackManager surfaces do not become OrchestrationUnit authority merely
+      because they are first-party management surfaces.
+
+12.7. RuntimeHost operation outcome does not by itself define
+      OrchestrationUnit terminal outcome.
+
+12.8. PackManager operation outcome does not by itself define
+      OrchestrationUnit terminal outcome.
+
+12.9. RuntimeHost operation trace evidence does not replace
+      OrchestrationUnit trace evidence.
+
+12.10. PackManager operation trace evidence does not replace
+       OrchestrationUnit trace evidence.
+
+12.11. OrchestrationUnit trace evidence does not replace RuntimeHost trace
+       evidence or PackManager trace evidence.
+
+
+===============================================================================
+13. ORCHESTRATIONUNIT OUTCOMES
+===============================================================================
+
+13.1. An OrchestrationUnit reaches exactly one terminal outcome.
+
+13.2. OrchestrationUnit terminal outcomes are:
       - Completed
       - Failed
       - Cancelled
       - Superseded
 
-12.3. Completed means the Orchestration Unit finished its execution path
+13.3. Completed means the OrchestrationUnit finished its execution path
       without ending as Failed, Cancelled, or Superseded.
 
-12.4. Failed means the Orchestration Unit ended because an unexpected or
-      error outcome prevented successful completion.
+13.4. Failed means the OrchestrationUnit ended because an unexpected or error
+      outcome prevented successful completion.
 
-12.5. Cancelled means the Orchestration Unit ended because intentional
+13.5. Cancelled means the OrchestrationUnit ended because intentional
       cancellation stopped the unit before completion.
 
-12.6. Superseded means the Orchestration Unit ended because newer work,
-      newer accepted input, or higher-priority work replaced it.
+13.6. Superseded means the OrchestrationUnit ended because newer work, newer
+      accepted input, or higher-priority work replaced it.
 
-12.7. Superseded is not failure.
+13.7. Superseded is not failure.
 
-12.8. Superseded is not timeout.
+13.8. Superseded is not timeout.
 
-12.9. Superseded does not roll back authoritative state that was already
+13.9. Superseded does not roll back authoritative state that was already
       committed.
 
-12.10. Completed may include:
+13.10. Completed may include:
        - committed authoritative mutation
        - no authoritative mutation
        - aborted or discarded transactional staging
 
-12.11. Failed, Cancelled, and Superseded abort or discard open
-       transactional staging according to DA-04.
+13.11. Failed, Cancelled, and Superseded abort or discard open transactional
+       staging according to DA-04.
 
-12.12. RuntimeHost operation completion, failure, cancellation, detachment,
-       retention, or supersession does not by itself define Orchestration Unit
+13.12. RuntimeHost operation completion, failure, cancellation, detachment,
+       retention, or supersession does not by itself define OrchestrationUnit
        terminal outcome unless the owning workflow maps those outcomes
        explicitly.
 
-12.13. The document or workflow that owns a concrete Orchestration Unit
-       class may define narrower outcome meanings that remain compatible
-       with this section.
+13.13. PackManager operation completion, failure, cancellation, retention, or
+       supersession does not by itself define OrchestrationUnit terminal
+       outcome unless the owning workflow maps those outcomes explicitly.
 
-12.14. An Orchestration Unit terminal outcome is trace-visible.
+13.14. Artifact/export completion is not OrchestrationUnit completion by
+       default.
+
+13.15. ComparisonResult is not OrchestrationUnit outcome by default.
+
+13.16. Replay outcome is not OrchestrationUnit outcome by default.
+
+13.17. Resume outcome is not OrchestrationUnit outcome by default.
+
+13.18. Retry outcome is not OrchestrationUnit outcome by default.
+
+13.19. Audit workflow outcome is not OrchestrationUnit outcome by default.
+
+13.20. The document or workflow that owns a concrete OrchestrationUnit class
+       may define narrower outcome meanings that remain compatible with this
+       section.
+
+13.21. An OrchestrationUnit terminal outcome is trace-visible.
 
 
 ===============================================================================
-13. SINGLE-LANE APPLICATIONRUN ORCHESTRATION
+14. SINGLE-LANE APPLICATIONRUN ORCHESTRATION
 ===============================================================================
 
-13.1. Turnix uses a deterministic single-lane orchestration model within one
+14.1. Turnix uses a deterministic single-lane orchestration model within one
       ApplicationRun unless an explicit concurrency mode is defined elsewhere.
 
-13.2. Within one ApplicationRun, Turnix does not execute multiple
-      Orchestration Units concurrently when those units may mutate the same
+14.2. Within one ApplicationRun, Turnix does not execute multiple
+      OrchestrationUnits concurrently when those units may mutate the same
       ApplicationRun state.
 
-13.3. Awaited input/output, model calls, adapter calls, RuntimeHost calls,
-      or transport calls may suspend the current unit.
+14.3. Awaited input/output, model calls, adapter calls, RuntimeHost calls,
+      persistent I/O, export work, audit work, comparison work, or other I/O
+      may suspend the current unit.
 
-13.4. Suspension does not authorize another state-mutating unit to run
+14.4. Suspension does not authorize another state-mutating unit to run
       concurrently in the same ApplicationRun unless an explicit concurrency
       mode permits that behavior.
 
-13.5. Work started outside Turnix orchestration remains outside Turnix
+14.5. Work started outside Turnix orchestration remains outside Turnix
       guarantees until it re-enters through orchestration boundaries.
 
-13.6. Any mutation that seeks Turnix guarantees re-enters through
+14.6. Any mutation that seeks Turnix guarantees re-enters through
       orchestration boundaries before becoming authoritative.
 
-13.7. Turnix does not imply concurrency safety merely because execution is
+14.7. Turnix does not imply concurrency safety merely because execution is
       asynchronous or suspended.
 
-13.8. Turnix does not imply determinism for mutation paths that occur
-      outside orchestration boundaries.
+14.8. Turnix does not imply determinism for mutation paths that occur outside
+      orchestration boundaries.
 
-13.9. Adapter suspension, adapter disconnect, transport behavior, frontend
+14.9. Adapter suspension, adapter disconnect, transport behavior, frontend
       behavior, RuntimeHost command-surface behavior, or RuntimeHost
       entry-surface behavior does not authorize concurrent state-mutating
       orchestration within the same ApplicationRun.
 
-13.10. Adapter-mediated mutation follows the same single-lane ApplicationRun
+14.10. Adapter-mediated mutation follows the same single-lane ApplicationRun
        orchestration rule unless an explicit concurrency mode defines
        otherwise.
 
-13.11. RuntimeHost-operation-mediated mutation follows the same single-lane
+14.11. RuntimeHost-operation-mediated mutation follows the same single-lane
        ApplicationRun orchestration rule unless an explicit concurrency mode
        defines otherwise.
 
-13.12. Future concurrency modes must define:
+14.12. PackManager-operation-mediated mutation follows the same single-lane
+       ApplicationRun orchestration rule unless an explicit concurrency mode
+       defines otherwise.
+
+14.13. Future concurrency modes must define:
        - mutation conflict boundaries
        - transaction interaction
        - ordering rules
        - trace obligations
        - persistence and recovery implications
+       - artifact/export interaction if artifacts or exports are affected
+       - Replay, Resume, Retry, and audit workflow interaction if those
+         workflows are affected
 
 
 ===============================================================================
-14. ORCHESTRATION UNIT TRACE REASON IDENTIFIERS
+15. ORCHESTRATIONUNIT TRACE REASON IDENTIFIERS
 ===============================================================================
 
-14.1. DA-24 owns the Orchestration Unit trace reason identifiers used for
-      Orchestration Unit lifecycle, transaction association, and decision
+15.1. DA-24 owns the OrchestrationUnit trace reason identifiers used for
+      OrchestrationUnit lifecycle, transaction association, and decision
       waiting inside state-mutating orchestration.
 
-14.2. The following Orchestration Unit trace reasons are defined:
+15.2. OrchestrationUnit-domain trace evidence is required as an emission
+      obligation where OrchestrationUnit lifecycle, transaction association,
+      and decision waiting events occur.
+
+15.3. Trace representation, retention, pruning, and loss remain governed by
+      DA-03.
+
+15.4. The following OrchestrationUnit trace reasons are defined:
 
       - OrchestrationUnitCreated
       - OrchestrationUnitStarted
@@ -633,54 +854,56 @@ Downstream Documents:
       - OrchestrationUnitDecisionPending
       - OrchestrationUnitDecisionResolved
 
-14.3. OrchestrationUnitCreated is emitted when an Orchestration Unit is
+15.5. OrchestrationUnitCreated is emitted when an OrchestrationUnit is
       created.
 
-14.4. OrchestrationUnitStarted is emitted when Orchestration Unit execution
+15.6. OrchestrationUnitStarted is emitted when OrchestrationUnit execution
       begins.
 
-14.5. OrchestrationUnitCompleted is emitted when an Orchestration Unit
-      reaches the Completed terminal outcome.
+15.7. OrchestrationUnitCompleted is emitted when an OrchestrationUnit reaches
+      the Completed terminal outcome.
 
-14.6. OrchestrationUnitFailed is emitted when an Orchestration Unit reaches
-      the Failed terminal outcome.
+15.8. OrchestrationUnitFailed is emitted when an OrchestrationUnit reaches the
+      Failed terminal outcome.
 
-14.7. OrchestrationUnitCancelled is emitted when an Orchestration Unit
-      reaches the Cancelled terminal outcome.
+15.9. OrchestrationUnitCancelled is emitted when an OrchestrationUnit reaches
+      the Cancelled terminal outcome.
 
-14.8. OrchestrationUnitSuperseded is emitted when an Orchestration Unit
-      reaches the Superseded terminal outcome.
+15.10. OrchestrationUnitSuperseded is emitted when an OrchestrationUnit
+       reaches the Superseded terminal outcome.
 
-14.9. OrchestrationUnitTransactionOpened is emitted when an Orchestration
-      Unit opens or enters a transaction.
+15.11. OrchestrationUnitTransactionOpened is emitted when an
+       OrchestrationUnit opens or enters a transaction.
 
-14.10. OrchestrationUnitTransactionCommitted is emitted when a transaction
-       associated with an Orchestration Unit commits.
+15.12. OrchestrationUnitTransactionCommitted is emitted when a transaction
+       associated with an OrchestrationUnit commits.
 
-14.11. OrchestrationUnitTransactionAborted is emitted when a transaction
-       associated with an Orchestration Unit aborts or is discarded.
+15.13. OrchestrationUnitTransactionAborted is emitted when a transaction
+       associated with an OrchestrationUnit aborts or is discarded.
 
-14.12. OrchestrationUnitDecisionPending is emitted when an Orchestration
-       Unit is waiting on a decision point that can affect its execution or
+15.14. OrchestrationUnitDecisionPending is emitted when an OrchestrationUnit
+       is waiting on a decision point that can affect its execution or
        mutation outcome.
 
-14.13. OrchestrationUnitDecisionResolved is emitted when such a decision
+15.15. OrchestrationUnitDecisionResolved is emitted when such a decision
        point resolves.
 
-14.14. DA-03 defines the tracing substrate used to represent Orchestration
-       Unit trace evidence.
+15.16. DA-03 defines the tracing substrate used to represent
+       OrchestrationUnit trace evidence.
 
 
 ===============================================================================
-15. ORCHESTRATION UNIT TRACE CONTEXT
+16. ORCHESTRATIONUNIT TRACE CONTEXT
 ===============================================================================
 
-15.1. Orchestration Unit trace evidence records enough context, when
-      available, to explain:
+16.1. OrchestrationUnit trace evidence records enough context, when available,
+      to explain:
       - orchestrationUnitId
-      - applicationRunId
+      - applicationId when applicable
+      - applicationRunId when applicable
       - runtimeHostId when applicable
       - RuntimeHost operation identity when applicable
+      - PackManager operation identity when applicable
       - owner or caller identity when available
       - work kind
       - parent jobId when applicable
@@ -694,7 +917,7 @@ Downstream Documents:
       - failure reason category when applicable
       - cancellation reason category when applicable
 
-15.2. Transaction association trace evidence records enough context, when
+16.2. Transaction association trace evidence records enough context, when
       available, to explain:
       - orchestrationUnitId
       - transactionId
@@ -703,107 +926,174 @@ Downstream Documents:
       - transaction operation
       - commit or abort outcome when applicable
 
-15.3. Decision waiting trace evidence records enough context, when
-      available, to explain:
+16.3. Decision waiting trace evidence records enough context, when available,
+      to explain:
       - orchestrationUnitId
       - decision identity
       - policy scope when applicable
       - effect on execution or mutation outcome when known
 
-15.4. Orchestration Unit trace evidence does not replace transaction trace
+16.4. OrchestrationUnit trace evidence does not replace transaction trace
       evidence owned by DA-04.
 
-15.5. Orchestration Unit trace evidence does not replace Job trace evidence
-      owned by DA-19.
+16.5. OrchestrationUnit trace evidence does not replace payload or committed-
+      value evidence owned by DA-05.
 
-15.6. Orchestration Unit trace evidence does not replace Window evidence
-      owned by DA-08.
+16.6. OrchestrationUnit trace evidence does not replace configuration or
+      migration evidence owned by DA-06.
 
-15.7. Orchestration Unit trace evidence does not replace adapter trace
-      evidence owned by DA-23.
+16.7. OrchestrationUnit trace evidence does not replace persistent-I/O
+      evidence owned by DA-07.
 
-15.8. Orchestration Unit trace evidence does not replace RuntimeHost trace
-      evidence owned by DA-28.
+16.8. OrchestrationUnit trace evidence does not replace Window trace or
+      evidence owned by DA-08.
+
+16.9. OrchestrationUnit trace evidence does not replace capability trace
+      evidence owned by DA-16.
+
+16.10. OrchestrationUnit trace evidence does not replace decision or policy
+       trace evidence owned by DA-17.
+
+16.11. OrchestrationUnit trace evidence does not replace Job trace evidence
+       owned by DA-19.
+
+16.12. OrchestrationUnit trace evidence does not replace Application or
+       ApplicationRun trace evidence owned by DA-20.
+
+16.13. OrchestrationUnit trace evidence does not replace RPC trace evidence
+       owned by DA-21.
+
+16.14. OrchestrationUnit trace evidence does not replace adapter trace
+       evidence owned by DA-23 or DA-27.
+
+16.15. OrchestrationUnit trace evidence does not replace artifact/export trace
+       evidence owned by DA-25.
+
+16.16. OrchestrationUnit trace evidence does not replace comparison, Replay,
+       Resume, Retry, or audit workflow evidence owned by DA-26.
+
+16.17. OrchestrationUnit trace evidence does not replace RuntimeHost trace
+       evidence owned by DA-28.
+
+16.18. OrchestrationUnit trace evidence does not replace PackManager trace
+       evidence owned by DA-29.
+
+16.19. Trace loss weakens evidential completeness. Trace loss does not by
+       itself change committed-state correctness.
 
 
 ===============================================================================
-16. WHAT IS EXPLICITLY NOT SUPPORTED
+17. WHAT IS EXPLICITLY NOT SUPPORTED
 ===============================================================================
 
-16.1. The following are not supported:
+17.1. The following are not supported:
       - mutation outside orchestration acquiring Turnix guarantees by
         implication
       - pack-provided code directly mutating committed state
       - adapter-executed code directly mutating committed state
       - RuntimeHost implementation code directly mutating committed state
         outside Kernel-owned orchestration paths
-      - same-language execution bypassing Orchestration Unit boundaries
-      - same-process execution bypassing Orchestration Unit boundaries
-      - RuntimeHost command surfaces bypassing Orchestration Unit boundaries
+      - PackManager-triggered code directly mutating committed state outside
+        Kernel-owned orchestration paths
+      - same-language execution bypassing OrchestrationUnit boundaries
+      - same-process execution bypassing OrchestrationUnit boundaries
+      - RuntimeHost command surfaces bypassing OrchestrationUnit boundaries
       - RuntimeHost startup modes creating independent mutation semantics
-      - RPC acknowledgement treated as Orchestration Unit completion
-      - RuntimeHost command acceptance treated as Orchestration Unit completion
-      - transport timeout treated as Orchestration Unit failure
-      - adapter failure treated as Orchestration Unit failure by default
-      - RuntimeHost operation failure treated as Orchestration Unit failure by
+      - PackManager management surfaces creating independent mutation semantics
+      - RPC acknowledgement treated as OrchestrationUnit completion
+      - RuntimeHost command acceptance treated as OrchestrationUnit completion
+      - PackManager command acceptance treated as OrchestrationUnit completion
+      - transport timeout treated as OrchestrationUnit failure
+      - adapter failure treated as OrchestrationUnit failure by default
+      - RuntimeHost operation failure treated as OrchestrationUnit failure by
         default
-      - Job terminal outcome treated as Orchestration Unit terminal outcome
-        by default
-      - Orchestration Unit terminal outcome treated as Job terminal outcome
-        by default
-      - Orchestration Unit completion treated as SafePointWindow creation
-      - Orchestration Unit failure treated as AbortedWindow creation
-      - concurrent state-mutating Orchestration Units inside one
-        ApplicationRun unless an explicit concurrency mode defines that
-        behavior
+      - PackManager operation failure treated as OrchestrationUnit failure by
+        default
+      - Job terminal outcome treated as OrchestrationUnit terminal outcome by
+        default
+      - OrchestrationUnit terminal outcome treated as Job terminal outcome by
+        default
+      - OrchestrationUnit completion treated as SafePointWindow creation
+      - OrchestrationUnit failure treated as AbortedWindow creation
+      - OrchestrationUnit completion treated as artifact/export completion
+      - artifact/export completion treated as OrchestrationUnit completion
+      - ComparisonResult treated as OrchestrationUnit outcome
+      - Replay outcome treated as OrchestrationUnit outcome
+      - Resume outcome treated as OrchestrationUnit outcome
+      - Retry outcome treated as OrchestrationUnit outcome
+      - audit workflow outcome treated as OrchestrationUnit outcome
+      - concurrent state-mutating OrchestrationUnits inside one ApplicationRun
+        unless an explicit concurrency mode defines that behavior
 
 
 ===============================================================================
-17. EXPLICITLY OPEN QUESTIONS
+18. EXPLICITLY OPEN QUESTIONS
 ===============================================================================
 
-17.1. OPEN questions include:
-      - exact concrete Orchestration Unit outcome envelope
-      - exact Orchestration Unit API names
-      - exact Orchestration Unit creation API
+18.1. OPEN questions include:
+      - exact concrete OrchestrationUnit outcome envelope
+      - exact OrchestrationUnit API names
+      - exact OrchestrationUnit creation API
       - exact parent or cause relation representation
-      - exact relationship between specific Orchestration Unit classes and
+      - exact relationship between specific OrchestrationUnit classes and
         Job-backed workflows
       - exact future concurrency-mode taxonomy
       - exact orchestrationUnitId representation
 
-17.2. RuntimeHost identity, workspace ownership, startup-mode semantics,
+18.2. RuntimeHost identity, workspace ownership, startup-mode semantics,
       entry-surface semantics, command-surface semantics, RuntimeHost
       operation trace reason ownership, and RuntimeHost trace context are
       defined by DA-28.
 
+18.3. PackManager catalog, management, graph-preparation, and trace reason
+      ownership remain defined by DA-29.
+
+18.4. Exact SaveBundle storage, retained-material, durable persistence,
+      compatibility, and recovery details remain outside this document.
+
 
 ===============================================================================
-18. LOCKED SUMMARY
+19. LOCKED SUMMARY
 ===============================================================================
 
-18.1. LOCKED:
-      - Orchestration Unit is a kernel-tracked execution-authority unit
-      - Orchestration Unit identity is distinct from ApplicationRun, Job,
-        transaction, View, adapter, RuntimeHost, RPC message, and capability
-        identity
+19.1. LOCKED:
+      - OrchestrationUnit is a kernel-tracked execution-authority unit
+      - OrchestrationUnit authority is scoped authority to own or coordinate a
+        mutation flow
+      - OrchestrationUnit authority is not general backend authority
+      - OrchestrationUnit authority is not direct committed-state authority for
+        arbitrary contained code
+      - OrchestrationUnit identity is distinct from Application,
+        ApplicationRun, Job, transaction, View, adapter, RuntimeHost,
+        PackManager, RPC message, and capability identity
       - mutation outside orchestration does not acquire Turnix guarantees by
         implication
-      - Orchestration Unit authority does not bypass DA-04 transaction and
+      - OrchestrationUnit authority does not bypass DA-04 transaction and
         commit rules
-      - Orchestration Units, Jobs, and transactions remain distinct
-      - Orchestration Unit outcome does not by itself define Job terminal
+      - OrchestrationUnit authority does not bypass DA-05 committed-value
+        representation
+      - OrchestrationUnit authority does not bypass DA-06 configuration
+        semantics
+      - OrchestrationUnit authority does not bypass DA-07 persistent-I/O
+        authority
+      - OrchestrationUnits, Jobs, and transactions remain distinct
+      - OrchestrationUnit outcome does not by itself define Job terminal
         outcome, transaction outcome, ApplicationRun outcome, adapter outcome,
-        RuntimeHost outcome, or Window finalization
-      - transaction commit or abort does not by itself define Orchestration
-        Unit outcome
+        RuntimeHost outcome, PackManager outcome, or Window finalization
+      - OrchestrationUnit outcome does not by itself define artifact/export,
+        ComparisonResult, Replay, Resume, Retry, or audit workflow outcome
+      - transaction commit or abort does not by itself define OrchestrationUnit
+        outcome
       - RuntimeHost command acceptance does not by itself define
-        Orchestration Unit completion
+        OrchestrationUnit completion
       - RuntimeHost operation outcome does not by itself define
-        Orchestration Unit terminal outcome unless the owning workflow maps
+        OrchestrationUnit terminal outcome unless the owning workflow maps
         those outcomes explicitly
-      - Orchestration Unit terminal outcomes are Completed, Failed,
-        Cancelled, and Superseded
+      - PackManager operation outcome does not by itself define
+        OrchestrationUnit terminal outcome unless the owning workflow maps
+        those outcomes explicitly
+      - OrchestrationUnit terminal outcomes are Completed, Failed, Cancelled,
+        and Superseded
       - Superseded is not failure
       - Superseded is not timeout
       - Superseded does not roll back authoritative state that was already
@@ -811,27 +1101,35 @@ Downstream Documents:
       - adapter-executed code does not directly mutate committed state
       - RuntimeHost implementation code does not directly mutate committed
         state outside Kernel-owned orchestration paths
-      - adapter-executed mutation seeking Turnix guarantees re-enters
-        through orchestration, capability, transaction, and commit
-        boundaries
+      - PackManager-triggered work does not directly mutate committed state
+        outside Kernel-owned orchestration paths
+      - adapter-executed mutation seeking Turnix guarantees re-enters through
+        orchestration, capability, transaction, and commit boundaries
       - RuntimeHost-operation mutation seeking Turnix guarantees re-enters
+        through orchestration, capability, transaction, policy, persistence,
+        and commit boundaries
+      - PackManager-operation mutation seeking Turnix guarantees re-enters
         through orchestration, capability, transaction, policy, persistence,
         and commit boundaries
       - same-language or same-process execution does not bypass committed-
         state authority
+      - same-language or same-process execution does not bypass
+        OrchestrationUnit authority rules
       - ApplicationRun mutation follows deterministic single-lane orchestration
         unless another mode is explicitly defined elsewhere
-      - adapter suspension, adapter disconnect, transport behavior,
-        frontend behavior, RuntimeHost command-surface behavior, or
-        RuntimeHost entry-surface behavior does not authorize concurrent
-        state-mutating orchestration within the same ApplicationRun
-      - DA-24 owns Orchestration Unit trace reason identifiers
+      - adapter suspension, adapter disconnect, transport behavior, frontend
+        behavior, RuntimeHost command-surface behavior, RuntimeHost
+        entry-surface behavior, or PackManager command-surface behavior does
+        not authorize concurrent state-mutating orchestration within the same
+        ApplicationRun
+      - DA-24 owns OrchestrationUnit trace reason identifiers
       - DA-28 owns RuntimeHost-domain trace reason identifiers
-      - DA-03 owns the trace substrate, not Orchestration Unit lifecycle
+      - DA-29 owns PackManager-domain trace reason identifiers
+      - DA-03 owns the trace substrate, not OrchestrationUnit lifecycle
         semantics
 
-18.2. OPEN:
-      - exact concrete Orchestration Unit envelope, API names, creation API,
+19.2. OPEN:
+      - exact concrete OrchestrationUnit envelope, API names, creation API,
         parent relation representation, and concurrency-mode taxonomy
 
 
@@ -842,6 +1140,6 @@ END OF DA-24 - ORCHESTRATION UNITS AND MUTATION AUTHORITY
 --- doc-meta ---
 DOC_ID: DA-24
 DOC_FILE: docs/design/DA-24_ORCHESTRATION_UNITS_AND_MUTATION_AUTHORITY.txt
-DOC_REV: 2
-DOC_GIT: 7454f98
+DOC_REV: 3
+DOC_GIT: 718769c
 ----------------
