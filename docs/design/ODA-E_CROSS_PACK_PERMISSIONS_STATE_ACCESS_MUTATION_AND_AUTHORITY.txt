@@ -1,5 +1,5 @@
 ===============================================================================
-OPTIONAL DESIGN AREA ODA-E - CROSS-PACK PERMISSIONS, STATE ACCESS,
+OPTIONAL DESIGN AREA ODA-E - CROSS-PACK PERMISSIONS - STATE ACCESS,
 MUTATION & AUTHORITY
 ===============================================================================
 
@@ -10,7 +10,7 @@ EVOLVING
 Description:
 ------------
 Defines an optional cross-pack state-access and mutation-authority model for
-state owned by the kernel or by packs.
+state governed by Kernel-mediated runtime domains and Pack-owned namespaces.
 
 This area is cross-cutting in topic, but optional in tier. It does not
 override higher-authority DA documents.
@@ -21,24 +21,25 @@ This document defines an optional ownership-and-access model for cross-pack
 state access, mutation, observation, and derived-value handling.
 
 It defines:
-- a state ownership model
-- scope categories for kernel, pack-global, and save-bound state
+- state ownership domains inside this optional model
+- logical scope categories for Kernel-mediated and Pack-owned state
 - access-level concepts
 - separation between read authority and write authority
 - computed and derived-value handling
 - adapter-mediated state-access constraints
 - cross-pack intentional modification requirements
-- trace and audit expectations for state access
+- trace and diagnostic expectations for state access
 
 It does NOT define:
 - filesystem access (see DA-07)
 - service or capability invocation mechanics (see DA-16)
 - execution adapter boundary semantics (see DA-23)
 - RPC, channel, or transport semantics (see DA-21)
-- AppInstance lifecycle or runtime identity semantics (see DA-20)
+- lifecycle or runtime identity semantics (see DA-20)
 - dependency resolution or visibility semantics
 - final authoritative memory, state-layer, or journaling semantics
 - final authoritative config-schema representation for access metadata
+- final Workspace, Application, ApplicationRun, or SaveBundle storage layout
 
 Upstream Documents:
 ------------------
@@ -58,6 +59,7 @@ Upstream Documents:
 - DA-21
 - DA-23
 
+
 ===============================================================================
 01. INTERPRETATION BASIS
 ===============================================================================
@@ -74,6 +76,9 @@ Upstream Documents:
 01.4. This document defines an optional cross-pack state-access and
       mutation-authority model within that shared interpretation model.
 
+01.5. This document does not replace higher-authority state, configuration,
+      persistence, permission, lifecycle, adapter, RPC, or tracing semantics.
+
 
 ===============================================================================
 02. CORE INTENT
@@ -81,7 +86,8 @@ Upstream Documents:
 
 02.1. This model exists to:
       - prevent accidental cross-pack corruption
-      - preserve determinism and reproducibility
+      - preserve determinism and reproducibility where retained evidence and
+        workflow semantics support them
       - make authority explicit and traceable
       - avoid pretending that hostile local behavior can be fully prevented
 
@@ -96,10 +102,15 @@ Upstream Documents:
       - moral or trust enforcement
 
 02.4. This document remains subordinate to higher-authority documents that
-      define the final state, memory, config, permission, adapter, RPC, and
-      tracing model.
+      define the final state, memory, configuration, permission, adapter, RPC,
+      tracing, and lifecycle models.
 
 02.5. Adapter mediation does not change state ownership by itself.
+
+02.6. Pack ownership in this model is ownership of a Turnix-governed state
+      namespace or authority domain.
+
+02.7. Pack ownership does not grant raw backend authority to Pack code.
 
 
 ===============================================================================
@@ -107,9 +118,9 @@ Upstream Documents:
 ===============================================================================
 
 03.1. This document governs an optional model for cross-pack access to:
-      - kernel-owned state
-      - pack-global state
-      - pack-local save-bound state
+      - Kernel-mediated runtime or domain state
+      - Pack-global state
+      - Pack-local save-bound state
       - computed or derived effective values
 
 03.2. This document considers the following operations:
@@ -118,121 +129,152 @@ Upstream Documents:
       - delete
       - observation or watching
 
-03.3. This document applies equally when state access is requested by
+03.3. This document applies when state access is requested by
       adapter-executed code through Turnix-mediated surfaces.
 
 03.4. This document does not grant adapter-executed code direct state
       authority.
+
+03.5. Scope names define logical ownership and access boundaries.
+
+03.6. Physical or durable storage location is owned by higher-authority
+      state, configuration, Workspace, persistence, and SaveBundle documents.
 
 
 ===============================================================================
 04. STATE OWNERSHIP MODEL (LOCKED)
 ===============================================================================
 
-04.1. In this model, every state key has exactly one authority owner.
+04.1. In this model, every governed state key has one owning authority
+      domain.
 
-04.2. The owner is either:
-      - the kernel
-      - a specific pack
+04.2. This optional model describes the following owning authority domains:
+      - Kernel-mediated runtime or domain state
+      - Pack-owned namespaces
 
-04.3. Ownership is:
+04.3. Higher-authority documents may define additional owning domains.
+
+04.4. This document does not replace final state, memory, configuration,
+      lifecycle, persistence, or permission semantics.
+
+04.5. Ownership is:
       - defined by domain and key path
       - not inferred dynamically
       - immutable unless changed by migration or a higher-authority
         state-transition rule
 
-04.4. This model does not use a shared undifferentiated global key bag.
+04.6. This model does not use a shared undifferentiated global key bag.
 
-04.5. Adapter identity is not state ownership identity.
+04.7. Adapter identity is not state ownership identity.
 
-04.6. Frontend client identity is not state ownership identity.
+04.8. Frontend client identity is not state ownership identity.
 
-04.7. RPC peer identity is not state ownership identity.
+04.9. RPC peer identity is not state ownership identity.
+
+04.10. ApplicationRun identity is not state ownership identity.
+
+04.11. Pack-owned state remains mediated by runtime authority, granted
+       permissions, owning-domain rules, transactions, and commit boundaries.
 
 
 ===============================================================================
 05. STATE SCOPES (LOCKED)
 ===============================================================================
 
-05.1. This model recognizes the following scopes:
-      - Kernel scope
+05.1. This model recognizes the following logical scopes:
+      - Kernel-mediated runtime scope
       - Pack-global scope
       - Pack-local save-bound scope
       - Computed or effective layer
 
 
-05.1 KERNEL SCOPE
------------------
+05.2 KERNEL-MEDIATED RUNTIME SCOPE
+----------------------------------
 
-05.1.1. Kernel scope:
-        - is owned by the kernel
-        - is stored in userdata in this model
-        - exists independently of packs and saves
-        - is accessible without ctx where the higher API permits that
+05.2.1. Kernel-mediated runtime scope:
+        - is governed by a Kernel-controlled authority domain
+        - exists independently of a particular Pack
+        - exists independently of a particular SaveBundle
+        - is accessed only through authorized APIs
 
-05.1.2. Examples include:
+05.2.2. Pack code accesses Kernel-mediated runtime state only through
+        ModCallContext or another explicitly provided mediated surface.
+
+05.2.3. Host, runtime, or admin tooling may use separate controlled command
+        or diagnostic surfaces.
+
+05.2.4. Controlled host, runtime, or admin surfaces do not grant Pack code
+        raw Kernel authority.
+
+05.2.5. Examples include:
         - UI language
         - global UI scale
         - developer-mode toggles
 
 
-05.2 PACK-GLOBAL SCOPE
+05.3 PACK-GLOBAL SCOPE
 ----------------------
 
-05.2.1. Pack-global scope:
-        - is owned by a specific pack
-        - is stored in userdata in this model
-        - is shared across all SavePacks
-        - available after pack indexing
+05.3.1. Pack-global scope:
+        - is owned by a specific Pack namespace
+        - is shared across Applications or SaveBundle generations only where
+          the owning configuration or persistence model permits that sharing
+        - becomes addressable only through the relevant mediated runtime
+          surfaces
 
-05.2.2. Examples include:
+05.3.2. Pack-global scope does not grant Pack visibility, import authority,
+        activation authority, service access, or capability invocation rights.
+
+05.3.3. Examples include:
         - UI theme defaults
         - code-formatting preferences
         - accessibility base parameters
 
 
-05.3 PACK-LOCAL SAVE-BOUND SCOPE
+05.4 PACK-LOCAL SAVE-BOUND SCOPE
 --------------------------------
 
-05.3.1. Pack-local save-bound scope:
-        - is owned by a specific pack
-        - is stored in a SavePack in this model
-        - exists only when a save is loaded
-        - is accessed through pack-aware runtime context
+05.4.1. Pack-local save-bound scope:
+        - is owned by a specific Pack namespace inside one save context
+        - exists only through an Application and SaveBundle binding
+        - is accessed through Pack-aware mediated runtime context
 
-05.3.2. Examples include:
+05.4.2. Examples include:
         - game difficulty
         - per-save gameplay modifiers
         - save-specific UI overrides
 
-05.3.3. Save-bound state access remains constrained by AppInstance and
-        SavePack binding rules defined in higher-authority documents.
+05.4.3. Save-bound state access remains constrained by Application,
+        ApplicationRun, SaveBundle, and accepted Pack graph binding rules.
 
 
-05.4 COMPUTED OR EFFECTIVE LAYER
+05.5 COMPUTED OR EFFECTIVE LAYER
 --------------------------------
 
-05.4.1. The computed or effective layer:
+05.5.1. The computed or effective layer:
         - is not an ownership scope
         - is derived at read time or runtime-evaluation time
         - is not persisted directly
 
-05.4.2. Examples include:
+05.5.2. Examples include:
         - accessibility scaling applied to UI font size
         - late runtime transforms
         - temporary overrides
+
+05.5.3. Computed or effective values do not become authoritative stored state
+        merely because they are read, cached, displayed, or transported.
 
 
 ===============================================================================
 06. ACCESS LEVELS (LOCKED)
 ===============================================================================
 
-06.1. In this model, each state key declares an access level.
+06.1. In this model, each governed state key declares an access level.
 
 06.2. Access level is metadata that is:
-      - declared in schema
-      - immutable unless changed through migration or another higher-
-        authority schema-evolution rule
+      - declared in schema or another higher-authority metadata model
+      - immutable unless changed through migration or another higher-authority
+        schema-evolution rule
       - enforced uniformly across all APIs that honor this model
 
 06.3. Levels in this model are:
@@ -242,11 +284,11 @@ Upstream Documents:
       - INTERNAL
 
 06.4. PUBLIC means:
-      - readable by any pack that can address the scope
+      - readable by any Pack that can address the scope
       - writable only by the owner unless other authority is granted
 
 06.5. PROTECTED means:
-      - readable by any pack
+      - readable by any Pack that can address the scope
       - writable only with explicit permission or ownership
 
 06.6. PRIVATE means:
@@ -254,14 +296,24 @@ Upstream Documents:
       - hidden or redacted by default in user-facing surfaces and traces
 
 06.7. INTERNAL means:
-      - readable and writable only by the owner and the kernel
+      - readable and writable only by the owner and the Kernel-mediated
+        authority domain allowed by the owning model
       - not discoverable by default through enumeration
       - redacted by default in exports
 
 06.8. These access levels are intended to prevent mistakes.
-      They do not claim secrecy against the local user.
 
-06.9. Adapter transport does not change access level meaning.
+06.9. These access levels do not claim secrecy against the local user.
+
+06.10. Adapter transport does not change access level meaning.
+
+06.11. PUBLIC, PROTECTED, PRIVATE, and INTERNAL govern state-key read,
+       write, enumeration, and redaction behavior inside this optional model.
+
+06.12. Access levels do not grant Pack visibility, dependency satisfaction,
+       import permission, activation, service access, capability invocation,
+       adapter execution authorization, persistence authority, or lifecycle
+       authority by themselves.
 
 
 ===============================================================================
@@ -271,50 +323,59 @@ Upstream Documents:
 07.1. This model separates read authority from write or delete authority.
 
 
-07.1 READING
+07.2 READING
 ------------
 
-07.1.1. Reading is permissive by default in this model.
+07.2.1. Reading is permissive by default in this model.
 
-07.1.2. Restrictions exist only where needed to prevent misuse, probing, or
+07.2.2. Restrictions exist only where needed to prevent misuse, probing, or
         violation of explicit access-level rules.
 
-07.1.3. If access is denied for any reason:
+07.2.3. If access is denied for any reason:
         - the API returns NotFoundOrPermissionDenied
         - the distinction is not exposed programmatically
-        - trace records the real reason
+        - trace records the real reason where tracing policy permits it
 
-07.1.4. No silent fallback occurs.
+07.2.4. No silent fallback occurs.
 
-07.1.5. Adapter-mediated reads remain subject to the same read-authority
+07.2.5. Adapter-mediated reads remain subject to the same read-authority
         rules.
 
+07.2.6. Frontend presentation does not broaden read authority.
 
-07.2 WRITING AND DELETING
+07.2.7. RPC transport does not broaden read authority.
+
+
+07.3 WRITING AND DELETING
 -------------------------
 
-07.2.1. All mutation requires authority.
+07.3.1. All mutation requires authority.
 
-07.2.2. Delete is explicit and is treated as a write-class operation.
+07.3.2. Delete is explicit and is treated as a write-class operation.
 
-07.2.3. Subtree deletion may be supported.
+07.3.3. Subtree deletion may be supported.
 
-07.2.4. Mutation authority may come from:
+07.3.4. Mutation authority may come from:
         - ownership
         - explicit permission
         - user-mediated decision where the governing model allows it
 
-07.2.5. Unauthorized mutation does not occur.
+07.3.5. Unauthorized mutation does not occur.
 
-07.2.6. Unauthorized mutation emits a trace event.
+07.3.6. Unauthorized mutation emits trace evidence where tracing policy
+        permits it.
 
-07.2.7. Unauthorized mutation may trigger a user decision only where a
+07.3.7. Unauthorized mutation may trigger a user decision only where a
         higher-authority decision-handling model permits that recovery path.
 
-07.2.8. Adapter-mediated writes remain subject to the same write-authority
+07.3.8. Adapter-mediated writes remain subject to the same write-authority
         rules.
 
-07.2.9. In-process adapter calls do not bypass write authority.
+07.3.9. In-process adapter calls do not bypass write authority.
+
+07.3.10. Pack-owned state is mutated only through mediated APIs, granted
+         permissions, owning-domain rules, transactions, and commit
+         boundaries.
 
 
 ===============================================================================
@@ -325,18 +386,29 @@ Upstream Documents:
 
 08.2. Schemas are not mutated.
 
-08.3. Only override layers are written in this model.
+08.3. Only override layers or other higher-authority writable layers are
+      written in this model.
 
 08.4. All writes:
-      - go through IoManager or the higher-authority persistence path
+      - go through IoManager or another higher-authority persistence path
       - are atomic where the underlying authority model requires atomicity
-      - produce trace events
+      - emit trace evidence where tracing policy permits it
       - may produce backups
       - may trigger recovery handling when higher documents permit that
 
-08.5. Adapter-executed mutation does not become authoritative until it
+08.5. IoManager owns persistent-I/O authority.
+
+08.6. IoManager does not replace committed-state truth.
+
+08.7. Adapter-executed mutation does not become authoritative until it
       crosses the higher-authority orchestration, transaction, and commit
       boundaries.
+
+08.8. Mutation triggered by observation, watching, or computed handling is
+      mediated work.
+
+08.9. Mutation triggered by observation, watching, or computed handling is
+      not direct hidden mutation.
 
 
 ===============================================================================
@@ -355,11 +427,16 @@ Upstream Documents:
 
 09.3. Computed layers:
       - declare dependencies
-      - remain traceable
+      - remain traceable where tracing policy permits it
       - avoid cycles
 
 09.4. Computed or effective values do not become authoritative stored state
       merely because they are transported to another runtime.
+
+09.5. Computed-handler logic may not bypass ordinary authority,
+      transaction, orchestration, permission, trace, or commit boundaries.
+
+09.6. Any mutation triggered by computed-handler logic is mediated work.
 
 
 ===============================================================================
@@ -380,6 +457,13 @@ Upstream Documents:
 
 10.4. Adapter-mediated observation does not grant write authority.
 
+10.5. Watcher and observer logic may not bypass ordinary authority,
+      transaction, orchestration, permission, trace, or commit boundaries.
+
+10.6. Any mutation triggered by watcher or observer logic is mediated work.
+
+10.7. Watcher and observer delivery mechanics remain OPEN.
+
 
 ===============================================================================
 11. CROSS-PACK INTENTIONAL MODIFICATION (LOCKED)
@@ -390,13 +474,19 @@ Upstream Documents:
         relationship
       - the target owner domain is explicit
       - the permission model applies
-      - trace records the intent and outcome
+      - trace records the intent and outcome where tracing policy permits it
 
 11.2. This is explicit cooperation rather than an implicit override.
 
 11.3. If the modifying request originates from adapter-executed code, the
       adapter remains only the execution boundary or communication
-      participant. The pack or kernel authority remains explicit.
+      participant.
+
+11.4. Pack or Kernel-mediated authority remains explicit.
+
+11.5. Cross-pack modification does not create a general right to enumerate,
+      import, activate, call services, invoke capabilities, or access other
+      state owned by the target Pack.
 
 
 ===============================================================================
@@ -407,45 +497,62 @@ Upstream Documents:
 
 12.2. INTERNAL keys do not appear by default.
 
-12.3. PRIVATE keys appear only to the owner and to kernel tooling where the
-      higher diagnostic model permits that access.
+12.3. PRIVATE keys appear only to the owner and to Kernel-mediated tooling
+      where the higher diagnostic model permits that access.
 
 12.4. Enumeration exists for tooling rather than for probing.
 
 12.5. Adapter-mediated enumeration remains governed by the same authority
       and redaction rules.
 
+12.6. Enumeration permission does not imply write permission.
+
+12.7. Enumeration permission does not imply visibility, import, activation,
+      service access, capability invocation, or persistence authority.
+
 
 ===============================================================================
 13. USER VISIBILITY AND DEFAULT REDACTION (LOCKED)
 ===============================================================================
 
-13.1. Users may inspect all state through kernel tools.
+13.1. User-controlled diagnostic or admin tooling may inspect retained state
+      and evidence through authorized surfaces where owning documents make
+      that material available.
 
-13.2. However:
-      - PRIVATE and INTERNAL values are redacted by default
-      - traces redact raw values for PRIVATE or INTERNAL keys by default
-      - exports redact sensitive values unless explicitly included through
-        an allowed path
+13.2. Normal surfaces, traces, and exports keep redaction defaults unless an
+      allowed path explicitly includes the value.
 
-13.3. This model does not claim secrecy from the user.
-      It defines leak-minimizing defaults for normal surfaces.
+13.3. PRIVATE and INTERNAL values are redacted by default in normal surfaces.
 
-13.4. Frontend presentation does not remove redaction requirements.
+13.4. Traces redact raw values for PRIVATE or INTERNAL keys by default.
 
-13.5. Transporting a value to a frontend or remote adapter does not make it
+13.5. Exports redact sensitive values unless explicitly included through an
+      allowed path.
+
+13.6. This model does not claim secrecy from the user.
+
+13.7. This model defines leak-minimizing defaults for normal surfaces.
+
+13.8. Frontend presentation does not remove redaction requirements.
+
+13.9. Transporting a value to a frontend or remote adapter does not make it
       public by itself.
 
+13.10. A value that is absent, pruned, corrupt, encrypted, external,
+       unmounted, or not retained is not made inspectable by this document.
+
 
 ===============================================================================
-14. TRACE AND AUDIT REQUIREMENTS (LOCKED)
+14. TRACE AND DIAGNOSTIC REQUIREMENTS (LOCKED)
 ===============================================================================
 
-14.1. Cross-pack state access emits trace events including:
+14.1. Cross-pack state access emits trace evidence including, where
+      applicable and available:
       - caller identity
-      - adapter identity when applicable
-      - RPC message identity when applicable
-      - AppInstance identity when applicable
+      - adapter identity
+      - RPC message identity
+      - Application identity
+      - ApplicationRun identity
       - owner domain
       - key path
       - access level
@@ -456,8 +563,19 @@ Upstream Documents:
 14.2. Raw values are excluded or redacted according to access level and the
       governing tracing model.
 
-14.3. Adapter, RPC, and AppInstance correlation evidence remains evidence.
-      It does not redefine state authority.
+14.3. Adapter, RPC, frontend, and ApplicationRun correlation evidence remains
+      evidence.
+
+14.4. Correlation evidence does not redefine state ownership, access
+      authority, committed-state truth, or lifecycle authority.
+
+14.5. Trace records evidence of access decisions and outcomes.
+
+14.6. Trace is not enforcement authority.
+
+14.7. Trace is not committed-state truth.
+
+14.8. Trace is not persistence authority.
 
 
 ===============================================================================
@@ -465,18 +583,21 @@ Upstream Documents:
 ===============================================================================
 
 15.1. Denied access results in:
-      - deterministic behavior
+      - deterministic behavior where the governing model defines it
       - no partial mutation
       - no silent override
 
-15.2. Errors remain:
-      - traceable
-      - explainable
-      - reproducible
+15.2. Errors emit or retain structured evidence where owning tracing and
+      retention policies support it.
 
-15.3. Transport failure does not redefine denied-access meaning.
+15.3. Reproducibility is claimed only where retained evidence and owning
+      workflow semantics support reproduction.
 
-15.4. Adapter failure does not redefine committed-state meaning.
+15.4. Transport failure does not redefine denied-access meaning.
+
+15.5. Adapter failure does not redefine committed-state meaning.
+
+15.6. Access failure does not grant fallback authority.
 
 
 ===============================================================================
@@ -490,13 +611,23 @@ Upstream Documents:
       - DA-06 for configuration, schemas, and migration
       - DA-03 for tracing, diagnostics, and observability
       - DA-17 for user interaction, decision points, and policy handling
-      - DA-20 for AppInstance lifecycle and runtime identity
+      - DA-20 for lifecycle and runtime identity semantics
       - DA-21 for RPC, channels, transports, and message flow
       - DA-23 for execution adapter boundaries
 
 16.2. This document also remains compatible with:
       - the Core Truth Doctrine in DA-01
       - the lower-tier exploratory compatibility ideas in ODA-D
+
+16.3. If this document conflicts with a higher-authority document, the
+      higher-authority document controls.
+
+16.4. Access-level metadata in this document does not replace Pack
+      visibility, dependency, resolution, import, activation, service,
+      capability, permission, adapter, persistence, or lifecycle semantics.
+
+16.5. This document defines only the optional cross-pack state-access model
+      described here.
 
 
 ===============================================================================
@@ -523,8 +654,6 @@ Upstream Documents:
       - whether ordering is deterministic and what defines it
       - sync versus async delivery semantics
       - batching, queueing, scheduling, or inline execution behavior
-      - whether watcher logic may mutate state directly or only through
-        normal orchestrated paths
       - cycle prevention, cycle classification, and cycle diagnostics
       - whether recomputation watchers differ from ordinary observers
       - failure isolation and whether one failing watcher affects others
@@ -535,10 +664,13 @@ Upstream Documents:
       - debugger and tooling interaction with watcher notifications
       - activation, deactivation, and reload lifecycle rules
 
-17.4. Computed and effective behavior is accepted conceptually, but the
+17.4. Watcher and observer mutation cannot bypass ordinary mediated work
+      boundaries.
+
+17.5. Computed and effective behavior is accepted conceptually, but the
       concrete computed-handler model remains OPEN.
 
-17.5. OPEN computed-handler questions include:
+17.6. OPEN computed-handler questions include:
       - exact registration model
       - whether handlers attach by exact key, subtree, scope, owner domain,
         schema rule, or another declared dependency model
@@ -558,9 +690,12 @@ Upstream Documents:
       - interaction with staged versus committed mutation
       - debugger and tooling interaction with computed values
 
-17.6. Transform ordering remains OPEN.
+17.7. Computed-handler mutation cannot bypass ordinary mediated work
+      boundaries.
 
-17.7. OPEN transform-ordering questions include:
+17.8. Transform ordering remains OPEN.
+
+17.9. OPEN transform-ordering questions include:
       - whether ordering is declaration-based, priority-based, dependency-
         based, or another deterministic model
       - whether equal-priority transforms are allowed
@@ -571,21 +706,21 @@ Upstream Documents:
         runtime
       - trace expectations for chosen transform order
 
-17.8. Restriction metadata beyond configuration keys remains OPEN.
+17.10. Restriction metadata beyond configuration keys remains OPEN.
 
-17.9. OPEN restriction-metadata questions include:
-      - whether future non-config memory or state domains use schema-
-        declared access metadata
-      - whether a separate metadata model is required for non-config state
-      - how such metadata would attach to non-config keys, values, or
-        records
-      - whether the same PUBLIC, PROTECTED, PRIVATE, and INTERNAL model
-        applies unchanged outside configuration
-      - migration and compatibility handling for such metadata
+17.11. OPEN restriction-metadata questions include:
+       - whether future non-config memory or state domains use schema-
+         declared access metadata
+       - whether a separate metadata model is required for non-config state
+       - how such metadata would attach to non-config keys, values, or
+         records
+       - whether the same PUBLIC, PROTECTED, PRIVATE, and INTERNAL model
+         applies unchanged outside configuration
+       - migration and compatibility handling for such metadata
 
-17.10. Cross-runtime transport details for these rules remain OPEN.
+17.12. Cross-runtime transport details for these rules remain OPEN.
 
-17.11. OPEN cross-runtime transport questions include:
+17.13. OPEN cross-runtime transport questions include:
        - how read, write, delete, watch, and computed-state operations are
          represented across runtime boundaries
        - how authority, owner domain, and access-level metadata are carried
@@ -601,8 +736,10 @@ Upstream Documents:
        - which details belong in implementation specifications versus higher
          semantic documents
 
-17.12. This document does not claim that no other design questions exist
-       globally. It states only that these are the major open questions
+17.14. This document does not claim that no other design questions exist
+       globally.
+
+17.15. This document states only that these are the major open questions
        inside this optional model.
 
 
@@ -611,17 +748,18 @@ Upstream Documents:
 ===============================================================================
 
 18.1. LOCKED:
-      - explicit ownership
-      - a scoped state model
-      - schema-declared access levels
+      - explicit ownership domains
+      - a scoped state-access model
+      - schema-declared or metadata-declared access levels
       - permissive reads and guarded writes
       - non-persistent computed layers
-      - IoManager-mediated or equivalent authoritative mutation
+      - IoManager-mediated or equivalent authoritative persistence path
       - adapter-mediated state access does not grant adapter state authority
       - in-process adapter calls do not bypass write authority
       - transported computed values do not become authoritative stored state
-      - trace-first enforcement
+      - trace-emitting enforcement through owning authority paths
       - leak-minimizing diagnostics
+      - watcher, observer, and computed-handler mutation remains mediated work
 
 18.2. OPEN:
       - exact schema representation details
@@ -635,12 +773,12 @@ Upstream Documents:
 
 
 ===============================================================================
-END OF ODA-E - CROSS-PACK PERMISSIONS, STATE ACCESS, MUTATION & AUTHORITY
+END OF ODA-E - CROSS-PACK PERMISSIONS - STATE ACCESS, MUTATION & AUTHORITY
 ===============================================================================
 
 --- doc-meta ---
 DOC_ID: ODA-E
 DOC_FILE: docs/design/ODA-E_CROSS_PACK_PERMISSIONS_STATE_ACCESS_MUTATION_AND_AUTHORITY.txt
-DOC_REV: 9
-DOC_GIT: e676424
+DOC_REV: 10
+DOC_GIT: b2a0115
 ----------------
