@@ -10,7 +10,7 @@ Description:
 ------------
 Defines how Turnix involves the user in decisions, when execution is allowed
 to pause, how decisions are persisted, and how policy reduces repeated
-friction without hiding uncertainty.
+friction without hiding uncertainty or redefining authority.
 
 Purpose:
 --------
@@ -18,7 +18,7 @@ This document defines the Turnix decision-handling model for situations where
 the system cannot proceed safely or deterministically on its own.
 
 It defines:
-- user interaction as a kernel concern
+- user interaction as a Kernel-mediated system concern
 - decision-point types
 - hard and soft decision handling
 - scoped pause-and-resume behavior
@@ -32,15 +32,30 @@ It defines:
 - failure behavior while a decision is pending
 
 It does NOT define:
+- committed-state truth, transactions, or authoritative mutation (see DA-04)
+- configuration storage file placement (see DA-06)
+- persistent-I/O authority (see DA-07)
 - generic resolution mechanics (see DA-11)
-- config storage file placement (see DA-06)
 - importing and module-loading rules (see DA-12)
 - activation lifecycle or execution guarantees (see DA-14)
 - capability schemas and permission-class definitions (see DA-16)
+- debugging, inspection, breakpoint, or execution-control behavior (see DA-18)
 - Job lifecycle, Job terminal states, or Job result semantics (see DA-19)
-- RPC transport flow, disconnect mechanics, or wire schemas (see IS-01 and
-  IS-02)
-- tracing schema or storage details (see DA-03)
+- Application or ApplicationRun lifecycle semantics (see DA-20)
+- RPC, channel, transport, timeout, disconnect, or message-flow semantics
+  (see DA-21)
+- UI, View, frontend runtime, or multi-client presentation mechanics
+  (see DA-22)
+- adapter lifecycle, trust, isolation, or failure semantics (see DA-27)
+- OrchestrationUnit lifecycle or mutation authority (see DA-24)
+- Window finalization or artifact/export semantics (see DA-08 and DA-25)
+- comparison, Replay, Resume, Retry, or retained-evidence workflow semantics
+  (see DA-26)
+- RuntimeHost lifecycle, command surfaces, or workspace ownership (see DA-28)
+- PackManager catalog, repair, graph-preparation, or operation outcomes
+  (see DA-29)
+- trace substrate, retention, loss, trace DAG, event schema, or span semantics
+  (see DA-03)
 
 Upstream Documents:
 ------------------
@@ -50,7 +65,9 @@ Upstream Documents:
 - CMR-04
 - CMR-05
 - DA-01
+- DA-04
 - DA-06
+- DA-07
 - DA-11
 - DA-14
 - DA-16
@@ -59,6 +76,14 @@ Upstream Documents:
 Downstream Documents:
 --------------------
 - DA-18
+- DA-21
+- DA-22
+- DA-24
+- DA-25
+- DA-26
+- DA-27
+- DA-28
+- DA-29
 - IS-01
 - IS-02
 
@@ -102,29 +127,35 @@ Downstream Documents:
       - suspicious content divergence
       - work-lifecycle policy choice
 
-02.6. If a decision affects identity, persistence, authority, safety,
-      work lifecycle, or known content equivalence, the decision is explicit
-      and trace-backed.
+02.6. If a decision affects identity, persistence, authority, safety, work
+      lifecycle, or known content equivalence, the decision is explicit and
+      trace-backed.
 
 02.7. Decision handling reduces uncertainty by recording an explicit user or
-      policy outcome. It does not prove authenticity, trust, or correctness.
+      policy outcome.
 
-02.8. Policy may influence work lifecycle only through explicit policy
+02.8. Decision handling does not prove authenticity, trust, or correctness.
+
+02.9. Policy may influence work lifecycle only through explicit policy
       outcomes.
 
-02.9. Policy does not silently create, cancel, supersede, detach, retain, or
-      discard work.
-02.12. Remembered policy reduces repeated friction. It does not define domain
-       outcomes, committed state, Job outcomes, Window outcomes, Replay,
-       Resume, Retry, artifact export, or audit workflow results.
+02.10. Policy does not silently create, cancel, supersede, detach, retain,
+       or discard work.
+
+02.11. Remembered policy reduces repeated friction.
+
+02.12. Remembered policy does not define domain outcomes, committed state,
+       Job outcomes, Window outcomes, Replay, Resume, Retry, artifact export,
+       or retained-evidence workflow results.
 
 02.13. DA-06 owns policy storage location and top-level persistent file
-       structure. DA-17 owns decision semantics and remembered-policy meaning.
+       structure.
 
+02.14. DA-17 owns decision semantics and remembered-policy meaning.
 
 
 ===============================================================================
-03. USER INTERACTION IS A SYSTEM CONCERN (LOCKED)
+03. AUTHORITY BOUNDARIES
 ===============================================================================
 
 03.1. User interaction is not:
@@ -133,20 +164,52 @@ Downstream Documents:
       - frontend-specific
 
 03.2. User interaction is:
-      - kernel-mediated
+      - Kernel-mediated
       - policy-driven
       - serializable
       - trace-backed
 
-03.3. All decision points originate in the kernel.
+03.3. All decision points originate in the Kernel.
 
 03.4. Mods and packs may trigger decision points.
 
 03.5. Mods and packs do not own, implement, or bypass decision handling.
 
+03.6. Policy decisions choose allowed responses where Turnix cannot safely
+      or deterministically proceed on its own.
+
+03.7. Policy does not redefine authority.
+
+03.8. Policy does not directly define:
+      - committed-state truth
+      - Job terminal states
+      - RPC or transport outcomes
+      - OrchestrationUnit terminal outcomes
+      - Application or ApplicationRun lifecycle
+      - adapter lifecycle
+      - RuntimeHost lifecycle
+      - Window finalization
+      - PackManager operation outcomes
+      - Replay, Resume, or Retry workflow outcomes
+      - artifact or export authority
+      - capability permission semantics
+
+03.9. If a policy decision affects another domain, the owning domain defines
+      the resulting domain outcome.
+
+03.10. Correlation between a policy decision and a domain outcome is
+       explicit.
+
+03.11. Frontend presentation state is not policy state.
+
+03.12. Policy scope is not ownership authority.
+
+03.13. Persisted policy records are not hidden authority merely because they
+       are persisted.
+
 
 ===============================================================================
-04. DECISION POINT TYPES (LOCKED)
+04. DECISION POINT TYPES
 ===============================================================================
 
 04.1. Turnix recognizes the following decision-point types:
@@ -157,189 +220,193 @@ Downstream Documents:
       - Fingerprint-mismatch decisions
       - Work-lifecycle policy decisions
 
+04.2 Resolution decisions
+-------------------------
 
-04.1 RESOLUTION DECISIONS (LOCKED)
-----------------------------------
-
-04.1.1. Resolution decisions occur when Turnix cannot deterministically
+04.2.1. Resolution decisions occur when Turnix cannot deterministically
         select one safe option.
 
-04.1.2. Examples include:
+04.2.2. Examples include:
         - multiple eligible packs
         - semantic-version mismatch override
         - pinned pack missing
         - last-known-good fallback
         - conflicting pack requests
 
-04.1.3. Resolution-decision outcomes may include:
+04.2.3. Resolution-decision outcomes may include:
         - chosen pack or version
         - persisted resolution rule when applicable
-        - trace explaining why the selected option was chosen
+        - trace evidence explaining why the selected option was chosen
 
+04.3 Permission decisions
+-------------------------
 
-04.2 PERMISSION DECISIONS (LOCKED)
-----------------------------------
-
-04.2.1. Permission decisions occur when an action would cross an authority
+04.3.1. Permission decisions occur when an action would cross an authority
         or trust boundary.
 
-04.2.2. Examples include:
+04.3.2. Examples include:
         - external network access
         - filesystem writes through IoManager
         - mod installation
         - invoking a hard-classified capability
 
-04.2.3. Permission decisions apply only to actions that:
+04.3.3. Permission decisions apply only to actions that:
         - mutate persisted state
         - delete persisted state
         - intentionally cross ownership boundaries
 
-04.2.4. Permission decisions are not raised for:
+04.3.4. Permission decisions are not raised for:
         - computed-only effects
         - runtime-only transforms
         - observation or watching of values
 
-04.2.5. Read access is excluded from permission decisions:
+04.3.5. Read access is excluded from permission decisions:
         - reads either succeed or return NotFoundOrPermissionDenied
         - user interaction is never used for reads
         - prompting, confirmation, and policy do not apply to reads
 
-04.2.6. This preserves determinism, prevents probing, and avoids decision
+04.3.6. This preserves determinism, prevents probing, and avoids decision
         spam.
 
-04.2.7. Permission-decision outcomes may include:
+04.3.7. Permission-decision outcomes may include:
         - allow
         - deny
         - for this run
         - remember
 
-04.2.8. For capability-based permission decisions, the remembered
-        permission identity uses the exact versioned capability identifier.
+04.3.8. For capability-based permission decisions, the remembered permission
+        identity uses the exact versioned capability identifier.
 
-04.2.9. A capability permission for storage.export@1 is remembered against
+04.3.9. A capability permission for storage.export@1 is remembered against
         storage.export@1, not against storage.export, storage, or a wildcard
         family.
 
-04.2.10. This document does not introduce wildcard, prefix, or versionless
+04.3.10. This document does not introduce wildcard, prefix, or versionless
          fallback lookup for capability permission policies.
 
+04.4 Recovery decisions
+-----------------------
 
-04.3 RECOVERY DECISIONS (LOCKED)
---------------------------------
+04.4.1. Recovery decisions occur when persisted state cannot be used safely.
 
-04.3.1. Recovery decisions occur when persisted state cannot be used
-        safely.
-
-04.3.2. Examples include:
+04.4.2. Examples include:
         - corrupted config file
-        - unreadable SavePack
+        - unreadable SaveBundle
         - failed migration
         - checksum mismatch
-        - missing dependency for a SavePack
+        - missing dependency for a SaveBundle
 
-04.3.3. Recovery-decision outcomes may include:
+04.4.3. Recovery-decision outcomes may include:
         - restore from backup
         - reset to defaults
         - quarantine or rename broken data
         - abort startup of the affected unit
 
-04.3.4. Recovery decisions reference:
+04.4.4. Recovery decisions reference:
         - last-known-good state
         - available backups
-        - scope of impact such as engine, pack, or save
+        - scope of impact such as engine, pack, or save-bound state
 
+04.5 Configuration-scope decisions
+----------------------------------
 
-04.4 CONFIGURATION-SCOPE DECISIONS (LOCKED)
--------------------------------------------
-
-04.4.1. Configuration-scope decisions occur when persistence intent is
+04.5.1. Configuration-scope decisions occur when persistence intent is
         ambiguous rather than unsafe.
 
-04.4.2. These decisions answer:
+04.5.2. These decisions answer:
         "Where should this value live, if it is persisted at all?"
 
-04.4.3. Examples include:
+04.5.3. Examples include:
         - modifying a value that exists in both global and save scope
         - promoting a save-local value to pack-global or engine scope
         - deleting a value that shadows defaults
         - attempting to persist a value produced only by computation
 
-04.4.4. Configuration-scope decisions exclude:
+04.5.4. Configuration-scope decisions exclude:
         - computed-only values
         - derived runtime effects
         - accessibility or reactive transforms
 
-04.4.5. Configuration-scope-decision outcomes may include:
-        - chosen scope such as engine, pack-global, or save
+04.5.5. Configuration-scope-decision outcomes may include:
+        - chosen scope such as engine, pack-global, or save-bound
         - persisted rule when applicable
-        - trace linking the decision to the key and scope
+        - trace evidence linking the decision to the key and scope
 
+04.6 Fingerprint-mismatch decisions
+-----------------------------------
 
-04.5 FINGERPRINT-MISMATCH DECISIONS (LOCKED)
---------------------------------------------
-
-04.5.1. Fingerprint-mismatch decisions occur when Turnix has an expected
+04.6.1. Fingerprint-mismatch decisions occur when Turnix has an expected
         pack fingerprint and the computed fingerprint differs.
 
-04.5.2. Fingerprint mismatch means content divergence from an expected pack
-        representation. It does not prove malicious action or authenticity
-        failure.
+04.6.2. Fingerprint mismatch means content divergence from an expected pack
+        representation.
 
-04.5.3. Fingerprint-mismatch decision triggers are:
+04.6.3. Fingerprint mismatch does not prove malicious action or
+        authenticity failure.
+
+04.6.4. Fingerprint-mismatch decision triggers are:
         - same canonicalPackId and same packVersion with different
           fingerprints
-        - SavePack expected fingerprint mismatch
+        - SaveBundle-associated expected fingerprint mismatch
+        - SaveBundle-local retained Pack fingerprint mismatch
         - manifest-declared dependency fingerprint mismatch
 
-04.5.4. Manifest-declared dependency fingerprint mismatch applies only when
+04.6.5. Manifest-declared dependency fingerprint mismatch applies only when
         the manifest actually declares an expected fingerprint.
 
-04.5.5. Origin-only collision is not a fingerprint-mismatch decision trigger.
+04.6.6. Origin-only collision is not a fingerprint-mismatch decision
+        trigger.
 
-04.5.6. A first-party-looking source, repo source, third-party source,
+04.6.7. A first-party-looking source, repo source, third-party source,
         custom source, save-local source, or externally-managed content
         source does not by itself prove which candidate is authentic.
 
-04.5.7. Candidate origin may be shown as context to the user, but origin
+04.6.8. Candidate origin may be shown as context to the user, but origin
         alone is not treated as proof.
 
-04.5.8. Fingerprint-mismatch-decision outcomes may include:
+04.6.9. Fingerprint-mismatch-decision outcomes may include:
         - allow
         - deny
         - for this run
         - remember
 
-04.5.9. Allowing for this run does not update the stored expected
-        fingerprint.
+04.6.10. Allowing for this run does not update the stored expected
+         fingerprint.
 
-04.5.10. Remembering a fingerprint-mismatch decision records acceptance of
+04.6.11. Remembering a fingerprint-mismatch decision records acceptance of
          the specific mismatch under the selected policy scope.
 
+04.7 Work-lifecycle policy decisions
+------------------------------------
 
-04.6 WORK-LIFECYCLE POLICY DECISIONS (LOCKED)
----------------------------------------------
-
-04.6.1. Work-lifecycle policy decisions occur when Turnix must choose how
+04.7.1. Work-lifecycle policy decisions occur when Turnix must choose how
         accepted or in-flight work proceeds after a lifecycle-relevant
         condition.
 
-04.6.2. Work-lifecycle policy decisions may affect:
+04.7.2. Work-lifecycle policy decisions may be correlated with:
         - Jobs
-        - Orchestration Units
-        - RPC request handling
+        - OrchestrationUnits
+        - RPC requests
         - scheduler-owned work
         - debugger-controlled work
+        - adapter-mediated work
+        - RuntimeHost operations
+        - Windows
+        - PackManager operations
+        - Replay, Resume, or Retry workflow requests
 
-04.6.3. Work-lifecycle policy decisions may be triggered by:
+04.7.3. Work-lifecycle policy decisions may be triggered by:
         - cancellation request
         - timeout boundary
         - supersession condition
         - frontend or transport disconnect
         - scheduler replacement
         - debugger control action
+        - adapter failure or disconnect
+        - RuntimeHost shutdown
         - system shutdown
 
-04.6.4. Work-lifecycle policy outcomes may include:
+04.7.4. Work-lifecycle policy outcomes may include:
         - continue work
         - cancel work
         - supersede work
@@ -349,61 +416,86 @@ Downstream Documents:
         - refuse unsafe continuation
         - abort startup or affected work
 
-04.6.5. Work-lifecycle policy decisions do not define Job terminal states.
+04.7.5. Work-lifecycle policy decisions do not define Job terminal states.
 
-04.6.6. DA-19 defines Job lifecycle states, terminal outcomes, cancellation,
-        timeout, supersession, progress, and late completion semantics.
+04.7.6. DA-19 defines Job lifecycle states, terminal outcomes,
+        cancellation, timeout, supersession, progress, result, and late
+        completion semantics.
 
-04.6.7. Work-lifecycle policy decisions do not define RPC transport
+04.7.7. Work-lifecycle policy decisions do not define RPC or transport
         mechanics.
 
-04.6.8. IS-02 defines concrete WebSocket RPC transport flow and disconnect
-        mechanics.
+04.7.8. DA-21 defines RPC, RPCChannel, transport, timeout, disconnect,
+        cancellation message, and acknowledgement semantics.
 
-04.6.9. Work-lifecycle policy decisions do not define capability permission
+04.7.9. Work-lifecycle policy decisions do not define capability permission
         semantics.
 
-04.6.10. DA-16 defines capability permission and mediation semantics.
+04.7.10. DA-16 defines capability permission and mediation semantics.
 
-04.6.11. A policy outcome that affects a Job remains trace-linked to the Job
-         lifecycle evidence when a Job exists.
+04.7.11. DA-18 defines debugger pause, breakpoint, inspection, and
+         execution-control behavior.
 
-04.6.12. A policy outcome that affects an Orchestration Unit remains
-         trace-linked to Orchestration Unit evidence when such a unit exists.
+04.7.12. DA-22 defines UI, View, frontend runtime, frontend presentation,
+         frontend disconnect, and multi-client presentation semantics.
+
+04.7.13. DA-24 defines OrchestrationUnit lifecycle, mutation authority, and
+         terminal outcomes.
+
+04.7.14. DA-25 defines Window artifacts, Window manifests, Window exports,
+         optional digest representation, partial export, missing material,
+         and offline inspection artifact semantics.
+
+04.7.15. DA-26 defines comparison, ComparisonResult, Replay, Resume, Retry,
+         and retained-evidence workflow semantics.
+
+04.7.16. DA-27 defines adapter lifecycle, trust, isolation, failure,
+         disconnect, and adapter-domain trace semantics.
+
+04.7.17. DA-28 defines RuntimeHost lifecycle, startup modes, command
+         surfaces, workspace ownership, local-first, and LAN exposure
+         semantics.
+
+04.7.18. DA-29 defines PackManager catalog, graph-preparation, repair,
+         View, write, and PackManager-domain trace semantics.
+
+04.7.19. A policy outcome that affects a Job remains trace-linked to the
+         Job lifecycle evidence when a Job exists.
+
+04.7.20. A policy outcome that affects an OrchestrationUnit remains
+         trace-linked to OrchestrationUnit evidence when such a unit exists.
 
 
 ===============================================================================
-05. HARD AND SOFT DECISIONS (LOCKED)
+05. HARD AND SOFT DECISIONS
 ===============================================================================
 
 05.1. Turnix distinguishes between soft decisions and hard decisions.
 
+05.2 Soft decisions
+-------------------
 
-05.1 SOFT DECISIONS (LOCKED)
-----------------------------
-
-05.1.1. Soft-decision characteristics:
+05.2.1. Soft-decision characteristics are:
         - execution may continue if denied
         - denial does not break identity
         - policy may auto-allow where permitted
 
-05.1.2. Examples include:
+05.2.2. Examples include:
         - version mismatch warnings
         - optional capability usage
         - non-critical override refusals
         - replacing preview work with newer preview work
 
+05.3 Hard decisions
+-------------------
 
-05.2 HARD DECISIONS (LOCKED)
-----------------------------
-
-05.2.1. Hard-decision characteristics:
+05.3.1. Hard-decision characteristics are:
         - execution pauses
         - denial blocks progress
         - user response is mandatory unless an accepted policy already
           supplies the outcome
 
-05.2.2. Examples include:
+05.3.2. Examples include:
         - replacing a pinned pack
         - destructive migration
         - restoring from backup
@@ -411,30 +503,32 @@ Downstream Documents:
         - deciding whether work with committed side effects may continue
           detached after transport disconnect
 
-05.2.3. Hard decisions always:
+05.3.3. Hard decisions always:
         - generate trace events
         - require explicit acknowledgement of the effective outcome
 
-05.2.4. Fingerprint-mismatch decisions may be hard or soft depending on the
-        surrounding consumer context and impact. SavePack reproducibility or
-        exact dependency expectations may require hard handling.
+05.3.4. Fingerprint-mismatch decisions may be hard or soft depending on the
+        surrounding consumer context and impact.
 
-05.2.5. Work-lifecycle policy decisions may be hard or soft depending on
+05.3.5. SaveBundle reproducibility or exact dependency expectations may
+        require hard handling.
+
+05.3.6. Work-lifecycle policy decisions may be hard or soft depending on
         whether the affected work can safely continue, cancel, supersede, or
         detach without changing authority, persistence, or safety meaning.
 
 
 ===============================================================================
-06. PAUSING MODEL (LOCKED)
+06. PAUSING MODEL
 ===============================================================================
 
 06.1. When a decision is required:
       - the triggering execution unit pauses
       - unrelated execution may continue
-      - frontends are notified through a kernel-mediated event
+      - frontends are notified through a Kernel-mediated event
       - execution resumes only after decision handling completes
 
-06.2. Rules:
+06.2. During a decision pause:
       - no busy waiting occurs
       - no polling occurs
       - no global freeze occurs
@@ -444,9 +538,11 @@ Downstream Documents:
 06.4. While a decision is pending:
       - no persisted mutation may be committed
       - no configuration write may be finalized
-      - no SavePack mutation may complete
-      - no Job or Orchestration Unit affected by the decision may silently
-        cross the decision-controlled boundary
+      - no SaveBundle mutation may complete
+      - no Job affected by the decision may silently cross the
+        decision-controlled boundary
+      - no OrchestrationUnit affected by the decision may silently cross the
+        decision-controlled boundary
 
 06.5. Computed or runtime-only effects may continue if they do not persist
       state and do not cross the paused authority boundary.
@@ -457,9 +553,14 @@ Downstream Documents:
 06.7. Job lifecycle changes caused by decision timeout or policy are owned
       by DA-19 and remain trace-visible.
 
+06.8. A decision pause does not by itself define Window finalization.
+
+06.9. Window finalization remains owned by DA-08 and related artifact/export
+      documents.
+
 
 ===============================================================================
-07. POLICY SYSTEM (LOCKED)
+07. POLICY SYSTEM
 ===============================================================================
 
 07.1. Policies define how Turnix behaves when a decision arises.
@@ -493,6 +594,9 @@ Downstream Documents:
       - convert Job terminal outcomes into ordinary failures
       - treat transport timeout as Job timeout
       - treat Job timeout as transport timeout
+      - treat frontend disconnect as ApplicationRun termination
+      - treat adapter failure as Kernel failure
+      - treat RuntimeHost shutdown as Job cancellation by itself
 
 07.7. Policy exists to reduce friction rather than to weaken safety or
       determinism.
@@ -506,7 +610,8 @@ Downstream Documents:
 
 07.10. Save policy overrides global policy.
 
-07.11. Run policy is memory-only and ends with the current Turnix run.
+07.11. Run policy is memory-only and ends with the current ApplicationRun or
+       bounded run context that created it.
 
 07.12. Save policy is persisted inside the save-bound policy storage defined
        by DA-06.
@@ -517,15 +622,18 @@ Downstream Documents:
 07.14. Work-lifecycle policy evaluation records the policy source that
        supplied or influenced the outcome.
 
+07.15. A policy source that influences an outcome does not own the target
+       domain outcome.
+
 
 ===============================================================================
-08. POLICY PERSISTENCE (LOCKED)
+08. POLICY PERSISTENCE
 ===============================================================================
 
 08.1. When a user makes a remembered decision:
       - it is persisted centrally in the selected scope
       - future matching decisions become deterministic within that scope
-      - trace links the decision to its origin
+      - trace evidence links the decision to its origin
 
 08.2. Persisted policies are:
       - explicit
@@ -539,25 +647,35 @@ Downstream Documents:
 08.5. Save-scope and global-scope policy storage locations are defined by
       DA-06.
 
-08.6. Persisted policy files contain distinct remembered-decision classes
+08.6. Policy storage location and top-level persisted file structure are
+      defined by DA-06.
+
+08.7. Decision meaning, remembered-policy matching, policy scope precedence,
+      permission policy keys, fingerprint policy keys, and work-lifecycle
+      policy semantics are defined by DA-17.
+
+08.8. Storing a policy record does not by itself create a valid policy
+      outcome outside DA-17 semantics.
+
+08.9. Persisted policy files contain distinct remembered-decision classes
       for permission policies and fingerprint policies.
 
-08.7. Work-lifecycle policies are stored separately from permission and
-      fingerprint policies when persisted policy storage supports them.
+08.10. Work-lifecycle policies are stored separately from permission and
+       fingerprint policies when persisted policy storage supports them.
 
-08.8. A remembered work-lifecycle policy does not imply a remembered
-      capability permission decision.
+08.11. A remembered work-lifecycle policy does not imply a remembered
+       capability permission decision.
 
-08.9. A remembered capability permission decision does not imply a
-      remembered work-lifecycle policy.
+08.12. A remembered capability permission decision does not imply a
+       remembered work-lifecycle policy.
 
-08.10. Exact JSON record layout inside policy files is defined outside this
+08.13. Exact JSON record layout inside policy files is defined outside this
        document and remains storage-format detail unless another document
        locks it.
 
 
 ===============================================================================
-09. PERMISSION POLICY KEYS (LOCKED)
+09. PERMISSION POLICY KEYS
 ===============================================================================
 
 09.1. Remembered general permission policy is keyed by:
@@ -589,12 +707,15 @@ Downstream Documents:
 
 09.10. Normal tier asks again only when no remembered decision applies.
 
-09.11. The pack version is comparison metadata. It is not part of the
-       permission policy identity key.
+09.11. The pack version is comparison metadata.
+
+09.12. The pack version is not part of the permission policy identity key.
+
+09.13. Capability permission semantics remain owned by DA-16.
 
 
 ===============================================================================
-10. FINGERPRINT POLICY KEYS (LOCKED)
+10. FINGERPRINT POLICY KEYS
 ===============================================================================
 
 10.1. Remembered fingerprint-mismatch policy is keyed by:
@@ -603,8 +724,7 @@ Downstream Documents:
       - expectedFingerprint
       - actualFingerprint
 
-10.2. expectedFingerprint and actualFingerprint are full fingerprint
-      strings.
+10.2. expectedFingerprint and actualFingerprint are full fingerprint strings.
 
 10.3. The fingerprint algorithm/version is part of the full fingerprint
       string rather than a separate policy-key field.
@@ -620,13 +740,18 @@ Downstream Documents:
 10.7. Remembered fingerprint acceptance may update the applicable policy
       record for the selected scope.
 
-10.8. SavePack fingerprint mismatch defaults to save-scope persistence when
-      the user chooses remember, unless a higher explicit policy says
-      otherwise.
+10.8. SaveBundle-associated fingerprint mismatch defaults to save-scope
+      persistence when the user chooses remember, unless a higher explicit
+      policy says otherwise.
 
 10.9. General permission decisions default to global-scope persistence when
       the user chooses remember, unless a higher explicit policy says
       otherwise.
+
+10.10. Origin context is comparison context.
+
+10.11. Origin context is not part of the fingerprint policy identity key
+       unless the fingerprint string itself includes origin-bound material.
 
 
 ===============================================================================
@@ -645,6 +770,8 @@ Downstream Documents:
       - scheduler policy class when scheduler work is involved
       - disconnect condition when disconnect handling is involved
       - supersession target class when supersession handling is involved
+      - adapter condition when adapter work is involved
+      - RuntimeHost condition when host work is involved
 
 11.3. A remembered work-lifecycle policy is not keyed by jobId alone.
 
@@ -654,23 +781,28 @@ Downstream Documents:
       not only the original Job instance.
 
 11.6. A remembered policy that applies to cancellation does not imply a
-      remembered policy that applies to supersession, timeout, or disconnect.
+      remembered policy that applies to supersession, timeout, disconnect,
+      detachment, result retention, result discard, adapter failure,
+      RuntimeHost failure, Window finalization, Replay, Resume, or Retry.
 
 11.7. A remembered policy that applies to transport disconnect does not
       imply a remembered policy that applies to Job timeout.
 
-11.8. The exact work-lifecycle policy-key schema remains OPEN until the
+11.8. A remembered policy that applies to adapter failure does not imply a
+      remembered policy that applies to RuntimeHost failure.
+
+11.9. The exact work-lifecycle policy-key schema remains OPEN until the
       owning workflow or implementation specification defines it.
 
 
 ===============================================================================
-12. TRACE INTEGRATION (LOCKED)
+12. TRACE INTEGRATION
 ===============================================================================
 
 12.1. Every decision point emits trace events including:
       - decision type
       - triggering cause
-      - affected scope such as engine, pack, or save
+      - affected scope such as engine, pack, or save-bound scope
       - available options
       - selected outcome
       - policy involvement when applicable
@@ -699,49 +831,79 @@ Downstream Documents:
       - disconnect condition
       - selected lifecycle policy outcome
       - whether result retention or discard was selected
+      - affected domain owner
 
-12.5. User-facing explanations are derived from trace data.
+12.5. Decision trace requirements are decision-domain emission obligations.
 
-12.6. User-facing surfaces do not invent rationale.
+12.6. DA-03 owns trace substrate, retention, loss, trace DAG, event
+      structure, and span semantics.
 
-12.7. For denied mutation attempts, trace additionally records:
-      - owner domain
-      - caller domain
-      - access level
-      - authority failure reason
+12.7. User-facing explanations are derived from retained trace and policy
+      evidence where retained evidence exists.
 
-12.8. This applies even when no user interaction occurs.
+12.8. User-facing surfaces do not invent rationale.
 
-12.9. DA-03 defines the tracing substrate used to represent decision trace
-      evidence.
+12.9. Trace evidence is not committed state.
 
-12.10. DA-19 defines Job lifecycle trace obligations when a work-lifecycle
-       policy decision affects a Job.
+12.10. Trace loss does not redefine committed-state truth.
 
-12.11. IS-02 defines transport trace obligations when a work-lifecycle
-       policy decision is caused by transport behavior.
+12.11. All decisions remain traceable and attributable through retained
+       decision evidence where retained evidence exists.
+
+12.12. Retained decision evidence may support explanation and offline
+       inspection where retained evidence exists.
+
+12.13. Decision traceability does not imply DA-26 Replay, Resume, Retry, or
+       deterministic re-execution.
+
+12.14. For denied mutation attempts, trace additionally records:
+       - owner domain
+       - caller domain
+       - access level
+       - authority failure reason
+
+12.15. Trace emission for denied mutation attempts applies even when no user
+       interaction occurs.
+
+12.16. DA-19 defines Job lifecycle trace obligations when a
+       work-lifecycle policy decision affects a Job.
+
+12.17. DA-21 defines RPC and transport trace obligations when a
+       work-lifecycle policy decision is caused by transport behavior.
+
+12.18. DA-24 defines OrchestrationUnit trace obligations when a policy
+       decision affects an OrchestrationUnit.
 
 
 ===============================================================================
-13. FRONTEND RESPONSIBILITY (LOCKED)
+13. FRONTEND RESPONSIBILITY
 ===============================================================================
 
-13.1. Frontends:
+13.1. Frontends present decisions and collect valid responses.
+
+13.2. Frontends:
       - present clear explanation
       - show consequences
       - indicate scope of effect
       - offer only valid choices
 
-13.2. Frontends do not:
+13.3. Frontends do not:
       - invent defaults
       - auto-confirm without policy
-      - bypass kernel authority
+      - bypass Kernel authority
       - obscure the impact of denial
 
-13.3. For fingerprint-mismatch decisions, frontends may show origin context,
-      but must not present origin as authenticity proof.
+13.4. The Kernel remains the decision arbiter.
 
-13.4. For work-lifecycle policy decisions, frontends distinguish:
+13.5. Frontend presentation state is not policy state.
+
+13.6. DA-22 owns the UI and frontend runtime mechanics of presenting and
+      dismissing decision surfaces.
+
+13.7. For fingerprint-mismatch decisions, frontends may show origin
+      context, but do not present origin as authenticity proof.
+
+13.8. For work-lifecycle policy decisions, frontends distinguish:
       - continuing work
       - cancelling work
       - superseding work
@@ -749,15 +911,18 @@ Downstream Documents:
       - retaining result for later retrieval
       - discarding result when no consumer remains
 
-13.5. Frontends do not present Superseded as failure.
+13.9. Frontends do not present Superseded as failure.
 
-13.6. Frontends do not present transport timeout as Job timeout.
+13.10. Frontends do not present transport timeout as Job timeout.
 
-13.7. Frontends do not present Job timeout as transport timeout.
+13.11. Frontends do not present Job timeout as transport timeout.
+
+13.12. Frontends do not present frontend disconnect as ApplicationRun
+       termination unless the owning lifecycle domain produced that outcome.
 
 
 ===============================================================================
-14. MULTIPLE FRONTENDS (LOCKED)
+14. MULTIPLE FRONTENDS
 ===============================================================================
 
 14.1. If multiple frontends are connected:
@@ -765,11 +930,15 @@ Downstream Documents:
       - the first valid response wins
       - all other pending presentations are dismissed
 
-14.2. The kernel remains the single arbiter.
+14.2. The Kernel remains the single arbiter.
+
+14.3. DA-22 owns multi-client presentation mechanics.
+
+14.4. This document owns the decision meaning of the selected response.
 
 
 ===============================================================================
-15. FAILURE MODES (LOCKED)
+15. FAILURE MODES
 ===============================================================================
 
 15.1. If a frontend disconnects during a decision:
@@ -782,39 +951,64 @@ Downstream Documents:
       - failure is trace-logged
       - persisted state remains unchanged
 
-15.3. If a frontend or transport disconnects while a Job exists, policy
-      decides whether the affected Job:
+15.3. If a frontend or transport disconnects while a Job exists, policy may
+      choose whether the affected Job:
       - continues detached
       - is cancelled
       - is superseded
       - retains result for later retrieval
       - discards result if no consumer remains
 
-15.4. Disconnect handling does not silently cancel, supersede, or detach a
-      Job without explicit policy.
+15.4. Disconnect handling does not silently cancel, supersede, detach,
+      retain, or discard a Job without explicit policy.
 
-15.5. The transport disconnect mechanics are defined by IS-02.
+15.5. The transport disconnect mechanics are defined by DA-21.
 
 15.6. The Job lifecycle outcome is defined by DA-19 when the policy outcome
       affects a Job.
 
+15.7. The OrchestrationUnit lifecycle outcome is defined by DA-24 when the
+      policy outcome affects an OrchestrationUnit.
+
+15.8. The adapter lifecycle outcome is defined by DA-27 when the policy
+      outcome affects adapter-mediated work.
+
+15.9. The RuntimeHost lifecycle outcome is defined by DA-28 when the policy
+      outcome affects host shutdown or command-surface behavior.
+
+15.10. The Window finalization outcome is defined by DA-08 when the policy
+       outcome affects Window finalization.
+
+15.11. The PackManager operation outcome is defined by DA-29 when the policy
+       outcome affects PackManager work.
+
 
 ===============================================================================
-16. MOD INVOLVEMENT (LOCKED)
+16. MOD AND PACK INVOLVEMENT
 ===============================================================================
 
-16.1. Mods may trigger decision points.
+16.1. Mods and packs may trigger decision points.
 
-16.2. Mods do not handle decision points directly.
+16.2. Mods and packs do not handle decision points directly.
 
-16.3. Mods do not block while awaiting frontend interaction.
+16.3. Mods and packs do not block while awaiting frontend interaction.
 
-16.4. Mods observe decision outcomes only through Turnix-provided context
-      and results.
+16.4. Mods and packs do not invent policy defaults.
+
+16.5. Mods and packs do not persist policy decisions directly.
+
+16.6. Mods and packs observe decision outcomes only through Turnix-provided
+      context and results.
+
+16.7. The ability to trigger a decision point does not grant decision
+      authority.
+
+16.8. The ability to observe a decision outcome does not grant policy
+      storage authority.
 
 
 ===============================================================================
-17. RELATION TO DEBUGGING (LOCKED)
+17. RELATION TO DEBUGGING
 ===============================================================================
 
 17.1. Decision points:
@@ -831,6 +1025,11 @@ Downstream Documents:
 17.4. DA-18 defines debugger breakpoint, inspection, and execution-control
       behavior.
 
+17.5. Debugger control does not bypass Kernel-mediated decision authority.
+
+17.6. Debugger simulation does not create remembered policy unless the
+      normal policy persistence path explicitly records such a policy.
+
 
 ===============================================================================
 18. WHAT IS EXPLICITLY NOT SUPPORTED
@@ -841,6 +1040,7 @@ Downstream Documents:
       - console-based prompting
       - blocking the entire system for frontend interaction
       - mod-defined decision UIs
+      - pack-defined decision UIs
       - persistence of computed-only values
       - prompting the user to allow read access to restricted state
       - treating origin alone as authenticity proof
@@ -849,6 +1049,12 @@ Downstream Documents:
       - silent work cancellation without policy or lifecycle authority
       - silent supersession without policy or lifecycle authority
       - silent detached work after transport disconnect
+      - silent result retention without policy or lifecycle authority
+      - silent result discard without policy or lifecycle authority
+      - treating policy as committed-state truth
+      - treating trace evidence as committed-state truth
+      - treating frontend presentation state as policy state
+      - treating stored policy files as policy meaning outside DA-17 semantics
 
 
 ===============================================================================
@@ -899,13 +1105,19 @@ Downstream Documents:
       - whether the operation is atomic when multiple keys or subtrees are
         involved
 
+19.4. Cross-scope copy and promotion must not introduce implicit promotion or
+      hidden cross-scope copying.
+
+19.5. Policy remembering for copy or promotion does not silently broaden
+      authority.
+
 
 ===============================================================================
 20. LOCKED SUMMARY
 ===============================================================================
 
 20.1. LOCKED:
-      - decision authority is kernel-mediated
+      - decision authority is Kernel-mediated
       - decision types remain distinct
       - work-lifecycle policy decisions are distinct decision points
       - configuration-scope resolution is explicit
@@ -913,10 +1125,15 @@ Downstream Documents:
       - origin alone is not authenticity proof
       - execution pauses and resumes in a scoped way
       - policy is persistent and inspectable where persisted
+      - policy does not redefine authority
+      - policy does not define domain outcomes
       - policy does not silently create, cancel, supersede, detach, retain,
         or discard work
-      - run policy overrides save policy and save policy overrides global
-        policy
+      - run policy overrides save policy
+      - save policy overrides global policy
+      - DA-06 owns policy storage location and top-level persistent file
+        structure
+      - DA-17 owns decision semantics and remembered-policy meaning
       - permission policy keys use packCanonicalId and exact versioned
         capability id
       - fingerprint policy keys use canonicalPackId, packVersion,
@@ -924,9 +1141,11 @@ Downstream Documents:
       - work-lifecycle policies are distinct from permission and fingerprint
         policies
       - remembered work-lifecycle policy is not keyed by jobId alone
-      - explanations are derived only from trace-backed rationale
+      - explanations are derived only from retained trace and policy evidence
+        where retained evidence exists
       - frontend surfaces do not present Superseded as failure
       - frontend surfaces do not conflate transport timeout and Job timeout
+      - mods and packs may trigger but do not own decisions
 
 20.2. OPEN:
       - policy automation
@@ -942,6 +1161,6 @@ END OF DA-17 - USER INTERACTION, DECISION POINTS & POLICY HANDLING
 --- doc-meta ---
 DOC_ID: DA-17
 DOC_FILE: docs/design/DA-17_USER_INTERACTION_DECISION_POINTS_AND_POLICY_HANDLING.txt
-DOC_REV: 14
-DOC_GIT: 5a9dc0f
+DOC_REV: 15
+DOC_GIT: 010bfd3
 ----------------
