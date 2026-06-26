@@ -16,14 +16,15 @@ system guarantees, authority semantics, or policy rules.
 
 Purpose:
 --------
-This document defines the concrete bootstrap, handshake, connection-lifecycle,
-and message-flow behavior used for WebSocket RPC transport.
+This document defines the concrete bootstrap, handshake,
+connection-lifecycle, and message-flow behavior used for WebSocket RPC
+transport.
 
 It defines:
 - HTTP bootstrap before socket open
 - WebSocket connection lifecycle
 - browser frontend adapter connection behavior
-- session and generation tracking
+- connection-generation and continuity tracking
 - message dispatch behavior
 - RPC envelope completion-marker handling through IS-01
 - acknowledgements and flow control
@@ -43,6 +44,7 @@ It does NOT define:
 - frontend View semantics (see DA-22)
 - Job lifecycle states, terminal outcomes, or Job result semantics
   (see DA-19)
+- Application or ApplicationRun lifecycle semantics
 - higher-level routing, visibility, activation, or capability semantics
 - frontend user-interface behavior beyond transport responsibilities
 
@@ -93,7 +95,8 @@ Upstream Documents:
 
 02.2. This flow combines behavior from:
       - the WebSocket endpoint
-      - the Session manager
+      - RPCConnection state
+      - transport connection state
       - the ViewRegistry
       - the frontend RpcClient implementation
       - the browser frontend adapter runtime
@@ -125,6 +128,9 @@ Upstream Documents:
 02.14. Request acceptance as Job-backed work is distinct from final Job
        success.
 
+02.15. Transport flow is distinct from Application and ApplicationRun
+       lifecycle.
+
 
 ===============================================================================
 03. HTTP BOOTSTRAP BEFORE SOCKET OPEN
@@ -153,7 +159,10 @@ Upstream Documents:
         flags and environment switches before RPC is available.
 
 03.1.5. The frozen bootstrap object does not become authoritative
-        AppInstance state.
+        Application state.
+
+03.1.6. The frozen bootstrap object does not become committed state or
+        configuration authority.
 
 
 03.2 VIEW BOOTSTRAP
@@ -182,8 +191,10 @@ Upstream Documents:
         - allow reconnects to resume cleanly
         - prevent accidental cross-view binding
 
-03.2.7. View bootstrap establishes View binding context. It does not define
-        AppInstance lifecycle or adapter authority.
+03.2.7. View bootstrap establishes View binding context.
+
+03.2.8. View bootstrap does not define Application lifecycle,
+        ApplicationRun lifecycle, or adapter authority.
 
 
 03.3 VIEWREGISTRY RESPONSIBILITY
@@ -200,6 +211,10 @@ Upstream Documents:
 
 03.3.4. ViewRegistry behavior remains subordinate to DA-22 View semantics.
 
+03.3.5. ViewRegistry behavior does not define View authority,
+        Application identity, ApplicationRun lifecycle, Job outcome,
+        adapter lifecycle, committed state, or persistence root.
+
 
 ===============================================================================
 04. CONNECTION LIFECYCLE
@@ -215,11 +230,13 @@ Upstream Documents:
 
 04.2. This lifecycle is a transport connection lifecycle.
 
-04.3. This lifecycle is not AppInstance lifecycle.
+04.3. This lifecycle is not Application lifecycle.
 
-04.4. This lifecycle is not Job lifecycle.
+04.4. This lifecycle is not ApplicationRun lifecycle.
 
-04.5. This lifecycle is not execution adapter lifecycle by itself.
+04.5. This lifecycle is not Job lifecycle.
+
+04.6. This lifecycle is not execution adapter lifecycle by itself.
 
 
 04.1 WEBSOCKET UPGRADE
@@ -241,9 +258,9 @@ Upstream Documents:
         - validating incoming frames as RPCMessage objects
         - validating the IS-01 envelope completion marker before dispatch
 
-04.1.4. A frame that fails JSON parsing, RPCMessage validation, generation
-        validation, or envelope completion-marker validation is not routed as
-        workload.
+04.1.4. A frame that fails JSON parsing, RPCMessage validation,
+        generation validation, or envelope completion-marker validation is
+        not routed as workload.
 
 04.1.5. WebSocket upgrade success does not imply browser frontend adapter
         readiness.
@@ -267,7 +284,8 @@ Upstream Documents:
 04.2.4. Frontend helper logic verifies the serialized envelope completion
         marker before send according to IS-01.
 
-04.2.5. A valid hello frame establishes transport/session context only.
+04.2.5. A valid hello frame establishes transport connection context and
+        connection-generation continuity only.
 
 
 04.3 WELCOME
@@ -281,12 +299,12 @@ Upstream Documents:
 
 04.3.2. The backend then sends a welcome message containing:
         - the new generation
-        - a snapshot of current view or session state
+        - a snapshot of current View binding and connection state
 
 04.3.3. The welcome message carries isComplete = true according to IS-01.
 
-04.3.4. Welcome does not imply AppInstance readiness, Job success, or
-        adapter execution authorization.
+04.3.4. Welcome does not imply Application readiness, ApplicationRun
+        readiness, Job success, or adapter execution authorization.
 
 
 04.4 CLIENTREADY
@@ -304,14 +322,15 @@ Upstream Documents:
         - ensuring each reported module is processed only once per
           generation
 
-04.4.3. clientReady is processed only after normal RPCMessage and completion-
-        marker validation succeeds.
+04.4.3. clientReady is processed only after normal RPCMessage and
+        completion-marker validation succeeds.
 
 04.4.4. clientReady is frontend transport/readiness evidence.
 
-04.4.5. clientReady does not by itself mean AppInstance readiness, pack
-        activation success, or adapter execution success beyond the frontend
-        ready condition reported.
+04.4.5. clientReady does not by itself mean Application readiness,
+        ApplicationRun readiness, Pack activation success, capability
+        availability, committed-state evidence, or ExecutionAdapter
+        lifecycle success.
 
 
 04.5 HEARTBEAT
@@ -362,19 +381,22 @@ Upstream Documents:
 04.6.5. Transport disconnect does not automatically fail an execution
         adapter.
 
-04.6.6. Transport disconnect may trigger work-lifecycle policy handling
-      under DA-17 when accepted or in-flight work exists.
+04.6.6. Transport disconnect does not automatically define ApplicationRun
+        failure or committed-state mutation.
 
-04.6.7. If policy causes a Job to continue detached, cancel, supersede,
-      retain result, or discard result, the Job lifecycle meaning remains
-      governed by DA-19.
+04.6.7. Transport disconnect may trigger work-lifecycle policy handling
+        under DA-17 when accepted or in-flight work exists.
 
-04.6.8. If policy affects execution adapter lifecycle, adapter lifecycle
+04.6.8. If policy causes a Job to continue detached, cancel, supersede,
+        retain result, or discard result, the Job lifecycle meaning remains
+        governed by DA-19.
+
+04.6.9. If policy affects execution adapter lifecycle, adapter lifecycle
         meaning remains governed by DA-23.
 
 
 ===============================================================================
-05. SESSION AND GENERATION TRACKING
+05. CONNECTION GENERATION AND CONTINUITY TRACKING
 ===============================================================================
 
 05.1. RPCConnection maintains per-view or per-client state such as:
@@ -392,15 +414,19 @@ Upstream Documents:
 05.3. Frontend responsibility includes:
       - storing the latest generation
       - rejecting or discarding incoming messages whose generation does not
-        match the active session expectation
+        match the active connection-generation expectation
 
-05.4. Generation mismatch is a transport/session continuity failure.
+05.4. Generation mismatch is a connection-generation or transport-continuity
+      failure.
 
 05.5. Generation mismatch does not by itself define Job cancellation,
       timeout, failure, or supersession.
 
 05.6. Generation mismatch does not by itself define execution adapter
-      failure or AppInstance failure.
+      failure.
+
+05.7. Generation mismatch does not by itself define ApplicationRun failure
+      or Application lifecycle outcome.
 
 
 ===============================================================================
@@ -412,46 +438,50 @@ Upstream Documents:
       - acknowledges non-control messages according to transport rules
       - dispatches messages based on message type and route
 
-06.2. Request messages are routed to:
-      - object handlers
+06.2. Request messages are routed to explicit RPC routing targets such as:
+      - object handlers known to the routing layer
       - capability-based request handlers
       - adapter-facing handlers when defined by higher documents
 
-06.3. Permission checks occur through the backend capability-permission path
+06.3. Object routing does not grant raw backend-object access,
+      service-object access, filesystem access, committed-state authority,
+      capability permission, or Kernel authority.
+
+06.4. Permission checks occur through the backend capability-permission path
       used by the implementation.
 
-06.4. Failures become structured error envelopes that correlate to the
+06.5. Failures become structured error envelopes that correlate to the
       original message.
 
-06.5. Completion-marker validation failure is treated as malformed or
+06.6. Completion-marker validation failure is treated as malformed or
       incomplete transport message handling rather than as a routed workload
       error.
 
-06.6. Emit and subscribe messages are dispatched to capability handlers or
+06.7. Emit and subscribe messages are dispatched to capability handlers or
       other explicitly defined routed handlers.
 
-06.7. Subscription state is tracked so that unsubscribe can halt subscription
-      delivery and remove subscription transport state.
+06.8. Subscription state is tracked so that unsubscribe can halt
+      subscription delivery and remove subscription transport state.
 
-06.8. Cancel messages affect pending requests, subscriptions, Job-backed
+06.9. Cancel messages affect pending requests, subscriptions, Job-backed
       work, or adapter-mediated work only according to the message type,
       route, operation contract, and applicable policy.
 
-06.9. Cancel for transport-local pending work may remove pending transport
-      wait state.
+06.10. Cancel for transport-local pending work may remove pending transport
+       wait state.
 
-06.10. Cancel for subscription delivery may stop delivery and remove
+06.11. Cancel for subscription delivery may stop delivery and remove
        subscription state.
 
-06.11. Cancel for Job-backed work becomes a Job cancellation request or
+06.12. Cancel for Job-backed work becomes a Job cancellation request or
        work-lifecycle policy input when applicable.
 
-06.12. Cancel for adapter-mediated work becomes adapter or work lifecycle
+06.13. Cancel for adapter-mediated work becomes adapter or work lifecycle
        input when applicable.
 
-06.13. Cancel does not directly kill arbitrary underlying execution.
+06.14. Cancel does not directly kill arbitrary underlying execution.
 
-06.14. Frontend behavior includes:
+06.15. Frontend behavior includes:
        - dispatching workload messages to call, emit, or subscribe handlers
        - resolving or rejecting Promises from replies and errors
        - forwarding subscription updates to local event emitters or
@@ -493,8 +523,8 @@ Upstream Documents:
       - request acceptance as Job-backed work is distinct from final Job
         success
       - Job lifecycle updates are carried using IS-01 envelopes without this
-        document defining the final Job result, error, progress, or retained-
-        result envelope shape
+        document defining the final Job result, error, progress, or
+        retained-result envelope shape
 
 
 ===============================================================================
@@ -604,36 +634,51 @@ Upstream Documents:
 10.8. Idempotency does not bypass capability permission, execution adapter
       authorization, or routing checks.
 
+10.9. Idempotency is RPC request/message deduplication.
+
+10.10. Idempotency does not define Replay, Resume, Retry, retained Job
+       result behavior, Job identity reuse, OrchestrationUnit identity
+       reuse, ProcessingRun identity reuse, or adapter-work identity reuse
+       except where a higher owner and the operation contract explicitly
+       define the relationship.
+
 
 ===============================================================================
 11. PERMISSIONS AND PRINCIPALS
 ===============================================================================
 
 11.1. Before invoking a capability handler, backend behavior derives the
-      principal from the message and verifies required capability
-      permissions.
+      effective principal from authenticated connection context,
+      View/client binding, runtime-owned correlation, and allowed message
+      metadata.
 
-11.2. Permission failure produces a structured error envelope.
+11.2. Message fields may carry correlation metadata.
 
-11.3. Error payload may include retry-related metadata when the higher
+11.3. Message fields do not let a caller forge a principal, permission
+      identity, acting Pack, Kernel authority, Application identity, or
+      ApplicationRun authority.
+
+11.4. Permission failure produces a structured error envelope.
+
+11.5. Error payload may include retry-related metadata when the higher
       permission and decision model allows that behavior.
 
-11.4. Frontend handling may use this structured result to present clear
+11.6. Frontend handling may use this structured result to present clear
       feedback through the higher-level user-interaction model.
 
-11.5. This document does not define permission semantics themselves.
+11.7. This document does not define permission semantics themselves.
       Higher DA documents define those semantics.
 
-11.6. Capability invocations that become Job-backed remain capability-
-      mediated under DA-16.
+11.8. Capability invocations that become Job-backed remain
+      capability-mediated under DA-16.
 
-11.7. Job-backed capability execution does not bypass permission checks.
+11.9. Job-backed capability execution does not bypass permission checks.
 
-11.8. Adapter-mediated capability execution does not bypass permission
-      checks.
+11.10. Adapter-mediated capability execution does not bypass permission
+       checks.
 
-11.9. Execution adapter authorization remains distinct from capability
-      permission.
+11.11. Execution adapter authorization remains distinct from capability
+       permission.
 
 
 ===============================================================================
@@ -654,7 +699,8 @@ Upstream Documents:
 12.5. Transport timeout may cause a cancel message or cancellation request
       when policy and operation contract allow it.
 
-12.6. Transport timeout does not automatically transition a Job to TimedOut.
+12.6. Transport timeout does not automatically transition a Job to
+      TimedOut.
 
 12.7. Transport timeout does not automatically cancel a Job.
 
@@ -662,15 +708,19 @@ Upstream Documents:
 
 12.9. Transport timeout does not automatically fail an execution adapter.
 
-12.10. Job timeout does not mean the WebSocket transport failed.
+12.10. Transport timeout does not automatically define ApplicationRun
+       failure or committed-state mutation.
 
-12.11. Job timeout does not mean an acknowledgement, reply, or heartbeat
+12.11. Job timeout does not mean the WebSocket transport failed.
+
+12.12. Job timeout does not mean an acknowledgement, reply, or heartbeat
        timeout occurred.
 
-12.12. Adapter timeout does not mean the WebSocket transport failed.
+12.13. Adapter timeout does not mean the WebSocket transport failed.
 
-12.13. When transport timeout, Job timeout, and adapter timeout are possible,
-       user-facing and trace-facing surfaces preserve the distinction.
+12.14. When transport timeout, Job timeout, and adapter timeout are
+       possible, user-facing and trace-facing surfaces preserve the
+       distinction.
 
 
 ===============================================================================
@@ -726,7 +776,8 @@ Upstream Documents:
       - view identity
       - client identity
       - frontend adapter identity when applicable
-      - appInstanceId
+      - applicationId when known
+      - applicationRunId when known
       - jobId
       - envelope completion-marker validation failure
       - transport timeout category
@@ -737,7 +788,8 @@ Upstream Documents:
       message and trace correlation metadata when available.
 
 13.8. Transport observability does not define capability, permission,
-      activation, decision, Job, adapter, or AppInstance semantics.
+      activation, decision, Job, adapter, Application, or ApplicationRun
+      semantics.
 
 13.9. DA-03 defines the tracing substrate used to represent RPC transport
       evidence.
@@ -756,10 +808,10 @@ Upstream Documents:
        behavior affects adapter-mediated work or adapter lifecycle.
 
 13.14. IS-02 owns the RPC transport-domain trace reason identifiers used for
-       message receipt, acknowledgement, dispatch, request acceptance,
-       reply delivery, cancellation request handling, timeout, generation
-       mismatch, disconnect handling, disconnect policy application, and
-       envelope completion-marker rejection.
+       message receipt, acknowledgement, dispatch, request acceptance, reply
+       delivery, cancellation request handling, timeout, generation mismatch,
+       disconnect handling, disconnect policy application, and envelope
+       completion-marker rejection.
 
 13.15. The following RPC transport-domain trace reasons are defined:
 
@@ -790,79 +842,90 @@ Upstream Documents:
        message.
 
 13.19. RPCRequestDispatched is emitted when an RPC request is routed to an
-       object handler or capability-based request handler.
+       explicit object handler or capability-based request handler.
 
-13.20. RPCRequestRejectedBeforeJob is emitted when an RPC request is rejected
-       before Job-backed work exists.
+13.20. RPCRequestDispatched does not imply raw backend-object access,
+       service-object access, filesystem authority, Kernel authority,
+       committed-state authority, or capability permission.
 
-13.21. RPCRequestRejectedBeforeJob means DA-19 Job terminal outcomes do not
+13.21. RPCRequestRejectedBeforeJob is emitted when an RPC request is
+       rejected before Job-backed work exists.
+
+13.22. RPCRequestRejectedBeforeJob means DA-19 Job terminal outcomes do not
        apply to that rejected request.
 
-13.22. RPCRequestAcceptedAsJob is emitted when an RPC request is accepted as
+13.23. RPCRequestAcceptedAsJob is emitted when an RPC request is accepted as
        Job-backed work.
 
-13.23. RPCRequestAcceptedAsJob is not final Job success.
+13.24. RPCRequestAcceptedAsJob is not final Job success.
 
-13.24. RPCRequestAcceptedAsJob does not define Job terminal outcome.
+13.25. RPCRequestAcceptedAsJob does not define Job terminal outcome.
 
-13.25. DA-19 owns later Job lifecycle trace reasons after Job-backed work
+13.26. DA-19 owns later Job lifecycle trace reasons after Job-backed work
        exists.
 
-13.26. RPCRequestAcceptedAsAdapterWork is emitted when an RPC request is
+13.27. RPCRequestAcceptedAsAdapterWork is emitted when an RPC request is
        accepted as adapter-mediated work.
 
-13.27. RPCRequestAcceptedAsAdapterWork is not final adapter success.
+13.28. RPCRequestAcceptedAsAdapterWork is not final adapter success.
 
-13.28. RPCRequestAcceptedAsAdapterWork does not define adapter terminal
+13.29. RPCRequestAcceptedAsAdapterWork does not define adapter terminal
        outcome.
 
-13.29. DA-23 owns later adapter-domain trace reasons after adapter-mediated
+13.30. DA-23 owns later adapter-domain trace reasons after adapter-mediated
        work exists.
 
-13.30. RPCReplySent is emitted when a reply envelope is sent or accepted by
+13.31. RPCReplySent is emitted when a reply envelope is sent or accepted by
        the transport send path.
 
-13.31. RPCReplyDeliveryFailed is emitted when a reply envelope cannot be
+13.32. RPCReplyDeliveryFailed is emitted when a reply envelope cannot be
        delivered or delivery failure is detected for a reply.
 
-13.32. RPCTransportTimeout is emitted when transport-level waiting,
+13.33. RPCTransportTimeout is emitted when transport-level waiting,
        acknowledgement, reply, liveness, or frame-budget timeout occurs.
 
-13.33. RPCTransportTimeout is not JobTimedOut.
+13.34. RPCTransportTimeout is not JobTimedOut.
 
-13.34. RPCTransportTimeout is not adapter timeout.
+13.35. RPCTransportTimeout is not adapter timeout.
 
-13.35. RPCCancelRequested is emitted when a cancel message is received or
+13.36. RPCTransportTimeout is not ApplicationRun failure.
+
+13.37. RPCCancelRequested is emitted when a cancel message is received or
        produced by transport-level cancellation behavior.
 
-13.36. RPCCancelRequested is not JobCancelled.
+13.38. RPCCancelRequested is not JobCancelled.
 
-13.37. RPCCancelRequested is not adapter cancellation by itself.
+13.39. RPCCancelRequested is not adapter cancellation by itself.
 
-13.38. RPCGenerationMismatch is emitted when an RPC message is rejected,
+13.40. RPCGenerationMismatch is emitted when an RPC message is rejected,
        ignored, or classified because its generation does not match the
-       active session expectation.
+       active connection-generation expectation.
 
-13.39. RPCConnectionDisconnected is emitted when the WebSocket connection is
+13.41. RPCConnectionDisconnected is emitted when the WebSocket connection is
        disconnected or closed.
 
-13.40. RPCConnectionDisconnected is not adapter failure.
+13.42. RPCConnectionDisconnected is not adapter failure.
 
-13.41. RPCDisconnectPolicyApplied is emitted when disconnect handling applies
-       a policy outcome to affected work.
+13.43. RPCConnectionDisconnected is not ApplicationRun failure.
 
-13.42. RPCDisconnectPolicyApplied does not define Job terminal outcome by
+13.44. RPCDisconnectPolicyApplied is emitted when disconnect handling
+       applies a policy outcome to affected work.
+
+13.45. RPCDisconnectPolicyApplied does not define Job terminal outcome by
        itself.
 
-13.43. RPCDisconnectPolicyApplied does not define adapter terminal outcome by
-       itself.
+13.46. RPCDisconnectPolicyApplied does not define adapter terminal outcome
+       by itself.
 
-13.44. RPCEnvelopeIncompleteRejected is emitted when an envelope is rejected
+13.47. RPCDisconnectPolicyApplied does not define ApplicationRun lifecycle
+       outcome by itself.
+
+13.48. RPCEnvelopeIncompleteRejected is emitted when an envelope is rejected
        because IS-01 completion-marker validation fails.
 
-13.45. RPCEnvelopeIncompleteRejected is not a routed workload error.
+13.49. RPCEnvelopeIncompleteRejected is not a routed workload error.
 
-13.46. RPC transport-domain trace evidence for these reasons records enough
+13.50. RPC transport-domain trace evidence for these reasons records enough
        context, when available, to explain:
        - message id
        - correlatesTo
@@ -873,7 +936,8 @@ Upstream Documents:
        - view identity
        - client identity
        - frontend adapter identity when applicable
-       - appInstanceId
+       - applicationId when known
+       - applicationRunId when known
        - jobId when applicable
        - adapter identity when applicable
        - request identity when applicable
@@ -883,7 +947,7 @@ Upstream Documents:
        - disconnect policy outcome when applicable
        - completion-marker failure category when applicable
 
-13.47. The intended result is:
+13.51. The intended result is:
        - coherent cross-side debugging
        - no divergent logging semantics
        - RPC messages that remain linkable to trace evidence where trace
@@ -894,6 +958,8 @@ Upstream Documents:
          outcomes
        - adapter lifecycle outcomes that do not masquerade as transport
          failures
+       - transport failures that do not masquerade as ApplicationRun
+         lifecycle outcomes
 
 
 ===============================================================================
@@ -906,8 +972,9 @@ Upstream Documents:
       semantics, or policy rules.
 
 14.3. Visibility, activation, capability, permission, decision-handling,
-      AppInstance lifecycle, View lifecycle, execution adapter semantics,
-      and Job lifecycle semantics remain governed by higher DA documents.
+      Application lifecycle, ApplicationRun lifecycle, View lifecycle,
+      execution adapter semantics, and Job lifecycle semantics remain
+      governed by higher DA documents.
 
 14.4. This document defines only the concrete WebSocket transport flow used
       to carry those higher-level concepts.
@@ -969,6 +1036,6 @@ END OF IS-02 - WEBSOCKET RPC FLOW
 --- doc-meta ---
 DOC_ID: IS-02
 DOC_FILE: docs/design/IS-02_WEBSOCKET_RPC_FLOW.txt
-DOC_REV: 21
-DOC_GIT: 99b16c4
+DOC_REV: 22
+DOC_GIT: 654cf44
 ----------------
