@@ -20,9 +20,9 @@ handling.
 Purpose:
 --------
 This document defines how Turnix enters RuntimeHost execution through different
-startup modes without creating separate AppInstance, SavePack, adapter, RPC,
-capability, policy, persistence, Orchestration Unit, Job, View, or trace
-semantics for each mode.
+startup modes without creating separate Application, ApplicationRun,
+SaveBundle, adapter, RPC, capability, policy, persistence,
+OrchestrationUnit, Job, View, or trace semantics for each mode.
 
 It defines:
 - startupMode identity and classification
@@ -45,11 +45,13 @@ It does NOT define:
 - Kernel authority ordering (see DA-01 and DA-02)
 - committed-state or transaction semantics (see DA-04)
 - persistent I/O safety semantics (see DA-07)
-- AppInstance lifecycle or runtime identity semantics (see DA-20)
+- Application lifecycle or Application identity semantics (see DA-20)
+- ApplicationRun lifecycle or ApplicationRun identity semantics (see DA-20)
+- SaveBundle persistence semantics
 - RPC, channel, or transport semantics (see DA-21)
 - UI, View, or frontend runtime semantics (see DA-22)
 - execution adapter authority boundaries (see DA-23)
-- Orchestration Unit mutation authority semantics (see DA-24)
+- OrchestrationUnit mutation authority semantics (see DA-24)
 - adapter lifecycle, trust, and trace semantics (see DA-27)
 - workspace ownership and host-lock record mechanics (see IS-03)
 - RuntimeHost command-surface flow or command result envelope (see IS-04)
@@ -108,7 +110,9 @@ Downstream Documents:
       behavior within that shared interpretation model.
 
 01.5. This implementation specification does not create new authority
-      semantics. It implements DA-28 startup-mode rules.
+      semantics.
+
+01.6. This implementation specification implements DA-28 startup-mode rules.
 
 
 ===============================================================================
@@ -140,8 +144,31 @@ Downstream Documents:
 
 02.9. A startup mode is not authority by itself.
 
-02.10. Startup mode success is not AppInstance success, Job success, adapter
-       success, or Orchestration Unit completion by default.
+02.10. Startup mode success is not Application creation success,
+       ApplicationRun readiness, ApplicationRun start success, Job success,
+       adapter success, or OrchestrationUnit completion by default.
+
+02.11. Startup request input is classification, policy, and routing evidence.
+
+02.12. Startup request input does not grant Kernel authority.
+
+02.13. Startup request input does not grant RuntimeHost authority.
+
+02.14. Startup request input does not grant TurnixRuntime identity.
+
+02.15. Startup request input does not grant workspace ownership.
+
+02.16. Startup request input does not grant Application identity.
+
+02.17. Startup request input does not grant ApplicationRun identity.
+
+02.18. Startup request input does not grant SaveBundle authority.
+
+02.19. Startup request input does not grant capability permission.
+
+02.20. Startup request input does not grant adapter authorization.
+
+02.21. Startup request input does not grant policy approval.
 
 
 ===============================================================================
@@ -155,7 +182,8 @@ Downstream Documents:
       - commandId
       - runtimeOperationId
       - workspace identity
-      - appInstanceId
+      - applicationId
+      - applicationRunId
       - jobId
       - orchestrationUnitId
       - viewId
@@ -188,6 +216,9 @@ Downstream Documents:
 03.9. Unknown or unsupported startup mode input does not create a partial
       RuntimeHost.
 
+03.10. Startup mode input does not allow the caller to forge runtime,
+       application, ownership, adapter, capability, or policy identity.
+
 
 ===============================================================================
 04. STARTUP REQUEST NORMALIZATION
@@ -207,6 +238,8 @@ Downstream Documents:
       - requested local bind behavior capture
       - requested LAN exposure capture
       - test harness context capture
+      - launcher context capture
+      - service wrapper context capture
 
 04.3. Normalization does not grant authority.
 
@@ -214,12 +247,30 @@ Downstream Documents:
 
 04.5. Normalization does not create a RuntimeHost.
 
-04.6. Normalization does not create an AppInstance.
+04.6. Normalization does not create an Application.
 
-04.7. Normalization failure rejects the startup request.
+04.7. Normalization does not create an ApplicationRun.
 
-04.8. Concrete parsing syntax belongs to implementation code or a later CLI,
-      launcher, or service-wrapper implementation specification.
+04.8. Normalization does not load a SaveBundle.
+
+04.9. Normalization failure rejects the startup request.
+
+04.10. Concrete parsing syntax belongs to implementation code or a later CLI,
+       launcher, or service-wrapper implementation specification.
+
+04.11. Normalized executable invocation context remains classification and
+       routing evidence.
+
+04.12. Normalized environment input remains classification and policy evidence.
+
+04.13. Normalized test harness context remains test-surface evidence.
+
+04.14. Normalized launcher context remains launcher-surface evidence.
+
+04.15. Normalized service wrapper context remains service-wrapper evidence.
+
+04.16. Normalized startup input is not a trusted authority token merely
+       because it came from an official entry surface.
 
 
 ===============================================================================
@@ -241,6 +292,10 @@ Downstream Documents:
       - CreateEntrySurface
       - CreateCommandSurface
       - DispatchInitialCommand
+      - CreateApplication
+      - LoadSaveBundle
+      - CreateApplicationRun
+      - StartApplicationRun
       - StartFrontendSurface
       - ExposeLanSurface
       - RunTestHarness
@@ -257,20 +312,33 @@ Downstream Documents:
 05.6. Skipping an operation does not redefine the skipped operation's meaning.
 
 05.7. A startup mode that mutates Turnix-managed state enters the same DA-24
-      Orchestration Unit boundaries as other mutation-bearing work.
+      OrchestrationUnit boundaries as other mutation-bearing work.
 
 05.8. A startup mode that requires writable workspace ownership uses IS-03.
 
 05.9. A startup mode that dispatches a command uses IS-04.
 
-05.10. A startup mode that creates or starts an AppInstance uses DA-20.
+05.10. A startup mode that creates an Application follows the owning lifecycle
+       documents.
 
-05.11. A startup mode that creates or binds a View uses DA-22.
+05.11. A startup mode that loads a SaveBundle follows the owning lifecycle and
+       persistence documents.
 
-05.12. A startup mode that selects or starts adapter execution uses DA-23 and
+05.12. A startup mode that creates or starts an ApplicationRun follows the
+       owning lifecycle documents.
+
+05.13. A startup mode that creates or binds a View uses DA-22.
+
+05.14. A startup mode that selects or starts adapter execution uses DA-23 and
        DA-27.
 
-05.13. A startup mode that communicates through RPC uses DA-21.
+05.15. A startup mode that communicates through RPC uses DA-21.
+
+05.16. Shared operation ordering does not create independent semantics for
+       Application creation, SaveBundle loading, ApplicationRun creation,
+       ApplicationRun start, workspace ownership, command dispatch, adapter
+       execution, capability invocation, Job handling, RPC, View creation, or
+       persistence.
 
 
 ===============================================================================
@@ -284,24 +352,27 @@ Downstream Documents:
       creates a command surface.
 
 06.3. interactiveHost mode may acquire writable workspace ownership when it
-      starts a new writable RuntimeHost.
+      starts a writable RuntimeHost.
 
 06.4. interactiveHost mode may connect to an existing RuntimeHost when policy
       and connection rules permit that path.
 
-06.5. interactiveHost mode does not silently choose between new host and
-      existing host when that choice affects ownership or authority.
+06.5. interactiveHost mode does not silently choose between starting a host and
+      connecting to an existing host when that choice affects ownership or
+      authority.
 
 06.6. interactiveHost mode emits RuntimeHostInteractiveModeStarted when the
       mode flow begins.
 
 06.7. interactiveHost readiness does not imply command success.
 
-06.8. interactiveHost readiness does not imply AppInstance readiness.
+06.8. interactiveHost readiness does not imply ApplicationRun readiness.
 
-06.9. interactiveHost readiness does not imply adapter readiness.
+06.9. interactiveHost readiness does not imply ApplicationRun start success.
 
-06.10. Commands entered after interactiveHost readiness follow IS-04.
+06.10. interactiveHost readiness does not imply adapter readiness.
+
+06.11. Commands entered after interactiveHost readiness follow IS-04.
 
 
 ===============================================================================
@@ -338,6 +409,12 @@ Downstream Documents:
 07.10. oneShotCommand exit does not silently cancel detached work unless the
        owning workflow maps process exit to cancellation explicitly.
 
+07.11. oneShotCommand mode may project command result status into startup
+       result status only through an explicit startup-mode contract.
+
+07.12. oneShotCommand projection does not replace IS-04 command-domain
+       evidence.
+
 
 ===============================================================================
 08. SERVE MODE
@@ -357,15 +434,19 @@ Downstream Documents:
 08.5. serve mode never silently exposes internet-accessible runtime control
       surfaces.
 
-08.6. serve mode emits RuntimeHostServeModeStarted when the mode flow begins.
+08.6. serve mode does not silently expose LAN runtime control surfaces.
 
-08.7. serve mode readiness does not imply AppInstance readiness.
+08.7. serve mode emits RuntimeHostServeModeStarted when the mode flow begins.
 
-08.8. serve mode readiness does not imply command success.
+08.8. serve mode readiness does not imply ApplicationRun readiness.
 
-08.9. serve mode readiness does not imply adapter readiness.
+08.9. serve mode readiness does not imply ApplicationRun start success.
 
-08.10. serve mode stop uses RuntimeHost lifecycle and workspace ownership
+08.10. serve mode readiness does not imply command success.
+
+08.11. serve mode readiness does not imply adapter readiness.
+
+08.12. serve mode stop uses RuntimeHost lifecycle and workspace ownership
        release behavior under DA-28 and IS-03.
 
 
@@ -375,8 +456,8 @@ Downstream Documents:
 
 09.1. connect mode connects a command or client to an existing RuntimeHost.
 
-09.2. connect mode does not acquire writable workspace ownership for a new
-      RuntimeHost.
+09.2. connect mode does not acquire writable workspace ownership for a
+      RuntimeHost it did not start.
 
 09.3. connect mode may read workspace ownership evidence to discover or verify
       an existing RuntimeHost.
@@ -387,8 +468,8 @@ Downstream Documents:
 
 09.6. connect mode may fail when the existing RuntimeHost is unreachable.
 
-09.7. connect mode does not silently start a new writable RuntimeHost unless
-      the startup request explicitly permits fallback to a new host.
+09.7. connect mode does not silently start a writable RuntimeHost unless the
+      startup request explicitly permits fallback to a writable host.
 
 09.8. connect mode does not silently take over stale ownership evidence.
 
@@ -404,8 +485,8 @@ Downstream Documents:
 ===============================================================================
 
 10.1. test mode uses controlled test surfaces without weakening runtime,
-      adapter, AppInstance, SavePack, orchestration, capability, policy,
-      persistence, or trace boundaries.
+      adapter, Application, ApplicationRun, SaveBundle, orchestration,
+      capability, policy, persistence, or trace boundaries.
 
 10.2. test mode may use TestAdapter or test-specific entry surfaces.
 
@@ -417,15 +498,28 @@ Downstream Documents:
 
 10.5. Test fixtures do not become production defaults.
 
-10.6. test mode does not silently ignore persistence failures.
+10.6. Test fixtures do not create production permissions.
 
-10.7. test mode does not silently ignore trace obligations.
+10.7. Test fixtures do not create production policy defaults.
 
-10.8. test mode emits RuntimeHostTestModeStarted when the mode flow begins.
+10.8. Test fixtures do not create production adapter authority.
 
-10.9. test mode result surfaces distinguish test harness failure, RuntimeHost
-      failure, command failure, Job failure, adapter failure, and assertion
-      failure when those distinctions are available.
+10.9. Test fixtures do not create production workspace ownership.
+
+10.10. Test fixtures do not create production SaveBundle semantics.
+
+10.11. Test fixtures do not create production committed-state semantics.
+
+10.12. test mode does not silently ignore persistence failures.
+
+10.13. test mode does not silently ignore trace obligations.
+
+10.14. test mode emits RuntimeHostTestModeStarted when the mode flow begins.
+
+10.15. test mode result surfaces distinguish test harness failure,
+       RuntimeHost failure, command failure, ApplicationRun failure, Job
+       failure, adapter failure, and assertion failure when those distinctions
+       are available.
 
 
 ===============================================================================
@@ -442,16 +536,28 @@ Downstream Documents:
 
 11.4. launcher mode may create Views or frontend entry surfaces under DA-22.
 
-11.5. launcher mode does not create AppInstance or SavePack semantics separate
-      from DA-20 and DA-28.
+11.5. launcher mode does not create Application semantics separate from their
+      owning design documents.
 
-11.6. launcher mode does not make browser frontend state authoritative.
+11.6. launcher mode does not create ApplicationRun semantics separate from
+      their owning design documents.
 
-11.7. launcher mode emits RuntimeHostLauncherModeStarted when the mode flow
+11.7. launcher mode does not create SaveBundle semantics separate from their
+      owning design documents.
+
+11.8. launcher mode does not make browser frontend state authoritative.
+
+11.9. launcher mode emits RuntimeHostLauncherModeStarted when the mode flow
       begins.
 
-11.8. Commands or interactions submitted by launcher surfaces follow IS-04,
-      DA-22, and DA-21 as applicable.
+11.10. Commands or interactions submitted by launcher surfaces follow IS-04,
+       DA-22, and DA-21 as applicable.
+
+11.11. Launcher UI is an entry and request surface.
+
+11.12. Launcher UI is not Kernel authority, RuntimeHost authority, command
+       authority, View authority, Application authority, ApplicationRun
+       authority, SaveBundle authority, adapter authority, or policy authority.
 
 
 ===============================================================================
@@ -469,7 +575,8 @@ Downstream Documents:
       - workspace identity when applicable
       - commandId when applicable
       - runtimeOperationId when applicable
-      - appInstanceId when applicable
+      - applicationId when applicable
+      - applicationRunId when applicable
       - viewId when applicable
       - jobId when applicable
       - errorCategory when applicable
@@ -517,17 +624,38 @@ Downstream Documents:
 
 12.15. startupStatus does not redefine Job terminal outcome.
 
-12.16. startupStatus does not redefine Orchestration Unit terminal outcome.
+12.16. startupStatus does not redefine OrchestrationUnit terminal outcome.
 
-12.17. startupStatus does not redefine AppInstance lifecycle outcome.
+12.17. startupStatus does not redefine Application lifecycle outcome.
 
-12.18. A startup mode result envelope may reference a command result envelope
-       or commandId, but it does not replace the command result envelope unless
-       the startup-mode contract explicitly defines that projection.
+12.18. startupStatus does not redefine ApplicationRun lifecycle outcome.
 
-12.19. oneShotCommand mode may project command result status into startup
-       result status only as an explicit startup-mode surface; the underlying
-       command result remains command-domain evidence under IS-04.
+12.19. A startup mode result envelope may reference a command result envelope
+       or commandId.
+
+12.20. A startup mode result envelope does not replace the command result
+       envelope unless the startup-mode contract explicitly defines that
+       projection.
+
+12.21. oneShotCommand mode may project command result status into startup
+       result status only as an explicit startup-mode surface.
+
+12.22. The underlying command result remains command-domain evidence under
+       IS-04.
+
+12.23. A startup mode result envelope may summarize downstream outcomes only
+       through explicit startup-mode contracts.
+
+12.24. Downstream outcomes include command, RuntimeHost operation, workspace
+       ownership, Job, adapter, View, ApplicationRun, policy, and trace
+       outcomes.
+
+12.25. Startup result projection does not erase owning-domain evidence.
+
+12.26. Startup result projection does not erase trace correlation.
+
+12.27. Startup result projection does not convert retained downstream evidence
+       into startup-mode authority.
 
 
 ===============================================================================
@@ -537,7 +665,7 @@ Downstream Documents:
 13.1. Startup modes that require writable workspace ownership use IS-03.
 
 13.2. Startup modes that only connect to an existing RuntimeHost do not acquire
-      new writable workspace ownership.
+      writable workspace ownership.
 
 13.3. Startup modes that perform explicit read-only inspection do not acquire
       writable workspace ownership.
@@ -554,6 +682,10 @@ Downstream Documents:
       alternatives when the entry surface supports alternatives.
 
 13.8. Startup mode handling does not select those alternatives silently.
+
+13.9. Workspace ownership evidence does not let startup mode handling forge
+      RuntimeHost authority, Kernel authority, Application identity,
+      ApplicationRun identity, SaveBundle authority, or policy approval.
 
 
 ===============================================================================
@@ -579,6 +711,12 @@ Downstream Documents:
 
 14.8. test mode may dispatch commands through test-controlled command surfaces
       without weakening IS-04 command-surface boundaries.
+
+14.9. Command-surface availability does not grant startup mode authority over
+      command semantics.
+
+14.10. Startup mode result projection does not replace command-domain evidence
+       by default.
 
 
 ===============================================================================
@@ -621,7 +759,8 @@ Downstream Documents:
        - entry surface identity
        - commandId
        - runtimeOperationId
-       - appInstanceId
+       - applicationId
+       - applicationRunId
        - viewId
        - jobId
        - orchestrationUnitId
@@ -636,8 +775,12 @@ Downstream Documents:
 
 15.15. Startup mode trace evidence does not replace command trace evidence.
 
-15.16. Startup mode trace evidence does not replace AppInstance, Job, adapter,
-       RPC, UI, Orchestration Unit, transaction, or Window evidence.
+15.16. Startup mode trace evidence does not replace Application evidence.
+
+15.17. Startup mode trace evidence does not replace ApplicationRun evidence.
+
+15.18. Startup mode trace evidence does not replace Job, adapter, RPC, UI,
+       OrchestrationUnit, transaction, or Window evidence.
 
 
 ===============================================================================
@@ -687,22 +830,28 @@ Downstream Documents:
       - treating startup mode as independent runtime semantics
       - treating startup mode selection as authority
       - treating startup mode selection as workspace ownership acquisition
-      - treating startup mode success as AppInstance success by default
+      - treating startup mode success as Application creation success by
+        default
+      - treating startup mode success as ApplicationRun success by default
       - treating startup mode success as Job success by default
       - treating startup mode failure as Job failure by default
-      - treating startup mode failure as Orchestration Unit failure by default
-      - silently choosing between new host and existing host when ownership or
-        authority would change
-      - silently falling back from connect mode to new writable host
+      - treating startup mode failure as OrchestrationUnit failure by default
+      - silently choosing between host start and existing-host connection when
+        ownership or authority would change
+      - silently falling back from connect mode to a writable host
       - silently downgrading writable startup behavior to read-only inspection
       - silently exposing LAN surfaces in serve mode
+      - silently exposing internet-accessible runtime control surfaces
       - test mode bypassing persistence, trace, policy, capability,
-        Orchestration Unit, transaction, adapter, AppInstance, or RuntimeHost
-        boundaries
-      - launcher mode creating separate SavePack or AppInstance semantics
+        OrchestrationUnit, transaction, adapter, Application, ApplicationRun,
+        SaveBundle, or RuntimeHost boundaries
+      - launcher mode creating separate SaveBundle, Application, or
+        ApplicationRun semantics
       - one-shot process exit silently cancelling detached work by default
       - treating startup result projection as replacement for command-domain
         result evidence by default
+      - treating startup request input as an authority grant
+      - treating launcher UI state as authoritative state
 
 
 ===============================================================================
@@ -734,21 +883,25 @@ Downstream Documents:
       - Startup modes are entry workflows over shared Kernel-mediated runtime
         operations.
       - startupRequestId is distinct from runtimeHostId, commandId,
-        runtimeOperationId, appInstanceId, jobId, orchestrationUnitId, viewId,
-        adapter identity, RPC message identity, and decision identity.
+        runtimeOperationId, applicationId, applicationRunId, jobId,
+        orchestrationUnitId, viewId, adapter identity, RPC message identity,
+        and decision identity.
       - Startup mode values define semantic categories, not final CLI names,
         flags, desktop launcher actions, or service wrapper names.
       - Startup modes that require writable workspace ownership use IS-03.
       - Startup modes that receive or dispatch commands use IS-04.
-      - Startup mode success is not AppInstance success, Job success, adapter
-        success, or Orchestration Unit completion by default.
+      - Startup mode success is not Application creation success,
+        ApplicationRun readiness, ApplicationRun start success, Job success,
+        adapter success, or OrchestrationUnit completion by default.
       - Startup result projection does not replace command-domain result
         evidence by default.
-      - connect mode does not silently start a new writable RuntimeHost.
+      - connect mode does not silently start a writable RuntimeHost.
+      - connect mode does not silently take over stale ownership evidence.
       - serve mode does not silently expose LAN or internet control surfaces.
       - test mode does not weaken runtime authority boundaries.
-      - launcher mode does not create separate AppInstance or SavePack
-        semantics.
+      - launcher mode does not create separate Application, ApplicationRun, or
+        SaveBundle semantics.
+      - Launcher UI state is not authoritative state.
       - Startup mode classification and mode entry are trace-visible.
 
 19.2. OPEN:
@@ -765,6 +918,6 @@ END OF IS-05 - RUNTIME HOST STARTUP MODES
 --- doc-meta ---
 DOC_ID: IS-05
 DOC_FILE: docs/design/IS-05_RUNTIME_HOST_STARTUP_MODES.txt
-DOC_REV: 1
-DOC_GIT: aba165d
+DOC_REV: 2
+DOC_GIT: e747e09
 ----------------
