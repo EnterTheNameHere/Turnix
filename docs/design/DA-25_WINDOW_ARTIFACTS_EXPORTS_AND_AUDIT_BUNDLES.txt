@@ -35,21 +35,26 @@ It defines:
 
 It does NOT define:
 - memory, state, transaction, or commit mechanics (see DA-04)
-- payload identity, ChunkId, or ValueRef representation contracts
-  (see DA-05)
-- concrete persistent I/O authority, Readers, Writers, or filesystem rules
-  (see DA-07)
-- Window model, SafePointWindow, ActiveWindow, AbortedWindow, or Window
-  finalization semantics (see DA-08)
-- tracing structure, trace event schema, span semantics, or trace storage
-  semantics (see DA-03)
+- payload identity, Chunk, ChunkId, ValueRef, decode, integrity, or retained
+  value representation contracts (see DA-05)
+- concrete persistent I/O authority, Readers, Writers, filesystem rules,
+  storage roots, backup or snapshot behavior, or streaming I/O (see DA-07)
+- Window model, Window ordering, SafePointWindow, ActiveWindow,
+  AbortedWindow, or Window finalization semantics (see DA-08)
+- tracing structure, trace event schema, span semantics, trace retention,
+  trace pruning, or trace storage semantics (see DA-03)
 - Job lifecycle, Job terminal states, or Job result semantics (see DA-19)
-- Orchestration Unit lifecycle or mutation authority semantics (see DA-24)
-- equality modes, Replay, Resume, Retry, or cross-session audit workflow
-  semantics (see DA-26)
+- OrchestrationUnit lifecycle or mutation authority semantics (see DA-24)
+- equality modes, ComparisonResult, Replay, Resume, Retry, or cross-run,
+  cross-Application, or cross-SaveBundle audit workflow semantics
+  (see DA-26)
 - concrete packaging file format
 - concrete archive format
 - concrete digest algorithms
+- concrete canonical serialization rules
+- concrete missing-material taxonomy
+- export storage mechanics
+- audit-tooling presentation format
 
 Upstream Documents:
 ------------------
@@ -114,19 +119,16 @@ Downstream Documents:
 
 02.6. Exported form changes portability, not semantics.
 
-02.7. Offline inspection reads retained artifact contents. It does not run
-      Turnix orchestration logic.
+02.7. Offline inspection reads retained artifact contents.
 
-02.8. Missing, pruned, corrupt, partial, or unavailable retained material is
+02.8. Offline inspection does not run Turnix orchestration logic.
+
+02.9. Missing, pruned, corrupt, partial, or unavailable retained material is
       explicit.
 
-02.9. Later sections of this document refine and apply these rules.
-      They do not weaken them.
+02.10. Later sections of this document refine and apply these rules.
 
-02.12. Artifact representation does not add authority, and exported form
-       changes portability rather than semantics. Offline inspection reads
-       retained artifact contents; it does not run Turnix orchestration logic.
-
+02.11. Later sections of this document do not weaken these rules.
 
 
 ===============================================================================
@@ -162,6 +164,43 @@ Downstream Documents:
 03.11. Packaging does not hide missing data, pruning, corruption, or
        partial-export limitations.
 
+03.12. DA-25 begins after Window finalization.
+
+03.13. DA-08 owns Window kind, Window ordering, ActiveWindow,
+       SafePointWindow, AbortedWindow, Window finalization, and finalized
+       runtime history semantics.
+
+03.14. DA-25 does not define when a SafePointWindow or AbortedWindow
+       exists.
+
+03.15. DA-25 does not make an ActiveWindow exportable as a finalized Window
+       artifact.
+
+03.16. DA-04 owns committed-state truth.
+
+03.17. DA-05 owns payload identity, Chunk, ChunkId, ValueRef, decode,
+       integrity, and retained value representation contracts.
+
+03.18. DA-07 owns persistent-I/O authority, Reader and Writer providers,
+       filesystem rules, storage roots, backup and snapshot behavior, and
+       streaming I/O.
+
+03.19. DA-19 owns Job lifecycle semantics.
+
+03.20. DA-24 owns OrchestrationUnit lifecycle and mutation-authority
+       semantics.
+
+03.21. DA-26 owns equality modes, ComparisonResult, Replay, Resume,
+       Retry, and audit workflow semantics.
+
+03.22. A WindowManifest, WindowExport, Minimal Audit Bundle, digest,
+       partial-export marker, or missing-material marker may affect
+       workflow outcomes defined elsewhere.
+
+03.23. A WindowManifest, WindowExport, Minimal Audit Bundle, digest,
+       partial-export marker, or missing-material marker does not define
+       those workflow outcomes by itself.
+
 
 ===============================================================================
 04. WINDOWMANIFESTS
@@ -171,26 +210,29 @@ Downstream Documents:
       finalized Window.
 
 04.2. Manifest immutability preserves representation stability only.
-      It does not by itself create authority.
 
-04.3. Authority derives from the Window kind and retained roots represented,
+04.3. Manifest immutability does not by itself create authority.
+
+04.4. Authority derives from the Window kind and retained roots represented,
       not from the fact that a manifest exists.
 
-04.4. A WindowManifest never represents an ActiveWindow.
+04.5. A WindowManifest never represents an ActiveWindow.
 
-04.5. A WindowManifest is inspectable offline within the limits of retained
+04.6. A WindowManifest is inspectable offline within the limits of retained
       material and supported decoding rules.
 
-04.6. A WindowManifest is exactly one of:
+04.7. A WindowManifest is exactly one of:
       - SafePointWindowManifest
       - AbortedWindowManifest
 
-04.7. A WindowManifest does not preserve transactional layer contents.
+04.8. A WindowManifest does not preserve transactional layer contents.
 
-04.8. A WindowManifest does not preserve live execution handles.
+04.9. A WindowManifest does not preserve live execution handles.
 
-04.9. A WindowManifest does not define replay, resume, retry, or equality
-      workflow semantics by itself.
+04.10. A WindowManifest does not define replay, resume, retry, or equality
+       workflow semantics by itself.
+
+04.11. A WindowManifest represents a finalized Window that DA-08 defines.
 
 
 ===============================================================================
@@ -217,14 +259,15 @@ Downstream Documents:
 
 05.5. Optional roots do not add authority to the SafePointWindowManifest.
 
-05.6. mabRoot, when present, is an evidence root only and does not add
-      authority to the SafePointWindowManifest.
+05.6. mabRoot, when present, is an evidence root only.
 
-05.7. A SafePointWindowManifest is not complete if retained identity and
+05.7. mabRoot does not add authority to the SafePointWindowManifest.
+
+05.8. A SafePointWindowManifest is not complete if retained identity and
       committed scope evidence are insufficient to identify the represented
       SafePointWindow and its committed scope.
 
-05.8. Missing optional evidence roots are explicit when the manifest claims
+05.9. Missing optional evidence roots are explicit when the manifest claims
       a policy or export mode that would otherwise require them.
 
 
@@ -291,14 +334,22 @@ Downstream Documents:
 
 07.11. Export identity is not the same concept as committed-state identity.
 
-07.12. Export closure remains compatible with payload and reachability
+07.12. Export identity is not the same concept as payload identity.
+
+07.13. Export closure remains compatible with payload and reachability
        contracts defined elsewhere.
 
-07.13. A WindowExport does not imply replayability.
+07.14. A WindowExport containing value material does not define payload
+       identity, retained value representation, decode, or integrity
+       contracts.
 
-07.14. A WindowExport does not imply resumability.
+07.15. A WindowExport does not imply replayability.
 
-07.15. A WindowExport does not imply evidence completeness.
+07.16. A WindowExport does not imply resumability.
+
+07.17. A WindowExport does not imply evidence completeness.
+
+07.18. Export packaging does not bypass persistent-I/O authority.
 
 
 ===============================================================================
@@ -365,15 +416,15 @@ Downstream Documents:
         closure selected for the bundle from those roots
       - metadata required to interpret retained trace reasons
       - enough correlation metadata to relate retained evidence to relevant
-        ApplicationRun, Orchestration Unit, Job, Window, or export
-        identity
+        Application, ApplicationRun, SaveBundle, OrchestrationUnit, Job,
+        Window, or export identity
 
 10.4. A Minimal Audit Bundle may additionally include:
       - selected journal entries referenced by trace evidence
       - selected committed-state excerpts as read-only evidence
       - selected revision metadata without full value payloads
       - selected Job lifecycle evidence
-      - selected Orchestration Unit lifecycle evidence
+      - selected OrchestrationUnit lifecycle evidence
       - selected adapter lifecycle evidence
       - selected RPC correlation evidence
       - selected View or frontend lifecycle evidence
@@ -392,7 +443,7 @@ Downstream Documents:
       - capability implementations
       - secrets or credentials
       - live Job execution handles
-      - live Orchestration Unit execution handles
+      - live OrchestrationUnit execution handles
       - live adapter execution handles
       - live RPC channels or transports
 
@@ -407,7 +458,8 @@ Downstream Documents:
 10.11. Absence of data in a Minimal Audit Bundle does not imply absence of
        behavior.
 
-10.12. Minimal Audit Bundle creation failure is trace-visible.
+10.12. Minimal Audit Bundle creation failure is trace-visible when it occurs
+       in a running Turnix context.
 
 10.13. Minimal Audit Bundle creation failure does not affect runtime state.
 
@@ -421,6 +473,12 @@ Downstream Documents:
 10.17. If Minimal Audit Bundle creation requires a quiescent or finalized
        boundary, that requirement is explicit and owned by the creating
        workflow or export policy.
+
+10.18. Minimal Audit Bundle trace wording does not imply that trace evidence
+       is committed state.
+
+10.19. Minimal Audit Bundle trace wording does not imply that trace
+       persistence is guaranteed forever.
 
 
 ===============================================================================
@@ -461,6 +519,13 @@ Downstream Documents:
 11.12. This document owns digest representation as an artifact feature, not
        the complete comparison workflow.
 
+11.13. Digest canonicalization does not redefine committed-state truth.
+
+11.14. Digest canonicalization does not redefine payload identity or
+       retained value representation.
+
+11.15. Digest canonicalization does not redefine storage identity.
+
 
 ===============================================================================
 12. OFFLINE INSPECTION
@@ -473,35 +538,39 @@ Downstream Documents:
       retained value representations without running Turnix orchestration
       logic.
 
-12.3. Offline inspection does not require capability calls.
+12.3. Offline inspection does not define payload identity, Chunk, ChunkId,
+      ValueRef, decode, integrity, or retained value representation
+      contracts.
 
-12.4. Offline inspection does not require journal completeness.
+12.4. Offline inspection does not require capability calls.
 
-12.5. Offline inspection treats retained evidence as evidence only.
+12.5. Offline inspection does not require journal completeness.
 
-12.6. Offline inspection does not promote evidence roots, evidence excerpts,
+12.6. Offline inspection treats retained evidence as evidence only.
+
+12.7. Offline inspection does not promote evidence roots, evidence excerpts,
       or exported packaging into authoritative state.
 
-12.7. Lack of orchestration at inspection time does not weaken the
+12.8. Lack of orchestration at inspection time does not weaken the
       authority boundary defined by the represented artifact.
 
-12.8. If retained material is partial, pruned, corrupt, or unavailable,
+12.9. If retained material is partial, pruned, corrupt, or unavailable,
       offline inspection reports that limitation explicitly.
 
-12.9. Offline inspection of retained Job evidence does not resume, cancel,
-      supersede, or otherwise control the original Job.
+12.10. Offline inspection of retained Job evidence does not resume, cancel,
+       supersede, or otherwise control the original Job.
 
-12.10. Offline inspection of retained Orchestration Unit evidence does not
+12.11. Offline inspection of retained OrchestrationUnit evidence does not
        resume, cancel, supersede, or otherwise control the original
-       Orchestration Unit.
+       OrchestrationUnit.
 
-12.11. Offline inspection of retained adapter evidence does not resume,
+12.12. Offline inspection of retained adapter evidence does not resume,
        cancel, supersede, or otherwise control the original adapter.
 
-12.12. Offline inspection of retained RPC evidence does not reconnect,
+12.13. Offline inspection of retained RPC evidence does not reconnect,
        replay, or otherwise control the original transport or channel.
 
-12.13. Offline inspection of retained View or frontend evidence does not
+12.14. Offline inspection of retained View or frontend evidence does not
        reconnect or control the original frontend participant.
 
 
@@ -533,6 +602,11 @@ Downstream Documents:
 13.7. Export tools preserve missing-material markers when repackaging or
       transforming retained artifacts.
 
+13.8. Missing-material taxonomy does not define payload identity taxonomy.
+
+13.9. Missing-material taxonomy does not define persistent-I/O error
+      taxonomy.
+
 
 ===============================================================================
 14. WHAT IS EXPLICITLY NOT SUPPORTED
@@ -548,11 +622,12 @@ Downstream Documents:
       - promoting evidence excerpts into committed state
       - preserving transactional layers as export authority
       - exporting live Job handles
-      - exporting live Orchestration Unit handles
+      - exporting live OrchestrationUnit handles
       - exporting live adapter execution handles
       - using offline inspection to control original runtime participants
       - inferring replayability merely because an export exists
       - inferring resumability merely because an export exists
+      - inferring evidence completeness merely because an export exists
 
 
 ===============================================================================
@@ -566,10 +641,12 @@ Downstream Documents:
       - exact digest algorithms
       - exact canonical serialization rules for digest categories
       - exact missing-material reason taxonomy
+      - exact export storage mechanics
+      - exact retained material decoding implementation
       - exact retained adapter evidence presentation in audit tooling
       - exact retained RPC evidence presentation in audit tooling
       - exact retained Job evidence presentation in audit tooling
-      - exact retained Orchestration Unit evidence presentation in audit
+      - exact retained OrchestrationUnit evidence presentation in audit
         tooling
 
 
@@ -600,8 +677,9 @@ Downstream Documents:
       - optional digests do not add authority
       - offline inspection operates on retained contents without requiring
         orchestration logic
-      - offline inspection does not control original Jobs, Orchestration
-        Units, adapters, RPC channels, transports, Views, or frontends
+      - offline inspection does not control original Jobs,
+        OrchestrationUnits, adapters, RPC channels, transports, Views,
+        or frontends
       - missing data, pruning, corruption, and retained gaps remain explicit
 
 16.2. OPEN:
@@ -617,6 +695,6 @@ END OF DA-25 - WINDOW ARTIFACTS, EXPORTS AND AUDIT BUNDLES
 --- doc-meta ---
 DOC_ID: DA-25
 DOC_FILE: docs/design/DA-25_WINDOW_ARTIFACTS_EXPORTS_AND_AUDIT_BUNDLES.txt
-DOC_REV: 2
-DOC_GIT: e747e09
+DOC_REV: 3
+DOC_GIT: 41a30c5
 ----------------
