@@ -8,32 +8,37 @@ EVOLVING
 
 Description:
 ------------
-Defines an optional minimal contract model for pack and mod compatibility,
-version pinning, adapter requirements, and update safety.
+Defines an optional minimal contract model for Pack and mod compatibility,
+version and fingerprint binding, adapter requirements, and update safety.
 
-This area is exploratory and pragmatic. It does not replace the higher
-Turnix design areas that define authoritative runtime semantics.
+This area is pragmatic and subordinate. It does not replace the Turnix
+DESIGN AREA documents that define runtime authority, state, persistence,
+resolution, activation, adapter, capability, or policy semantics.
 
 Purpose:
 --------
 This document records a minimal compatibility and update-safety model aimed
-at low author burden, reproducibility, and explicit uncertainty.
+at low author burden, reproducibility, reversibility, and explicit
+uncertainty.
 
 It defines:
 - a pragmatic ownership model
 - a three-part compatibility split
 - adapter and runtime requirement compatibility as optional diagnostics
-- SavePack pinning as a deterministic source-of-truth concept
+- SaveBundle published-generation Pack binding for restoration
 - safe-default update behavior
-- storage and cleanup expectations for multiple pack versions
+- storage and cleanup expectations for retained Pack material
 
 It does NOT define:
 - authoritative dependency semantics
 - authoritative generic resolution behavior
 - authoritative activation rules
-- authoritative execution adapter semantics (see DA-23)
-- authoritative AppInstance lifecycle semantics (see DA-20)
-- authoritative persistence or SavePack semantics beyond this optional model
+- authoritative visibility or import rules
+- authoritative execution adapter semantics
+- authoritative capability or permission semantics
+- authoritative persistence, state, or SaveBundle semantics
+- authoritative Application or ApplicationRun lifecycle semantics
+- final manifest field shapes or schema details
 - any guarantee that compatibility can be proven in advance
 
 Upstream Documents:
@@ -48,8 +53,10 @@ Upstream Documents:
 - DA-11
 - DA-13
 - DA-14
+- DA-16
 - DA-20
 - DA-23
+
 
 ===============================================================================
 01. INTERPRETATION BASIS
@@ -64,8 +71,12 @@ Upstream Documents:
 01.3. The CORE META-RULES documents define the general rule language and
       interpretation model used by this document.
 
-01.4. This document defines an optional minimal pack and mod contract model
+01.4. This document defines an optional minimal Pack and mod contract model
       within that shared interpretation model.
+
+01.5. This document is subordinate to DESIGN AREA documents that own the
+      affected runtime, persistence, graph, activation, adapter, and
+      permission domains.
 
 
 ===============================================================================
@@ -82,29 +93,39 @@ Upstream Documents:
 02.3. This document treats those three properties as the practical baseline
       for a low-burden compatibility contract.
 
-02.4. This document does not claim that broader compatibility guarantees can
+02.4. This document does not claim that broad compatibility guarantees can
       be made reliable merely through author declarations.
 
 02.5. Adapter compatibility declarations improve diagnostics but do not
       prove safe execution.
+
+02.6. Capability compatibility declarations improve diagnostics but do not
+      grant capability permission.
+
+02.7. Version and fingerprint binding improve restoration reliability but
+      do not replace the owning domains that define state truth, Pack graph
+      truth, activation truth, or persistence truth.
 
 
 ===============================================================================
 03. OWNERSHIP MODEL
 ===============================================================================
 
-03.1. In this model, the system owns:
-      - stability enforcement
-      - versioning behavior
-      - rollback support
-      - enforcement of hard rules
+03.1. In this model, Turnix owning domains own:
+      - stability enforcement at their own boundaries
+      - version and fingerprint binding behavior
+      - rollback and restoration support where their domains provide it
+      - enforcement of hard rules that belong to their domains
 
-03.2. In this model, the author owns:
+03.2. In this model, the Pack author owns:
       - intent
       - declaration of minimum requirements
-      - declaration of runtime or adapter requirements where applicable
+      - declaration of runtime requirements where applicable
+      - declaration of adapter requirements where applicable
+      - declaration of capability reliance where applicable
 
-03.3. In this model, the author does not guarantee compatibility.
+03.3. In this model, the Pack author does not guarantee broad
+      compatibility.
 
 03.4. In this model, the user owns decisions only after consequences are
       made explicit.
@@ -112,9 +133,15 @@ Upstream Documents:
 03.5. This ownership split exists so that no party is assigned a burden it
       cannot realistically satisfy.
 
+03.6. The term "Turnix owning domains" does not mean one monolithic
+      system object.
+
+03.7. The owning domain for a compatibility question is the domain that
+      owns the affected authority boundary.
+
 
 ===============================================================================
-04. THREE KINDS OF COMPATIBILITY (STRICTLY SEPARATED)
+04. THREE KINDS OF COMPATIBILITY
 ===============================================================================
 
 04.1. This model separates:
@@ -123,79 +150,101 @@ Upstream Documents:
       - capability compatibility
 
 
-04.1 HARD COMPATIBILITY
+04.1 Hard compatibility
 -----------------------
 
 04.1.1. Hard compatibility is non-negotiable in this model.
 
-04.1.2. If hard compatibility fails, the pack does not load.
+04.1.2. Hard compatibility is declared by the Pack author and enforced by
+        the Turnix owning domain at the affected boundary.
 
-04.1.3. This model does not allow override or "try anyway" behavior for hard
-        compatibility failure.
+04.1.3. If hard compatibility fails, the failure blocks the operation whose
+        boundary detected the failure.
 
-04.1.4. Hard compatibility is declared by the author and enforced by the
-        engine.
+04.1.4. A hard compatibility failure may block:
+        - inclusion in an accepted runtime graph
+        - adapter binding
+        - activation-entry loading
+        - Pack activation
+        - another owning-domain operation that depends on the failed rule
 
-04.1.5. Example:
-        engineApi: ">=1.6 <2.0"
+04.1.5. A hard compatibility failure does not need to block discovery when
+        discovery can still classify the candidate safely.
 
-04.1.6. Typical hard-compatibility content may include:
-        - required engine API range
+04.1.6. This model does not allow ordinary override or "try anyway"
+        behavior for hard compatibility failure.
+
+04.1.7. Example:
+        turnixApi: ">=1.6 <2.0"
+
+04.1.8. Typical hard-compatibility content may include:
+        - required Turnix API range
         - required runtime such as JavaScript, Python, or a VM
-        - required execution adapter kind or isolation mode
+        - required ExecutionAdapter kind
+        - required adapter isolation property where the owning adapter
+          contract defines such a property
         - required execution model such as ESM versus CJS or sync versus
           async
 
-04.1.7. If hard compatibility mismatches:
-        - loading is blocked
-        - the error is explicit and final
+04.1.9. If hard compatibility mismatches:
+        - the relevant owning-domain operation is blocked
+        - the error is explicit and final for that operation
 
-04.1.8. The purpose of hard compatibility is to:
-        - protect the engine
-        - prevent undefined behavior
+04.1.10. The purpose of hard compatibility is to protect Turnix authority
+         boundaries and prevent undefined participation.
 
-04.1.9. Hard compatibility does not bypass DA-23 execution authorization.
+04.1.11. Hard compatibility does not bypass execution adapter authorization.
+
+04.1.12. Hard compatibility does not grant dependency satisfaction,
+         visibility, import permission, capability permission, or lifecycle
+         authority by itself.
 
 
-04.2 SOFT COMPATIBILITY
+04.2 Soft compatibility
 -----------------------
 
 04.2.1. Soft compatibility is informational in this model.
 
 04.2.2. Soft compatibility means:
-        - the pack may work
-        - but the result is not guaranteed by this declaration alone
+        - the Pack may work
+        - the Pack is not proven compatible by this declaration alone
 
-04.2.3. Soft compatibility is optional for authors to declare.
+04.2.3. Soft compatibility is optional for Pack authors to declare.
 
 04.2.4. Example:
         testedWith:
-        - engine@1.6.0
-        - engine@1.6.1
+        - turnix@1.6.0
+        - turnix@1.6.1
 
-04.2.5. If the current engine version is outside testedWith:
-        - the pack may still load
-        - the pack is marked as unverified
-        - the system emits an informational warning
+04.2.5. If the current Turnix version is outside testedWith:
+        - the Pack may still remain eligible where hard rules pass
+        - the Pack is marked as unverified for that version
+        - Turnix emits an informational warning
 
-04.2.6. Warnings in this model are consequence-based rather than moralized.
+04.2.6. Warnings in this model are consequence-based rather than
+        moralized.
 
 04.2.7. Good warning example:
-        "This pack has never been tested with engine 1.6.2.
-         Last known working version: 1.6.0."
+        "This Pack has not been tested with Turnix 1.6.2.
+         Last known tested version: 1.6.0."
 
-04.2.8. The model avoids yes/no prompting based only on soft compatibility.
+04.2.8. This model avoids yes-or-no prompting based only on soft
+        compatibility.
 
 04.2.9. Soft adapter compatibility warning does not imply adapter execution
         authorization.
 
+04.2.10. Soft compatibility information may feed diagnostics, user decision
+         surfaces, or policy surfaces only where the owning documents allow
+         that use.
 
-04.3 CAPABILITY COMPATIBILITY
+
+04.3 Capability compatibility
 -----------------------------
 
 04.3.1. Capability compatibility is fine-grained in this model.
 
-04.3.2. Packs may declare which engine capabilities they rely on.
+04.3.2. Packs may declare which Turnix capabilities they rely on.
 
 04.3.3. Example:
         capabilities:
@@ -203,158 +252,305 @@ Upstream Documents:
         - ui.inject
         - asset.pipeline@1
 
-04.3.4. If the engine tracks capability changes between versions, a pack may
-        be flagged as potentially affected when one of those capabilities
+04.3.4. If Turnix tracks capability changes between versions, a Pack may be
+        flagged as potentially affected when one of those capabilities
         changes.
 
 04.3.5. Example:
-        "Capability 'ui.inject' changed behavior in engine 1.6.2."
+        "Capability 'ui.inject' changed behavior in Turnix 1.6.2."
 
 04.3.6. The purpose of capability compatibility is to improve diagnostics
         without forcing authors to re-release merely to update version tags.
 
 04.3.7. Capability compatibility does not grant capability permission.
 
+04.3.8. Capability compatibility does not grant service-object access.
+
+04.3.9. Capability compatibility does not make a capability invocation
+        valid when permission, policy, visibility, activation, or runtime
+        state would reject the invocation.
+
 
 ===============================================================================
-05. SAVEPACK AS A SOURCE-OF-TRUTH CONCEPT
+05. COMPATIBILITY DECLARATION AUTHORITY BOUNDARIES
 ===============================================================================
 
-05.1. In this model, a SavePack pins exact pack versions.
+05.1. Compatibility declarations are inputs to validation, diagnostics,
+      graph preparation, and policy or user decision surfaces where owning
+      documents allow them.
 
-05.2. Example:
-      savePack:
-        packId: example.mod
-        version: 2.3.1
-        hash: abcdef123456
+05.2. Compatibility declarations do not define dependency semantics.
 
-05.3. Model rules:
-      - updates do not overwrite a SavePack
-      - a SavePack loads with pinned versions
-      - updates create new versions side by side
+05.3. Compatibility declarations do not define resolution semantics.
 
-05.4. The intended result is:
-      - deterministic saves
+05.4. Compatibility declarations do not define activation semantics.
+
+05.5. Compatibility declarations do not define import or module-loading
+      semantics.
+
+05.6. Compatibility declarations do not grant Pack visibility.
+
+05.7. Compatibility declarations do not satisfy dependencies by
+      themselves.
+
+05.8. Compatibility declarations do not grant adapter execution
+      authorization.
+
+05.9. Compatibility declarations do not grant capability permission.
+
+05.10. Compatibility declarations do not grant persistence authority.
+
+05.11. Compatibility declarations do not grant lifecycle authority.
+
+05.12. A compatibility declaration may be used only within the authority
+       boundary of the domain consuming it.
+
+05.13. A compatibility declaration remains evidence or constraint input.
+
+05.14. A compatibility declaration does not become Kernel authority,
+       RuntimeHost authority, PackManager authority, resolver authority,
+       activator authority, adapter authority, or permission authority.
+
+
+===============================================================================
+06. SAVEBUNDLE GENERATION PACK BINDING
+===============================================================================
+
+06.1. In this model, a SaveBundle generation records exact Pack bindings
+      used for restoration.
+
+06.2. Recorded Pack bindings may include:
+      - accepted Pack identity
+      - exact Pack version
+      - Pack fingerprint or content identity
+      - copied Pack binding
+      - pinned external Pack binding
+      - compatibility evidence used when the generation was published
+
+06.3. Example:
+      saveBundleGeneration:
+        applicationId: example-application
+        generationId: 43
+        packs:
+        - packId: example.mod
+          version: 2.3.1
+          fingerprint: abcdef123456
+
+06.4. Model rules:
+      - updates do not overwrite a published SaveBundle generation
+      - loading a SaveBundle uses a published generation
+      - loading a SaveBundle creates another ApplicationRun of the same
+        Application
+      - future updates create future graph selections or future generations
+
+06.5. The intended result is:
+      - deterministic restoration
       - no silent breakage from updates
-      - straightforward rollback
+      - straightforward rollback to retained published generations
 
-05.5. This section is subordinate to higher-authority SavePack,
-      AppInstance, and persistence documents when they define the final
-      authoritative model.
+06.6. SaveBundle generations preserve restoration evidence and accepted
+      graph bindings.
 
-05.6. SavePack pinning does not make SavePack identity the same as
-      AppInstance identity.
+06.7. SaveBundle generations do not replace semantic ownership of state,
+      policy, configuration, trace, resolution, activation, adapter,
+      capability, permission, or lifecycle domains.
 
-05.7. SavePack pinning does not authorize multi-writer SavePack mutation.
+06.8. SaveBundle generation binding does not make SaveBundle identity the
+      same as Application identity.
+
+06.9. SaveBundle generation binding does not make SaveBundle identity the
+      same as ApplicationRun identity.
+
+06.10. SaveBundle generation binding does not authorize multi-writer
+       SaveBundle mutation.
+
+06.11. SaveBundle generation binding is subordinate to higher-authority
+       persistence, Application, ApplicationRun, state, and Pack graph
+       documents.
 
 
 ===============================================================================
-06. UPDATE POLICY (DEFAULT SAFE)
+07. UPDATE POLICY
 ===============================================================================
 
-06.1. In this model, SavePacks do not auto-update packs by default.
+07.1. In this model, updates do not silently alter retained published
+      SaveBundle generations.
 
-06.2. Example per-save setting:
+07.2. In this model, updates do not silently alter an active
+      ApplicationRun.
+
+07.3. Safe-default behavior treats follow-up updates as future-selection
+      inputs rather than mutations of already accepted runtime material.
+
+07.4. Example per-Application or per-SaveBundle setting:
       - followUpdates = false as default
       - followUpdates = true only by explicit opt-in
 
-06.3. Global rolling profiles may exist in this model.
+07.5. Rolling-profile behavior may exist in this model.
 
-06.4. SavePack behavior remains deterministic within that rolling-profile
-      environment.
+07.6. Rolling-profile behavior may affect future graph preparation.
 
-06.5. Updating a pack does not silently change an already running
-      AppInstance.
+07.7. Rolling-profile behavior may affect future SaveBundle generations.
+
+07.8. Rolling-profile behavior does not change already published
+      SaveBundle generations.
+
+07.9. Rolling-profile behavior does not silently change an active
+      ApplicationRun.
+
+07.10. Updating a Pack does not silently change the accepted Pack graph of
+       an already published SaveBundle generation.
+
+07.11. Updating a Pack does not silently change an already running
+       ApplicationRun.
 
 
 ===============================================================================
-07. STORAGE AND GARBAGE COLLECTION
+08. STORAGE AND CLEANUP
 ===============================================================================
 
-07.1. In this model, the system may keep multiple versions of the same pack.
+08.1. In this model, Turnix may keep multiple versions of the same Pack.
 
-07.2. Versions referenced by any SavePack are not deleted.
+08.2. Pack material referenced by retained published SaveBundle
+      generations is not deleted by ordinary cleanup.
 
-07.3. Unreferenced versions may be deleted by policy.
+08.3. Pack material referenced by explicit pins is not deleted by ordinary
+      cleanup.
 
-07.4. Example deletion policies may include:
-      - older than 30 days
-      - disk quota exceeded
+08.4. Pack material referenced by accepted graph evidence is not deleted by
+      ordinary cleanup.
+
+08.5. Pack material referenced by copied or pinned bindings is not deleted
+      by ordinary cleanup.
+
+08.6. Pack material required by retained compatibility policy is not
+      deleted by ordinary cleanup.
+
+08.7. Unreferenced Pack versions may be deleted by policy.
+
+08.8. Example deletion policies may include:
+      - age-based cleanup
+      - disk quota cleanup
       - explicit user cleanup
 
-07.5. Users may pin versions manually to prevent deletion.
+08.9. Users may pin Pack versions manually to prevent deletion.
 
-07.6. Storage cleanup does not remove material required by retained
-      authoritative state or retained compatibility policy.
+08.10. Storage cleanup does not remove material required by retained
+       authoritative state.
+
+08.11. Storage cleanup does not remove material required by owning-domain
+       retention rules.
+
+08.12. Cleanup policy does not define Pack graph truth.
+
+08.13. Cleanup policy does not define persistence truth.
 
 
 ===============================================================================
-08. WHAT THIS CONTRACT DOES NOT REQUIRE
+09. WHAT THIS CONTRACT DOES NOT REQUIRE
 ===============================================================================
 
-08.1. This model does not require authors to:
+09.1. This model does not require Pack authors to:
       - maintain parallel branches
-      - publish exact "works with X.Y.Z" claims
+      - publish exact works-with-every-version claims
       - update only to silence warnings
 
-08.2. This model does not require users to:
+09.2. This model does not require users to:
       - understand dependency graphs
       - manage version pinning manually in normal use
+      - reason about adapter authority boundaries directly
 
-08.3. This model does not pretend that compatibility can be guaranteed in
+09.3. This model does not pretend that compatibility can be guaranteed in
       advance.
 
+09.4. This model does not require every compatibility warning to become a
+      decision prompt.
+
+09.5. This model does not require Turnix to retain unbounded Pack material
+      when no retained generation, pin, evidence, or policy requires it.
+
 
 ===============================================================================
-09. WHAT THIS CONTRACT GUARANTEES
+10. WHAT THIS CONTRACT GUARANTEES
 ===============================================================================
 
-09.1. Within the scope of this model:
-      - builds that worked once should be able to work again
-      - updates remain reversible
+10.1. Within the scope of this model:
+      - a build that worked once can be restored when required retained
+        material is still available
+      - updates remain reversible within retained generation and rollback
+        boundaries
       - responsibility remains explicit
       - uncertainty remains visible rather than hidden
       - stability remains system-owned rather than outsourced to authors
 
-09.2. These practical guarantees remain subordinate to higher-authority
-      state, AppInstance, persistence, adapter, and resolution documents.
+10.2. These practical guarantees remain subordinate to higher-authority
+      state, Application, ApplicationRun, persistence, adapter, permission,
+      resolution, activation, and Pack graph documents.
+
+10.3. This document does not guarantee that every retained build remains
+      executable forever when required external runtime conditions are no
+      longer available.
+
+10.4. This document does not guarantee that compatibility declarations can
+      prove behavioral correctness.
 
 
 ===============================================================================
-10. RELATION TO HIGHER DOCUMENTS
+11. RELATION TO HIGHER DOCUMENTS
 ===============================================================================
 
-10.1. This document is optional and subordinate.
+11.1. This document is optional and subordinate.
 
-10.2. If this document conflicts with higher-authority DA documents, the
-      higher-authority documents win.
+11.2. If this document conflicts with higher-authority DESIGN AREA
+      documents, the higher-authority documents win.
 
-10.3. This document is useful only to the extent that it remains aligned
+11.3. This document is useful only to the extent that it remains aligned
       with the higher Turnix design.
 
-10.4. DA-20 owns AppInstance runtime identity.
+11.4. The lifecycle and runtime-identity design owns Application and
+      ApplicationRun identity.
 
-10.5. DA-23 owns execution adapter boundary semantics.
+11.5. The persistence design owns SaveBundle persistence and generation
+      publication semantics.
+
+11.6. The Pack graph, dependency, and resolution designs own accepted graph
+      selection semantics.
+
+11.7. The activation design owns Pack activation semantics.
+
+11.8. The execution adapter design owns adapter boundary semantics.
+
+11.9. The capability and permission designs own capability invocation and
+      permission semantics.
+
+11.10. This document may describe compatibility inputs to those domains.
+
+11.11. This document does not absorb authority from those domains.
 
 
 ===============================================================================
-11. LOCKED AND OPEN
+12. LOCKED AND OPEN
 ===============================================================================
 
-11.1. LOCKED:
-      - the three-way compatibility split
+12.1. LOCKED:
+      - the hard, soft, and capability compatibility split
       - low-burden authoring intent
       - reproducibility, reversibility, and explicit uncertainty as the
         practical foundation of this model
       - adapter compatibility declarations do not grant adapter authority
       - capability compatibility declarations do not grant capability
         permission
+      - SaveBundle published generations are not silently changed by Pack
+        updates
+      - active ApplicationRuns are not silently changed by Pack updates
 
-11.2. OPEN:
-      - the final authoritative form of these ideas in higher documents
+12.2. OPEN:
       - exact field shapes and final schema details
       - exact adapter requirement declaration shape
-      - how much of this model survives unchanged into authoritative design
+      - exact fingerprint and content-identity field names
+      - exact compatibility evidence retention shape
+      - exact user-facing warning presentation
+      - exact relationship between rolling profiles and Pack graph selection
 
 
 ===============================================================================
@@ -364,6 +560,6 @@ END OF ODA-D - MINIMAL PACK / MOD CONTRACT
 --- doc-meta ---
 DOC_ID: ODA-D
 DOC_FILE: docs/design/ODA-D_MINIMAL_PACK_MOD_CONTRACT.txt
-DOC_REV: 9
-DOC_GIT: ad877cc
+DOC_REV: 10
+DOC_GIT: 19b7820
 ----------------
