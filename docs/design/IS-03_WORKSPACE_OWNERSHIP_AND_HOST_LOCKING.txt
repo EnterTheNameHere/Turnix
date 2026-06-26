@@ -8,21 +8,22 @@ EVOLVING
 
 Description:
 ------------
-Defines the concrete workspace ownership record, host-lock acquisition flow,
+Defines the concrete Workspace ownership record, host-lock acquisition flow,
 release flow, stale-owner handling, read-only inspection classification, and
-trace mapping for RuntimeHost workspace ownership.
+trace mapping for RuntimeHost-mediated Workspace ownership.
 
-This document implements the workspace ownership semantics defined by DA-28.
-It remains constrained by DA-20 AppInstance writable SavePack ownership, DA-04
-committed-state rules, and DA-07 persistence safety.
+This document implements Workspace ownership evidence and host-lock behavior.
+It remains constrained by RuntimeHost, Application, ApplicationRun,
+SaveBundle, committed-state, persistence, and policy semantics owned by their
+higher design documents.
 
 Purpose:
 --------
-This document defines how a RuntimeHost records and verifies exclusive writable
-workspace ownership at implementation level.
+This document defines how Turnix records and verifies exclusive writable
+Workspace ownership at implementation level.
 
 It defines:
-- workspace ownership record location and purpose
+- Workspace ownership record location and purpose
 - ownership record fields
 - ownership acquisition flow
 - ownership release flow
@@ -30,15 +31,16 @@ It defines:
 - stale-owner detection and recovery flow
 - read-only inspection behavior
 - crash and abnormal exit handling
-- trace mapping to DA-28 RuntimeHost trace reasons
+- trace mapping to RuntimeHost Workspace ownership trace reasons
 - implementation error categories
 
 It does NOT define:
 - RuntimeHost semantics (see DA-28)
-- Kernel authority ordering (see DA-01 and DA-02)
+- TurnixRuntime or Kernel authority ordering (see DA-01 and DA-02)
 - committed-state or transaction semantics (see DA-04)
 - persistent I/O safety semantics (see DA-07)
-- AppInstance lifecycle or writable SavePack ownership semantics (see DA-20)
+- Application lifecycle, ApplicationRun lifecycle, or SaveBundle writable
+  ownership semantics
 - RPC, channel, or transport semantics (see DA-21)
 - Orchestration Unit mutation authority semantics (see DA-24)
 - concrete CLI command syntax
@@ -64,7 +66,7 @@ Upstream Documents:
 
 Downstream Documents:
 --------------------
-- future runtime-host command-surface implementation specifications
+- future RuntimeHost command-surface implementation specifications
 - future LAN and remote-client implementation specifications
 - future RuntimeHost trace schema implementation specifications
 
@@ -82,11 +84,15 @@ Downstream Documents:
 01.3. The CORE META-RULES documents define the general rule language and
       interpretation model used by this document.
 
-01.4. This document defines implementation-level workspace ownership and
+01.4. This document defines implementation-level Workspace ownership and
       host-lock behavior within that shared interpretation model.
 
 01.5. This implementation specification does not create new authority
-      semantics. It implements DA-28 workspace ownership rules.
+      semantics.
+
+01.6. This implementation specification implements concrete Workspace
+      ownership evidence and host-lock behavior for the RuntimeHost-mediated
+      Workspace-opening path.
 
 
 ===============================================================================
@@ -95,58 +101,76 @@ Downstream Documents:
 
 02.1. Workspace ownership locking answers:
 
-          "How does one RuntimeHost prove that it is the current writable
-           owner of a workspace, and how does another RuntimeHost avoid
-           silently becoming a second writer?"
+          "How does one TurnixRuntime execution, through RuntimeHost, prove
+           that it is the current writable owner of a Workspace, and how does
+           another RuntimeHost avoid silently becoming a second writer?"
 
-02.2. A workspace ownership record is durable evidence that a RuntimeHost
-      claims writable ownership of a workspace.
+02.2. A Workspace ownership record is durable evidence that one runtime
+      execution claims writable ownership of one Workspace.
 
 02.3. A host lock is the implementation mechanism that prevents silent
-      concurrent writable RuntimeHost ownership of the same workspace.
+      concurrent writable ownership of the same Workspace.
 
 02.4. The ownership record and host lock do not create Kernel authority.
 
-02.5. The ownership record and host lock do not create AppInstance writable
-      SavePack ownership.
+02.5. The ownership record and host lock do not create SaveBundle writable
+      ownership.
 
-02.6. The ownership record and host lock do not grant adapter state-write
+02.6. The ownership record and host lock do not create ApplicationRun
+      lifecycle authority.
+
+02.7. The ownership record and host lock do not create Application
+      committed state.
+
+02.8. The ownership record and host lock do not grant adapter state-write
       authority.
 
-02.7. Workspace ownership is host-level ownership only.
+02.9. Workspace ownership is host-level and runtime-execution-level
+      ownership of Workspace mutable roots.
 
-02.8. AppInstance writable SavePack ownership remains governed by DA-20.
+02.10. Workspace ownership does not grant SaveBundle writable ownership,
+       ApplicationRun lifecycle authority, Application committed-state
+       mutation authority, or adapter write authority.
 
-02.9. Committed-state mutation remains governed by DA-04.
+02.11. Application, ApplicationRun, and SaveBundle ownership and lifecycle
+       semantics remain outside this document.
 
-02.10. Persistent I/O safety remains governed by DA-07.
+02.12. Committed-state mutation remains governed by DA-04.
+
+02.13. Persistent I/O safety remains governed by DA-07.
 
 
 ===============================================================================
 03. OWNERSHIP RECORD LOCATION
 ===============================================================================
 
-03.1. A writable RuntimeHost stores workspace ownership evidence inside the
-      workspace under a RuntimeHost-owned metadata location.
+03.1. A writable RuntimeHost-mediated opening stores Workspace ownership
+      evidence inside the Workspace under a Turnix-managed metadata location.
 
 03.2. The initial ownership record path is:
 
           .turnix/runtime-host/owner.json
 
-03.3. The parent directory is created by Turnix when writable RuntimeHost
+03.3. This path is the concrete implementation representation of ownership
+      evidence.
+
+03.4. This path is not the architecture-level source of Workspace ownership
+      authority.
+
+03.5. The parent directory is created by Turnix when writable Workspace
       ownership is requested and the directory does not already exist.
 
-03.4. The parent directory is Turnix-managed metadata.
+03.6. The parent directory is Turnix-managed metadata.
 
-03.5. Pack-provided code does not write this record directly.
+03.7. Pack-provided code does not write this record directly.
 
-03.6. Adapter-executed code does not write this record directly.
+03.8. Adapter-executed code does not write this record directly.
 
-03.7. User tools may inspect this record when read-only inspection is
+03.9. User tools may inspect this record when read-only inspection is
       explicitly requested or permitted.
 
-03.8. The ownership record path may be revised by a later implementation
-      specification when migration and compatibility rules are defined.
+03.10. The ownership record path may be revised by a later implementation
+       specification when migration and compatibility rules are defined.
 
 
 ===============================================================================
@@ -157,106 +181,142 @@ Downstream Documents:
 
 04.2. The ownership record contains the following fields:
       - schemaVersion
-      - runtimeHostId
       - workspaceId
+      - runtimeId
+      - runtimeHostId
       - ownershipMode
-      - processId
-      - hostMachineId
+      - coordinatorProcessId
+      - coordinatorProcessStartIdentity
+      - machineId
       - userId
-      - startedAtUtc
+      - openedAtUtc
       - heartbeatAtUtc
       - commandSurface
       - runtimeHostVersion
-      - ownerNonce
+      - ownerToken
       - lockState
 
 04.3. schemaVersion identifies the ownership record schema version.
 
-04.4. runtimeHostId identifies the RuntimeHost that owns the workspace.
+04.4. workspaceId identifies the Workspace claimed by the runtime execution.
 
-04.5. workspaceId identifies the workspace claimed by the RuntimeHost.
+04.5. runtimeId identifies one TurnixRuntime execution.
 
-04.6. ownershipMode is writable.
+04.6. runtimeHostId identifies the RuntimeHost or command-surface host
+      boundary that mediated the Workspace-opening request.
 
-04.7. Read-only inspection is represented by accessMode or by a later explicit
-      inspection-session record, not by writable ownershipMode.
+04.7. runtimeHostId is not Kernel identity.
 
-04.8. processId records the operating-system process identifier when
-      available.
+04.8. runtimeHostId is not Application identity.
 
-04.9. hostMachineId records a stable local machine identity when available.
+04.9. runtimeHostId is not SaveBundle authority.
 
-04.10. userId records a local user identity when available.
+04.10. runtimeHostId does not by itself replace runtimeId.
 
-04.11. startedAtUtc records when the ownership claim was created.
+04.11. ownershipMode is writable.
 
-04.12. heartbeatAtUtc records the most recent owner heartbeat time.
+04.12. Read-only inspection is represented by accessMode or by a later
+       explicit inspection-session record, not by writable ownershipMode.
 
-04.13. commandSurface records the entry surface or startup mode that created
+04.13. coordinatorProcessId records the operating-system process identifier
+       representing the runtime execution when available.
+
+04.14. coordinatorProcessStartIdentity distinguishes the concrete process
+       lifetime from later reuse of the same process identifier.
+
+04.15. machineId records a stable local machine identity when available.
+
+04.16. userId records a local user identity when available.
+
+04.17. openedAtUtc records when the ownership claim was created.
+
+04.18. openedAtUtc is informational.
+
+04.19. openedAtUtc does not establish identity or liveness.
+
+04.20. heartbeatAtUtc records the most recent owner heartbeat time.
+
+04.21. commandSurface records the entry surface or startup mode that created
        the ownership claim when available.
 
-04.14. runtimeHostVersion records the RuntimeHost implementation version when
+04.22. runtimeHostVersion records the RuntimeHost implementation version when
        available.
 
-04.15. ownerNonce records an unpredictable value generated for the ownership
+04.23. ownerToken records an unpredictable value generated for the ownership
        claim.
 
-04.16. lockState is one of:
+04.24. lockState is one of:
        - active
        - releasing
        - staleRecoveryPending
        - released
 
-04.17. Unknown fields are preserved by tooling that rewrites the record only
+04.25. Unknown fields are preserved by tooling that updates the record only
        when the tooling explicitly supports preservation.
 
-04.18. Unknown fields are ignored for authority decisions unless a later
+04.26. Unknown fields are ignored for authority decisions unless a later
        schema version defines their meaning.
 
-04.19. Missing required fields make the ownership record malformed.
+04.27. Unknown fields do not affect ownership, recovery, policy, identity,
+       stale-owner classification, or authority.
 
-04.20. A malformed ownership record is not silently treated as absent.
+04.28. Missing required fields make the ownership record malformed.
+
+04.29. A malformed ownership record is not silently treated as absent.
 
 
 ===============================================================================
 05. OWNERSHIP ACQUISITION FLOW
 ===============================================================================
 
-05.1. Workspace ownership acquisition begins when a RuntimeHost requests
-      writable ownership of a workspace.
+05.1. Workspace ownership acquisition begins when RuntimeHost requests
+      writable ownership of a Workspace for one runtime execution.
 
-05.2. The RuntimeHost resolves the workspace identity before creating or
-      writing the ownership record.
+05.2. RuntimeHost resolves the Workspace identity before creating or writing
+      the ownership record.
 
-05.3. The RuntimeHost checks for existing ownership evidence before claiming
+05.3. RuntimeHost checks for existing ownership evidence before claiming
       writable ownership.
 
-05.4. If no ownership evidence exists, the RuntimeHost writes a new ownership
-      record using persistence-safe write behavior under DA-07.
+05.4. Ownership acquisition does not rely on unsafe check-then-overwrite
+      behavior.
 
-05.5. The RuntimeHost verifies the written record after the write completes.
+05.5. Ownership claim creation uses atomic creation, exclusive creation,
+      compare-and-swap-equivalent behavior, or another DA-07-constrained
+      persistence-safe ownership-claim mechanism.
 
-05.6. The RuntimeHost treats ownership as acquired only when the verified
-      record still identifies the same runtimeHostId, workspaceId, ownerNonce,
-      and ownershipMode.
+05.6. If no ownership evidence exists, RuntimeHost creates a new ownership
+      record through the selected persistence-safe claim mechanism.
 
-05.7. If verification fails, ownership acquisition fails.
+05.7. RuntimeHost verifies the written record after the claim step completes.
 
-05.8. Ownership acquisition emits RuntimeHostWorkspaceOwnershipRequested.
+05.8. RuntimeHost treats ownership as acquired only when the verified record
+      still identifies the same workspaceId, runtimeId, ownershipMode, and
+      ownerToken.
 
-05.9. Successful ownership acquisition emits
-      RuntimeHostWorkspaceOwnershipGranted.
+05.9. If runtimeHostId participates in the selected schema, verification also
+      confirms the expected runtimeHostId.
 
-05.10. Failed ownership acquisition emits
-       RuntimeHostWorkspaceOwnershipRejected or a more specific ownership trace
-       reason when one applies.
+05.10. If verification fails, ownership acquisition fails.
 
-05.11. Ownership acquisition failure does not create a partially valid
-       RuntimeHost writable owner.
+05.11. Ownership acquisition emits RuntimeHostWorkspaceOwnershipRequested.
 
-05.12. Ownership acquisition failure does not create a partial AppInstance.
+05.12. Successful ownership acquisition emits
+       RuntimeHostWorkspaceOwnershipGranted.
 
-05.13. Ownership acquisition failure does not define Job terminal outcome
+05.13. Failed ownership acquisition emits RuntimeHostWorkspaceOwnershipRejected
+       or a more specific ownership trace reason when one applies.
+
+05.14. Ownership acquisition failure does not create a partially valid
+       writable owner.
+
+05.15. Ownership acquisition failure does not create a partial ApplicationRun.
+
+05.16. Ownership acquisition failure does not load a SaveBundle.
+
+05.17. Ownership acquisition failure does not commit Application state.
+
+05.18. Ownership acquisition failure does not define Job terminal outcome
        unless the owning Job workflow maps that failure explicitly.
 
 
@@ -264,60 +324,65 @@ Downstream Documents:
 06. SECOND-OWNER REJECTION FLOW
 ===============================================================================
 
-06.1. If an ownership record already exists for writable ownership, a new
-      RuntimeHost does not silently overwrite it.
+06.1. If an ownership record already exists for writable ownership, a
+      requesting RuntimeHost does not silently overwrite it.
 
-06.2. The new RuntimeHost reads the existing ownership record.
+06.2. The requesting RuntimeHost reads the existing ownership record.
 
-06.3. If the existing record is well formed and active, the new RuntimeHost
-      reports the workspace as already owned.
+06.3. If the existing record is well formed and active, the requesting
+      RuntimeHost reports the Workspace as already owned.
 
-06.4. The new RuntimeHost emits RuntimeHostWorkspaceAlreadyOwned.
+06.4. The requesting RuntimeHost emits RuntimeHostWorkspaceAlreadyOwned.
 
-06.5. The new RuntimeHost emits RuntimeHostSecondOwnerRejected when writable
-      ownership is rejected because another owner is present.
+06.5. The requesting RuntimeHost emits RuntimeHostSecondOwnerRejected when
+      writable ownership is rejected because another owner is present.
 
-06.6. The new RuntimeHost may offer explicit alternatives through a command
-      surface or policy path, including:
+06.6. The requesting RuntimeHost may offer explicit alternatives through a
+      command surface or policy path, including:
       - connect to existing host
       - open read-only inspection
       - request stale-owner recovery
       - abort
 
-06.7. The new RuntimeHost does not select an alternative silently.
+06.7. The requesting RuntimeHost does not select an alternative silently.
 
-06.8. The new RuntimeHost does not downgrade to read-only inspection silently.
+06.8. The requesting RuntimeHost does not downgrade to read-only inspection
+      silently.
 
-06.9. The new RuntimeHost does not detach, supersede, or claim work from the
-      existing RuntimeHost.
+06.9. The requesting RuntimeHost does not detach, supersede, or claim work
+      from the existing RuntimeHost.
 
-06.10. The new RuntimeHost does not create writable AppInstance or SavePack
-       state for the already-owned workspace.
+06.10. The requesting RuntimeHost does not create writable Application state,
+       ApplicationRun state, or SaveBundle write ownership for the
+       already-owned Workspace.
 
 
 ===============================================================================
 07. HEARTBEAT AND LIVENESS EVIDENCE
 ===============================================================================
 
-07.1. A writable RuntimeHost periodically refreshes heartbeatAtUtc while it
-      owns the workspace.
+07.1. A writable runtime owner periodically refreshes heartbeatAtUtc while it
+      owns the Workspace.
 
-07.2. Heartbeat refresh writes preserve the same runtimeHostId, workspaceId,
-      ownershipMode, and ownerNonce.
+07.2. Heartbeat refresh writes preserve the same workspaceId, runtimeId,
+      ownershipMode, and ownerToken.
 
-07.3. Heartbeat refresh uses persistence-safe write behavior under DA-07.
+07.3. When runtimeHostId participates in the selected schema, heartbeat
+      refresh writes preserve the same runtimeHostId.
 
-07.4. Heartbeat failure is trace-visible.
+07.4. Heartbeat refresh uses persistence-safe write behavior under DA-07.
 
-07.5. Heartbeat failure does not automatically release ownership.
+07.5. Heartbeat failure is trace-visible.
 
-07.6. Heartbeat failure may contribute to later crash, failure, or stale-owner
-      evidence.
+07.6. Heartbeat failure does not automatically release ownership.
 
-07.7. Heartbeat timing values are implementation parameters, not authority
+07.7. Heartbeat failure may contribute to later crash, failure, or
+      stale-owner evidence.
+
+07.8. Heartbeat timing values are implementation parameters, not authority
       semantics.
 
-07.8. A later implementation specification may define concrete heartbeat
+07.9. A later implementation specification may define concrete heartbeat
       intervals and tolerance windows.
 
 
@@ -331,34 +396,39 @@ Downstream Documents:
 
 08.2. Stale-owner detection checks available evidence, including:
       - ownership record schema validity
-      - runtimeHostId
       - workspaceId
+      - runtimeId
+      - runtimeHostId when present
       - ownershipMode
-      - processId when available
-      - hostMachineId when available
+      - coordinatorProcessId when available
+      - coordinatorProcessStartIdentity when available
+      - machineId when available
       - userId when available
       - heartbeatAtUtc
-      - ownerNonce
+      - ownerToken
       - lockState
 
 08.3. Stale-owner detection may also check implementation-specific liveness
       evidence when the evidence source is defined.
 
-08.4. A missing process is not sufficient by itself to prove safe recovery on a
-      different machine.
+08.4. A missing process is not sufficient by itself to prove safe recovery on
+      a different machine.
 
 08.5. A stale heartbeat is not sufficient by itself to authorize silent
       takeover.
 
-08.6. Malformed ownership evidence is not silently treated as stale.
+08.6. A process identifier match or mismatch is not sufficient without process
+      lifetime evidence when process reuse is possible.
 
-08.7. Stale-owner detection emits RuntimeHostStaleOwnerDetected only when the
+08.7. Malformed ownership evidence is not silently treated as stale.
+
+08.8. Stale-owner detection emits RuntimeHostStaleOwnerDetected only when the
       implementation classifies the existing owner as stale evidence rather
       than merely present evidence.
 
-08.8. Stale-owner detection does not itself acquire ownership.
+08.9. Stale-owner detection does not itself acquire ownership.
 
-08.9. Stale-owner detection does not itself overwrite ownership evidence.
+08.10. Stale-owner detection does not itself overwrite ownership evidence.
 
 
 ===============================================================================
@@ -377,26 +447,30 @@ Downstream Documents:
 09.5. If recovery is accepted, Turnix emits
       RuntimeHostStaleOwnerRecoveryAccepted.
 
-09.6. Recovery acceptance permits the RuntimeHost to replace stale ownership
+09.6. Recovery acceptance permits RuntimeHost to replace stale ownership
       evidence only through persistence-safe write behavior under DA-07.
 
 09.7. Recovery acceptance does not grant committed-state mutation authority.
 
-09.8. Recovery acceptance does not grant AppInstance writable SavePack
-      ownership.
+09.8. Recovery acceptance does not grant SaveBundle writable ownership.
 
-09.9. Recovery acceptance does not validate or repair corrupted SavePack state
-      by itself.
+09.9. Recovery acceptance does not grant ApplicationRun lifecycle authority.
 
-09.10. If ownership replacement fails, Turnix emits
+09.10. Recovery acceptance does not grant Application committed-state mutation
+       authority.
+
+09.11. Recovery acceptance does not validate or repair corrupted SaveBundle
+       material by itself.
+
+09.12. If ownership replacement fails, Turnix emits
        RuntimeHostStaleOwnerRecoveryFailed.
 
-09.11. If ownership replacement succeeds and verification succeeds, Turnix
+09.13. If ownership replacement succeeds and verification succeeds, Turnix
        emits RuntimeHostWorkspaceOwnershipGranted.
 
-09.12. Recovery failure leaves the workspace without a new writable owner.
+09.14. Recovery failure leaves the Workspace without a new writable owner.
 
-09.13. Recovery failure does not silently downgrade to read-only inspection.
+09.15. Recovery failure does not silently downgrade to read-only inspection.
 
 
 ===============================================================================
@@ -405,27 +479,31 @@ Downstream Documents:
 
 10.1. Read-only inspection is an explicit accessMode.
 
-10.2. Read-only inspection does not create writable workspace ownership.
+10.2. Read-only inspection does not create writable Workspace ownership.
 
 10.3. Read-only inspection may read the ownership record, trace evidence,
       configuration, manifests, and other inspection-allowed material.
 
-10.4. Read-only inspection does not write SavePack state.
+10.4. Read-only inspection does not write SaveBundle material.
 
-10.5. Read-only inspection does not write committed state.
+10.5. Read-only inspection does not write Application committed state.
 
-10.6. Read-only inspection may write optional local tool output only when that
-      output is outside the inspected workspace or when a later policy defines
-      safe inspection output inside the workspace.
+10.6. Read-only inspection does not write ownership records.
 
-10.7. Read-only inspection does not repair malformed ownership evidence.
+10.7. Read-only inspection does not write mutable Workspace roots except for
+      explicitly policy-defined inspection output.
 
-10.8. Read-only inspection does not release another RuntimeHost's ownership.
+10.8. Read-only inspection may write optional local tool output only when that
+      output is outside the inspected Workspace or when a later policy defines
+      safe inspection output inside the Workspace.
 
-10.9. Read-only inspection does not acquire AppInstance writable SavePack
-      ownership.
+10.9. Read-only inspection does not repair malformed ownership evidence.
 
-10.10. Read-only inspection does not create or update the ownership record
+10.10. Read-only inspection does not release another RuntimeHost's ownership.
+
+10.11. Read-only inspection does not acquire SaveBundle writable ownership.
+
+10.12. Read-only inspection does not create or update the ownership record
        unless a later implementation specification defines an explicit
        inspection-session record separate from writable ownership.
 
@@ -434,33 +512,43 @@ Downstream Documents:
 11. OWNERSHIP RELEASE FLOW
 ===============================================================================
 
-11.1. Ownership release begins when a writable RuntimeHost intentionally stops
-      owning the workspace.
+11.1. Ownership release begins when the writable runtime owner intentionally
+      stops owning the Workspace.
 
-11.2. The RuntimeHost verifies that the current ownership record still matches
-      its runtimeHostId, workspaceId, ownershipMode, and ownerNonce before
+11.2. RuntimeHost verifies that the current ownership record still matches the
+      expected workspaceId, runtimeId, ownershipMode, and ownerToken before
       releasing ownership.
 
-11.3. If the current ownership record does not match, the RuntimeHost does not
+11.3. When runtimeHostId participates in the selected schema, release
+      verification also confirms the expected runtimeHostId.
+
+11.4. If the current ownership record does not match, RuntimeHost does not
       delete or overwrite it.
 
-11.4. The RuntimeHost may mark lockState as releasing before final release.
+11.5. RuntimeHost may mark lockState as releasing before final release.
 
-11.5. The RuntimeHost removes or marks the ownership record as released only
+11.6. RuntimeHost removes or marks the ownership record as released only
       through persistence-safe write behavior under DA-07.
 
-11.6. Successful release emits RuntimeHostWorkspaceOwnershipReleased.
+11.7. Successful release emits RuntimeHostWorkspaceOwnershipReleased.
 
-11.7. Failed release emits RuntimeHostWorkspaceOwnershipReleaseFailed.
+11.8. Failed release emits RuntimeHostWorkspaceOwnershipReleaseFailed.
 
-11.8. Failed release is trace-visible and may leave stale ownership evidence
+11.9. Failed release is trace-visible and may leave stale ownership evidence
       for later explicit recovery.
 
-11.9. Ownership release does not by itself define AppInstance stop outcome.
+11.10. Ownership release does not by itself define ApplicationRun stop
+       outcome.
 
-11.10. Ownership release does not by itself define Job terminal outcome.
+11.11. Ownership release does not by itself define Application lifecycle
+       outcome.
 
-11.11. Ownership release does not by itself finalize a Window.
+11.12. Ownership release does not by itself define SaveBundle publication
+       outcome.
+
+11.13. Ownership release does not by itself define Job terminal outcome.
+
+11.14. Ownership release does not by itself finalize a Window.
 
 
 ===============================================================================
@@ -475,7 +563,7 @@ Downstream Documents:
       ownership evidence until stale-owner detection and recovery classify it
       otherwise.
 
-12.4. Crash handling does not silently rewrite the ownership record.
+12.4. Crash handling does not silently update the ownership record.
 
 12.5. Crash handling does not silently create a new owner.
 
@@ -507,18 +595,24 @@ Downstream Documents:
 
 13.6. Inconsistent ownership fields are not silently normalized.
 
-13.7. If workspaceId in the record does not match the resolved workspace,
+13.7. If workspaceId in the record does not match the resolved Workspace,
       Turnix treats the condition as malformed or conflicting ownership
       evidence.
 
-13.8. Conflicting ownership evidence is not silently ignored.
+13.8. If runtimeId, runtimeHostId, coordinatorProcessId,
+      coordinatorProcessStartIdentity, machineId, or ownerToken conflict with
+      the claim being verified, Turnix treats the condition as malformed or
+      conflicting ownership evidence according to the selected schema.
+
+13.9. Conflicting ownership evidence is not silently ignored.
 
 
 ===============================================================================
 14. TRACE MAPPING
 ===============================================================================
 
-14.1. IS-03 maps implementation behavior to DA-28 RuntimeHost trace reasons.
+14.1. IS-03 maps implementation behavior to RuntimeHost Workspace ownership
+      trace reasons.
 
 14.2. Ownership acquisition maps to:
       - RuntimeHostWorkspaceOwnershipRequested
@@ -541,16 +635,18 @@ Downstream Documents:
       - RuntimeHostStaleOwnerRecoveryFailed
 
 14.6. Implementation-specific trace evidence may add concrete details, but it
-      does not redefine DA-28 RuntimeHost-domain trace reason meanings.
+      does not redefine RuntimeHost-domain trace reason meanings.
 
 14.7. Trace evidence includes enough context, when available, to identify:
-      - runtimeHostId
       - workspaceId
+      - runtimeId
+      - runtimeHostId when present
       - ownershipMode when ownership exists
       - accessMode when inspection access exists
-      - ownerNonce when ownership exists
-      - processId
-      - hostMachineId
+      - ownerToken when ownership exists
+      - coordinatorProcessId
+      - coordinatorProcessStartIdentity
+      - machineId
       - startup mode
       - command identity
       - policy decision identity
@@ -561,6 +657,10 @@ Downstream Documents:
 
 14.9. The ownership record does not replace trace evidence.
 
+14.10. Trace evidence does not create writable ownership.
+
+14.11. Trace evidence does not repair missing or malformed ownership evidence.
+
 
 ===============================================================================
 15. ERROR CATEGORIES
@@ -570,12 +670,14 @@ Downstream Documents:
       - WorkspaceOwnerAlreadyExists
       - WorkspaceOwnerRecordMalformed
       - WorkspaceOwnerRecordMismatch
+      - WorkspaceOwnerClaimFailed
       - WorkspaceOwnerWriteFailed
       - WorkspaceOwnerVerifyFailed
       - WorkspaceOwnerReleaseFailed
       - WorkspaceOwnerRecoveryDenied
       - WorkspaceOwnerRecoveryFailed
       - WorkspaceOwnerLivenessUnknown
+      - WorkspaceOwnerIdentityInvariantViolation
 
 15.2. Error category names in this section define semantic categories, not
       final exception class names.
@@ -586,11 +688,14 @@ Downstream Documents:
 15.4. Error reporting preserves the distinction between:
       - already owned
       - malformed ownership evidence
+      - conflicting ownership evidence
       - stale ownership evidence
       - recovery denied
       - recovery attempted and failed
+      - claim failure
       - write failure
       - verification failure
+      - identity invariant violation
 
 15.5. Error reporting does not collapse these outcomes into a generic lock
       failure when the implementation can distinguish them.
@@ -601,22 +706,27 @@ Downstream Documents:
 ===============================================================================
 
 16.1. The following are not supported:
-      - silently creating a second writable RuntimeHost for the same workspace
+      - silently creating a second writable owner for the same Workspace
       - silently overwriting existing ownership evidence
       - silently treating malformed ownership evidence as absent
+      - silently treating malformed ownership evidence as stale
+      - silently normalizing malformed ownership evidence
       - silently treating stale heartbeat as takeover permission
+      - silently treating process absence as takeover permission
       - silently downgrading writable ownership request to read-only inspection
-      - using workspace ownership as committed-state mutation authority
-      - using workspace ownership as AppInstance writable SavePack ownership
-      - using workspace ownership as adapter SavePack write authority
+      - using Workspace ownership as committed-state mutation authority
+      - using Workspace ownership as SaveBundle writable ownership
+      - using Workspace ownership as ApplicationRun lifecycle authority
+      - using Workspace ownership as adapter SaveBundle or application-data
+        write authority
       - pack-provided code directly writing the ownership record
       - adapter-executed code directly writing the ownership record
       - deleting another RuntimeHost's ownership evidence without explicit
         stale-owner recovery or manual repair tooling
-      - treating ownership release as AppInstance stop success
+      - treating ownership release as ApplicationRun stop success
       - treating ownership release as Job terminal outcome
       - treating ownership acquisition as command completion by itself
-      - treating read-only inspection as workspace ownership
+      - treating read-only inspection as Workspace ownership
 
 
 ===============================================================================
@@ -625,9 +735,13 @@ Downstream Documents:
 
 17.1. OPEN questions include:
       - exact workspaceId representation
+      - exact runtimeId representation
       - exact runtimeHostId representation
-      - exact hostMachineId representation
+      - exact coordinatorProcessId representation
+      - exact coordinatorProcessStartIdentity representation
+      - exact machineId representation
       - exact userId representation
+      - exact ownerToken representation
       - exact accessMode representation
       - exact heartbeat interval
       - exact heartbeat stale threshold
@@ -644,28 +758,39 @@ Downstream Documents:
 ===============================================================================
 
 18.1. LOCKED:
-      - IS-03 implements DA-28 workspace ownership semantics.
-      - A writable workspace is owned by at most one RuntimeHost at a time
-        unless a later authoritative multi-host design defines another mode.
+      - IS-03 implements Workspace ownership evidence and host-lock behavior.
+      - A writable Workspace is owned by at most one runtime execution at a
+        time unless a later authoritative multi-host design defines another
+        mode.
+      - RuntimeHost mediates the Workspace-opening command surface without
+        becoming Kernel authority, Application identity, or SaveBundle
+        authority.
       - The initial ownership record path is
         .turnix/runtime-host/owner.json.
+      - The ownership record path is concrete implementation representation,
+        not architecture-level authority.
       - Existing ownership evidence is not silently overwritten.
-      - Malformed ownership evidence is not silently treated as absent.
+      - Ownership acquisition does not use unsafe check-then-overwrite
+        behavior.
+      - Malformed ownership evidence is not silently treated as absent, stale,
+        or normalized.
       - Stale ownership recovery is explicit, policy-governed, and
         trace-visible.
       - Read-only inspection is accessMode, not writable ownershipMode.
-      - Read-only inspection does not create writable workspace ownership.
+      - Read-only inspection does not create writable Workspace ownership.
       - Read-only inspection does not create or update the ownership record
         unless a later inspection-session record is explicitly defined.
       - Workspace ownership does not grant committed-state mutation authority.
-      - Workspace ownership does not grant AppInstance writable SavePack
-        ownership.
-      - Workspace ownership does not grant adapter SavePack write authority.
+      - Workspace ownership does not grant SaveBundle writable ownership.
+      - Workspace ownership does not grant ApplicationRun lifecycle authority.
+      - Workspace ownership does not grant Application committed-state
+        mutation authority.
+      - Workspace ownership does not grant adapter SaveBundle or
+        application-data write authority.
       - Ownership acquisition, release, stale-owner recovery, and second-owner
         rejection are trace-visible.
-      - DA-28 owns RuntimeHost workspace ownership semantics.
+      - DA-28 owns RuntimeHost Workspace ownership semantics.
       - DA-07 constrains persistence-safe ownership-record writes.
-      - DA-20 constrains AppInstance writable SavePack ownership.
       - DA-04 constrains committed-state mutation.
 
 18.2. OPEN:
@@ -681,6 +806,6 @@ END OF IS-03 - WORKSPACE OWNERSHIP AND HOST LOCKING
 --- doc-meta ---
 DOC_ID: IS-03
 DOC_FILE: docs/design/IS-03_WORKSPACE_OWNERSHIP_AND_HOST_LOCKING.txt
-DOC_REV: 1
-DOC_GIT: b7e42a9
+DOC_REV: 2
+DOC_GIT: e747e09
 ----------------
