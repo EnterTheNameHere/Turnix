@@ -8,38 +8,50 @@ EVOLVING
 
 Description:
 ------------
-Defines when pack code is permitted to execute under Turnix-recognized
-activation, under whose authority execution occurs, and which execution
-behaviors Turnix explicitly guarantees or does not guarantee.
+Defines the activation process, final Activated state, lifecycle phase
+barriers, executable Pack participation, and execution guarantees for
+Turnix-controlled Pack code.
 
-Activation is the sole mechanism that transitions a pack from inert metadata
-to an executable participant under Turnix control.
+Activation is the Turnix-controlled boundary that separates inert Pack
+metadata from recognized executable participation under Turnix orchestration.
 
 Purpose:
 --------
-This document defines the strict boundary between inert pack metadata and
+This document defines the strict boundary between inert Pack metadata,
+activation-process participation, final Activated state, and later
 Turnix-recognized execution.
 
 It defines:
-- lifecycle phase ordering and the activation boundary
-- the meaning of Activated state and ModCallContext gateway authority
-- pack-level activation semantics and the canonical entrypoint
-- relationship between activation and execution adapters
-- the separation between activation and later runtime execution
-- rules for immediate execution and import-time side effects
-- JavaScript runtime entry semantics relevant to activation
-- orchestrated execution pathways and guarantees
+- the activation process and final Activated state
+- activation entries and executable Pack material roles
+- Turnix-facing readiness before Pack code is loaded
+- Stage 0 entry evaluation
+- Phase 1, Phase 2, and Phase 3 lifecycle semantics
+- phase barriers and registration publication scopes
+- ordinary Pack activation completion
+- cyclic dependency group admission and activation
+- multiple adapter/runtime participation for one Pack
+- ModCallContext use during activation-related invocations
+- immediate execution and top-level side-effect boundaries
+- resolve/ensure activation interface boundaries
 - activation trace obligations
-- failure behavior, including NotActivatedError requirements
+- activation failure, cleanup limits, and NotActivatedError handling
 
 It does NOT define:
 - generic resolution mechanics (see DA-11)
 - dependency semantics and source selection (see DA-13)
 - importing and module-loading boundaries (see DA-12)
 - execution adapter boundary semantics (see DA-23)
-- tracing schema and storage (see DA-03)
+- adapter trust, lifecycle, or sandboxing semantics (see DA-27)
+- tracing schema, storage, or retention policy (see DA-03)
 - capability schemas and permission prompting details (see DA-16)
 - user decision and remembered policy handling (see DA-17)
+- Job lifecycle semantics (see DA-19)
+- OrchestrationUnit mutation authority (see DA-24)
+- RuntimeHost command-surface authority (see DA-28)
+- PackManager catalog and graph-preparation ownership (see DA-29)
+- detailed ModCallContext facade semantics (see DA-30)
+- concrete manifest schema or concrete public hook declaration syntax
 
 Upstream Documents:
 ------------------
@@ -49,11 +61,20 @@ Upstream Documents:
 - CMR-04
 - CMR-05
 - DA-01
+- DA-03
 - DA-11
 - DA-12
 - DA-13
 - DA-15
+- DA-16
+- DA-17
+- DA-19
 - DA-23
+- DA-24
+- DA-27
+- DA-28
+- DA-29
+- DA-30
 
 Downstream Documents:
 --------------------
@@ -84,23 +105,44 @@ Downstream Documents:
 
 02.1. Activation answers exactly one question:
 
-          "Has Turnix intentionally brought this pack into recognized
+          "Has Turnix intentionally brought this Pack into recognized
            executable participation under Turnix orchestration?"
 
-02.2. Activation is a controlled, explicit, one-time state transition.
+02.2. The activation process is the Turnix-controlled process of preparing
+      and attempting to bring a Pack or cyclic activation group into
+      recognized executable participation.
 
-02.3. Before activation:
-      - a pack exists only as metadata
-      - its code has no execution authority under Turnix
-      - adapter loading or native module evaluation does not make it active
+02.3. Final Activated state is the externally visible state reached only
+      after the required activation protocol succeeds.
 
-02.4. After activation:
-      - the pack may participate in runtime behavior
-      - execution is allowed only through Turnix-controlled orchestration
-        pathways
-      - ModCallContext provides invocation-scoped Pack-facing gateway authority
+02.4. Final activation boundary is the point where the Pack or admitted
+      cyclic activation group becomes externally Activated.
 
-02.5. Activation is not:
+02.5. Before the activation process:
+      - Pack metadata may exist
+      - Pack code has no Turnix-recognized executable participation
+      - native import or adapter loading does not make the Pack Activated
+
+02.6. During the activation process, Turnix may:
+      - load declared activation entries
+      - run Stage 0 entry evaluation
+      - invoke Phase 1, Phase 2, and Phase 3 callbacks
+      - accept provisional registrations
+      - prepare cyclic-group surfaces under phase and barrier rules
+
+02.7. After successful activation:
+      - the Pack or admitted cyclic activation group is externally Activated
+      - eligible public registrations are externally published
+      - later runtime execution may occur through Turnix orchestration
+
+02.8. If activation fails:
+      - the Pack is not Activated
+      - the cyclic group is not Activated when group activation fails
+      - provisional Turnix-owned registrations are withdrawn
+      - staged Turnix-owned mutation is aborted where applicable
+      - the failure is explicit and trace-visible
+
+02.9. Activation is not:
       - discovery
       - indexing
       - dependency resolution
@@ -110,558 +152,1138 @@ Downstream Documents:
       - adapter loading
       - visibility granting
       - capability permission
+      - RuntimeHost authority
+      - Job terminal outcome
+      - OrchestrationUnit terminal outcome
+      - Window finalization
+      - committed-state mutation
+      - trace substrate ownership
 
-02.6. Those earlier phases may occur before activation, but none of them
-      implies activation.
-
-02.7. DA-23 owns the execution adapter boundary in which adapter-mediated
-      activation occurs.
+02.10. Those other phases or domains may participate in activation causes,
+       inputs, or evidence, but none of them implies final Activated state.
 
 
 ===============================================================================
-03. LIFECYCLE PHASES (LOCKED)
+03. OUTER LIFECYCLE PHASES
 ===============================================================================
 
-03.1. Turnix operates in logically ordered, externally observable phases:
+03.1. Turnix operates with the following outer lifecycle ordering for
+      Pack executable participation:
 
       1) Discovery
       2) Indexing
       3) Resolution
       4) Execution adapter preparation where applicable
-      5) Activation
+      5) Activation process
       6) Running or Finalized
 
-03.2. Activation is the first moment Turnix may intentionally execute pack
-      code with ModCallContext gateway authority.
-
-03.3. Execution adapter preparation may include adapter selection,
+03.2. Execution adapter preparation may include adapter selection,
       execution authorization, adapter creation, adapter readiness, and
       artifact loading.
 
-03.4. Execution adapter preparation is not activation.
+03.3. Execution adapter preparation is not final Activated state.
 
-03.5. After activation, pack code may execute during Running only through
-      Turnix-orchestrated execution pathways defined by this document and
-      related higher documents.
+03.4. The activation process is the first Turnix-supported context in
+      which Turnix may intentionally invoke declared Pack activation-entry
+      code with ModCallContext gateway authority.
 
-03.6. Code that executes outside Turnix orchestration remains outside Turnix
-      guarantees.
+03.5. Phase 1 and Phase 2 callbacks are activation-process participation.
 
+03.6. Phase 1 and Phase 2 callbacks are not final Activated authority.
 
-===============================================================================
-04. WHAT ACTIVATED MEANS (LOCKED)
-===============================================================================
+03.7. Final Activated state is reached only after the required activation
+      protocol completes successfully.
 
-04.1. When a pack is activated:
-      - Turnix has admitted the pack into executable participation
-      - every required activation entry for that pack or activation group has
-        completed according to the applicable activation plan
-      - pack code has received only Turnix-created ModCallContext values for
-        the invocations that Turnix performed
-      - the pack may participate in Turnix-managed runtime behavior
+03.8. After activation, Pack code may execute during Running only through
+      Turnix-controlled orchestration pathways.
 
-04.2. When an activated pack participates through one or more adapter
-      runtimes, activation dispatch occurs through the appropriate execution
-      adapters under DA-23.
-
-04.3. Activated packs may, for example:
-      - register services
-      - register capabilities
-      - subscribe to Turnix events
-      - allocate runtime resources
-      - participate in Turnix-managed orchestration
-
-04.4. Before activation:
-      - pack metadata may be resolved
-      - the pack may appear in graphs
-      - adapter selection may have occurred
-      - artifact loading may have occurred
-      - early activation phases may have prepared provisional surfaces
-      - pack code must not execute with final Activated authority
-
-04.5. Final Activated authority is externally visible only after the pack or
-      admitted cyclic activation group crosses its activation boundary.
+03.9. Code that executes outside Turnix orchestration remains outside
+      Turnix guarantees.
 
 
 ===============================================================================
-05. PACK-LEVEL AND ACTIVATION-GROUP SEMANTICS (LOCKED)
+04. READINESS BEFORE ENTRY LOADING
 ===============================================================================
 
-05.1. Activation applies to a pack as an executable participant.
+04.1. Before Turnix asks an ExecutionAdapter to load a Pack activation
+      entry, the Turnix-facing infrastructure required by Pack code is
+      operational.
 
-05.2. Activation does not apply to:
-      - individual files
-      - individual modules
-      - individual imports
-      - individual capabilities
-      - individual adapter-loaded artifacts by themselves
+04.2. Turnix is ready to create and provide ModCallContext values.
 
-05.3. A pack may declare more than one adapter/runtime participation.
+04.3. Turnix is ready to receive valid capability registrations.
 
-05.4. Each declared adapter/runtime participation has at most one activation
+04.4. Turnix is ready to receive permitted service or handler
+      registrations.
+
+04.5. Turnix is ready to route supported RPC requests.
+
+04.6. Turnix is ready to accept supported capability invocations.
+
+04.7. Turnix is ready to apply capability permission and policy mediation.
+
+04.8. Turnix is ready to emit structured trace evidence.
+
+04.9. Turnix is ready to classify and return structured errors.
+
+04.10. Turnix is ready to associate registrations and calls with the
+       current activation attempt.
+
+04.11. Turnix is ready to withdraw provisional Turnix-owned registrations
+       when activation fails.
+
+04.12. Readiness means Turnix can receive Pack participation.
+
+04.13. Readiness does not mean every requested capability, service,
+       handler, event surface, or Pack-provided surface is already
+       available.
+
+04.14. Capability-system readiness means Turnix can accept mediated
+       registration and invocation requests.
+
+04.15. Capability availability means the requested capability has been
+       registered and is visible at the current lifecycle barrier.
+
+04.16. The same distinction applies to services, handlers, events, and
+       other Pack-provided surfaces.
+
+
+===============================================================================
+05. ACTIVATION ENTRY MODEL
+===============================================================================
+
+05.1. A Pack may participate through multiple ExecutionAdapters.
+
+05.2. Each declared adapter/runtime participation has at most one
+      activation entry.
+
+05.3. One activation entry coordinates that adapter/runtime participation.
+
+05.4. The activation entry may load private implementation modules owned
+      by the same Pack through mechanisms supported by its
+      ExecutionAdapter.
+
+05.5. Turnix does not automatically treat every code file as an activation
       entry.
 
-05.5. One activation entry coordinates that adapter/runtime participation.
+05.6. Turnix does not automatically call lifecycle hooks on every code
+      file found in a Pack directory.
 
-05.6. A pack with multiple adapter entries is activated only when the
-      activation plan has satisfied the required entries and barriers for
-      that pack.
+05.7. Turnix does not define a plural list of automatically loaded
+      non-activation entries merely to preload implementation files.
 
-05.7. A cyclic dependency component may be admitted as one cyclic activation
-      group only when the activation plan explicitly admits it.
+05.8. Executable Pack material has three distinct roles:
 
-05.8. A cyclic activation group is atomic at its external activation boundary.
+      Activation entry:
+      - loaded by Turnix through one ExecutionAdapter
+      - participates in Pack lifecycle hooks
 
-05.9. Failure of one required member of an admitted cyclic activation group
-      fails the group activation.
+      Private implementation module:
+      - loaded by Pack code as needed
+      - does not participate in lifecycle merely because it exists
+      - is not externally addressable through Turnix by default
 
-05.10. Adapter loading does not create partial activation.
+      Exported module surface:
+      - publicly addressable through a supported mediated module loader
+      - loaded on demand
+      - does not receive lifecycle hooks merely because it is exported
 
+05.9. Only activation entries participate in the activation lifecycle
+      protocol defined by this document.
 
-===============================================================================
-06. MODCALLCONTEXT (ctx) - EXECUTION GATEWAY (LOCKED)
-===============================================================================
+05.10. Concrete manifest fields that declare activation entries are owned
+       by manifest and Pack-definition documents.
 
-06.1. Turnix provides pack-facing invocation authority through
-      ModCallContext (ctx).
-
-06.2. ModCallContext is created only by Turnix.
-
-06.3. Each callback, activation entry, hook, event, timer, or capability
-      invocation receives a fresh ModCallContext when Pack code needs
-      platform access.
-
-06.4. ModCallContext is bound to the acting Pack and to the invocation scope.
-
-06.5. ModCallContext represents scoped gateway authority for that invocation.
-
-06.6. ModCallContext is not a raw backend service object exposed to Pack code.
-
-06.7. ModCallContext is not unrestricted access to Kernel internals.
-
-06.8. ModCallContext operations route through Kernel-owned boundaries.
-
-06.9. Code executing with a ModCallContext:
-      - executes under the authority of the acting Pack
-      - is subject to that Pack's visibility, permissions, and policy
-      - remains constrained by capability, transaction, persistence, trace,
-        adapter, lifecycle, cancellation, and deadline rules
-
-06.10. ModCallContext may be represented differently in different adapters.
-
-06.11. Representation difference does not change authority meaning.
-
-06.12. In-process ModCallContext calls do not bypass capability mediation,
-       policy, transaction, trace, persistence, or lifecycle rules.
-
-06.13. Pack code does not retain ModCallContext after the invocation
-       completes.
-
-06.14. Registration records retain owner, callback, metadata, and scope.
-       They do not retain the ModCallContext that created them.
+05.11. This document defines the lifecycle meaning of activation entries,
+       not their concrete declaration syntax.
 
 
 ===============================================================================
-07. ACTIVATION ENTRIES AND PHASES (LOCKED)
+06. ACTIVATION PROCESS OVERVIEW
 ===============================================================================
 
-07.1. The ordinary final activation entry is:
+06.1. The Pack code lifecycle has four observable activation moments:
+
+      Stage 0:
+      - entry evaluation by the ExecutionAdapter
+
+      Phase 1:
+      - entry-local early lifecycle hook
+
+      Phase 2:
+      - all Pack entries loaded lifecycle hook
+
+      Phase 3:
+      - canonical Pack activation through onLoad(ctx)
+
+06.2. Stage 0 is unavoidable host-runtime behavior.
+
+06.3. Phase 1, Phase 2, and Phase 3 are Turnix-supported lifecycle
+      phases.
+
+06.4. The current working hook name for Phase 1 is:
+      onEntryLoaded(ctx)
+
+06.5. The current working hook name for Phase 2 is:
+      onEntriesLoaded(ctx)
+
+06.6. The canonical Phase 3 activation hook is:
       onLoad(ctx)
 
-07.2. Turnix may also define earlier activation phases for adapter-local
-      initialization, cross-adapter coordination, and cyclic prerequisites.
+06.7. Phase meanings are more important than final public hook names.
 
-07.3. Earlier activation phases do not by themselves make the pack Activated.
+06.8. Most Pack creators need only Phase 3.
 
-07.4. Locked rules:
-      - activation entries are called only by Turnix
-      - ctx is always provided by Turnix
-      - final activation failure aborts activation of that pack
-      - cyclic-group failure aborts the group
+06.9. Phase 1 and Phase 2 exist for advanced cross-adapter
+      initialization, cyclic prerequisites, and cases that ordinary
+      acyclic onLoad(ctx) ordering cannot safely express.
 
-07.5. No function, construct, or mechanism activates a pack unless the
-      Turnix activation plan recognizes it as an activation entry.
+06.10. Earlier lifecycle phases do not by themselves make a Pack
+       externally Activated.
 
-07.6. Adapter implementations do not introduce alternate activation
-      semantics by themselves.
+06.11. No function, construct, or mechanism activates a Pack unless the
+       Turnix activation plan recognizes it as activation participation.
 
-07.7. Future activation entries, if introduced, follow the same rules and
-      are explicitly defined by Turnix.
+06.12. Adapter implementations do not introduce activation semantics by
+       themselves.
+
+06.13. Future lifecycle hook names or activation-entry declaration forms
+       preserve the same ModCallContext, phase/barrier, and publication
+       boundaries defined here.
 
 
 ===============================================================================
-08. ACTIVATION VS EXECUTION (CRITICAL DISTINCTION)
+07. PHASE BARRIERS AND PUBLICATION
 ===============================================================================
 
-08.1. Activation and execution are distinct concepts.
+07.1. Turnix guarantees phase barriers, not callback order.
 
-08.2. Activation:
-      - is a controlled state transition
-      - establishes Pack participation under Turnix orchestration
-      - uses ModCallContext for Pack-facing invocation authority
-      - may dispatch through one or more execution adapters
-      - may include admitted cyclic-group phases before final activation
+07.2. Callbacks in one phase may be invoked sequentially, concurrently, in
+      adapter-defined order, in scheduler-defined order, or in another
+      implementation order.
 
-08.3. Execution:
-      - occurs only after activation when Turnix-recognized
-      - may happen multiple times
-      - occurs through Turnix-controlled orchestration pathways
-      - may receive a fresh ModCallContext for each callback or invocation
+07.3. Callback order inside a phase is not part of the public guarantee
+      unless a separate contract explicitly defines that order.
 
-08.4. Pack code may be loaded or evaluated by an adapter before final
-      activation only when the activation plan permits that preparation.
+07.4. A callback may rely only on guarantees established by completed
+      earlier phase barriers.
 
-08.5. Adapter preparation without final activation does not make a Pack
+07.5. A callback does not rely on another callback in the same phase having
+      already run.
+
+07.6. A registration made during one phase becomes guaranteed available
+      only after the barrier for that phase has completed for the relevant
+      scope.
+
+07.7. Acceptance is not publication.
+
+07.8. Registrations associated with an activation attempt may be:
+      - accepted
+      - provisional
+      - visible inside one Pack
+      - visible inside one cyclic group
+      - externally published
+      - withdrawn
+
+07.9. Stage 0 and Phase 1 registrations become guaranteed only after the
+      relevant Phase 1 barrier.
+
+07.10. Phase 2 registrations become guaranteed only after the relevant
+       Phase 2 barrier.
+
+07.11. Phase 3 registrations become externally published only after
+       successful Pack activation or successful cyclic-group activation.
+
+07.12. After ordinary Pack activation, eligible public registrations become
+       available to later dependents and runtime participants.
+
+07.13. After cyclic-group activation, eligible public registrations of
+       every group member become available together.
+
+07.14. If activation fails, provisional Turnix-owned registrations are
+       withdrawn.
+
+07.15. If activation fails, external publication does not occur.
+
+07.16. If activation fails, later dependent activation does not begin.
+
+07.17. Registration visibility still obeys Pack visibility, capability
+       identity, service exposure rules, permission decisions, policy,
+       adapter support, and other applicable Turnix boundaries.
+
+07.18. Early publication does not bypass any of those boundaries.
+
+
+===============================================================================
+08. STAGE 0 ENTRY EVALUATION
+===============================================================================
+
+08.1. Stage 0 begins when the ExecutionAdapter loads or evaluates the
+      declared activation entry.
+
+08.2. Entry evaluation follows the runtime behavior defined by the
+      ExecutionAdapter and host language.
+
+08.3. Top-level or module-level side effects may occur during entry
+      evaluation.
+
+08.4. Turnix does not prohibit such host-runtime side effects.
+
+08.5. Turnix may be unable to prevent such host-runtime side effects.
+
+08.6. Turnix discourages relying on entry-evaluation side effects.
+
+08.7. Entry-evaluation side effects are not the safe ordinary activation
+      pattern.
+
+08.8. During entry evaluation, Turnix does not guarantee that:
+      - another adapter entry of the same Pack has loaded
+      - another Pack entry has loaded
+      - a dependency has completed Phase 1
+      - a dependency has completed Phase 2
+      - a dependency has activated
+      - another entry has registered a capability
+      - another Pack has registered a capability
+      - a particular adapter runs before another adapter
+      - a particular Pack is loaded before another Pack
+
+08.9. The supported Turnix-facing adapter bridge is operational during
+      entry evaluation.
+
+08.10. Module-level code may technically use supported Turnix-facing
+       surfaces during entry evaluation.
+
+08.11. The creator owns ordering and availability risks created by such
+       entry-evaluation use.
+
+08.12. Turnix does not guarantee that cross-adapter or cross-Pack calls
+       made during entry evaluation are valid.
+
+08.13. Turnix-owned registrations made during entry evaluation are
+       associated with the current activation attempt.
+
+08.14. Turnix-owned registrations made during entry evaluation remain
+       provisional until later publication.
+
+08.15. Turnix guarantees cleanup only for Turnix-owned and explicitly
+       controlled activation material.
+
+08.16. Turnix does not guarantee reversal of arbitrary side effects outside
+       Turnix-controlled boundaries.
+
+
+===============================================================================
+09. PHASE 1 ENTRY-LOCAL EARLY HOOK
+===============================================================================
+
+09.1. Phase 1 invokes the entry-local early lifecycle hook for each
+      declared activation entry that defines it.
+
+09.2. Turnix invokes Phase 1 for an activation entry only after:
+      - the ExecutionAdapter loaded or evaluated that entry successfully
+      - unavoidable module-level evaluation for that entry completed
+      - Turnix identified the entry's supported lifecycle hooks
+
+09.3. If an activation entry does not define the Phase 1 hook, its Phase 1
+      participation is a successful no-op.
+
+09.4. Phase 1 is the first supported early lifecycle phase.
+
+09.5. Phase 1 may be used for:
+      - minimal early capability registration
+      - minimal early service or handler registration where permitted
+      - adapter-local state initialization
+      - a surface needed by another adapter entry
+      - a surface needed to handle a declared Pack dependency cycle
+      - setup that does not depend on another entry being ready
+
+09.6. Phase 1 is not ordinary Pack activation.
+
+09.7. Phase 1 does not begin general application work.
+
+09.8. Phase 1 does not assume another adapter entry has loaded.
+
+09.9. Phase 1 does not assume another Pack's Phase 1 callback has run.
+
+09.10. Phase 1 does not assume a dependency has completed Phase 2.
+
+09.11. Phase 1 does not assume a dependency has activated.
+
+09.12. Phase 1 does not depend on callback ordering inside the phase.
+
+09.13. Phase 1 does not commit persistent state merely to establish
+       activation ordering.
+
+09.14. A Phase 1 callback may use Turnix-facing infrastructure.
+
+09.15. A Phase 1 callback may use already available external capabilities.
+
+09.16. A Phase 1 callback may use its own module-local state.
+
+09.17. A Phase 1 callback may use registrations made earlier only when
+       their availability is guaranteed by a completed barrier.
+
+09.18. For one ordinary Pack, the Pack Phase 1 barrier completes only
+       after every declared activation entry for that Pack has loaded and
+       every declared activation entry has completed Phase 1 or no-op
+       Phase 1 participation.
+
+09.19. For one cyclic dependency group, the group Phase 1 barrier
+       completes only after every declared activation entry of every Pack
+       in the group has loaded and completed Phase 1 or no-op Phase 1
+       participation.
+
+09.20. A completed Phase 1 barrier does not mean the Pack is Activated.
+
+09.21. A completed Phase 1 barrier does not mean the cyclic group is
+       Activated.
+
+09.22. A completed Phase 1 barrier does not mean Phase 2 or Phase 3
+       registrations are available.
+
+09.23. A completed Phase 1 barrier does not make external dependent Packs
+       eligible to use the Pack.
+
+
+===============================================================================
+10. PHASE 2 ALL ENTRIES LOADED HOOK
+===============================================================================
+
+10.1. Phase 2 invokes the all-entries-loaded lifecycle hook for each
+      activation entry that defines it.
+
+10.2. If an activation entry does not define the Phase 2 hook, its Phase 2
+      participation is a successful no-op.
+
+10.3. For an ordinary non-cyclic Pack, Turnix invokes Phase 2 only after:
+      - the Pack Phase 1 barrier completed
+      - every hard dependency required by the activation plan completed its
+        Phase 2 barrier
+
+10.4. For a cyclic dependency group, Turnix invokes Phase 2 only after:
+      - the group Phase 1 barrier completed
+      - every hard dependency outside the cyclic group completed its Phase 2
+        barrier
+
+10.5. Phase 2 may be used for:
+      - cross-adapter coordination
+      - use of Phase 1 registrations
+      - registration of surfaces required during onLoad(ctx)
+      - completion of cyclic prerequisites
+      - validation that required early registrations exist
+
+10.6. Phase 2 callbacks may rely on completed Phase 1 barriers within the
+      applicable Pack or cyclic-group scope.
+
+10.7. Phase 2 callbacks may not rely on another Phase 2 callback in the
+      same scope having already run.
+
+10.8. For one ordinary Pack, the Pack Phase 2 barrier completes only after
+      every Phase 2 callback completed successfully or no-op Phase 2
+      participation completed successfully.
+
+10.9. For one cyclic dependency group, the group Phase 2 barrier completes
+      only after every Phase 2 callback of every Pack in the group
+      completed successfully or no-op Phase 2 participation completed
+      successfully.
+
+10.10. After the relevant Phase 2 barrier, accepted Phase 2 registrations
+       become available within the scope allowed by the activation plan.
+
+10.11. A completed Phase 2 barrier does not mean the Pack is Activated.
+
+10.12. A completed Phase 2 barrier does not mean the cyclic group is
+       Activated.
+
+10.13. A completed Phase 2 barrier does not mean Phase 3 callbacks have
+       run.
+
+10.14. A completed Phase 2 barrier does not externally publish Phase 3
+       registrations.
+
+
+===============================================================================
+11. PHASE 3 CANONICAL ONLOAD ACTIVATION
+===============================================================================
+
+11.1. Phase 3 is the normal Pack activation phase.
+
+11.2. The canonical Phase 3 activation hook is onLoad(ctx).
+
+11.3. Most Pack creators use only onLoad(ctx).
+
+11.4. Phase 3 may be used for:
+      - the Pack's ordinary capability registrations
+      - ordinary actions and handlers
+      - dependency-provided public surfaces
+      - normal activation setup
+      - ordinary runtime contributions
+      - preparing the Pack for ordinary participation
+
+11.5. For an ordinary acyclic Pack, Turnix invokes Phase 3 only after:
+      - all entries of this Pack loaded
+      - this Pack completed Phase 1
+      - this Pack completed Phase 2
+      - every declared hard dependency activated successfully
+
+11.6. Ordinary acyclic onLoad(ctx) may assume every hard dependency is
       Activated.
 
-08.6. No execution mechanism substitutes for a Turnix-recognized activation
-      entry.
+11.7. Ordinary acyclic onLoad(ctx) may use dependency public surfaces
+      published by successful dependency activation according to normal
+      visibility, capability, service, permission, and policy rules.
 
-08.7. Adapter execution without ModCallContext authority is not
-      Turnix-recognized Pack execution.
+11.8. Ordinary acyclic onLoad(ctx) may assume every adapter entry of this
+      Pack exists.
 
+11.9. Ordinary acyclic onLoad(ctx) may assume every Phase 1 and Phase 2
+      callback of this Pack completed.
 
-===============================================================================
-09. IMMEDIATE EXECUTION AND LANGUAGE CONSTRUCTS (LOCKED)
-===============================================================================
+11.10. Ordinary acyclic onLoad(ctx) may use Phase 1 and Phase 2
+       registrations that are available in the allowed scope.
 
-09.1. Some languages permit immediate execution constructs, including:
-      - Immediately Invoked Function Expressions (IIFE)
-      - module-level executable statements
-      - top-level side effects
+11.11. No ordering is guaranteed among multiple onLoad(ctx) callbacks that
+       belong to different adapter entries of the same Pack.
 
-09.2. Turnix does not rely on, endorse, or coordinate immediate execution.
+11.12. If one adapter entry needs a same-Pack surface during onLoad(ctx),
+       that surface is established in Phase 1 or Phase 2.
 
-09.3. Immediate execution is discouraged in pack code.
+11.13. Phase 3 does not create same-phase ordering dependencies between
+       adapter entries.
 
-09.4. Immediate execution does not activate a pack.
+11.14. If an activation entry does not define onLoad(ctx), its Phase 3
+       participation is a successful no-op unless a Pack-kind or adapter
+       contract requires the hook.
 
-09.5. Immediate execution runs outside Turnix orchestration.
-
-09.6. Code that executes immediately on import:
-      - runs without ModCallContext gateway authority
-      - is not tracked by Turnix
-      - is outside lifecycle guarantees
-      - is not recoverable or abortable by Turnix guarantees
-
-09.7. Such execution may technically occur, but its behavior is unsupported.
-
-09.8. All consequences of such execution are the responsibility of the pack
-      author.
-
-09.9. These rules apply uniformly to:
-      - Python
-      - JavaScript
-      - future supported languages
-
-09.10. Same-language execution does not make immediate execution supported.
-
-09.11. Adapter loading does not make immediate execution supported.
+11.15. Public Phase 3 registrations become externally available only after
+       the Pack or cyclic group successfully crosses the final activation
+       boundary.
 
 
 ===============================================================================
-10. RUNTIME ENTRIES - JAVASCRIPT SEMANTICS (LOCKED)
+12. ORDINARY PACK ACTIVATION COMPLETION
 ===============================================================================
 
-10.1. Relevant manifest fields include:
-      - runtimes.javascript.entry
-      - runtimes.javascript.entries
+12.1. An ordinary non-cyclic Pack becomes Activated only after:
+      - every declared activation entry loaded successfully
+      - every Phase 1 callback completed successfully or no-op Phase 1
+        participation completed successfully
+      - every Phase 2 callback completed successfully or no-op Phase 2
+        participation completed successfully
+      - every Phase 3 callback completed successfully or allowed no-op
+        Phase 3 participation completed successfully
+      - activation validation completed successfully
+      - no required registration or dependency check failed
 
-10.2. runtimes.javascript.entry:
-      - is imported by Turnix during activation
-      - provides the module from which onLoad(ctx) is invoked
-      - may be loaded through the browser JavaScript adapter
-      - successful completion marks JavaScript activation success
+12.2. Ordinary Pack activation is atomic at the Pack boundary.
 
-10.3. runtimes.javascript.entries:
-      - are never imported automatically by Turnix as activation entries
-      - never receive ctx automatically
-      - never have onLoad(ctx) invoked
-      - are treated strictly as library modules
+12.3. A Pack is not partially Activated.
 
-10.4. DA-23 owns the general adapter boundary that applies to JavaScript
-      runtime entries.
+12.4. A Pack with one successful adapter entry and one failed required
+      adapter entry is not mostly activated.
 
+12.5. No public Phase 3 registration becomes externally available merely
+      because one entry completed early.
 
-===============================================================================
-11. ENTRY VS ENTRIES - EXECUTION RULES (LOCKED)
-===============================================================================
+12.6. After successful ordinary Pack activation, the Pack's eligible public
+      registrations become available according to visibility, capability,
+      service, permission, and policy rules.
 
-11.1. If runtimes.javascript.entry exists:
-      - it must execute before pack code relies on activation state
-      - entries must not assume activation unless caller logic enforces that
+12.7. After successful ordinary Pack activation, dependent Packs may begin
+      Phase 3 according to the accepted activation plan.
 
-11.2. If runtimes.javascript.entry does not exist:
-      - no JavaScript code is executed during activation
-      - the pack may still activate based on non-JavaScript activation rules
-
-11.3. If only runtimes.javascript.entries exist:
-      - the pack is treated as a library-only pack
-      - all such modules remain activation-independent
-
-11.4. Library-only module loading remains distinct from activation.
+12.8. After successful ordinary Pack activation, the Pack may participate
+      in ordinary runtime work.
 
 
 ===============================================================================
-12. ACTIVATION-INDEPENDENT CODE (LOCKED)
+13. CYCLIC DEPENDENCY ACTIVATION
 ===============================================================================
 
-12.1. Activation-independent code:
-      - must not assume its own pack is activated
-      - must not implicitly depend on ctx
-      - must not perform Turnix side effects at module top level
+13.1. A strongly connected component is a set of Packs where every Pack is
+      reachable from every other Pack through hard dependency edges.
 
-12.2. Such code may:
-      - accept a ModCallContext explicitly as a parameter
-      - execute under the authority of the caller pack that provides that ctx
+13.2. A non-cyclic Pack is treated as a one-Pack activation component.
 
-12.3. In that case:
-      - the caller pack owns responsibility
-      - the authority is that of the caller, not the provider
+13.3. A cyclic component is treated as one cyclic activation group.
 
-12.4. If code requires activation-specific state of its own pack, that code
-      is initialized from that pack's activation entry.
+13.4. The component graph formed by collapsing strongly connected
+      components is acyclic.
 
-12.5. Passing ModCallContext into activation-independent code does not change
-      the provider pack's activation state.
+13.5. The component graph defines the outer activation order.
+
+13.6. Canonical Phase 3 ordering alone cannot satisfy a dependency cycle.
+
+13.7. Turnix does not pretend that a dependency cycle has a total onLoad
+      order that satisfies every member.
+
+13.8. A cyclic dependency group is admitted only when at least one
+      activation entry in the group defines a supported Phase 1 or Phase 2
+      hook.
+
+13.9. The presence of at least one early hook means one or more cycle
+      participants intentionally opted into the early activation protocol.
+
+13.10. The presence of an early hook does not prove the cycle is logically
+       correct.
+
+13.11. The presence of an early hook does not prove every required early
+       surface is registered.
+
+13.12. The presence of an early hook does not prove the selected early
+       phase is sufficient.
+
+13.13. If no Pack in the cycle provides Phase 1 or Phase 2 handling,
+       Turnix rejects the cycle.
+
+13.14. UnsupportedActivationCycle identifies a cyclic dependency group that
+       cannot be satisfied through ordinary onLoad(ctx) ordering and has no
+       supported early lifecycle handler.
+
+13.15. For a cyclic activation group, Turnix may load entries in any order
+       allowed by adapter availability and implementation scheduling.
+
+13.16. No dependency order is guaranteed inside the cycle before the group
+       crosses its final activation boundary.
+
+13.17. The group Phase 1 barrier completes only after every group entry
+       loaded successfully and completed Phase 1 or no-op Phase 1
+       participation.
+
+13.18. The group Phase 2 barrier completes only after every group Phase 2
+       callback completed successfully or no-op Phase 2 participation
+       completed successfully.
+
+13.19. Cyclic Phase 3 begins only after:
+       - every external hard dependency is Activated
+       - every group activation entry loaded
+       - every group Phase 1 callback completed
+       - every group Phase 2 callback completed
+       - all eligible Phase 1 and Phase 2 registrations inside the group
+         are available within permitted scope
+
+13.20. During cyclic Phase 3, no intra-cycle onLoad(ctx) order is
+       guaranteed.
+
+13.21. During cyclic Phase 3, no group member may assume another group
+       member is already Activated.
+
+13.22. Every intra-cycle capability, service, handler, or other surface
+       required during onLoad(ctx) must have been established in Phase 1 or
+       Phase 2.
+
+13.23. If cyclic onLoad(ctx) requests an intra-cycle required surface that
+       is not available, Turnix fails immediately.
+
+13.24. Turnix does not wait for another onLoad(ctx) callback to register a
+       missing cyclic surface.
+
+13.25. Turnix does not suspend the request indefinitely.
+
+13.26. Turnix does not retry the same phase in another order.
+
+13.27. CyclicDependencySurfaceNotReady identifies a cyclic Phase 3 request
+       for an intra-cycle surface that was not established in an earlier
+       phase.
+
+13.28. After every group onLoad(ctx) callback succeeds, every Pack in the
+       group becomes Activated together.
+
+13.29. The cyclic group is atomic at its external activation boundary.
+
+13.30. External dependent Packs do not begin Phase 3 until the entire
+       cyclic group has activated successfully.
+
+13.31. One member failure fails the entire cyclic activation group.
+
+13.32. Cycles weaken availability assumptions only inside the cyclic group.
+
+13.33. Cycles do not weaken the component graph outside the cyclic group.
 
 
 ===============================================================================
-13. ACTIVATION ORDER (LOCKED RESPONSIBILITY)
+14. MULTIPLE ADAPTERS IN ONE PACK
 ===============================================================================
 
-13.1. Activation order is determined exclusively by:
-      - PackManager
-      - resolved dependencies
-      - visibility constraints
-      - user policy
-      - future category-based ordering if later accepted
+14.1. A Pack may declare multiple activation entries, one per
+      adapter/runtime participation.
 
-13.2. Packs must not assume:
-      - another pack is activated unless explicitly required
-      - services exist unless explicitly requested
-      - capabilities are available unless explicitly granted
+14.2. Turnix does not define a universal adapter order.
 
-13.3. Adapter readiness does not define activation order.
+14.3. Turnix may load adapter entries in any order allowed by adapter
+      availability and implementation scheduling.
 
-13.4. Adapter loading does not define activation order.
+14.4. Phase 1 is entry-local.
 
+14.5. Phase 2 guarantees that all Pack entries completed Phase 1.
 
-===============================================================================
-14. RESOLVEPACK VS ENSUREACTIVATED (LOCKED)
-===============================================================================
+14.6. Phase 3 guarantees that all Pack entries completed Phase 2.
 
-14.1. resolvePack(selector):
-      - resolves metadata
-      - performs visibility checks
-      - does not select an adapter for execution
-      - does not authorize execution
-      - does not load code
-      - does not activate packs
+14.7. One adapter's Phase 2 callback may use another adapter entry's
+      Phase 1 registration only after that registration is available under
+      the completed Phase 1 barrier.
 
-14.2. ensureActivated(selector):
-      - ensures the target pack is activated
-      - may trigger activation
-      - returns activation metadata only
-      - activation metadata is immutable and diagnostic
-      - does not return code or symbols
-      - may raise NotActivatedError
+14.8. One adapter's onLoad(ctx) callback may use another adapter entry's
+      Phase 1 or Phase 2 registration only after that registration is
+      available under the completed earlier barrier.
 
-14.3. ensureActivated may cause adapter-mediated activation when the target
-      pack's executable artifact belongs to an adapter runtime.
+14.9. One adapter's onLoad(ctx) callback may not assume another adapter's
+      onLoad(ctx) callback already ran.
 
-14.4. ensureActivated does not expose adapter internals.
+14.10. Ordinary outward-facing functionality is normally registered during
+       onLoad(ctx).
+
+14.11. Cross-adapter prerequisites required during onLoad(ctx) are
+       registered earlier in Phase 1 or Phase 2.
+
+14.12. Early phases are exceptional tools for cross-adapter and cyclic
+       activation needs.
+
+14.13. Early phases are not mandatory ceremony for ordinary Packs.
 
 
 ===============================================================================
-15. ORCHESTRATED EXECUTION GUARANTEE (LOCKED)
+15. MODCALLCONTEXT (ctx) GATEWAY
 ===============================================================================
 
-15.1. Turnix guarantees behavior only for execution that is invoked and
-      tracked through Turnix orchestration.
+15.1. Turnix provides Pack-facing invocation authority through
+      ModCallContext (ctx).
 
-15.2. Guaranteed execution pathways include:
-      - activation entrypoints such as onLoad(ctx)
+15.2. ModCallContext is created only by Turnix.
+
+15.3. Every Turnix invocation of Pack code receives a fresh ModCallContext
+      when the invoked Pack code needs platform access.
+
+15.4. ModCallContext is bound to the acting Pack and invocation scope.
+
+15.5. ModCallContext may also be bound to Application, ApplicationRun,
+      cause/correlation, current OrchestrationUnit, current transaction,
+      current Job, current ProcessingRun, current lifecycle phase,
+      cancellation, deadline, and stage-specific granted operations where
+      those bindings exist.
+
+15.6. ModCallContext represents scoped gateway authority for that
+      invocation.
+
+15.7. ModCallContext is not a raw backend service object exposed to Pack
+      code.
+
+15.8. ModCallContext is not unrestricted access to Kernel internals.
+
+15.9. ModCallContext operations route through Kernel-owned boundaries.
+
+15.10. Code executing with a ModCallContext executes under the authority of
+       the acting Pack.
+
+15.11. Code executing with a ModCallContext is subject to the acting Pack's
+       visibility, permissions, and policy.
+
+15.12. Code executing with a ModCallContext remains constrained by
+       capability, transaction, persistence, trace, adapter, lifecycle,
+       cancellation, and deadline rules.
+
+15.13. ModCallContext may be represented differently in different adapters.
+
+15.14. Representation difference does not change authority meaning.
+
+15.15. In-process ModCallContext calls do not bypass capability mediation,
+       policy, transaction, trace, persistence, or lifecycle rules.
+
+15.16. Pack code does not retain ModCallContext after the invocation
+       completes.
+
+15.17. Registrations retain owner, callback endpoint, registration
+       metadata, and registration scope.
+
+15.18. Registrations do not retain the ModCallContext that created them.
+
+15.19. Later callbacks always receive a fresh ModCallContext when Pack code
+       needs platform access.
+
+15.20. Detailed ModCallContext facade semantics are owned by DA-30.
+
+
+===============================================================================
+16. ACTIVATION-INDEPENDENT CODE AND MODULE SURFACES
+===============================================================================
+
+16.1. Activation-independent code does not assume its own Pack is
+      Activated.
+
+16.2. Activation-independent code does not implicitly depend on ctx.
+
+16.3. Activation-independent code does not perform Turnix side effects at
+      module top level.
+
+16.4. Activation-independent code may accept a ModCallContext explicitly as
+      a parameter.
+
+16.5. Code using a caller-provided ModCallContext executes under the
+      authority of the caller Pack.
+
+16.6. The authority is that of the caller, not the provider.
+
+16.7. Passing ModCallContext into activation-independent code does not
+      change the provider Pack's activation state.
+
+16.8. If code requires activation-specific state of its own Pack, that code
+      is initialized from that Pack's activation entry.
+
+16.9. Private implementation modules do not participate in lifecycle merely
+      because Pack code loads them.
+
+16.10. Exported module surfaces do not participate in lifecycle merely
+       because they are exported.
+
+16.11. The activation protocol guarantees that declared activation entries
+       are loaded.
+
+16.12. The activation protocol does not guarantee that every private or
+       exported code file in the Pack has been evaluated.
+
+16.13. Pack dependency cycles and native language module-import cycles are
+       different problems.
+
+16.14. The early activation protocol resolves Pack lifecycle availability.
+
+16.15. The early activation protocol does not repair arbitrary
+       host-language import recursion.
+
+16.16. Cross-Pack code access remains mediated through supported Turnix
+       mechanisms.
+
+
+===============================================================================
+17. RESOLUTION AND ACTIVATION INTERFACE BOUNDARY
+===============================================================================
+
+17.1. A resolution operation may resolve metadata.
+
+17.2. A resolution operation may perform visibility checks.
+
+17.3. A resolution operation does not select an adapter for execution by
+      itself.
+
+17.4. A resolution operation does not authorize execution by itself.
+
+17.5. A resolution operation does not load code by itself.
+
+17.6. A resolution operation does not activate Packs by itself.
+
+17.7. An ensure-activation operation ensures that the target Pack is
+      Activated or fails explicitly.
+
+17.8. An ensure-activation operation may trigger activation.
+
+17.9. An ensure-activation operation may cause adapter-mediated activation
+      when the target Pack participates through an ExecutionAdapter.
+
+17.10. An ensure-activation operation returns activation metadata,
+       diagnostics, status, or warnings.
+
+17.11. Activation metadata is immutable and diagnostic.
+
+17.12. An ensure-activation operation does not return executable code.
+
+17.13. An ensure-activation operation does not return module namespaces.
+
+17.14. An ensure-activation operation does not return runtime symbols.
+
+17.15. An ensure-activation operation does not expose adapter internals.
+
+17.16. An ensure-activation operation may raise NotActivatedError.
+
+17.17. Concrete public API names for resolution and ensure-activation
+       operations are owned by API-specific documents or implementation
+       specifications.
+
+
+===============================================================================
+18. ORCHESTRATED EXECUTION GUARANTEE
+===============================================================================
+
+18.1. Turnix guarantees behavior only for execution invoked and tracked
+      through Turnix orchestration.
+
+18.2. Guaranteed execution pathways include:
+      - activation lifecycle callbacks invoked by Turnix
       - capability calls dispatched by Turnix
       - Turnix event dispatch for handlers registered through Turnix
-      - Turnix-managed schedulers if such schedulers are later accepted
-      - IoManager-mediated operations, including streaming reads and writes
+      - Turnix-managed timers and schedulers where accepted
+      - IoManager-mediated operations
+      - other explicitly defined Turnix-controlled pathways
 
-15.3. Execution started outside Turnix orchestration is unsupported.
+18.3. Execution started outside Turnix orchestration is unsupported.
 
-15.4. Unsupported execution may still run, but Turnix provides:
-      - no guarantees
-      - no tracing guarantees
-      - no lifecycle control
-      - no cleanup guarantees
+18.4. Unsupported execution may still run, but Turnix provides:
+      - no activation guarantee
+      - no tracing guarantee
+      - no lifecycle control guarantee
+      - no cleanup guarantee
 
-15.5. Adapter-mediated execution has Turnix guarantees only when it is
-      invoked and tracked through Turnix orchestration.
+18.5. Adapter-mediated execution has Turnix guarantees only when Turnix
+      invokes and tracks it through Turnix orchestration.
 
-15.6. In-process execution has no extra guarantees merely because it runs in
-      the same process as the backend implementation.
+18.6. In-process execution has no extra guarantees merely because it runs
+      in the same process as trusted backend implementation code.
 
+18.7. Same host language does not grant backend implementation authority.
 
-15.1 ACTIVATION TRACE OBLIGATIONS
----------------------------------
-
-15.1.1. Activation lifecycle outcomes remain trace-visible.
-
-15.1.2. Activation trace evidence distinguishes:
-        - activation start
-        - dependency activation ordering
-        - adapter-mediated activation dispatch when applicable
-        - activation entrypoint invocation
-        - service registration during activation
-        - capability registration during activation
-        - activation success
-        - activation failure
-
-15.1.3. Activation trace evidence records enough context to explain:
-        - which pack instance was activated
-        - which activation entrypoint was invoked
-        - which adapter kind or adapter instance was involved when
-          applicable
-        - which dependency or ordering condition caused activation to wait,
-          proceed, or fail
-        - which service or capability registration occurred during activation
-        - which failure caused activation to abort when activation fails
-
-15.1.4. Activation trace evidence defines runtime causality and activation
-        scope boundaries.
-
-15.1.5. Activation trace evidence does not redefine import, dependency
-        resolution, adapter lifecycle, capability permission, or Job
-        lifecycle semantics.
-
-15.1.6. DA-03 defines the tracing substrate used to represent activation
-        trace evidence.
-
-15.1.7. DA-14 owns the activation-domain trace reason identifiers used for
-        activation start, dependency activation ordering, activation
-        entrypoint invocation, activation-time service registration,
-        activation-time capability registration, activation success,
-        activation failure, and not-activated access failure.
-
-15.1.8. The following activation-domain trace reasons are defined:
-
-        - ActivationStarted
-        - ActivationOrderingEvaluated
-        - ActivationEntrypointInvoked
-        - ActivationServiceRegistered
-        - ActivationCapabilityRegistered
-        - ActivationSucceeded
-        - ActivationFailed
-        - NotActivated
-
-15.1.9. ActivationStarted is emitted when activation begins for a pack
-        instance.
-
-15.1.10. ActivationOrderingEvaluated is emitted when a dependency or
-         ordering condition causes activation to wait, proceed, or fail.
-
-15.1.11. ActivationEntrypointInvoked is emitted when Turnix invokes the
-         activation entrypoint for a pack instance.
-
-15.1.12. ActivationServiceRegistered is emitted when a service registration
-         occurs during activation.
-
-15.1.13. ActivationCapabilityRegistered is emitted when a capability
-         registration occurs during activation.
-
-15.1.14. ActivationSucceeded is emitted when activation succeeds for a pack
-         instance.
-
-15.1.15. ActivationFailed is emitted when activation fails for a pack
-         instance.
-
-15.1.16. NotActivated is emitted when a Turnix-mediated action is refused
-         because the target pack is not activated.
-
-15.1.17. DA-23 owns adapter-domain trace evidence that may causally relate
-         to activation dispatch.
+18.8. Physical possibility does not create a supported Turnix contract.
 
 
 ===============================================================================
-16. ACTIVATION FAILURE AND NOTACTIVATEDERROR (LOCKED)
+19. ACTIVATION TRACE OBLIGATIONS
 ===============================================================================
 
-16.1. Activation failure indicates a system-level error such as:
-      - unresolved dependency
-      - policy violation
-      - visibility violation
-      - execution authorization failure
-      - adapter loading failure
-      - activation entry failure
+19.1. Activation lifecycle outcomes remain trace-visible.
 
-16.2. Locked consequences:
-      - activation failure leaves the pack inactive
-      - dependent activations do not proceed
-      - failure is surfaced to the user
-      - silent fallback is forbidden
+19.2. Activation trace evidence records enough context to explain:
+      - which Pack identity participated
+      - which activation attempt was involved
+      - which activation entry was involved
+      - which adapter identity was involved when applicable
+      - which dependency component was involved
+      - which cyclic group was involved when applicable
+      - which lifecycle phase was active
+      - which callback was invoked
+      - which registration was accepted, published, or withdrawn
+      - which dependency or ordering condition caused waiting or failure
+      - which failure caused activation to abort
+      - which cleanup result occurred when cleanup was attempted
 
-16.3. NotActivatedError must not be swallowed by pack code.
+19.3. Activation-domain evidence categories include:
+      - activation plan accepted
+      - dependency component identified
+      - cyclic group detected
+      - cyclic group admitted
+      - cyclic group rejected
+      - activation entry load requested
+      - activation entry loaded
+      - activation entry load failed
+      - Phase 1 callback started, completed, or failed
+      - Phase 1 barrier completed
+      - Phase 2 callback started, completed, or failed
+      - Phase 2 barrier completed
+      - Phase 3 callback started, completed, or failed
+      - registration accepted
+      - registration published to Pack scope
+      - registration published to cyclic-group scope
+      - registration published externally
+      - registration withdrawn
+      - cyclic dependency surface unavailable
+      - Pack activation completed
+      - Pack activation failed
+      - cyclic-group activation completed
+      - cyclic-group activation failed
+      - cleanup requested, completed, or failed
+      - not-activated access failure
 
-16.4. Swallowing NotActivatedError hides orchestration failure.
+19.4. Exact trace reason identifier names remain implementation-facing until
+      the tracing documents or implementation specifications lock them.
 
-16.5. Activation failure is not a Job terminal outcome merely because the
-      activation path used adapter-executed code.
+19.5. DA-14 owns activation-domain trace reason meaning.
+
+19.6. DA-03 owns the tracing substrate used to represent activation trace
+      evidence.
+
+19.7. DA-23 and DA-27 own adapter-domain trace evidence that may causally
+      relate to activation dispatch or adapter behavior.
+
+19.8. Activation trace evidence defines runtime causality and activation
+      scope boundaries.
+
+19.9. Activation trace evidence does not redefine import, dependency
+      resolution, adapter lifecycle, capability permission, Job lifecycle,
+      OrchestrationUnit lifecycle, Window finalization, committed-state
+      authority, or trace substrate semantics.
+
+19.10. Trace evidence describes what Turnix observed.
+
+19.11. Trace evidence does not make external side effects reversible.
+
+19.12. Trace evidence does not make retained evidence authoritative
+       committed state.
+
+19.13. Trace persistence and retention remain separate from activation
+       semantics.
 
 
 ===============================================================================
-17. ACTIVATION RESULT (LOCKED)
+20. ACTIVATION FAILURE AND CLEANUP LIMITS
 ===============================================================================
 
-17.1. ensureActivated may return:
-      - activation status
-      - warnings
-      - diagnostics
+20.1. The following failures fail an ordinary Pack activation:
+      - activation entry load or evaluation failure
+      - unsupported entry format
+      - missing required adapter
+      - Phase 1 hook failure
+      - Phase 2 hook failure
+      - Phase 3 hook failure
+      - required early registration missing
+      - dependency activation failure
+      - capability, service, or handler registration rejection
+      - permission or policy denial where activation requires acceptance
+      - activation validation failure
 
-17.2. ensureActivated does not return:
-      - executable code
-      - module namespaces
-      - runtime symbols
-      - adapter internals
+20.2. The following failures fail an entire cyclic activation group:
+      - any member entry load or evaluation failure
+      - any member Phase 1 failure
+      - any member Phase 2 failure
+      - any member Phase 3 failure
+      - missing required early cyclic surface
+      - unsupported cycle with no early handler
+      - external dependency activation failure
+      - cyclic-group validation failure
+
+20.3. On activation failure, Turnix marks no failed Pack as Activated.
+
+20.4. On cyclic-group activation failure, Turnix marks no cyclic-group
+      member as Activated.
+
+20.5. On activation failure, Turnix withdraws provisional Turnix-owned
+      registrations.
+
+20.6. On activation failure, Turnix aborts staged Turnix-owned state
+      mutation where applicable.
+
+20.7. On activation failure, Turnix prevents external dependents from
+      activating.
+
+20.8. On activation failure, Turnix classifies the failure.
+
+20.9. On activation failure, Turnix emits trace evidence.
+
+20.10. On activation failure, Turnix invokes supported cleanup or
+       deactivation paths where available.
+
+20.11. Turnix cannot guarantee reversal of arbitrary effects performed
+       outside Turnix-controlled boundaries.
+
+20.12. Effects outside Turnix-controlled boundaries include:
+       - arbitrary network requests
+       - writes outside Turnix persistence authority
+       - external process side effects
+       - host-language module-level side effects
+       - direct unsupported backend access
+
+20.13. Creators who perform irreversible effects before successful
+       activation own those effects.
+
+20.14. Turnix guarantees cleanup only for Turnix-owned and explicitly
+       controlled activation material.
+
+20.15. Silent fallback is forbidden.
+
+20.16. Activation failure is not a Job terminal outcome merely because the
+       activation path used adapter-executed code.
+
+20.17. Activation failure is not an OrchestrationUnit terminal outcome
+       merely because the activation path used orchestrated work.
+
+20.18. NotActivatedError identifies a Turnix-mediated action refused
+       because the target Pack is not Activated.
+
+20.19. Pack code does not swallow NotActivatedError.
+
+20.20. Swallowing NotActivatedError hides orchestration failure.
 
 
 ===============================================================================
-18. EXPLICITLY OPEN QUESTIONS
+21. ASYNC HOOK COMPLETION
 ===============================================================================
 
-18.1. OPEN questions include:
-      - category-based activation ordering
-      - staged or phased activation
-      - activation retry semantics
-      - exact adapter-mediated activation diagnostics
+21.1. A lifecycle hook completes only when its returned synchronous or
+      asynchronous result completes according to the adapter contract.
+
+21.2. Required setup is awaited by the hook.
+
+21.3. Starting detached background work and returning does not extend the
+      phase barrier.
+
+21.4. Detached work started outside Turnix orchestration does not receive
+      Turnix lifecycle guarantees by implication.
+
+21.5. A Pack does not publish a capability at a barrier while its
+      implementation is still being prepared by untracked detached work.
+
+21.6. If a capability is published at a barrier, it is callable according
+      to the guarantees of that barrier.
+
+21.7. Hook timeout, cancellation, and host-disconnect behavior remain
+      explicit activation-policy topics.
+
+21.8. No hidden retry or alternate callback order is implied.
 
 
 ===============================================================================
-19. LOCKED SUMMARY
+22. EXPLICITLY OPEN QUESTIONS
 ===============================================================================
 
-19.1. LOCKED:
-      - activation is explicit and pack-level
-      - onLoad(ctx) is the ordinary final activation entrypoint
-      - activation establishes ModCallContext gateway authority
-      - ModCallContext is a pack-facing gateway context, not raw backend
-        internals
-      - execution is allowed only after activation when Turnix-recognized
-      - adapter selection, execution authorization, adapter readiness, and
-        adapter loading do not imply activation
-      - immediate execution, including IIFE-style patterns and top-level
-        code, is unsupported
-      - execution requires Turnix orchestration
-      - adapter-mediated execution has guarantees only when invoked and
-        tracked through Turnix orchestration
-      - activation is distinct from import, resolution, and adapter lifecycle
-      - activation lifecycle outcomes remain trace-visible
-      - activation-domain trace reason identifiers are owned by DA-14
-      - adapter-domain trace evidence remains owned by DA-23
-      - failures are visible and abort activation
+22.1. The final public names for Phase 1 and Phase 2 hooks remain open.
 
-19.2. OPEN:
-      - ordering refinements
-      - adapter-mediated activation diagnostics
+22.2. The exact manifest schema for declaring activation entries and hooks
+      remains open.
+
+22.3. Exact adapter-mediated activation diagnostics remain open.
+
+22.4. Activation retry semantics remain open.
+
+22.5. Category-based activation ordering remains open.
+
+22.6. Exact cleanup or deactivation hooks remain open.
+
+22.7. Exact timeout, cancellation, and host-disconnect policy for
+      activation hooks remain open.
+
+22.8. Placeholder registration or late-binding protocols for early phases
+      remain open.
+
+22.9. Open questions do not weaken the activation boundary, final
+      Activated-state boundary, phase-barrier model, or publication rules
+      defined by this document.
+
+
+===============================================================================
+23. SUMMARY
+===============================================================================
+
+23.1. Activation is executable Pack participation under Turnix
+      orchestration.
+
+23.2. The activation process may contain Stage 0, Phase 1, Phase 2, and
+      Phase 3 before final Activated state is reached.
+
+23.3. Final Activated state is externally visible only after the Pack or
+      admitted cyclic activation group crosses its activation boundary.
+
+23.4. Turnix guarantees phase barriers, not same-phase callback order.
+
+23.5. A Pack may have multiple adapter/runtime participations.
+
+23.6. A Pack or cyclic activation group is not partially Activated.
+
+23.7. Private implementation modules and exported module surfaces are not
+      activation entries merely because they exist or are exported.
+
+23.8. ModCallContext is a fresh invocation-scoped gateway, not raw backend
+      internals.
+
+23.9. Activation and later runtime execution are distinct.
+
+23.10. Immediate execution and top-level side effects are unsupported as
+       activation authority.
+
+23.11. Execution has Turnix guarantees only when invoked and tracked
+       through Turnix orchestration.
+
+23.12. Activation failures are explicit, trace-visible, and do not silently
+       fall back.
+
+23.13. DA-14 owns activation lifecycle semantics while leaving resolution,
+       dependencies, importing, adapters, capabilities, policy, Jobs,
+       OrchestrationUnits, RuntimeHost, PackManager, and ModCallContext
+       facade details to their owning documents.
 
 
 ===============================================================================
@@ -671,6 +1293,6 @@ END OF DA-14 - ACTIVATION, LIFECYCLE & EXECUTION GUARANTEES
 --- doc-meta ---
 DOC_ID: DA-14
 DOC_FILE: docs/design/DA-14_ACTIVATION_LIFECYCLE_AND_EXECUTION_GUARANTEES.txt
-DOC_REV: 17
-DOC_GIT: 08317f7
+DOC_REV: 18
+DOC_GIT: b57921b
 ----------------
