@@ -10,10 +10,10 @@ Description:
 ------------
 Defines concrete PackManager operation surfaces used by RuntimeHost commands,
 RPC requests, Views, Launcher, tools, tests, and future remote clients. It
-covers graph preparation, activation-plan preparation, SavePack graph checks,
-repair suggestions, selected graph acceptance, operation result envelopes,
-operation failure categories, and placeholder source-management operation
-contracts without defining concrete package protocols.
+covers graph preparation, activation-plan preparation, SaveBundle graph
+checks, repair suggestions, selected graph acceptance, operation result
+envelopes, operation failure categories, and placeholder source-management
+operation contracts without defining concrete package protocols.
 
 This document implements PackManager operation access described by DA-29 and
 uses IS-09 catalog listing plus IS-11 graph and activation-plan records.
@@ -30,8 +30,8 @@ It defines:
 - shared operation status fields
 - PreparePackGraph operation
 - PrepareActivationPlan operation
-- CheckSavePackGraph operation
-- SuggestSavePackGraphRepair operation
+- CheckSaveBundleGraph operation
+- SuggestSaveBundleGraphRepair operation
 - AcceptPackGraph operation
 - SupersedePackGraph operation
 - source-management placeholder operation surfaces
@@ -41,19 +41,21 @@ It defines:
 
 It does NOT define:
 - root discovery boundaries or filesystem scanning rules (see DA-09)
-- pack identity, hierarchy, visibility, or SavePack visibility semantics
+- pack identity, hierarchy, visibility, or SaveBundle visibility semantics
   (see DA-10)
 - generic PackRequest resolution mechanics (see DA-11)
 - importing or module-loading behavior (see DA-12)
 - dependency, provider-role, pinned, copied, or advisory-relation semantics
   (see DA-13)
-- activation lifecycle, onLoad(ctx), or PackContext authority (see DA-14)
+- activation lifecycle, activation callback invocation, or ModCallContext
+  authority (see DA-14)
 - service, capability, permission, or Job-backed capability semantics
   (see DA-16)
 - user decision or remembered policy semantics (see DA-17)
 - Job lifecycle, timeout, cancellation, progress, or result semantics
   (see DA-19)
-- AppInstance lifecycle or SavePack binding behavior (see DA-20)
+- Application lifecycle, ApplicationRun lifecycle, or SaveBundle binding
+  behavior (see DA-20)
 - RPC, channel, or transport semantics (see DA-21)
 - UI, View, or frontend runtime semantics (see DA-22)
 - execution adapter authority or adapter lifecycle semantics (see DA-23 and
@@ -110,7 +112,7 @@ Downstream Documents:
 - future package source and index implementation specifications
 - future install, update, remove, and verification implementation
   specifications
-- future SavePack export and pack-bundling implementation specifications
+- future SaveBundle export and pack-bundling implementation specifications
 - future PackManager View implementation specifications
 - future PackManager CLI command specifications
 - future PackManager RPC envelope mappings
@@ -163,8 +165,18 @@ Downstream Documents:
 02.9. PackManager operation acceptance is distinct from operation completion.
 
 02.10. PackManager operation completion is distinct from activation success,
-       AppInstance success, Job success, or persistence success unless the
+       ApplicationRun success, Job success, or persistence success unless the
        operation contract explicitly defines that relationship.
+
+02.11. A PackManager operation response may summarize downstream records.
+
+02.12. Such a summary does not replace ResolvedPackGraph, ActivationPlan, Job,
+       activation, adapter, RuntimeHost, ApplicationRun, persistence, decision,
+       or trace evidence unless the owning document defines that projection.
+
+02.13. PackManager operation surfaces do not invoke Pack activation callbacks,
+       construct ModCallContext, load executable Pack code, or call adapter
+       execution entry points.
 
 
 ===============================================================================
@@ -174,8 +186,8 @@ Downstream Documents:
 03.1. Defined PackManager operation names are:
       - PreparePackGraph
       - PrepareActivationPlan
-      - CheckSavePackGraph
-      - SuggestSavePackGraphRepair
+      - CheckSaveBundleGraph
+      - SuggestSaveBundleGraphRepair
       - AcceptPackGraph
       - SupersedePackGraph
       - SearchPackSources
@@ -190,11 +202,11 @@ Downstream Documents:
 03.3. PrepareActivationPlan produces or attempts to produce an ActivationPlan
       from a ResolvedPackGraph.
 
-03.4. CheckSavePackGraph inspects SavePack graph evidence against current
+03.4. CheckSaveBundleGraph inspects SaveBundle graph evidence against current
       catalog and policy context.
 
-03.5. SuggestSavePackGraphRepair produces repair suggestions without applying
-      them unless another operation accepts and performs repair.
+03.5. SuggestSaveBundleGraphRepair produces repair suggestions without
+      applying them unless another operation accepts and performs repair.
 
 03.6. AcceptPackGraph records acceptance of a prepared graph for a later owning
       workflow.
@@ -229,7 +241,7 @@ Downstream Documents:
 
 04.3. operation identifies the requested PackManager operation.
 
-04.4. operationContext identifies RuntimeHost, workspace, scope, requesting
+04.4. operationContext identifies RuntimeHost, Workspace, scope, requesting
       surface, and related runtime identities.
 
 04.5. input contains operation-specific input.
@@ -258,8 +270,9 @@ Downstream Documents:
       - runtimeHostId
       - workspaceId
       - appPackId
-      - savePackId
-      - appInstanceId
+      - saveBundleId
+      - applicationId
+      - applicationRunId
       - viewId
       - requestingPackId
       - requestingSurfaceKind
@@ -273,41 +286,55 @@ Downstream Documents:
 
 05.3. runtimeHostId identifies the RuntimeHost context when applicable.
 
-05.4. workspaceId identifies the workspace context when applicable.
+05.4. workspaceId identifies the Workspace context when applicable.
 
 05.5. appPackId identifies the AppPack context when applicable.
 
-05.6. savePackId identifies the SavePack context when applicable.
+05.6. saveBundleId identifies the SaveBundle context when applicable.
 
-05.7. appInstanceId identifies the AppInstance context when applicable.
-
-05.8. viewId identifies the View context when applicable.
-
-05.9. requestingPackId identifies the pack requesting operation when
+05.7. applicationId identifies the durable Application context when
       applicable.
 
-05.10. requestingSurfaceKind identifies CLI, Launcher, PackManager View,
-       application View, remote client, AI buddy, test, or another surface.
+05.8. applicationRunId identifies the live ApplicationRun context when
+      applicable.
 
-05.11. packManagerScope uses DA-29 and IS-09 scope vocabulary.
+05.9. viewId identifies the View context when applicable.
 
-05.12. accessMode uses IS-09 accessMode vocabulary when applicable.
-
-05.13. commandId identifies a RuntimeHost command when applicable.
-
-05.14. rpcMessageId identifies the RPC message that caused the operation when
+05.10. requestingPackId identifies the pack requesting operation when
        applicable.
 
-05.15. capabilityIdentity identifies the capability used to request the
+05.11. requestingSurfaceKind identifies CLI, Launcher, PackManager View,
+       application View, remote client, AI buddy, test, or another surface.
+
+05.12. packManagerScope uses DA-29 and IS-09 scope vocabulary.
+
+05.13. accessMode uses IS-09 accessMode vocabulary when applicable.
+
+05.14. commandId identifies a RuntimeHost command when applicable.
+
+05.15. rpcMessageId identifies the RPC message that caused the operation when
+       applicable.
+
+05.16. capabilityIdentity identifies the capability used to request the
        operation when applicable.
 
-05.16. jobId identifies an associated Job when operation execution is
+05.17. jobId identifies an associated Job when operation execution is
        Job-backed.
 
-05.17. orchestrationUnitId identifies an associated Orchestration Unit when
+05.18. orchestrationUnitId identifies an associated Orchestration Unit when
        mutation or lifecycle authority is involved.
 
-05.18. operationContext does not grant authority by itself.
+05.19. operationContext does not grant authority by itself.
+
+05.20. Caller-provided operationContext fields are correlation and requested
+       context evidence only until the receiving boundary validates them.
+
+05.21. Caller-provided operationContext fields do not let the caller forge
+       RuntimeHost authority, Workspace ownership, Application identity,
+       ApplicationRun identity, SaveBundle identity, View authority, command
+       authority, RPC authority, capability permission, Job identity,
+       Orchestration Unit authority, PackManager authority, policy approval, or
+       persistence authority.
 
 
 ===============================================================================
@@ -380,8 +407,8 @@ Downstream Documents:
 
 07.8. Cancelled means accepted operation work was cancelled.
 
-07.9. Superseded means newer work, newer accepted input, or higher-priority work
-      replaced this operation.
+07.9. Superseded means newer work, newer accepted input, or higher-
+      priority work replaced this operation.
 
 07.10. Partial means the operation produced partial output under an explicit
        profile permitting partial output.
@@ -390,7 +417,7 @@ Downstream Documents:
 
 07.12. operationStatus is not activation outcome.
 
-07.13. operationStatus is not AppInstance lifecycle outcome.
+07.13. operationStatus is not ApplicationRun lifecycle outcome.
 
 07.14. If an operation is Job-backed, Job lifecycle semantics remain owned by
        DA-19.
@@ -404,14 +431,14 @@ Downstream Documents:
       - graphPurpose
       - rootPackRequest
       - appPackId
-      - savePackId
+      - saveBundleId
       - requestedPacks
       - catalogRequest
       - graphProfile
       - validationProfile
       - includeAdvisoryAnalysis
       - includeProviderRoleAnalysis
-      - includeSavePackGraphEvidence
+      - includeSaveBundleGraphEvidence
       - acceptedDecisionIds
 
 08.2. graphPurpose uses IS-11 graphPurpose vocabulary.
@@ -421,11 +448,11 @@ Downstream Documents:
 
 08.4. appPackId identifies the AppPack context when already known.
 
-08.5. savePackId identifies the SavePack context when graph preparation is
-      SavePack-related.
+08.5. saveBundleId identifies the SaveBundle context when graph preparation is
+      SaveBundle-related.
 
-08.6. requestedPacks contains explicit pack requests or selected pack identities
-      supplied by the caller.
+08.6. requestedPacks contains explicit pack requests or selected pack
+      identities supplied by the caller.
 
 08.7. catalogRequest may contain an IS-09 catalog request or catalog context
       reference used for graph preparation.
@@ -439,8 +466,8 @@ Downstream Documents:
 
 08.11. includeProviderRoleAnalysis requests provider-role analysis.
 
-08.12. includeSavePackGraphEvidence requests SavePack copied, pinned,
-       last-used, or last-known-good evidence.
+08.12. includeSaveBundleGraphEvidence requests SaveBundle copied, pinned,
+       last-used, or last-known-good graph evidence.
 
 08.13. acceptedDecisionIds supplies prior decisions relevant to this operation.
 
@@ -476,6 +503,11 @@ Downstream Documents:
 
 09.8. A produced ResolvedPackGraph does not guarantee activation success.
 
+09.9. A produced ResolvedPackGraph does not execute code.
+
+09.10. A produced ResolvedPackGraph does not grant capability permission or
+       adapter authorization.
+
 
 ===============================================================================
 10. PREPAREACTIVATIONPLAN INPUT
@@ -494,8 +526,9 @@ Downstream Documents:
 10.3. resolvedPackGraph may inline an IS-11 ResolvedPackGraph when the graph is
        not separately stored.
 
-10.4. activationContext identifies RuntimeHost, AppInstance, AppPack,
-       SavePack, workspace, adapter, and View context when available.
+10.4. activationContext identifies RuntimeHost, Application, ApplicationRun,
+       AppPack or AppDefinition source, SaveBundle, Workspace, adapter, and
+       View context when available.
 
 10.5. activationProfile identifies the activation-plan preparation profile.
 
@@ -535,13 +568,16 @@ Downstream Documents:
 
 11.8. A produced ActivationPlan does not guarantee activation success.
 
+11.9. A produced ActivationPlan does not load executable Pack code or invoke
+      activation callbacks.
+
 
 ===============================================================================
-12. CHECKSAVEPACKGRAPH INPUT
+12. CHECKSAVEBUNDLEGRAPH INPUT
 ===============================================================================
 
-12.1. CheckSavePackGraph input contains:
-       - savePackId
+12.1. CheckSaveBundleGraph input contains:
+       - saveBundleId
        - appPackId
        - catalogRequest
        - checkProfile
@@ -551,13 +587,13 @@ Downstream Documents:
        - includePinnedPacks
        - includeRepairCandidates
 
-12.2. savePackId identifies the SavePack to check.
+12.2. saveBundleId identifies the SaveBundle to check.
 
 12.3. appPackId identifies the associated AppPack when available.
 
 12.4. catalogRequest identifies the current catalog context used for checking.
 
-12.5. checkProfile identifies the SavePack graph check profile.
+12.5. checkProfile identifies the SaveBundle graph check profile.
 
 12.6. includeLastUsedGraph requests last-used graph comparison.
 
@@ -569,16 +605,16 @@ Downstream Documents:
 
 12.10. includeRepairCandidates requests repair candidate summaries.
 
-12.11. CheckSavePackGraph does not load, bind, or migrate the SavePack by
-       itself.
+12.11. CheckSaveBundleGraph does not load, bind, migrate, mutate, or repair the
+       SaveBundle by itself.
 
 
 ===============================================================================
-13. CHECKSAVEPACKGRAPH OUTPUT
+13. CHECKSAVEBUNDLEGRAPH OUTPUT
 ===============================================================================
 
-13.1. CheckSavePackGraph output contains:
-       - savePackGraphStatus
+13.1. CheckSaveBundleGraph output contains:
+       - saveBundleGraphStatus
        - lastUsedGraphComparison
        - lastKnownGoodGraphComparison
        - copiedPackStatus
@@ -588,13 +624,13 @@ Downstream Documents:
        - warningSummary
        - failureCategory
 
-13.2. savePackGraphStatus summarizes SavePack graph condition.
+13.2. saveBundleGraphStatus summarizes SaveBundle graph condition.
 
 13.3. lastUsedGraphComparison records comparison with last-used graph evidence
        when available.
 
-13.4. lastKnownGoodGraphComparison records comparison with last-known-good graph
-       evidence when available.
+13.4. lastKnownGoodGraphComparison records comparison with last-known-good
+       graph evidence when available.
 
 13.5. copiedPackStatus summarizes copied pack state.
 
@@ -608,27 +644,29 @@ Downstream Documents:
 
 13.10. failureCategory records failure category when the operation failed.
 
-13.11. SavePack graph check output is evidence.
+13.11. SaveBundle graph check output is evidence.
 
-13.12. SavePack graph check output does not mutate the SavePack.
+13.12. SaveBundle graph check output does not mutate the SaveBundle.
+
+13.13. SaveBundle graph check output does not make a graph safe by itself.
 
 
 ===============================================================================
-14. SUGGESTSAVEPACKGRAPHREPAIR INPUT
+14. SUGGESTSAVEBUNDLEGRAPHREPAIR INPUT
 ===============================================================================
 
-14.1. SuggestSavePackGraphRepair input contains:
-       - savePackId
+14.1. SuggestSaveBundleGraphRepair input contains:
+       - saveBundleId
        - checkResultRef
        - checkResult
        - repairProfile
        - allowedRepairKinds
        - acceptedDecisionIds
 
-14.2. savePackId identifies the SavePack for which repair suggestions are
+14.2. saveBundleId identifies the SaveBundle for which repair suggestions are
        requested.
 
-14.3. checkResultRef references a prior CheckSavePackGraph result when
+14.3. checkResultRef references a prior CheckSaveBundleGraph result when
        available.
 
 14.4. checkResult may inline prior check output.
@@ -640,14 +678,14 @@ Downstream Documents:
 14.7. acceptedDecisionIds supplies prior decisions relevant to repair
        suggestion.
 
-14.8. SuggestSavePackGraphRepair does not apply repair by itself.
+14.8. SuggestSaveBundleGraphRepair does not apply repair by itself.
 
 
 ===============================================================================
-15. SUGGESTSAVEPACKGRAPHREPAIR OUTPUT
+15. SUGGESTSAVEBUNDLEGRAPHREPAIR OUTPUT
 ===============================================================================
 
-15.1. SuggestSavePackGraphRepair output contains:
+15.1. SuggestSaveBundleGraphRepair output contains:
        - repairSuggestions
        - requiredDecisions
        - warningSummary
@@ -655,8 +693,8 @@ Downstream Documents:
 
 15.2. repairSuggestions is an array of repair suggestion records.
 
-15.3. requiredDecisions contains decision requests needed before suggestions can
-       be accepted or applied.
+15.3. requiredDecisions contains decision requests needed before
+       suggestions can be accepted or applied.
 
 15.4. warningSummary summarizes repair warnings.
 
@@ -664,7 +702,14 @@ Downstream Documents:
 
 15.6. A repair suggestion is not an applied repair.
 
-15.7. A repair suggestion does not mutate SavePack state.
+15.7. A repair suggestion does not mutate SaveBundle state.
+
+15.8. A repair suggestion does not mutate persistence.
+
+15.9. A repair suggestion does not bypass dependency, policy, capability, or
+      persistence boundaries.
+
+15.10. A repair suggestion does not make a graph safe by itself.
 
 
 ===============================================================================
@@ -674,7 +719,7 @@ Downstream Documents:
 16.1. A repair suggestion contains:
        - repairSuggestionId
        - repairKind
-       - savePackId
+       - saveBundleId
        - affectedGraphIds
        - affectedPackIdentities
        - proposedResolvedPackGraph
@@ -690,7 +735,7 @@ Downstream Documents:
        - MarkGraphRiskAccepted
        - ManualRepairRequired
 
-16.3. savePackId identifies the SavePack.
+16.3. saveBundleId identifies the SaveBundle.
 
 16.4. affectedGraphIds identifies affected graph records.
 
@@ -706,8 +751,8 @@ Downstream Documents:
 
 16.9. trace records trace references.
 
-16.10. ManualRepairRequired means PackManager cannot produce an automatic repair
-       suggestion under the current profile.
+16.10. ManualRepairRequired means PackManager cannot produce an automatic
+       repair suggestion under the current profile.
 
 
 ===============================================================================
@@ -728,7 +773,7 @@ Downstream Documents:
 
 17.4. acceptancePurpose explains why the graph is being accepted.
 
-17.5. acceptanceScope records run, save, workspace, graph, test, or other
+17.5. acceptanceScope records run, SaveBundle, Workspace, graph, test, or other
        defined scope.
 
 17.6. acceptedDecisionIds supplies decisions required for acceptance.
@@ -738,8 +783,11 @@ Downstream Documents:
 
 17.8. AcceptPackGraph does not activate packs.
 
-17.9. AcceptPackGraph does not write SavePack state unless the owning workflow
-      explicitly performs an authorized persistence operation.
+17.9. AcceptPackGraph does not write SaveBundle state unless the owning
+      workflow explicitly performs an authorized persistence operation.
+
+17.10. AcceptPackGraph does not by itself persist, bind, mutate, load, migrate,
+       activate, or publish state.
 
 
 ===============================================================================
@@ -887,12 +935,17 @@ Downstream Documents:
        - warningSummary
        - failureCategory
 
-20.14. These placeholder fields do not define concrete internet, index,
-       package, verification, or installation protocols.
+20.14. These placeholder fields do not define concrete internet, package,
+       index, trust, verification, installation, update, removal, transaction,
+       rollback, external-network, or root-write protocols.
 
-20.15. Source-management operations that write roots, change installed packs, or
-       access external sources require explicit policy, permission,
+20.15. Source-management operations that write roots, change installed packs,
+       or access external sources require explicit policy, permission,
        persistence, and trace handling.
+
+20.16. Source-management placeholder operation names do not authorize network
+       access, package source authenticity, root write permission, or package
+       trust decisions by themselves.
 
 
 ===============================================================================
@@ -930,10 +983,17 @@ Downstream Documents:
 
 21.6. A decision record does not resolve itself.
 
-21.7. The operation resumes or is retried only through an accepted decision path
-      owned by policy and decision handling.
+21.7. The operation resumes or is retried only through an accepted decision
+      path owned by policy and decision handling.
 
 21.8. PackManager does not silently remember decisions.
+
+21.9. A decision record does not silently broaden scope.
+
+21.10. A decision record does not grant capabilities, approve adapter
+       execution, authorize source-management writes, mutate persistence, or
+       become remembered policy unless DA-17 and the owning operation define
+       that effect.
 
 
 ===============================================================================
@@ -953,7 +1013,7 @@ Downstream Documents:
        - CatalogUnavailable
        - GraphPreparationFailed
        - ActivationPlanPreparationFailed
-       - SavePackGraphCheckFailed
+       - SaveBundleGraphCheckFailed
        - RepairSuggestionFailed
        - GraphAcceptanceFailed
        - GraphSupersessionFailed
@@ -1021,19 +1081,23 @@ Downstream Documents:
       Job lifecycle semantics.
 
 24.3. Search, install, update, remove, verify, refresh, graph preparation, or
-      SavePack graph repair may be Job-backed depending on implementation and
+      SaveBundle graph repair may be Job-backed depending on implementation and
       operation profile.
 
 24.4. Job-backed PackManager operation acceptance is not final operation
       success unless the operation contract defines successful acceptance as
       the direct result.
 
-24.5. Job lifecycle semantics remain owned by DA-19.
+24.5. Command acceptance, RPC acceptance, operation acceptance, Job creation,
+      Job success, cancellation, timeout, and progress reporting remain
+      distinct unless an operation contract explicitly maps them.
 
-24.6. Capability-mediated Job-backed PackManager operations remain
+24.6. Job lifecycle semantics remain owned by DA-19.
+
+24.7. Capability-mediated Job-backed PackManager operations remain
       capability-mediated under DA-16.
 
-24.7. RPC request acceptance remains distinct from Job success under DA-21.
+24.8. RPC request acceptance remains distinct from Job success under DA-21.
 
 
 ===============================================================================
@@ -1052,7 +1116,7 @@ Downstream Documents:
       - operationContext
       - graphId when applicable
       - activationPlanId when applicable
-      - savePackId when applicable
+      - saveBundleId when applicable
       - packageSourceId when applicable
       - selected pack identities when applicable
       - decision identities when applicable
@@ -1067,8 +1131,9 @@ Downstream Documents:
       record envelope.
 
 25.5. Operation trace evidence does not replace catalog, resolution,
-      dependency, activation, capability, Job, RuntimeHost, AppInstance,
-      persistence, or decision trace evidence.
+      dependency, activation, capability, Job, RuntimeHost, Application,
+      ApplicationRun, SaveBundle, persistence, decision, or source-management
+      evidence.
 
 25.6. Operation trace evidence preserves causal links to those records when
       those records exist.
@@ -1115,18 +1180,24 @@ Downstream Documents:
       - treating View access as PackManager authority by itself
       - treating Launcher access as PackManager authority by itself
       - treating test access as runtime authority bypass
+      - treating caller-provided operationContext fields as forged authority
       - accepting malformed operation envelopes silently
       - treating operation acceptance as operation success
       - treating operation completion as activation success by default
       - treating operation status as Job terminal outcome
       - PreparePackGraph activating packs
       - PrepareActivationPlan activating packs
-      - CheckSavePackGraph loading or migrating SavePacks
-      - SuggestSavePackGraphRepair applying repair by itself
+      - CheckSaveBundleGraph loading, binding, migrating, repairing, or
+        mutating SaveBundles
+      - SuggestSaveBundleGraphRepair applying repair by itself
       - AcceptPackGraph guaranteeing activation success
+      - AcceptPackGraph persisting or mutating SaveBundle state by itself
       - SupersedePackGraph rolling back committed state
       - source-management placeholder operations defining concrete package
         protocols
+      - source-management placeholder operations granting external network
+        access
+      - source-management placeholder operations granting root write permission
       - PackManager silently remembering decisions
       - PackManager silently broadening decisions
       - PackManager operations bypassing capability, policy, RuntimeHost,
@@ -1166,30 +1237,34 @@ Downstream Documents:
 29.1. LOCKED:
       - PackManager operations are requested through mediated Turnix surfaces.
       - RuntimeHost commands, RPC requests, capability-mediated requests,
-        Views, Launcher, tools, tests, and remote clients use the same operation
-        semantics.
+        Views, Launcher, tools, tests, and remote clients use the same
+        operation semantics.
       - Entry surface does not define operation authority.
       - A PackManager operation request contains requestId, operation,
         operationContext, input, options, decisionContext, and trace.
       - A PackManager operation response contains requestId, operation,
         operationStatus, operationContext, output, warnings, diagnostics,
         decisions, and trace.
+      - operationContext fields do not grant or forge authority by themselves.
       - Operation acceptance is distinct from operation completion.
       - Operation status is not Job terminal outcome, activation outcome, or
-        AppInstance lifecycle outcome.
+        ApplicationRun lifecycle outcome.
       - PreparePackGraph produces or attempts to produce an IS-11
         ResolvedPackGraph.
       - PrepareActivationPlan produces or attempts to produce an IS-11
         ActivationPlan.
-      - CheckSavePackGraph inspects SavePack graph evidence without loading,
-        binding, migrating, or mutating the SavePack.
-      - SuggestSavePackGraphRepair produces suggestions and does not apply
+      - CheckSaveBundleGraph inspects SaveBundle graph evidence without
+        loading, binding, migrating, repairing, or mutating the SaveBundle.
+      - SuggestSaveBundleGraphRepair produces suggestions and does not apply
         repair by itself.
       - AcceptPackGraph records graph acceptance and does not activate packs.
+      - AcceptPackGraph does not persist or mutate SaveBundle state by itself.
       - SupersedePackGraph records graph supersession and does not roll back
         committed state.
       - Source-management placeholder operations define operation-surface shape
         only and do not define concrete package protocols.
+      - Source-management writes require explicit policy, permission,
+        persistence, and trace handling.
       - PackManager operations may require decisions, and DA-17 owns decision
         semantics.
       - PackManager operations may be Job-backed, and DA-19 owns Job lifecycle.
@@ -1210,6 +1285,6 @@ END OF IS-12 - PACKMANAGER COMMAND AND OPERATION SURFACE
 --- doc-meta ---
 DOC_ID: IS-12
 DOC_FILE: docs/design/IS-12_PACKMANAGER_COMMAND_AND_OPERATION_SURFACE.txt
-DOC_REV: 1
-DOC_GIT: e4446ac
+DOC_REV: 2
+DOC_GIT: e747e09
 ----------------
