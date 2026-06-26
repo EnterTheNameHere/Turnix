@@ -9,7 +9,7 @@ EVOLVING
 Description:
 ------------
 Defines offline comparison, equality modes, ComparisonResult, Replay,
-Resume, Retry, and cross-session audit workflow semantics for retained
+Resume, Retry, and retained-artifact audit workflow semantics for retained
 Window-derived artifacts.
 
 This document owns workflow semantics for using retained finalized Window
@@ -30,20 +30,26 @@ It defines:
 - Replay workflow boundaries
 - Resume workflow boundaries
 - Retry workflow boundaries
-- cross-session audit workflow boundaries
-- workflow relationships to retained Job and Orchestration Unit evidence
+- retained-artifact audit workflow boundaries
+- workflow relationships to retained Job and OrchestrationUnit evidence
 - explicit missing-material handling in comparison and audit workflows
 
 It does NOT define:
 - memory, state, transaction, or commit mechanics (see DA-04)
+- payload identity, Chunk, ChunkId, ValueRef, decode, integrity, or retained
+  value representation contracts (see DA-05)
+- persistent-I/O authority, Reader/Writer providers, filesystem rules,
+  storage roots, backup/snapshot behavior, or streaming I/O (see DA-07)
 - Window model, SafePointWindow, ActiveWindow, AbortedWindow, or Window
   finalization semantics (see DA-08)
 - WindowManifest, WindowExport, Minimal Audit Bundle, digest representation,
-  or offline inspection artifact semantics (see DA-25)
+  partial-export marker semantics, missing-material marker structure, or
+  offline inspection artifact semantics (see DA-25)
 - trace event structure, trace DAG semantics, span mechanics, or trace
   storage semantics (see DA-03)
 - Job lifecycle, Job terminal states, or Job result semantics (see DA-19)
-- Orchestration Unit lifecycle or mutation authority semantics (see DA-24)
+- Application or ApplicationRun lifecycle semantics (see DA-20)
+- OrchestrationUnit lifecycle or mutation authority semantics (see DA-24)
 - execution adapter boundary semantics (see DA-23)
 - concrete packaging file format
 - concrete digest algorithms
@@ -60,8 +66,11 @@ Upstream Documents:
 - DA-01
 - DA-03
 - DA-04
+- DA-05
+- DA-07
 - DA-08
 - DA-19
+- DA-20
 - DA-23
 - DA-24
 - DA-25
@@ -119,14 +128,17 @@ Downstream Documents:
 02.8. ComparisonResult is a semantic claim scoped by an explicit equality
       mode.
 
-02.9. Later sections of this document refine and apply these rules.
-      They do not weaken them.
+02.9. DA-26 workflows consume DA-05 payload identity and DA-07 persistent
+      I/O boundaries when they inspect retained material, exported closures,
+      digest inputs, structural comparison inputs, missing payload material,
+      or restoration inputs.
 
-02.12. DA-26 workflows consume DA-05 payload identity and DA-07 persistent I/O
-       boundaries when they inspect retained material, exported closures,
-       digest inputs, structural comparison inputs, missing payload material,
-       or restoration inputs. They do not redefine those authorities.
+02.10. DA-26 does not redefine payload identity, Chunk, ChunkId, ValueRef,
+       decode, integrity, retained value representation, persistent-I/O
+       authority, storage identity, or concrete file access behavior.
 
+02.11. Later sections of this document refine and apply these rules.
+       They do not weaken them.
 
 
 ===============================================================================
@@ -144,7 +156,7 @@ Downstream Documents:
       - retained journal evidence
       - retained revision metadata
       - retained Job lifecycle evidence
-      - retained Orchestration Unit lifecycle evidence
+      - retained OrchestrationUnit lifecycle evidence
       - retained adapter, RPC, View, or frontend evidence when available
 
 03.2. Workflow input does not add authority to the material consumed.
@@ -160,6 +172,9 @@ Downstream Documents:
       digest presence, presentation, or transport origin.
 
 03.7. A workflow does not hide the authority class of material it consumes.
+
+03.8. A workflow claim over retained material does not redefine the domain
+      that owns the consumed material.
 
 
 ===============================================================================
@@ -225,7 +240,7 @@ Downstream Documents:
 05.1.2. StateEquality ignores revision history.
 
 05.1.3. StateEquality ignores non-authoritative trace, journal, audit, Job,
-        Orchestration Unit, adapter, RPC, View, and frontend evidence.
+        OrchestrationUnit, adapter, RPC, View, and frontend evidence.
 
 05.1.4. StateEquality is the default equality mode.
 
@@ -262,7 +277,7 @@ Downstream Documents:
 05.3.3. EvidenceEquality may compare retained Job lifecycle evidence when
         such evidence is included by the selected evidence closure.
 
-05.3.4. EvidenceEquality may compare retained Orchestration Unit lifecycle
+05.3.4. EvidenceEquality may compare retained OrchestrationUnit lifecycle
         evidence when such evidence is included by the selected evidence
         closure.
 
@@ -273,8 +288,8 @@ Downstream Documents:
 05.3.6. Equality of retained Job lifecycle evidence does not imply resumed
         or replayable Job execution.
 
-05.3.7. Equality of retained Orchestration Unit evidence does not imply
-        resumed or replayable Orchestration Unit execution.
+05.3.7. Equality of retained OrchestrationUnit evidence does not imply
+        resumed or replayable OrchestrationUnit execution.
 
 05.3.8. Equality of retained adapter evidence does not imply adapter
         replayability or resumability.
@@ -366,6 +381,10 @@ Downstream Documents:
 07.11. Digest mismatch in one equality mode does not imply mismatch in every
        equality mode.
 
+07.12. Digest computation does not redefine committed-state truth, payload
+       identity, retained value representation, storage identity, or
+       persistent-I/O authority.
+
 
 ===============================================================================
 08. REPLAY
@@ -391,7 +410,7 @@ Downstream Documents:
 
 08.7. Replay does not imply resuming retained Job execution.
 
-08.8. Replay does not imply resuming retained Orchestration Unit execution.
+08.8. Replay does not imply resuming retained OrchestrationUnit execution.
 
 08.9. Replay does not imply restarting retained adapter execution.
 
@@ -418,8 +437,8 @@ Downstream Documents:
       SafePointWindow.
 
 09.2. Resume may involve:
-      - re-running in-flight orchestration units
-      - abandoning in-flight work
+      - running replacement OrchestrationUnits
+      - abandoning previously in-flight work
       - retrying selected external calls
       - starting new work from the restored committed boundary
 
@@ -429,7 +448,7 @@ Downstream Documents:
 
 09.5. Resume does not reuse closed Job lifecycle identity.
 
-09.6. Resume does not reuse closed Orchestration Unit lifecycle identity.
+09.6. Resume does not reuse closed OrchestrationUnit lifecycle identity.
 
 09.7. Resume does not reuse closed adapter execution identity.
 
@@ -480,7 +499,8 @@ Downstream Documents:
        attempt.
 
 10.12. Retry remains constrained by current policy, capability, adapter,
-       AppInstance, and state rules at the time of retry.
+       ApplicationRun, state, configuration, persistence, artifact, and
+       workflow rules at the time of retry.
 
 
 ===============================================================================
@@ -511,40 +531,44 @@ Downstream Documents:
 
 
 ===============================================================================
-12. CROSS-SESSION AUDIT WORKFLOWS
+12. RETAINED-ARTIFACT AUDIT WORKFLOWS
 ===============================================================================
 
 12.1. Audit workflows may operate across retained traces, retained
       committed-state artifacts, retained revisions, retained journal
       evidence, WindowExports, and Minimal Audit Bundles.
 
-12.2. Audit workflows may support:
+12.2. Audit workflows may compare retained artifacts across ApplicationRuns,
+      Applications, or SaveBundles when the retained material supports that
+      workflow scope.
+
+12.3. Audit workflows may support:
       - reconstructing retained decision chains
       - inspecting retained state evolution
       - correlating retained journal evidence with retained trace evidence
       - correlating retained Job lifecycle evidence with retained trace
         evidence
-      - correlating retained Orchestration Unit evidence with retained trace
+      - correlating retained OrchestrationUnit evidence with retained trace
         evidence
       - correlating retained adapter evidence with retained RPC evidence
       - correlating retained View or frontend evidence with retained trace
         evidence
-      - comparing retained finalized artifacts across sessions
+      - comparing retained finalized artifacts across workflow scopes
 
-12.3. Audit workflows do not mutate state.
+12.4. Audit workflows do not mutate state.
 
-12.4. Audit workflows do not require journal completeness.
+12.5. Audit workflows do not require journal completeness.
 
-12.5. Audit workflows do not assume replayability.
+12.6. Audit workflows do not assume replayability.
 
-12.6. Audit workflows remain honest about retained gaps, pruned evidence,
+12.7. Audit workflows remain honest about retained gaps, pruned evidence,
       and explicit incompleteness.
 
-12.7. Audit workflow output remains evidence presentation unless a higher
+12.8. Audit workflow output remains evidence presentation unless a higher
       authority explicitly defines a committed-state mutation path that
       consumes the result.
 
-12.8. Audit workflows do not control original Jobs, Orchestration Units,
+12.9. Audit workflows do not control original Jobs, OrchestrationUnits,
       adapters, RPC channels, transports, Views, or frontend participants.
 
 
@@ -565,15 +589,23 @@ Downstream Documents:
       - restored SafePointWindow identity when applicable
       - policy decision identity when applicable
       - new Job identity when Resume or Retry creates Job-backed work
-      - new Orchestration Unit identity when Resume or Retry creates
+      - new OrchestrationUnit identity when Resume or Retry creates
         orchestrated work
       - relation to retained evidence used as explanation
 
-13.3. Offline tool runs outside Turnix orchestration may produce external
+13.3. Workflow trace requirements are workflow-domain emission obligations.
+
+13.4. Trace retention, trace pruning, trace loss, event structure, trace DAG
+      semantics, span mechanics, and trace storage semantics remain owned by
+      DA-03.
+
+13.5. Offline tool runs outside Turnix orchestration may produce external
       reports, but those reports do not become Turnix trace evidence unless
       imported or recorded through a defined Turnix path.
 
-13.4. DA-03 defines the trace substrate used to represent workflow trace
+13.6. Trace visibility does not make workflow output committed state.
+
+13.7. DA-03 defines the trace substrate used to represent workflow trace
       evidence.
 
 
@@ -620,7 +652,7 @@ Downstream Documents:
       - silently weakening equality mode after comparison failure
       - replaying external side effects by implication
       - resuming retained Job execution identity
-      - resuming retained Orchestration Unit execution identity
+      - resuming retained OrchestrationUnit execution identity
       - resuming retained adapter execution identity
       - resuming retained RPC channels, transports, Views, or frontends
       - treating Retry as the same execution as the earlier attempt
@@ -643,7 +675,7 @@ Downstream Documents:
       - exact Retry policy taxonomy
       - future audit-tooling user experience and visualization
       - exact retained Job evidence presentation in audit tooling
-      - exact retained Orchestration Unit evidence presentation in audit
+      - exact retained OrchestrationUnit evidence presentation in audit
         tooling
       - exact retained adapter, RPC, View, and frontend evidence
         presentation in audit tooling
@@ -669,12 +701,12 @@ Downstream Documents:
       - Replay restores committed state within the DA-04 restoration
         boundary and retained causal story where available
       - Replay does not imply resuming retained Job execution
-      - Replay does not imply resuming retained Orchestration Unit execution
+      - Replay does not imply resuming retained OrchestrationUnit execution
       - Replay does not imply restarting retained adapter execution
       - Replay does not reconnect retained RPC channels, transports, Views,
         or frontend participants
       - Resume is explicit, trace-visible, and not deterministic in outcome
-      - Resume does not reuse closed Job, Orchestration Unit, adapter, or RPC
+      - Resume does not reuse closed Job, OrchestrationUnit, adapter, or RPC
         lifecycle identity
       - Retry is new work
       - Retry does not reuse previous jobId when retried work is represented
@@ -699,6 +731,6 @@ END OF DA-26 - OFFLINE COMPARISON, REPLAY AND AUDIT WORKFLOWS
 --- doc-meta ---
 DOC_ID: DA-26
 DOC_FILE: docs/design/DA-26_OFFLINE_COMPARISON_REPLAY_AND_AUDIT_WORKFLOWS.txt
-DOC_REV: 2
-DOC_GIT: e747e09
+DOC_REV: 3
+DOC_GIT: 1f20682
 ----------------
