@@ -19,9 +19,9 @@ This area is authoritative for:
 - shared pack-specifier structure across dependency-like manifest fields
 - dependency-specific resolution policy above DA-11
 - deterministic dependency selection policy
-- saved, pinned, and global dependency behavior
+- SaveBundle-local, pinned, and global dependency behavior
 - provider-role requirement semantics
-- advisory pack-relation semantics for Pack Manager and UI
+- advisory pack-relation semantics for PackManager and UI
 - ambiguity handling and required external involvement
 
 Generic resolution mechanics are defined in DA-11.
@@ -46,10 +46,13 @@ It defines:
 
 It does NOT define:
 - PackRequest parsing grammar or generic Phase-A / Phase-B mechanics
-- tracing schema or storage
-- activation lifecycle semantics
+- tracing schema, trace retention, trace pruning, or trace storage
+- activation lifecycle semantics or activation recovery procedure
+- Application or ApplicationRun lifecycle semantics
+- SaveBundle storage format, ownership, or retained-material layout
 - visibility rules beyond the fact that they gate dependency outcomes
-- Pack Manager heuristics or load-list generation behavior
+- PackManager heuristics, repair behavior, or load-list generation behavior
+- service, capability, permission, or capability invocation semantics
 
 Upstream Documents:
 ------------------
@@ -59,15 +62,21 @@ Upstream Documents:
 - CMR-04
 - CMR-05
 - DA-01
+- DA-03
 - DA-09
 - DA-10
 - DA-11
+- DA-14
 - DA-15
+- DA-16
 - DA-17
+- DA-20
+- DA-29
 
 Downstream Documents:
 --------------------
 - DA-14
+- DA-29
 
 
 ===============================================================================
@@ -86,6 +95,24 @@ Downstream Documents:
 01.4. This document defines dependency semantics, provider-role semantics,
       advisory pack-relation semantics, and dependency-resolution policy
       within that shared interpretation model.
+
+01.5. This document uses the following canonical architecture names when
+      dependency semantics need to refer to runtime or persistence context:
+      - SaveBundle
+      - Application
+      - ApplicationRun
+
+01.6. SaveBundle is the durable persistence closure of an Application.
+
+01.7. Application is one durable application individual.
+
+01.8. ApplicationRun is one live execution period of an Application.
+
+01.9. This document names those concepts only to preserve dependency-source
+      and dependency-boundary meaning.
+
+01.10. DA-13 does not define SaveBundle storage, Application lifecycle, or
+       ApplicationRun lifecycle semantics.
 
 
 ===============================================================================
@@ -106,7 +133,10 @@ Downstream Documents:
       - activate a pack
       - grant visibility
       - grant capabilities
+      - grant runtime access
+      - grant capability permission
       - define activation order
+      - consult last-known-good fallback during dependency resolution
 
 02.5. Failure to satisfy a hard dependency is a hard failure unless some
       other accepted policy or user decision explicitly resolves it.
@@ -120,13 +150,10 @@ Downstream Documents:
 
 02.9. Provider-role requirements are dependency/resolution-layer semantics.
       They are similar in spirit to capabilities because they depend on a
-      named function/role rather than one concrete implementation, but they
-      are not runtime capability invocation semantics.
-02.12. Declaring or resolving a dependency does not load code, activate a
-       pack, grant visibility, grant capabilities, grant runtime access, grant
-       capability permission, define activation order, or consult
-       last-known-good fallback during dependency resolution.
+      named function or role rather than one concrete implementation.
 
+02.10. Provider-role requirements are not runtime capability invocation
+       semantics.
 
 
 ===============================================================================
@@ -152,12 +179,13 @@ Downstream Documents:
       may therefore reuse the same pack-specifier structure while producing
       different higher-level meaning.
 
-03.7. The shared pack-specifier structure supports the already-existing
-      versionless PackRequestRef forms where the surrounding field semantics
-      allow them.
+03.7. The shared pack-specifier structure supports versionless
+      PackRequestRef forms where the surrounding field semantics allow them.
 
 03.8. Fingerprint is an optional strengthening of an exact concrete pack
-      form. Fingerprint is never a vague compatibility hint by itself.
+      form.
+
+03.9. Fingerprint is never a vague compatibility hint by itself.
 
 
 ===============================================================================
@@ -325,36 +353,52 @@ Downstream Documents:
 09.1 SAVEONLY (LOCKED)
 ----------------------
 
-09.1.1. SaveOnly applies when the dependency's packTreeId is listed in
-        SavePack metadata as copied.
+09.1.1. SaveOnly applies when the dependency's packTreeId is listed as
+        SaveBundle-local copied or retained Pack material by one of:
+        - SaveBundle graph evidence
+        - retained Pack material metadata
+        - copied Pack material metadata
+        - accepted graph metadata
 
 09.1.2. Under SaveOnly:
-        - only copied packs inside that SavePack are eligible
-        - the global registry is not consulted
-        - absence of the copied pack is a hard error
+        - only copied or retained Pack material local to that
+          SaveBundle/Application context is eligible
+        - the ordinary global registry is not consulted
+        - absence of the local copied or retained Pack material is a hard
+          error
 
-09.1.3. Saved packs under this model:
-        - are identified by full identity
-          (author + packTreeId + version)
-        - are owned by the SavePack
-        - are immutable unless explicitly replaced
-        - are visible only within that save context
+09.1.3. SaveBundle-local Pack material under this model:
+        - is identified by full Pack identity when available
+        - is associated with the SaveBundle/Application context
+        - is immutable unless explicitly replaced by an owning persistence
+          or SaveBundle rule
+        - is visible only within that SaveBundle/Application context unless
+          another owning document explicitly says otherwise
+
+09.1.4. SaveBundle may physically contain Pack material.
+
+09.1.5. SaveBundle itself is not a Pack.
 
 
 09.2 GLOBALPINNED (LOCKED)
 --------------------------
 
-09.2.1. GlobalPinned applies when the dependency is bound to a pin in
-        SavePack metadata.
+09.2.1. GlobalPinned applies when the dependency is bound to a pin in one of:
+        - SaveBundle graph evidence
+        - accepted dependency graph metadata
+        - another owning persistence or graph document
 
 09.2.2. Under GlobalPinned:
-        - only the pinned concrete identity is eligible
+        - only the pinned concrete Pack identity is eligible
         - resolution occurs in the global registry only
         - a missing pinned identity is a hard error
         - the pin does not imply copying or saving
 
-09.2.3. Pins express explicit historical intent and bypass selector-based
-        candidate choice.
+09.2.3. Pins express explicit historical or accepted-graph intent.
+
+09.2.4. Pins bypass selector-based candidate choice.
+
+09.2.5. GlobalPinned does not fall back to GlobalNormal.
 
 
 09.3 GLOBALNORMAL (LOCKED)
@@ -363,9 +407,16 @@ Downstream Documents:
 09.3.1. GlobalNormal applies in all other dependency cases.
 
 09.3.2. Under GlobalNormal:
-        - resolution occurs in the global registry only
-        - SavePack content is not consulted
+        - resolution occurs in the ordinary global registry only
+        - SaveBundle-local retained or copied Pack material is not consulted
         - selection follows the deterministic procedure in section 11
+
+09.3.3. GlobalNormal does not apply to:
+        - SaveBundle-local copied or retained Pack material
+        - GlobalPinned pinned identity
+        - pinned graph identity
+        - explicit selected graph semantics
+        - accepted SaveBundle-local graph semantics
 
 
 ===============================================================================
@@ -438,6 +489,16 @@ Downstream Documents:
       - the first eligible candidate is selected
       - silent substitution is forbidden
 
+11.5. The root precedence in section 11.3.3 applies only to GlobalNormal
+      dependency resolution.
+
+11.6. The root precedence in section 11.3.3 does not override:
+      - SaveBundle-local copied or retained Pack material
+      - pinned dependency evidence
+      - pinned graph identity
+      - explicit selected graph semantics
+      - accepted SaveBundle-local graph semantics
+
 
 ===============================================================================
 12. REQUIRED ROLES AND PROVIDED ROLES (LOCKED)
@@ -467,19 +528,28 @@ Downstream Documents:
 12.9. A pack declaring providedRoles says that it can serve as a provider
       for those roles.
 
-12.10. If several providers declare the same role, runtime/provider
-       selection behavior is defined outside this document. By current
-       locked design, the first registered provider wins by default, and
-       specific-provider request may be used programmatically.
+12.10. Provider registration and provider selection behavior are defined
+       outside this document.
 
-12.11. requiredRoles does not itself force loader reordering or magical
-       dependency-graph mutation.
+12.11. requiredRoles does not itself force loader reordering or dependency-
+       graph mutation.
 
-12.12. Pack Manager may use role metadata to help users build sensible load
-       lists, but runtime behavior remains explicit.
+12.12. requiredRoles does not grant capability permission.
 
-12.13. This document does not yet define role-version matching, manifest-side
-       preferred provider constraints, or wildcard role semantics.
+12.13. providedRoles does not grant capability permission.
+
+12.14. PackManager may use role metadata to help users build sensible load
+       lists.
+
+12.15. Runtime behavior remains explicit.
+
+12.16. This document does not define:
+       - role-version matching
+       - manifest-side preferred provider constraints
+       - wildcard role semantics
+       - provider registry implementation
+       - provider registration order
+       - provider selection order
 
 
 ===============================================================================
@@ -518,7 +588,7 @@ Downstream Documents:
       - loader/runtime warning rules by themselves
 
 13.10. Advisory pack relations are for:
-       - Pack Manager
+       - PackManager
        - UI
        - compatibility presentation
        - helping the user assemble a load list
@@ -528,6 +598,14 @@ Downstream Documents:
 
 13.12. A shared pack-specifier structure does not upgrade advisory metadata
        into dependency semantics.
+
+13.13. PackManager may present advisory relation evidence.
+
+13.14. PackManager does not upgrade advisory relation evidence into
+       dependency authority.
+
+13.15. PackManager repair and graph-preparation behavior are defined outside
+       this document.
 
 
 ===============================================================================
@@ -541,11 +619,15 @@ Downstream Documents:
 
 14.3. User decision or accepted policy input is then required.
 
-14.4. Once such a decision is made:
+14.4. The decision owner is defined by the user-decision and policy layer.
+
+14.5. Once such a decision is made:
       - it is persisted by the surrounding consumer
       - future runs remain deterministic
 
-14.5. The resolver does not guess.
+14.6. The resolver does not guess.
+
+14.7. The resolver does not broaden the decision scope silently.
 
 
 ===============================================================================
@@ -555,7 +637,8 @@ Downstream Documents:
 15.1. Dependency resolution fails explicitly if:
       - no candidates remain after hard constraints
       - dependency-resolution source rules are violated
-      - a pinned or saved identity is missing
+      - a pinned identity is missing
+      - a SaveBundle-local copied or retained Pack identity is missing
       - ambiguity cannot be resolved
       - no permitted decision path exists
 
@@ -565,12 +648,17 @@ Downstream Documents:
       - observable
       - never silently resolved by fallback
 
+15.3. Dependency-resolution failure does not by itself define activation
+      recovery behavior.
+
 
 ===============================================================================
 16. LAST-KNOWN-GOOD FALLBACK BOUNDARY (LOCKED)
 ===============================================================================
 
-16.1. Turnix stores the last successfully activated graph per SavePack.
+16.1. Turnix may store last-known-good activation graph evidence for an
+      Application or SaveBundle according to activation/recovery and
+      persistence documents.
 
 16.2. Resolution always attempts fresh dependency resolution first.
 
@@ -578,10 +666,15 @@ Downstream Documents:
 
 16.4. Last-known-good fallback is used only after activation failure.
 
-16.5. Fallback procedure:
-      1) abort current activation
-      2) attempt activation using the stored graph
-      3) propagate failure if fallback fails
+16.5. Last-known-good fallback is activation/recovery behavior.
+
+16.6. Last-known-good fallback is not dependency success.
+
+16.7. DA-14 defines activation lifecycle, activation failure behavior, and
+      activation/recovery procedure.
+
+16.8. SaveBundle and persistence documents define durable storage of retained
+      activation graph evidence.
 
 
 ===============================================================================
@@ -592,36 +685,74 @@ Downstream Documents:
       - activate a pack
       - load code
       - grant runtime access
+      - grant capability permission
+      - create an ApplicationRun
+      - change Application lifecycle state
+      - change SaveBundle storage state by itself
 
 17.2. Activation semantics are defined elsewhere.
 
+17.3. Importing and module-loading semantics are defined elsewhere.
+
+17.4. Capability invocation and permission semantics are defined elsewhere.
+
 
 ===============================================================================
-18. LOCKED SUMMARY
+18. TRACE AND OBSERVABILITY BOUNDARY
 ===============================================================================
 
-18.1. LOCKED:
+18.1. Dependency-resolution trace evidence is required as a domain emission
+      obligation where dependency resolution occurs.
+
+18.2. Trace representation, retention, pruning, and loss remain governed by
+      DA-03.
+
+18.3. Trace evidence does not become committed state.
+
+18.4. Trace evidence does not become SaveBundle truth.
+
+18.5. Trace evidence does not become activation success.
+
+18.6. Trace evidence does not become dependency success.
+
+18.7. Trace evidence does not become PackManager decision truth.
+
+
+===============================================================================
+19. LOCKED SUMMARY
+===============================================================================
+
+19.1. LOCKED:
       - dependencies are hard contracts
       - PackRequest interpretation is fixed in dependency context
       - shared pack-specifier structure is reused across dependency-like
         manifest fields
+      - shared pack-specifier syntax does not imply shared semantics
       - accepted-entry normalization supports versionless, versioned, and
         exact-version-plus-fingerprint forms where allowed
       - fingerprint requires exact concrete version
       - dependency-resolution sources are exclusive
-      - saved packs are immutable and local
+      - SaveBundle-local copied or retained Pack material is local
       - pinned packs enforce exact identity
       - GlobalNormal selection is procedural and deterministic
+      - GlobalNormal root precedence is scoped to GlobalNormal
       - requiredRoles and providedRoles are separate manifest semantics from
         packs
+      - requiredRoles and providedRoles do not grant capability permission
       - supportedPacks, conflictingPacks, and recommendedPacks are advisory
         metadata only
-      - no silent substitution
+      - no silent substitution occurs
       - ambiguity requires explicit decision
+      - last-known-good is not dependency-resolution fallback
+      - dependency resolution does not load code
+      - dependency resolution does not activate packs
+      - dependency resolution does not grant runtime access
 
-18.2. OPEN:
+19.2. OPEN:
       - role-version model
       - richer manifest-side provider constraints
+      - provider registry implementation
+      - provider registration and selection order
       - tooling and UI presentation only
 
 
@@ -632,6 +763,6 @@ END OF DA-13 - DEPENDENCIES, REQUIREMENTS & PACK REQUESTS
 --- doc-meta ---
 DOC_ID: DA-13
 DOC_FILE: docs/design/DA-13_DEPENDENCIES_REQUIREMENTS_AND_PACK_REQUESTS.txt
-DOC_REV: 15
-DOC_GIT: 94da777
+DOC_REV: 16
+DOC_GIT: 8d4bff8
 ----------------
