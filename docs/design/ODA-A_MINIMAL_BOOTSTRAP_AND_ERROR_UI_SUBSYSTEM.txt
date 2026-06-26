@@ -9,8 +9,8 @@ EVOLVING
 Description:
 ------------
 Defines a minimal bootstrap and error-presentation layer for failures that
-occur before normal appPack activation and before the main user-facing
-Turnix surfaces are available.
+occur before normal Pack activation, Application-facing View surfaces, or
+ApplicationRun readiness.
 
 This area is optional in tier, but strategically important for robustness,
 debuggability, and user trust.
@@ -24,20 +24,21 @@ are available.
 It defines:
 - bootstrap rings as a conceptual startup model
 - the role and scope of the minimal error UI
-- kernel-owned error communication and action handling
+- Kernel-mediated error communication and action handling
 - frontend handling during early blocking failures
 - relationship to RPC, View, and execution adapter boundaries
 - fallback behavior when minimal UI is unavailable
 
 It does NOT define:
 - core Turnix correctness semantics
-- normal appPack user-interface behavior
+- normal Application/View user-interface behavior
 - PackManager behavior
 - normal View runtime behavior (see DA-22)
 - execution adapter boundary semantics (see DA-23)
 - RPC, channel, or transport semantics (see DA-21)
 - mod-defined or themeable early UI extension rules
 - LLM-assisted recovery as required behavior
+- a general runtime ring taxonomy
 
 Upstream Documents:
 ------------------
@@ -78,13 +79,14 @@ Upstream Documents:
 ===============================================================================
 
 02.1. Turnix may fail before:
-      - any appPack is active
-      - normal user interface exists
+      - any normal Pack activation has succeeded
+      - any ApplicationRun is ready
+      - normal Application-facing View surfaces exist
       - mods are loaded
       - services or capabilities are available for normal application use
 
 02.2. Examples include:
-      - corrupted global config
+      - corrupted Workspace/runtime configuration
       - unreadable manifest
       - schema mismatch
       - missing runtime files
@@ -104,69 +106,81 @@ Upstream Documents:
 02.5. The minimal bootstrap error subsystem does not become the normal UI
       runtime merely because it can present errors.
 
+02.6. The minimal bootstrap error subsystem does not belong to an
+      ApplicationRun merely because it may present an error during
+      Application creation or loading.
+
 
 ===============================================================================
 03. BOOTSTRAP RINGS (LOCKED CONCEPT)
 ===============================================================================
 
-03.1. Turnix startup may be understood as a ring-based conceptual model.
+03.1. Turnix startup may be understood through a ring-based conceptual
+      model.
+
+03.2. Bootstrap rings are local to this document's startup explanation.
+
+03.3. This document does not define a general runtime ring taxonomy.
 
 
-03.1 RING 0 - KERNEL BOOTSTRAP (LOCKED CONCEPT)
+03.4 RING 0 - KERNEL BOOTSTRAP (LOCKED CONCEPT)
 -----------------------------------------------
 
-03.1.1. Ring 0 includes early kernel bootstrap responsibilities such as:
+03.4.1. Ring 0 includes early Kernel bootstrap responsibilities such as:
         - process startup
-        - logging
-        - IoManager
+        - logging and early diagnostics
+        - IoManager readiness needed by bootstrap paths
         - error-envelope handling
-        - config schema loading
-        - default-config loading
-        - user-config loading
+        - configuration schema loading
+        - default configuration loading
+        - Workspace/runtime configuration loading
 
-03.1.2. Failures in Ring 0 are fatal.
+03.4.2. Failures in Ring 0 are fatal.
 
-03.1.3. No user interface is guaranteed in Ring 0.
+03.4.3. No user interface is guaranteed in Ring 0.
 
 
-03.2 RING 1 - MINIMAL UI BOOTSTRAP (LOCKED CONCEPT)
+03.5 RING 1 - MINIMAL UI BOOTSTRAP (LOCKED CONCEPT)
 ---------------------------------------------------
 
-03.2.1. Ring 1 includes the minimal bootstrap-facing error subsystem.
+03.5.1. Ring 1 includes the minimal bootstrap-facing error subsystem.
 
-03.2.2. Ring 1 responsibilities may include:
-        - serving index.html
-        - serving bootstrap.js
+03.5.2. Ring 1 responsibilities may include:
+        - serving minimal bootstrap UI assets
+        - serving an HTML shell or bootstrap script when used
         - establishing RPC or an equivalent bootstrap communication path
         - registering early error-reporting paths
         - rendering a minimal error UI
 
-03.2.3. Failures in Ring 1 are severe.
+03.5.3. Failures in Ring 1 are severe.
 
-03.2.4. Ring-1 failures may still allow retry, fallback, or user action when
+03.5.4. Ring-1 failures may still allow retry, fallback, or user action when
         the surrounding bootstrap environment supports that.
 
-03.2.5. Ring-1 frontend code, when present, remains frontend adapter code
+03.5.5. Ring-1 frontend code, when present, remains frontend adapter code
         under DA-23 rather than Kernel authority.
 
-03.2.6. Ring-1 communication, when RPC-backed, remains constrained by
+03.5.6. Ring-1 communication, when RPC-backed, remains constrained by
         DA-21.
 
 
-03.3 RING 2 - PACK DISCOVERY AND ACTIVATION (LOCKED CONCEPT)
-------------------------------------------------------------
+03.6 RING 2 - PACK DISCOVERY, APPLICATION, AND ACTIVATION
+---------------------------------------------------------
 
-03.3.1. Ring 2 includes later startup work such as:
+03.6.1. Ring 2 includes later startup work such as:
         - content scanning
         - indexing
-        - activation
-        - appInstance creation
+        - graph preparation
+        - Pack activation
+        - Application creation or loading
+        - ApplicationRun creation and readiness
 
-03.3.2. Failures in Ring 2 are expected to be more user-resolvable than
+03.6.2. Failures in Ring 2 are expected to be more user-resolvable than
         Ring-0 failures because the minimal interaction layer may already
         exist by then.
 
-03.3.3. AppInstance lifecycle meaning remains owned by DA-20.
+03.6.3. Application and ApplicationRun lifecycle meaning remains outside
+        this document's authority.
 
 
 ===============================================================================
@@ -175,19 +189,24 @@ Upstream Documents:
 
 04.1. The minimal error UI exists only to:
       - display fatal or blocking errors
-      - present recovery choices supplied by the kernel
-      - return a decision to the kernel
+      - present recovery choices supplied by the Kernel-owned recovery path
+      - return a selected decision to the Kernel-owned recovery path
 
 04.2. The minimal error UI is not:
       - a full application UI
       - a normal View runtime surface
       - a PackManager
+      - a RuntimeHost command surface
       - themeable by normal packs
       - customizable by mods
 
 04.3. The minimal error UI does not own the meaning of actions it displays.
 
 04.4. The minimal error UI does not own recovery authority.
+
+04.5. The minimal error UI is a bootstrap decision surface.
+
+04.6. The minimal error UI is not a normal Application View.
 
 
 ===============================================================================
@@ -199,8 +218,8 @@ Upstream Documents:
       - fast to load
       - independent of packs
       - independent of LLM availability
-      - independent of user config
-      - independent of saves
+      - independent of Workspace/user-authored configuration
+      - independent of SaveBundles
       - independent of asset compilation
 
 05.2. Acceptable forms may include:
@@ -219,10 +238,11 @@ Upstream Documents:
 
 
 ===============================================================================
-06. ERROR COMMUNICATION MODEL (LOCKED)
+06. ERROR COMMUNICATION AND DIAGNOSTICS MODEL (LOCKED)
 ===============================================================================
 
-06.1. Kernel-originated blocking errors are sent to the minimal UI as:
+06.1. Blocking errors classified through the Kernel-owned recovery path are
+      sent to the minimal UI as:
       - the standard error envelope
       - a human-readable message
       - structured payload
@@ -233,52 +253,90 @@ Upstream Documents:
       - optional parameters
       - acknowledgement when required
 
-06.3. Action meaning originates in the kernel rather than in the UI.
+06.3. Action meaning originates in the Kernel-owned recovery path rather
+      than in the UI.
 
 06.4. UI acknowledgement does not imply recovery success.
 
 06.5. Transport acknowledgement does not imply recovery success.
 
-06.6. Recovery outcome remains owned by the kernel-owned recovery path.
+06.6. Recovery outcome remains owned by the Kernel-owned recovery path.
+
+06.7. The subsystem emits structured trace or diagnostic evidence for early
+      blocking errors when the relevant bootstrap substrate is available.
+
+06.8. The subsystem emits structured trace or diagnostic evidence for
+      presented actions when the relevant bootstrap substrate is available.
+
+06.9. The subsystem emits structured trace or diagnostic evidence for
+      selected decisions when the relevant bootstrap substrate is available.
+
+06.10. The subsystem emits structured trace or diagnostic evidence for
+       fallback, unavailable-UI, timeout, and abort outcomes when the
+       relevant bootstrap substrate is available.
+
+06.11. Early trace or diagnostic loss weakens evidence.
+
+06.12. Early trace or diagnostic loss does not by itself redefine
+       committed-state correctness.
 
 
 ===============================================================================
 07. SUPPORTED USER ACTIONS (LOCKED)
 ===============================================================================
 
-07.1. Typical kernel-provided actions may include:
+07.1. Typical Kernel-provided actions may include:
       - Retry
-      - Reset config to defaults
+      - Reset selected Workspace/runtime configuration to defaults when allowed
       - Ignore and continue when allowed
       - Abort startup
-      - Open logs directory
+      - Open diagnostics/logs through a controlled host action
 
-07.2. Available actions are provided by the kernel.
+07.2. Available actions are provided by the Kernel-owned recovery path.
 
 07.3. The UI does not invent actions.
 
 07.4. The UI does not auto-confirm actions without policy authority.
+
+07.5. Opening diagnostics or logs does not grant the minimal UI unrestricted
+      filesystem authority.
+
+07.6. Opening diagnostics or logs does not grant the minimal UI a general
+      file-browser capability.
 
 
 ===============================================================================
 08. UI AVAILABILITY GUARANTEE
 ===============================================================================
 
-08.1. Once Ring 1 is complete:
-      - the kernel may assume that a minimal decision surface exists
-      - user decisions may be requested
-      - execution may pause safely for decision handling
+08.1. Ring-1 completion means the minimal bootstrap decision surface has
+      been established for use.
 
-08.2. Before Ring 1 completes:
+08.2. Once Ring 1 is complete, the Kernel may attempt to use the minimal
+      decision surface for blocking startup decisions.
+
+08.3. Once Ring 1 is complete, Kernel-mediated work may pause at a decision
+      point according to policy.
+
+08.4. Ring-1 completion does not guarantee continued frontend availability.
+
+08.5. Ring-1 completion does not guarantee successful reconnect.
+
+08.6. Ring-1 completion does not guarantee successful recovery.
+
+08.7. If the minimal UI is unavailable, disconnects, or times out, the
+      fallback and failure rules in section 10 apply.
+
+08.8. Before Ring 1 completes:
       - no user interaction is relied upon
       - fatal errors abort immediately unless an even earlier fallback path
         exists outside this document's guaranteed scope
 
-08.3. Ring-1 completion does not imply normal UI readiness.
+08.9. Ring-1 completion does not imply normal UI readiness.
 
-08.4. Ring-1 completion does not imply AppInstance readiness.
+08.10. Ring-1 completion does not imply ApplicationRun readiness.
 
-08.5. Ring-1 completion does not imply pack activation success.
+08.11. Ring-1 completion does not imply Pack activation success.
 
 
 ===============================================================================
@@ -287,13 +345,12 @@ Upstream Documents:
 
 09.1. If multiple frontends connect to the minimal error subsystem:
       - the blocking error is broadcast
-      - the first valid response wins
+      - the first valid response accepted by Kernel-owned recovery wins
       - other pending presentations are dismissed
 
-09.2. The kernel remains the authority.
+09.2. The Kernel remains the authority.
 
-09.3. Multiple frontend presentations do not create multiple recovery
-      truths.
+09.3. Multiple frontend presentations do not create multiple recovery truths.
 
 09.4. Stale or already-resolved presentations are not accepted again.
 
@@ -303,7 +360,8 @@ Upstream Documents:
 ===============================================================================
 
 10.1. If the minimal UI fails to load:
-      - Turnix may fall back to a launcher surface
+      - Turnix may request a controlled RuntimeHost fallback surface
+      - Turnix may request a controlled launcher fallback surface
       - Turnix may fall back to console reporting
       - Turnix may abort with a clear error when no safe fallback exists
 
@@ -312,21 +370,27 @@ Upstream Documents:
       - reconnect may be allowed
       - timeout handling may apply when configured
 
-10.3. UI disconnect does not automatically imply Job failure.
+10.3. If the UI becomes unavailable after Ring-1 completion, section 08 does
+      not preserve a stronger availability guarantee.
 
-10.4. UI disconnect does not automatically imply adapter failure.
+10.4. If the UI times out, fallback handling or abort handling applies
+      according to the Kernel-owned recovery path.
 
-10.5. UI disconnect does not redefine committed-state meaning.
+10.5. UI disconnect does not automatically imply Job failure.
+
+10.6. UI disconnect does not automatically imply adapter failure.
+
+10.7. UI disconnect does not redefine committed-state meaning.
 
 
 ===============================================================================
 11. OPTIONAL PACK-BASED ERROR UI (OPEN)
 ===============================================================================
 
-11.1. A future design may define a special early-loaded errorUiPack model.
+11.1. A future design may define a special early-loaded error UI Pack model.
 
 11.2. Such a model might:
-      - load before normal discovery
+      - load before normal Pack activation
       - require explicit whitelisting
       - replace the built-in minimal error UI
 
@@ -341,9 +405,15 @@ Upstream Documents:
 
 11.5. This concept remains OPEN.
 
-11.6. Any future pack-based error UI model remains constrained by normal
-      execution adapter, activation, RPC, and authority boundaries unless a
-      later authoritative document defines a narrower bootstrap exception.
+11.6. A future pack-based error UI model remains constrained by normal
+      execution adapter, activation, RPC, and authority boundaries unless an
+      authoritative document defines a narrower bootstrap exception.
+
+11.7. A future pack-based error UI model does not inherit ordinary discovery
+      or activation behavior merely because it is pack-based.
+
+11.8. A future pack-based error UI model does not become PackManager,
+      RuntimeHost, Kernel, or recovery authority.
 
 
 ===============================================================================
@@ -353,12 +423,16 @@ Upstream Documents:
 12.1. A future design may allow LLM-assisted explanation or guidance when an
       LLM service is available.
 
-12.2. Constraints would include:
+12.2. Constraints include:
       - LLM assistance does not block recovery
       - LLM assistance does not replace user choice
       - LLM assistance is never required for recovery
 
-12.3. This concept remains OPEN and optional.
+12.3. LLM assistance does not own action meaning.
+
+12.4. LLM assistance does not own recovery authority.
+
+12.5. This concept remains OPEN and optional.
 
 
 ===============================================================================
@@ -374,6 +448,9 @@ Upstream Documents:
       - theming
       - normal frontend adapter lifecycle
       - normal View lifecycle
+      - raw filesystem access
+      - PackManager operations
+      - RuntimeHost command ownership
 
 
 ===============================================================================
@@ -381,14 +458,17 @@ Upstream Documents:
 ===============================================================================
 
 14.1. LOCKED:
-      - bootstrap rings as a conceptual model
+      - bootstrap rings as a conceptual model local to this document
       - the minimal error UI role
-      - kernel-driven actions
+      - Kernel-mediated action authority
       - structured error-envelope communication
-      - pause-and-resume handling once minimal UI exists
+      - qualified decision-surface use after Ring 1
       - Ring-1 frontend code is not Kernel authority
       - presentation technology does not define authority
       - UI or transport acknowledgement does not imply recovery success
+      - minimal UI diagnostics/log actions do not grant raw filesystem
+        authority
+      - early trace or diagnostic evidence is emitted when available
 
 14.2. OPEN:
       - pack-based error UI
@@ -403,6 +483,6 @@ END OF ODA-A - MINIMAL BOOTSTRAP & ERROR UI SUBSYSTEM
 --- doc-meta ---
 DOC_ID: ODA-A
 DOC_FILE: docs/design/ODA-A_MINIMAL_BOOTSTRAP_AND_ERROR_UI_SUBSYSTEM.txt
-DOC_REV: 8
-DOC_GIT: ad877cc
+DOC_REV: 9
+DOC_GIT: a07a3bf
 ----------------
