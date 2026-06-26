@@ -12,16 +12,17 @@ Defines execution adapter trust and isolation expectations, initial adapter
 classes, adapter lifecycle semantics, and adapter trace reason ownership.
 
 This document owns operational lifecycle and traceability semantics for
-adapters. It consumes the abstract execution-boundary model defined by
-DA-23. RuntimeHost identity, workspace ownership, startup modes, entry
-surfaces, command-surface semantics, local-first interpretation, LAN exposure,
-and RuntimeHost trace reason ownership are defined by DA-28.
+adapters. It consumes the abstract execution-boundary model defined by DA-23.
+RuntimeHost identity, workspace ownership, startup modes, entry surfaces,
+command-surface semantics, local-first interpretation, LAN exposure, and
+RuntimeHost trace reason ownership are defined by DA-28.
 
 Purpose:
 --------
 This document defines how Turnix treats adapter runtime trust, lifecycle,
 traceability, and concrete adapter classes without changing the abstract
-execution authority boundary or runtime-host authority boundary.
+execution authority boundary, Pack activation boundary, or RuntimeHost
+authority boundary.
 
 It defines:
 - distinction between adapter mediation and sandboxing
@@ -36,18 +37,25 @@ It defines:
 It does NOT define:
 - generic resolution mechanics (see DA-11)
 - importing and module-loading selector details (see DA-12)
-- activation lifecycle beyond adapter lifecycle constraints (see DA-14)
+- Pack activation lifecycle, phase barriers, registration publication, cyclic
+  activation groups, or final Activated-state meaning (see DA-14)
 - capability permission semantics (see DA-16)
 - user decision and remembered policy semantics (see DA-17)
 - Job lifecycle, timeout, cancellation, or progress semantics (see DA-19)
 - ApplicationRun lifecycle or runtime identity semantics (see DA-20)
 - abstract RPC, channel, and transport semantics (see DA-21)
 - UI, View, and frontend runtime presentation semantics (see DA-22)
-- abstract execution adapter authority boundaries, ModCallContext, code
-  artifact phases, or RPC-shaped authority boundary semantics (see DA-23)
+- abstract execution adapter authority boundaries, code artifact phases, or
+  RPC-shaped authority boundary semantics (see DA-23)
+- OrchestrationUnit lifecycle or mutation authority semantics (see DA-24)
+- Window artifact, export, or retained artifact semantics (see DA-25)
+- offline comparison, Replay, Resume, Retry, or retained-evidence workflow
+  semantics (see DA-26)
 - RuntimeHost identity, workspace ownership, startup modes, entry surfaces,
   command-surface semantics, local-first interpretation, LAN exposure, or
   RuntimeHost trace reason identifiers (see DA-28)
+- ModCallContext invocation gateway lifetime, facade, retention, or absent
+  surfaces (see DA-30)
 - concrete RPC message schema (see IS-01)
 - concrete WebSocket flow (see IS-02)
 - concrete Python subprocess, container, or worker protocol details
@@ -64,6 +72,8 @@ Upstream Documents:
 - DA-01
 - DA-02
 - DA-03
+- DA-05
+- DA-06
 - DA-07
 - DA-14
 - DA-16
@@ -73,12 +83,17 @@ Upstream Documents:
 - DA-21
 - DA-22
 - DA-23
+- DA-24
+- DA-25
+- DA-26
 - DA-28
+- DA-30
 
 Downstream Documents:
 --------------------
 - DA-23
 - DA-28
+- DA-30
 - IS-01
 - IS-02
 - future adapter implementation specifications
@@ -102,6 +117,19 @@ Downstream Documents:
 01.4. This document defines adapter lifecycle, trust, isolation, and
       traceability semantics within that shared interpretation model.
 
+01.5. This document uses canonical architecture type names where those names
+      are part of the current indexed document set.
+
+01.6. Important type names for this document include:
+      - Application
+      - ApplicationRun
+      - SaveBundle
+      - ExecutionAdapter
+      - ModCallContext
+      - OrchestrationUnit
+      - RuntimeHost
+      - View
+
 
 ===============================================================================
 02. CORE CONCEPT
@@ -110,49 +138,55 @@ Downstream Documents:
 02.1. This design area answers:
 
           "How does Turnix classify, run, observe, trust, disconnect, fail,
-           and close execution adapters without changing Kernel authority or
-           RuntimeHost authority?"
+           and close execution adapters without changing Kernel authority,
+           Pack activation authority, or RuntimeHost authority?"
 
-02.2. DA-23 defines the abstract execution boundary for declared pack code.
+02.2. DA-23 defines the abstract execution boundary for declared Pack code.
 
-02.3. DA-28 defines RuntimeHost identity, workspace ownership, startup modes,
+02.3. DA-14 defines Pack activation lifecycle, phase barriers, registration
+      publication, cyclic activation groups, and final Activated-state
+      meaning.
+
+02.4. DA-28 defines RuntimeHost identity, workspace ownership, startup modes,
       entry surfaces, command-surface semantics, local-first interpretation,
       LAN exposure, and RuntimeHost trace reason ownership.
 
-02.4. This document defines the operational adapter lifecycle and
+02.5. DA-30 defines ModCallContext invocation gateway semantics.
+
+02.6. This document defines the operational adapter lifecycle and
       traceability model for the DA-23 execution boundary.
 
-02.5. Adapter mediation is not sandboxing.
+02.7. Adapter mediation is not sandboxing.
 
-02.6. Adapter readiness is not pack activation success.
+02.8. Adapter readiness is not Pack activation success or final Activated
+      state.
 
-02.7. Adapter failure is not Job failure by default.
+02.9. Adapter failure is not Job failure by default.
 
-02.8. Adapter disconnect is not Job cancellation by default.
+02.10. Adapter disconnect is not Job cancellation by default.
 
-02.9. Adapter lifecycle is distinct from ApplicationRun lifecycle.
+02.11. Adapter lifecycle is distinct from ApplicationRun lifecycle.
 
-02.10. Adapter lifecycle is distinct from transport lifecycle.
+02.12. Adapter lifecycle is distinct from transport lifecycle.
 
-02.11. Adapter lifecycle is distinct from RuntimeHost lifecycle.
+02.13. Adapter lifecycle is distinct from RuntimeHost lifecycle.
 
-02.12. Adapter lifecycle is distinct from capability permission.
+02.14. Adapter lifecycle is distinct from capability permission.
 
-02.13. Deployment topology does not redefine adapter authority.
+02.15. Deployment topology does not redefine adapter authority.
 
-02.14. Deployment topology does not redefine RuntimeHost authority.
+02.16. Deployment topology does not redefine RuntimeHost authority.
 
-02.15. Later sections refine and apply these rules. They do not weaken them.
+02.17. Later sections refine and apply these rules. They do not weaken them.
 
-02.16. Adapter lifecycle, trust, unsafe execution, active save identity,
+02.18. Adapter lifecycle, trust, unsafe execution, SaveBundle identity,
        BrowserJSAdapter state, persistent state, workspace ownership, and
        persistent I/O wording do not redefine DA-05, DA-06, DA-07, DA-23, or
        DA-28 authority.
 
-02.17. Adapter failure, disconnect, trace evidence, retained evidence,
-       artifact loading, audit, comparison, Replay, Resume, Retry, or workflow
+02.19. Adapter failure, disconnect, trace evidence, retained evidence,
+       artifact loading, comparison, Replay, Resume, Retry, or workflow
        wording does not define DA-25 or DA-26 semantics.
-
 
 
 ===============================================================================
@@ -161,9 +195,9 @@ Downstream Documents:
 
 03.1. Adapter mediation is not sandboxing.
 
-03.2. Adapter mediation means adapter-executed code participates in Turnix
-      through Turnix-controlled context, RPC-shaped boundaries,
-      capabilities, lifecycle, policy, and trace correlation.
+03.2. Adapter mediation means adapter-executed Pack code participates in
+      Turnix through ModCallContext, RPC-shaped boundaries, capabilities,
+      lifecycle, policy, and trace correlation.
 
 03.3. Sandbox means a security isolation mechanism that restricts what code
       can do outside Turnix semantic boundaries.
@@ -183,6 +217,13 @@ Downstream Documents:
 03.9. Lack of isolation does not grant backend authority.
 
 03.10. Isolation mechanism does not change RuntimeHost authority semantics.
+
+03.11. Adapter trust or isolation class does not grant ctx.kernel,
+       ctx.runtimeHost, ctx.services, ctx.rawFilesystem, or any other
+       surface withheld by ModCallContext semantics.
+
+03.12. DA-30 owns ModCallContext lifetime, facade, retention, and absent-
+       surface semantics.
 
 
 ===============================================================================
@@ -208,8 +249,8 @@ Downstream Documents:
 04.7. Third-party or externally supplied executable code is not executed
       through unsafe adapters unless explicit policy permits that path.
 
-04.8. Trust classification, permission prompts, and policy persistence
-      remain governed by the owning decision and policy documents.
+04.8. Trust classification, permission prompts, and policy persistence remain
+      governed by the owning decision and policy documents.
 
 04.9. A trust decision authorizes only the declared trust scope.
 
@@ -227,12 +268,20 @@ Downstream Documents:
        the governing RuntimeHost and policy documents define that combined
        effect explicitly.
 
+04.14. A trust decision does not authorize artifact or export authority unless
+       the owning artifact and export documents define that combined effect
+       explicitly.
+
+04.15. A trust decision does not authorize comparison, Replay, Resume, Retry,
+       or retained-evidence workflow authority unless the owning workflow
+       documents define that combined effect explicitly.
+
 
 ===============================================================================
 05. INITIAL ADAPTER CLASSES
 ===============================================================================
 
-05.1. BrowserJSAdapter runs JavaScript pack code in a browser frontend
+05.1. BrowserJSAdapter runs JavaScript Pack code in a browser frontend
       runtime.
 
 05.2. BrowserJSAdapter is normally used for View packs, UI packs, and other
@@ -240,51 +289,55 @@ Downstream Documents:
 
 05.3. BrowserJSAdapter owns no authoritative persistent state.
 
-05.4. PythonInProcessAdapter runs Python pack code in the same process as
-      the backend implementation.
+05.4. BrowserJSAdapter state is not authoritative Application state.
 
-05.5. PythonInProcessAdapter is trusted or policy-gated adapter execution.
+05.5. BrowserJSAdapter state is not authoritative ApplicationRun state.
 
-05.6. PythonInProcessAdapter still uses Turnix context, capability, trace,
+05.6. PythonInProcessAdapter runs Python Pack code in the same process as the
+      backend implementation.
+
+05.7. PythonInProcessAdapter is trusted or policy-gated adapter execution.
+
+05.8. PythonInProcessAdapter still uses ModCallContext, capability, trace,
       and lifecycle boundaries.
 
-05.7. PythonInProcessAdapter is not backend implementation authority.
+05.9. PythonInProcessAdapter is not backend implementation authority.
 
-05.8. PythonSubprocessAdapter runs Python pack code in a worker process.
+05.10. PythonSubprocessAdapter runs Python Pack code in a worker process.
 
-05.9. PythonSubprocessAdapter communicates with the Kernel through an
-      RPC-shaped boundary over an implementation-defined transport.
+05.11. PythonSubprocessAdapter communicates with the Kernel through an
+       RPC-shaped boundary over an implementation-defined transport.
 
-05.10. PythonSubprocessAdapter provides process separation but not complete
+05.12. PythonSubprocessAdapter provides process separation but not complete
        security by itself.
 
-05.11. CliAdapter presents command-line interaction and may act as a control
+05.13. CliAdapter presents command-line interaction and may act as a control
        surface for a RuntimeHost.
 
-05.12. CliAdapter is not the Kernel by itself.
+05.14. CliAdapter is not the Kernel by itself.
 
-05.13. CliAdapter is not RuntimeHost authority by itself.
+05.15. CliAdapter is not RuntimeHost authority by itself.
 
-05.14. DA-28 owns RuntimeHost command-surface semantics used by CLI control
+05.16. DA-28 owns RuntimeHost command-surface semantics used by CLI control
        surfaces.
 
-05.15. RemoteClientAdapter connects to a Kernel or RuntimeHost-facing surface
+05.17. RemoteClientAdapter connects to a Kernel or RuntimeHost-facing surface
        over an explicit transport.
 
-05.16. RemoteClientAdapter does not own state authority.
+05.18. RemoteClientAdapter does not own state authority.
 
-05.17. RemoteClientAdapter does not own RuntimeHost authority.
+05.19. RemoteClientAdapter does not own RuntimeHost authority.
 
-05.18. TestAdapter provides controlled execution and observation surfaces for
+05.20. TestAdapter provides controlled execution and observation surfaces for
        tests.
 
-05.19. TestAdapter does not weaken runtime authority boundaries merely
-       because it exists for testing.
+05.21. TestAdapter does not weaken runtime authority boundaries merely because
+       it exists for testing.
 
-05.20. Future adapter classes remain constrained by this document, DA-23,
-       and DA-28 when RuntimeHost behavior is involved.
+05.22. Future adapter classes remain constrained by this document, DA-23, and
+       DA-28 when RuntimeHost behavior is involved.
 
-05.21. Adapter class names are descriptive unless a later implementation
+05.23. Adapter class names are descriptive unless a later implementation
        specification locks concrete identifiers.
 
 
@@ -309,7 +362,7 @@ Downstream Documents:
 06.2. Concrete adapter lifecycle states may be refined by implementation
       specifications.
 
-06.3. Adapter lifecycle does not replace pack activation lifecycle.
+06.3. Adapter lifecycle does not replace Pack activation lifecycle.
 
 06.4. Adapter lifecycle does not replace ApplicationRun lifecycle.
 
@@ -321,31 +374,55 @@ Downstream Documents:
 
 06.8. Adapter lifecycle does not replace capability permission.
 
-06.9. Adapter readiness means the adapter can participate in the expected
-      runtime flow.
+06.9. Adapter lifecycle does not replace Window, OrchestrationUnit, artifact,
+      export, comparison, Replay, Resume, Retry, or retained-evidence workflow
+      lifecycle.
 
-06.10. Adapter readiness does not imply pack activation success.
+06.10. Adapter readiness means the adapter can participate in the expected
+       runtime flow.
 
-06.11. Adapter readiness does not imply capability permission.
+06.11. Adapter readiness does not imply Pack activation success.
 
-06.12. Adapter readiness does not imply ApplicationRun readiness.
+06.12. Adapter readiness does not imply final Activated state.
 
-06.13. Adapter readiness does not imply RuntimeHost readiness.
+06.13. Adapter readiness does not imply capability permission.
 
-06.14. Adapter readiness does not imply Job success.
+06.14. Adapter readiness does not imply ApplicationRun readiness.
 
-06.15. Adapter connection does not imply adapter readiness.
+06.15. Adapter readiness does not imply RuntimeHost readiness.
 
-06.16. Adapter loading does not imply adapter activation dispatch success.
+06.16. Adapter readiness does not imply Job success.
 
-06.17. Adapter activation dispatch does not imply activation success.
+06.17. Adapter connection does not imply adapter readiness.
 
-06.18. Adapter closed means the adapter instance has been released or is no
+06.18. Adapter loading does not imply adapter activation dispatch success.
+
+06.19. Adapter entry loading or evaluation is adapter-domain lifecycle
+       evidence.
+
+06.20. Adapter activation dispatch is adapter-domain lifecycle evidence.
+
+06.21. Adapter activation dispatch does not imply Phase 1 completion.
+
+06.22. Adapter activation dispatch does not imply Phase 2 completion.
+
+06.23. Adapter activation dispatch does not imply Phase 3 completion.
+
+06.24. Adapter activation dispatch does not imply cyclic-group activation.
+
+06.25. Adapter activation dispatch does not imply registration publication.
+
+06.26. Adapter activation dispatch does not imply final Activated state unless
+       DA-14 maps the dispatch to that outcome.
+
+06.27. DA-14 owns Pack activation lifecycle meanings.
+
+06.28. Adapter closed means the adapter instance has been released or is no
        longer available to participate in the relevant runtime flow.
 
-06.19. Adapter closed does not silently redefine committed-state meaning.
+06.29. Adapter closed does not silently redefine committed-state meaning.
 
-06.20. Adapter closed does not silently define RuntimeHost stop, failure, or
+06.30. Adapter closed does not silently define RuntimeHost stop, failure, or
        command-surface outcome.
 
 
@@ -370,7 +447,7 @@ Downstream Documents:
 07.8. Adapter disconnect does not automatically cancel, supersede, time out,
       detach, retain, or discard Job-backed work.
 
-07.9. Adapter disconnect does not automatically cancel an Orchestration Unit.
+07.9. Adapter disconnect does not automatically cancel an OrchestrationUnit.
 
 07.10. Adapter disconnect does not automatically fail an ApplicationRun.
 
@@ -378,7 +455,7 @@ Downstream Documents:
        RuntimeHost.
 
 07.12. If adapter failure or disconnect affects accepted work, decision,
-       Orchestration Unit, Job, and policy documents govern the resulting
+       OrchestrationUnit, Job, and policy documents govern the resulting
        lifecycle handling.
 
 07.13. If adapter failure or disconnect affects transport state, DA-21 and
@@ -391,6 +468,27 @@ Downstream Documents:
        governs RuntimeHost lifecycle, host-operation, and command-surface
        classification.
 
+07.16. Adapter artifact loading, execution, readiness, failure, disconnect,
+       trace evidence, or closure does not by itself grant committed-value
+       representation authority.
+
+07.17. Adapter artifact loading, execution, readiness, failure, disconnect,
+       trace evidence, or closure does not by itself grant configuration
+       authority.
+
+07.18. Adapter artifact loading, execution, readiness, failure, disconnect,
+       trace evidence, or closure does not by itself grant persistent I/O
+       authority.
+
+07.19. Adapter artifact loading, execution, readiness, failure, disconnect,
+       trace evidence, or closure does not by itself define artifact or export
+       authority.
+
+07.20. Adapter artifact loading, execution, readiness, failure, disconnect,
+       trace evidence, or closure does not by itself define missing-material,
+       comparison, Replay, Resume, Retry, or retained-evidence workflow
+       outcomes.
+
 
 ===============================================================================
 08. ADAPTER TRACE REASON IDENTIFIERS
@@ -401,7 +499,6 @@ Downstream Documents:
       disconnect, and closure.
 
 08.2. The following adapter-domain trace reasons are defined:
-
       - AdapterSelected
       - AdapterCreated
       - AdapterConnected
@@ -424,19 +521,19 @@ Downstream Documents:
 08.5. AdapterConnected is emitted when an adapter connection or equivalent
       participation channel becomes available.
 
-08.6. AdapterReady is emitted when an adapter reports or reaches readiness
-      for the expected runtime flow.
+08.6. AdapterReady is emitted when an adapter reports or reaches readiness for
+      the expected runtime flow.
 
 08.7. AdapterExecutionRejected is emitted when execution authorization fails
       before artifact loading or activation dispatch.
 
-08.8. AdapterArtifactLoadStarted is emitted when adapter loading of a
-      declared artifact begins.
+08.8. AdapterArtifactLoadStarted is emitted when adapter loading of a declared
+      artifact begins.
 
 08.9. AdapterArtifactLoadFailed is emitted when adapter loading fails.
 
-08.10. AdapterActivationDispatchStarted is emitted when Turnix dispatches
-       an activation entrypoint through the adapter.
+08.10. AdapterActivationDispatchStarted is emitted when Turnix dispatches an
+       activation entrypoint through the adapter.
 
 08.11. AdapterExecutionStarted is emitted when adapter-executed runtime work
        begins after activation dispatch or another Turnix-recognized entry.
@@ -447,8 +544,8 @@ Downstream Documents:
 08.13. AdapterExecutionFailed is emitted when adapter-executed runtime work
        fails.
 
-08.14. AdapterDisconnected is emitted when an adapter connection or
-       equivalent participation channel becomes unavailable.
+08.14. AdapterDisconnected is emitted when an adapter connection or equivalent
+       participation channel becomes unavailable.
 
 08.15. AdapterClosed is emitted when an adapter instance is closed or
        released.
@@ -467,10 +564,15 @@ Downstream Documents:
       - adapter instance identity
       - pack identity
       - declared artifact identity
+      - activationAttemptId when applicable
+      - activation entry identity when applicable
+      - lifecycle phase when applicable
+      - dependency component identity when applicable
+      - cyclic group identity when applicable
       - runtimeHostId when applicable
       - RuntimeHost operation identity when applicable
       - applicationRunId when applicable
-      - active save identity when applicable
+      - SaveBundle identity when applicable
       - transport kind when applicable
       - channel identity when applicable
       - RPC message identity when applicable
@@ -493,33 +595,49 @@ Downstream Documents:
 
 09.6. Adapter trace evidence does not replace ApplicationRun trace evidence.
 
-09.7. Adapter trace evidence does not replace Orchestration Unit trace
+09.7. Adapter trace evidence does not replace OrchestrationUnit trace
       evidence.
 
 09.8. Adapter trace evidence does not replace UI-domain trace evidence.
 
 09.9. Adapter trace evidence does not replace RuntimeHost trace evidence.
 
-09.10. DA-14 owns activation-domain trace obligations.
+09.10. Adapter trace evidence does not replace artifact or export trace
+       evidence.
 
-09.11. DA-16 owns capability-domain trace obligations.
+09.11. Adapter trace evidence does not replace comparison, Replay, Resume,
+       Retry, or retained-evidence workflow trace evidence.
 
-09.12. DA-19 owns Job-domain trace obligations.
+09.12. Adapter trace context fields are correlation fields.
 
-09.13. DA-20 owns ApplicationRun-domain trace obligations.
+09.13. Adapter trace context fields do not transfer DA-14 activation ownership
+       to this document.
 
-09.14. DA-21 owns RPC trace correlation semantics.
+09.14. DA-14 owns activation-domain trace obligations.
 
-09.15. DA-22 owns UI-domain trace obligations.
+09.15. DA-16 owns capability-domain trace obligations.
 
-09.16. DA-24 owns Orchestration Unit trace reason identifiers.
+09.16. DA-19 owns Job-domain trace obligations.
 
-09.17. DA-28 owns RuntimeHost-domain trace reason identifiers.
+09.17. DA-20 owns ApplicationRun-domain trace obligations.
 
-09.18. Implementation specifications may define concrete adapter-specific
+09.18. DA-21 owns RPC trace correlation semantics.
+
+09.19. DA-22 owns UI-domain trace obligations.
+
+09.20. DA-24 owns OrchestrationUnit trace reason identifiers.
+
+09.21. DA-25 owns artifact and export trace obligations.
+
+09.22. DA-26 owns comparison, Replay, Resume, Retry, and retained-evidence
+       workflow trace obligations.
+
+09.23. DA-28 owns RuntimeHost-domain trace reason identifiers.
+
+09.24. Implementation specifications may define concrete adapter-specific
        trace reason extensions.
 
-09.19. Implementation-specific trace reason extensions do not redefine the
+09.25. Implementation-specific trace reason extensions do not redefine the
        adapter-domain reason meanings owned by this document.
 
 
@@ -552,26 +670,39 @@ Downstream Documents:
 
 10.9. Remote or LAN access does not imply adapter execution authority.
 
-10.10. A second RuntimeHost does not silently acquire writable ownership of
+10.10. RuntimeHost and Workspace ownership semantics are constrained by
+       TurnixRuntime and Kernel authority.
+
+10.11. Adapter class, deployment topology, LAN access, CLI access, or
+       RemoteClientAdapter access does not acquire Workspace ownership.
+
+10.12. Adapter class, deployment topology, LAN access, CLI access, or
+       RemoteClientAdapter access does not release Workspace ownership.
+
+10.13. Adapter class, deployment topology, LAN access, CLI access, or
+       RemoteClientAdapter access does not recover, downgrade, or override
+       Workspace ownership.
+
+10.14. A second RuntimeHost does not silently acquire writable ownership of
        the same workspace under DA-28.
 
-10.11. Workspace ownership and host locking semantics are owned by DA-28 and
+10.15. Workspace ownership and host locking semantics are owned by DA-28 and
        later implementation specifications constrained by DA-28, DA-20,
        DA-04, and DA-07.
 
-10.12. This document does not define RuntimeHost lifecycle or workspace
+10.16. This document does not define RuntimeHost lifecycle or workspace
        ownership semantics.
 
 
 ===============================================================================
-11. RELATION TO DA-23 AND DA-28
+11. RELATION TO DA-23, DA-28, AND DA-30
 ===============================================================================
 
 11.1. DA-23 owns the abstract adapter execution boundary.
 
 11.2. DA-23 owns code artifact recognition, declaration, adapter selection,
-      execution authorization, loading, activation boundary, ModCallContext,
-      and RPC-shaped authority boundary semantics.
+      execution authorization, loading boundary, and RPC-shaped authority
+      boundary semantics.
 
 11.3. DA-27 owns adapter lifecycle, trust, isolation, traceability, and
       initial adapter classes.
@@ -580,17 +711,26 @@ Downstream Documents:
       entry surfaces, command-surface semantics, local-first interpretation,
       LAN exposure, and RuntimeHost trace reason ownership.
 
-11.5. This document does not weaken DA-23 authority boundaries.
+11.5. DA-30 owns ModCallContext invocation gateway lifetime, facade,
+      retention, and absent-surface semantics.
 
-11.6. This document does not weaken DA-28 RuntimeHost boundaries.
+11.6. This document does not weaken DA-23 authority boundaries.
 
-11.7. If this document appears to grant authority that DA-23 withholds, the
+11.7. This document does not weaken DA-28 RuntimeHost boundaries.
+
+11.8. This document does not weaken DA-30 ModCallContext boundaries.
+
+11.9. If this document appears to grant authority that DA-23 withholds, the
       interpretation that preserves DA-23 authority boundaries is used until
       the documents are corrected.
 
-11.8. If this document appears to grant RuntimeHost authority that DA-28
-      withholds, the interpretation that preserves DA-28 RuntimeHost
-      boundaries is used until the documents are corrected.
+11.10. If this document appears to grant RuntimeHost authority that DA-28
+       withholds, the interpretation that preserves DA-28 RuntimeHost
+       boundaries is used until the documents are corrected.
+
+11.11. If this document appears to grant a ModCallContext surface that DA-30
+       withholds, the interpretation that preserves DA-30 ModCallContext
+       boundaries is used until the documents are corrected.
 
 
 ===============================================================================
@@ -601,8 +741,14 @@ Downstream Documents:
       - treating adapter mediation as sandboxing
       - treating sandboxing as Kernel authority
       - treating lack of sandboxing as backend implementation authority
-      - treating adapter readiness as pack activation success
+      - treating adapter readiness as Pack activation success
+      - treating adapter readiness as final Activated state
       - treating adapter connection as adapter readiness
+      - treating adapter activation dispatch as phase completion by itself
+      - treating adapter activation dispatch as cyclic-group activation by
+        itself
+      - treating adapter activation dispatch as registration publication by
+        itself
       - treating adapter failure as Job failure by default
       - treating adapter disconnect as Job cancellation by default
       - treating adapter failure as ApplicationRun failure by default
@@ -616,6 +762,8 @@ Downstream Documents:
       - treating BrowserJSAdapter state as authoritative state
       - treating PythonInProcessAdapter as backend implementation authority
       - hiding unsafe adapter trust decisions behind convenience
+      - treating adapter trace evidence as replacement evidence for another
+        domain
       - implementation-specific trace reason extensions redefining the
         adapter-domain reason meanings owned here
 
@@ -640,6 +788,15 @@ Downstream Documents:
       questions are owned by DA-28 or future implementation specifications
       constrained by DA-28.
 
+13.3. Pack activation phase names, phase barriers, activation group
+      behavior, registration publication, and final Activated-state open
+      questions are owned by DA-14 or future implementation specifications
+      constrained by DA-14.
+
+13.4. ModCallContext lifetime, facade, retention, and absent-surface open
+      questions are owned by DA-30 or future implementation specifications
+      constrained by DA-30.
+
 
 ===============================================================================
 14. LOCKED SUMMARY
@@ -652,22 +809,33 @@ Downstream Documents:
       - DA-28 owns RuntimeHost identity, workspace ownership, startup modes,
         entry surfaces, command-surface semantics, local-first interpretation,
         LAN exposure, and RuntimeHost-domain trace reason ownership
+      - DA-30 owns ModCallContext invocation gateway semantics
       - adapter mediation is not sandboxing
       - sandboxing does not grant Kernel authority
       - lack of sandboxing does not grant backend implementation authority
       - BrowserJSAdapter owns no authoritative persistent state
+      - BrowserJSAdapter state is not authoritative Application or
+        ApplicationRun state
       - PythonInProcessAdapter is not backend implementation authority
       - RemoteClientAdapter does not own state authority
       - RemoteClientAdapter does not own RuntimeHost authority
       - CliAdapter is not the Kernel by itself
       - CliAdapter is not RuntimeHost authority by itself
       - adapter lifecycle does not replace activation, ApplicationRun, Job,
-        transport, RuntimeHost, or capability lifecycle
-      - adapter readiness does not imply pack activation success
+        transport, RuntimeHost, capability, Window, OrchestrationUnit,
+        artifact, export, comparison, Replay, Resume, Retry, or retained-
+        evidence workflow lifecycle
+      - adapter readiness does not imply Pack activation success
+      - adapter readiness does not imply final Activated state
       - adapter readiness does not imply capability permission
       - adapter readiness does not imply RuntimeHost readiness
+      - adapter activation dispatch does not imply phase completion,
+        cyclic-group activation, registration publication, or final Activated
+        state by itself
       - adapter failure does not silently redefine ApplicationRun, Job,
-        Orchestration Unit, RuntimeHost, Window, or committed-state meaning
+        OrchestrationUnit, RuntimeHost, Window, or committed-state meaning
+      - adapter failure does not silently define artifact, export, comparison,
+        Replay, Resume, Retry, or retained-evidence workflow outcomes
       - adapter disconnect does not automatically cancel Job-backed work
       - DA-27 owns adapter-domain trace reason identifiers
       - implementation-specific trace reason extensions do not redefine
@@ -689,6 +857,6 @@ END OF DA-27 - ADAPTER LIFECYCLE, TRUST AND TRACEABILITY
 --- doc-meta ---
 DOC_ID: DA-27
 DOC_FILE: docs/design/DA-27_ADAPTER_LIFECYCLE_TRUST_AND_TRACEABILITY.txt
-DOC_REV: 2
-DOC_GIT: 540243e
+DOC_REV: 3
+DOC_GIT: 6d6a830
 ----------------
