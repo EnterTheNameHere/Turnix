@@ -22,20 +22,22 @@ diagnostics, and observability expectations for Turnix tooling.
 It defines:
 - observability principles for developer experience
 - tooling expectations for trace viewing and reporting
-- activation and resolution explanation requirements as surfaced in tooling
-- adapter, RPC, capability, and AppInstance diagnostic expectations
+- activation and resolution explanation expectations as surfaced in tooling
+- adapter, RPC, capability, Application, and ApplicationRun diagnostics
 - development-versus-production diagnostics behavior
-- snapshot-tooling expectations for bug reports and regression testing
+- diagnostic snapshot expectations for bug reports and regression testing
+- post-mortem and diagnostic re-run boundary expectations
 
 It does NOT define:
 - trace event schemas, trace reasons, or trace retention semantics
   (see DA-03)
 - debugger semantics, pause rules, or mutation safety (see DA-18)
-- authoritative state, transactions (see DA-04)
+- authoritative state or transactions (see DA-04)
 - window semantics (see DA-08)
 - execution adapter semantics (see DA-23)
 - RPC, channel, and transport semantics (see DA-21)
-- AppInstance lifecycle semantics (see DA-20)
+- Application or ApplicationRun lifecycle semantics (see DA-20)
+- deterministic Replay, Resume, or Retry semantics (see DA-26)
 - new runtime correctness guarantees or authority boundaries
 
 Upstream Documents:
@@ -48,11 +50,14 @@ Upstream Documents:
 - DA-03
 - DA-04
 - DA-08
+- DA-11
+- DA-14
 - DA-18
 - DA-20
 - DA-21
 - DA-22
 - DA-23
+- DA-26
 
 
 ===============================================================================
@@ -95,27 +100,35 @@ Upstream Documents:
       - explainability
       - inspectability
       - debuggability
-      - auditability
+      - reviewability
 
 02.4. This area remains optional in tier, but it is strategically useful for
       development and operational trust.
 
-02.5. Diagnostic tooling consumes authority evidence. It does not become
-      authority by presenting that evidence.
+02.5. Diagnostic tooling consumes trace evidence, retained system evidence,
+      and authorized read-only views of relevant authoritative state where
+      such access is available.
+
+02.6. Diagnostic tooling does not become authority by presenting that
+      material.
 
 
 ===============================================================================
-03. OBSERVABILITY PRINCIPLE (LOCKED)
+03. OBSERVABILITY PRINCIPLE
 ===============================================================================
 
-03.1. Meaningful decisions remain explainable.
+LOCKED:
 
-03.2. Every meaningful decision should be:
-      - traceable
-      - attributable
-      - reproducible where the underlying evidence permits reproduction
+03.1. Meaningful decisions remain explainable where the owning domain and
+      retained evidence support explanation.
 
-03.3. If something happened, the system should be able to answer:
+03.2. Meaningful decisions emit or retain enough structured evidence to be:
+      - traceable where the owning domain requires trace emission
+      - attributable where retained evidence identifies the acting source
+      - reproducible only where retained evidence and workflow semantics
+        support reproduction
+
+03.3. If something happened, tooling attempts to answer:
       - what happened
       - why it happened
       - who or what decided it
@@ -123,15 +136,22 @@ Upstream Documents:
         decision context
 
 03.4. ODA-B does not define the trace model itself.
-      DA-03 defines the trace model.
-      ODA-B defines how tooling should consume that evidence.
 
-03.5. Tooling distinguishes missing evidence from evidence of absence.
+03.5. DA-03 defines the trace model.
+
+03.6. ODA-B defines how tooling consumes trace evidence.
+
+03.7. Tooling distinguishes missing evidence from evidence of absence.
+
+03.8. Tooling does not claim reproducibility from missing, pruned, dropped,
+      corrupt, partial, or non-retained evidence.
 
 
 ===============================================================================
-04. TRACE SYSTEM FOUNDATION (LOCKED)
+04. TRACE SYSTEM FOUNDATION
 ===============================================================================
+
+LOCKED:
 
 04.1. Turnix uses the structured tracing system defined in DA-03.
 
@@ -150,10 +170,15 @@ Upstream Documents:
 04.4. Domain-specific trace reason ownership remains with the owning DA
       document.
 
+04.5. ODA-B tooling does not turn trace evidence into committed state,
+      persistence authority, Kernel authority, or runtime correctness.
+
 
 ===============================================================================
-05. TRACE DOMAINS (LOCKED)
+05. TRACE DOMAINS
 ===============================================================================
+
+LOCKED:
 
 05.1. Important trace domains may include:
       - discovery
@@ -164,10 +189,11 @@ Upstream Documents:
       - capabilities
       - io
       - persistence
-      - AppInstance lifecycle
+      - Application and ApplicationRun lifecycle
       - RPC and transport flow
       - frontend UI and View lifecycle
       - execution adapter lifecycle
+      - Job and OrchestrationUnit lifecycle
       - runtime errors
 
 05.2. Trace domains are additive rather than exclusive.
@@ -175,35 +201,42 @@ Upstream Documents:
 05.3. ODA-B tooling does not invent trace-domain authority merely by showing
       a domain filter.
 
+05.4. A displayed domain filter is a presentation and search aid.
+
+05.5. A displayed domain filter is not an authority boundary by itself.
+
 
 ===============================================================================
-06. TRACE VISIBILITY (LOCKED)
+06. TRACE VISIBILITY
 ===============================================================================
+
+LOCKED:
 
 06.1. Trace events remain recordable even when no user interface is present.
 
-06.2. Trace evidence remains queryable later through structured access.
+06.2. Retained trace evidence remains queryable later through structured
+      access where the relevant retention policy preserved it.
 
-06.3. Trace persistence remains policy-driven and best-effort under DA-03.
+06.3. Trace persistence remains policy-driven under DA-03.
 
 06.4. ODA-B tooling treats trace evidence as potentially incomplete.
 
 06.5. If trace evidence is incomplete because of pruning, dropping,
-      corruption, or partial export, tooling surfaces that incompleteness
-      explicitly and does not guess.
+      corruption, non-retention, or partial export, tooling surfaces that
+      incompleteness explicitly and does not guess.
 
 06.6. Trace event levels and trace domains are defined by DA-03.
 
 06.7. ODA-B tooling uses the DA-03 definitions rather than inventing new
       local ones.
 
-06.8. Adapter, RPC, UI, AppInstance, capability, and Job evidence may be
-      correlated by tooling only where retained trace evidence supports that
-      correlation.
+06.8. Adapter, RPC, UI, Application, ApplicationRun, capability, Job, and
+      OrchestrationUnit evidence may be correlated by tooling only where
+      retained trace evidence supports that correlation.
 
 
 ===============================================================================
-07. TRACE VIEWER (OPTIONAL UI)
+07. TRACE VIEWER
 ===============================================================================
 
 07.1. A trace-viewer surface may exist to:
@@ -211,7 +244,8 @@ Upstream Documents:
       - filter by domain, reason, and scope identifiers
       - collapse or expand causal branches
       - jump to related entities such as packs, links, memory, Jobs,
-        AppInstances, Views, RPC messages, and adapter instances
+        Applications, ApplicationRuns, Views, RPC messages, and adapter
+        instances
 
 07.2. The trace-viewer user interface is optional.
 
@@ -224,12 +258,20 @@ Upstream Documents:
       - if evidence incompleteness is declared under DA-03, the viewer
         surfaces that incompleteness explicitly
       - the viewer distinguishes transport, adapter, capability, Job, View,
-        and AppInstance outcomes where evidence supports those distinctions
+        Application, and ApplicationRun outcomes where evidence supports
+        those distinctions
+
+07.5. The viewer does not make frontend presentation authoritative.
+
+07.6. The viewer does not make retained non-authoritative evidence
+      authoritative.
 
 
 ===============================================================================
-08. PACK RESOLUTION EXPLANATIONS (LOCKED)
+08. PACK RESOLUTION EXPLANATIONS
 ===============================================================================
+
+LOCKED:
 
 08.1. When a pack is:
       - selected
@@ -252,25 +294,32 @@ Upstream Documents:
       - development tooling may provide "why not chosen" views when
         evidence is available
       - if available trace evidence is not sufficient to explain why a
-        candidate was not chosen, tooling must say so explicitly and must
-        not guess
+        candidate was not chosen, tooling states that limitation explicitly
+        and does not guess
+
+08.4. Resolution explanations do not change resolver outcome.
+
+08.5. Resolution explanations do not create alternate resolution semantics.
 
 
 ===============================================================================
-09. CAPABILITY USAGE REPORTING (LOCKED)
+09. CAPABILITY USAGE REPORTING
 ===============================================================================
+
+LOCKED:
 
 09.1. In development mode, Turnix may produce capability-usage reports.
 
 09.2. Reports may be produced per:
       - KernelRunSpan
-      - AppInstanceActiveSpan
+      - selected ApplicationRun span
       - selected window
       - selected adapter instance
       - selected RPC correlation
       - selected time range
 
-09.3. Any such report is derived from trace evidence and registry state.
+09.3. Any such report is derived from retained trace evidence and registry
+      state available to the reporting tool.
 
 09.4. Reports distinguish:
       - not used
@@ -280,17 +329,25 @@ Upstream Documents:
 09.5. Adapter-originated capability reports do not imply that the adapter
       owned capability authority.
 
+09.6. Capability reports do not grant capability permission.
+
+09.7. Capability reports do not redefine service access, capability access,
+      or permission outcome semantics.
+
 
 ===============================================================================
-10. ACTIVATION ORDER DIAGNOSTICS (LOCKED)
+10. ACTIVATION ORDER DIAGNOSTICS
 ===============================================================================
 
-10.1. Tooling should be able to explain:
+LOCKED:
+
+10.1. Tooling may explain:
       - activation order
       - why pack X ran before pack Y
       - why reordering was impossible
       - where user intervention occurred
       - which adapter participated in activation when applicable
+      - which lifecycle phase or barrier was relevant when evidence exists
 
 10.2. These explanations remain trace-backed as defined by DA-03 and
       constrained by DA-14.
@@ -303,30 +360,43 @@ Upstream Documents:
 10.5. Adapter loading or readiness is not presented as activation unless
       activation evidence supports that conclusion.
 
+10.6. Activation diagnostics do not define activation ordering.
+
+10.7. Activation diagnostics do not retry, repair, or reinterpret dependency
+      cycles by themselves.
+
 
 ===============================================================================
-11. RUNTIME SAFETY WARNINGS (OPTIONAL)
+11. RUNTIME SAFETY WARNINGS
 ===============================================================================
 
 11.1. Optional diagnostics may warn about patterns such as:
       - background tasks outside Turnix orchestration
-      - timers not owned by the kernel
+      - timers outside Turnix-controlled scheduling
       - untracked async loops
       - direct filesystem access attempts
       - native imports attempting to bypass code boundaries
       - in-process calls attempting to bypass capability mediation
       - frontend state presented as authoritative state
 
-11.2. These are warnings rather than correctness errors unless a higher
+11.2. These are warnings rather than correctness errors unless an owning
       document explicitly classifies the situation otherwise.
 
 11.3. Tooling warnings do not grant execution authorization, capability
       permission, or persistence authority.
 
+11.4. Tooling warnings do not make the diagnostic subsystem responsible for
+      enforcing every warned pattern.
+
+11.5. A warning may identify a risk without proving that platform
+      correctness was violated.
+
 
 ===============================================================================
-12. DEVELOPMENT-MODE BEHAVIOR (LOCKED)
+12. DEVELOPMENT-MODE BEHAVIOR
 ===============================================================================
+
+LOCKED:
 
 12.1. In development mode:
       - warnings may be more verbose
@@ -351,38 +421,60 @@ Upstream Documents:
 12.4. Development-mode adapter diagnostics do not weaken adapter authority
       boundaries.
 
+12.5. Production-mode quietness does not convert missing evidence into
+      evidence of absence.
+
 
 ===============================================================================
-13. ERROR, WARNING, AND INFO LEVELS (LOCKED)
+13. ERROR, WARNING, AND INFO LEVELS
 ===============================================================================
+
+LOCKED:
 
 13.1. ODA-B tooling may classify surfaced diagnostics using the levels:
       - ERROR
       - WARNING
       - INFO
 
-13.2. In ODA-B tooling:
-      - ERROR means correctness was violated or a blocking failure occurred
-      - WARNING means a policy, hygiene, or diagnostics concern exists
-        without the same correctness implication
-      - INFO means expected behavior or informational outcome
+13.2. In ODA-B tooling, ERROR is used for presentation of:
+      - a blocking failure
+      - an owning-domain-classified correctness violation
+      - a diagnostic condition mapped from owning-domain evidence
 
-13.3. Correctness errors are not silently downgraded by tooling.
+13.3. In ODA-B tooling, WARNING is used for presentation of a policy,
+      hygiene, or diagnostics concern without the same blocking
+      implication.
 
-13.4. Tooling does not treat transport timeout, adapter failure, Job timeout,
-      and AppInstance failure as interchangeable diagnostic categories.
+13.4. In ODA-B tooling, INFO is used for presentation of expected behavior
+      or informational outcome.
+
+13.5. ODA-B diagnostic levels classify how tooling presents evidence.
+
+13.6. ODA-B diagnostic levels do not define the underlying domain outcome,
+      authority violation, Job result, adapter failure, RPC failure, or
+      committed-state correctness.
+
+13.7. Correctness errors are not silently downgraded by tooling.
+
+13.8. Tooling does not treat transport timeout, adapter failure, Job
+      timeout, and ApplicationRun failure as interchangeable diagnostic
+      categories.
 
 
 ===============================================================================
-14. STATE SNAPSHOTS (OPTIONAL)
+14. DIAGNOSTIC SNAPSHOTS
 ===============================================================================
 
-14.1. Optional tooling may snapshot:
+14.1. Optional tooling may snapshot read-only diagnostic views or retained
+      evidence for:
       - pack registry
       - dependency graph
       - activation state
-      - memory layers
-      - AppInstance identity and lifecycle evidence
+      - Memory contexts and transaction layers
+      - committed state views where authorized
+      - Application identity evidence
+      - ApplicationRun lifecycle evidence
+      - SaveBundle generation evidence where relevant
       - View and frontend client evidence
       - adapter lifecycle evidence
       - RPC correlation evidence
@@ -397,18 +489,46 @@ Upstream Documents:
 14.4. Snapshot tooling distinguishes authoritative state from
       non-authoritative evidence.
 
+14.5. Snapshot packaging does not make staged, diagnostic, exported,
+      retained, or presentation material authoritative.
+
+14.6. Authoritative state remains authoritative only through the owning
+      state and commit model.
+
+14.7. A diagnostic snapshot is not a live process snapshot.
+
+14.8. A diagnostic snapshot is not a SaveBundle generation unless the
+      owning persistence and state documents define it as such.
+
 
 ===============================================================================
-15. REPLAY AND POST-MORTEM (OPEN)
+15. DIAGNOSTIC RE-RUN AND POST-MORTEM
 ===============================================================================
+
+OPEN:
 
 15.1. Future tooling may support:
-      - replaying activation with the same inputs
+      - diagnostic re-run using retained inputs and evidence
+      - simulation using controlled inputs
       - inspecting divergence
       - comparing traces
-      - inspecting adapter/RPC/AppInstance correlation across a failure
+      - post-mortem inspection of adapter, RPC, Application, and
+        ApplicationRun correlation across a failure
 
 15.2. This area remains OPEN and is not locked by this document.
+
+15.3. Diagnostic re-run, simulation, comparison, and post-mortem inspection
+      are not DA-26 Replay unless the workflow satisfies DA-26 Replay
+      semantics.
+
+15.4. Diagnostic re-run and simulation are new work.
+
+15.5. Diagnostic re-run and simulation do not imply deterministic
+      restoration, resumed work, re-run external effects, or authority over
+      activation outcomes.
+
+15.6. ODA-B does not define Replay, Resume, Retry, comparison, or retained
+      artifact authority semantics.
 
 
 ===============================================================================
@@ -420,31 +540,67 @@ Upstream Documents:
       - AI-driven debugging as a required feature
       - speculative corrections
       - hiding errors
+      - trace schema authority
+      - trace retention authority
+      - committed-state authority
       - adapter authority
       - RPC authority
-      - AppInstance lifecycle authority
+      - capability permission authority
+      - persistence authority
+      - Kernel authority
+      - Application lifecycle authority
+      - ApplicationRun lifecycle authority
+      - Replay, Resume, or Retry authority
+
+16.2. ODA-B diagnostics may reveal an issue.
+
+16.3. ODA-B diagnostics do not own the domain rule that made the issue
+      important.
+
+16.4. ODA-B diagnostics may guide a human or tool toward a fix.
+
+16.5. ODA-B diagnostics do not apply fixes unless another owning domain
+      grants an explicit, mediated action path.
 
 
 ===============================================================================
-17. LOCKED SUMMARY
+17. SUMMARY
 ===============================================================================
 
-17.1. LOCKED:
-      - observability remains a first-class development concern
-      - tooling consumes DA-03 trace evidence without redefining it
-      - domain-specific trace reason ownership remains with owning
-        documents
-      - resolver explanations remain trace-backed
-      - capability-usage reporting distinguishes absence from missing proof
-      - activation diagnostics remain trace-backed
-      - adapter/RPC/AppInstance diagnostics consume evidence without
-        creating authority
-      - development and production diagnostics remain distinct
+LOCKED:
 
-17.2. OPTIONAL OR OPEN:
-      - trace-viewer UI
-      - snapshots
-      - replay tools
+17.1. Observability remains a first-class development concern.
+
+17.2. Tooling consumes DA-03 trace evidence without redefining it.
+
+17.3. Domain-specific trace reason ownership remains with owning documents.
+
+17.4. Retained evidence remains distinct from committed-state authority.
+
+17.5. Resolver explanations remain trace-backed.
+
+17.6. Capability-usage reporting distinguishes absence from missing proof.
+
+17.7. Activation diagnostics remain trace-backed.
+
+17.8. Adapter, RPC, Application, and ApplicationRun diagnostics consume
+      evidence without creating authority.
+
+17.9. Development and production diagnostics remain distinct.
+
+17.10. Diagnostic levels classify presentation rather than owning domain
+       outcomes.
+
+17.11. Diagnostic snapshots do not create authority.
+
+OPEN:
+
+17.12. Trace-viewer UI remains optional.
+
+17.13. Diagnostic snapshots remain optional.
+
+17.14. Diagnostic re-run, simulation, comparison, and post-mortem tooling
+       remain open.
 
 
 ===============================================================================
@@ -454,6 +610,6 @@ END OF ODA-B - DEVELOPMENT, DIAGNOSTICS & OBSERVABILITY
 --- doc-meta ---
 DOC_ID: ODA-B
 DOC_FILE: docs/design/ODA-B_DEVELOPMENT_DIAGNOSTICS_AND_OBSERVABILITY.txt
-DOC_REV: 12
-DOC_GIT: fd499bd
+DOC_REV: 13
+DOC_GIT: 96b7912
 ----------------
