@@ -8,34 +8,46 @@ EVOLVING
 
 Description:
 ------------
-Defines who is permitted to reference whom across the pack graph, and where
-strict reachability boundaries exist.
+Defines permissioned reference reachability, export enforcement, and
+access-control consequences across Pack hierarchy, dependency/source domains,
+and SaveBundle-local retained or copied Pack material.
 
 Visibility is enforced by Turnix.
-Visibility is not negotiated at runtime by packs.
+Visibility is not negotiated at runtime by Packs.
 Visibility violations are hard failures.
 
 Purpose:
 --------
 This document defines the deterministic, policy-enforced reachability system
-that constrains pack-to-pack referencing across pack hierarchy and
-resolution-source boundaries.
+that constrains Pack-to-Pack referencing across Pack hierarchy,
+dependency/source boundaries, and SaveBundle-local retained material.
 
 It defines:
 - the visibility question and its scope boundary
-- local and global visibility domains
-- manifest-level visibility fields and constraints
-- globalVisibility derivation rules
-- importPacksFromParent semantics and list resolution rules
-- resolution-source isolation for visibility
-- SavePack-specific visibility isolation
+- canonical architecture names used by this document
+- local and global visibility enforcement inputs
+- manifest-level visibility fields and access-control consequences
+- exportNestedPacks enforcement consequences
+- importPacksFromParent enforcement consequences
+- dependency/source isolation for visibility
+- SaveBundle-local retained or copied Pack material visibility isolation
+- capability, service, execution, and authority stop-lines
 - failure behavior and error requirements
 
 It does NOT define:
-- dependency semantics or solver behavior
+- Pack identity, hierarchy, or computed visibility ownership
 - generic resolution ordering or selection criteria
-- activation lifecycle, runtime execution, or service initialization
+- dependency semantics, dependency-source policy, or solver behavior
+- importing, module loading, or code-boundary mechanics
+- activation lifecycle, runtime execution, or adapter execution
 - capability schemas, permission prompting, or grant persistence details
+- Service registry shape or direct service-access surfaces
+- ModCallContext facade shape, lifetime, or absent surfaces
+- Application or ApplicationRun lifecycle semantics
+- RuntimeHost command behavior or Workspace ownership
+- PackManager catalog, graph-preparation, repair, or UI behavior
+- SaveBundle storage format, ownership, loading, or graph evidence details
+- exact UI phrasing, graph visualization, or final error subtype taxonomy
 
 Upstream Documents:
 ------------------
@@ -44,16 +56,22 @@ Upstream Documents:
 - CMR-03
 - CMR-04
 - CMR-05
-- DA-01
 - DA-09
 - DA-10
 - DA-11
 - DA-12
+- DA-13
+- DA-16
+- DA-20
+- DA-29
+- DA-30
 
 Downstream Documents:
 --------------------
 - DA-16
 - DA-17
+- DA-29
+- DA-30
 
 
 ===============================================================================
@@ -72,6 +90,25 @@ Downstream Documents:
 01.4. This document defines visibility, exports, and access-control
       boundaries within that shared interpretation model.
 
+01.5. This document uses canonical architecture names.
+
+01.6. SaveBundle is the durable persistence closure of an Application.
+
+01.7. SaveBundle is not a Pack.
+
+01.8. Application is one durable application individual.
+
+01.9. ApplicationRun is one live execution period of an Application.
+
+01.10. ModCallContext is the invocation-scoped Pack-facing gateway into
+       Turnix.
+
+01.11. SaveBundle-local Pack material means Pack material retained or copied
+       inside a SaveBundle for use by its owning Application context.
+
+01.12. Visibility does not grant authority merely because this document names
+       another runtime domain.
+
 
 ===============================================================================
 02. CORE CONCEPT
@@ -79,348 +116,664 @@ Downstream Documents:
 
 02.1. Visibility answers exactly one question:
 
-          "Is pack A permitted to reference pack B?"
+          "Is Pack A permitted to reference Pack B?"
 
-02.2. Visibility is about reachability and permission only.
+02.2. Visibility is permissioned reachability.
 
-02.3. Visibility does not:
-      - activate packs
-      - load code
-      - imply execution order
-      - imply dependency satisfaction
-      - imply version compatibility
-      - grant runtime capabilities
-      - grant runtime services
+02.3. Visibility is about reference permission only.
 
-02.4. This document defines visibility as a gate on permitted reference
-      reachability.
-02.12. Visibility is permissioned reachability. It is not activation, code
-       loading, execution order, dependency satisfaction, version
-       compatibility, runtime capability access, runtime service access,
-       ApplicationRun authority, RuntimeHost authority, adapter authority, or
-       PackManager authority.
+02.4. Visibility is not activation.
 
+02.5. Visibility is not code loading.
+
+02.6. Visibility is not importing or module loading authority.
+
+02.7. Visibility is not execution order.
+
+02.8. Visibility is not dependency satisfaction.
+
+02.9. Visibility is not version compatibility.
+
+02.10. Visibility is not runtime capability access.
+
+02.11. Visibility is not runtime service access.
+
+02.12. Visibility is not ApplicationRun authority.
+
+02.13. Visibility is not RuntimeHost authority.
+
+02.14. Visibility is not adapter authority.
+
+02.15. Visibility is not PackManager authority.
+
+02.16. Visibility is not committed-state authority.
+
+02.17. Visibility is not OrchestrationUnit mutation authority.
+
+02.18. Visibility is not ModCallContext gateway authority.
+
+02.19. This document defines visibility as a gate on permitted reference
+       reachability.
 
 
 ===============================================================================
-03. VISIBILITY VS DEPENDENCY (LOCKED DISTINCTION)
+03. AUTHORITY AND OWNERSHIP BOUNDARIES
 ===============================================================================
 
-03.1. Dependency declaration expresses requirement.
+03.1. DA-15 owns visibility enforcement and access-control consequences.
 
-03.2. Visibility expresses permission.
+03.2. DA-15 may name neighboring domains only to state that visibility does
+      not grant authority in those domains.
 
-03.3. A pack may depend on another pack and still be forbidden from
+03.3. DA-10 owns Pack identity, Pack hierarchy, local visibility structure,
+      global visibility structure, exportNestedPacks structure, and
+      importPacksFromParent structure.
+
+03.4. DA-11 owns generic resolution semantics.
+
+03.5. DA-12 owns importing, module loading, and code-boundary rules.
+
+03.6. DA-13 owns dependency semantics, requirement semantics,
+      dependency-source policy, and PackRequest behavior.
+
+03.7. DA-14 owns activation lifecycle and execution guarantees.
+
+03.8. DA-16 owns Services, Capabilities, permission semantics, and
+      capability invocation.
+
+03.9. DA-17 owns user decision and remembered policy semantics.
+
+03.10. DA-20 owns Application and ApplicationRun lifecycle semantics.
+
+03.11. DA-23 owns abstract ExecutionAdapter boundary semantics.
+
+03.12. DA-27 owns adapter lifecycle, trust, isolation, failure, disconnect,
+       and adapter-domain trace semantics.
+
+03.13. DA-28 owns RuntimeHost lifecycle, startup modes, command surfaces,
+       Workspace ownership, local-first behavior, and LAN exposure semantics.
+
+03.14. DA-29 owns PackManager catalog, graph-preparation, repair, UI, write,
+       and PackManager-domain trace semantics.
+
+03.15. DA-30 owns ModCallContext gateway semantics, facade shape, lifetime,
+       and absent surfaces.
+
+03.16. SaveBundle and persistence documents own SaveBundle storage,
+       ownership, retained material, graph evidence, and loading details.
+
+03.17. DA-15 does not define detailed behavior for the domains listed in
+       this section.
+
+
+===============================================================================
+04. VISIBILITY VS DEPENDENCY
+===============================================================================
+
+04.1. Dependency declaration expresses requirement.
+
+04.2. Visibility expresses permission.
+
+04.3. A Pack may depend on another Pack and still be forbidden from
       referencing it.
 
-03.4. Consequences:
-      - a dependency may fail because visibility forbids the dependency target
-      - visibility failure is a hard dependency failure in that case
-      - no silent bypass is allowed
+04.4. A dependency may fail because visibility forbids the dependency target.
 
-03.5. Visibility is evaluated:
+04.5. Visibility failure during dependency resolution is a hard dependency
+      failure.
+
+04.6. Turnix does not silently bypass visibility when dependency resolution
+      encounters a forbidden target.
+
+04.7. Visibility is evaluated:
       - during dependency resolution
       - during resolvePack calls
       - during turnixImport resolution
 
-03.6. Visibility is not bypassed or deferred.
+04.8. Visibility is not bypassed or deferred.
 
 
 ===============================================================================
-04. VISIBILITY DOMAINS
+05. VISIBILITY DOMAINS
 ===============================================================================
 
-04.1. Each pack participates in two visibility domains:
+05.1. Each Pack participates in two visibility domains:
       - local visibility
       - global visibility
 
-04.2. Local visibility:
-      - applies within a parent pack tree
-      - controls parent-child export gating inputs
+05.2. Local visibility applies within a parent Pack tree.
 
-04.3. Global visibility:
-      - determines whether a pack is reachable from outside its parent chain
+05.3. Local visibility controls parent-child export gating inputs.
 
-04.4. These domains are computed statically and enforced dynamically.
+05.4. Global visibility determines whether a Pack is reachable from outside
+      its parent chain.
+
+05.5. DA-10 owns the structure and computation of local visibility and
+      global visibility.
+
+05.6. DA-15 owns the enforcement consequences of those visibility values.
+
+05.7. Visibility values are computed statically and enforced dynamically.
 
 
 ===============================================================================
-05. DECLARED VISIBILITY (MANIFEST-LEVEL) (LOCKED)
+06. DECLARED VISIBILITY
 ===============================================================================
 
-05.1. Manifest field:
+06.1. Manifest field:
       visibility: "public" | "private"
 
-05.2. If declared, the declared value is used as-is.
+06.2. If declared, the declared value is used as-is.
 
-05.3. If omitted, the default is derived from pack kind:
+06.3. If omitted, the default is derived from Pack kind:
       - ContentPack -> public
       - AppPack -> private
       - ViewPack -> private
       - ModPack -> private
-      - SavePack -> private
 
-05.4. Declared visibility expresses local visibility intent only.
+06.4. Declared visibility expresses local visibility intent only.
 
-05.5. Declared visibility does not directly grant global reachability.
+06.5. Declared visibility does not directly grant global reachability.
+
+06.6. SaveBundle does not use Pack manifest visibility as its own
+      visibility identity.
+
+06.7. SaveBundle-local retained or copied Pack material follows
+      SaveBundle-local visibility isolation and the retained Pack material's
+      own applicable Pack identity and visibility rules.
 
 
 ===============================================================================
-06. EXPORTNESTEDPACKS (LOCKED)
+07. EXPORTNESTEDPACKS
 ===============================================================================
 
-06.1. Manifest field:
+07.1. Manifest field:
       exportNestedPacks
 
-06.2. Allowed values:
+07.2. Allowed values are:
       - true
       - false
       - list of localId strings
 
-06.3. Purpose:
-      - controls which direct child packs may become globally visible
+07.3. exportNestedPacks controls which direct child Packs may become
+      globally visible.
 
-06.4. Semantics:
-      - true:
-        all direct children may be exported
-      - false:
-        no direct children are exported
-      - list:
-        only listed direct children may be exported
+07.4. If exportNestedPacks is true, all direct child Packs may be exported.
 
-06.5. Constraints:
-      - only direct children may be listed
-      - dotted identifiers are forbidden
-      - non-existent localId is an error
-      - exportNestedPacks does not apply transitively
+07.5. If exportNestedPacks is false, no direct child Packs are exported.
+
+07.6. If exportNestedPacks is a list, only listed direct child Packs may be
+      exported.
+
+07.7. Only direct child Packs may be listed.
+
+07.8. Dotted identifiers are forbidden in exportNestedPacks lists.
+
+07.9. A non-existent localId in an exportNestedPacks list is an error.
+
+07.10. exportNestedPacks does not apply transitively.
+
+07.11. exportNestedPacks does not grant capability access.
+
+07.12. exportNestedPacks does not grant service access.
+
+07.13. exportNestedPacks does not authorize activation, importing, module
+       loading, adapter execution, or RuntimeHost command execution.
 
 
 ===============================================================================
-07. GLOBAL VISIBILITY DERIVATION (LOCKED)
+08. GLOBAL VISIBILITY DERIVATION
 ===============================================================================
 
-07.1. Computed field:
+08.1. Computed field:
       globalVisibility: "public" | "private"
 
-07.2. If a pack has no parent:
-      globalVisibility = visibility
+08.2. If a Pack has no parent, globalVisibility equals visibility.
 
-07.3. If a pack has a parent:
-      - if visibility == private:
-        globalVisibility = private
-      - else if parent.exportNestedPacks == false:
-        globalVisibility = private
-      - else if parent.exportNestedPacks == true:
-        globalVisibility = public
-      - else if parent.exportNestedPacks is a list:
-        globalVisibility = public only if declaredId is listed
-        otherwise globalVisibility = private
+08.3. If a Pack has a parent and visibility is private, globalVisibility is
+      private.
 
-07.4. globalVisibility is immutable after computation.
+08.4. If a Pack has a parent, visibility is public, and
+      parent.exportNestedPacks is false, globalVisibility is private.
+
+08.5. If a Pack has a parent, visibility is public, and
+      parent.exportNestedPacks is true, globalVisibility is public.
+
+08.6. If a Pack has a parent, visibility is public, and
+      parent.exportNestedPacks is a list, globalVisibility is public only
+      when the Pack's declaredId appears in the list.
+
+08.7. If a Pack has a parent, visibility is public, and
+      parent.exportNestedPacks is a list that does not contain the Pack's
+      declaredId, globalVisibility is private.
+
+08.8. globalVisibility is immutable after computation.
+
+08.9. DA-10 owns the full computed visibility model.
+
+08.10. DA-15 relies on computed globalVisibility only as an enforcement
+       input.
 
 
 ===============================================================================
-08. IMPORTPACKSFROMPARENT (LOCKED)
+09. IMPORTPACKSFROMPARENT
 ===============================================================================
 
-08.1. Manifest field:
+09.1. Manifest field:
       importPacksFromParent
 
-08.2. Purpose:
-      - controls which parent-side packs are reference-visible to this pack
-      - does not imply export
-      - does not imply capability access
-      - does not imply service access
+09.2. importPacksFromParent controls which parent-side Packs are
+      reference-visible to this Pack.
 
-08.3. Allowed values:
-      - false
-      - true
-      - list of selectors
+09.3. importPacksFromParent does not imply export.
 
-08.4. Semantics:
-      - false:
-        no parent packs are visible
-      - true:
-        all globally visible parent packs are visible
-      - list:
-        only explicitly listed parent-side packs are visible
+09.4. importPacksFromParent does not imply capability access.
+
+09.5. importPacksFromParent does not imply service access.
+
+09.6. importPacksFromParent does not imply permission inheritance.
+
+09.7. importPacksFromParent does not imply activation.
+
+09.8. importPacksFromParent does not authorize adapter execution.
+
+09.9. importPacksFromParent does not grant RuntimeHost authority.
+
+09.10. Allowed values are:
+       - false
+       - true
+       - list of selectors
+
+09.11. If importPacksFromParent is false, no parent-side Packs are visible.
+
+09.12. If importPacksFromParent is true, all globally visible parent-side
+       Packs are visible.
+
+09.13. If importPacksFromParent is a list, only explicitly listed
+       parent-side Packs are visible.
+
+09.14. Default importPacksFromParent values are:
+       - ViewPack -> false
+       - all other Pack kinds -> true
+
+09.15. ViewPack isolation remains the default unless an owning View document
+       changes it.
 
 
 ===============================================================================
-09. IMPORTPACKSFROMPARENT LIST RESOLUTION (LOCKED)
+10. IMPORTPACKSFROMPARENT LIST RESOLUTION
 ===============================================================================
 
-09.1. Selectors in an importPacksFromParent list are resolved relative to
-      the parent pack.
+10.1. Selectors in an importPacksFromParent list are resolved relative to
+      the parent Pack.
 
-09.2. Resolution rule:
+10.2. Resolution rule:
       resolvedId = parent.packTreeId + "." + selector
 
-09.3. Constraints:
-      - selectors refer only to descendants of the parent
-      - escaping the parent tree is forbidden
-      - invalid resolution is a hard error
+10.3. Selectors refer only to descendants of the parent Pack.
 
-09.4. Visibility checks still apply after resolution.
+10.4. Escaping the parent Pack tree is forbidden.
 
+10.5. Invalid selector resolution is a hard error.
 
-===============================================================================
-10. DEFAULT IMPORT BEHAVIOR (LOCKED)
-===============================================================================
+10.6. Visibility checks still apply after selector resolution.
 
-10.1. Default importPacksFromParent values are:
-      - ViewPack -> false
-      - all other pack kinds -> true
-
-10.2. Rationale:
-      - views remain isolated by default
-      - UI contamination remains explicit
-      - app-level behavior does not leak silently
+10.7. List resolution does not grant a selector access to Packs outside the
+      parent Pack tree.
 
 
 ===============================================================================
-11. VISIBILITY AND RESOLUTION SOURCES (LOCKED INVARIANT)
+11. VISIBILITY AND DEPENDENCY/SOURCE DOMAINS
 ===============================================================================
 
-11.1. Visibility evaluation occurs after resolution-source determination.
+11.1. Visibility evaluation occurs after dependency/source determination.
 
-11.2. Rules:
-      - the resolution source is determined first
-      - only packs inside that source are considered visible candidates
-      - packs outside the active source are not visible regardless of
-        declared visibility or globalVisibility
+11.2. The dependency/source domain is determined before visibility
+      evaluation.
 
-11.3. Consequences:
-      - save-scoped resolution ignores global packs
-      - global resolution ignores save-scoped copies
-      - visibility does not bridge resolution sources
+11.3. Only Packs inside the active dependency/source domain are considered
+      visible candidates.
 
+11.4. Packs outside the active dependency/source domain are not visible
+      candidates regardless of declared visibility or globalVisibility.
 
-===============================================================================
-12. SAVEPACK VISIBILITY (LOCKED)
-===============================================================================
+11.5. Visibility does not bridge dependency/source domains.
 
-12.1. SavePack has a dedicated visibility domain.
+11.6. SaveBundle-local dependency/source resolution ignores ordinary global
+      Packs unless a global source is explicitly selected.
 
-12.2. Rules:
-      - SavePack is never globally visible
-      - SavePack is visible only within its AppInstance context
-      - copied packs inside a SavePack:
-        - are visible only within that save
-        - are not visible globally
-        - shadow global packs of the same identity within that save domain
+11.7. Global dependency/source resolution ignores SaveBundle-local retained
+      or copied Pack material unless a SaveBundle-local source is explicitly
+      selected.
 
-12.3. If a pack is resolved from a save-scoped source:
-      - global packs with the same identity are not visible
-      - the global registry is not consulted
+11.8. Dependency/source policy remains owned by DA-13.
+
+11.9. DA-15 defines only the visibility consequence once the active
+      dependency/source domain has been selected.
 
 
 ===============================================================================
-13. CAPABILITIES AND VISIBILITY (LOCKED SEPARATION)
+12. SAVEBUNDLE-LOCAL PACK MATERIAL VISIBILITY
 ===============================================================================
 
-13.1. Capabilities are not governed by visibility.
+12.1. SaveBundle is not ordinary globally visible Pack material.
 
-13.2. Rules:
-      - visibility does not grant capabilities
-      - capabilities are not inherited through visibility
-      - capability access requires explicit request and grant
+12.2. SaveBundle-local retained or copied Pack material has a dedicated
+      SaveBundle/Application visibility context.
 
-13.3. A visible pack may still be unable to use another pack's
-      capabilities.
+12.3. SaveBundle-local retained or copied Pack material is visible only
+      within its owning SaveBundle/Application context unless another owning
+      document explicitly exposes it.
+
+12.4. SaveBundle-local retained or copied Pack material is not visible
+      globally by default.
+
+12.5. SaveBundle-local retained or copied Pack material may shadow global
+      Packs of the same identity inside its SaveBundle/Application context.
+
+12.6. Shadowing behavior follows dependency/source and graph rules owned by
+      their respective documents.
+
+12.7. If a Pack is resolved from a SaveBundle-local source, global Packs with
+      the same identity are not visible for that resolution path unless the
+      active dependency/source policy explicitly selects a global source.
+
+12.8. If a Pack is resolved from a SaveBundle-local source, the global
+      registry is not consulted for that resolution path unless the active
+      dependency/source policy explicitly selects a global source.
+
+12.9. SaveBundle-local visibility isolation does not make SaveBundle a Pack.
+
+12.10. SaveBundle-local visibility isolation does not define SaveBundle
+       storage format, ownership, loading, or graph evidence details.
 
 
 ===============================================================================
-14. SERVICES AND VISIBILITY (LOCKED SEPARATION)
+13. VISIBILITY AND IMPORTING
 ===============================================================================
 
-14.1. Services are runtime objects.
+13.1. Visibility is evaluated during turnixImport resolution.
 
-14.2. Rules:
-      - services are registered during activation
-      - services are accessed via ctx.services
-      - visibility does not grant service access
+13.2. Visibility does not by itself load code.
 
-14.3. Service access requires:
-      - service registration
-      - explicit lookup
+13.3. Visibility does not authorize importing or module loading.
+
+13.4. Importing and module loading remain owned by DA-12.
+
+13.5. A visible Pack may still be unavailable for import or module loading
+      when DA-12 boundaries, adapter support, activation state, or other owning
+      rules forbid that access.
+
+13.6. Native host-language mechanisms do not bypass Turnix visibility rules.
+
+13.7. Direct implementation access across Pack boundaries is not created by
+      visibility.
 
 
 ===============================================================================
-15. VISIBILITY EVALUATION TIMING
+14. VISIBILITY AND ACTIVATION
 ===============================================================================
 
-15.1. Visibility checks occur:
+14.1. Visibility does not activate Packs.
+
+14.2. Visibility does not create Pack lifecycle participation.
+
+14.3. Visibility does not define activation order.
+
+14.4. Visibility does not satisfy activation prerequisites.
+
+14.5. Activation lifecycle and execution guarantees remain owned by DA-14.
+
+14.6. A Pack that is visible to another Pack may still be inactive.
+
+14.7. A Pack that is visible to another Pack may still be unavailable for
+      runtime execution.
+
+
+===============================================================================
+15. VISIBILITY AND CAPABILITIES
+===============================================================================
+
+15.1. Capabilities are not governed by visibility.
+
+15.2. Visibility does not grant capabilities.
+
+15.3. Capabilities are not inherited through visibility.
+
+15.4. Capability access requires an explicit capability path defined by the
+      owning capability and permission documents.
+
+15.5. A visible Pack may still be unable to use another Pack's capabilities.
+
+15.6. Visibility does not authorize capability invocation.
+
+15.7. Services, Capabilities, permission semantics, and capability invocation
+      remain owned by DA-16.
+
+
+===============================================================================
+16. VISIBILITY AND SERVICES
+===============================================================================
+
+16.1. Services are runtime/internal wiring owned by DA-16 and related
+      runtime documents.
+
+16.2. Visibility does not grant access to Services.
+
+16.3. Visibility does not create direct Service object access.
+
+16.4. Service access, if any, requires an explicitly defined runtime-owned or
+      capability-mediated surface in an owning document.
+
+16.5. Cross-Pack execution uses Capabilities rather than direct Service
+      object lookup.
+
+16.6. A visible Pack may still be unable to use a Service associated with
+      another Pack.
+
+16.7. DA-15 does not define Service registry shape.
+
+16.8. DA-15 does not define Pack-facing Service access surfaces.
+
+
+===============================================================================
+17. VISIBILITY AND MODCALLCONTEXT
+===============================================================================
+
+17.1. ModCallContext is the Pack-facing invocation gateway into Turnix.
+
+17.2. Visibility does not grant ModCallContext authority.
+
+17.3. Visibility does not add ModCallContext facades.
+
+17.4. Visibility does not make absent ModCallContext surfaces present.
+
+17.5. Visibility does not allow Pack code to retain or fabricate a
+      ModCallContext.
+
+17.6. ModCallContext gateway semantics, facade shape, lifetime, and absent
+      surfaces remain owned by DA-30.
+
+
+===============================================================================
+18. VISIBILITY AND RUNTIME AUTHORITY
+===============================================================================
+
+18.1. Visibility does not grant ApplicationRun authority.
+
+18.2. Visibility does not grant RuntimeHost authority.
+
+18.3. Visibility does not grant ExecutionAdapter authority.
+
+18.4. Visibility does not grant adapter lifecycle authority.
+
+18.5. Visibility does not grant OrchestrationUnit mutation authority.
+
+18.6. Visibility does not grant committed-state authority.
+
+18.7. Visibility does not grant persistence authority.
+
+18.8. Visibility does not authorize RuntimeHost command execution.
+
+18.9. Visibility does not authorize adapter execution.
+
+18.10. Visibility does not authorize state mutation.
+
+18.11. Runtime authority remains mediated by the owning runtime domains.
+
+
+===============================================================================
+19. PACKMANAGER PRESENTATION AND VISIBILITY
+===============================================================================
+
+19.1. PackManager may present, inspect, or prepare information related to
+      Pack visibility.
+
+19.2. PackManager presentation is not visibility authority.
+
+19.3. PackManager graph preparation is not visibility authority.
+
+19.4. PackManager repair suggestions do not silently override visibility
+      rules.
+
+19.5. PackManager repair suggestions do not silently expose forbidden Packs.
+
+19.6. PackManager UI behavior remains owned by DA-29.
+
+19.7. DA-15 defines the access-control consequence of visibility failure, not
+      PackManager repair behavior.
+
+
+===============================================================================
+20. VISIBILITY EVALUATION TIMING
+===============================================================================
+
+20.1. Visibility checks occur:
       - during dependency resolution
       - during resolvePack calls
       - during turnixImport resolution
 
-15.2. Visibility is evaluated dynamically between:
-      - the requesting pack
-      - the target pack
+20.2. Visibility is evaluated dynamically between:
+      - the requesting Pack
+      - the target Pack
 
-15.3. Visibility is not pre-expanded into a static graph.
+20.3. Visibility is not pre-expanded into a static graph.
 
+20.4. Visibility evaluation uses the active dependency/source domain.
 
-===============================================================================
-16. FAILURE MODE (LOCKED)
-===============================================================================
+20.5. Visibility evaluation uses the applicable local visibility and global
+      visibility values.
 
-16.1. If a visibility check fails:
-      - PermissionDeniedError is raised
-      - the error includes:
-        - requesting pack identity
-        - target pack identity
-        - violated rule
+20.6. Visibility evaluation treats identifiers as case-sensitive and
+      byte-exact.
 
-16.2. Visibility failure during dependency resolution:
-      - constitutes a hard dependency failure
-      - aborts resolution for that request
-
-16.3. No fallback is permitted.
-
-16.4. No probing is permitted.
+20.7. Visibility evaluation is not runtime negotiation by Packs.
 
 
 ===============================================================================
-17. CASE SENSITIVITY (LOCKED)
+21. FAILURE MODE
 ===============================================================================
 
-17.1. All identifiers used in visibility checks are:
-      - case-sensitive
-      - byte-exact
+21.1. If a visibility check fails, Turnix raises PermissionDeniedError unless
+      an owning error-taxonomy document defines a more specific visibility
+      denial subtype.
 
-17.2. No normalization is performed.
+21.2. A visibility-denial error includes:
+      - requesting Pack identity
+      - target Pack identity
+      - violated rule
+
+21.3. Visibility failure during dependency resolution is a hard dependency
+      failure.
+
+21.4. Visibility failure during dependency resolution aborts resolution for
+      that request.
+
+21.5. Visibility failure permits no fallback.
+
+21.6. Visibility failure permits no probing.
+
+21.7. Visibility failure permits no runtime negotiation by Packs.
+
+21.8. Turnix does not retry weaker visibility rules and present the result as
+      if it answered the original request.
+
+21.9. Exact final error subtype taxonomy remains outside this document unless
+      an owning error document fixes it.
 
 
 ===============================================================================
-18. EXPLICITLY OPEN QUESTIONS
+22. CASE SENSITIVITY
 ===============================================================================
 
-18.1. OPEN questions include:
+22.1. All identifiers used in visibility checks are case-sensitive.
+
+22.2. All identifiers used in visibility checks are byte-exact.
+
+22.3. Visibility evaluation performs no identifier normalization.
+
+22.4. Visibility evaluation performs no case folding.
+
+
+===============================================================================
+23. EXPLICITLY OPEN QUESTIONS
+===============================================================================
+
+23.1. OPEN questions include:
       - tooling for visualizing visibility graphs
       - UI phrasing for visibility-denial explanations
+      - final visibility-denial error subtype taxonomy
 
-18.2. Future concepts such as explicit bilateral visibility agreements
-      remain out of scope for this document.
+23.2. Explicit bilateral visibility agreements remain out of scope for this
+      document unless an owning design document defines them.
+
+23.3. PackManager repair behavior remains out of scope for this document.
+
+23.4. SaveBundle storage format and graph-evidence layout remain out of scope
+      for this document.
+
+23.5. ModCallContext facade shape and absent surfaces remain out of scope for
+      this document.
 
 
 ===============================================================================
-19. LOCKED SUMMARY
+24. SUMMARY
 ===============================================================================
 
-19.1. LOCKED:
-      - visibility is permission, not preference
-      - dependency does not override visibility
-      - visibility and exportNestedPacks define global reachability
-      - importPacksFromParent controls parent-to-child reference visibility
-      - resolution source restricts the visibility domain
-      - SavePack visibility is strictly isolated
-      - visibility does not imply capability or service access
-      - dynamic evaluation with hard failure on violation
+24.1. Visibility is permissioned reference reachability.
 
-19.2. OPEN:
-      - tooling and user-experience presentation only
+24.2. Visibility is permission, not preference.
+
+24.3. Dependency does not override visibility.
+
+24.4. Visibility and exportNestedPacks constrain global reachability.
+
+24.5. importPacksFromParent controls parent-to-child reference visibility.
+
+24.6. Dependency/source domain selection restricts the visibility domain.
+
+24.7. SaveBundle-local retained or copied Pack material is isolated from
+      global visibility by default.
+
+24.8. Visibility does not imply capability access.
+
+24.9. Visibility does not imply service access.
+
+24.10. Visibility does not authorize importing, module loading, activation,
+       adapter execution, capability invocation, RuntimeHost command
+       execution, OrchestrationUnit-backed mutation, committed-state
+       authority, ApplicationRun authority, ModCallContext authority, or
+       PackManager authority.
+
+24.11. Visibility is evaluated dynamically with hard failure on violation.
+
+24.12. Visibility failure permits no fallback, probing, silent bypass, or
+       runtime negotiation by Packs.
+
+24.13. Visibility-check identifiers are case-sensitive and byte-exact.
+
+24.14. Remaining OPEN items are tooling, presentation, and error-taxonomy
+       details only.
 
 
 ===============================================================================
@@ -430,6 +783,6 @@ END OF DA-15 - VISIBILITY, EXPORTS & ACCESS CONTROL
 --- doc-meta ---
 DOC_ID: DA-15
 DOC_FILE: docs/design/DA-15_VISIBILITY_EXPORTS_AND_ACCESS_CONTROL.txt
-DOC_REV: 15
-DOC_GIT: 023e3de
+DOC_REV: 16
+DOC_GIT: 82fe274
 ----------------
