@@ -9,8 +9,8 @@ EVOLVING
 Description:
 ------------
 Defines the storage-neutral representation contract for committed values in
-Turnix, including immutable payload identity, Chunk semantics, and ValueRef
-forms.
+Turnix, including immutable payload identity, Chunk semantics, ChunkId
+semantics, and ValueRef forms.
 
 This document makes committed value representation stable across storage
 backends without turning storage realization into platform truth.
@@ -18,8 +18,8 @@ backends without turning storage realization into platform truth.
 Purpose:
 --------
 This document defines how authoritative committed values are represented in
-Turnix independently of any specific storage backend, file layout, or
-database implementation.
+Turnix independently of any specific storage backend, file layout, or database
+implementation.
 
 It defines:
 - the storage-neutral payload model for committed values
@@ -28,24 +28,31 @@ It defines:
 - ValueRef as the committed value representation contract
 - schemaless default and optional schema linkage for committed values
 - payload sharing and reachability constraints across retained artifacts
-- boundary rules between representation semantics and persistent I/O
-  authority
+- boundary rules between representation semantics and persistent I/O authority
 
 It does NOT define:
-- the general memory and authoritative-state model (see DA-04)
+- the general memory, transaction, and authoritative-state model (see DA-04)
 - concrete persistent I/O authority, Readers, Writers, or filesystem rules
   (see DA-07)
-- tracing structure, trace event schema, or trace storage semantics
-  (see DA-03)
-- configuration-specific scope, defaults, or migration semantics
+- tracing structure, trace event schema, trace retention, trace pruning, trace
+  loss, span mechanics, or trace storage semantics (see DA-03)
+- configuration-specific scope, defaults, schema, or migration semantics
   (see DA-06)
-- windows, manifests, exports, or audit-bundle semantics
-  (see later design areas)
-- concrete digest algorithms, canonical serialization formats, or codec
-  implementations beyond the semantic constraints stated here
+- Window, ActiveWindow, SafePointWindow, AbortedWindow, Window sequence, or
+  Window finalization semantics (see DA-08)
+- WindowManifest, WindowExport, Minimal Audit Bundle, digest representation,
+  partial export, missing material, export creation, or offline-inspection
+  artifact semantics (see DA-25)
+- equality modes, ComparisonResult, Replay, Resume, Retry, or audit workflow
+  semantics (see DA-26)
+- SaveBundle storage, compatibility, recovery, or durable persistence closure
+  details owned by persistence documents
+- concrete digest algorithms, canonical serialization formats, codec
+  implementations, storage layouts, or garbage-collection algorithms beyond
+  the semantic constraints stated here
 
 Upstream Documents:
-------------------
+-------------------
 - CMR-01
 - CMR-02
 - CMR-03
@@ -55,6 +62,14 @@ Upstream Documents:
 - DA-02
 - DA-03
 - DA-04
+- DA-07
+
+Downstream Documents:
+---------------------
+- DA-07
+- DA-08
+- DA-25
+- DA-26
 
 
 ===============================================================================
@@ -73,6 +88,20 @@ Upstream Documents:
 01.4. This document defines committed value representation and payload
       identity semantics within that shared interpretation model.
 
+01.5. This document uses SaveBundle to name the durable persistence closure
+      of one Application.
+
+01.6. SaveBundle semantics remain owned by their owning persistence
+      documents.
+
+01.7. This document uses ValueRef to name an immutable committed-value
+      decoding contract.
+
+01.8. This document uses Chunk to name an immutable byte payload.
+
+01.9. This document uses ChunkId to name stable content-derived identity for a
+      Chunk.
+
 
 ===============================================================================
 02. CORE CONCEPT
@@ -85,8 +114,7 @@ Upstream Documents:
 
 02.2. Turnix does not treat committed state as live runtime object identity.
 
-02.3. Turnix represents committed values through immutable payload
-      references.
+02.3. Turnix represents committed values through immutable payload references.
 
 02.4. Runtime objects are decoded views of committed payload material.
 
@@ -105,24 +133,25 @@ Upstream Documents:
 02.8. This document defines the representation contract only.
 
 02.9. This document does not define who is allowed to persist payload
-      material or how persistent I/O is performed. Those authority rules
-      belong elsewhere.
+      material or how persistent I/O is performed.
 
-02.10. Turnix does not treat storage realization as the definition of
+02.10. Persistent I/O authority belongs to DA-07.
+
+02.11. Turnix does not treat storage realization as the definition of
        committed truth.
 
-02.11. Turnix does not allow backend convenience, location, or runtime
+02.12. Turnix does not allow backend convenience, location, or runtime
        identity to redefine committed value meaning.
 
-02.12. Later sections of this document refine and apply these rules.
+02.13. Later sections of this document refine and apply these rules.
        They do not weaken them.
 
-02.13. DA-05 defines representation semantics for committed values. It does
-       not grant transaction authority, persistence authority, trace authority,
-       capability permission, pack authority, Window finalization authority,
-       export authority, comparison authority, Replay, Resume, or Retry
-       authority.
+02.14. DA-05 defines representation semantics for committed values.
 
+02.15. DA-05 does not grant transaction authority, persistence authority,
+       trace authority, capability permission, Pack authority, Window
+       finalization authority, export authority, comparison authority, Replay,
+       Resume, or Retry authority.
 
 
 ===============================================================================
@@ -183,28 +212,29 @@ Upstream Documents:
 
 04.2. A ChunkId is the canonical identity of a Chunk.
 
-04.3. A ValueRef is an immutable reference describing how to obtain and
-      decode committed value payload material.
+04.3. A ValueRef is an immutable reference describing how to obtain and decode
+      committed value payload material.
 
 04.4. A codec is a deterministic decoding rule identified by codecId.
 
-04.5. A schema is optional typing and version metadata that may participate
-      in typed decode and compatibility handling.
+04.5. A schema is optional typing and version metadata that may participate in
+      typed decode and compatibility handling.
 
 04.6. A root manifest is an immutable manifest that enumerates referenced
       payload roots and defines a reachability root for retained artifact
       closure.
 
-04.6.1. Later documents may define specialized manifest kinds that satisfy
-        this root-manifest role for particular retained artifact classes.
+04.7. Specialized manifest kinds may satisfy the root-manifest role for
+      particular retained artifact classes when their owning documents define
+      that role.
 
-04.7. This document defines the semantic meaning of these terms.
+04.8. This document defines the semantic meaning of these terms.
 
-04.8. This document does not define their concrete on-disk realization.
+04.9. This document does not define their concrete on-disk realization.
 
-04.9. These terms describe representation semantics. They do not by
-      themselves define authority boundaries outside the committed-state
-      model defined elsewhere.
+04.10. These terms describe representation semantics. They do not by
+       themselves define authority boundaries outside the committed-state model
+       defined elsewhere.
 
 
 ===============================================================================
@@ -218,17 +248,17 @@ Upstream Documents:
 
 05.3. A Chunk is addressable by a stable ChunkId.
 
-05.4. A retained Chunk is retrievable by ChunkId unless it has been removed
-      by explicit retention or garbage-collection policy compatible with
+05.4. A retained Chunk is retrievable by ChunkId unless it has been removed by
+      explicit retention or garbage-collection policy compatible with
       authoritative reachability guarantees.
 
-05.5. Two Chunks are the same Chunk if and only if their ChunkId is
-      identical.
+05.5. Two Chunks are the same Chunk if and only if their ChunkId is identical.
 
 05.6. ChunkId is stable across:
       - export and import
       - copying between storage backends
-      - savePack repackaging
+      - SaveBundle packaging
+      - SaveBundle persistence-closure movement
       - other storage relocation that preserves the same payload material
 
 05.7. ChunkId does not depend on:
@@ -244,21 +274,21 @@ Upstream Documents:
       - the payload byte sequence
       - the identity-relevant chunk metadata fields
 
-05.10. ChunkId is not derived from values expected to differ across
-       machines or runs.
+05.10. ChunkId is not derived from values expected to differ across machines or
+       runs.
 
 05.11. ChunkId is representable in plain text.
 
 05.12. ChunkId remains byte-for-byte stable across export and import.
 
-05.13. The exact ChunkId encoding remains open within the constraints of
-       this document.
+05.13. The exact ChunkId encoding remains open within the constraints of this
+       document.
 
-05.14. Turnix does not treat location, transport, or storage-container
-       identity as Chunk identity.
+05.14. Turnix does not treat location, transport, or storage-container identity
+       as Chunk identity.
 
-05.15. Chunk identity does not become backend-specific merely because a
-       backend stores, packs, or indexes payloads differently.
+05.15. Chunk identity does not become backend-specific merely because a backend
+       stores, packs, or indexes payloads differently.
 
 
 ===============================================================================
@@ -283,8 +313,7 @@ Upstream Documents:
 
 06.6. hashAlgorithm names a deterministic hash function.
 
-06.7. chunkType is a stable explicit identifier for the chunk's artifact
-      role.
+06.7. chunkType is a stable explicit identifier for the chunk's artifact role.
 
 06.8. chunkType does not redefine Chunk identity semantics by itself.
 
@@ -310,16 +339,19 @@ Upstream Documents:
 
 06.13. Corrupt payload material is not treated as authoritative.
 
-06.14. Corruption detection is trace-visible through the tracing system
-       defined elsewhere.
+06.14. Corruption detection creates a representation-domain trace emission
+       obligation when detected in a running Turnix context.
 
-06.15. ChunkId is verified against the identity-relevant header fields when
+06.15. Trace retention, trace pruning, trace loss, event structure, span
+       mechanics, and trace storage semantics remain owned by DA-03.
+
+06.16. ChunkId is verified against the identity-relevant header fields when
        integrity validation requires that check.
 
-06.16. Turnix does not silently accept corrupt retained payload material as
+06.17. Turnix does not silently accept corrupt retained payload material as
        valid committed representation.
 
-06.17. Turnix does not treat integrity failure as a tolerable variation in
+06.18. Turnix does not treat integrity failure as a tolerable variation in
        authoritative content.
 
 
@@ -329,130 +361,131 @@ Upstream Documents:
 
 07.1. Chunk identity is format-aware.
 
-07.2. Format-aware means that payloads representing the same semantic value
-      in different encodings produce different ChunkIds unless some later
+07.2. Format-aware means that payloads representing the same semantic value in
+      different encodings produce different ChunkIds unless some later
       authoritative rule explicitly defines a canonical equivalence model.
 
-07.3. Any change to payload serialization format results in a different
-      Chunk identity.
+07.3. Any change to payload serialization format results in a different Chunk
+      identity.
 
 07.4. Identity does not collapse multiple encodings into one merely because
       their decoded semantic value could be judged similar.
 
-07.5. identity-relevant metadata may include format or schema-related
-      markers when that metadata participates in identity.
+07.5. Identity-relevant metadata may include format or schema-related markers
+      when that metadata participates in identity.
 
 07.6. Turnix does not silently treat representation variance as identity
       equivalence.
 
-07.7. Turnix does not infer canonical sameness from semantic similarity
-      unless a later authoritative rule defines that equivalence
-      explicitly.
+07.7. Turnix does not infer canonical sameness from semantic similarity unless
+      a later authoritative rule defines that equivalence explicitly.
 
 
 ===============================================================================
 08. VALUEREF
 ===============================================================================
 
-08.1. A ValueRef is an immutable reference to committed value payload
-      material.
+08.1. VALUEREF CORE RULES
+-------------------------
 
-08.2. A ValueRef is not a pointer to live runtime memory.
+08.1.1. A ValueRef is an immutable reference to committed value payload
+        material.
 
-08.3. A ValueRef is a deterministic decoding contract for one committed
-      value payload.
+08.1.2. A ValueRef is not a pointer to live runtime memory.
 
-08.4. A committed key in a committed layer or committed configuration is
-      representable as key -> ValueRef at the commit boundary.
+08.1.3. A ValueRef is a deterministic decoding contract for one committed
+        value payload.
 
-08.5. A ValueRef is immutable once created.
+08.1.4. A committed key in a committed layer or committed configuration is
+        representable as key -> ValueRef at the commit boundary.
 
-08.6. A ValueRef does not require:
-      - transactional layers
-      - journal completeness
-      - trace completeness
-      - hidden runtime side effects
-      in order to decode successfully.
+08.1.5. A ValueRef is immutable once created.
 
-08.7. If a ValueRef cannot be decoded, the failure is explicit.
+08.1.6. A ValueRef does not require:
+        - transactional layers
+        - journal completeness
+        - trace completeness
+        - hidden runtime side effects
+        in order to decode successfully.
 
-08.8. A committed value whose ValueRef cannot be decoded is not treated as
-      valid authoritative content.
+08.1.7. If a ValueRef cannot be decoded, the failure is explicit.
 
-08.9. A ValueRef may be resolved eagerly or lazily.
+08.1.8. A committed value whose ValueRef cannot be decoded is not treated as
+        valid authoritative content.
 
-08.10. Eager versus lazy resolution is an implementation choice and does not
-       change ValueRef semantics.
+08.1.9. A ValueRef may be resolved eagerly or lazily.
 
-08.11. Turnix does not treat residency strategy as part of committed value
-       meaning.
+08.1.10. Eager versus lazy resolution is an implementation choice and does not
+         change ValueRef semantics.
 
-08.12. Turnix does not allow decoding success to depend on hidden mutable
-       runtime context.
+08.1.11. Turnix does not treat residency strategy as part of committed value
+         meaning.
+
+08.1.12. Turnix does not allow decoding success to depend on hidden mutable
+         runtime context.
 
 
-08.1 VALUEREF FORMS
--------------------
+08.2. VALUEREF FORMS
+--------------------
 
-08.1.1. A ValueRef is exactly one of the following forms:
+08.2.1. A ValueRef is exactly one of the following forms:
 
         A) InlineValueRef
         B) ChunkValueRef
 
-08.1.2. InlineValueRef stores payload bytes directly inside the ValueRef.
+08.2.2. InlineValueRef stores payload bytes directly inside the ValueRef.
 
-08.1.3. ChunkValueRef stores payload bytes in a Chunk and references them by
+08.2.3. ChunkValueRef stores payload bytes in a Chunk and references them by
         ChunkId.
 
-08.1.4. Both ValueRef forms include an explicit codec identifier.
+08.2.4. Both ValueRef forms include an explicit codec identifier.
 
-08.1.5. ChunkValueRef includes integrity metadata sufficient to validate
+08.2.5. ChunkValueRef includes integrity metadata sufficient to validate
         retrieved payload bytes.
 
-08.1.6. InlineValueRef may include integrity metadata.
+08.2.6. InlineValueRef may include integrity metadata.
 
-08.1.7. Arbitrary network references and arbitrary file-path references are
-        not part of ValueRef under this document.
+08.2.7. Arbitrary network references and arbitrary file-path references are not
+        part of ValueRef under this document.
 
-08.1.8. If a later authoritative document ever introduces external
-        references, such references do not become valid for authoritative
-        committed state unless deterministic retrieval is explicitly
-        guaranteed.
+08.2.8. If a later authoritative document ever introduces external references,
+        such references do not become valid for authoritative committed state
+        unless deterministic retrieval is explicitly guaranteed.
 
-08.1.9. Turnix does not silently widen ValueRef into an open-ended external
+08.2.9. Turnix does not silently widen ValueRef into an open-ended external
         reference model.
 
-08.1.10. Turnix does not treat environment-dependent retrieval as valid
+08.2.10. Turnix does not treat environment-dependent retrieval as valid
          authoritative committed representation.
 
 
-08.2 VALUEREF REQUIRED FIELDS
------------------------------
+08.3. VALUEREF REQUIRED FIELDS
+------------------------------
 
-08.2.1. Every ValueRef includes:
+08.3.1. Every ValueRef includes:
         - codecId
 
-08.2.2. codecId is a stable identifier describing how payload bytes decode
-        into a runtime value.
+08.3.2. codecId is a stable identifier describing how payload bytes decode into
+        a runtime value.
 
-08.2.3. Every ChunkValueRef includes:
+08.3.3. Every ChunkValueRef includes:
         - chunkId
         - integrity metadata
 
-08.2.4. chunkId identifies the immutable payload bytes.
+08.3.4. chunkId identifies the immutable payload bytes.
 
-08.2.5. integrity metadata is sufficient to validate the retrieved payload
+08.3.5. integrity metadata is sufficient to validate the retrieved payload
         bytes used by that ChunkValueRef.
 
-08.2.6. A ValueRef may additionally include:
+08.3.6. A ValueRef may additionally include:
         - contentType
         - schemaId
         - schemaVersion
 
-08.2.7. Optional fields do not become required merely because some artifact
+08.3.7. Optional fields do not become required merely because some artifact
         classes use them.
 
-08.2.8. Optional descriptive metadata does not redefine committed value
+08.3.8. Optional descriptive metadata does not redefine committed value
         identity unless this document or a later authoritative document says
         that it participates in identity.
 
@@ -463,8 +496,8 @@ Upstream Documents:
 
 09.1. Committed values are schemaless by default.
 
-09.2. Schemaless default means that a ValueRef without schema linkage
-      decodes into the generic runtime structure defined by its codec.
+09.2. Schemaless default means that a ValueRef without schema linkage decodes
+      into the generic runtime structure defined by its codec.
 
 09.3. Generic runtime structure may include:
       - map
@@ -480,24 +513,28 @@ Upstream Documents:
 
 09.6. Presence of schema linkage is not required for storing simple values.
 
-09.7. If schema-aware decode fails, the failure is explicit unless some
-      later authoritative policy explicitly permits fallback.
+09.7. If schema-aware decode fails, the failure is explicit unless some later
+      authoritative policy explicitly permits fallback.
 
 09.8. Any permitted fallback from schema-aware decode to schemaless decode
-      remains trace-visible.
+      creates a representation-domain trace emission obligation when it occurs
+      in a running Turnix context.
 
-09.9. This document defines schema linkage only as optional committed-value
-      representation metadata.
+09.9. Trace retention, trace pruning, trace loss, event structure, span
+      mechanics, and trace storage semantics remain owned by DA-03.
 
-09.10. This document does not define the full generalized schema system used
-       by configuration or other structured domains.
+09.10. This document defines schema linkage only as optional committed-value
+       representation metadata.
 
-09.11. Turnix does not silently require schema for ordinary committed value
+09.11. This document does not define the full generalized schema system used by
+       configuration or other structured domains.
+
+09.12. Turnix does not silently require schema for ordinary committed value
        storage.
 
-09.12. Turnix does not silently downgrade schema-aware failure into
-       successful committed decode unless an explicit authoritative policy
-       allows that behavior.
+09.13. Turnix does not silently downgrade schema-aware failure into successful
+       committed decode unless an explicit authoritative policy allows that
+       behavior.
 
 
 ===============================================================================
@@ -513,8 +550,8 @@ Upstream Documents:
       committed value remains representable as a ValueRef at the commit
       boundary.
 
-10.4. Patch and Copy semantics apply at the level of committed value
-      meaning rather than raw chunk storage identity.
+10.4. Patch and Copy semantics apply at the level of committed value meaning
+      rather than raw chunk storage identity.
 
 10.5. Chunk reuse or duplication is an implementation detail when committed
       value meaning remains preserved.
@@ -532,15 +569,16 @@ Upstream Documents:
 
 11.1. Payload chunks may be shared across retained artifacts.
 
-11.2. The same ChunkId may be referenced by multiple retained artifacts such
-      as:
+11.2. The same ChunkId may be referenced by multiple retained artifacts
+       such as:
       - committed state roots
-      - windows
-      - manifests
+      - Windows
+      - Window manifests
       - traces
       - journals
       - exports
-      - audit bundles
+      - Minimal Audit Bundle manifests
+      - SaveBundle manifests
 
 11.3. Payload sharing does not change authority boundaries.
 
@@ -552,29 +590,33 @@ Upstream Documents:
 11.6. Storage realization allows enumeration of chunk references from a root
       manifest sufficient to compute reachability.
 
-11.7. Garbage collection may delete chunks unreachable from all retained
-      roots according to explicit policy.
+11.7. Garbage collection may delete chunks unreachable from all retained roots
+      according to explicit policy.
 
 11.8. Garbage collection does not delete any chunk reachable from an
       authoritative retained root.
 
-11.9. Garbage collection is trace-visible.
+11.9. Garbage collection creates a representation-domain trace emission
+      obligation when performed in a running Turnix context.
 
-11.10. Example retained roots include:
-       - savePack manifests
-       - pinned window manifests
-       - pinned audit-bundle manifests
+11.10. Trace retention, trace pruning, trace loss, event structure, span
+       mechanics, and trace storage semantics remain owned by DA-03.
+
+11.11. Example retained roots include:
+       - SaveBundle manifests
+       - pinned Window manifests
+       - pinned Minimal Audit Bundle manifests
        - other explicitly designated policy roots
 
-11.11. Example retained roots are illustrative and do not lock the full
-       future root catalog.
+11.12. Example retained roots are illustrative and do not lock the full future
+       root catalog.
 
-11.12. Sharing does not promote non-authoritative artifacts into authority.
+11.13. Sharing does not promote non-authoritative artifacts into authority.
 
-11.13. Reachability determines retention safety. It does not redefine what
-       kind of artifact a root represents.
+11.14. Reachability determines retention safety. It does not redefine what kind
+       of artifact a root represents.
 
-11.14. Turnix does not silently collect payload that authoritative retained
+11.15. Turnix does not silently collect payload that authoritative retained
        roots still require.
 
 
@@ -588,17 +630,17 @@ Upstream Documents:
       material directly.
 
 12.3. Persistent access required to resolve retained Chunk material or
-      committed ValueRef payload routes through the centralized persistent
-      I/O authority defined elsewhere.
+      committed ValueRef payload routes through the centralized persistent I/O
+      authority defined by DA-07.
 
 12.4. Packs do not resolve chunk storage directly.
 
-12.5. Packs do not write payload bytes referenced by authoritative
-      committed ValueRefs directly.
+12.5. Packs do not write payload bytes referenced by authoritative committed
+      ValueRefs directly.
 
 12.6. Readers, Writers, codecs, and storage providers that realize this
-      representation contract remain subordinate to the persistent I/O
-      authority defined elsewhere.
+      representation contract remain subordinate to DA-07 persistent I/O
+      authority.
 
 12.7. Representation semantics remain stable even if the persistent storage
       backend changes.
@@ -606,8 +648,12 @@ Upstream Documents:
 12.8. Persistent I/O authority controls access. It does not redefine the
       representation meaning defined by this document.
 
-12.9. Turnix does not allow direct storage access to become a shadow
-      authority path for committed value meaning.
+12.9. SaveBundle may physically retain payload material. That physical
+      retention does not make SaveBundle a Pack and does not transfer
+      persistent I/O authority to Pack code.
+
+12.10. Turnix does not allow direct storage access to become a shadow authority
+       path for committed value meaning.
 
 
 ===============================================================================
@@ -621,8 +667,7 @@ Upstream Documents:
       - logical chunk packing into containers
       - partial retrieval through index chunks
 
-13.2. Optional capabilities do not change Chunk or ValueRef identity
-      semantics.
+13.2. Optional capabilities do not change Chunk or ValueRef identity semantics.
 
 13.3. If storage transforms bytes for transport or persistence convenience,
       Chunk identity still follows the canonical payload rule defined by the
@@ -637,13 +682,18 @@ Upstream Documents:
 13.6. Concrete digest algorithms remain open.
 
 13.7. Concrete canonical serialization rules remain open except where some
-      later authoritative document defines them for a specific artifact
-      class.
+      later authoritative document defines them for a specific artifact class.
 
-13.8. Optional capability does not authorize hidden semantic drift.
+13.8. Concrete codec implementation remains open except where an owning
+      implementation specification defines it.
 
-13.9. Open encoding choice does not permit backend-specific weakening of the
-      identity contract defined by this document.
+13.9. Concrete storage layout remains open except where an owning
+      implementation specification defines it.
+
+13.10. Optional capability does not authorize hidden semantic drift.
+
+13.11. Open encoding choice does not permit backend-specific weakening of the
+       identity contract defined by this document.
 
 
 ===============================================================================
@@ -651,31 +701,53 @@ Upstream Documents:
 ===============================================================================
 
 14.1. LOCKED:
-      - committed values are represented through immutable payload
-        references rather than live runtime object identity
+      - committed values are represented through immutable payload references
+        rather than live runtime object identity
       - a committed key is representable as key -> ValueRef at the commit
         boundary
       - Chunk is immutable byte payload identified by stable ChunkId
       - ChunkId is content-derived and independent of path, machine, and
         wall-clock accident
+      - Chunk identity is format-aware
       - integrity failure is explicit and corrupt payload is not treated as
         authoritative
+      - decode failure is explicit and failed decode is not treated as valid
+        authoritative content
       - ValueRef is immutable and decodes deterministically from retained
         authoritative payload material
       - ValueRef forms are InlineValueRef and ChunkValueRef
-      - committed values are schemaless by default with optional schema
-        linkage
+      - arbitrary file-path and arbitrary network references are not ValueRef
+        forms
+      - committed values are schemaless by default with optional schema linkage
+      - static origin does not bypass committed representation
       - payload sharing across retained artifacts does not change authority
         boundaries
       - reachability is determined from explicit retained roots
+      - garbage collection does not delete chunks reachable from authoritative
+        retained roots
+      - representation-domain trace wording means trace emission obligation,
+        not trace persistence guarantee
+      - trace substrate, retention, pruning, loss, event structure, span
+        mechanics, and trace storage semantics remain owned by DA-03
+      - committed-state authority and transaction semantics remain owned by
+        DA-04
+      - persistent I/O authority remains owned by DA-07
+      - Window finalization remains owned by DA-08
+      - artifact and export semantics remain owned by DA-25
+      - comparison, Replay, Resume, Retry, and audit workflow semantics remain
+        owned by DA-26
+      - SaveBundle and persistence documents own durable persistence closure,
+        retained material, storage, compatibility, and recovery semantics
       - representation semantics are separate from persistent I/O authority
 
 14.2. OPEN:
       - exact ChunkId encoding
       - concrete digest algorithms
       - concrete canonical serialization rules
-      - optional storage capabilities within the constraints of this
-        document
+      - concrete codec implementation
+      - concrete storage layout
+      - optional storage capabilities within the constraints of this document
+      - reachability graph storage and garbage-collection algorithm details
 
 
 ===============================================================================
@@ -685,6 +757,6 @@ END OF DA-05 - PAYLOAD IDENTITY, CHUNKS & VALUEREF REPRESENTATION
 --- doc-meta ---
 DOC_ID: DA-05
 DOC_FILE: docs/design/DA-05_PAYLOAD_IDENTITY_CHUNKS_AND_VALUEREF_REPRESENTATION.txt
-DOC_REV: 4
-DOC_GIT: bd68ffb
+DOC_REV: 5
+DOC_GIT: 683a850
 ----------------
