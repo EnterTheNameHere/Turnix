@@ -8,16 +8,17 @@ EVOLVING
 
 Description:
 ------------
-Defines how packs interact at runtime without importing each other's code,
-and how Turnix mediates authority, power, safety, adapter-executed calls, and
-Job-backed capability execution.
+Defines how Turnix mediates runtime interaction through Services,
+Capabilities, permission checks, adapter-mediated calls, Job-backed
+capability execution, and trace-visible capability evidence.
 
-This is the primary and only supported cross-pack interaction mechanism.
+This document owns the Service / Capability distinction and the supported
+cross-Pack execution boundary.
 
 Purpose:
 --------
-This document defines the strict, auditable runtime interaction model used
-by Turnix for cross-pack wiring and cross-pack execution.
+This document defines the strict, reviewable runtime interaction model used
+by Turnix for cross-Pack wiring and cross-Pack execution.
 
 It defines:
 - Services as runtime wiring objects
@@ -26,22 +27,32 @@ It defines:
 - capability identity and version rules
 - conflict rules for capability identities
 - capability invocation flow and execution modes
-- capability relationship to execution adapters
+- capability relationship to ExecutionAdapters
 - capability relationship to Jobs when execution is Job-backed
-- trace and audit requirements for capability calls
+- capability relationship to OrchestrationUnits and other runtime outcomes
+- trace-evidence obligations for capability calls
 - cross-runtime and cross-adapter symmetry
 
 It does NOT define:
 - importing and module-loading rules (see DA-12)
 - activation semantics and execution guarantees (see DA-14)
 - execution adapter boundary semantics (see DA-23)
+- adapter lifecycle, trust, or traceability semantics (see DA-27)
 - persistence rules and file I/O (see DA-07)
 - configuration schemas and policy storage formats (see DA-06)
 - remembered-decision precedence and user-decision persistence semantics
   (see DA-17)
-- tracing schema or storage details (see DA-03)
+- tracing schema, trace storage, or trace retention details (see DA-03)
 - Job lifecycle, Job result, Job timeout, or Job cancellation semantics
   (see DA-19)
+- Application or ApplicationRun lifecycle semantics (see DA-20)
+- RPC channel, transport, or message-flow semantics (see DA-21)
+- OrchestrationUnit lifecycle or mutation-authority semantics (see DA-24)
+- Window artifact, export, comparison, replay, resume, or retry semantics
+  (see DA-25 and DA-26)
+- RuntimeHost lifecycle, command, or ownership semantics (see DA-28)
+- PackManager catalog, graph, or repair semantics (see DA-29)
+- full ModCallContext facade semantics or absent surfaces (see DA-30)
 
 Upstream Documents:
 ------------------
@@ -52,11 +63,23 @@ Upstream Documents:
 - CMR-05
 - DA-01
 - DA-03
+- DA-04
+- DA-06
+- DA-07
 - DA-12
 - DA-14
 - DA-17
 - DA-19
+- DA-20
+- DA-21
 - DA-23
+- DA-24
+- DA-25
+- DA-26
+- DA-27
+- DA-28
+- DA-29
+- DA-30
 
 Downstream Documents:
 --------------------
@@ -64,6 +87,9 @@ Downstream Documents:
 - DA-19
 - DA-21
 - DA-23
+- DA-24
+- DA-27
+- DA-30
 - IS-01
 - IS-02
 
@@ -81,9 +107,26 @@ Downstream Documents:
 01.3. The CORE META-RULES documents define the general rule language and
       interpretation model used by this document.
 
-01.4. This document defines services, capabilities, permission boundaries,
-      adapter-mediated capability invocation, and capability-to-Job
-      correlation within that shared interpretation model.
+01.4. This document defines Services, Capabilities, permission boundaries,
+      adapter-mediated capability invocation, capability-to-Job
+      correlation, and capability-domain trace evidence within that shared
+      interpretation model.
+
+01.5. This document uses ModCallContext for the invocation-scoped,
+      Pack-facing gateway into Turnix.
+
+01.6. This document uses ApplicationRun for one live execution period of an
+      Application.
+
+01.7. This document uses OrchestrationUnit for a bounded work and
+      mutation-authority context.
+
+01.8. DA-30 owns the exact ModCallContext facade set and absent surfaces.
+
+01.9. This document names ModCallContext only where capability registration
+      or invocation needs a Pack-facing mediated surface.
+
+01.10. This document does not define the full ModCallContext API.
 
 
 ===============================================================================
@@ -94,101 +137,134 @@ Downstream Documents:
       - Services
       - Capabilities
 
-02.2. Services provide shared runtime wiring.
+02.2. Services provide runtime wiring.
 
-02.3. Capabilities provide named, permissioned operations.
+02.3. Capabilities provide named, versioned, permissioned operations.
 
-02.4. Services and Capabilities serve different purposes and are not
-      conflated.
+02.4. Services and Capabilities serve different purposes.
 
-02.5. Neither Services nor Capabilities implies persistence.
+02.5. Services and Capabilities are not conflated.
 
-02.6. Persistence remains governed by:
+02.6. Neither Services nor Capabilities implies persistence.
+
+02.7. Persistence remains governed by:
       - DA-07 for file I/O and persistence authority
       - DA-06 for configuration and schema-driven persisted behavior
       - DA-17 for remembered-decision policy handling when user decisions
         are involved
 
-02.7. Capabilities may use Jobs for observable execution lifecycle when the
+02.8. Capabilities may use Jobs for observable execution lifecycle when the
       capability operation requires Job semantics.
 
-02.8. A Job handle is not a Service.
+02.9. A Job handle is not a Service.
 
-02.9. A Job handle is not a raw implementation object.
+02.10. A Job handle is not a raw implementation object.
 
-02.10. Adapter-executed code invokes capabilities through Turnix-mediated
-       context, RPC, or equivalent capability surfaces.
+02.11. Adapter-executed code invokes capabilities through ModCallContext,
+       RPC, or equivalent Turnix-mediated capability surfaces.
 
-02.11. In-process adapter calls remain capability-mediated.
+02.12. In-process adapter calls remain capability-mediated.
 
-02.12. Same process, same runtime, or same language does not bypass
+02.13. Same process, same runtime, or same language does not bypass
        capability mediation.
-02.13. Capability-call trace evidence is a capability-domain trace emission
-       obligation. Trace retention, pruning, and loss remain governed by
-       DA-03 and do not redefine capability success or failure.
 
+02.14. Capability-call trace evidence is a capability-domain trace emission
+       obligation.
+
+02.15. Trace retention, pruning, and loss remain governed by DA-03.
+
+02.16. Trace retention, pruning, and loss do not redefine capability
+       success or failure.
 
 
 ===============================================================================
 03. SERVICES - RUNTIME WIRING (LOCKED)
 ===============================================================================
 
-03.1. A Service is:
-      - a concrete runtime object or instance
-      - registered by a pack during activation
-      - stored in a scoped service registry
-      - retrieved explicitly by other packs
+03.1. A Service is a runtime-owned wiring object or internal implementation
+      dependency.
 
-03.2. Example:
-      - ctx.registerService("llm", client)
-      - client = ctx.services.get("llm")
+03.2. A Service may be provided by the platform, an adapter, or an
+      activated Pack through an explicitly supported lifecycle surface.
 
-03.3. Locked properties:
-      - services are opaque runtime objects
-      - service lifetime is bound to the providing pack's activation
-      - service name collisions are forbidden
-      - services must not perform direct filesystem I/O that bypasses Turnix
-        persistence authority
-      - services have no permission layer by themselves
+03.3. The Service registry is owned by the runtime.
 
-03.4. Services are not adapter authority.
+03.4. A Service may support a capability implementation.
 
-03.5. Services are not ModCallContext authority.
+03.5. A caller of a Capability receives the capability contract and mediated
+      result.
 
-03.6. Services do not expose backend internals to adapter-executed code.
+03.6. A caller of a Capability does not receive the backing Service object.
+
+03.7. Service lifetime is bound to the owning runtime scope and providing
+      lifecycle defined for that Service.
+
+03.8. Service name collisions are forbidden within the registry scope where
+      a Service name is registered.
+
+03.9. Services do not provide a permission layer by themselves.
+
+03.10. Services do not expose backend internals to adapter-executed code.
+
+03.11. Services are not adapter authority.
+
+03.12. Services are not ModCallContext authority.
+
+03.13. Services are not capability permission.
+
+03.14. Services are not Pack-facing cross-Pack execution surfaces.
+
+03.15. Services do not grant direct filesystem I/O that bypasses Turnix
+       persistence authority.
 
 
 ===============================================================================
 04. SERVICE ACCESS RULES (LOCKED)
 ===============================================================================
 
-04.1. Service access is explicit.
+04.1. Service access occurs through runtime-owned wiring paths.
 
-04.2. Services are not inherited.
+04.2. Ordinary Pack-to-Pack behavior is invoked through Capabilities.
 
-04.3. Visibility does not grant service access.
+04.3. Ordinary Pack code does not retrieve another Pack's Service object
+      for cross-Pack execution.
 
-04.4. Service availability is never implicit.
+04.4. ModCallContext does not expose ctx.services as an ordinary
+      Pack-facing surface.
 
-04.5. If a service does not exist:
-      - ctx.services.get(name) must fail
-      - or must return None only when the API contract explicitly allows
-        that behavior
+04.5. A later explicitly scoped Service facade may define a narrower safe
+      Service access surface.
 
-04.6. Services are for trusted runtime wiring only.
+04.6. Until such a facade is defined, Service object access remains
+      internal runtime wiring.
 
-04.7. Services are not used to bypass:
-      - configuration schemas
-      - persistence rules
-      - execution authorization
-      - permission checks
-      - capability mediation
-      - adapter boundaries
-      - Job lifecycle boundaries
+04.7. Service availability is never implicit.
 
-04.8. Services are not used as a cross-pack execution shortcut.
+04.8. Service access is not inherited.
 
-04.9. Services are not used as an in-process adapter bypass.
+04.9. Visibility does not grant Service access.
+
+04.10. Service object access is not used to bypass:
+       - configuration schemas
+       - persistence rules
+       - execution authorization
+       - permission checks
+       - capability mediation
+       - adapter boundaries
+       - Job lifecycle boundaries
+       - OrchestrationUnit mutation-authority boundaries
+       - ModCallContext absent-surface rules
+
+04.11. Service object access is not used as a cross-Pack execution
+       shortcut.
+
+04.12. Service object access is not used as an in-process adapter bypass.
+
+04.13. If a capability implementation uses a Service internally, the
+       Service remains hidden behind the capability boundary.
+
+04.14. If a Service does not exist or is not visible to a runtime-owned
+       wiring path, access fails according to the owning Service API.
 
 
 ===============================================================================
@@ -197,34 +273,38 @@ Downstream Documents:
 
 05.1. A Capability is:
       - a named operation
-      - exported by a pack
-      - invoked by other packs or adapter-executed code
+      - versioned by major version
+      - exported by a Pack or platform-owned provider
+      - invoked by Packs or adapter-executed code through mediated surfaces
       - mediated by Turnix
-      - permission-checked
+      - permission-checked according to its permission class
 
-05.2. Capabilities are the only supported cross-pack execution boundary.
+05.2. Capabilities are the only supported cross-Pack execution boundary.
 
-05.3. Capabilities are the supported authority boundary for adapter-executed
-      code that requests pack-provided behavior.
+05.3. Capabilities are the supported authority boundary for
+      adapter-executed code that requests Pack-provided behavior.
 
-05.4. Example export:
-      ctx.registerCapability("llm.pipeline@1", handler)
+05.4. Capability registration occurs through a Turnix-mediated capability
+      registration surface.
 
-05.5. Example call:
-      ctx.callCapability("llm.pipeline@1", args)
+05.5. Capability invocation occurs through ModCallContext, RPC, or an
+      equivalent Turnix-mediated capability request surface.
 
-05.6. A capability invocation may complete without creating a Job.
+05.6. Example capability identity:
+      - llm.pipeline@1
 
-05.7. A capability invocation may create or attach to a Job when the
+05.7. A capability invocation may complete without creating a Job.
+
+05.8. A capability invocation may create or attach to a Job when the
       operation requires observable Job lifecycle semantics.
 
-05.8. A Job-backed capability remains a capability invocation.
+05.9. A Job-backed capability remains a capability invocation.
 
-05.9. Job-backed execution does not bypass capability mediation.
+05.10. Job-backed execution does not bypass capability mediation.
 
-05.10. Adapter-mediated execution does not bypass capability mediation.
+05.11. Adapter-mediated execution does not bypass capability mediation.
 
-05.11. In-process execution does not bypass capability mediation.
+05.12. In-process execution does not bypass capability mediation.
 
 
 ===============================================================================
@@ -235,36 +315,50 @@ Downstream Documents:
       <name>@<major>
 
 06.2. Examples:
-      - "llm.pipeline@1"
-      - "http.request@1"
-      - "compile.typescript@1"
+      - llm.pipeline@1
+      - http.request@1
+      - compile.typescript@1
 
-06.3. Locked rules:
-      - capability identity uses major version only
-      - incompatible change creates a new major version
-      - minor or patch versions are not part of capability identity
-      - capability identity is stable and global
+06.3. Capability identity uses major version only.
 
-06.4. Permission matching for remembered capability decisions uses the exact
-      versioned capability identifier.
+06.4. An incompatible change creates a new major version.
 
-06.5. A permission remembered for storage.export@1 applies to
+06.5. Minor or patch versions are not part of capability identity.
+
+06.6. Capability identity is stable and global within the runtime authority
+      domain where capability registration occurs.
+
+06.7. Permission matching for remembered capability decisions uses the
+      exact versioned capability identifier.
+
+06.8. A permission remembered for storage.export@1 applies to
       storage.export@1.
 
-06.6. This document does not introduce wildcard, prefix, family, or
-      versionless fallback matching for remembered capability decisions.
+06.9. This document does not introduce wildcard matching for remembered
+      capability decisions.
+
+06.10. This document does not introduce prefix matching for remembered
+       capability decisions.
+
+06.11. This document does not introduce family matching for remembered
+       capability decisions.
+
+06.12. This document does not introduce versionless fallback matching for
+       remembered capability decisions.
 
 
 ===============================================================================
 07. CAPABILITY EXPORT VS USAGE (LOCKED DISTINCTION)
 ===============================================================================
 
-07.1. Capability export happens at runtime through ctx.registerCapability.
+07.1. Capability export happens at runtime through explicit capability
+      registration.
 
-07.2. Capability export defines authoritative runtime behavior.
+07.2. Capability export defines authoritative runtime behavior for that
+      capability identity.
 
-07.3. Capability usage happens through ctx.callCapability or an equivalent
-      Turnix-mediated capability request surface.
+07.3. Capability usage happens through a Turnix-mediated capability request
+      surface.
 
 07.4. Capability usage invokes Turnix mediation.
 
@@ -281,8 +375,9 @@ Downstream Documents:
 
 07.9. Runtime behavior remains authoritative over manifest intent.
 
-07.10. Adapter metadata or adapter binding does not substitute for runtime
-       capability export.
+07.10. Adapter metadata does not substitute for runtime capability export.
+
+07.11. Adapter binding does not substitute for runtime capability export.
 
 
 ===============================================================================
@@ -298,226 +393,331 @@ Downstream Documents:
       - soft
       - hard
 
-08.4. none means the capability is always allowed.
+08.4. none means the capability is always allowed by the capability
+      permission model.
 
-08.5. soft means:
-      - user decision may be required
-      - allow, deny, for-this-run, and remember-style outcomes may exist
+08.5. soft means user decision may be required.
 
-08.6. hard means:
-      - explicit user allowance is required
-      - the capability is not auto-granted
+08.6. soft permits allow, deny, for-this-run, and remember-style outcomes
+      when those outcomes are defined by policy handling.
 
-08.7. Permission classification is capability-defined and is not negotiated
-      by callers.
+08.7. hard means explicit user allowance is required.
 
-08.8. Decision persistence scope and precedence are defined by DA-17.
+08.8. hard capabilities are not auto-granted by the capability permission
+      model.
 
-08.9. Capability permission is distinct from DA-23 execution authorization
-      for a code artifact.
+08.9. Permission classification is capability-defined.
 
-08.10. Execution authorization may allow adapter code to run while later
+08.10. Permission classification is not negotiated by callers.
+
+08.11. Decision persistence scope and precedence are defined by DA-17.
+
+08.12. Capability permission is distinct from DA-23 execution
+       authorization for a code artifact.
+
+08.13. Execution authorization may allow adapter code to run while later
        capability permission still denies a specific capability invocation.
+
+08.14. Service object access is distinct from capability permission.
+
+08.15. RuntimeHost command acceptance is distinct from capability
+       permission.
+
+08.16. PackManager graph preparation is distinct from capability
+       permission.
 
 
 ===============================================================================
 09. CAPABILITY INVOCATION FLOW (LOCKED)
 ===============================================================================
 
-09.1. When ctx.callCapability(...) or an equivalent mediated capability
-      request is invoked:
-      1) Turnix evaluates permission
-      2) if allowed, the handler executes or accepted Job-backed execution
-         begins
-      3) if undecided, execution pauses for decision handling
+09.1. When a mediated capability request is invoked, Turnix evaluates
+      permission before capability execution begins.
 
-09.2. During undecided permission handling:
-      - a decision surface may be shown
-      - user or policy input is obtained
-      - the resulting decision is recorded according to DA-17 policy rules
-      - execution resumes only after that decision path completes
+09.2. If permission allows execution, the handler executes or accepted
+      Job-backed execution begins.
 
-09.3. Locked rules:
-      - Turnix remains responsive while execution is paused for decision
-        handling
-      - no background mutation may occur while paused
-      - execution resumes deterministically from the pause point
+09.3. If permission is undecided, execution pauses for decision handling.
 
-09.4. Permission evaluation occurs before capability execution begins.
+09.4. During undecided permission handling, a decision surface may be
+      shown.
 
-09.5. Job-backed execution does not skip permission evaluation.
+09.5. During undecided permission handling, user or policy input is
+      obtained.
 
-09.6. Adapter-mediated invocation does not skip permission evaluation.
+09.6. During undecided permission handling, the resulting decision is
+      recorded according to DA-17 policy rules.
 
-09.7. In-process invocation does not skip permission evaluation.
+09.7. Execution resumes only after that decision path completes.
 
+09.8. Turnix remains responsive while execution is paused for decision
+      handling.
 
-09.1 CAPABILITY EXECUTION MODES AND JOBS
-----------------------------------------
+09.9. No background mutation occurs while paused unless an owning lifecycle
+      or work document explicitly defines the allowed staged work.
 
-09.1.1. Capability invocation may use direct execution or Job-backed
-        execution.
+09.10. Execution resumes deterministically from the pause point.
 
-09.1.2. Direct execution means the capability handler completes the
-        capability operation in the immediate invocation path.
+09.11. Job-backed execution does not skip permission evaluation.
 
-09.1.3. Job-backed execution means the capability operation is represented
-        by or attached to a Job lifecycle owned by DA-19.
+09.12. Adapter-mediated invocation does not skip permission evaluation.
 
-09.1.4. Not every capability invocation creates a Job.
+09.13. In-process invocation does not skip permission evaluation.
 
-09.1.5. Short or immediate capability operations may complete directly.
+09.14. ModCallContext participation does not replace capability mediation.
 
-09.1.6. Long-running capability execution may create or attach to a Job.
-
-09.1.7. Cancellable capability execution may create or attach to a Job.
-
-09.1.8. Progress-reporting capability execution may create or attach to a
-        Job.
-
-09.1.9. Timeout-managed capability execution may create or attach to a Job.
-
-09.1.10. A capability invocation that creates or attaches to a Job remains
-         subject to the same permission model as a direct capability
-         invocation.
-
-09.1.11. A Job-backed capability returns or exposes only the lifecycle
-         surface defined for that operation.
-
-09.1.12. A Job-backed capability does not expose service internals.
-
-09.1.13. A Job-backed capability does not expose raw implementation objects.
-
-09.1.14. A Job-backed capability does not grant callers direct access to the
-         underlying execution mechanism.
-
-09.1.15. Job lifecycle semantics, terminal outcomes, cancellation, timeout,
-         supersession, progress, and late completion handling are defined by
-         DA-19.
-
-09.1.16. Capability semantics continue to own permission, mediation, and
-         cross-pack execution boundary behavior.
-
-09.1.17. Adapter lifecycle semantics remain distinct from capability
-         execution mode and Job lifecycle.
+09.15. RPC transport participation does not replace capability mediation.
 
 
 ===============================================================================
-10. USER DECISIONS AND POLICY (LOCKED)
+10. CAPABILITY EXECUTION MODES AND JOBS
 ===============================================================================
 
-10.1. User decisions may be persisted.
+10.1. Capability invocation may use direct execution.
 
-10.2. Remembered capability decisions may be scoped as:
+10.2. Capability invocation may use Job-backed execution.
+
+10.3. Direct execution means the capability handler completes the
+      capability operation in the immediate invocation path.
+
+10.4. Job-backed execution means the capability operation is represented by
+      or attached to a Job lifecycle owned by DA-19.
+
+10.5. Not every capability invocation creates a Job.
+
+10.6. Short or immediate capability operations may complete directly.
+
+10.7. Long-running capability execution may create or attach to a Job.
+
+10.8. Cancellable capability execution may create or attach to a Job.
+
+10.9. Progress-reporting capability execution may create or attach to a
+      Job.
+
+10.10. Timeout-managed capability execution may create or attach to a Job.
+
+10.11. A capability invocation that creates or attaches to a Job remains
+       subject to the same permission model as a direct capability
+       invocation.
+
+10.12. A Job-backed capability returns or exposes only the lifecycle
+       surface defined for that operation.
+
+10.13. A Job-backed capability does not expose Service internals.
+
+10.14. A Job-backed capability does not expose raw implementation objects.
+
+10.15. A Job-backed capability does not grant callers direct access to the
+       underlying execution mechanism.
+
+10.16. Job lifecycle semantics, terminal outcomes, cancellation, timeout,
+       supersession, progress, and late completion handling are defined by
+       DA-19.
+
+10.17. Capability semantics continue to own permission, mediation, and
+       cross-Pack execution boundary behavior.
+
+10.18. Adapter lifecycle semantics remain distinct from capability
+       execution mode and Job lifecycle.
+
+
+===============================================================================
+11. CAPABILITY OUTCOME BOUNDARY
+===============================================================================
+
+11.1. Capability invocation is a named, permissioned, Turnix-mediated
+      operation.
+
+11.2. Capability invocation is not automatically a Job.
+
+11.3. Capability invocation is not automatically an OrchestrationUnit.
+
+11.4. Capability invocation is not automatically an RPC outcome.
+
+11.5. Capability invocation is not automatically an adapter lifecycle
+      outcome.
+
+11.6. Capability invocation is not automatically a RuntimeHost outcome.
+
+11.7. Capability invocation is not automatically an ApplicationRun
+      lifecycle outcome.
+
+11.8. Capability invocation is not automatically Window finalization.
+
+11.9. Capability invocation is not automatically a PackManager outcome.
+
+11.10. Capability invocation is not automatically a committed-state
+       mutation.
+
+11.11. Capability invocation is not automatically a persistent I/O result.
+
+11.12. Capability invocation is not automatically an artifact or export
+       outcome.
+
+11.13. Capability invocation is not automatically a ComparisonResult.
+
+11.14. Capability invocation is not automatically a Replay outcome.
+
+11.15. Capability invocation is not automatically a Resume outcome.
+
+11.16. Capability invocation is not automatically a Retry outcome.
+
+11.17. Capability invocation is not automatically an offline evidence review
+       workflow outcome.
+
+11.18. If capability invocation affects another domain, that domain defines
+       the resulting domain outcome.
+
+11.19. Correlation between a capability invocation and another domain
+       outcome is explicit.
+
+11.20. Correlation between a capability invocation and another domain
+       outcome is trace-visible when the participating domains emit trace
+       evidence.
+
+11.21. DA-24 owns OrchestrationUnit lifecycle, mutation authority, and
+       terminal outcome semantics.
+
+
+===============================================================================
+12. USER DECISIONS AND POLICY (LOCKED)
+===============================================================================
+
+12.1. User decisions may be persisted.
+
+12.2. Remembered capability decisions may be scoped as:
       - run
       - save
       - global
 
-10.3. User decisions remain explainable.
+12.3. User decisions remain explainable.
 
-10.4. User decisions remain reversible.
+12.4. User decisions remain reversible.
 
-10.5. Policy may define:
-      - auto-allow behavior for soft permissions
-      - never-auto-allow behavior for hard permissions
+12.5. Policy may define auto-allow behavior for soft permissions.
 
-10.6. All decisions remain:
-      - traceable
-      - attributable
-      - replayable within the meaning of the governing tracing and policy
-        documents
+12.6. Policy may define never-auto-allow behavior for hard permissions.
 
-10.7. DA-17 defines:
-      - remembered-decision precedence
-      - run/save/global evaluation order
-      - exact remembered-decision key semantics
-      - policy persistence behavior
+12.7. Decisions remain traceable where decision trace evidence is emitted
+      and retained.
 
-10.8. Adapter presentation of a decision is not decision ownership.
+12.8. Decisions remain attributable.
 
+12.9. DA-17 defines remembered-decision precedence.
 
-===============================================================================
-11. SERVICES VS CAPABILITIES - STRICT SEPARATION (LOCKED)
-===============================================================================
+12.10. DA-17 defines run/save/global evaluation order.
 
-11.1. Services provide direct object access for runtime wiring.
+12.11. DA-17 defines exact remembered-decision key semantics.
 
-11.2. Services do not perform permission checks by themselves.
+12.12. DA-17 defines policy persistence behavior.
 
-11.3. Capabilities provide an explicit execution boundary.
+12.13. Adapter presentation of a decision is not decision ownership.
 
-11.4. Capabilities represent user-visible or policy-visible power.
-
-11.5. Capabilities remain permissioned and audited.
-
-11.6. Locked rules:
-      - capabilities must not expose service internals directly as a bypass
-        path
-      - one pack must not call another pack's service-provided behavior
-        directly across pack boundaries
-      - cross-pack execution must go through capability mediation
-      - adapter-executed cross-pack behavior must go through capability
-        mediation
-      - Job-backed capability execution does not expose service internals
-      - Job handles do not provide direct service access
+12.14. View presentation of a decision is not decision ownership.
 
 
 ===============================================================================
-12. COMPUTED AND REACTIVE BEHAVIOR (LOCKED CLARIFICATION)
+13. SERVICES VS CAPABILITIES - STRICT SEPARATION (LOCKED)
 ===============================================================================
 
-12.1. Packs may react to runtime state or configuration changes by:
-      - observing values
-      - computing derived behavior
-      - adjusting runtime output
+13.1. Services provide runtime wiring.
 
-12.2. Locked rules:
-      - such behavior remains runtime-only
-      - such behavior does not mutate stored configuration or memory by
-        itself
-      - such behavior does not intercept persistence
-      - such behavior does not replace the authoritative source of truth
+13.2. Services do not perform permission checks by themselves.
 
-12.3. Allowed mechanisms include:
+13.3. Capabilities provide an explicit execution boundary.
+
+13.4. Capabilities represent user-visible or policy-visible power.
+
+13.5. Capabilities remain permissioned and trace-visible.
+
+13.6. Capabilities do not expose Service internals directly as a bypass
+      path.
+
+13.7. One Pack does not call another Pack's Service-provided behavior
+      directly across Pack boundaries.
+
+13.8. Cross-Pack execution goes through capability mediation.
+
+13.9. Adapter-executed cross-Pack behavior goes through capability
+      mediation.
+
+13.10. Job-backed capability execution does not expose Service internals.
+
+13.11. Job handles do not provide direct Service access.
+
+13.12. Service object access is not permission approval.
+
+13.13. Service object access is not capability invocation.
+
+
+===============================================================================
+14. COMPUTED AND REACTIVE BEHAVIOR (LOCKED CLARIFICATION)
+===============================================================================
+
+14.1. Packs may react to runtime state or configuration changes by
+      observing values.
+
+14.2. Packs may react to runtime state or configuration changes by
+      computing derived behavior.
+
+14.3. Packs may react to runtime state or configuration changes by
+      adjusting runtime output.
+
+14.4. Such behavior remains runtime-only by itself.
+
+14.5. Such behavior does not mutate stored configuration or memory by
+      itself.
+
+14.6. Such behavior does not intercept persistence.
+
+14.7. Such behavior does not replace the authoritative source of truth.
+
+14.8. Durable mutation occurs only through the owning state, transaction,
+      capability, permission, and persistence boundaries.
+
+14.9. Allowed runtime mechanisms may include:
       - capability invocation
-      - service cooperation
+      - internal Service cooperation
       - config or watch-style notifications defined elsewhere
 
-12.4. This preserves:
-      - determinism
-      - reversibility
-      - non-invasive override behavior such as accessibility scaling
-
-12.5. Adapter-executed reactive behavior remains subject to DA-23 and this
-      document.
+14.10. Adapter-executed reactive behavior remains subject to DA-23 and this
+       document.
 
 
 ===============================================================================
-13. CONFLICTS AND OVERRIDES (LOCKED)
+15. CONFLICTS AND OVERRIDES (LOCKED)
 ===============================================================================
 
-13.1. Multiple packs exporting the same capability identity are not allowed
+15.1. Multiple Packs exporting the same capability identity are not allowed
       by default.
 
-13.2. Such conflict is detected explicitly.
+15.2. Such conflict is detected explicitly.
 
-13.3. Resolution requires:
-      - explicit user choice
-      - or hard failure if no permitted resolution path exists
+15.3. Conflict resolution requires explicit user choice or hard failure.
 
-13.4. Silent override is forbidden.
+15.4. Hard failure occurs when no permitted resolution path exists.
 
-13.5. Adapter selection does not silently resolve capability conflicts.
+15.5. Silent override is forbidden.
+
+15.6. Adapter selection does not silently resolve capability conflicts.
+
+15.7. PackManager graph preparation does not silently resolve capability
+      conflicts.
+
+15.8. Manifest declarations do not silently resolve capability conflicts.
+
+15.9. Policy does not silently resolve capability conflicts unless an
+      owning policy document explicitly defines that behavior.
 
 
 ===============================================================================
-14. TRACE AND AUDIT (LOCKED)
+16. TRACE AND EVIDENCE REVIEW (LOCKED)
 ===============================================================================
 
-14.1. Capability calls remain trace-visible.
+16.1. Capability calls remain trace-visible.
 
-14.2. Capability-call trace evidence includes:
-      - caller pack identity
+16.2. Capability-call trace evidence includes:
+      - caller Pack identity
       - caller adapter identity when applicable
       - target capability identifier
       - exact versioned capability identity used for permission matching
@@ -528,39 +728,58 @@ Downstream Documents:
       - jobId when a Job is created or attached
       - duration or elapsed execution evidence when available
 
-14.3. Capability-call trace evidence distinguishes:
-      - denied execution
-      - deferred execution while waiting on decision handling
-      - direct successful execution
-      - direct failed execution
-      - Job-backed execution accepted by the capability boundary
+16.3. Capability-call trace evidence distinguishes denied execution.
 
-14.4. In this section, deferred execution means waiting on decision handling
-      before the capability handler is allowed to run.
+16.4. Capability-call trace evidence distinguishes deferred execution while
+      waiting on decision handling.
 
-14.5. Job-backed execution acceptance is not a Job terminal outcome.
+16.5. Capability-call trace evidence distinguishes direct successful
+      execution.
 
-14.6. Job-backed execution acceptance is not capability success by itself
-      unless the operation's contract defines successful acceptance as the
-      direct capability result.
+16.6. Capability-call trace evidence distinguishes direct failed execution.
 
-14.7. When a capability invocation creates or attaches to a Job, the Job
-      lifecycle trace remains causally linked to the capability invocation
-      trace evidence through DA-03 trace DAG parentage.
+16.7. Capability-call trace evidence distinguishes Job-backed execution
+      accepted by the capability boundary.
 
-14.8. When a capability invocation creates or attaches to a Job, the Job
-      lifecycle itself is traced through DA-19 Job-domain trace reasons.
+16.8. In this section, deferred execution means waiting on decision
+      handling before the capability handler is allowed to run.
 
-14.9. When adapter-executed code invokes a capability, adapter-domain trace
-      evidence remains causally linkable to capability-call trace evidence
-      where such adapter evidence exists.
+16.9. Job-backed execution acceptance is not a Job terminal outcome.
 
-14.10. DA-16 owns the capability-domain trace reason identifiers used for
-       capability calls, permission evaluation, deferred execution, denied
-       execution, direct successful execution, and direct failed execution.
+16.10. Job-backed execution acceptance is not capability success by itself
+       unless the operation's contract defines successful acceptance as the
+       direct capability result.
 
-14.11. The following capability-domain trace reasons are defined:
+16.11. When a capability invocation creates or attaches to a Job, the Job
+       lifecycle trace remains causally linked to the capability invocation
+       trace evidence through DA-03 trace DAG parentage.
 
+16.12. When a capability invocation creates or attaches to a Job, the Job
+       lifecycle itself is traced through DA-19 Job-domain trace reasons.
+
+16.13. When adapter-executed code invokes a capability, adapter-domain trace
+       evidence remains causally linkable to capability-call trace evidence
+       where such adapter evidence exists.
+
+16.14. DA-16 owns the capability-domain trace reason identifiers used for
+       capability calls.
+
+16.15. DA-16 owns the capability-domain trace reason identifiers used for
+       permission evaluation.
+
+16.16. DA-16 owns the capability-domain trace reason identifiers used for
+       deferred execution.
+
+16.17. DA-16 owns the capability-domain trace reason identifiers used for
+       denied execution.
+
+16.18. DA-16 owns the capability-domain trace reason identifiers used for
+       direct successful execution.
+
+16.19. DA-16 owns the capability-domain trace reason identifiers used for
+       direct failed execution.
+
+16.20. The following capability-domain trace reasons are defined:
        - CapabilityCallRequested
        - CapabilityPermissionEvaluated
        - CapabilityExecutionDenied
@@ -569,105 +788,127 @@ Downstream Documents:
        - CapabilityExecutionSucceeded
        - CapabilityExecutionFailed
 
-14.12. CapabilityCallRequested is emitted when a pack invokes a capability
+16.21. CapabilityCallRequested is emitted when a Pack invokes a capability
        through Turnix mediation.
 
-14.13. CapabilityPermissionEvaluated is emitted when Turnix evaluates the
+16.22. CapabilityPermissionEvaluated is emitted when Turnix evaluates the
        permission classification and applicable decision state for a
        capability call.
 
-14.14. CapabilityExecutionDenied is emitted when a capability call is
+16.23. CapabilityExecutionDenied is emitted when a capability call is
        refused before handler execution.
 
-14.15. CapabilityExecutionDeferred is emitted when a capability call waits
+16.24. CapabilityExecutionDeferred is emitted when a capability call waits
        on decision handling before handler execution.
 
-14.16. CapabilityExecutionStarted is emitted when the capability handler is
+16.25. CapabilityExecutionStarted is emitted when the capability handler is
        allowed to begin execution or accepted Job-backed execution begins.
 
-14.17. CapabilityExecutionSucceeded is emitted when direct capability
-       execution completes successfully, or when the capability contract
+16.26. CapabilityExecutionSucceeded is emitted when direct capability
+       execution completes successfully.
+
+16.27. CapabilityExecutionSucceeded is emitted when the capability contract
        defines successful Job acceptance as the direct capability result.
 
-14.18. CapabilityExecutionFailed is emitted when direct capability execution
-       fails after execution begins, or when Job-backed acceptance fails
-       before a Job lifecycle exists.
+16.28. CapabilityExecutionFailed is emitted when direct capability
+       execution fails after execution begins.
 
-14.19. Capability-call trace evidence does not expose service internals as a
-       bypass path.
+16.29. CapabilityExecutionFailed is emitted when Job-backed acceptance
+       fails before a Job lifecycle exists.
 
-14.20. Capability-call trace evidence is required for:
-       - debugging
-       - trust
-       - reproducibility
-       - audit
+16.30. Capability-call trace evidence does not expose Service internals as
+       a bypass path.
 
-14.21. DA-03 defines the tracing substrate used to represent capability-call
-       evidence.
+16.31. Capability-call trace evidence is required as a domain emission
+       obligation where capability calls occur.
 
-14.22. DA-17 defines decision trace obligations when capability permission
+16.32. Trace representation, retention, pruning, and loss remain governed
+       by DA-03.
+
+16.33. Trace retention loss does not redefine committed-state correctness.
+
+16.34. Trace retention loss does not redefine capability success or
+       failure.
+
+16.35. DA-03 defines the tracing substrate used to represent
+       capability-call evidence.
+
+16.36. DA-17 defines decision trace obligations when capability permission
        decisions are required.
 
-14.23. DA-19 defines Job lifecycle trace obligations when capability
+16.37. DA-19 defines Job lifecycle trace obligations when capability
        execution creates or attaches to a Job.
 
-14.24. DA-23 defines adapter-domain trace obligations when adapter-executed
+16.38. DA-23 defines adapter-domain trace obligations when adapter-executed
        code participates in capability invocation.
 
-
-===============================================================================
-15. DEVELOPMENT-TIME DIAGNOSTICS (LOCKED)
-===============================================================================
-
-15.1. In development mode, Turnix reports:
-      - declared-but-unused capabilities
-      - used-but-undeclared capabilities
-      - exported-but-never-called capabilities
-
-15.2. These reports are:
-      - informational
-      - non-fatal
-      - tooling-oriented
-
-15.3. Development diagnostics do not grant capability permission.
-
-15.4. Development diagnostics do not grant adapter execution authorization.
+16.39. DA-27 defines adapter lifecycle and trust trace obligations.
 
 
 ===============================================================================
-16. CROSS-RUNTIME AND CROSS-ADAPTER SYMMETRY (LOCKED)
+17. DEVELOPMENT-TIME DIAGNOSTICS (LOCKED)
 ===============================================================================
 
-16.1. The same interaction model applies across supported runtimes such as
+17.1. In development mode, Turnix may report declared-but-unused
+      capabilities.
+
+17.2. In development mode, Turnix may report used-but-undeclared
+      capabilities.
+
+17.3. In development mode, Turnix may report exported-but-never-called
+      capabilities.
+
+17.4. Development reports are informational.
+
+17.5. Development reports are non-fatal unless another owning document
+      defines a stronger rule for a specific context.
+
+17.6. Development reports are tooling-oriented.
+
+17.7. Development diagnostics do not grant capability permission.
+
+17.8. Development diagnostics do not grant adapter execution authorization.
+
+17.9. Development diagnostics do not grant Service access.
+
+
+===============================================================================
+18. CROSS-RUNTIME AND CROSS-ADAPTER SYMMETRY (LOCKED)
+===============================================================================
+
+18.1. The same interaction model applies across supported runtimes such as
       Python and JavaScript.
 
-16.2. The same interaction model applies across execution adapters.
+18.2. The same interaction model applies across ExecutionAdapters.
 
-16.3. Python packs may expose capabilities used by JavaScript packs.
+18.3. Python Packs may expose capabilities used by JavaScript Packs.
 
-16.4. JavaScript packs may invoke Python logic through capabilities.
+18.4. JavaScript Packs may invoke Python logic through Capabilities.
 
-16.5. Browser frontend adapters may invoke Kernel-mediated capabilities only
-      through Turnix-mediated surfaces.
+18.5. Browser frontend adapters may invoke Kernel-mediated capabilities
+      only through Turnix-mediated surfaces.
 
-16.6. Python in-process adapters may invoke capabilities only through
+18.6. Python in-process adapters may invoke capabilities only through
       Turnix-mediated surfaces.
 
-16.7. Direct cross-language object access is not part of this model.
+18.7. Direct cross-language object access is not part of this model.
 
-16.8. Direct cross-adapter object access is not part of this model.
+18.8. Direct cross-adapter object access is not part of this model.
 
-16.9. Capabilities remain the universal mediated execution boundary.
+18.9. Capabilities remain the universal mediated execution boundary.
 
-16.10. Job-backed capability execution does not change cross-runtime or
+18.10. Job-backed capability execution does not change cross-runtime or
        cross-adapter boundary rules.
 
+18.11. Direct-call optimization preserves the same capability mediation
+       boundary as remote or RPC-mediated invocation.
+
 
 ===============================================================================
-17. EXPLICITLY OPEN QUESTIONS
+19. EXPLICITLY OPEN QUESTIONS
 ===============================================================================
 
-17.1. OPEN questions include:
+19.1. OPEN questions include:
       - fine-grained permission scopes beyond the current run/save/global
         decision model
       - capability discovery and browsing user interfaces
@@ -678,33 +919,56 @@ Downstream Documents:
       - exact distinction between successful Job acceptance and final Job
         success in concrete capability APIs
       - exact adapter metadata included in capability-call envelopes
+      - exact service registry implementation
+      - exact shape of any future scoped Service facade
+
+19.2. This document leaves those questions open.
+
+19.3. This document does not define concrete capability API shape.
+
+19.4. This document does not define concrete permission UI shape.
+
+19.5. This document does not define concrete policy storage schema.
+
+19.6. This document does not define concrete RPC envelope schema.
+
+19.7. This document does not define concrete adapter metadata schema.
+
+19.8. This document does not define concrete Service registry
+      implementation.
 
 
 ===============================================================================
-18. LOCKED SUMMARY
+20. LOCKED SUMMARY
 ===============================================================================
 
-18.1. LOCKED:
-      - services are runtime wiring only
-      - services are not adapter authority
-      - capabilities are the sole supported cross-pack execution boundary
-      - capabilities are the supported authority boundary for adapter-executed
-        code that requests pack-provided behavior
+20.1. LOCKED:
+      - Services are runtime wiring only
+      - Services are not adapter authority
+      - Services are not ModCallContext authority
+      - Services are not Pack-facing cross-Pack execution surfaces
+      - ModCallContext does not expose ctx.services as an ordinary
+        Pack-facing surface
+      - Capabilities are the sole supported cross-Pack execution boundary
+      - Capabilities are the supported authority boundary for
+        adapter-executed code that requests Pack-provided behavior
       - capability invocation may complete directly or become Job-backed
       - not every capability invocation creates a Job
       - Job-backed capability execution remains capability-mediated
       - adapter-mediated capability execution remains capability-mediated
       - in-process capability execution remains capability-mediated
       - capability permission is distinct from DA-23 execution authorization
-      - Job-backed capability execution does not expose service internals
+      - Job-backed capability execution does not expose Service internals
       - Job handle is not a Service or raw implementation object
       - Job lifecycle semantics are owned by DA-19
+      - OrchestrationUnit lifecycle and mutation authority are owned by
+        DA-24
       - the permission model is explicit and immutable per major version
       - remembered capability permission matching uses exact versioned
         capability identity
-      - services and capabilities do not imply persistence
-      - silent overrides are forbidden
-      - capability calls remain fully trace-visible and auditable
+      - Services and Capabilities do not imply persistence
+      - silent capability overrides are forbidden
+      - capability calls remain trace-visible
       - capability trace evidence includes jobId when a Job is created or
         attached
       - Job lifecycle trace is causally linked to capability invocation trace
@@ -713,10 +977,11 @@ Downstream Documents:
         capability-call trace evidence when adapter-executed code invokes a
         capability
       - capability-domain trace reason identifiers are owned by DA-16
+      - trace retention, pruning, and loss remain owned by DA-03
 
-18.2. OPEN:
-      - user experience, policy, streaming, Job-backed API, and
-        adapter-metadata extensions
+20.2. OPEN:
+      - user experience, policy, streaming, Job-backed API,
+        adapter-metadata, and scoped Service facade extensions
 
 
 ===============================================================================
@@ -726,6 +991,6 @@ END OF DA-16 - SERVICES, CAPABILITIES & PERMISSIONS
 --- doc-meta ---
 DOC_ID: DA-16
 DOC_FILE: docs/design/DA-16_SERVICES_CAPABILITIES_AND_PERMISSIONS.txt
-DOC_REV: 18
-DOC_GIT: 3bdd1cc
+DOC_REV: 19
+DOC_GIT: dfea60d
 ----------------
