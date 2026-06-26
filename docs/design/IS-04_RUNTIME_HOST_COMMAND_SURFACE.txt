@@ -10,12 +10,13 @@ Description:
 ------------
 Defines the concrete RuntimeHost command-surface flow, command category
 classification, command identity, command acceptance and dispatch behavior,
-command result envelopes, command-to-runtime-operation mapping, and trace mapping
-for RuntimeHost command surfaces.
+command result envelopes, command-to-runtime-operation mapping, and trace
+mapping for RuntimeHost command surfaces.
 
 This document implements the command-surface semantics defined by DA-28. It
-remains constrained by RPC, AppInstance, adapter, Job, Orchestration Unit,
-workspace ownership, policy, persistence, and committed-state documents.
+remains constrained by RPC, Application, ApplicationRun, SaveBundle, adapter,
+Job, OrchestrationUnit, workspace ownership, policy, persistence, and
+committed-state documents.
 
 Purpose:
 --------
@@ -31,7 +32,7 @@ It defines:
 - command dispatch flow
 - command result envelope shape
 - command-to-runtime-operation mapping
-- command relationship to Jobs and Orchestration Units
+- command relationship to Jobs and OrchestrationUnits
 - command relationship to workspace ownership
 - command trace mapping to DA-28 trace reasons
 - command error categories
@@ -41,13 +42,15 @@ It does NOT define:
 - Kernel authority ordering (see DA-01 and DA-02)
 - committed-state or transaction semantics (see DA-04)
 - persistent I/O safety semantics (see DA-07)
-- AppInstance lifecycle or runtime identity semantics (see DA-20)
+- Application lifecycle, Application identity, ApplicationRun lifecycle, or
+  ApplicationRun identity semantics
 - RPC, channel, or transport semantics (see DA-21)
 - UI, View, or frontend runtime semantics (see DA-22)
 - execution adapter authority boundaries (see DA-23)
-- Orchestration Unit mutation authority semantics (see DA-24)
+- OrchestrationUnit mutation authority semantics (see DA-24)
 - adapter lifecycle, trust, and trace semantics (see DA-27)
 - workspace ownership and host-lock record mechanics (see IS-03)
+- SaveBundle persistence semantics
 - concrete shell syntax, argparse parser structure, or terminal rendering
 - concrete LAN pairing or authentication
 
@@ -128,11 +131,18 @@ Downstream Documents:
 
 02.7. Command failure is not Job failure by default.
 
-02.8. Command failure is not Orchestration Unit failure by default.
+02.8. Command failure is not OrchestrationUnit failure by default.
 
 02.9. Command syntax does not define authority.
 
-02.10. Command handling remains constrained by DA-28 and by each owning domain
+02.10. Command input, source relation, entry-surface identity, and normalized
+       arguments are evidence for classification and policy checks.
+
+02.11. Those inputs do not let a caller forge Kernel authority, acting Pack
+       identity, Application identity, ApplicationRun identity, workspace
+       ownership, capability permission, or adapter authorization.
+
+02.12. Command handling remains constrained by DA-28 and by each owning domain
        document for the work requested by the command.
 
 
@@ -145,7 +155,8 @@ Downstream Documents:
 03.2. commandId is distinct from:
       - runtimeHostId
       - runtimeOperationId
-      - appInstanceId
+      - applicationId
+      - applicationRunId
       - jobId
       - orchestrationUnitId
       - RPC message identity
@@ -171,14 +182,18 @@ Downstream Documents:
 
 03.7. A command may create or correlate with a runtimeOperationId.
 
-03.8. A command may create or correlate with a jobId when command handling
+03.8. A command may create or correlate with multiple runtime operations.
+
+03.9. A command may create or correlate with a jobId when command handling
       becomes Job-backed work.
 
-03.9. A command may create or correlate with an orchestrationUnitId when
-      command handling performs or may perform mutation-bearing orchestration.
+03.10. A command may create or correlate with an orchestrationUnitId when
+       command handling performs or may perform mutation-bearing
+       orchestration.
 
-03.10. A command may correlate with appInstanceId, viewId, adapter identity, or
-       capability identity when the command reaches those domains.
+03.11. A command may correlate with applicationId, applicationRunId, viewId,
+       adapter identity, or capability identity when the command reaches those
+       domains.
 
 
 ===============================================================================
@@ -212,6 +227,11 @@ Downstream Documents:
 04.8. Normalized command representation preserves enough original source
       information to explain what the user or caller requested when practical.
 
+04.9. Normalized command representation remains caller evidence.
+
+04.10. Normalized command representation does not replace policy, permission,
+       workspace ownership, adapter authorization, or lifecycle checks.
+
 
 ===============================================================================
 05. COMMAND CATEGORY CLASSIFICATION
@@ -224,12 +244,13 @@ Downstream Documents:
       - StopHost
       - ConnectHost
       - RunAppPack
-      - CreateSavePack
-      - LoadSavePack
+      - CreateSaveBundle
+      - LoadSaveBundle
       - ListPacks
       - ListAppPacks
-      - ListSavePacks
-      - ListAppInstances
+      - ListSaveBundles
+      - ListApplications
+      - ListApplicationRuns
       - InspectHost
       - InspectTraceEvidence
       - InspectPolicyDecisions
@@ -250,16 +271,18 @@ Downstream Documents:
 
 05.6. Classification does not acquire workspace ownership.
 
-05.7. Classification does not create an AppInstance.
+05.7. Classification does not create an Application.
 
-05.8. Classification does not create a Job by itself.
+05.8. Classification does not create an ApplicationRun.
 
-05.9. Classification does not create an Orchestration Unit by itself.
+05.9. Classification does not create a Job by itself.
 
-05.10. Classification emits RuntimeHostCommandClassified when classification
+05.10. Classification does not create an OrchestrationUnit by itself.
+
+05.11. Classification emits RuntimeHostCommandClassified when classification
        succeeds.
 
-05.11. Classification failure emits RuntimeHostCommandRejected.
+05.12. Classification failure emits RuntimeHostCommandRejected.
 
 
 ===============================================================================
@@ -274,42 +297,46 @@ Downstream Documents:
 
 06.3. Command acceptance does not mean workspace ownership was acquired.
 
-06.4. Command acceptance does not mean AppInstance creation succeeded.
+06.4. Command acceptance does not mean Application creation succeeded.
 
-06.5. Command acceptance does not mean adapter execution succeeded.
+06.5. Command acceptance does not mean ApplicationRun creation succeeded.
 
-06.6. Command acceptance does not mean Job success.
+06.6. Command acceptance does not mean ApplicationRun start succeeded.
 
-06.7. Command acceptance does not mean Orchestration Unit completion.
+06.7. Command acceptance does not mean adapter execution succeeded.
 
-06.8. Command rejection means the command did not enter dispatch for the
-      requested operation.
+06.8. Command acceptance does not mean Job success.
 
-06.9. Command rejection may occur because of:
-      - malformed command input
-      - unknown command category
-      - unsupported startup mode
-      - invalid workspace selection
-      - missing required argument
-      - policy denial
-      - permission denial
-      - existing workspace owner
-      - unavailable RuntimeHost
-      - incompatible command and entry surface
-      - unavailable required implementation feature
+06.9. Command acceptance does not mean OrchestrationUnit completion.
 
-06.10. Command rejection before Job-backed work exists does not produce Job
+06.10. Command rejection means the command did not enter dispatch for the
+       requested operation.
+
+06.11. Command rejection may occur because of:
+       - malformed command input
+       - unknown command category
+       - unsupported startup mode
+       - invalid workspace selection
+       - missing required argument
+       - policy denial
+       - permission denial
+       - existing workspace owner
+       - unavailable RuntimeHost
+       - incompatible command and entry surface
+       - unavailable required implementation feature
+
+06.12. Command rejection before Job-backed work exists does not produce Job
        terminal outcome.
 
-06.11. Command rejection before Orchestration Unit creation does not produce
-       Orchestration Unit terminal outcome.
+06.13. Command rejection before OrchestrationUnit creation does not produce
+       OrchestrationUnit terminal outcome.
 
-06.12. Command rejection before adapter-mediated work exists does not produce
+06.14. Command rejection before adapter-mediated work exists does not produce
        adapter failure.
 
-06.13. Command acceptance emits RuntimeHostCommandAccepted.
+06.15. Command acceptance emits RuntimeHostCommandAccepted.
 
-06.14. Command rejection emits RuntimeHostCommandRejected.
+06.16. Command rejection emits RuntimeHostCommandRejected.
 
 
 ===============================================================================
@@ -325,33 +352,37 @@ Downstream Documents:
 
 07.4. Dispatch does not bypass domain-owned semantics.
 
-07.5. A command that requests AppInstance creation follows DA-20.
+07.5. A command that requests Application creation follows the owning
+      Application lifecycle semantics.
 
-07.6. A command that communicates through RPC follows DA-21.
+07.6. A command that requests ApplicationRun creation or ApplicationRun start
+      follows the owning ApplicationRun lifecycle semantics.
 
-07.7. A command that affects UI or View behavior follows DA-22.
+07.7. A command that communicates through RPC follows DA-21.
 
-07.8. A command that starts adapter execution follows DA-23 and DA-27.
+07.8. A command that affects UI or View behavior follows DA-22.
 
-07.9. A command that mutates Turnix-managed state follows DA-04 and DA-24.
+07.9. A command that starts adapter execution follows DA-23 and DA-27.
 
-07.10. A command that performs persistent I/O follows DA-07.
+07.10. A command that mutates Turnix-managed state follows DA-04 and DA-24.
 
-07.11. A command that invokes a capability follows DA-16.
+07.11. A command that performs persistent I/O follows DA-07.
 
-07.12. A command that requires policy or user decision follows DA-17.
+07.12. A command that invokes a capability follows DA-16.
 
-07.13. A command that creates, observes, cancels, or retrieves Job-backed work
+07.13. A command that requires policy or user decision follows DA-17.
+
+07.14. A command that creates, observes, cancels, or retrieves Job-backed work
        follows DA-19.
 
-07.14. A command that acquires, releases, inspects, or recovers workspace
+07.15. A command that acquires, releases, inspects, or recovers workspace
        ownership follows IS-03.
 
-07.15. Dispatch may produce immediate completion, immediate failure, accepted
+07.16. Dispatch may produce immediate completion, immediate failure, accepted
        Job-backed work, accepted RuntimeHost operation, accepted adapter-
        mediated work, or accepted subscription-like observation.
 
-07.16. Dispatch result shape is represented by the command result envelope.
+07.17. Dispatch result shape is represented by the command result envelope.
 
 
 ===============================================================================
@@ -380,39 +411,51 @@ Downstream Documents:
 08.5. RunAppPack may map to:
       - ResolveWorkspace
       - AcquireWorkspaceOwnership when host ownership is required
-      - ResolveAppPack
-      - CreateSavePack or LoadSavePack
-      - ValidateSavePackCompatibility
-      - BindSaveContext
-      - CreateAppInstance
-      - StartAppInstance
-      - CreateView when a view is requested
+      - ResolveAppPack or accepted application-definition source
+      - CreateApplication or locate existing Application when required
+      - CreateSaveBundle or LoadSaveBundle when required
+      - ValidateSaveBundleCompatibility
+      - BindSaveBundle or bind Application persistence context
+      - CreateApplicationRun
+      - StartApplicationRun
+      - CreateView when a View is requested
 
-08.6. CreateSavePack may map to:
-      - ResolveAppPack
-      - CreateSavePack
-      - ValidateSavePackCompatibility
-      - BindSaveContext when immediate binding is requested
+08.6. CreateSaveBundle may map to:
+      - ResolveAppPack or accepted application-definition source
+      - CreateApplication when required
+      - CreateSaveBundle
+      - ValidateSaveBundleCompatibility
+      - BindSaveBundle or bind Application persistence context when requested
 
-08.7. LoadSavePack may map to:
-      - LoadSavePack
-      - ValidateSavePackCompatibility
-      - BindSaveContext
+08.7. LoadSaveBundle may map to:
+      - LoadSaveBundle
+      - ValidateSaveBundleCompatibility
+      - BindSaveBundle or bind Application persistence context
+      - CreateApplicationRun when the command starts live execution
 
-08.8. List and inspect commands map to read-only discovery or inspection
-      operations unless an explicit policy grants writable repair behavior.
+08.8. ListApplications may map to read-only Application inspection.
 
-08.9. ExposeLanSurface maps to RuntimeHost LAN exposure operations and policy
-      handling under DA-28 and DA-17.
+08.9. ListApplicationRuns may map to read-only live-run inspection.
 
-08.10. RecoverStaleWorkspaceOwner maps to stale-owner detection and recovery
+08.10. List and inspect commands map to read-only discovery or inspection
+       operations unless an explicit policy grants writable repair behavior.
+
+08.11. ExposeLanSurface maps to RuntimeHost LAN exposure operations and policy
+       handling under DA-28 and DA-17.
+
+08.12. RecoverStaleWorkspaceOwner maps to stale-owner detection and recovery
        behavior under IS-03.
 
-08.11. Runtime operation mapping does not create independent semantics for a
+08.13. Runtime operation mapping does not create independent semantics for a
        command category.
 
-08.12. Runtime operation mapping is trace-visible when runtime operation trace
+08.14. Runtime operation mapping is trace-visible when runtime operation trace
        evidence exists.
+
+08.15. Exact operation names may remain implementation-facing.
+
+08.16. Operation names do not define different Application, ApplicationRun, or
+       SaveBundle semantics by themselves.
 
 
 ===============================================================================
@@ -430,9 +473,11 @@ Downstream Documents:
       - message
       - details
       - runtimeOperationId when applicable
+      - runtimeOperationIds or operation summary when applicable
       - jobId when applicable
       - orchestrationUnitId when applicable
-      - appInstanceId when applicable
+      - applicationId when applicable
+      - applicationRunId when applicable
       - viewId when applicable
       - errorCategory when applicable
       - traceCorrelation when available
@@ -467,21 +512,34 @@ Downstream Documents:
 
 09.11. commandStatus does not redefine Job terminal outcome.
 
-09.12. commandStatus does not redefine Orchestration Unit terminal outcome.
+09.12. commandStatus does not redefine OrchestrationUnit terminal outcome.
 
-09.13. commandStatus does not redefine AppInstance lifecycle outcome.
+09.13. commandStatus does not redefine Application lifecycle outcome.
 
-09.14. commandStatus does not redefine adapter lifecycle outcome.
+09.14. commandStatus does not redefine ApplicationRun lifecycle outcome.
 
-09.15. details contains structured command-specific data when available.
+09.15. commandStatus does not redefine adapter lifecycle outcome.
 
-09.16. message is a user-facing or caller-facing explanation summary.
+09.16. Detached and retained are command-surface statuses only unless an owning
+       workflow maps them to Job, RuntimeHost operation, retained result, or
+       subscription behavior.
 
-09.17. A command result envelope may reference a RuntimeHost operation result
+09.17. details contains structured command-specific data when available.
+
+09.18. message is a user-facing or caller-facing explanation summary.
+
+09.19. A command result envelope may reference a RuntimeHost operation result
        or runtimeOperationId, but it does not replace the RuntimeHost operation
        result unless the command contract explicitly defines that projection.
 
-09.18. Concrete JSON field names may be revised by a future schema
+09.20. A command result envelope may summarize multiple runtime operations.
+
+09.21. A command result envelope does not erase distinguishable downstream
+       operation outcomes, Job handles, policy decisions, workspace ownership
+       errors, adapter outcomes, or trace correlation when those distinctions
+       are available and relevant.
+
+09.22. Concrete JSON field names may be revised by a future schema
        implementation specification if semantic meaning is preserved.
 
 
@@ -512,25 +570,25 @@ Downstream Documents:
 
 
 ===============================================================================
-11. RELATION TO ORCHESTRATION UNITS
+11. RELATION TO ORCHESTRATIONUNITS
 ===============================================================================
 
-11.1. A command may cause creation of an Orchestration Unit when it performs or
+11.1. A command may cause creation of an OrchestrationUnit when it performs or
       may perform orchestrated mutation.
 
-11.2. Command acceptance is not Orchestration Unit creation unless the owning
+11.2. Command acceptance is not OrchestrationUnit creation unless the owning
       workflow defines that relationship.
 
-11.3. Command completion is not Orchestration Unit completion by default.
+11.3. Command completion is not OrchestrationUnit completion by default.
 
-11.4. Command failure is not Orchestration Unit failure by default.
+11.4. Command failure is not OrchestrationUnit failure by default.
 
-11.5. Command cancellation is not Orchestration Unit cancellation by default.
+11.5. Command cancellation is not OrchestrationUnit cancellation by default.
 
-11.6. A command rejected before Orchestration Unit creation has no
-      Orchestration Unit terminal outcome.
+11.6. A command rejected before OrchestrationUnit creation has no
+      OrchestrationUnit terminal outcome.
 
-11.7. Mutation-bearing command dispatch enters DA-24 Orchestration Unit
+11.7. Mutation-bearing command dispatch enters DA-24 OrchestrationUnit
       boundaries before mutation becomes authoritative.
 
 11.8. Command trace evidence may correlate commandId with orchestrationUnitId
@@ -613,7 +671,8 @@ Downstream Documents:
        - startup mode
        - entry surface identity
        - workspace identity
-       - appInstanceId
+       - applicationId
+       - applicationRunId
        - jobId
        - orchestrationUnitId
        - RPC message identity
@@ -624,11 +683,15 @@ Downstream Documents:
 
 13.13. Command trace evidence does not replace Job trace evidence.
 
-13.14. Command trace evidence does not replace Orchestration Unit trace
+13.14. Command trace evidence does not replace OrchestrationUnit trace
        evidence.
 
 13.15. Command trace evidence does not replace workspace ownership trace
        evidence under IS-03.
+
+13.16. Command trace evidence does not replace adapter trace evidence.
+
+13.17. Command trace evidence does not replace committed-state evidence.
 
 
 ===============================================================================
@@ -648,8 +711,8 @@ Downstream Documents:
       - CommandPolicyDenied
       - CommandPermissionDenied
       - CommandAppPackNotFound
-      - CommandSavePackNotFound
-      - CommandSavePackIncompatible
+      - CommandSaveBundleNotFound
+      - CommandSaveBundleIncompatible
       - CommandRuntimeHostUnavailable
       - CommandRuntimeOperationFailed
       - CommandJobUnavailable
@@ -684,25 +747,29 @@ Downstream Documents:
 
 15.1. The following are not supported:
       - treating command syntax as authority
+      - treating command input as authority
+      - treating source relation as identity authority
+      - treating entry-surface identity as Kernel authority
+      - treating normalized arguments as permission grants
       - treating command receipt as command acceptance
       - treating command acceptance as command completion
       - treating command completion as Job success by default
       - treating command failure as Job failure by default
-      - treating command failure as Orchestration Unit failure by default
+      - treating command failure as OrchestrationUnit failure by default
       - treating command cancellation as Job cancellation by default
-      - treating command cancellation as Orchestration Unit cancellation by
+      - treating command cancellation as OrchestrationUnit cancellation by
         default
       - silently selecting a command alternative after workspace ownership
         rejection
       - silently downgrading a writable command to read-only inspection
       - silently starting a second writable RuntimeHost for the same workspace
-      - silently creating separate SavePack creation semantics for one command
-        surface
-      - silently creating separate AppInstance creation semantics for one
-        command surface
+      - silently creating separate SaveBundle creation or loading semantics for
+        one command surface
+      - silently creating separate Application or ApplicationRun creation or
+        start semantics for one command surface
       - command dispatch bypassing capability, policy, persistence,
-        transaction, Orchestration Unit, AppInstance, adapter, RPC, or trace
-        boundaries
+        transaction, OrchestrationUnit, Application, ApplicationRun,
+        SaveBundle, adapter, RPC, or trace boundaries
       - treating CommandRuntimeOperationFailed as replacement for the
         underlying RuntimeHost operation outcome
 
@@ -714,6 +781,7 @@ Downstream Documents:
 16.1. OPEN questions include:
       - exact commandId representation
       - exact runtimeOperationId representation
+      - exact multi-operation command result aggregation structure
       - exact command result JSON schema
       - exact command parser structure
       - exact CLI syntax
@@ -734,30 +802,39 @@ Downstream Documents:
       - IS-04 implements DA-28 RuntimeHost command-surface semantics.
       - A command surface is not Kernel authority by itself.
       - commandId is distinct from runtimeHostId, runtimeOperationId, jobId,
-        orchestrationUnitId, appInstanceId, adapter identity, viewId, and RPC
-        message identity.
+        orchestrationUnitId, applicationId, applicationRunId, adapter identity,
+        viewId, and RPC message identity.
       - Command receipt is not command acceptance.
       - Command acceptance is not command completion.
       - Command completion is not Job success by default.
       - Command failure is not Job failure by default.
-      - Command failure is not Orchestration Unit failure by default.
+      - Command failure is not OrchestrationUnit failure by default.
       - Command syntax does not define authority.
+      - Command input and normalized arguments do not grant authority.
       - Command categories define semantic categories, not final CLI syntax.
       - Runtime operation mapping does not create independent semantics for a
         command category.
       - Commands that require writable workspace ownership use IS-03.
-      - Mutation-bearing command dispatch enters DA-24 Orchestration Unit
+      - Mutation-bearing command dispatch enters DA-24 OrchestrationUnit
         boundaries before mutation becomes authoritative.
+      - Command result envelopes do not erase distinguishable downstream
+        outcomes when those distinctions are available and relevant.
       - CommandRuntimeOperationFailed does not replace the underlying
         RuntimeHost operation outcome.
+      - Command surfaces do not own Kernel authority, TurnixRuntime identity,
+        Application identity, ApplicationRun lifecycle, SaveBundle authority,
+        workspace ownership, adapter authority, Job lifecycle, or
+        committed-state mutation.
       - Command handling preserves DA-20, DA-21, DA-22, DA-23, DA-27, DA-28,
-        DA-04, DA-07, DA-16, DA-17, DA-19, and DA-24 boundaries.
+        DA-04, DA-07, DA-16, DA-17, DA-19, DA-24, IS-03, Application,
+        ApplicationRun, and SaveBundle boundaries.
       - Command receipt, classification, acceptance, rejection, dispatch,
         completion, failure, and cancellation are trace-visible.
 
 17.2. OPEN:
       - concrete command identifiers, parser shape, CLI syntax, result schema,
-        retention behavior, subscription surface, error classes, and help text.
+        multi-operation aggregation, retention behavior, subscription surface,
+        error classes, and help text.
 
 
 ===============================================================================
@@ -767,6 +844,6 @@ END OF IS-04 - RUNTIME HOST COMMAND SURFACE
 --- doc-meta ---
 DOC_ID: IS-04
 DOC_FILE: docs/design/IS-04_RUNTIME_HOST_COMMAND_SURFACE.txt
-DOC_REV: 1
-DOC_GIT: 797b7f8
+DOC_REV: 2
+DOC_GIT: e747e09
 ----------------
