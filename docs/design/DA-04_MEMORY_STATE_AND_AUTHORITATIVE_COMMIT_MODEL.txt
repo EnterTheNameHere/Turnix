@@ -10,8 +10,8 @@ Description:
 ------------
 Defines how Turnix distinguishes runtime memory from authoritative state, how
 state is layered and mutated, and how committed state changes become
-deterministic, restorable, and traceable without depending on observational
-history.
+deterministic, restorable, and trace-visible without depending on
+observational history.
 
 Purpose:
 --------
@@ -37,22 +37,31 @@ It does NOT define:
   (see DA-03)
 - payload identity, ChunkId, or ValueRef representation contracts
   (see DA-05)
-- concrete persistent I/O authority, Readers, Writers, or filesystem rules
-  (see DA-07)
 - configuration-specific scope, schema, and migration semantics
   (see DA-06)
-- windows, manifests, exports, replay workflows, or audit bundles
+- concrete persistent I/O authority, Readers, Writers, or filesystem rules
+  (see DA-07)
+- Window kinds, Window finalization, finalized history, manifests,
+  exports, comparison, Replay, Resume, Retry, or workflow reports
   (see DA-08, DA-25, and DA-26)
-- pack activation semantics or ModCallContext authority (see DA-14)
+- Pack activation semantics (see DA-14)
 - service, capability, or permission semantics (see DA-16)
 - Job lifecycle, Job result, Job timeout, or Job cancellation semantics
   (see DA-19)
-- ApplicationRun lifecycle or runtime identity semantics (see DA-20)
-- execution adapter boundary semantics (see DA-23)
-- Orchestration Unit lifecycle, mutation-authority ownership, terminal
-  outcomes, single-lane ApplicationRun orchestration, or Orchestration Unit
-  trace reason ownership (see DA-24)
+- Application or ApplicationRun lifecycle semantics (see DA-20)
+- execution adapter boundary or adapter lifecycle semantics
+  (see DA-23 and DA-27)
+- OrchestrationUnit lifecycle, mutation-authority ownership, terminal
+  outcomes, single-lane ApplicationRun orchestration, or
+  OrchestrationUnit trace reason ownership (see DA-24)
 - debugger pause, breakpoint, or execution-control behavior (see DA-18)
+- RuntimeHost lifecycle, workspace ownership, command surfaces, or
+  RuntimeHost-domain trace semantics (see DA-28)
+- PackManager catalog, graph-preparation, repair, write, or
+  PackManager-domain trace semantics (see DA-29)
+- ModCallContext gateway semantics or facade shape (see DA-30)
+- concrete transaction API shape
+- retained revision policy implementation
 
 Upstream Documents:
 ------------------
@@ -68,15 +77,23 @@ Upstream Documents:
 
 Downstream Documents:
 --------------------
+- DA-05
 - DA-06
+- DA-07
 - DA-08
 - DA-16
 - DA-17
 - DA-18
 - DA-19
+- DA-20
+- DA-23
 - DA-24
 - DA-25
 - DA-26
+- DA-27
+- DA-28
+- DA-29
+- DA-30
 - IS-01
 - IS-02
 
@@ -99,7 +116,7 @@ Downstream Documents:
 
 
 ===============================================================================
-02. CORE CONCEPT
+02. CORE CONCEPT AND TERMINOLOGY
 ===============================================================================
 
 02.1. This design area answers:
@@ -131,25 +148,61 @@ Downstream Documents:
 
 02.8. Turnix does not treat observation as authority.
 
-02.9. Turnix does not require observational completeness for committed-state
-      correctness.
+02.9. Turnix does not require observational completeness for
+      committed-state correctness.
 
 02.10. Turnix does not imply determinism outside the committed-state
        boundary defined by this document.
 
-02.11. Later sections of this document refine and apply these rules.
+02.11. Trace-visible mutation means that state and transaction domains have
+       trace emission obligations.
+
+02.12. Retained trace evidence is not required for committed-state
+       correctness.
+
+02.13. Trace evidence does not become committed-state authority.
+
+02.14. This document uses these architecture names:
+
+       ApplicationRun:
+       One live execution period of an Application.
+
+       OrchestrationUnit:
+       One bounded work and mutation-authority context.
+
+       ModCallContext:
+       One invocation-scoped Pack-facing gateway into Turnix.
+
+       SaveBundle:
+       The durable persistence closure of an Application.
+
+02.15. Committed state is authoritative state.
+
+02.16. Runtime memory, transactional staging layers, trace, progress, tool
+       views, debugger views, UI/View presentation, frontend state, adapter
+       state, RuntimeHost command-surface output, PackManager presentation,
+       Job lifecycle state, OrchestrationUnit lifecycle state, capability
+       invocation records, RPC acknowledgement, diagnostic output, Window
+       evidence, journal evidence, retained historical evidence, artifact
+       packaging, export packaging, Minimal Audit Bundle material,
+       comparison output, Replay reports, Resume attempts, Retry attempts,
+       and audit workflow reports are not committed-state authority unless
+       their relevant material is committed through the DA-04 commit model.
+
+02.17. Persistence protects committed truth but does not define truth.
+
+02.18. Trace explains or reports what happened where evidence is retained.
+
+02.19. Trace does not define committed truth.
+
+02.20. Payload representation, effectiveConfig, UI/View presentation,
+       debugger views, artifact packaging, export packaging, comparison
+       output, Replay reports, Resume attempts, and Retry attempts are not
+       committed state unless the relevant material is committed through
+       this document.
+
+02.21. Later sections of this document refine and apply these rules.
        They do not weaken them.
-
-02.16. Trace-visible mutation means that state and transaction domains have a
-       trace emission obligation. Retained trace evidence is not required for
-       committed-state correctness and does not become committed-state
-       authority.
-
-02.17. Payload representation, effectiveConfig, UI or View presentation,
-       debugger views, artifact packaging, export packages, comparison output,
-       Replay reports, Resume attempts, and Retry attempts are not committed
-       state unless the relevant material is committed through DA-04.
-
 
 
 ===============================================================================
@@ -187,9 +240,8 @@ Downstream Documents:
 03.12. Runtime memory is not treated as authoritative unless it has become
        committed state through the commit rules defined by this document.
 
-
-03.1 AUTHORITY CLASSES
-----------------------
+03.1 Authority classes
+---------------------
 
 03.1.1. Turnix distinguishes exactly two authority classes:
 
@@ -219,7 +271,7 @@ Downstream Documents:
 
 03.1.7. Non-authoritative material may support:
         - explanation
-        - audit
+        - inspection
         - debugging
         - diagnosis
 
@@ -232,9 +284,8 @@ Downstream Documents:
          missing according to explicit policy without changing committed
          state meaning.
 
-
-03.2 AUTHORITY SEPARATION RULES
--------------------------------
+03.2 Authority separation rules
+------------------------------
 
 03.2.1. Authoritative state is derivable without requiring access to:
         - traces
@@ -289,8 +340,10 @@ Downstream Documents:
 04.9. Valid committed revisionId values start at 1.
 
 04.10. Revision metadata supports conflict detection and committed-state
-       history. It does not by itself create authority outside committed
-       state.
+       history.
+
+04.11. Revision metadata does not by itself create authority outside
+       committed state.
 
 
 ===============================================================================
@@ -314,25 +367,30 @@ Downstream Documents:
 
 05.6. Example layer kinds include:
       - kernel-global
+      - application
       - applicationRun
-      - session
       - view
+      - orchestrationUnit
       - transactional
 
 05.7. Example layer kinds do not lock the complete future layer catalog.
 
-05.8. A committed layer is representable at the commit boundary through the
+05.8. View-local presentation state remains non-authoritative unless the
+      relevant material is committed through this document.
+
+05.9. A committed layer is representable at the commit boundary through the
       committed value representation contract defined elsewhere.
 
-05.9. Layer serialization preserves committed value meaning rather than live
-      runtime object identity.
+05.10. Layer serialization preserves committed value meaning rather than
+       live runtime object identity.
 
-05.10. Runtime residency is an implementation detail and does not change the
+05.11. Runtime residency is an implementation detail and does not change the
        meaning of a committed layer.
 
-05.11. Layering defines visibility, rollback, and mutation boundaries. It
-       does not blur the distinction between committed and non-committed
-       material.
+05.12. Layering defines visibility, rollback, and mutation boundaries.
+
+05.13. Layering does not blur the distinction between committed and
+       non-committed material.
 
 
 ===============================================================================
@@ -351,7 +409,7 @@ Downstream Documents:
 06.5. A transaction is resolved only by commit or abort.
 
 06.6. Primary transaction use includes:
-      - pipeline execution
+      - ProcessingRun execution
       - capability calls with mutation
       - adapter-mediated capability calls with mutation
       - adapter-executed orchestrated mutation
@@ -364,11 +422,10 @@ Downstream Documents:
 06.8. Staged mutation does not become committed truth until commit into an
       authoritative boundary occurs under the rules of this document.
 
-06.9. Orchestration Unit lifecycle, mutation authority, and single-lane
+06.9. OrchestrationUnit lifecycle, mutation authority, and single-lane
       ApplicationRun orchestration are defined by DA-24.
 
-
-06.1 COMMIT AND ABORT
+06.1 Commit and abort
 ---------------------
 
 06.1.1. A transaction ends in exactly one outcome:
@@ -402,14 +459,11 @@ Downstream Documents:
 
 06.1.13. A transaction abort does not directly finalize an AbortedWindow.
 
-06.1.14. Window finalization remains owned by DA-08.
+06.2 Nested transaction stacking
+-------------------------------
 
-
-06.2 NESTED TRANSACTION STACKING
---------------------------------
-
-06.2.1. If a pipeline run creates or enters a child session while an
-        enclosing pipeline run is active, the child session inherits the
+06.2.1. If orchestrated work creates or enters a child transaction while an
+        enclosing transaction is active, the child transaction inherits the
         enclosing transactional view.
 
 06.2.2. Reads resolve first-match from the child transaction downward
@@ -420,20 +474,19 @@ Downstream Documents:
 06.2.4. Committing the child transaction propagates its writes into the
         parent transaction.
 
-06.2.5. No child transaction commits directly into committed layers while
-        an enclosing transaction exists.
+06.2.5. No child transaction commits directly into committed layers while an
+        enclosing transaction exists.
 
 06.2.6. Only the outermost transaction commit mutates committed layers.
 
 06.2.7. This stacking rule prevents lost updates and desynchronization
-        across nested pipeline activity.
+        across nested orchestrated activity.
 
 06.2.8. Nested transactional propagation is not itself authoritative
         mutation into committed state.
 
-
-06.3 COMMIT INTO COMMITTED LAYERS AND CONFLICT DETECTION
---------------------------------------------------------
+06.3 Commit into committed layers and conflict detection
+-------------------------------------------------------
 
 06.3.1. Commit conflict detection applies only when a transaction attempts
         to commit into committed layers.
@@ -481,328 +534,461 @@ Downstream Documents:
          guesswork, or convenience behavior.
 
 
-06.4 STATE AND TRANSACTION TRACE OBLIGATIONS
---------------------------------------------
+===============================================================================
+07. STATE AND TRANSACTION TRACE OBLIGATIONS
+===============================================================================
 
-06.4.1. Authoritative state mutation remains trace-visible.
+07.1. Authoritative state mutation remains trace-visible.
 
-06.4.2. Transaction commit and abort outcomes remain trace-visible.
+07.2. Transaction commit and abort outcomes remain trace-visible.
 
-06.4.3. State trace evidence distinguishes:
-        - staged mutation
-        - committed mutation
-        - aborted staged mutation
-        - computed or runtime-only effect
+07.3. State and transaction trace obligations are emission obligations.
 
-06.4.4. Computed or runtime-only effects do not appear as committed
-        mutations.
+07.4. Trace retention and trace loss are governed by DA-03.
 
-06.4.5. For any committed mutation of a memory key, Turnix emits or can
-        reconstruct trace evidence with at least:
-        - mutationKind
-        - applicationRunId
-        - memoryLayerId
-        - memory key identity
-        - baseRevisionId
-        - newRevisionId
-        - debuggerInitiated
-        - transactionId when mutation was committed through a transaction
-        - orchestrationUnitId when applicable
-        - jobId when applicable
+07.5. Loss of trace evidence affects evidential completeness.
 
-06.4.6. baseRevisionId follows the absent-sentinel and revision rules
-        defined in section 04.
+07.6. Loss of trace evidence does not affect committed-state correctness.
 
-06.4.7. Mutation trace evidence is causally linked to:
-        - the transaction commit event when a transaction commits the
-          mutation
-        - the owning Orchestration Unit when such ownership exists
-        - the owning Job when such ownership exists
-        - the owning trace span when such a span exists
+07.7. Trace evidence does not become committed-state authority.
 
-06.4.8. Abort trace evidence does not imply committed mutation.
+07.8. State trace evidence distinguishes:
+      - staged mutation
+      - committed mutation
+      - aborted staged mutation
+      - computed or runtime-only effect
 
-06.4.9. Commit trace evidence does not by itself define Window finalization.
+07.9. Computed or runtime-only effects do not appear as committed
+      mutations.
 
-06.4.10. Transaction trace evidence records enough context, when available,
-         to explain:
-         - transactionId
-         - applicationRunId
-         - orchestrationUnitId when applicable
-         - jobId when applicable
-         - affected committed layers when allowed
-         - affected keys or scopes when allowed
-         - base revision information when relevant
-         - new revision information when relevant
-         - abort reason when the transaction aborts
+07.10. For any committed mutation of a memory key, Turnix emits or can
+       reconstruct trace evidence with at least:
+       - mutationKind
+       - applicationRunId
+       - memoryLayerId
+       - memory key identity
+       - baseRevisionId
+       - newRevisionId
+       - debuggerInitiated
+       - transactionId when mutation was committed through a transaction
+       - orchestrationUnitId when applicable
+       - jobId when applicable
 
-06.4.11. DA-03 defines the tracing substrate used to represent state and
-         transaction trace evidence.
+07.11. baseRevisionId follows the absent-sentinel and revision rules
+       defined in section 04.
 
-06.4.12. DA-24 defines Orchestration Unit lifecycle trace reason ownership.
+07.12. Mutation trace evidence is causally linked to:
+       - the transaction commit event when a transaction commits the
+         mutation
+       - the owning OrchestrationUnit when such ownership exists
+       - the owning Job when such ownership exists
+       - the owning trace span when such a span exists
+
+07.13. Abort trace evidence does not imply committed mutation.
+
+07.14. Commit trace evidence does not by itself define Window finalization.
+
+07.15. Transaction trace evidence records enough context, when available,
+       to explain:
+       - transactionId
+       - applicationRunId
+       - orchestrationUnitId when applicable
+       - jobId when applicable
+       - affected committed layers when allowed
+       - affected keys or scopes when allowed
+       - base revision information when relevant
+       - new revision information when relevant
+       - abort reason when the transaction aborts
+
+07.16. DA-03 defines the tracing substrate used to represent state and
+       transaction trace evidence.
+
+07.17. DA-24 defines OrchestrationUnit lifecycle trace reason ownership.
 
 
 ===============================================================================
-07. RELATION TO ORCHESTRATION UNITS
+08. RELATION TO ORCHESTRATIONUNIT
 ===============================================================================
 
-07.1. DA-24 defines Orchestration Units as kernel-tracked execution-
-      authority units.
+08.1. DA-24 defines OrchestrationUnit as a kernel-tracked execution-
+      authority unit.
 
-07.2. This document defines the transaction, staging, conflict-detection,
-      commit, and restoration boundaries consumed by Orchestration Units.
+08.2. This document defines the transaction, staging, conflict-detection,
+      commit, and restoration boundaries consumed by OrchestrationUnit.
 
-07.3. An Orchestration Unit does not make staged mutation authoritative by
+08.3. An OrchestrationUnit does not make staged mutation authoritative by
       existing.
 
-07.4. An Orchestration Unit may open, commit, or abort transactions only
+08.4. An OrchestrationUnit may open, commit, or abort transactions only
       under the transaction rules defined by this document.
 
-07.5. Orchestration Unit terminal outcomes are defined by DA-24.
+08.5. OrchestrationUnit terminal outcomes are defined by DA-24.
 
-07.6. Orchestration Unit terminal outcome does not by itself define
+08.6. OrchestrationUnit terminal outcome does not by itself define
       transaction commit or abort.
 
-07.7. Transaction commit or abort does not by itself define Orchestration
-      Unit terminal outcome.
+08.7. Transaction commit or abort does not by itself define
+      OrchestrationUnit terminal outcome.
 
-07.8. Adapter-executed mutation seeking Turnix guarantees re-enters through
-      Orchestration Unit, capability, transaction, and commit boundaries
+08.8. Adapter-executed mutation seeking Turnix guarantees re-enters through
+      OrchestrationUnit, capability, transaction, and commit boundaries
       before becoming authoritative.
 
-07.9. Same-language or same-process execution does not bypass committed-
-      state authority.
+08.9. Same-language or same-process execution does not bypass
+      committed-state authority.
 
-07.10. Single-lane ApplicationRun mutation orchestration is defined by DA-24.
+08.10. Single-lane ApplicationRun mutation orchestration is defined by
+       DA-24.
 
 
 ===============================================================================
-08. PERSISTENCE AS PROTECTION, NOT TRUTH
+09. PERSISTENCE AS PROTECTION, NOT TRUTH
 ===============================================================================
 
-08.1. Persistence protects committed state against loss.
+09.1. Persistence protects committed state against loss.
 
-08.2. Persistence does not define what state truth is.
+09.2. Persistence does not define what state truth is.
 
-08.3. Committed state truth is determined by the commit model defined by
+09.3. Committed state truth is determined by the commit model defined by
       this document.
 
-08.4. Any committed value may be persisted.
+09.4. Any committed value may be persisted.
 
-08.5. Persistence of committed state occurs under Turnix authority.
+09.5. Persistence of committed state occurs under Turnix authority.
 
-08.6. Persistence ordering is controlled by Turnix.
+09.6. Persistence ordering is controlled by Turnix.
 
-08.7. Persistence failure is trace-visible.
+09.7. Persistence failure is trace-visible.
 
-08.8. Persistence does not imply:
+09.8. Persistence does not imply:
       - immediate disk residency
       - continuous in-memory residency
       - unlimited retention
 
-08.9. This section defines the state-model meaning of persistence only. It
-      does not redefine the separate persistent I/O authority defined
-      elsewhere.
+09.9. This section defines the state-model meaning of persistence only.
 
-08.10. Persistence failure does not silently redefine committed-state truth.
+09.10. This section does not redefine the separate persistent I/O authority
+       defined elsewhere.
 
-08.11. Persistence exists to protect committed state, not to decide whether
+09.11. Persistence failure does not silently redefine committed-state truth.
+
+09.12. Persistence exists to protect committed state, not to decide whether
        committed state exists.
 
-08.12. durable save persistence does not make adapters durable save writers.
+09.13. SaveBundle/persistence authority does not make adapters SaveBundle
+       writers or persistence writers.
 
-08.13. Persistence remains protection for committed state, not adapter-owned
-       authority.
+09.14. Persistence remains protection for committed state, not
+       adapter-owned authority.
 
 
 ===============================================================================
-09. STATIC DATA AND MUTATION INTENT
+10. STATIC DATA AND MUTATION INTENT
 ===============================================================================
 
-09.1. Static data is data provided by:
+10.1. Static data is data provided by:
       - packs
       - configuration defaults
       - bundled resources
 
-09.2. Static data is read-only by default.
+10.2. Static data is read-only by default.
 
-09.3. When a mutation is attempted on static data, the intended mutation
+10.3. When a mutation is attempted on static data, the intended mutation
       mode is explicit.
 
-09.4. Turnix recognizes exactly two mutation-intent modes for static data:
+10.4. Turnix recognizes exactly two mutation-intent modes for static data:
 
       A) Patch
       B) Copy
 
-09.5. In Patch mode:
+10.5. In Patch mode:
       - the original key remains authoritative
       - a patch is applied on each read
       - the patch is persisted as overlay data
 
-09.6. In Copy mode:
+10.6. In Copy mode:
       - a new key is created
       - data is copied and modified
       - the original remains unchanged
 
-09.7. Static-data mutation intent may require explicit user decision or
+10.7. Static-data mutation intent may require explicit user decision or
       policy handling defined elsewhere.
 
-09.8. Static-data mutation intent remains visible and explainable after the
+10.8. Static-data mutation intent remains visible and explainable after the
       fact.
 
-09.9. Static data does not become freely mutable merely because a runtime
+10.9. Static data does not become freely mutable merely because a runtime
       actor wants to modify it.
 
-09.10. Turnix does not silently substitute Patch for Copy or Copy for Patch.
+10.10. Turnix does not silently substitute Patch for Copy or Copy for Patch.
 
 
 ===============================================================================
-10. REVISIONS AND STATE GARBAGE COLLECTION
+11. REVISIONS AND STATE GARBAGE COLLECTION
 ===============================================================================
 
-10.1. Committed state values may have revisions.
+11.1. Committed state values may have revisions.
 
-10.2. Revisions support:
+11.2. Revisions support:
       - rollback
-      - audit
+      - inspection
       - debugging
       - committed-state history
 
-10.3. Revision retention is policy-driven.
+11.3. Revision retention is policy-driven.
 
-10.4. State garbage collection may remove:
+11.4. State garbage collection may remove:
       - older revisions
       - unreachable historical committed states
 
-10.5. State garbage collection does not remove data required to reconstruct
+11.5. State garbage collection does not remove data required to reconstruct
       the latest committed state for each committed key.
 
-10.6. State garbage collection does not occur silently.
+11.6. State garbage collection does not occur silently.
 
-10.7. State garbage collection does not violate rollback guarantees that the
+11.7. State garbage collection does not violate rollback guarantees that the
       retained policy still claims to preserve.
 
-10.8. Removal of older revisions may make older committed value
+11.8. Removal of older revisions may make older committed value
       representations unreachable.
 
-10.9. Historical removal does not invalidate the ability to restore the
+11.9. Historical removal does not invalidate the ability to restore the
       latest retained committed state.
 
-10.10. Turnix does not silently discard material that retained-policy
+11.10. Turnix does not silently discard material that retained-policy
        guarantees still depend on.
 
-10.11. Retention policy may bound history. It does not silently rewrite
-       current committed truth.
+11.11. Retention policy may bound history.
+
+11.12. Retention policy does not silently rewrite current committed truth.
 
 
 ===============================================================================
-11. TOOLING-INITIATED STATE MUTATION CONSTRAINTS
+12. TOOLING-INITIATED STATE MUTATION CONSTRAINTS
 ===============================================================================
 
-11.1. Tooling may inspect Turnix-managed memory and committed state through
+12.1. Tooling may inspect Turnix-managed memory and committed state through
       appropriate controlled surfaces.
 
-11.2. Tooling-initiated edits occur inside a transaction.
+12.2. Tooling-initiated edits occur inside a transaction.
 
-11.3. Tooling-created transactions follow the same commit or abort rules as
+12.3. Tooling-created transactions follow the same commit or abort rules as
       runtime transactions.
 
-11.4. Tooling commits propagate according to normal transaction-layer rules.
+12.4. Tooling commits propagate according to normal transaction-layer rules.
 
-11.5. Tooling actions do not finalize committed state in the middle of
-      active pipeline work merely because the tooling surface exists.
+12.5. Tooling actions do not finalize committed state in the middle of
+      active orchestrated work merely because the tooling surface exists.
 
-11.6. Tooling-originated state mutation is labeled distinctly in trace.
+12.6. Tooling-originated state mutation is labeled distinctly in trace.
 
-11.7. This document defines only the state-contract constraints for
+12.7. This document defines only the state-contract constraints for
       tooling-initiated mutation.
 
-11.8. Breakpoints, pausing, step control, and debugger execution behavior
+12.8. Breakpoints, pausing, step control, and debugger execution behavior
       are defined elsewhere.
 
-11.9. Tooling does not bypass normal authority boundaries merely because it
+12.9. Tooling does not bypass normal authority boundaries merely because it
       is privileged tooling.
 
-11.10. Tooling-originated mutation does not become committed truth except
+12.10. Tooling-originated mutation does not become committed truth except
        through the same commit model that governs runtime mutation.
 
-11.11. Tooling through frontend, debugger, CLI, or other adapters still
+12.11. Tooling through frontend, debugger, CLI, or other adapters still
        obeys the same transaction and commit model.
 
-11.12. Adapter-mediated tooling presentation does not grant tooling a
+12.12. Adapter-mediated tooling presentation does not grant tooling a
        separate committed-state authority path.
 
 
 ===============================================================================
-12. COMMITTED-STATE RESTORATION BOUNDARY
+13. COMMITTED-STATE RESTORATION BOUNDARY
 ===============================================================================
 
-12.1. Turnix supports deterministic restoration of committed state.
+13.1. Turnix supports deterministic restoration of committed state.
 
-12.2. Deterministic restoration means that committed state can be restored
+13.2. Deterministic restoration means that committed state can be restored
       from retained authoritative material without requiring
       non-authoritative historical material.
 
-12.3. Deterministic restoration does not imply deterministic reconstruction
+13.3. Deterministic restoration does not imply deterministic reconstruction
       of in-flight runtime activity that never became committed.
 
-12.4. Deterministic restoration does not imply deterministic replay of
+13.4. Deterministic restoration does not imply deterministic replay of
       external side effects.
 
-12.5. Restoration of committed state is authoritative.
+13.5. Restoration of committed state is authoritative.
 
-12.6. Any later resumed or retried work after restoration is new work and is
+13.6. Any later resumed or retried work after restoration is new work and is
       not retroactively part of the earlier committed mutation.
 
-12.7. Later workflow concepts such as Replay, Resume, and Retry remain
+13.7. Later workflow concepts such as Replay, Resume, and Retry remain
       constrained by the restoration boundary defined in this section.
 
-12.8. This document defines the restoration boundary only. It does not
-      define the full workflow semantics of Replay, Resume, or Retry.
+13.8. This document defines the restoration boundary only.
 
-12.9. Turnix does not imply that uncommitted activity becomes reproducible
-      merely because committed state is restorable.
+13.9. This document does not define the full workflow semantics of Replay,
+      Resume, or Retry.
 
-12.10. Turnix does not imply that external effects are reversible,
+13.10. Turnix does not imply that uncommitted activity becomes reproducible
+       merely because committed state is restorable.
+
+13.11. Turnix does not imply that external effects are reversible,
        replayable, or reconstructible merely because committed state can be
        restored.
 
-12.11. DA-26 defines Replay, Resume, Retry, comparison, and audit workflow
+13.12. DA-26 defines Replay, Resume, Retry, comparison, and workflow
        semantics that consume this restoration boundary.
 
 
 ===============================================================================
-13. MIGRATION COMMIT RULE
+14. MIGRATION COMMIT RULE
 ===============================================================================
 
-13.1. Migration that changes authoritative committed state occurs as normal
+14.1. Migration that changes authoritative committed state occurs as normal
       orchestrated work inside a transaction.
 
-13.2. Migration that changes authoritative committed state results in a new
+14.2. Migration that changes authoritative committed state results in a new
       committed state boundary on success.
 
-13.3. Migration is abortable.
+14.3. Migration is abortable.
 
-13.4. If migration aborts, partial authoritative mutation does not occur.
+14.4. If migration aborts, partial authoritative mutation does not occur.
 
-13.5. If one migration operation attempts multiple authoritative changes,
+14.5. If one migration operation attempts multiple authoritative changes,
       the migration transaction is atomic with respect to the affected
       committed layers.
 
-13.6. If migration cannot complete safely, it aborts and authoritative
+14.6. If migration cannot complete safely, it aborts and authoritative
       state remains identical to the pre-migration committed state.
 
-13.7. Migration does not bypass the normal commit boundary.
+14.7. Migration does not bypass the normal commit boundary.
 
-13.8. Migration does not acquire permission to perform partial
+14.8. Migration does not acquire permission to perform partial
       authoritative mutation merely because it is migration work.
 
 
 ===============================================================================
-14. WHAT IS EXPLICITLY NOT REQUIRED
+15. AUTHORITY BOUNDARY WITH NEIGHBORING DOMAINS
 ===============================================================================
 
-14.1. Turnix does not require:
+15.1. This document may name neighboring domains to protect committed-state
+      authority.
+
+15.2. This document does not define the detailed behavior of those
+      neighboring domains.
+
+15.3. DA-03 owns trace substrate, event structure, span mechanics,
+      retention, pruning, and trace loss.
+
+15.4. DA-04 owns state and transaction trace emission obligations.
+
+15.5. DA-05 owns payload identity, Chunk, ChunkId, ValueRef, decode,
+      integrity, and reachability representation.
+
+15.6. Payload material participates in committed-state restoration only when
+      it is retained authoritative material referenced by committed state.
+
+15.7. DA-06 owns configuration scopes, schemas, defaults, overrides,
+      effectiveConfig, materialization, migration, storage layout, and
+      policy-file placement.
+
+15.8. Committed configuration is authoritative when committed through this
+      document.
+
+15.9. effectiveConfig is a runtime-visible derived view.
+
+15.10. effectiveConfig is not a separate authority class.
+
+15.11. DA-07 owns persistent I/O authority.
+
+15.12. SaveBundle and persistence documents own durable persistence closure,
+       retained material, SaveBundle storage, persistence compatibility, and
+       recovery details.
+
+15.13. DA-08 owns Window kinds, Window finalization, journal evidence, and
+       finalized runtime history semantics.
+
+15.14. SafePointWindow contains committed boundary material, but optional
+       retained evidence inside it does not add committed-state authority.
+
+15.15. DA-18 owns debugger pause, breakpoint, safe-point, inspection, and
+       execution-control behavior.
+
+15.16. Debugger mutation that affects authoritative state still uses this
+       document's transaction and commit rules.
+
+15.17. DA-19 owns Job lifecycle, Job result, Job timeout, Job cancellation,
+       progress, retained result, and late completion semantics.
+
+15.18. Job lifecycle state is not committed state.
+
+15.19. Job result payloads become authoritative only if their relevant
+       material is committed through the owning state or transaction domain.
+
+15.20. DA-20 owns Application and ApplicationRun lifecycle semantics.
+
+15.21. DA-23 and DA-27 own ExecutionAdapter and adapter lifecycle semantics.
+
+15.22. Adapter state is not committed state merely because adapter execution
+       is active or same-process.
+
+15.23. DA-24 owns OrchestrationUnit lifecycle, mutation-authority ownership,
+       terminal outcomes, single-lane ApplicationRun orchestration, and
+       OrchestrationUnit trace reason ownership.
+
+15.24. OrchestrationUnit lifecycle state is not committed state.
+
+15.25. DA-25 owns WindowManifest, WindowExport, Minimal Audit Bundle,
+       digest, partial export, missing-material artifact semantics, and
+       offline inspection artifact semantics.
+
+15.26. Artifact and export representation do not add committed-state
+       authority.
+
+15.27. DA-26 owns ComparisonResult, equality modes, Replay, Resume, Retry,
+       and workflow semantics.
+
+15.28. ComparisonResult does not define committed-state truth.
+
+15.29. Replay restores retained committed state within this document's
+       restoration boundary.
+
+15.30. Replay does not create new committed truth by itself.
+
+15.31. Replay does not re-run external effects.
+
+15.32. Resume and Retry are new work.
+
+15.33. Resume and Retry do not retroactively commit prior uncommitted
+       activity.
+
+15.34. DA-28 owns RuntimeHost lifecycle, workspace ownership, command
+       surfaces, and RuntimeHost-domain trace semantics.
+
+15.35. RuntimeHost command surfaces do not directly mutate committed state.
+
+15.36. RuntimeHost command-surface output is not committed-state authority.
+
+15.37. DA-29 owns PackManager catalog, graph-preparation, repair, write, and
+       PackManager-domain trace semantics.
+
+15.38. PackManager views, repair suggestions, graph preparation, and
+       management operations do not directly mutate committed state.
+
+15.39. DA-30 owns ModCallContext gateway semantics and absent surfaces.
+
+15.40. ModCallContext does not expose unrestricted committed-state mutation.
+
+15.41. Capability invocation records and RPC acknowledgements are not
+       committed-state authority by existing.
+
+
+===============================================================================
+16. WHAT IS EXPLICITLY NOT REQUIRED
+===============================================================================
+
+16.1. Turnix does not require:
       - infinite committed history retention
       - journal-backed determinism
       - journal-backed recovery
@@ -810,24 +996,37 @@ Downstream Documents:
       - concurrency-first execution
       - deterministic reconstruction of uncommitted runtime activity
 
-14.2. Turnix does not imply determinism where determinism does not exist.
+16.2. Turnix does not imply determinism where determinism does not exist.
 
-14.3. Turnix does not treat observational completeness as a requirement for
+16.3. Turnix does not treat observational completeness as a requirement for
       committed-state correctness.
 
-14.4. Turnix does not require non-authoritative history to remain complete
-      in order for committed state to remain authoritative.
+16.4. Turnix does not require non-authoritative history to remain complete in
+      order for committed state to remain authoritative.
 
-14.5. Turnix does not require hidden fallback, reconciliation, or
+16.5. Turnix does not require hidden fallback, reconciliation, or
       observational reconstruction in order to preserve committed-state
       correctness.
 
+16.6. This document does not define:
+      - exact concrete transaction API shape
+      - exact transaction trace payload taxonomy
+      - exact retained revision policy shape
+      - exact payload representation format
+      - exact configuration schema
+      - exact persistent I/O provider implementation
+      - exact SaveBundle storage format
+      - exact artifact or export format
+      - exact comparison algorithm
+      - exact Replay, Resume, or Retry workflow protocol
+      - exact ModCallContext facade shape
+
 
 ===============================================================================
-15. LOCKED SUMMARY
+17. LOCKED SUMMARY
 ===============================================================================
 
-15.1. LOCKED:
+17.1. LOCKED:
       - runtime memory and committed state are distinct
       - only committed state is authoritative
       - authoritative and non-authoritative material remain separate
@@ -839,24 +1038,27 @@ Downstream Documents:
       - transaction abort does not directly finalize an AbortedWindow
       - nested transaction stacking prevents child authoritative commits
         while an enclosing transaction exists
+      - only the outermost transaction commit mutates committed layers
       - conflict detection applies when committing into committed layers
-      - state mutation and transaction outcomes remain trace-visible under
-        this document's ownership
-      - Orchestration Unit lifecycle, mutation-authority ownership,
+      - state and transaction trace obligations are emission obligations
+      - trace retention and loss are governed by DA-03
+      - trace evidence does not become committed-state authority
+      - OrchestrationUnit lifecycle, mutation-authority ownership,
         terminal outcomes, single-lane ApplicationRun orchestration, and
-        Orchestration Unit trace reason ownership are defined by DA-24
-      - Orchestration Unit existence does not make staged mutation
+        OrchestrationUnit trace reason ownership are defined by DA-24
+      - OrchestrationUnit existence does not make staged mutation
         authoritative
-      - Orchestration Unit outcome does not by itself define transaction
+      - OrchestrationUnit outcome does not by itself define transaction
         outcome
       - transaction commit or abort does not by itself define
-        Orchestration Unit outcome
+        OrchestrationUnit outcome
       - adapter-executed mutation seeking Turnix guarantees re-enters
         through orchestration, transaction, and commit boundaries
-      - same-language or same-process execution does not bypass committed-
-        state authority
+      - same-language or same-process execution does not bypass
+        committed-state authority
       - persistence protects state against loss but does not define truth
-      - durable save persistence does not make adapters durable save writers
+      - SaveBundle/persistence authority does not make adapters
+        SaveBundle writers or persistence writers
       - static-data mutation intent is explicit as Patch or Copy
       - revision retention is policy-driven and does not invalidate latest
         committed-state restoration
@@ -866,10 +1068,11 @@ Downstream Documents:
       - migration that changes authoritative state is transactional and
         abortable
 
-15.2. OPEN:
+17.2. OPEN:
       - exact concrete transaction API shape
       - exact transaction trace payload taxonomy
       - exact retained revision policy shape
+      - exact complete memory-layer catalog
 
 
 ===============================================================================
@@ -879,6 +1082,6 @@ END OF DA-04 - MEMORY, STATE & AUTHORITATIVE COMMIT MODEL
 --- doc-meta ---
 DOC_ID: DA-04
 DOC_FILE: docs/design/DA-04_MEMORY_STATE_AND_AUTHORITATIVE_COMMIT_MODEL.txt
-DOC_REV: 25
-DOC_GIT: 24ebfa0
+DOC_REV: 26
+DOC_GIT: ec8bbcc
 ----------------
