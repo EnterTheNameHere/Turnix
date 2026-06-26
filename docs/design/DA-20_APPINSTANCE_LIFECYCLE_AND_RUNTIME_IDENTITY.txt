@@ -1,5 +1,5 @@
 ===============================================================================
-DESIGN AREA DA-20 - APPINSTANCE LIFECYCLE & RUNTIME IDENTITY
+DESIGN AREA DA-20 - APPLICATION AND APPLICATIONRUN LIFECYCLE & RUNTIME IDENTITY
 ===============================================================================
 
 Status:
@@ -8,42 +8,50 @@ EVOLVING
 
 Description:
 ------------
-Defines Application, ApplicationRun, AppPack binding, active runtime lifecycle
-boundaries, adapter participation, writable application-state ownership, and
-runtime-identity trace reason identifiers.
+Defines Application identity, ApplicationRun runtime identity, AppDefinition
+and AppPack binding, SaveBundle binding, active runtime lifecycle boundaries,
+participant separation, writable SaveBundle ownership, and runtime-identity
+trace reason identifiers.
 
 This document owns Application and ApplicationRun lifecycle semantics. It does
-not own pack activation, persistent storage format, runtime-host workspace
+not own pack activation, SaveBundle storage format, runtime-host workspace
 ownership, runtime-host command-surface semantics, adapter execution semantics,
 or concrete workspace locking implementation.
 
 Purpose:
 --------
-This document defines the ApplicationRun lifecycle and runtime identity anchor
-for Turnix.
+This document defines the Application and ApplicationRun lifecycle and runtime
+identity anchor for Turnix.
 
 It defines:
-- applicationId as durable application identity
+- applicationId as durable Application identity
 - applicationRunId as live runtime execution identity
-- Application as the durable application individual created from an AppPack
+- Application as one durable application individual
 - ApplicationRun as one live execution period of an Application
-- relationship between Application, ApplicationRun, AppPack, and saves
-- new application creation as an ApplicationRun creation path
-- existing application load as an ApplicationRun creation path
-- active save context and writable save ownership
+- relationship between Application, ApplicationRun, AppDefinition/AppPack
+  binding, and SaveBundle
+- new Application creation as an ApplicationRun creation path
+- existing Application loading as an ApplicationRun creation path
+- optional SaveBundle binding and writable SaveBundle ownership
 - ApplicationRun runtime lifecycle phases
 - relationship between ApplicationRun lifecycle and pack activation
 - relationship between ApplicationRun lifecycle and execution adapters
-- relationship between ApplicationRun lifecycle, Views, RPC, Jobs, and Windows
+- relationship between ApplicationRun lifecycle, Views, RPC, Jobs,
+  OrchestrationUnits, and Windows
 - ApplicationRun active-region lifecycle boundaries
 - runtime-identity trace reason identifiers
 - minimum trace evidence for ApplicationRun lifecycle and active-region events
 
 It does NOT define:
-- trace event structure, trace DAG semantics, or span mechanics (see DA-03)
+- trace event structure, trace DAG semantics, trace retention, or span
+  mechanics
+  (see DA-03)
 - authoritative committed state or transaction semantics (see DA-04)
+- payload identity or committed-value representation (see DA-05)
+- configuration semantics or configuration migration (see DA-06)
 - persistent I/O authority or filesystem rules (see DA-07)
-- Window, SafePointWindow, or AbortedWindow semantics (see DA-08)
+- Window, SafePointWindow, AbortedWindow, or finalized-history semantics
+  (see DA-08)
 - pack discovery, identity, dependency, or resolution semantics
   (see DA-09, DA-10, DA-11, and DA-13)
 - pack activation semantics, onLoad(ctx), or ModCallContext gateway authority
@@ -54,10 +62,16 @@ It does NOT define:
 - RPC, channel, and transport semantics (see DA-21)
 - UI, View, and frontend runtime semantics (see DA-22)
 - execution adapter boundary semantics (see DA-23)
-- RuntimeHost identity, workspace ownership, startup modes, or command-surface
-  semantics (see DA-28)
+- OrchestrationUnit lifecycle or mutation authority (see DA-24)
+- artifact or export semantics (see DA-25)
+- comparison, Replay, Resume, or Retry workflow semantics (see DA-26)
+- adapter lifecycle, trust, isolation, or traceability semantics (see DA-27)
+- RuntimeHost identity, workspace ownership, startup modes, command-surface,
+  local-first, or LAN semantics (see DA-28)
+- PackManager graph-preparation or catalog-operation semantics (see DA-29)
+- ModCallContext invocation gateway details
 - concrete workspace locking implementation
-- concrete save storage format
+- concrete SaveBundle storage format or generation-publication mechanics
 
 Upstream Documents:
 ------------------
@@ -69,6 +83,8 @@ Upstream Documents:
 - DA-01
 - DA-03
 - DA-04
+- DA-05
+- DA-06
 - DA-07
 - DA-08
 - DA-09
@@ -82,7 +98,12 @@ Upstream Documents:
 - DA-21
 - DA-22
 - DA-23
+- DA-24
+- DA-25
+- DA-26
+- DA-27
 - DA-28
+- DA-29
 
 Downstream Documents:
 --------------------
@@ -95,8 +116,13 @@ Downstream Documents:
 - DA-21
 - DA-22
 - DA-23
+- DA-24
+- DA-25
+- DA-26
+- DA-27
 - DA-28
-- future save implementation specifications
+- DA-29
+- future SaveBundle implementation specifications
 - future workspace ownership implementation specifications
 
 
@@ -113,8 +139,8 @@ Downstream Documents:
 01.3. The CORE META-RULES documents define the general rule language and
       interpretation model used by this document.
 
-01.4. This document defines ApplicationRun lifecycle and runtime identity
-      semantics within that shared interpretation model.
+01.4. This document defines Application and ApplicationRun lifecycle and
+      runtime identity semantics within that shared interpretation model.
 
 
 ===============================================================================
@@ -124,258 +150,379 @@ Downstream Documents:
 02.1. ApplicationRun lifecycle answers:
 
           "Which live execution of an Application is active, which durable
-           Application and save context are bound to it, which participants
-           are attached, and when does its runtime authority region begin and
-           end?"
+           Application and SaveBundle are bound when applicable, which
+           participants are attached, and when does its runtime authority
+           region begin and end?"
 
-02.2. An AppPack is a reusable application definition.
+02.2. An AppPack is a reusable application definition source.
 
-02.3. An Application is one durable application individual created from an
-      AppPack or from another explicitly defined application creation source.
+02.3. An AppDefinition binding is the accepted definition binding used to
+      create, load, validate, or run one Application.
 
-02.4. An Application may have multiple ApplicationRuns over time.
+02.4. An Application is one durable application individual created from an
+      AppDefinition binding.
 
-02.5. An ApplicationRun is one live execution period of an Application.
+02.5. An Application may have multiple ApplicationRuns over time.
 
-02.6. A new ApplicationRun receives a fresh applicationRunId.
+02.6. An ApplicationRun is one live execution period of one Application.
 
-02.7. An ApplicationRun may be associated with one active save context.
+02.7. A new ApplicationRun receives a fresh applicationRunId.
 
-02.8. An ApplicationRun may be associated with one active writable durable
-      state owner when durable application mutation is allowed.
+02.8. An ApplicationRun may be associated with one active SaveBundle when
+      durable persistence is requested or required.
 
-02.9. Application identity is distinct from AppPack identity.
+02.9. An ApplicationRun may be associated with one active writable SaveBundle
+      owner when durable application mutation is allowed.
 
-02.10. ApplicationRun identity is distinct from Application identity.
+02.10. Application identity is distinct from AppPack identity.
 
-02.11. ApplicationRun identity is distinct from Pack identity.
+02.11. Application identity is distinct from SaveBundle identity.
 
-02.12. ApplicationRun identity is distinct from View identity.
+02.12. ApplicationRun identity is distinct from Application identity.
 
-02.13. ApplicationRun identity is distinct from adapter identity.
+02.13. ApplicationRun identity is distinct from Pack identity.
 
-02.14. ApplicationRun lifecycle is distinct from pack activation.
+02.14. ApplicationRun identity is distinct from SaveBundle identity.
 
-02.15. ApplicationRun lifecycle is distinct from execution adapter lifecycle.
+02.15. ApplicationRun identity is distinct from View identity.
 
-02.16. ApplicationRun lifecycle is distinct from RPC transport lifecycle.
+02.16. ApplicationRun identity is distinct from adapter identity.
 
-02.17. ApplicationRun lifecycle is distinct from Job lifecycle.
+02.17. ApplicationRun lifecycle is distinct from pack activation.
 
-02.18. ApplicationRun lifecycle provides the live runtime container boundary
-       in which activation, state mutation, Windows, capabilities, Views,
-       adapters, debugging, tracing, and Jobs may occur.
+02.18. ApplicationRun lifecycle is distinct from execution adapter lifecycle.
 
-02.19. Ending an ApplicationRun does not by itself define whether related work
-       committed, aborted, cancelled, superseded, detached, resumed, or was
-       retried.
+02.19. ApplicationRun lifecycle is distinct from RPC transport lifecycle.
 
-02.20. Session is not a core runtime identity in this model.
+02.20. ApplicationRun lifecycle is distinct from Job lifecycle.
 
-02.21. Later sections refine and apply these rules. They do not weaken them.
+02.21. ApplicationRun lifecycle provides the live runtime container boundary in
+       which activation, state mutation, Windows, capabilities, Views,
+       adapters, debugging, ProcessingRuns, OrchestrationUnits, timers, hooks,
+       tracing, and Jobs may occur.
 
-02.22. ApplicationRun lifecycle does not define committed value
-       representation, configuration semantics, retained evidence packaging,
-       artifact export, comparison, Replay, Resume, Retry, or audit workflow
-       semantics.
+02.22. Ending an ApplicationRun does not by itself define whether related work
+       committed, aborted, cancelled, superseded, detached, resumed, retried,
+       or retained a result.
 
+02.23. Session is not a core runtime identity in this model.
+
+02.24. ApplicationRun lifecycle does not define committed value representation,
+       configuration semantics, retained evidence packaging, artifact export,
+       comparison, Replay, Resume, or Retry workflow semantics.
+
+02.25. Later sections refine and apply these rules. They do not weaken them.
 
 
 ===============================================================================
-03. APPLICATIONRUN IDENTITY
+03. APPLICATION IDENTITY
 ===============================================================================
 
-03.1. applicationRunId identifies one ApplicationRun.
+03.1. applicationId identifies one durable Application.
 
-03.2. applicationRunId is stable for the lifetime of that ApplicationRun.
+03.2. applicationId is created once for one Application.
 
-03.3. applicationRunId is not reused for a different ApplicationRun during the
-      same kernel run.
+03.3. applicationId persists across runtime shutdown and later loading when the
+      Application is retained durably.
 
-03.4. applicationRunId is the correlation identity used by ApplicationRun-owned
-      trace evidence.
+03.4. applicationId persists across multiple ApplicationRuns of the same
+      Application.
 
-03.5. applicationRunId does not identify an AppPack by itself.
+03.5. Loading an existing Application does not create a new applicationId.
 
-03.6. applicationRunId does not identify a save by itself.
+03.6. A deliberate clone or fork creates a new Application with a new
+      applicationId.
 
-03.7. applicationRunId does not identify a View by itself.
+03.7. Application provenance may record the source Application or retained
+      generation when a clone or fork is created.
 
-03.8. applicationRunId does not identify an execution adapter by itself.
+03.8. Application identity is not AppPack identity.
 
-03.9. applicationRunId does not identify a Job by itself.
+03.9. Application identity is not SaveBundle identity.
 
-03.10. An ApplicationRun record includes enough identity context, when
+03.10. Application identity is not ApplicationRun identity.
+
+03.11. Application identity is not View, adapter, Job, Window,
+       OrchestrationUnit, RuntimeHost, Workspace, transport, or artifact
+       identity.
+
+03.12. Session does not identify an Application.
+
+
+===============================================================================
+04. APPLICATIONRUN IDENTITY
+===============================================================================
+
+04.1. applicationRunId identifies one ApplicationRun.
+
+04.2. applicationRunId is stable for the lifetime of that ApplicationRun.
+
+04.3. applicationRunId is not reused for a different ApplicationRun during the
+      same Kernel or TurnixRuntime run.
+
+04.4. applicationRunId is the correlation identity used by
+      ApplicationRun-owned trace evidence.
+
+04.5. applicationRunId does not identify an Application by itself.
+
+04.6. applicationRunId does not identify an AppPack by itself.
+
+04.7. applicationRunId does not identify a SaveBundle by itself.
+
+04.8. applicationRunId does not identify a View by itself.
+
+04.9. applicationRunId does not identify an execution adapter by itself.
+
+04.10. applicationRunId does not identify an RPC message, RPC channel, or
+       transport by itself.
+
+04.11. applicationRunId does not identify a Job by itself.
+
+04.12. applicationRunId does not identify an OrchestrationUnit by itself.
+
+04.13. applicationRunId does not identify a Window by itself.
+
+04.14. applicationRunId does not identify RuntimeHost or Workspace by itself.
+
+04.15. applicationRunId does not identify artifact, export, comparison,
+       Replay, Resume, or Retry workflow identity by itself.
+
+04.16. Session does not identify an ApplicationRun.
+
+04.17. An ApplicationRun record includes enough identity context, when
        available, to relate:
        - applicationRunId
-       - active AppPack identity
-       - active application or save identity when applicable
+       - applicationId
+       - AppDefinition/AppPack binding identity
+       - SaveBundle identity when applicable
+       - accepted Pack graph identity when applicable
        - runtime host identity when such identity is defined
        - workspace identity when such identity is defined
 
-03.11. RuntimeHost identity and workspace identity are defined by DA-28.
+04.18. RuntimeHost identity and workspace identity are defined by DA-28.
 
 
 ===============================================================================
-04. RELATION TO APPPACK
+05. RELATION TO APPDEFINITION AND APPPACK BINDING
 ===============================================================================
 
-04.1. An ApplicationRun has exactly one active AppPack identity.
+05.1. An Application has one accepted AppDefinition binding for the Application
+      state being created, loaded, validated, migrated, or run.
 
-04.2. The active AppPack identity identifies the executable application pack
-      whose runtime instance is represented by the ApplicationRun.
+05.2. An AppPack is the normal reusable application definition source.
 
-04.3. An ApplicationRun is not itself a Pack.
+05.3. Direct-local, synthetic-script, synthetic-test, and internal AppPack
+      sources are AppDefinition source classes when those entry paths are used.
 
-04.4. An ApplicationRun does not change AppPack identity during its lifetime.
+05.4. Such sources create normal Applications and ApplicationRuns when runtime
+      or persistence use requires Application/ApplicationRun identity.
 
-04.5. Loading a different AppPack creates a different ApplicationRun.
+05.5. A script or runtime test using a synthetic source is not a separate
+      execution species.
 
-04.6. Pack discovery and resolution choose the AppPack identity before
-      ApplicationRun creation.
+05.6. An ApplicationRun has one active Application identity.
 
-04.7. AppPack dependency resolution remains owned by the pack and
-      resolution documents.
+05.7. An ApplicationRun has one active AppDefinition/AppPack binding for the
+      Application being run.
 
-04.8. ApplicationRun creation does not reopen AppPack resolution silently.
+05.8. An ApplicationRun does not silently change its active Application
+      identity during its lifetime.
 
-04.9. ApplicationRun runtime behavior remains constrained by the AppPack and
-      its resolved dependency graph.
+05.9. An ApplicationRun does not silently change its active
+      AppDefinition/AppPack binding during its lifetime.
+
+05.10. Switching to another AppDefinition/AppPack binding creates a new
+       Application, clone, fork, migration, or explicitly defined transition
+       according to owning documents.
+
+05.11. ApplicationRun creation does not reopen AppDefinition/AppPack resolution
+       silently.
+
+05.12. AppDefinition/AppPack dependency resolution remains owned by the pack
+       and resolution documents.
+
+05.13. ApplicationRun runtime behavior remains constrained by the accepted
+       AppDefinition/AppPack binding and accepted dependency graph.
+
+05.14. DA-20 may name AppDefinition source classes only to define Application
+       and ApplicationRun identity boundaries.
+
+05.15. DA-20 does not define AppDefinition source mechanics, manifest schema,
+       direct-local execution mechanics, synthetic source construction, or
+       internal source policy.
 
 
 ===============================================================================
-05. RELATION TO APPLICATION AND SAVE CONTEXT
+06. RELATION TO SAVEBUNDLE
 ===============================================================================
 
-05.1. save stores durable executed state for an AppPack.
+06.1. SaveBundle is the durable persistence closure of one Application.
 
-05.2. An ApplicationRun may have one active save identity when running from
-      or against a durable save context.
+06.2. A SaveBundle preserves Application identity and retained Application
+      material according to owning documents.
 
-05.3. Absence of active save identity means no durable save context is
+06.3. SaveBundle material may include AppDefinition/AppPack binding evidence,
+      selected Pack graph evidence, committed state, SaveBundle-bound
+      configuration and policy material, generated static data, application
+      data, finalized Window history, retained evidence, and retained Pack or
+      application material.
+
+06.4. This document names SaveBundle material only to define Application and
+      ApplicationRun identity and lifecycle boundaries.
+
+06.5. DA-20 does not define SaveBundle storage format.
+
+06.6. DA-20 does not define SaveBundle generation-publication mechanics.
+
+06.7. DA-20 does not define persistent I/O authority for SaveBundle storage.
+
+06.8. An ApplicationRun may have one active SaveBundle identity when running
+      from or against durable persistence.
+
+06.9. Absence of active SaveBundle identity means no durable SaveBundle is
       bound, not that the ApplicationRun identity is invalid.
 
-05.4. Active save context identifies the save scope against which committed
-      state, Windows, retained evidence, and save-local material are
-      interpreted.
+06.10. SaveBundle binding identifies the persistence closure against which
+       committed state, Windows, retained evidence, and retained material are
+       interpreted for the ApplicationRun.
 
-05.5. save identity is not ApplicationRun identity.
+06.11. SaveBundle identity is not Application identity.
 
-05.6. ApplicationRun identity is not save identity.
+06.12. SaveBundle identity is not ApplicationRun identity.
 
-05.7. save being bound to an ApplicationRun does not make adapter-executed
-      code a save writer.
+06.13. SaveBundle being bound to an ApplicationRun does not make
+       adapter-executed code a SaveBundle writer.
 
-05.8. save mutation occurs only through Kernel-mediated state and
-      persistence authority.
+06.14. SaveBundle mutation occurs only through Kernel-mediated state and
+       persistence authority.
 
-05.9. Authoritative mutation remains governed by DA-04.
+06.15. Authoritative mutation remains governed by DA-04.
 
-05.10. Persistent I/O remains governed by DA-07.
+06.16. Persistent I/O remains governed by DA-07.
 
-05.11. Window and retained evidence behavior remains governed by DA-08.
+06.17. Window and retained evidence behavior remains governed by DA-08.
 
-05.12. Save-local pack material remains constrained by pack and save-scope
-       documents.
+06.18. SaveBundle-local Pack material remains constrained by pack and
+       persistence-scope documents.
 
 
 ===============================================================================
-06. APPLICATIONRUN CREATION PATHS
+07. APPLICATIONRUN CREATION AND LOADING PATHS
 ===============================================================================
 
-06.1. ApplicationRun creation begins only after an AppPack identity has been
-      resolved.
+07.1. ApplicationRun creation begins only after Turnix has resolved or
+      reconstructed the Application and its accepted AppDefinition/AppPack
+      binding.
 
-06.2. ApplicationRun creation has two primary paths:
-      - new save path
-      - existing save path
+07.2. ApplicationRun creation has two primary paths:
+      - new Application creation path
+      - existing Application loading path
 
-06.3. New save path means Turnix creates a new save or save context for
-      the resolved AppPack before or as part of ApplicationRun creation.
+07.3. New Application creation path means Turnix resolves the
+      AppDefinition/AppPack source, creates a new Application identity, and
+      prepares a SaveBundle when durable persistence is requested or required.
+      Turnix then creates an ApplicationRun.
 
-06.4. Existing save path means Turnix loads an existing compatible save
-      or save context for the resolved AppPack before or as part of
-      ApplicationRun creation.
+07.4. Existing Application loading path means Turnix inspects and loads an
+      existing SaveBundle, validates the Application identity, validates the
+      AppDefinition/AppPack binding, validates accepted graph evidence,
+      resolves compatibility requirements, acquires writable ownership when
+      writable use is requested, and creates a new ApplicationRun.
 
-06.5. New save path may invoke AppPack-defined save generation behavior when
-      such behavior is defined and authorized.
+07.5. Loading an existing Application creates a new ApplicationRun of the same
+      Application.
 
-06.6. Save generation behavior is AppPack-provided executable behavior and
-      remains subject to activation, adapter, capability, policy, and
-      persistence boundaries.
+07.6. Loading an existing Application does not create a new Application unless
+      an explicit clone, fork, recovery, or transition workflow does so.
 
-06.7. Save generation does not bypass DA-04 committed-state rules.
+07.7. AppDefinition-defined initialization behavior may run during new
+      Application creation when such behavior is defined and authorized.
 
-06.8. Save generation does not bypass DA-07 persistence authority.
+07.8. AppDefinition-defined initialization behavior remains AppPack-provided or
+      source-provided executable behavior.
 
-06.9. Existing save path validates compatibility between the resolved
-      AppPack and the selected save or save context.
+07.9. AppDefinition-defined initialization behavior remains subject to
+      activation, adapter, capability, policy, and persistence boundaries.
 
-06.10. Compatibility validation failure prevents ApplicationRun creation unless
-       explicit migration, override, or recovery policy permits another
-       path.
+07.10. Initialization behavior does not bypass DA-04 committed-state rules.
 
-06.11. Migration that changes authoritative committed state remains governed
-       by DA-04 and DA-06.
+07.11. Initialization behavior does not bypass DA-07 persistence authority.
 
-06.12. ApplicationRun creation failure is explicit and trace-visible.
+07.12. Compatibility validation failure prevents ApplicationRun creation unless
+       explicit migration, override, or recovery policy permits another path.
 
-06.13. ApplicationRun creation failure does not create a partially valid
+07.13. Migration that changes authoritative committed state remains governed by
+       DA-04 and DA-06.
+
+07.14. ApplicationRun creation failure is explicit and trace-visible.
+
+07.15. ApplicationRun creation failure does not create a partially valid
        ApplicationRun.
 
-06.14. RuntimeHost startup modes and command surfaces use the ApplicationRun
-       creation paths defined in this section rather than defining separate
-       creation semantics.
+07.16. RuntimeHost startup modes and command surfaces use the Kernel-mediated
+       Application/ApplicationRun creation and SaveBundle loading paths defined
+       or referenced in this section.
 
-06.15. DA-28 owns the RuntimeHost rule that all entry surfaces use the same
-       Kernel-mediated save creation and save loading paths.
+07.17. RuntimeHost startup modes and command surfaces do not define separate
+       ApplicationRun creation semantics.
+
+07.18. DA-28 owns the RuntimeHost rule that all entry surfaces use the same
+       Kernel-mediated creation and loading paths.
+
+07.19. Loading an existing Application from a SaveBundle may include
+       inspection, requirement reconstruction, ownership acquisition, runtime
+       context construction, domain rehydration, activation, and
+       ApplicationRun readiness.
+
+07.20. DA-20 owns only the ApplicationRun identity and lifecycle part of those
+       loading phases.
 
 
 ===============================================================================
-07. WRITABLE DURABLE STATE OWNERSHIP
+08. WRITABLE SAVEBUNDLE OWNERSHIP
 ===============================================================================
 
-07.1. A writable save is owned by at most one running ApplicationRun at a
-      time.
+08.1. A writable SaveBundle may be owned by at most one active writable
+      ApplicationRun at a time.
 
-07.2. Writable save ownership prevents silent multi-writer mutation of
-      durable executed state.
+08.2. Writable SaveBundle ownership prevents silent multi-writer mutation of
+      durable Application state.
 
-07.3. A second ApplicationRun does not silently acquire writable ownership of
-      the same save.
+08.3. A second ApplicationRun does not silently acquire writable ownership
+      of the same SaveBundle.
 
-07.4. A second RuntimeHost does not silently acquire writable ownership of
-      the same workspace or save.
+08.4. A second RuntimeHost does not silently acquire writable ownership of the
+      same Workspace or SaveBundle.
 
-07.5. RuntimeHost workspace ownership semantics are defined by DA-28.
+08.5. RuntimeHost workspace ownership semantics are defined by DA-28.
 
-07.6. Read-only inspection of a save may be allowed by explicit tooling,
-      audit, export, or policy rules.
+08.6. Read-only inspection of a SaveBundle may be allowed by explicit tooling,
+      export, review, or policy rules.
 
-07.7. Read-only inspection does not create writable ownership.
+08.7. Read-only inspection does not create writable ownership.
 
-07.8. Multi-writer save behavior is not defined by this document.
+08.8. Multi-writer SaveBundle behavior is not defined by this document.
 
-07.9. Any future multi-writer mode requires an explicit authoritative design
+08.9. Any future multi-writer mode requires an explicit authoritative design
       that defines conflict handling, transaction boundaries, persistence
       ordering, and recovery semantics.
 
-07.10. Concrete workspace locking and concrete writable ownership
+08.10. Concrete workspace locking and concrete writable ownership
        implementation remain open for future implementation specifications
        constrained by DA-20, DA-28, DA-04, and DA-07.
 
-07.11. Absence of concrete locking implementation detail does not weaken the
+08.11. Absence of concrete locking implementation detail does not weaken the
        single-writer semantic rule in this section.
 
 
 ===============================================================================
-08. APPLICATIONRUN LIFECYCLE PHASES
+09. APPLICATIONRUN LIFECYCLE PHASES
 ===============================================================================
 
-08.1. ApplicationRun lifecycle phases may include:
+09.1. ApplicationRun lifecycle phases may include:
       - requested
       - creating
-      - save binding
+      - SaveBundle binding
       - starting
       - active
       - stopping
@@ -384,250 +531,310 @@ Downstream Documents:
       - crashed
       - closed
 
-08.2. Concrete implementations may use additional internal states if those
+09.2. Concrete implementations may use additional internal states if those
       states preserve the externally visible meanings defined here.
 
-08.3. requested means ApplicationRun creation has been requested but creation
+09.3. requested means ApplicationRun creation has been requested but creation
       has not yet begun.
 
-08.4. creating means Turnix is constructing ApplicationRun runtime identity and
+09.4. creating means Turnix is constructing ApplicationRun runtime identity and
       validating required creation inputs.
 
-08.5. save binding means Turnix is creating, loading, validating, or binding
-      the active save context.
+09.5. SaveBundle binding means Turnix is creating, loading, validating, or
+      binding the active SaveBundle when such binding is required.
 
-08.6. starting means Turnix is preparing the runtime active region and may
+09.6. starting means Turnix is preparing the runtime active region and may
       begin pack activation or adapter preparation according to owning
       documents.
 
-08.7. active means the ApplicationRun runtime active region exists.
+09.7. active means the ApplicationRun runtime active region exists.
 
-08.8. stopping means Turnix is intentionally ending the active runtime
-      region.
+09.8. stopping means Turnix is intentionally ending the active runtime region.
 
-08.9. stopped means the ApplicationRun ended through normal controlled
+09.9. stopped means the ApplicationRun ended through normal controlled
       shutdown.
 
-08.10. failed means ApplicationRun lifecycle could not continue because an
+09.10. failed means ApplicationRun lifecycle could not continue because an
        error prevented valid creation, start, or controlled operation.
 
-08.11. crashed means the ApplicationRun active region ended because the runtime
+09.11. crashed means the ApplicationRun active region ended because the runtime
        failed unexpectedly or the Kernel detected loss of valid runtime
        continuity.
 
-08.12. closed means ApplicationRun runtime identity has been released and is no
+09.12. closed means ApplicationRun runtime identity has been released and is no
        longer usable for new runtime work.
 
-08.13. Lifecycle phase names do not define Job terminal outcomes.
+09.13. Lifecycle phase names do not define Job terminal outcomes.
 
-08.14. Lifecycle phase names do not define Window finalization outcomes.
+09.14. Lifecycle phase names do not define OrchestrationUnit outcomes.
 
-08.15. Lifecycle phase names do not define adapter lifecycle outcomes.
+09.15. Lifecycle phase names do not define Window finalization outcomes.
+
+09.16. Lifecycle phase names do not define adapter lifecycle outcomes.
+
+09.17. Lifecycle phase names do not define artifact or export outcomes.
+
+09.18. Lifecycle phase names do not define Replay, Resume, or Retry outcomes.
 
 
 ===============================================================================
-09. APPLICATIONRUN ACTIVE REGION
+10. APPLICATIONRUN ACTIVE REGION
 ===============================================================================
 
-09.1. An ApplicationRun active region is the bounded runtime interval during
+10.1. An ApplicationRun active region is the bounded runtime interval during
       which an ApplicationRun is active.
 
-09.2. An active region begins when the ApplicationRun becomes active.
+10.2. An active region begins when the ApplicationRun becomes active.
 
-09.3. An active region ends when the ApplicationRun is no longer active.
+10.3. An active region ends when the ApplicationRun is no longer active.
 
-09.4. At most one active region exists for one ApplicationRun at a time.
+10.4. At most one active region exists for one ApplicationRun at a time.
 
-09.5. Work occurring inside an ApplicationRun active region remains linkable to
+10.5. Work occurring inside an ApplicationRun active region remains linkable to
       that ApplicationRun when the owning subsystem records ApplicationRun
       correlation evidence.
 
-09.6. Ending an ApplicationRun active region does not by itself define whether
+10.6. Ending an ApplicationRun active region does not by itself define whether
       in-flight work committed, aborted, retried, resumed, cancelled,
       superseded, detached, or retained a result.
 
-09.7. Window finalization semantics are defined by DA-08.
+10.7. Ending an ApplicationRun active region does not by itself define Window
+      finalization, artifact export, comparison, Replay, Resume, or Retry
+      workflow outcome.
 
-09.8. Pack activation failure semantics are defined by DA-14.
+10.8. Window finalization semantics are defined by DA-08.
 
-09.9. Job lifecycle semantics are defined by DA-19.
+10.9. Pack activation failure semantics are defined by DA-14.
 
-09.10. Adapter lifecycle semantics are defined by DA-23.
+10.10. Job lifecycle semantics are defined by DA-19.
+
+10.11. OrchestrationUnit lifecycle semantics are defined by DA-24.
+
+10.12. Adapter lifecycle semantics are defined by DA-23 and DA-27.
 
 
 ===============================================================================
-10. RELATION TO PACK ACTIVATION
+11. RELATION TO PACK ACTIVATION
 ===============================================================================
 
-10.1. Pack activation occurs inside or in relation to an ApplicationRun active
+11.1. Pack activation occurs inside or in relation to an ApplicationRun active
       region.
 
-10.2. ApplicationRun creation does not by itself activate every pack.
+11.2. ApplicationRun creation does not by itself activate every pack.
 
-10.3. ApplicationRun activation of the AppPack and its runtime participants
-      remains governed by DA-14.
+11.3. ApplicationRun activation of the AppDefinition/AppPack binding and its
+      runtime participants remains governed by DA-14.
 
-10.4. ApplicationRun lifecycle is not pack activation lifecycle.
+11.4. ApplicationRun lifecycle is not pack activation lifecycle.
 
-10.5. Pack activation success does not by itself mean ApplicationRun shutdown
+11.5. Pack activation success does not by itself mean ApplicationRun shutdown
       will succeed.
 
-10.6. Pack activation failure may cause ApplicationRun start failure when the
+11.6. Pack activation failure may cause ApplicationRun start failure when the
       failed activation is required for the ApplicationRun to become active.
 
-10.7. NotActivatedError remains an activation-domain outcome under DA-14.
+11.7. NotActivatedError remains an activation-domain outcome under DA-14.
 
-10.8. ApplicationRun lifecycle evidence may causally link to activation trace
+11.8. ApplicationRun lifecycle evidence may causally link to activation trace
       evidence when activation affects ApplicationRun lifecycle.
 
+11.9. DA-20 does not define lifecycle hook ordering, activation phase barriers,
+      cyclic activation groups, or registration publication scopes.
+
 
 ===============================================================================
-11. RELATION TO EXECUTION ADAPTERS
+12. RELATION TO EXECUTION ADAPTERS
 ===============================================================================
 
-11.1. Execution adapters may attach to or participate in an ApplicationRun.
+12.1. Execution adapters may attach to or participate in an ApplicationRun.
 
-11.2. Adapter participation does not make the adapter the ApplicationRun.
+12.2. Adapter participation does not make the adapter the ApplicationRun.
 
-11.3. Adapter identity is distinct from ApplicationRun identity.
+12.3. Adapter identity is distinct from ApplicationRun identity.
 
-11.4. Adapter lifecycle is distinct from ApplicationRun lifecycle.
+12.4. Adapter lifecycle is distinct from ApplicationRun lifecycle.
 
-11.5. Adapter readiness does not imply ApplicationRun readiness.
+12.5. Adapter readiness does not imply ApplicationRun readiness.
 
-11.6. ApplicationRun readiness does not imply that every possible adapter is
+12.6. ApplicationRun readiness does not imply that every possible adapter is
       ready.
 
-11.7. Adapter failure does not automatically stop the ApplicationRun.
+12.7. Adapter failure does not automatically stop the ApplicationRun.
 
-11.8. ApplicationRun stop does not automatically define adapter failure.
+12.8. ApplicationRun stop does not automatically define adapter failure.
 
-11.9. If adapter failure affects required ApplicationRun behavior, policy or
+12.9. If adapter failure affects required ApplicationRun behavior, policy or
       lifecycle rules define whether the ApplicationRun continues, stops,
       fails, detaches the adapter, or enters another explicit outcome.
 
-11.10. Adapter-executed code does not own ApplicationRun state.
+12.10. Adapter-executed code does not own ApplicationRun state.
 
-11.11. Adapter-executed code requests ApplicationRun state mutation only
+12.11. Adapter-executed code requests ApplicationRun state mutation only
        through Kernel-mediated boundaries.
 
-11.12. DA-23 owns execution adapter boundary semantics.
+12.12. DA-23 owns execution adapter boundary semantics.
+
+12.13. DA-27 owns adapter lifecycle, trust, isolation, and traceability
+       semantics.
 
 
 ===============================================================================
-12. RELATION TO VIEWS AND FRONTEND CLIENTS
+13. RELATION TO VIEWS AND FRONTEND CLIENTS
 ===============================================================================
 
-12.1. A View may present or control one ApplicationRun when the View class and
+13.1. A View may present or control one ApplicationRun when the View class and
       policy permit that relationship.
 
-12.2. View identity is distinct from ApplicationRun identity.
+13.2. View identity is distinct from ApplicationRun identity.
 
-12.3. Frontend client identity is distinct from ApplicationRun identity.
+13.3. Frontend client identity is distinct from ApplicationRun identity.
 
-12.4. A frontend client disconnect does not automatically stop an
+13.4. A frontend client disconnect does not automatically stop an
       ApplicationRun.
 
-12.5. View disconnect does not automatically stop an ApplicationRun.
+13.5. View disconnect does not automatically stop an ApplicationRun.
 
-12.6. ApplicationRun stop does not automatically define View failure.
+13.6. ApplicationRun stop does not automatically define View failure.
 
-12.7. If View lifecycle affects ApplicationRun lifecycle, that relationship is
+13.7. If View lifecycle affects ApplicationRun lifecycle, that relationship is
       explicit and governed by View, policy, and ApplicationRun lifecycle
       rules.
 
-12.8. DA-22 owns UI, View, and frontend runtime semantics.
+13.8. DA-22 owns UI, View, and frontend runtime semantics.
 
 
 ===============================================================================
-13. RELATION TO RPC AND TRANSPORTS
+14. RELATION TO RPC AND TRANSPORTS
 ===============================================================================
 
-13.1. RPC messages may target or originate from participants associated with
-      an ApplicationRun.
+14.1. RPC messages may target or originate from participants associated with an
+      ApplicationRun.
 
-13.2. RPC message identity is distinct from applicationRunId.
+14.2. RPC message identity is distinct from applicationRunId.
 
-13.3. RPC channel identity is distinct from applicationRunId.
+14.3. RPC channel identity is distinct from applicationRunId.
 
-13.4. Transport lifecycle is distinct from ApplicationRun lifecycle.
+14.4. Transport lifecycle is distinct from ApplicationRun lifecycle.
 
-13.5. Transport disconnect does not automatically stop an ApplicationRun.
+14.5. Transport disconnect does not automatically stop an ApplicationRun.
 
-13.6. Transport timeout does not automatically fail an ApplicationRun.
+14.6. Transport timeout does not automatically fail an ApplicationRun.
 
-13.7. ApplicationRun stop does not automatically mean the transport failed.
+14.7. ApplicationRun stop does not automatically mean the transport failed.
 
-13.8. If transport lifecycle affects ApplicationRun lifecycle, that effect is
+14.8. If transport lifecycle affects ApplicationRun lifecycle, that effect is
       explicit and governed by policy and the owning lifecycle documents.
 
-13.9. DA-21 owns RPC, channel, transport, and message-flow semantics.
+14.9. DA-21 owns RPC, channel, transport, and message-flow semantics.
 
 
 ===============================================================================
-14. RELATION TO JOBS
+15. RELATION TO JOBS AND ORCHESTRATIONUNITS
 ===============================================================================
 
-14.1. Jobs may execute inside or in relation to an ApplicationRun active
+15.1. Jobs may execute inside or in relation to an ApplicationRun active
       region.
 
-14.2. jobId is distinct from applicationRunId.
+15.2. jobId is distinct from applicationRunId.
 
-14.3. Job lifecycle is distinct from ApplicationRun lifecycle.
+15.3. Job lifecycle is distinct from ApplicationRun lifecycle.
 
-14.4. ApplicationRun stop does not automatically define Job terminal outcome.
+15.4. ApplicationRun stop does not automatically define Job terminal outcome.
 
-14.5. Job terminal outcome does not automatically stop an ApplicationRun.
+15.5. Job terminal outcome does not automatically stop an ApplicationRun.
 
-14.6. If ApplicationRun lifecycle affects a Job, DA-19 governs Job terminal
-      outcome, cancellation, timeout, supersession, progress, late
-      completion, and retained result semantics.
+15.6. If ApplicationRun lifecycle affects a Job, DA-19 governs Job terminal
+      outcome, cancellation, timeout, supersession, progress, late completion,
+      and retained result semantics.
 
-14.7. If a Job affects ApplicationRun lifecycle, that effect is explicit and
+15.7. If a Job affects ApplicationRun lifecycle, that effect is explicit and
       governed by the workflow or lifecycle rules that own the relationship.
 
-14.8. DA-19 owns Job lifecycle semantics.
+15.8. OrchestrationUnits may execute inside or in relation to an ApplicationRun
+      active region.
+
+15.9. orchestrationUnitId is distinct from applicationRunId.
+
+15.10. OrchestrationUnit lifecycle is distinct from ApplicationRun lifecycle.
+
+15.11. ApplicationRun lifecycle does not grant mutation authority outside
+       OrchestrationUnit and transaction boundaries.
+
+15.12. DA-19 owns Job lifecycle semantics.
+
+15.13. DA-24 owns OrchestrationUnit lifecycle and mutation authority semantics.
 
 
 ===============================================================================
-15. RELATION TO WINDOWS AND COMMITTED STATE
+16. RELATION TO WINDOWS AND COMMITTED STATE
 ===============================================================================
 
-15.1. Windows are associated with one ApplicationRun.
+16.1. Windows may be associated with one ApplicationRun.
 
-15.2. An ApplicationRun active region may contain an ActiveWindow.
+16.2. An ApplicationRun active region may contain an ActiveWindow.
 
-15.3. ApplicationRun lifecycle does not by itself finalize a Window.
+16.3. ApplicationRun lifecycle does not by itself finalize a Window.
 
-15.4. ApplicationRun stop does not by itself create a SafePointWindow.
+16.4. ApplicationRun stop does not by itself create a SafePointWindow.
 
-15.5. ApplicationRun failure does not by itself create an AbortedWindow.
+16.5. ApplicationRun failure does not by itself create an AbortedWindow.
 
-15.6. Window finalization remains governed by DA-08.
+16.6. Window finalization remains governed by DA-08.
 
-15.7. Authoritative committed-state mutation remains governed by DA-04.
+16.7. Authoritative committed-state mutation remains governed by DA-04.
 
-15.8. ApplicationRun lifecycle evidence may be retained inside Window evidence
+16.8. ApplicationRun lifecycle evidence may be retained inside Window evidence
       according to DA-08.
 
-15.9. Retained ApplicationRun evidence does not become authoritative committed
+16.9. Retained ApplicationRun evidence does not become authoritative committed
       state merely because it is retained in a Window.
 
+16.10. SafePointWindow, AbortedWindow, Window artifact, export, comparison,
+       Replay, Resume, and Retry semantics remain outside DA-20 authority.
+
 
 ===============================================================================
-16. APPLICATIONRUN TRACE REASON IDENTIFIERS
+17. RELATION TO PACKMANAGER AND OFFLINE WORKFLOWS
 ===============================================================================
 
-16.1. DA-20 owns the runtime-identity trace reason identifiers used for
+17.1. PackManager may help prepare, inspect, or manage Pack graph intent
+      used by an Application or ApplicationRun.
+
+17.2. PackManager is not the Application.
+
+17.3. PackManager is not the ApplicationRun.
+
+17.4. PackManager does not define ApplicationRun lifecycle.
+
+17.5. PackManager does not own ApplicationRun state authority.
+
+17.6. PackManager graph-preparation and catalog-operation semantics are defined
+      by DA-29.
+
+17.7. Artifact and export semantics are defined by DA-25.
+
+17.8. Comparison, Replay, Resume, and Retry workflow semantics are defined by
+      DA-26.
+
+17.9. ApplicationRun lifecycle evidence does not imply replayability,
+      resumability, retryability, comparison completeness, or export
+      completeness.
+
+
+===============================================================================
+18. APPLICATIONRUN TRACE REASON IDENTIFIERS
+===============================================================================
+
+18.1. DA-20 owns the runtime-identity trace reason identifiers used for
       ApplicationRun lifecycle and active-region span boundaries.
 
-16.2. The following ApplicationRun-domain trace reasons are defined:
+18.2. The following ApplicationRun-domain trace reasons are defined:
 
       - ApplicationRunCreationRequested
       - ApplicationRunCreationStarted
-      - ApplicationRunSaveBindingStarted
-      - ApplicationRunSaveBindingSucceeded
-      - ApplicationRunSaveBindingFailed
+      - ApplicationRunSaveBundleBindingStarted
+      - ApplicationRunSaveBundleBindingSucceeded
+      - ApplicationRunSaveBundleBindingFailed
       - ApplicationRunStartStarted
       - ApplicationRunActiveSpanBegin
       - ApplicationRunStopRequested
@@ -638,65 +845,67 @@ Downstream Documents:
       - ApplicationRunCrashed
       - ApplicationRunClosed
 
-16.3. ApplicationRunCreationRequested is emitted when ApplicationRun
+18.3. ApplicationRunCreationRequested is emitted when ApplicationRun
       creation is requested.
 
-16.4. ApplicationRunCreationStarted is emitted when Turnix begins constructing
+18.4. ApplicationRunCreationStarted is emitted when Turnix begins constructing
       ApplicationRun runtime identity and validating creation inputs.
 
-16.5. ApplicationRunSaveBindingStarted is emitted when Turnix begins creating,
-      loading, validating, or binding the active save context.
+18.5. ApplicationRunSaveBundleBindingStarted is emitted when Turnix begins
+      creating, loading, validating, or binding the active SaveBundle.
 
-16.6. ApplicationRunSaveBindingSucceeded is emitted when active save context
-      binding succeeds.
+18.6. ApplicationRunSaveBundleBindingSucceeded is emitted when active
+      SaveBundle binding succeeds.
 
-16.7. ApplicationRunSaveBindingFailed is emitted when active save context
+18.7. ApplicationRunSaveBundleBindingFailed is emitted when active SaveBundle
       binding fails.
 
-16.8. ApplicationRunStartStarted is emitted when Turnix begins starting the
+18.8. ApplicationRunStartStarted is emitted when Turnix begins starting the
       ApplicationRun runtime active region.
 
-16.9. ApplicationRunActiveSpanBegin is emitted when an ApplicationRun becomes
+18.9. ApplicationRunActiveSpanBegin is emitted when an ApplicationRun becomes
       active.
 
-16.10. ApplicationRunStopRequested is emitted when ApplicationRun stop is
+18.10. ApplicationRunStopRequested is emitted when ApplicationRun stop is
        requested.
 
-16.11. ApplicationRunStopStarted is emitted when Turnix begins stopping the
+18.11. ApplicationRunStopStarted is emitted when Turnix begins stopping the
        ApplicationRun active region.
 
-16.12. ApplicationRunActiveSpanEnd is emitted when an ApplicationRun is no
+18.12. ApplicationRunActiveSpanEnd is emitted when an ApplicationRun is no
        longer active.
 
-16.13. ApplicationRunStopped is emitted when the ApplicationRun reaches
+18.13. ApplicationRunStopped is emitted when the ApplicationRun reaches
        controlled stopped state.
 
-16.14. ApplicationRunFailed is emitted when the ApplicationRun lifecycle cannot
-       continue because an error prevents valid creation, start, or
-       controlled operation.
+18.14. ApplicationRunFailed is emitted when the ApplicationRun lifecycle cannot
+       continue because an error prevents valid creation, start, or controlled
+       operation.
 
-16.15. ApplicationRunCrashed is emitted when the ApplicationRun active
-       region ends because runtime continuity failed unexpectedly.
+18.15. ApplicationRunCrashed is emitted when the ApplicationRun active region
+       ends because runtime continuity failed unexpectedly.
 
-16.16. ApplicationRunClosed is emitted when ApplicationRun runtime identity is
+18.16. ApplicationRunClosed is emitted when ApplicationRun runtime identity is
        released and no longer usable for new runtime work.
 
-16.17. DA-03 defines the trace substrate used to represent ApplicationRun
+18.17. DA-03 defines the trace substrate used to represent ApplicationRun
        evidence.
 
-16.18. DA-20 defines only the ApplicationRun-domain ownership of these trace
+18.18. DA-20 defines only ApplicationRun-domain ownership of these trace
        reasons and required correlation evidence.
 
 
 ===============================================================================
-17. APPLICATIONRUN TRACE CONTEXT
+19. APPLICATIONRUN TRACE CONTEXT
 ===============================================================================
 
-17.1. ApplicationRun trace evidence records enough context, when available, to
+19.1. ApplicationRun trace evidence records enough context, when available, to
       explain:
+      - applicationId
       - applicationRunId
-      - active AppPack identity
-      - active application or save identity when applicable
+      - AppDefinition/AppPack binding identity when applicable
+      - SaveBundle identity when applicable
+      - accepted Pack graph identity when applicable
       - creation request identity when applicable
       - runtime host identity when applicable
       - workspace identity when applicable
@@ -705,53 +914,99 @@ Downstream Documents:
       - adapter identity when applicable
       - RPC message identity when applicable
       - jobId when applicable
+      - orchestrationUnitId when applicable
       - failure reason category when failure occurs
       - stop reason category when stopping occurs
       - crash reason category when crash is detected
 
-17.2. ApplicationRunActiveSpanBegin trace evidence records enough context to
+19.2. ApplicationRunActiveSpanBegin trace evidence records enough context to
       explain:
+      - applicationId
       - applicationRunId
       - spanIdentity
-      - active AppPack identity
-      - active application or save identity when applicable
+      - AppDefinition/AppPack binding identity when applicable
+      - SaveBundle identity when applicable
 
-17.3. ApplicationRunActiveSpanEnd trace evidence records enough context to
+19.3. ApplicationRunActiveSpanEnd trace evidence records enough context to
       explain:
       - applicationRunId
       - spanIdentity
       - endReasonCategory
 
-17.4. ApplicationRunActiveSpanEnd endReasonCategory distinguishes:
+19.4. ApplicationRunActiveSpanEnd endReasonCategory distinguishes:
       - NormalDeactivate
       - Crash
       - ForcedDeactivate
       - KernelExit
 
-17.5. ApplicationRun trace evidence does not replace activation trace evidence.
+19.5. ApplicationRun trace evidence does not replace activation trace evidence.
 
-17.6. ApplicationRun trace evidence does not replace adapter trace evidence.
+19.6. ApplicationRun trace evidence does not replace adapter trace evidence.
 
-17.7. ApplicationRun trace evidence does not replace RPC trace evidence.
+19.7. ApplicationRun trace evidence does not replace RPC trace evidence.
 
-17.8. ApplicationRun trace evidence does not replace Job trace evidence.
+19.8. ApplicationRun trace evidence does not replace Job trace evidence.
 
-17.9. ApplicationRun trace evidence does not replace Window finalization
+19.9. ApplicationRun trace evidence does not replace OrchestrationUnit trace
       evidence.
 
-17.10. RuntimeHost trace evidence and RuntimeHost-domain trace reason
-       ownership are defined by DA-28.
+19.10. ApplicationRun trace evidence does not replace Window finalization
+       evidence.
+
+19.11. ApplicationRun trace evidence does not replace RuntimeHost trace
+       evidence.
+
+19.12. ApplicationRun trace evidence does not replace PackManager trace
+       evidence.
+
+19.13. ApplicationRun trace evidence does not replace artifact or export trace
+       evidence.
+
+19.14. ApplicationRun trace evidence does not replace Replay, Resume, or Retry
+       workflow trace evidence.
+
+19.15. ApplicationRun trace evidence does not replace committed-state trace
+       evidence.
+
+19.16. ApplicationRun trace evidence does not replace persistent-I/O evidence.
+
+19.17. RuntimeHost trace evidence and RuntimeHost-domain trace reason ownership
+       are defined by DA-28.
+
+19.18. ApplicationRun trace evidence is correlation and lifecycle evidence.
+
+19.19. ApplicationRun trace evidence is not committed-state truth.
+
+19.20. ApplicationRun trace evidence is not SaveBundle truth.
+
+19.21. ApplicationRun trace evidence is not a workflow outcome.
 
 
 ===============================================================================
-18. WHAT IS EXPLICITLY NOT SUPPORTED
+20. WHAT IS EXPLICITLY NOT SUPPORTED
 ===============================================================================
 
-18.1. The following are not supported:
-      - treating ApplicationRun identity as pack identity
-      - treating ApplicationRun identity as save identity
-      - changing AppPack identity inside one ApplicationRun
-      - silent writable multi-writer save ownership
+20.1. The following are not supported:
+      - treating Application identity as Pack identity
+      - treating Application identity as SaveBundle identity
+      - treating ApplicationRun identity as Application identity
+      - treating ApplicationRun identity as Pack identity
+      - treating ApplicationRun identity as SaveBundle identity
+      - treating ApplicationRun identity as View identity
+      - treating ApplicationRun identity as adapter identity
+      - treating ApplicationRun identity as RPC, channel, or transport identity
+      - treating ApplicationRun identity as Job identity
+      - treating ApplicationRun identity as OrchestrationUnit identity
+      - treating ApplicationRun identity as Window identity
+      - treating ApplicationRun identity as RuntimeHost or Workspace identity
+      - treating ApplicationRun identity as artifact or export identity
+      - treating ApplicationRun identity as comparison, Replay, Resume, or
+        Retry workflow identity
+      - treating Session as core runtime identity
+      - changing Application identity silently inside one ApplicationRun
+      - changing AppDefinition/AppPack binding silently inside one
+        ApplicationRun
+      - silent writable multi-writer SaveBundle ownership
       - adapter-owned ApplicationRun state authority
       - frontend-owned ApplicationRun state authority
       - transport disconnect silently stopping an ApplicationRun
@@ -768,73 +1023,89 @@ Downstream Documents:
 
 
 ===============================================================================
-19. EXPLICITLY OPEN QUESTIONS
+21. EXPLICITLY OPEN QUESTIONS
 ===============================================================================
 
-19.1. OPEN questions include:
+21.1. OPEN questions include:
+      - exact applicationId representation
       - exact applicationRunId representation
       - exact creation request representation
-      - exact save compatibility validation schema
-      - exact save generator API
+      - exact AppDefinition/AppPack binding representation
+      - exact SaveBundle compatibility validation schema
+      - exact AppDefinition-defined initialization API
       - exact ApplicationRun restart semantics
       - exact ApplicationRun retained-result behavior when clients disconnect
       - exact ApplicationRun lifecycle API names
+      - exact fork, clone, and provenance API names
       - exact implementation-specific lifecycle substate vocabulary
 
-19.2. RuntimeHost identity, workspace identity, runtime-host command surface,
-      workspace ownership, and startup-mode semantics are defined by DA-28.
+21.2. RuntimeHost identity, Workspace identity, runtime-host command surface,
+      Workspace ownership, startup-mode semantics, local-first semantics, and
+      LAN semantics are defined by DA-28.
 
-19.3. Concrete workspace locking implementation remains open for future
+21.3. Concrete workspace locking implementation remains open for future
       implementation specifications constrained by DA-20, DA-28, DA-04, and
       DA-07.
 
+21.4. SaveBundle format, generation publication, retained material layout, and
+      persistence storage details remain outside DA-20 authority.
+
 
 ===============================================================================
-20. LOCKED SUMMARY
+22. LOCKED SUMMARY
 ===============================================================================
 
-20.1. LOCKED:
-      - ApplicationRun is a live runtime instance of one AppPack
-      - ApplicationRun identity is distinct from pack identity
-      - ApplicationRun identity is distinct from save identity
+22.1. LOCKED:
+      - Application is one durable application individual
+      - applicationId identifies one durable Application
+      - ApplicationRun is one live execution period of one Application
+      - applicationRunId identifies one live ApplicationRun
+      - ApplicationRun has one active Application identity
+      - ApplicationRun has one active AppDefinition/AppPack binding
+      - ApplicationRun may be bound to a SaveBundle when durable persistence is
+        requested or required
+      - Application identity is distinct from ApplicationRun identity
+      - ApplicationRun identity is distinct from Pack identity
+      - ApplicationRun identity is distinct from SaveBundle identity
       - ApplicationRun identity is distinct from View identity
       - ApplicationRun identity is distinct from adapter identity
       - ApplicationRun identity is distinct from Job identity
+      - ApplicationRun identity is distinct from OrchestrationUnit identity
+      - ApplicationRun identity is distinct from Window identity
       - ApplicationRun lifecycle is distinct from pack activation
       - ApplicationRun lifecycle is distinct from execution adapter lifecycle
       - ApplicationRun lifecycle is distinct from RPC transport lifecycle
       - ApplicationRun lifecycle is distinct from Job lifecycle
-      - applicationRunId is the runtime instance correlation identity
-      - an ApplicationRun has exactly one active AppPack identity
-      - an ApplicationRun may have one active save or save context
-      - new save path and existing save path are distinct ApplicationRun
-        creation paths
+      - Session is not a core runtime identity
+      - new Application creation and existing Application loading are distinct
+        ApplicationRun creation/loading paths
       - RuntimeHost startup modes and command surfaces use the same
-        ApplicationRun creation paths defined by DA-20
-      - a writable save is owned by at most one running ApplicationRun at a
-        time
+        Kernel-mediated Application/ApplicationRun creation and SaveBundle
+        loading paths defined or referenced by DA-20
+      - a writable SaveBundle may be owned by at most one active writable
+        ApplicationRun at a time
       - ApplicationRun active regions have begin and end boundaries
       - ApplicationRun stop does not by itself define Job terminal outcome
       - ApplicationRun stop does not by itself finalize a Window
       - adapter-executed code does not own ApplicationRun state
       - DA-20 owns runtime-identity trace reason identifiers
       - DA-28 owns RuntimeHost-domain trace reason identifiers and runtime-host
-        workspace and command-surface semantics
+        Workspace and command-surface semantics
       - DA-03 owns the trace substrate, not ApplicationRun lifecycle semantics
 
-20.2. OPEN:
-      - concrete ApplicationRun identifiers, save generator API,
-        compatibility validation, restart, retained-result, and implementation
-        substate details
+22.2. OPEN:
+      - concrete Application and ApplicationRun identifiers, compatibility
+        validation, initialization API, restart, retained-result, fork/clone,
+        provenance, and implementation substate details
 
 
 ===============================================================================
-END OF DA-20 - APPINSTANCE LIFECYCLE & RUNTIME IDENTITY
+END OF DA-20 - APPLICATION AND APPLICATIONRUN LIFECYCLE & RUNTIME IDENTITY
 ===============================================================================
 
 --- doc-meta ---
 DOC_ID: DA-20
 DOC_FILE: docs/design/DA-20_APPINSTANCE_LIFECYCLE_AND_RUNTIME_IDENTITY.txt
-DOC_REV: 4
-DOC_GIT: 207a047
+DOC_REV: 5
+DOC_GIT: 25c9bf0
 ----------------
