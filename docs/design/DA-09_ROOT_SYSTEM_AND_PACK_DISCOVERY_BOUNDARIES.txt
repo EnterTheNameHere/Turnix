@@ -14,7 +14,9 @@ how bootstrap path selection works, and what discovery is allowed to produce.
 
 This area constrains:
 - deterministic discovery inputs
+- root-system terminology
 - root-origin meaning and precedence
+- root-category namespace meaning
 - bootstrap path selection for userdata and saves
 - content-root aggregation
 - trust and override boundaries
@@ -24,17 +26,24 @@ This area constrains:
 
 Purpose:
 --------
+This document defines the root-system domain for Turnix discovery. The root
+system is the umbrella model for root origins, root bases, root categories,
+candidate roots, selected roots, preferred roots, bootstrap path behavior,
+content-root aggregation, and discovery stop-lines.
+
 This document defines the root-origin model, root categories, candidate-root
 rules, and discovery behavior that produce discovered Pack candidates,
 rejected Pack candidates, SaveBundle candidates, and non-pack root candidates.
 
 It exists to keep discovery boring, strict, and predictable, preventing ghost
-packs, accidental global behavior, silent path substitution, and root-origin
-confusion.
+packs, accidental global behavior, silent path substitution, root-origin
+confusion, and confusion between content namespaces and Pack roots.
 
 This area defines:
+- root-system terminology
 - root origin kinds and their meaning
-- root categories and allowed origin/category combinations
+- root bases and root categories
+- allowed origin/category combinations
 - candidate roots, selected roots, and preferred roots
 - userdata bootstrap path resolution
 - saves path resolution
@@ -47,6 +56,7 @@ This area defines:
 - discovery-domain trace obligations
 
 This area does NOT define:
+- Pack identity or hierarchy beyond discovery stop-lines
 - Pack activation or runtime loading
 - policy evaluation beyond the root/bootstrap model defined here
 - visibility rules beyond discovery boundaries
@@ -100,13 +110,13 @@ Downstream Documents:
 01.3. The CORE META-RULES documents define the general rule language and
       interpretation model used by this document.
 
-01.4. This document defines root origins, root categories, bootstrap path
-      behavior, and discovery boundaries within that shared interpretation
-      model.
+01.4. This document defines root-system terminology, root origins, root
+      categories, bootstrap path behavior, and discovery boundaries within
+      that shared interpretation model.
 
 
 ===============================================================================
-02. CORE CONCEPT
+02. CORE CONCEPT AND TERMINOLOGY BOUNDARY
 ===============================================================================
 
 02.1. Discovery answers:
@@ -115,18 +125,52 @@ Downstream Documents:
            contribute, and what discovered or rejected candidate entities
            may discovery legitimately produce?"
 
-02.2. Discovery is the stage that identifies candidate Pack entities inside
-      allowed roots and classifies them into discovered or rejected outcomes.
+02.2. The root system is the umbrella model defined by this document.
 
-02.3. Discovery also establishes candidate roots for non-pack categories such
-      as userdata and saves.
+02.3. The root system is not a filesystem object.
 
-02.4. Discovery may identify SaveBundle candidates under saves roots.
+02.4. The root system is not a synonym for root base, root category,
+      content root, or Pack root.
 
-02.5. Discovery does not by itself grant runtime meaning beyond the
-      root/bootstrap model defined here.
+02.5. Root origin kind describes where a root base came from.
 
-02.6. Discovery does not decide:
+02.6. Root base means a normalized base directory contributed by a root
+      origin.
+
+02.7. Root category means one of the category namespaces under a root base.
+
+02.8. Root category directory means the concrete directory for one root
+      category under one root base.
+
+02.9. Content categories are custom/, first-party/, and third-party/.
+
+02.10. A content root is a root category directory for a content category.
+
+02.11. A content root is a discovery namespace.
+
+02.12. A content root is not a Pack root.
+
+02.13. A Pack root is identified by a Pack manifest and is defined by DA-10.
+
+02.14. A Pack root may appear inside a content root.
+
+02.15. A content root may contain zero or more Pack roots.
+
+02.16. A manifest directly inside a content root is handled by the discovery
+       entrypoint rules in section 11.
+
+02.17. Discovery is the stage that identifies candidate Pack entities inside
+       allowed roots and classifies them into discovered or rejected outcomes.
+
+02.18. Discovery also establishes candidate roots for non-pack categories such
+       as userdata and saves.
+
+02.19. Discovery may identify SaveBundle candidates under saves roots.
+
+02.20. Discovery does not by itself grant runtime meaning beyond the
+       root/bootstrap model defined here.
+
+02.21. Discovery does not decide:
       - visibility
       - enablement
       - indexing
@@ -141,39 +185,39 @@ Downstream Documents:
       - committed-state authority
       - policy outcomes beyond the root/bootstrap model defined here
 
-02.7. Discovery is intentionally strict, boring, and side-effect free.
+02.22. Discovery is intentionally strict, boring, and side-effect free.
 
-02.8. Discovery boundaries exist to preserve:
+02.23. Discovery boundaries exist to preserve:
       - deterministic visibility inputs
       - trust and override boundaries
       - runtime and authoring separation
       - save isolation
       - predictable performance
 
-02.9. Pack is the general reusable application, mod, content, definition, or
-      executable-participation container concept.
+02.24. Pack is the general reusable application, mod, content, definition, or
+       executable-participation container concept.
 
-02.10. Specialized Pack kinds include AppPack, ModPack, ContentPack, and
+02.25. Specialized Pack kinds include AppPack, ModPack, ContentPack, and
        other explicitly defined Pack kinds.
 
-02.11. SaveBundle is not a Pack.
+02.26. SaveBundle is not a Pack.
 
-02.12. SaveBundle is the durable persistence closure of an Application.
+02.27. SaveBundle is the durable persistence closure of an Application.
 
-02.13. A SaveBundle may retain, copy, pin, or reference Pack material and graph
-       evidence according to the owning SaveBundle and graph documents.
+02.28. A SaveBundle may retain, copy, pin, or reference Pack material and
+       graph evidence according to the owning SaveBundle and graph documents.
 
-02.14. SaveBundle-local retained or copied Pack material remains context-bound
+02.29. SaveBundle-local retained or copied Pack material remains context-bound
        unless another authoritative document explicitly states otherwise.
 
-02.15. This document names Application, ApplicationRun, SaveBundle,
+02.30. This document names Application, ApplicationRun, SaveBundle,
        PackManager, ExecutionAdapter, and ModCallContext only to preserve
        discovery boundaries and stop-lines.
 
-02.16. This document does not define the detailed behavior of those neighboring
-       domains.
+02.31. This document does not define the detailed behavior of those
+       neighboring domains.
 
-02.17. Discovery remains compatible with [constrained-by: DA-07 07] for
+02.32. Discovery remains compatible with [constrained-by: DA-07 07] for
        early-phase I/O limits and built-in-reader-only behavior.
 
 
@@ -189,7 +233,7 @@ Downstream Documents:
       - repo root
       - externally-managed content root
 
-03.2. Root origin kind describes where a root came from.
+03.2. Root origin kind describes where a root base came from.
 
 03.3. Root origin kind does not by itself determine whether a candidate wins
       later resolution.
@@ -206,39 +250,51 @@ Downstream Documents:
 
 03.7. This document refers to that baseline as repo root.
 
-03.8. Externally-managed content roots are content-only roots by semantics.
+03.8. Externally-managed content root is a root origin kind.
 
-03.9. The externally-managed content-root rule is a provenance and
-      safety-hygiene rule.
+03.9. An externally-managed content root contributes only content by
+      semantics.
 
-03.10. The externally-managed content-root rule is not presented as a hard
+03.10. The externally-managed content-root rule is a provenance and
+       safety-hygiene rule.
+
+03.11. The externally-managed content-root rule is not presented as a hard
        adversarial-security guarantee.
 
 
 ===============================================================================
-04. ROOT CATEGORIES (LOCKED)
+04. ROOT BASES AND ROOT CATEGORIES (LOCKED)
 ===============================================================================
 
-04.1. Turnix recognizes the following root categories:
+04.1. A root base is a normalized base directory contributed by a root origin.
+
+04.2. Turnix recognizes the following root categories:
       - custom/
       - first-party/
       - third-party/
       - userdata/
       - saves/
 
-04.2. Each root category has distinct semantic meaning and enforced
+04.3. Each root category has distinct semantic meaning and enforced
       constraints.
 
-04.3. Root categories are subdirectories under a root origin base.
+04.4. Root categories are subdirectories under a root base.
 
-04.4. Extra root paths are interpreted as root bases.
+04.5. A root category directory is the concrete category directory under one
+      root base.
 
-04.5. If a provided absolute path already points to a category directory
+04.6. Extra root paths are interpreted as root bases.
+
+04.7. If a provided absolute path already points to a category directory
       itself, Turnix normalizes it back to the containing root base.
 
-04.6. Relative paths are invalid for persisted root configuration.
+04.8. Relative paths are invalid for persisted root configuration.
 
-04.7. Stored/configured root hints use normalized absolute root-base paths.
+04.9. Stored/configured root hints use normalized absolute root-base paths.
+
+04.10. Root category directories are namespaces.
+
+04.11. Root category directories are not Pack roots.
 
 
 ===============================================================================
@@ -303,37 +359,43 @@ Downstream Documents:
 
 06.2. userdata/ and saves/ are not content categories.
 
-06.3. custom/ is a special workspace/override category.
+06.3. A content root is a root category directory for a content category.
 
-06.4. first-party/ is shipped or officially updated content baseline.
+06.4. A content root is a discovery namespace for Pack candidates.
 
-06.5. third-party/ is external content.
+06.5. A content root is not itself a Pack root.
 
-06.6. userdata/ is used for persisted configuration, runtime state, user
+06.6. custom/ is a special workspace/override category.
+
+06.7. first-party/ is shipped or officially updated content baseline.
+
+06.8. third-party/ is external content.
+
+06.9. userdata/ is used for persisted configuration, runtime state, user
       decisions, caches, and related persisted non-pack data.
 
-06.7. saves/ contains SaveBundles and related durable Application persistence
-      material.
+06.10. saves/ contains SaveBundles and related durable Application persistence
+       material.
 
-06.8. SaveBundles are discoverable as durable Application persistence
-      entities.
+06.11. SaveBundles are discoverable as durable Application persistence
+       entities.
 
-06.9. SaveBundles are not ordinary importable content-root Packs.
+06.12. SaveBundles are not ordinary importable content-root Packs.
 
-06.10. A SaveBundle may contain retained or copied Pack material, pinned Pack
+06.13. A SaveBundle may contain retained or copied Pack material, pinned Pack
        graph evidence, compatibility evidence, and SaveBundle-local material.
 
-06.11. Pack material retained or copied into a SaveBundle remains
+06.14. Pack material retained or copied into a SaveBundle remains
        SaveBundle-local and context-bound unless another authoritative
        document explicitly states otherwise.
 
-06.12. SaveBundle-local retained or copied Pack material is a distinct nearer
+06.15. SaveBundle-local retained or copied Pack material is a distinct nearer
        source context for that SaveBundle/Application context.
 
-06.13. Ordinary content-root precedence does not override SaveBundle-local
+06.16. Ordinary content-root precedence does not override SaveBundle-local
        retained or copied Pack material by default.
 
-06.14. Therefore custom does not override SaveBundle-local retained or copied
+06.17. Therefore custom does not override SaveBundle-local retained or copied
        Pack material by default.
 
 
@@ -380,7 +442,7 @@ Downstream Documents:
        root becomes unusable and controlled recovery causes Turnix to use
        another root.
 
-07.13. Such mismatch must be surfaced to the user rather than hidden.
+07.13. Such mismatch is surfaced to the user rather than hidden.
 
 07.14. If no usable selected or preferred root exists, Turnix chooses:
        1) the first existing usable concrete category directory
@@ -624,27 +686,30 @@ Downstream Documents:
 
 11.1. Root directories are namespaces rather than Packs.
 
-11.2. A manifest located directly in a category root directory is ignored.
+11.2. Root category directories are namespaces rather than Packs.
 
-11.3. Examples include:
+11.3. A manifest located directly in a category root directory is ignored.
+
+11.4. Examples include:
       - first-party/manifest.json5
       - custom/manifest.json5
       - saves/manifest.json5
 
-11.4. This outcome is not treated as a fatal error.
+11.5. This outcome is not treated as a fatal error.
 
-11.5. The rationale is:
+11.6. The rationale is:
       - roots define namespaces rather than Pack identities
       - accidental global Packs are prevented
       - ambiguity at root level is avoided
+      - content roots remain distinct from Pack roots
 
-11.6. Every ignored, skipped, rejected, or accepted discovery candidate
+11.7. Every ignored, skipped, rejected, or accepted discovery candidate
       remains trace-visible.
 
-11.7. Discovery does not silently ignore manifests, directories, or files
+11.8. Discovery does not silently ignore manifests, directories, or files
       that appear eligible for discovery.
 
-11.8. Discovery trace evidence distinguishes:
+11.9. Discovery trace evidence distinguishes:
       - manifest found
       - manifest ignored because it is at a category-root entrypoint
       - manifest skipped
@@ -653,19 +718,20 @@ Downstream Documents:
       - depth limit reached
       - symlink refusal
 
-11.9. Discovery trace evidence records enough context to explain:
-      - which root category was being scanned
-      - which root origin contributed the candidate
-      - which path or artifact was involved
-      - which discovery rule accepted, ignored, skipped, or rejected it
+11.10. Discovery trace evidence records enough context to explain:
+       - which root category was being scanned
+       - which root origin contributed the candidate
+       - which root base or category directory was involved
+       - which path or artifact was involved
+       - which discovery rule accepted, ignored, skipped, or rejected it
 
-11.10. Discovery trace evidence does not define resolution, visibility,
+11.11. Discovery trace evidence does not define resolution, visibility,
        activation, import behavior, runtime loading, capability availability,
        committed state, SaveBundle truth, or runtime meaning.
 
-11.11. This document defines which discovery outcomes must be trace-visible.
+11.12. This document defines which discovery outcomes are trace-visible.
 
-11.12. DA-03 defines how trace evidence is represented and related.
+11.13. DA-03 defines how trace evidence is represented and related.
 
 
 ===============================================================================
@@ -688,6 +754,15 @@ Downstream Documents:
 
 12.1.5. This rule is locked because it affects deterministic discovery
         boundaries.
+
+12.1.6. When a discovered manifest creates a Pack root, scanning below that
+        Pack root is scanning inside the Pack boundary.
+
+12.1.7. A nested discovered manifest creates a nested Pack candidate for later
+        Pack hierarchy handling.
+
+12.1.8. DA-10 owns Pack identity and hierarchy after discovery establishes
+        the candidate boundary.
 
 12.2. Maximum scan depth (LOCKED)
 --------------------------------
@@ -929,54 +1004,61 @@ Downstream Documents:
 
 17.1. DA-09 owns root-system and discovery-boundary semantics.
 
-17.2. DA-09 may name neighboring domains to keep discovery boundaries clear.
+17.2. DA-09 owns the distinction between root system, root origin, root base,
+      root category, root category directory, content root, and discovery
+      output.
 
-17.3. DA-09 does not define detailed behavior for neighboring domains.
+17.3. DA-09 does not own Pack identity or Pack hierarchy after candidate
+      discovery establishes the candidate boundary.
 
-17.4. DA-03 owns trace substrate, trace DAG semantics, trace storage, trace
+17.4. DA-09 may name neighboring domains to keep discovery boundaries clear.
+
+17.5. DA-09 does not define detailed behavior for neighboring domains.
+
+17.6. DA-03 owns trace substrate, trace DAG semantics, trace storage, trace
       retention, and trace loss.
 
-17.5. DA-06 owns configuration semantics and path-config persistence.
+17.7. DA-06 owns configuration semantics and path-config persistence.
 
-17.6. DA-07 owns early-phase I/O limits and built-in-reader-only behavior.
+17.8. DA-07 owns early-phase I/O limits and built-in-reader-only behavior.
 
-17.7. DA-10 owns Pack identity, hierarchy, indexing, visibility, and
+17.9. DA-10 owns Pack identity, hierarchy, indexing, visibility, and
       visibility semantics for retained Pack material.
 
-17.8. DA-11 owns generic PackRequest resolution mechanics, selector
-      resolution, and deterministic selection.
+17.10. DA-11 owns generic PackRequest resolution mechanics, selector
+       resolution, and deterministic selection.
 
-17.9. DA-12 owns importing, module loading, and code-boundary rules.
+17.11. DA-12 owns importing, module loading, and code-boundary rules.
 
-17.10. DA-13 owns dependency semantics, advisory relation semantics,
+17.12. DA-13 owns dependency semantics, advisory relation semantics,
        pinned/copied field semantics, and provider-role semantics.
 
-17.11. DA-14 owns activation lifecycle and final Activated state.
+17.13. DA-14 owns activation lifecycle and final Activated state.
 
-17.12. DA-16 owns service, capability, permission, and Job-backed capability
+17.14. DA-16 owns service, capability, permission, and Job-backed capability
        semantics.
 
-17.13. DA-17 owns user decision and remembered policy semantics outside
+17.15. DA-17 owns user decision and remembered policy semantics outside
        DA-09's root/bootstrap model.
 
-17.14. DA-20 owns Application/ApplicationRun lifecycle and runtime identity.
+17.16. DA-20 owns Application/ApplicationRun lifecycle and runtime identity.
 
-17.15. DA-21 owns RPC, channel, and transport semantics.
+17.17. DA-21 owns RPC, channel, and transport semantics.
 
-17.16. DA-23 owns ExecutionAdapter boundary semantics.
+17.18. DA-23 owns ExecutionAdapter boundary semantics.
 
-17.17. DA-24 owns OrchestrationUnit and mutation-authority semantics.
+17.19. DA-24 owns OrchestrationUnit and mutation-authority semantics.
 
-17.18. DA-28 owns RuntimeHost workspace ownership and command-surface
+17.20. DA-28 owns RuntimeHost workspace ownership and command-surface
        semantics.
 
-17.19. DA-29 owns PackManager inspection, explanation, graph preparation,
+17.21. DA-29 owns PackManager inspection, explanation, graph preparation,
        validation, repair, selected graph management, and PackManager-domain
        trace semantics.
 
-17.20. DA-30 owns ModCallContext invocation gateway semantics.
+17.22. DA-30 owns ModCallContext invocation gateway semantics.
 
-17.21. SaveBundle-owning documents define SaveBundle storage format,
+17.23. SaveBundle-owning documents define SaveBundle storage format,
        compatibility, generation, retained material, ownership, and loading
        details.
 
@@ -993,8 +1075,9 @@ Downstream Documents:
       - whether any later document should split some bootstrap details from
         this area for maintainability only
 
-18.2. Root meaning, root/bootstrap semantics, and candidate-root behavior
-      defined in this document are otherwise treated as semantically locked.
+18.2. Root meaning, root/bootstrap semantics, candidate-root behavior, and
+      the terminology boundaries in section 02 are otherwise treated as
+      semantically locked.
 
 
 ===============================================================================
@@ -1009,11 +1092,12 @@ Downstream Documents:
       - save isolation breaks
       - bootstrap path behavior becomes magical
       - ignored or rejected discovery artifacts become impossible to explain
+      - content namespaces and Pack roots become easy to conflate
 
 19.2. Discovery therefore remains boring, strict, and predictable.
 
 19.3. PackManager and UI may be more helpful and exploratory, but that
-      helpfulness must not silently migrate into discovery itself.
+      helpfulness does not silently migrate into discovery itself.
 
 
 ===============================================================================
@@ -1023,6 +1107,6 @@ END OF DA-09 - ROOT SYSTEM & PACK DISCOVERY BOUNDARIES
 --- doc-meta ---
 DOC_ID: DA-09
 DOC_FILE: docs/design/DA-09_ROOT_SYSTEM_AND_PACK_DISCOVERY_BOUNDARIES.txt
-DOC_REV: 18
-DOC_GIT: 9af8f17
+DOC_REV: 19
+DOC_GIT: temporary-root-terminology-clarification
 ----------------
