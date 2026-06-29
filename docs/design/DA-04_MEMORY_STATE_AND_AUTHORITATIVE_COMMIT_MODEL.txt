@@ -20,9 +20,10 @@ This document defines the authoritative memory and state model used by Turnix.
 It defines:
 - what "memory" means in Turnix
 - what "state" means in Turnix
+- what "committed state" means in Turnix
 - authority boundaries between committed and non-committed material
 - layer-based runtime memory structure
-- transactional staging and commit or abort rules
+- transactional staging, promotion, commit, and abort rules
 - commit conflict detection for authoritative mutation
 - state and transaction trace obligations
 - persistence as protection against loss rather than the definition of truth
@@ -31,6 +32,8 @@ It defines:
 - migration commit rules for authoritative state mutation
 - state-boundary constraints for tooling-initiated mutation
 - restoration boundary rules for committed state
+- neighboring-domain boundaries for service, capability, ModCallContext, and
+  OrchestrationUnit concepts named by this document
 
 It does NOT define:
 - tracing structure, trace event schema, or trace storage semantics
@@ -178,7 +181,44 @@ Downstream Documents:
 
 02.15. Committed state is authoritative state.
 
-02.16. Runtime memory, transactional staging layers, trace, progress, tool
+02.16. Committed state is data accepted by the relevant commit boundary as
+       system truth for its scope.
+
+02.17. Authoritative does not mean useful, correct, complete, or desirable.
+
+02.18. Authoritative means accepted by the owning commit boundary as state
+       truth for the relevant scope.
+
+02.19. A later controller or workflow may decide that committed authoritative
+       data requires corrective mutation.
+
+02.20. Corrective mutation is a later authoritative mutation.
+
+02.21. Corrective mutation is not a retroactive erasure of the earlier
+       committed state.
+
+02.22. A memory transaction is a staged mutation boundary.
+
+02.23. A memory transaction records intended changes before those changes
+       become authoritative.
+
+02.24. A memory transaction is the normal mechanism by which mutation of a
+       persistent memory entry is staged before it becomes committed state.
+
+02.25. Mutation authority is the authority to initiate, own, or coordinate
+       mutation-bearing work.
+
+02.26. Mutation authority does not by itself make mutation authoritative.
+
+02.27. Mutation becomes authoritative only through the DA-04 transaction and
+       commit model.
+
+02.28. DA-24 owns OrchestrationUnit mutation-authority coordination.
+
+02.29. DA-04 owns transaction, commit, rollback, promotion, and
+       committed-state truth.
+
+02.30. Runtime memory, transactional staging layers, trace, progress, tool
        views, debugger views, UI/View presentation, frontend state, adapter
        state, RuntimeHost command-surface output, PackManager presentation,
        Job lifecycle state, OrchestrationUnit lifecycle state, capability
@@ -189,21 +229,42 @@ Downstream Documents:
        and audit workflow reports are not committed-state authority unless
        their relevant material is committed through the DA-04 commit model.
 
-02.17. Persistence protects committed truth but does not define truth.
+02.31. Persistence protects committed truth but does not define truth.
 
-02.18. Trace explains or reports what happened where evidence is retained.
+02.32. Persistence is storage and recovery support for committed state.
 
-02.19. Trace does not define committed truth.
+02.33. Persistence does not make uncommitted material authoritative.
 
-02.20. Payload representation, effectiveConfig, UI/View presentation,
+02.34. A persisted artifact, log, or record is committed state only when the
+       owning domain commits it as authoritative material.
+
+02.35. Trace explains or reports what happened where evidence is retained.
+
+02.36. Trace does not define committed truth.
+
+02.37. Payload representation, effectiveConfig, UI/View presentation,
        debugger views, artifact packaging, export packaging, comparison
        output, Replay reports, Resume attempts, and Retry attempts are not
        committed state unless the relevant material is committed through
        this document.
 
-02.21. Later sections of this document refine and apply these rules.
+02.38. DA-16 owns Service, Capability, capability invocation, and permission
+       semantics.
 
-02.22. Later sections of this document do not weaken these rules.
+02.39. DA-30 owns ModCallContext identity, lifetime, facade shape, and absent
+       surfaces.
+
+02.40. DA-04 names Services, Capabilities, capability invocations, and
+       ModCallContext only where those concepts affect committed-state
+       boundaries.
+
+02.41. A Service, Capability, capability invocation, or ModCallContext does
+       not become authoritative state merely because it is active, visible,
+       resident, or referenced by runtime memory.
+
+02.42. Later sections of this document refine and apply these rules.
+
+02.43. Later sections of this document do not weaken these rules.
 
 
 ===============================================================================
@@ -423,8 +484,29 @@ Downstream Documents:
 06.8. Staged mutation does not become committed truth until commit into an
       authoritative boundary occurs under the rules of this document.
 
-06.9. OrchestrationUnit lifecycle, mutation authority, and single-lane
-      ApplicationRun orchestration are defined by DA-24.
+06.9. A transaction may be opened or entered by a controller that owns or
+      coordinates mutation-bearing work.
+
+06.10. A controller may include a Job, OrchestrationUnit, ProcessingPipeline,
+       ProcessingRun, Pack lifecycle callback, capability handler, tooling
+       operation, or other owning workflow where the relevant owning document
+       permits mutation-bearing work.
+
+06.11. A controller commit may promote staged mutation to a parent
+       controller's transaction rather than to permanent committed state.
+
+06.12. A controller abort discards the controller's staged mutation and may
+       propagate failure or rollback information to its parent controller.
+
+06.13. A parent controller may decide to continue, recover, abort, or
+       propagate rollback only where the owning controller semantics permit
+       that decision.
+
+06.14. Permanent committed state is reached only when the top relevant commit
+       boundary accepts the mutation into committed layers.
+
+06.15. OrchestrationUnit lifecycle, mutation authority, and single-lane
+       ApplicationRun orchestration are defined by DA-24.
 
 06.1 Commit and abort
 ---------------------
@@ -485,6 +567,31 @@ Downstream Documents:
 
 06.2.8. Nested transactional propagation is not itself authoritative
         mutation into committed state.
+
+06.2.9. Transactional propagation to a parent transaction is promotion of
+        staged mutation.
+
+06.2.10. Transactional promotion does not guarantee that the promoted
+         mutation will become permanent committed state.
+
+06.2.11. A parent transaction may later commit or abort according to the
+         same transaction rules.
+
+06.2.12. If the parent transaction aborts, mutation promoted from a child
+         transaction is discarded with the parent transaction's staged
+         mutation.
+
+06.2.13. Nested transaction stacking permits long-running work to accumulate
+         provisional state without making that state permanent before the
+         owning top-level controller succeeds.
+
+06.2.14. An encounter, workflow, or other long-running controller may stage
+         internal progress for its duration and commit it to durable world
+         state only when the owning top-level commit boundary succeeds.
+
+06.2.15. If the owning top-level controller fails, aborts, times out, or
+         rejects its result, staged mutation from child controllers does not
+         become permanent committed state.
 
 06.3 Commit into committed layers and conflict detection
 -------------------------------------------------------
@@ -555,6 +662,7 @@ Downstream Documents:
 
 07.8. State trace evidence distinguishes:
       - staged mutation
+      - promoted staged mutation
       - committed mutation
       - aborted staged mutation
       - computed or runtime-only effect
@@ -621,8 +729,9 @@ Downstream Documents:
 08.1. DA-24 defines OrchestrationUnit as a kernel-tracked bounded
       execution and mutation-authority context.
 
-08.2. This document defines the transaction, staging, conflict-detection,
-      commit, and restoration boundaries consumed by OrchestrationUnit.
+08.2. This document defines the transaction, staging, promotion,
+      conflict-detection, commit, and restoration boundaries consumed by
+      OrchestrationUnit.
 
 08.3. An OrchestrationUnit does not make staged mutation authoritative by
       existing.
@@ -647,6 +756,29 @@ Downstream Documents:
 
 08.10. Single-lane ApplicationRun mutation orchestration is defined by
        DA-24.
+
+08.11. Mutation authority is the authority to coordinate mutation-bearing
+       work.
+
+08.12. Mutation authority is not direct committed-state authority.
+
+08.13. Mutation authority remains constrained by the transaction, promotion,
+       commit, and abort rules defined by this document.
+
+08.14. OrchestrationUnit authority may coordinate a mutation flow without
+       causing every child transaction commit to become permanent committed
+       state.
+
+08.15. A mutation-bearing OrchestrationUnit may receive rollback, abort, or
+       failure information from nested work and decide its own outcome only
+       under DA-24 semantics.
+
+08.16. If OrchestrationUnit-coordinated work commits a child transaction to a
+       parent transaction, that child commit is staged promotion rather than
+       permanent committed-state mutation.
+
+08.17. If the outer transaction aborts, staged mutation coordinated by the
+       OrchestrationUnit does not become committed state.
 
 
 ===============================================================================
@@ -688,6 +820,24 @@ Downstream Documents:
 
 09.14. Persistence remains protection for committed state, not
        adapter-owned authority.
+
+09.15. Persistent storage of a memory entry does not make that memory entry
+       authoritative unless the relevant material crossed the commit
+       boundary defined by this document.
+
+09.16. A persisted log, artifact, record, or diagnostic item may be
+       committed state only when the owning domain commits that material as
+       authoritative state for its scope.
+
+09.17. Material may be committed and authoritative even when later workflow
+       determines that the material is incomplete, malformed, undesirable, or
+       no longer useful.
+
+09.18. A later correction to committed material is a later committed
+       mutation.
+
+09.19. A later correction does not mean the earlier committed material was
+       never committed.
 
 
 ===============================================================================
@@ -808,6 +958,12 @@ Downstream Documents:
 12.12. Adapter-mediated tooling presentation does not grant tooling a
        separate committed-state authority path.
 
+12.13. Tooling-originated child transactions promote only to parent
+       transactions when an enclosing transaction exists.
+
+12.14. Tooling-originated mutation does not become permanent committed state
+       merely because a tooling surface commits a nested transaction.
+
 
 ===============================================================================
 13. COMMITTED-STATE RESTORATION BOUNDARY
@@ -848,6 +1004,15 @@ Downstream Documents:
 13.12. DA-26 defines Replay, Resume, Retry, comparison, and workflow
        semantics that consume this restoration boundary.
 
+13.13. Restored committed state includes only material that crossed the
+       relevant commit boundary before restoration.
+
+13.14. Staged child transaction material that never reached the top relevant
+       commit boundary is not restored as committed state.
+
+13.15. Restoration does not convert abandoned, aborted, failed, or timed-out
+       staged mutation into committed state.
+
 
 ===============================================================================
 14. MIGRATION COMMIT RULE
@@ -874,6 +1039,16 @@ Downstream Documents:
 
 14.8. Migration does not acquire permission to perform partial
       authoritative mutation merely because it is migration work.
+
+14.9. Migration may use nested transactions where the owning migration
+      workflow requires staged sub-work.
+
+14.10. A nested migration transaction commit promotes staged mutation to its
+       parent transaction.
+
+14.11. A nested migration transaction commit does not become authoritative
+       committed state until the top relevant migration transaction commits
+       into committed layers.
 
 
 ===============================================================================
@@ -925,11 +1100,41 @@ Downstream Documents:
        acknowledgements do not expose or create unrestricted
        committed-state mutation authority.
 
-15.16. Neighboring documents own the detailed lifecycle, representation,
+15.16. ModCallContext is the Pack-facing invocation gateway defined by
+       DA-30.
+
+15.17. Capability invocation is the mediated operation request model defined
+       by DA-16.
+
+15.18. Services are runtime wiring objects defined by DA-16.
+
+15.19. A Service is not committed-state authority.
+
+15.20. A Capability is not committed-state authority.
+
+15.21. A capability invocation is not committed-state authority.
+
+15.22. ModCallContext is not committed-state authority.
+
+15.23. A capability implementation may use a Service internally without
+       exposing the backing Service object as committed-state authority.
+
+15.24. Pack code may request memory reads or mutations through
+       ModCallContext only when the current invocation has the required
+       state authority.
+
+15.25. A Pack-facing save request stages mutation through the transaction
+       model defined by this document.
+
+15.26. A Pack-facing save request does not bypass parent transaction,
+       controller, OrchestrationUnit, policy, permission, persistence, or
+       commit boundaries.
+
+15.27. Neighboring documents own the detailed lifecycle, representation,
        persistence, workflow, adapter, host, tooling, capability, and RPC
        semantics for their domains.
 
-15.17. This document owns the committed-state authority boundary those
+15.28. This document owns the committed-state authority boundary those
        neighboring domains must not bypass.
 
 
@@ -978,6 +1183,9 @@ Downstream Documents:
 17.1. LOCKED:
       - runtime memory and committed state are distinct
       - only committed state is authoritative
+      - authoritative does not mean useful, correct, complete, or desirable
+      - committed means accepted by the owning commit boundary as state truth
+        for the relevant scope
       - authoritative and non-authoritative material remain separate
       - memory is layered by authority, scope, lifetime, and rollback
         boundary
@@ -987,6 +1195,9 @@ Downstream Documents:
       - transaction abort does not directly finalize an AbortedWindow
       - nested transaction stacking prevents child authoritative commits
         while an enclosing transaction exists
+      - child transaction commit promotes staged mutation to the parent
+        transaction
+      - promotion to a parent transaction is not permanent committed state
       - only the outermost transaction commit mutates committed layers
       - conflict detection applies when committing into committed layers
       - state and transaction trace obligations are emission obligations
@@ -995,6 +1206,8 @@ Downstream Documents:
       - OrchestrationUnit lifecycle, mutation-authority ownership,
         terminal outcomes, single-lane ApplicationRun orchestration, and
         OrchestrationUnit trace reason ownership are defined by DA-24
+      - mutation authority does not by itself create committed-state
+        authority
       - OrchestrationUnit existence does not make staged mutation
         authoritative
       - OrchestrationUnit outcome does not by itself define transaction
@@ -1006,6 +1219,7 @@ Downstream Documents:
       - same-language or same-process execution does not bypass
         committed-state authority
       - persistence protects state against loss but does not define truth
+      - persistence does not make uncommitted material authoritative
       - SaveBundle/persistence authority does not make adapters
         SaveBundle writers or persistence writers
       - static-data mutation intent is explicit as Patch or Copy
@@ -1016,6 +1230,12 @@ Downstream Documents:
         committed-state boundary
       - migration that changes authoritative state is transactional and
         abortable
+      - DA-16 owns Service, Capability, capability invocation, and
+        permission semantics
+      - DA-30 owns ModCallContext identity, lifetime, facade shape, and
+        absent surfaces
+      - Service, Capability, capability invocation, and ModCallContext do
+        not become committed-state authority merely by existing
 
 17.2. OPEN:
       - exact concrete transaction API shape
@@ -1031,6 +1251,6 @@ END OF DA-04 - MEMORY, STATE & AUTHORITATIVE COMMIT MODEL
 --- doc-meta ---
 DOC_ID: DA-04
 DOC_FILE: docs/design/DA-04_MEMORY_STATE_AND_AUTHORITATIVE_COMMIT_MODEL.txt
-DOC_REV: 27
-DOC_GIT: 0a8af00
+DOC_REV: 28
+DOC_GIT: beb0cee
 ----------------
