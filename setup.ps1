@@ -1,0 +1,361 @@
+# file: setup.ps1
+param(
+  [string] $PythonVersion = "3.12.10",
+
+  [string] $PythonZipRel = "vendor/python/python-3.12.10-embed-amd64.zip",
+  [string] $Sha256Rel    = "vendor/python/python-3.12.10-embed-amd64.zip.sha256",
+  [string] $GetPipRel    = "vendor/python/get-pip.py",
+
+  [string] $EmbedDir     = "python-embedded",
+  [string] $Requirements = "requirements.txt"
+)
+
+$ErrorActionPreference = "Stop"
+
+$scriptPath = $MyInvocation.MyCommand.Path
+$root = Split-Path -Parent $scriptPath
+Set-Location $root
+
+function Section([string] $title) {
+  Write-Host ""
+  Write-Host "=== $title ===" -ForegroundColor Cyan
+}
+
+function Write-Utf8NoBom([string] $path, [string] $text) {
+  $encoding = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($path, $text, $encoding)
+}
+
+function Get-Sha256([string] $path) {
+  return (Get-FileHash -Algorithm SHA256 -Path $path).Hash.ToUpperInvariant()
+}
+
+function Invoke-NativeChecked(
+  [string] $label,
+  [string] $exe,
+  [string[]] $arguments
+) {
+  Write-Host "Running: $label"
+
+  $output = & $exe @arguments 2>&1
+  $exitCode = $LASTEXITCODE
+
+  $outputText = ($output | Out-String).TrimEnd()
+
+  if ($exitCode -ne 0) {
+    throw "$label failed with exit code $exitCode.`nCommand: $exe $($arguments -join ' ')`nOutput:`n$outputText"
+  }
+
+  if ($outputText) {
+    Write-Host $outputText
+  }
+
+  return $output
+}
+
+function Ensure-GitHooks {
+  Section "Git hooks"
+
+  $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+  if (-not $gitCmd) {
+    throw "git was not found in PATH."
+  }
+
+  try {
+    $repoRoot = (& git rev-parse --show-toplevel 2>$null).Trim()
+  } catch {
+    throw "This directory is not inside a Git repository."
+  }
+
+  if (-not $repoRoot) {
+    throw "Could not determine Git repository root."
+  }
+
+  $resolvedRepoRoot = (Resolve-Path $repoRoot).Path
+  $resolvedRoot = (Resolve-Path $root).Path
+
+  if ($resolvedRepoRoot -ne $resolvedRoot) {
+    throw "setup.ps1 must be run from the repository root.`nRepository root: $resolvedRepoRoot`nScript root:     $resolvedRoot"
+  }
+
+  $hooksDir = Join-Path $root ".githooks"
+  if (-not (Test-Path $hooksDir)) {
+    throw "Missing .githooks directory."
+  }
+
+  & git config core.hooksPath ".githooks"
+
+  $configured = (& git config --get core.hooksPath).Trim()
+  if ($configured -ne ".githooks") {
+    throw "Failed to configure Git hooks path. Expected '.githooks', got '$configured'."
+  }
+
+  Write-Host "Configured Git core.hooksPath = .githooks"
+
+  $preCommit = Join-Path $hooksDir "pre-commit"
+  if (Test-Path $preCommit) {
+    Write-Host "Found pre-commit hook: $preCommit"
+  } else {
+    Write-Host "No .githooks/pre-commit found yet. Hooks path is registered, but no pre-commit hook will run." -ForegroundColor Yellow
+  }
+}
+
+function Normalize-EmbeddedPythonPth([string] $embedPath) {
+  Section "Embedded Python ._pth"
+
+  $pthCandidates = Get-ChildItem -Path $embedPath -Filter "python*._pth" -ErrorAction SilentlyContinue
+
+  if (-not $pthCandidates -or $pthCandidates.Count -eq 0) {
+    throw "No python*._pth file found in: $embedPath"
+  }
+
+  if ($pthCandidates.Count -gt 1) {
+    throw "Multiple python*._pth files found in: $embedPath"
+  }
+
+  $pthFile = $pthCandidates[0].FullName
+
+  $originalLines = Get-Content -Path $pthFile -ErrorAction Stop
+  $newLines = New-Object System.Collections.Generic.List[string]
+
+  $hasRepoRoot = $false
+  $hasSitePackages = $false
+
+  foreach ($line in $originalLines) {
+    $trimmed = $line.Trim()
+
+    if ($trimmed -eq "..") {
+      $hasRepoRoot = $true
+      $newLines.Add("..")
+      continue
+    }
+
+    if ($trimmed -eq "Lib\site-packages" -or $trimmed -eq ".\Lib\site-packages") {
+      $hasSitePackages = $true
+      $newLines.Add("Lib\site-packages")
+      continue
+    }
+
+    if ($trimmed -match '^\#\s*import\s+site$') {
+      continue
+    }
+
+    $newLines.Add($line)
+  }
+
+  if (-not $hasRepoRoot) {
+    $insertAt = 0
+
+    for ($i = 0; $i -lt $newLines.Count; $i++) {
+      if ($newLines[$i].Trim() -eq ".") {
+        $insertAt = $i + 1
+        break
+      }
+    }
+
+    $newLines.Insert($insertAt, "..")
+  }
+
+  if (-not $hasSitePackages) {
+    $newLines.Add("Lib\site-packages")
+  }
+
+  while ($newLines.Count -gt 0 -and $newLines[$newLines.Count - 1].Trim() -eq "") {
+    $newLines.RemoveAt($newLines.Count - 1)
+  }
+
+  $newLines.Add("")
+  $newLines.Add("# Enable site-packages and sitecustomize.py")
+  $newLines.Add("import site")
+
+  $newText = ($newLines -join "`r`n") + "`r`n"
+  $oldText = Get-Content -Path $pthFile -Raw -ErrorAction Stop
+
+  if ($newText -ne $oldText) {
+    Copy-Item $pthFile "$pthFile.bak" -Force
+    Write-Utf8NoBom -path $pthFile -text $newText
+    Write-Host "Updated $pthFile"
+  } else {
+    Write-Host "$pthFile already configured"
+  }
+}
+
+function Ensure-SiteCustomize([string] $embedPath) {
+  Section "sitecustomize.py"
+
+  $sitecustomizePath = Join-Path $embedPath "sitecustomize.py"
+
+  $body = @'
+# Auto-generated by setup.ps1.
+#
+# Purpose:
+# - make the embedded Python runtime usable from the repository root
+# - mirror PYTHONPATH into sys.path for editor/test tooling
+# - avoid relying on machine-global Python configuration
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+_EMBED_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _EMBED_DIR.parent
+
+_repo_root_text = str(_REPO_ROOT)
+if _repo_root_text not in sys.path:
+    sys.path.insert(0, _repo_root_text)
+
+_pythonpath = os.environ.get("PYTHONPATH")
+if _pythonpath:
+    for _entry in _pythonpath.split(os.pathsep):
+        if _entry and _entry not in sys.path:
+            sys.path.insert(0, _entry)
+'@
+
+  $existing = ""
+  if (Test-Path $sitecustomizePath) {
+    $existing = Get-Content -Path $sitecustomizePath -Raw
+  }
+
+  if ($existing -ne $body) {
+    Write-Utf8NoBom -path $sitecustomizePath -text $body
+    Write-Host "Wrote $sitecustomizePath"
+  } else {
+    Write-Host "$sitecustomizePath already up to date"
+  }
+}
+
+function Ensure-EmbeddedPython {
+  Section "Embedded Python"
+
+  $zipPath = Join-Path $root $PythonZipRel
+  $shaPath = Join-Path $root $Sha256Rel
+  $embedPath = Join-Path $root $EmbedDir
+  $versionPath = Join-Path $embedPath "VERSION.txt"
+  $pythonExe = Join-Path $embedPath "python.exe"
+
+  if (-not (Test-Path $zipPath)) {
+    throw "Missing Python archive: $PythonZipRel"
+  }
+
+  if (Test-Path $shaPath) {
+    $expected = ((Get-Content -Path $shaPath -Raw).Trim() -split '\s+')[0].ToUpperInvariant()
+    $actual = Get-Sha256 $zipPath
+
+    if ($actual -ne $expected) {
+      throw "SHA256 mismatch for $PythonZipRel.`nExpected: $expected`nActual:   $actual"
+    }
+
+    Write-Host "SHA256 OK"
+  } else {
+    Write-Host "No SHA256 file found at $Sha256Rel. Skipping archive verification." -ForegroundColor Yellow
+  }
+
+  $needsInstall = $true
+
+  if ((Test-Path $pythonExe) -and (Test-Path $versionPath)) {
+    $installedVersion = (Get-Content -Path $versionPath -Raw).Trim()
+
+    if ($installedVersion -eq $PythonVersion) {
+      $needsInstall = $false
+      Write-Host "Python $PythonVersion already installed at $embedPath"
+    } else {
+      Write-Host "Installed Python marker is $installedVersion, expected $PythonVersion. Reinstalling." -ForegroundColor Yellow
+    }
+  }
+
+  if ($needsInstall) {
+    if (Test-Path $embedPath) {
+      Remove-Item $embedPath -Recurse -Force
+    }
+
+    New-Item -ItemType Directory -Path $embedPath -Force | Out-Null
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $embedPath)
+
+    Write-Utf8NoBom -path $versionPath -text "$PythonVersion`r`n"
+    Write-Host "Installed Python $PythonVersion to $embedPath"
+  }
+
+  if (-not (Test-Path $pythonExe)) {
+    throw "Embedded python.exe was not found after install: $pythonExe"
+  }
+
+  Normalize-EmbeddedPythonPth -embedPath $embedPath
+  Ensure-SiteCustomize -embedPath $embedPath
+
+  return $pythonExe
+}
+
+function Ensure-Pip([string] $pythonExe) {
+  Section "pip"
+
+  $embedPath = Split-Path -Parent $pythonExe
+  $scriptsPath = Join-Path $embedPath "Scripts"
+  $pipExe = Join-Path $scriptsPath "pip.exe"
+  $getPipPath = Join-Path $root $GetPipRel
+
+  $env:PATH = "$scriptsPath;$env:PATH"
+
+  if (Test-Path $pipExe) {
+    Write-Host "pip already installed: $pipExe"
+  } else {
+    if (-not (Test-Path $getPipPath)) {
+      throw "pip is not installed and get-pip.py is missing: $GetPipRel"
+    }
+
+    Invoke-NativeChecked `
+      -label "bootstrap pip" `
+      -exe $pythonExe `
+      -arguments @($getPipPath)
+  }
+
+  if (-not (Test-Path $pipExe)) {
+    throw "pip bootstrap completed, but pip.exe was not found: $pipExe"
+  }
+
+  Invoke-NativeChecked `
+    -label "verify pip import" `
+    -exe $pythonExe `
+    -arguments @("-c", "import pip; print('pip', pip.__version__)") | Out-Null
+
+  Invoke-NativeChecked `
+    -label "pip --version" `
+    -exe $pipExe `
+    -arguments @("--version") | Out-Null
+
+  return $pipExe
+}
+
+function Install-Requirements([string] $pythonExe) {
+  Section "requirements"
+
+  $requirementsPath = Join-Path $root $Requirements
+
+  if (-not (Test-Path $requirementsPath)) {
+    Write-Host "No $Requirements found. Skipping dependency install."
+    return
+  }
+
+  Invoke-NativeChecked `
+    -label "install requirements" `
+    -exe $pythonExe `
+    -arguments @("-m", "pip", "install", "-r", $requirementsPath) | Out-Null
+}
+
+Ensure-GitHooks
+
+$pythonExe = Ensure-EmbeddedPython
+$pipExe = Ensure-Pip -pythonExe $pythonExe
+Install-Requirements -pythonExe $pythonExe
+
+Write-Host ""
+Write-Host "Setup complete." -ForegroundColor Green
+Write-Host ""
+Write-Host "Python:" -ForegroundColor Green
+Write-Host "  .\python-embedded\python.exe"
+Write-Host ""
+Write-Host "pip:" -ForegroundColor Green
+Write-Host "  .\python-embedded\python.exe -m pip --version"
