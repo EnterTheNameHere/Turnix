@@ -12,32 +12,30 @@ Defines PackManager as the official Turnix pack-management and graph-
 preparation domain, defines pack catalog operation semantics, separates
 PackManager tooling from discovery, resolution, importing, activation,
 capability authority, and mechanical loading, and defines how advisory pack
-relations, hard dependencies, user policy, SaveBundle graph evidence,
-retained Pack material, and selected graph intent are handled before
+relations, hard dependencies, user policy, SaveBundle graph evidence, retained
+Pack material, selected graph intent, and activation plans are handled before
 activation.
 
 This document owns PackManager semantic boundaries. It consumes root
 Discovery, Pack identity, generic resolution, importing, dependency,
-activation, service, capability, permission, policy, RuntimeHost,
-Application, ApplicationRun, SaveBundle, ModCallContext, View, and adapter
-semantics defined by their owning design areas.
+activation, service, capability, permission, policy, RuntimeHost, Application,
+ApplicationRun, SaveBundle, ModCallContext, View, and adapter semantics defined
+by their owning design areas.
 
 Purpose:
 --------
 This document defines how Turnix inspects, presents, prepares, modifies, and
-explains pack catalogs and selected pack graphs without allowing helpful
-tooling to become hidden loader, resolver, activation, import, persistence,
-policy, user-decision, lifecycle, or capability authority.
+explains pack catalogs, selected pack graphs, and activation plans without
+allowing helpful tooling to become hidden loader, resolver, activation, import,
+persistence, policy, user-decision, lifecycle, or capability authority.
 
 It defines:
 - PackManager as an official Turnix management and graph-preparation domain
 - pack catalog operation meaning
 - ListPacks as the general Pack-listing primitive
-- AppPack, ViewPack, ContentPack, and ModPack listing as filters over Pack
-  kind
-- SaveBundle-related listing as a separate persistence-aware catalog
-  operation over durable Application persistence closures and retained graph
-  evidence
+- AppPack, ViewPack, ContentPack, and ModPack listing as filters over Pack kind
+- SaveBundle-related listing as a separate persistence-aware catalog operation
+  over durable Application persistence closures and retained graph evidence
 - PackManager scope across RuntimeHost, Workspace, AppPack, AppDefinition,
   SaveBundle, Application, ApplicationRun, tooling, and test contexts
 - PackManager relationship to roots, Discovery, visibility, generic
@@ -45,6 +43,9 @@ It defines:
   capabilities, decisions, persistence, RuntimeHost, Application,
   ApplicationRun, SaveBundle, Views, and adapters
 - selected pack graph and activation-plan preparation meaning
+- activation-plan information boundaries
+- cyclic activation group detection and admission boundaries
+- mechanical loader separation from graph preparation
 - advisory conflict, suggestion, and compatibility presentation semantics
 - hard dependency handling boundary
 - user and policy override boundary
@@ -75,13 +76,15 @@ It does NOT define:
 - UI, View, or frontend runtime semantics (see DA-22)
 - execution adapter boundary or adapter lifecycle semantics (see DA-23 and
   DA-27)
-- RuntimeHost lifecycle, startup mode, command surface, or Workspace
-  ownership semantics (see DA-28)
+- RuntimeHost lifecycle, startup mode, command surface, or Workspace ownership
+  semantics (see DA-28)
 - SaveBundle persistence-carrier semantics beyond PackManager graph evidence
 - concrete pack catalog result envelopes
 - concrete SaveBundle catalog result envelopes
 - concrete resolved graph schema
 - concrete activation-plan schema
+- concrete activation executor implementation
+- concrete mechanical loader implementation
 - concrete PackManager UI layout
 - concrete internet search, registry, package-index, install, update, or
   delete protocols
@@ -145,8 +148,8 @@ Downstream Documents:
       interpretation model used by this document.
 
 01.4. This document defines PackManager, pack catalog, SaveBundle-related
-      catalog, and graph-preparation semantics within that shared
-      interpretation model.
+      catalog, selected graph, and graph-preparation semantics within that
+      shared interpretation model.
 
 01.5. This document uses canonical architecture type names for:
       - Application
@@ -156,6 +159,19 @@ Downstream Documents:
 
 01.6. Terms not defined in this document do not act as aliases unless their
       owning documents define that alias explicitly.
+
+01.7. "Activation plan" means selected graph intent refined for activation
+      order and activation readiness.
+
+01.8. "Activation plan" does not mean activation itself.
+
+01.9. "Activation plan" does not mean mechanical loading.
+
+01.10. "Mechanical loader" means the component or adapter-facing mechanism
+       that loads or evaluates what it is explicitly instructed to load.
+
+01.11. Mechanical loading does not imply graph preparation, dependency
+       repair, cyclic activation admission, or final Activated state.
 
 
 ===============================================================================
@@ -175,75 +191,81 @@ Downstream Documents:
 02.3. PackManager prepares, explains, validates, repairs, and manages
       selected pack graph intent.
 
-02.4. PackManager is helpful tooling and a management authority surface.
+02.4. PackManager may prepare activation plans from selected pack graph
+      intent.
 
-02.5. PackManager is not Kernel authority by itself.
+02.5. PackManager is helpful tooling and a management authority surface.
 
-02.6. PackManager is not Discovery.
+02.6. PackManager is not Kernel authority by itself.
 
-02.7. PackManager is not generic resolution.
+02.7. PackManager is not Discovery.
 
-02.8. PackManager is not importing.
+02.8. PackManager is not generic resolution.
 
-02.9. PackManager is not activation.
+02.9. PackManager is not importing.
 
-02.10. PackManager is not an execution adapter.
+02.10. PackManager is not activation.
 
-02.11. PackManager is not a mechanical loader.
+02.11. PackManager is not an execution adapter.
 
-02.12. PackManager is not capability permission.
+02.12. PackManager is not a mechanical loader.
 
-02.13. PackManager is not policy authority by itself.
+02.13. PackManager is not an activation executor.
 
-02.14. PackManager is not user-decision authority by itself.
+02.14. PackManager is not capability permission.
 
-02.15. PackManager is not persistence authority by itself.
+02.15. PackManager is not policy authority by itself.
 
-02.16. PackManager is not Application lifecycle authority.
+02.16. PackManager is not user-decision authority by itself.
 
-02.17. PackManager is not ApplicationRun lifecycle authority.
+02.17. PackManager is not persistence authority by itself.
 
-02.18. PackManager is not SaveBundle authority by itself.
+02.18. PackManager is not Application lifecycle authority.
 
-02.19. PackManager is not ModCallContext gateway authority.
+02.19. PackManager is not ApplicationRun lifecycle authority.
 
-02.20. PackManager is not a View by itself.
+02.20. PackManager is not SaveBundle authority by itself.
 
-02.21. PackManager may expose Views, command surfaces, capability surfaces,
-       RPC operations, and test surfaces that present or request
-       PackManager operations.
+02.21. PackManager is not ModCallContext gateway authority.
 
-02.22. Those surfaces do not become authority merely because they can
-       present or request PackManager behavior.
+02.22. PackManager is not a View by itself.
 
-02.23. PackManager helps choose and explain what Turnix will try.
+02.23. PackManager may expose Views, command surfaces, capability surfaces,
+       RPC operations, and test surfaces that present or request PackManager
+       operations.
 
-02.24. Turnix still performs only the accepted graph, activation plan,
-       policy, and operation requested through Kernel-mediated boundaries.
+02.24. Those surfaces do not become authority merely because they can present
+       or request PackManager behavior.
 
-02.25. PackManager repair means explicit, scoped, policy- or user-accepted
+02.25. PackManager helps choose and explain what Turnix will try.
+
+02.26. Turnix still performs only the accepted graph, accepted activation
+       plan, policy, and operation requested through Kernel-mediated
+       boundaries.
+
+02.27. PackManager repair means explicit, scoped, policy- or user-accepted
        graph-preparation repair.
 
-02.26. PackManager repair does not mean automatic hidden correction,
-       Kernel authority, Discovery, import, activation, mechanical loading,
+02.28. PackManager repair does not mean automatic hidden correction, Kernel
+       authority, Discovery, import, activation, mechanical loading,
        capability permission, persistence authority, policy authority,
-       user-decision authority, durable Application authority,
-       ApplicationRun authority, RuntimeHost authority, View authority, or
-       adapter execution authority.
+       user-decision authority, durable Application authority, ApplicationRun
+       authority, RuntimeHost authority, View authority, or adapter execution
+       authority.
 
-02.27. Later sections refine and apply these rules.
+02.29. Later sections refine and apply these rules.
 
-02.28. Later sections do not weaken these rules.
+02.30. Later sections do not weaken these rules.
 
 
 ===============================================================================
 03. PACKMANAGER IDENTITY AND ROLE
 ===============================================================================
 
-03.1. PackManager is a Turnix-recognized management domain for pack
-      catalogs, pack sources, selected graphs, compatibility evidence,
-      advisory relations, retained graph evidence, and graph-preparation
-      workflows.
+03.1. PackManager is a Turnix-recognized management domain for pack catalogs,
+      pack sources, selected graphs, activation-plan preparation,
+      compatibility evidence, advisory relations, retained graph evidence,
+      and graph-preparation workflows.
 
 03.2. PackManager may be implemented by first-party Turnix tooling.
 
@@ -267,9 +289,9 @@ Downstream Documents:
 03.7. A Pack or View displaying PackManager UI does not own PackManager
       authority merely because it displays that UI.
 
-03.8. A game, application, launcher, or tool may request PackManager
-      behavior only through Turnix-mediated command, capability, RPC, or
-      equivalent Kernel-owned surfaces.
+03.8. A game, application, launcher, or tool may request PackManager behavior
+      only through Turnix-mediated command, capability, RPC, or equivalent
+      Kernel-owned surfaces.
 
 03.9. PackManager operations may exist before any Application exists.
 
@@ -277,12 +299,12 @@ Downstream Documents:
        when policy, capability, RuntimeHost, and authority boundaries permit
        that request.
 
-03.11. PackManager is official Turnix tooling, not third-party hidden
-       runtime behavior.
+03.11. PackManager is official Turnix tooling, not third-party hidden runtime
+       behavior.
 
-03.12. Official tooling status does not permit PackManager to bypass
-       Kernel, persistence, policy, capability, resolution, activation,
-       adapter, or trace boundaries.
+03.12. Official tooling status does not permit PackManager to bypass Kernel,
+       persistence, policy, capability, resolution, activation, adapter, or
+       trace boundaries.
 
 
 ===============================================================================
@@ -365,9 +387,8 @@ Downstream Documents:
 04.23. A listed Pack does not grant capability permission.
 
 04.24. Catalog presentation preserves the distinction between existence,
-       visibility, resolution eligibility, dependency satisfaction,
-       selected graph membership, activation state, and capability
-       availability.
+       visibility, resolution eligibility, dependency satisfaction, selected
+       graph membership, activation state, and capability availability.
 
 
 ===============================================================================
@@ -388,30 +409,30 @@ Downstream Documents:
       - test scope
 
 05.3. RuntimeHost scope concerns pack catalogs, roots, installed Packs,
-      package sources, and selected graph operations available to the
-      running RuntimeHost.
+      package sources, and selected graph operations available to the running
+      RuntimeHost.
 
-05.4. Workspace scope concerns pack catalogs, configuration, source state,
-      and installed or available Pack material associated with one
-      Workspace.
+05.4. Workspace scope concerns pack catalogs, configuration, source state, and
+      installed or available Pack material associated with one Workspace.
 
 05.5. AppPack scope concerns graph preparation, dependency checks,
-      advisory-relation presentation, and compatibility for one AppPack.
+      activation-plan preparation, advisory-relation presentation, and
+      compatibility for one AppPack.
 
 05.6. AppDefinition scope concerns graph preparation for an accepted
       Application definition source that is not necessarily a discovered
       AppPack catalog entry.
 
-05.7. SaveBundle scope concerns retained graph evidence, copied Pack
-      material, pinned Pack bindings, retained Pack material, compatibility
-      checks, repair, export, and import for one SaveBundle.
+05.7. SaveBundle scope concerns retained graph evidence, copied Pack material,
+      pinned Pack bindings, retained Pack material, compatibility checks,
+      repair, export, and import for one SaveBundle.
 
 05.8. Application scope concerns durable Application identity, saved graph
       lineage, migrations, and SaveBundle-bound graph planning.
 
-05.9. ApplicationRun scope concerns active graph inspection, active
-      activation evidence, pending graph changes, and operations that may
-      affect running Pack material.
+05.9. ApplicationRun scope concerns active graph inspection, active activation
+      evidence, pending graph changes, and operations that may affect running
+      Pack material.
 
 05.10. Tooling scope concerns development, review, diagnostics, authoring,
        package-index work, test behavior, or maintenance behavior not
@@ -421,8 +442,8 @@ Downstream Documents:
 
 05.12. Scope does not grant authority by itself.
 
-05.13. Each operation remains constrained by the owning authority documents
-       for the resources it touches.
+05.13. Each operation remains constrained by the owning authority documents for
+       the resources it touches.
 
 
 ===============================================================================
@@ -435,12 +456,12 @@ Downstream Documents:
 
 06.3. PackManager does not redefine root classes.
 
-06.4. PackManager does not redefine content-root, userdata-root, or
-      saves-root meaning.
+06.4. PackManager does not redefine content-root, userdata-root, or saves-root
+      meaning.
 
 06.5. PackManager may request explicit rescan, install, update, remove,
-      repair, or source-refresh operations when those operations are
-      defined and authorized.
+      repair, or source-refresh operations when those operations are defined
+      and authorized.
 
 06.6. Those operations remain subject to root, persistence, policy, and
       authority boundaries.
@@ -471,9 +492,9 @@ Downstream Documents:
 
 07.4. PackManager does not redefine visibility.
 
-07.5. PackManager may present visibility graphs, hidden Packs, shadowed
-      Packs, SaveBundle-retained Packs, and visibility failures when the
-      operation and policy permit that presentation.
+07.5. PackManager may present visibility graphs, hidden Packs, shadowed Packs,
+      SaveBundle-retained Packs, and visibility failures when the operation
+      and policy permit that presentation.
 
 07.6. Visibility presentation does not grant visibility.
 
@@ -487,8 +508,8 @@ Downstream Documents:
 07.10. PackManager may help users or tooling choose a graph that respects
        visibility constraints.
 
-07.11. PackManager does not silently bypass visibility constraints to make
-       a graph work.
+07.11. PackManager does not silently bypass visibility constraints to make a
+       graph work.
 
 
 ===============================================================================
@@ -511,15 +532,13 @@ Downstream Documents:
 08.7. PackManager does not silently switch resolution contexts.
 
 08.8. PackManager may present resolution candidates, hard rejections, soft
-      constraints, ambiguities, selected candidates, and resolution
-      failures.
+      constraints, ambiguities, selected candidates, and resolution failures.
 
-08.9. PackManager may ask user or policy to resolve ambiguity when the
-      owning resolution consumer permits that path.
+08.9. PackManager may ask user or policy to resolve ambiguity when the owning
+      resolution consumer permits that path.
 
-08.10. PackManager may persist accepted ambiguity decisions only through
-       the surrounding policy or consumer authority that owns such
-       persistence.
+08.10. PackManager may persist accepted ambiguity decisions only through the
+       surrounding policy or consumer authority that owns such persistence.
 
 08.11. PackManager does not persist resolution decisions by hidden side
        effect.
@@ -554,32 +573,44 @@ Downstream Documents:
 09.7. PackManager does not convert advisory pack relations into hard
       activation blockers by itself.
 
-09.8. PackManager does not convert advisory pack relations into loader
-      rules by itself.
+09.8. PackManager does not convert advisory pack relations into loader rules
+      by itself.
 
 09.9. PackManager may let policy or user decision turn an advisory warning
       into a graph-selection decision for a specific selected graph.
 
-09.10. Such a graph-selection decision is explicit, scoped, trace-visible,
-       and does not modify the manifest advisory relation.
+09.10. Such a graph-selection decision is explicit, scoped, trace-visible, and
+       does not modify the manifest advisory relation.
 
-09.11. Hard dependency failure remains hard failure unless an accepted
-       policy or user decision explicitly resolves it under DA-13 and
-       DA-17.
+09.11. Hard dependency failure remains hard failure unless an accepted policy
+       or user decision explicitly resolves it under DA-13 and DA-17.
 
 09.12. Advisory conflict override is not the same as hard dependency
        satisfaction.
 
-09.13. PackManager may explain both categories, but it does not collapse
-       them.
+09.13. PackManager may explain both categories, but it does not collapse them.
+
+09.14. A hard dependency edge may contribute to activation ordering.
+
+09.15. A hard dependency edge may contribute to strongly connected component
+       detection.
+
+09.16. Strongly connected component detection does not weaken hard dependency
+       semantics.
+
+09.17. Strongly connected component detection does not prove that a dependency
+       cycle is activatable.
+
+09.18. Cyclic activation group admission remains distinct from hard dependency
+       declaration.
 
 
 ===============================================================================
-10. SELECTED PACK GRAPH AND ACTIVATION PLAN
+10. SELECTED PACK GRAPH
 ===============================================================================
 
-10.1. A selected pack graph is the explicit graph intent that Turnix will
-      use for later runtime or tooling operations.
+10.1. A selected pack graph is the explicit graph intent that Turnix will use
+      for later runtime or tooling operations.
 
 10.2. A selected pack graph may include:
       - graph identity when defined
@@ -604,254 +635,484 @@ Downstream Documents:
       - pinned Pack references
       - origin or provenance evidence when available
 
-10.3. An activation plan is selected graph intent refined for activation
-      order and activation readiness.
+10.3. A selected pack graph is information about intended graph membership
+      and graph relationships.
 
-10.4. Activation lifecycle semantics are defined by DA-14.
+10.4. A selected pack graph is not activation.
 
-10.5. Dependency graph preparation may detect strongly connected
-      components and cyclic activation groups.
+10.5. A selected pack graph is not importing.
 
-10.6. Lifecycle phase and cyclic activation semantics remain owned by
-      activation and adapter-boundary documents.
+10.6. A selected pack graph is not adapter artifact loading.
 
-10.7. PackManager may prepare an activation plan.
+10.7. A selected pack graph is not ModCallContext gateway authority.
 
-10.8. PackManager does not activate Packs by preparing an activation plan.
+10.8. PackManager may prepare, present, repair, and retain selected pack graph
+      intent where the operation and policy permit that behavior.
 
 10.9. PackManager does not execute Pack code by preparing a selected pack
       graph.
 
-10.10. PackManager does not import code by preparing a selected pack graph.
+10.10. PackManager does not import Pack code by preparing a selected pack
+       graph.
 
-10.11. PackManager does not grant ModCallContext gateway authority by
-       preparing a selected pack graph.
+10.11. PackManager does not activate Packs by preparing a selected pack graph.
 
-10.12. Activation consumes the accepted activation plan through DA-14 and
+10.12. PackManager does not grant capability permission by preparing a
+       selected pack graph.
+
+10.13. PackManager does not grant execution authorization by preparing a
+       selected pack graph.
+
+10.14. A selected pack graph may still be invalid for activation.
+
+10.15. A selected pack graph may still fail during activation.
+
+10.16. Selected graph failure is classified according to the owning domain
+       where the failure occurs.
+
+
+===============================================================================
+11. ACTIVATION PLAN
+===============================================================================
+
+11.1. An activation plan is selected graph intent refined for activation order
+      and activation readiness.
+
+11.2. PackManager may prepare an activation plan.
+
+11.3. PackManager owns activation-plan preparation meaning.
+
+11.4. DA-14 owns activation lifecycle semantics.
+
+11.5. DA-14 owns the final Activated state boundary.
+
+11.6. DA-23 and DA-27 own adapter boundary and adapter lifecycle semantics.
+
+11.7. An activation plan may include:
+      - accepted selected graph identity when defined
+      - graph purpose
+      - AppPack identity when applicable
+      - AppDefinition identity when applicable
+      - Application identity when applicable
+      - ApplicationRun identity when applicable
+      - SaveBundle identity when applicable
+      - selected Pack identities
+      - selected versions
+      - dependency edges
+      - activation components
+      - strongly connected components when detected
+      - cyclic activation group candidates
+      - admitted cyclic activation groups
+      - rejected cyclic activation groups
+      - external dependency order
+      - activation readiness diagnostics
+      - adapter participation evidence when available
+      - advisory warnings relevant to activation
+      - accepted graph overrides
+      - policy decisions
+      - user decisions
+      - expected-break evidence when risk was accepted
+      - provenance evidence when available
+
+11.8. An activation plan is information.
+
+11.9. An activation plan is graph intent.
+
+11.10. An activation plan is ordering evidence.
+
+11.11. An activation plan is not activation.
+
+11.12. An activation plan is not a loader.
+
+11.13. An activation plan is not adapter execution.
+
+11.14. An activation plan is not module import.
+
+11.15. An activation plan is not ModCallContext gateway authority.
+
+11.16. An activation plan is not capability permission.
+
+11.17. An activation plan is not proof that activation will succeed.
+
+11.18. Activation consumes an accepted activation plan through DA-14 and
        related execution-boundary documents.
 
-10.13. An accepted graph or activation plan may still fail during
+11.19. Activation may fail after consuming an accepted activation plan.
+
+11.20. Such failure is activation evidence, not proof that PackManager owned
        activation.
 
-10.14. Such failure is activation evidence, not proof that PackManager
-       owned activation.
-
-10.15. PackManager may contribute diagnostic context to explain activation
+11.21. PackManager may contribute diagnostic context to explain activation
        failure where graph evidence is relevant.
 
+11.22. PackManager diagnostics do not replace activation trace evidence.
+
+11.23. PackManager warnings do not become activation outcomes.
+
+11.24. An activation plan can make loading predictable without making the
+       loader responsible for dependency order.
+
+11.25. An activation plan can expose missing dependencies without repairing
+       them by itself.
+
+11.26. An activation plan can expose conflicts without resolving them by
+       itself.
+
+11.27. An activation plan can record accepted risky graph intent without
+       making that graph safe.
+
+11.28. An activation plan can identify expected-break evidence without
+       converting failure into success.
+
 
 ===============================================================================
-11. GRAPH REPAIR AND RISKY GRAPH SEMANTICS
+12. CYCLIC ACTIVATION GROUP PREPARATION
 ===============================================================================
 
-11.1. PackManager repair is an explicit graph-preparation operation.
+12.1. Dependency graph preparation may detect strongly connected components.
 
-11.2. PackManager repair operates inside a declared scope.
+12.2. A strongly connected component is a graph-preparation fact.
 
-11.3. PackManager repair requires policy or user acceptance when it changes
+12.3. A strongly connected component is not cyclic activation by itself.
+
+12.4. A cyclic activation group is a strongly connected component admitted by
+      the accepted activation plan for cyclic activation handling under DA-14.
+
+12.5. PackManager may identify cyclic activation group candidates.
+
+12.6. PackManager may present cyclic activation group candidates to a policy
+      or user-decision surface where decision handling is required.
+
+12.7. PackManager may record that a cyclic activation group candidate was
+      admitted.
+
+12.8. PackManager may record that a cyclic activation group candidate was
+      rejected.
+
+12.9. Cyclic activation group admission does not activate Packs.
+
+12.10. Cyclic activation group admission does not call onLoad(ctx).
+
+12.11. Cyclic activation group admission does not grant ModCallContext gateway
+       authority.
+
+12.12. Cyclic activation group admission does not prove that the group can
+       successfully activate.
+
+12.13. Cyclic activation group admission means that activation may attempt
+       DA-14 cyclic activation behavior for that group.
+
+12.14. DA-14 owns Phase 1, Phase 2, Phase 3, phase barriers, cyclic surface
+       readiness, and final cyclic-group activation semantics.
+
+12.15. PackManager does not define lifecycle hook behavior.
+
+12.16. PackManager does not define lifecycle callback order.
+
+12.17. PackManager does not define cyclic Phase 3 execution behavior.
+
+12.18. PackManager does not retry cyclic activation in alternate orders.
+
+12.19. PackManager does not convert a dependency cycle into an acyclic order
+       by naming it cyclic.
+
+12.20. PackManager preserves the distinction between:
+       - cycle detection
+       - cyclic activation group candidate
+       - cyclic activation group admission
+       - DA-14 cyclic activation execution
+       - DA-14 cyclic activation success or failure
+
+
+===============================================================================
+13. MECHANICAL LOADING BOUNDARY
+===============================================================================
+
+13.1. Mechanical loading means loading or evaluating a requested artifact,
+      module, or activation entry through the applicable loader or adapter
+      path.
+
+13.2. Mechanical loading semantics are governed by DA-12, DA-14, DA-23, and
+      DA-27.
+
+13.3. PackManager is not a mechanical loader.
+
+13.4. A mechanical loader is not PackManager.
+
+13.5. A mechanical loader does not prepare selected pack graphs by itself.
+
+13.6. A mechanical loader does not prepare activation plans by itself.
+
+13.7. A mechanical loader does not resolve graph ambiguity by itself.
+
+13.8. A mechanical loader does not repair missing dependencies by itself.
+
+13.9. A mechanical loader does not select replacement Packs by itself.
+
+13.10. A mechanical loader does not convert advisory relations into loader
+       rules by itself.
+
+13.11. A mechanical loader does not decide cyclic activation admission by
+       itself.
+
+13.12. A mechanical loader does not own activation order.
+
+13.13. A mechanical loader loads what Turnix instructs it to load under the
+       applicable authority boundary.
+
+13.14. Loading material in an order not supported by the accepted activation
+       plan may fail.
+
+13.15. Such failure is valid boundary behavior.
+
+13.16. Such failure is not hidden graph repair.
+
+13.17. Such failure is not PackManager silently changing the graph.
+
+13.18. Such failure is not proof that the loader owns graph preparation.
+
+13.19. PackManager prepares graph and activation-plan information so later
+       loading and activation can be requested predictably.
+
+13.20. Activation and adapter execution still own their own runtime failures.
+
+
+===============================================================================
+14. GRAPH REPAIR AND RISKY GRAPH SEMANTICS
+===============================================================================
+
+14.1. PackManager repair is an explicit graph-preparation operation.
+
+14.2. PackManager repair operates inside a declared scope.
+
+14.3. PackManager repair requires policy or user acceptance when it changes
       selected graph intent, retained graph evidence, copied Pack material,
       pinned Pack bindings, package sources, or persisted configuration.
 
-11.4. PackManager repair may suggest graph changes, replacement Packs,
+14.4. PackManager repair may suggest graph changes, replacement Packs,
       version changes, source changes, copied Pack updates, pinned binding
       changes, or compatibility decisions when the owning documents permit
       those operations.
 
-11.5. PackManager repair does not silently correct graphs.
+14.5. PackManager repair does not silently correct graphs.
 
-11.6. PackManager repair does not silently modify Pack manifests.
+14.6. PackManager repair does not silently modify Pack manifests.
 
-11.7. PackManager repair does not silently mutate SaveBundle graph
-      evidence.
+14.7. PackManager repair does not silently mutate SaveBundle graph evidence.
 
-11.8. PackManager repair does not silently update running Pack material.
+14.8. PackManager repair does not silently update running Pack material.
 
-11.9. PackManager repair does not make a graph safe by itself.
+14.9. PackManager repair does not make a graph safe by itself.
 
-11.10. PackManager repair does not satisfy hard dependencies unless the
+14.10. PackManager repair does not satisfy hard dependencies unless the
        accepted repair selects an allowed dependency-resolution path.
 
-11.11. PackManager may detect graphs with warnings, advisory conflicts,
-       unsupported combinations, missing optional material, soft
-       constraints, or other risk evidence.
+14.11. PackManager may detect graphs with warnings, advisory conflicts,
+       unsupported combinations, missing optional material, soft constraints,
+       or other risk evidence.
 
-11.12. PackManager may present those risks to the user or policy surface.
+14.12. PackManager may present those risks to the user or policy surface.
 
-11.13. User or policy may explicitly accept a risky graph when the
-       governing documents permit that choice.
+14.13. User or policy may explicitly accept a risky graph when the governing
+       documents permit that choice.
 
-11.14. An accepted risky graph remains trace-visible.
+14.14. An accepted risky graph remains trace-visible.
 
-11.15. Risk acceptance does not make the graph safe.
+14.15. Risk acceptance does not make the graph safe.
 
-11.16. Risk acceptance does not modify Pack metadata.
+14.16. Risk acceptance does not modify Pack metadata.
 
-11.17. Risk acceptance does not satisfy hard dependencies unless the
-       accepted decision explicitly resolves the hard dependency failure
-       through an allowed path.
+14.17. Risk acceptance does not satisfy hard dependencies unless the accepted
+       decision explicitly resolves the hard dependency failure through an
+       allowed path.
 
-11.18. Risk acceptance does not grant capability permission.
+14.18. Risk acceptance does not grant capability permission.
 
-11.19. Risk acceptance does not grant execution authorization for unsafe
-       code.
+14.19. Risk acceptance does not grant execution authorization for unsafe code.
 
-11.20. If an accepted risky graph later fails, the failure is expected
+14.20. If an accepted risky graph later fails, the failure is expected
        evidence in the sense that the risk was known and recorded.
 
-11.21. Expected-break evidence does not convert failure into success.
+14.21. Expected-break evidence does not convert failure into success.
 
-11.22. Expected-break evidence helps diagnostics explain that the run used
-       an explicitly accepted risky graph.
+14.22. Expected-break evidence helps diagnostics explain that the run used an
+       explicitly accepted risky graph.
 
-11.23. PackManager does not hide failure merely because risk was accepted.
+14.23. PackManager does not hide failure merely because risk was accepted.
 
 
 ===============================================================================
-12. RELATION TO IMPORTING AND MODULE LOADING
+15. RELATION TO IMPORTING AND MODULE LOADING
 ===============================================================================
 
-12.1. Importing and module-loading semantics are defined by DA-12.
+15.1. Importing and module-loading semantics are defined by DA-12.
 
-12.2. PackManager does not import Pack code as part of catalog listing.
+15.2. PackManager does not import Pack code as part of catalog listing.
 
-12.3. PackManager does not import Pack code as part of graph preparation.
+15.3. PackManager does not import Pack code as part of graph preparation.
 
-12.4. PackManager does not use native imports to inspect Pack runtime
+15.4. PackManager does not import Pack code as part of activation-plan
+      preparation.
+
+15.5. PackManager does not use native imports to inspect Pack runtime
       symbols.
 
-12.5. PackManager does not bypass turnixImport, dependency consistency,
+15.6. PackManager does not bypass turnixImport, dependency consistency,
       visibility, activation, or execution authority.
 
-12.6. PackManager may inspect metadata, manifests, indexes, graph
-      evidence, and trace evidence through authorized non-executing paths.
+15.7. PackManager may inspect metadata, manifests, indexes, graph evidence,
+      and trace evidence through authorized non-executing paths.
 
-12.7. Metadata inspection does not become code execution.
+15.8. Metadata inspection does not become code execution.
 
-12.8. Code import or adapter artifact loading remains governed by DA-12,
+15.9. Code import or adapter artifact loading remains governed by DA-12,
       DA-14, DA-23, and DA-27.
 
+15.10. Module loading does not establish selected graph validity by itself.
+
+15.11. Module loading does not establish activation-plan correctness by
+       itself.
+
+15.12. Module loading does not repair graph-preparation failures.
+
+15.13. Module loading does not repair dependency cycles.
+
 
 ===============================================================================
-13. RELATION TO ACTIVATION
+16. RELATION TO ACTIVATION
 ===============================================================================
 
-13.1. Activation semantics are defined by DA-14.
+16.1. Activation semantics are defined by DA-14.
 
-13.2. PackManager may influence activation order by preparing the accepted
+16.2. PackManager may influence activation order by preparing the accepted
       graph or activation plan.
 
-13.3. PackManager does not activate Packs by itself.
+16.3. PackManager does not activate Packs by itself.
 
-13.4. PackManager does not call onLoad(ctx) by itself.
+16.4. PackManager does not call onLoad(ctx) by itself.
 
-13.5. PackManager does not create ModCallContext gateway authority by
-      itself.
+16.5. PackManager does not create ModCallContext gateway authority by itself.
 
-13.6. PackManager may present activation readiness, activation ordering,
-      dependency blocking, cyclic activation grouping, and activation
-      failure diagnostics.
+16.6. PackManager may present activation readiness, activation ordering,
+      dependency blocking, cyclic activation grouping, and activation failure
+      diagnostics.
 
-13.7. Activation failure remains activation-domain evidence under DA-14.
+16.7. Activation failure remains activation-domain evidence under DA-14.
 
-13.8. PackManager diagnostics do not replace activation trace evidence.
+16.8. PackManager diagnostics do not replace activation trace evidence.
 
-13.9. PackManager warnings do not become activation outcomes.
+16.9. PackManager warnings do not become activation outcomes.
 
-13.10. An activation executor does not perform PackManager compatibility
+16.10. An activation executor does not perform PackManager compatibility
        planning by itself.
 
-13.11. Mechanical loading, adapter artifact loading, importing, and
-       activation execution do not perform PackManager policy or graph-
-       preparation work by themselves.
+16.11. An activation executor may consume an accepted activation plan.
+
+16.12. Consuming an accepted activation plan does not make the activation
+       executor PackManager.
+
+16.13. Mechanical loading, adapter artifact loading, importing, and activation
+       execution do not perform PackManager policy or graph-preparation work
+       by themselves.
+
+16.14. Activation may fail when the accepted activation plan is incomplete,
+       invalid for the current runtime, or impossible to execute.
+
+16.15. Activation-plan failure during activation remains activation-domain
+       evidence with PackManager graph evidence as context.
+
+16.16. Activation success does not retroactively make PackManager the owner of
+       lifecycle semantics.
 
 
 ===============================================================================
-14. RELATION TO SERVICES, CAPABILITIES AND PERMISSIONS
+17. RELATION TO SERVICES, CAPABILITIES AND PERMISSIONS
 ===============================================================================
 
-14.1. Service, capability, and permission semantics are defined by DA-16.
+17.1. Service, capability, and permission semantics are defined by DA-16.
 
-14.2. PackManager operations may be exposed through RuntimeHost commands.
+17.2. PackManager operations may be exposed through RuntimeHost commands.
 
-14.3. PackManager operations may be exposed through capabilities when
-      Pack, View, adapter-executed code, or cross-Pack runtime behavior
-      requests PackManager behavior.
+17.3. PackManager operations may be exposed through capabilities when Pack,
+      View, adapter-executed code, or cross-Pack runtime behavior requests
+      PackManager behavior.
 
-14.4. PackManager operations may be exposed through RPC or equivalent
-      mediated request surfaces.
+17.4. PackManager operations may be exposed through RPC or equivalent mediated
+      request surfaces.
 
-14.5. PackManager operations that install, update, remove, download,
-      search external sources, modify selected graphs, copy Packs into
-      SaveBundles, export SaveBundles, or change persisted state require
-      appropriate permission, policy, persistence, and trace handling.
+17.5. PackManager operations that install, update, remove, download, search
+      external sources, modify selected graphs, prepare activation plans, copy
+      Packs into SaveBundles, export SaveBundles, or change persisted state
+      require appropriate permission, policy, persistence, and trace handling.
 
-14.6. A PackManager service, if one exists internally, is runtime wiring
-      only.
+17.6. A PackManager service, if one exists internally, is runtime wiring only.
 
-14.7. A PackManager service is not a cross-Pack authority bypass.
+17.7. A PackManager service is not a cross-Pack authority bypass.
 
-14.8. AppPacks, ViewPacks, tools, tests, AI buddy surfaces, games, or
-      launcher surfaces do not receive raw PackManager authority merely
-      because they can display PackManager UI.
+17.8. AppPacks, ViewPacks, tools, tests, AI buddy surfaces, games, or launcher
+      surfaces do not receive raw PackManager authority merely because they
+      can display PackManager UI.
 
-14.9. Capability-mediated PackManager operations remain capability-
-      mediated.
+17.9. Capability-mediated PackManager operations remain capability-mediated.
 
-14.10. RuntimeHost-command PackManager operations remain RuntimeHost-
-       command operations and do not become Pack authority.
+17.10. RuntimeHost-command PackManager operations remain RuntimeHost-command
+       operations and do not become Pack authority.
 
-14.11. PackManager does not grant capability permission.
+17.11. PackManager does not grant capability permission.
 
-14.12. PackManager does not resolve capability export conflicts silently.
+17.12. PackManager does not resolve capability export conflicts silently.
 
-14.13. PackManager may help present capability conflicts, but DA-16
-       governs the conflict outcome.
+17.13. PackManager may help present capability conflicts, but DA-16 governs
+       the conflict outcome.
 
 
 ===============================================================================
-15. RELATION TO POLICY AND USER DECISIONS
+18. RELATION TO POLICY AND USER DECISIONS
 ===============================================================================
 
-15.1. User decision and remembered policy semantics are defined by DA-17.
+18.1. User decision and remembered policy semantics are defined by DA-17.
 
-15.2. PackManager may request decisions for graph ambiguity, advisory risk,
-      source trust, unsafe operation, install/update/delete confirmation,
-      hard dependency resolution where allowed, or SaveBundle graph repair.
+18.2. PackManager may request decisions for graph ambiguity, advisory risk,
+      source trust, unsafe operation, install/update/delete confirmation, hard
+      dependency resolution where allowed, cyclic activation group admission
+      where required, or SaveBundle graph repair.
 
-15.3. PackManager does not own remembered-decision precedence.
+18.3. PackManager does not own remembered-decision precedence.
 
-15.4. PackManager does not silently remember user decisions.
+18.4. PackManager does not silently remember user decisions.
 
-15.5. PackManager does not silently broaden remembered decisions to other
+18.5. PackManager does not silently broaden remembered decisions to other
       Packs, other versions, other roots, other sources, other SaveBundles,
       other Applications, other ApplicationRuns, or other trust categories.
 
-15.6. PackManager decision prompts preserve the distinction between:
+18.6. PackManager decision prompts preserve the distinction between:
       - advisory warning and hard dependency failure
       - risk acceptance and safety
       - source trust and capability permission
       - graph selection and activation success
+      - cyclic group admission and cyclic activation success
       - install/update permission and runtime execution permission
       - for-this-run and remembered decisions
 
-15.7. PackManager decisions remain trace-visible.
+18.7. PackManager decisions remain trace-visible.
 
 
 ===============================================================================
-16. RELATION TO PERSISTENCE, CONFIGURATION AND STATE
+19. RELATION TO PERSISTENCE, CONFIGURATION AND STATE
 ===============================================================================
 
-16.1. Authoritative state and transaction semantics are defined by DA-04.
+19.1. Authoritative state and transaction semantics are defined by DA-04.
 
-16.2. Configuration and schema semantics are defined by DA-06.
+19.2. Configuration and schema semantics are defined by DA-06.
 
-16.3. Persistent I/O authority is defined by DA-07.
+19.3. Persistent I/O authority is defined by DA-07.
 
-16.4. PackManager operations may read or write:
+19.4. PackManager operations may read or write:
       - catalog caches
       - package source configuration
       - installed Pack records
       - selected graph records
+      - activation-plan records where defined
       - SaveBundle graph evidence
       - copied Pack material where permitted
       - retained Pack material where permitted
@@ -859,81 +1120,85 @@ Downstream Documents:
       - user decisions through DA-17-owned mechanisms
       - tool state through the owning state/configuration mechanism
 
-16.5. PackManager writes occur only through Kernel-mediated persistence,
+19.5. PackManager writes occur only through Kernel-mediated persistence,
       configuration, transaction, and policy boundaries.
 
-16.6. PackManager does not write into Pack content roots unless the
-      operation is an authorized pack-management operation for that root.
+19.6. PackManager does not write into Pack content roots unless the operation
+      is an authorized pack-management operation for that root.
 
-16.7. PackManager does not make runtime Pack code a writer for installed
-      Pack roots.
+19.7. PackManager does not make runtime Pack code a writer for installed Pack
+      roots.
 
-16.8. PackManager does not mutate SaveBundle material except through
+19.8. PackManager does not mutate SaveBundle material except through
       SaveBundle, persistence, policy, and authority rules.
 
-16.9. PackManager persistence failure is explicit.
+19.9. PackManager persistence failure is explicit.
 
-16.10. PackManager persistence failure does not silently become successful
+19.10. PackManager persistence failure does not silently become successful
        graph preparation.
 
+19.11. PackManager persistence failure does not silently become successful
+       activation-plan preparation.
+
 
 ===============================================================================
-17. RELATION TO RUNTIMEHOST, APPLICATION, APPLICATIONRUN AND SAVEBUNDLE
+20. RELATION TO RUNTIMEHOST, APPLICATION, APPLICATIONRUN AND SAVEBUNDLE
 ===============================================================================
 
-17.1. RuntimeHost semantics are defined by DA-28.
+20.1. RuntimeHost semantics are defined by DA-28.
 
-17.2. Application and ApplicationRun lifecycle semantics are defined by
-      DA-20.
+20.2. Application and ApplicationRun lifecycle semantics are defined by DA-20.
 
-17.3. SaveBundle binding and writable ownership semantics are defined by
+20.3. SaveBundle binding and writable ownership semantics are defined by
       Application, SaveBundle, state, and persistence documents.
 
-17.4. PackManager may operate at RuntimeHost scope before any Application
+20.4. PackManager may operate at RuntimeHost scope before any Application
       exists.
 
-17.5. PackManager may prepare a graph for Application creation or for a
+20.5. PackManager may prepare a graph for Application creation or for a
       future ApplicationRun, depending on the operation.
 
-17.6. PackManager may check last-used or last-known-good graph evidence
-      for a SaveBundle before ApplicationRun creation.
+20.6. PackManager may prepare an activation plan for Application creation or
+      for a future ApplicationRun, depending on the operation.
 
-17.7. PackManager may inspect durable graph evidence for an Application
-      when policy permits that inspection.
+20.7. PackManager may check last-used or last-known-good graph evidence for a
+      SaveBundle before ApplicationRun creation.
 
-17.8. PackManager may inspect active graph evidence for an ApplicationRun
-      when policy permits that inspection.
+20.8. PackManager may inspect durable graph evidence for an Application when
+      policy permits that inspection.
 
-17.9. PackManager may prepare graph changes for future ApplicationRun
-      load, restart, or migration.
+20.9. PackManager may inspect active graph evidence for an ApplicationRun when
+      policy permits that inspection.
 
-17.10. PackManager does not silently mutate ApplicationRun active graph
-       state.
+20.10. PackManager may prepare graph changes for future ApplicationRun load,
+       restart, or migration.
 
-17.11. PackManager does not silently update Packs that are active in a
-       running ApplicationRun.
+20.11. PackManager does not silently mutate ApplicationRun active graph state.
 
-17.12. PackManager does not silently make changes to a SaveBundle-owned
-       copied Pack graph.
+20.12. PackManager does not silently update Packs that are active in a running
+       ApplicationRun.
 
-17.13. PackManager graph changes affecting a running ApplicationRun
-       require explicit lifecycle, policy, and trace handling.
+20.13. PackManager does not silently make changes to a SaveBundle-owned copied
+       Pack graph.
 
-17.14. SaveBundle last-known-good fallback remains governed by DA-13 and
+20.14. PackManager graph changes affecting a running ApplicationRun require
+       explicit lifecycle, policy, and trace handling.
+
+20.15. SaveBundle last-known-good fallback remains governed by DA-13 and
        activation behavior.
 
 
 ===============================================================================
-18. RELATION TO VIEWS, UI AND FRONTEND RUNTIME
+21. RELATION TO VIEWS, UI AND FRONTEND RUNTIME
 ===============================================================================
 
-18.1. UI, View, and frontend runtime semantics are defined by DA-22.
+21.1. UI, View, and frontend runtime semantics are defined by DA-22.
 
-18.2. PackManager may expose one or more Views.
+21.2. PackManager may expose one or more Views.
 
-18.3. PackManager Views are presentation and interaction surfaces.
+21.3. PackManager Views are presentation and interaction surfaces.
 
-18.4. PackManager Views may be displayed by:
+21.4. PackManager Views may be displayed by:
       - Turnix Default Launcher
       - dedicated PackManager tooling
       - AI buddy surfaces
@@ -941,65 +1206,74 @@ Downstream Documents:
       - developer tools
       - test tools
 
-18.5. Displaying a PackManager View does not grant pack-management
-      authority to the displaying surface.
+21.5. Displaying a PackManager View does not grant pack-management authority
+      to the displaying surface.
 
-18.6. Frontend PackManager code remains adapter-executed frontend code.
+21.6. Frontend PackManager code remains adapter-executed frontend code.
 
-18.7. Frontend PackManager code does not directly mutate pack catalogs,
-      selected graphs, roots, SaveBundles, Applications, ApplicationRuns,
-      or configuration.
+21.7. Frontend PackManager code does not directly mutate pack catalogs,
+      selected graphs, activation plans, roots, SaveBundles, Applications,
+      ApplicationRuns, or configuration.
 
-18.8. Frontend PackManager commands become meaningful only when Kernel-
-      owned authority accepts the corresponding command, capability
-      request, RPC message, decision, or runtime operation.
+21.8. Frontend PackManager commands become meaningful only when Kernel-owned
+      authority accepts the corresponding command, capability request, RPC
+      message, decision, or runtime operation.
 
-18.9. PackManager UI may present advisory warnings, hard failures, risk
-      decisions, graph previews, source trust, install/update/delete
-      actions, active graph state, and SaveBundle graph evidence.
+21.9. PackManager UI may present advisory warnings, hard failures, risk
+      decisions, graph previews, activation-plan previews, source trust,
+      install/update/delete actions, active graph state, and SaveBundle graph
+      evidence.
 
-18.10. PackManager UI does not own the semantics it presents.
+21.10. PackManager UI does not own the semantics it presents.
 
 
 ===============================================================================
-19. RELATION TO EXECUTION ADAPTERS
+22. RELATION TO EXECUTION ADAPTERS
 ===============================================================================
 
-19.1. Execution adapter boundary semantics are defined by DA-23.
+22.1. Execution adapter boundary semantics are defined by DA-23.
 
-19.2. Adapter lifecycle, trust, isolation, and adapter-domain trace
-      semantics are defined by DA-27.
+22.2. Adapter lifecycle, trust, isolation, and adapter-domain trace semantics
+      are defined by DA-27.
 
-19.3. PackManager does not gain adapter authority by selecting or
-      presenting an adapter-related graph.
+22.3. PackManager does not gain adapter authority by selecting or presenting
+      an adapter-related graph.
 
-19.4. Adapter selection for executable artifacts remains governed by DA-23
-      and DA-27.
+22.4. Adapter selection for executable artifacts remains governed by DA-23 and
+      DA-27.
 
-19.5. PackManager may present adapter requirements, adapter availability,
+22.5. PackManager may present adapter requirements, adapter availability,
       adapter trust warnings, or adapter incompatibilities.
 
-19.6. PackManager presentation of adapter evidence does not authorize
-      adapter execution.
+22.6. PackManager presentation of adapter evidence does not authorize adapter
+      execution.
 
-19.7. Adapter execution authorization remains distinct from PackManager
-      graph preparation.
+22.7. Adapter execution authorization remains distinct from PackManager graph
+      preparation.
 
-19.8. Adapter failure does not become PackManager failure by default.
+22.8. Adapter failure does not become PackManager failure by default.
 
-19.9. PackManager graph problems do not become adapter failure by default.
+22.9. PackManager graph problems do not become adapter failure by default.
+
+22.10. PackManager activation-plan preparation may include adapter
+       participation evidence when available.
+
+22.11. Adapter participation evidence does not make PackManager the owner of
+       adapter loading.
+
+22.12. Adapter artifact loading does not prepare activation plans by itself.
 
 
 ===============================================================================
-20. PACKMANAGER TRACE REASON IDENTIFIERS
+23. PACKMANAGER TRACE REASON IDENTIFIERS
 ===============================================================================
 
-20.1. DA-29 owns PackManager-domain trace reason identifiers used for pack
-      catalog operations, graph preparation, advisory analysis, source
-      management, selected graph decisions, graph repair, SaveBundle graph
-      checks, and PackManager operation outcomes.
+23.1. DA-29 owns PackManager-domain trace reason identifiers used for pack
+      catalog operations, graph preparation, activation-plan preparation,
+      advisory analysis, source management, selected graph decisions, graph
+      repair, SaveBundle graph checks, and PackManager operation outcomes.
 
-20.2. The following catalog trace reasons are defined:
+23.2. The following catalog trace reasons are defined:
       - PackCatalogListRequested
       - PackCatalogListStarted
       - PackCatalogListCompleted
@@ -1007,7 +1281,7 @@ Downstream Documents:
       - PackCatalogFilterApplied
       - PackCatalogVisibilityEvaluated
 
-20.3. The following graph-preparation trace reasons are defined:
+23.3. The following graph-preparation trace reasons are defined:
       - PackGraphPreparationRequested
       - PackGraphPreparationStarted
       - PackGraphCandidateResolved
@@ -1027,7 +1301,22 @@ Downstream Documents:
       - PackGraphPreparationCompleted
       - PackGraphPreparationFailed
 
-20.4. The following SaveBundle graph trace reasons are defined:
+23.4. The following activation-plan trace reasons are defined:
+      - ActivationPlanPreparationRequested
+      - ActivationPlanPreparationStarted
+      - ActivationPlanComponentIdentified
+      - ActivationPlanCycleDetected
+      - ActivationPlanCyclicGroupCandidateIdentified
+      - ActivationPlanCyclicGroupAdmitted
+      - ActivationPlanCyclicGroupRejected
+      - ActivationPlanOrderingPrepared
+      - ActivationPlanReadinessChecked
+      - ActivationPlanExpectedBreakRecorded
+      - ActivationPlanAccepted
+      - ActivationPlanPreparationCompleted
+      - ActivationPlanPreparationFailed
+
+23.5. The following SaveBundle graph trace reasons are defined:
       - SaveBundleGraphCheckRequested
       - SaveBundleGraphLastUsedCompared
       - SaveBundleGraphLastKnownGoodCompared
@@ -1040,7 +1329,7 @@ Downstream Documents:
       - SaveBundleGraphCheckCompleted
       - SaveBundleGraphCheckFailed
 
-20.5. The following source-management trace reasons are defined:
+23.6. The following source-management trace reasons are defined:
       - PackSourceSearchRequested
       - PackSourceSearchCompleted
       - PackSourceSearchFailed
@@ -1057,7 +1346,7 @@ Downstream Documents:
       - PackRemoveCompleted
       - PackRemoveFailed
 
-20.6. The following PackManager access trace reasons are defined:
+23.7. The following PackManager access trace reasons are defined:
       - PackManagerOperationRequested
       - PackManagerOperationAccepted
       - PackManagerOperationRejected
@@ -1065,31 +1354,31 @@ Downstream Documents:
       - PackManagerOperationFailed
       - PackManagerOperationCancelled
 
-20.7. DA-03 defines the trace substrate used to represent PackManager
-      trace evidence.
+23.8. DA-03 defines the trace substrate used to represent PackManager trace
+      evidence.
 
-20.8. PackManager trace reason identifiers do not replace DA-11 resolution
+23.9. PackManager trace reason identifiers do not replace DA-11 resolution
       trace reasons.
 
-20.9. PackManager trace reason identifiers do not replace DA-13 dependency
-      or fallback semantics.
+23.10. PackManager trace reason identifiers do not replace DA-13 dependency
+       or fallback semantics.
 
-20.10. PackManager trace reason identifiers do not replace DA-14
-       activation trace reasons.
+23.11. PackManager trace reason identifiers do not replace DA-14 activation
+       trace reasons.
 
-20.11. PackManager trace reason identifiers do not replace DA-16
-       capability trace reasons.
+23.12. PackManager trace reason identifiers do not replace DA-16 capability
+       trace reasons.
 
-20.12. PackManager trace reason identifiers do not replace DA-28
-       RuntimeHost trace reasons.
+23.13. PackManager trace reason identifiers do not replace DA-28 RuntimeHost
+       trace reasons.
 
 
 ===============================================================================
-21. PACKMANAGER TRACE CONTEXT
+24. PACKMANAGER TRACE CONTEXT
 ===============================================================================
 
-21.1. PackManager trace evidence records enough context, when available,
-      to explain:
+24.1. PackManager trace evidence records enough context, when available, to
+      explain:
       - PackManager operation identity
       - PackManager scope
       - runtimeHostId when applicable
@@ -1107,9 +1396,14 @@ Downstream Documents:
       - jobId when applicable
       - orchestrationUnitId when applicable
       - PackRequest when applicable
+      - selected graph identity when applicable
+      - activation-plan identity when applicable
       - selected Pack identity when applicable
       - candidate Pack identity when applicable
       - dependency edge when applicable
+      - dependency component when applicable
+      - cyclic activation group candidate when applicable
+      - admitted cyclic activation group when applicable
       - advisory relation kind when applicable
       - provider role when applicable
       - source identity when applicable
@@ -1118,32 +1412,33 @@ Downstream Documents:
       - warning or conflict category when applicable
       - failure reason category when failure occurs
 
-21.2. PackManager trace evidence does not replace resolution trace
-      evidence.
+24.2. PackManager trace evidence does not replace resolution trace evidence.
 
-21.3. PackManager trace evidence does not replace activation trace
-      evidence.
+24.3. PackManager trace evidence does not replace activation trace evidence.
 
-21.4. PackManager trace evidence does not replace capability trace
-      evidence.
+24.4. PackManager trace evidence does not replace capability trace evidence.
 
-21.5. PackManager trace evidence does not replace RuntimeHost trace
-      evidence.
+24.5. PackManager trace evidence does not replace RuntimeHost trace evidence.
 
-21.6. PackManager trace evidence does not replace persistence trace
-      evidence.
+24.6. PackManager trace evidence does not replace persistence trace evidence.
 
-21.7. PackManager trace evidence preserves causal links to resolution,
+24.7. PackManager trace evidence preserves causal links to resolution,
       decision, capability, RuntimeHost, Job, Application, ApplicationRun,
       SaveBundle, activation, and persistence evidence when those events
       exist.
 
+24.8. PackManager trace evidence may be linked from activation trace evidence
+      when activation consumes an accepted activation plan.
+
+24.9. PackManager trace evidence does not become activation trace evidence by
+      being linked.
+
 
 ===============================================================================
-22. RELATION TO IMPLEMENTATION SPECIFICATIONS
+25. RELATION TO IMPLEMENTATION SPECIFICATIONS
 ===============================================================================
 
-22.1. Implementation specifications may define:
+25.1. Implementation specifications may define:
       - concrete ListPacks request and result envelopes
       - concrete SaveBundle listing request and result envelopes
       - concrete pack catalog field vocabulary
@@ -1159,7 +1454,7 @@ Downstream Documents:
       - concrete SaveBundle export and retained-Pack bundling workflows
       - concrete PackManager trace field schema
 
-22.2. Implementation specifications do not redefine:
+25.2. Implementation specifications do not redefine:
       - root meaning
       - Pack identity
       - visibility
@@ -1168,6 +1463,7 @@ Downstream Documents:
       - advisory relation meaning
       - importing boundaries
       - activation lifecycle
+      - activation-plan semantic ownership
       - ModCallContext gateway semantics
       - service and capability authority
       - user decision and policy semantics
@@ -1177,17 +1473,18 @@ Downstream Documents:
       - ApplicationRun lifecycle
       - SaveBundle authority
       - adapter authority boundaries
+      - mechanical loader boundaries
 
-22.3. If a PackManager implementation requires a semantic rule not defined
+25.3. If a PackManager implementation requires a semantic rule not defined
       here, this document is updated first or alongside that implementation
       specification.
 
 
 ===============================================================================
-23. WHAT IS EXPLICITLY NOT SUPPORTED
+26. WHAT IS EXPLICITLY NOT SUPPORTED
 ===============================================================================
 
-23.1. The following are not supported:
+26.1. The following are not supported:
       - PackManager replacing Kernel authority
       - PackManager replacing Discovery
       - PackManager replacing generic resolution
@@ -1199,7 +1496,9 @@ Downstream Documents:
         itself
       - PackManager importing Pack code during catalog listing or graph
         preparation
+      - PackManager importing Pack code during activation-plan preparation
       - PackManager activating Packs by preparing a graph
+      - PackManager activating Packs by preparing an activation plan
       - PackManager calling onLoad(ctx) by itself
       - PackManager creating ModCallContext gateway authority by itself
       - PackManager granting capability permission
@@ -1207,9 +1506,10 @@ Downstream Documents:
       - PackManager exposing raw management authority through a View
       - PackManager service objects being used as cross-Pack authority bypass
       - PackManager silently writing roots, configuration, SaveBundles,
-        selected graphs, or policy decisions
+        selected graphs, activation plans, or policy decisions
       - PackManager silently resolving ambiguity
       - PackManager silently accepting risky graphs
+      - PackManager silently admitting cyclic activation groups
       - PackManager silently broadening remembered decisions
       - PackManager silently updating active Packs used by a running
         ApplicationRun
@@ -1217,16 +1517,18 @@ Downstream Documents:
       - PackManager treating SaveBundle listing as ListPacks filtered by Pack
         kind
       - PackManager warnings being treated as activation outcomes
+      - activation plans being treated as activation success
+      - selected graphs being treated as loader instructions by themselves
       - mechanical loaders, importers, adapter artifact loaders, or activation
         executors performing PackManager policy or graph-preparation work by
         themselves
 
 
 ===============================================================================
-24. EXPLICITLY OPEN QUESTIONS
+27. EXPLICITLY OPEN QUESTIONS
 ===============================================================================
 
-24.1. OPEN questions include:
+27.1. OPEN questions include:
       - exact PackManager operation identity representation
       - exact PackManager scope vocabulary finalization
       - exact ListPacks request envelope
@@ -1246,39 +1548,50 @@ Downstream Documents:
       - exact SaveBundle export and retained-Pack bundling workflows
       - exact active ApplicationRun graph-change policy
       - exact PackManager trace field schema
+      - exact activation-plan persistence and identity model
+      - exact activation-plan preview UI model
+
+27.2. Open questions do not weaken PackManager, activation-plan, activation,
+      loader, adapter, policy, persistence, or capability boundaries defined
+      by this document.
 
 
 ===============================================================================
-25. LOCKED SUMMARY
+28. LOCKED SUMMARY
 ===============================================================================
 
-25.1. LOCKED:
+28.1. LOCKED:
       - PackManager is the official Turnix pack-management and graph-
         preparation domain.
       - PackManager prepares, explains, validates, repairs, and manages
         selected pack graph intent.
+      - PackManager may prepare selected pack graphs and activation plans.
+      - Activation plan means selected graph intent refined for activation
+        order and activation readiness.
+      - Activation plan is information, graph intent, and ordering evidence.
+      - Activation plan is not activation, loading, importing, adapter
+        execution, ModCallContext gateway authority, or capability permission.
       - PackManager is not Kernel authority by itself.
       - PackManager is not Discovery, generic resolution, importing,
-        activation, adapter execution, mechanical loading, capability
-        permission, policy authority, user-decision authority, persistence
-        authority, Application lifecycle authority, ApplicationRun lifecycle
-        authority, SaveBundle authority, ModCallContext gateway authority,
-        or a View by itself.
+        activation, adapter execution, mechanical loading, activation
+        execution, capability permission, policy authority, user-decision
+        authority, persistence authority, Application lifecycle authority,
+        ApplicationRun lifecycle authority, SaveBundle authority,
+        ModCallContext gateway authority, or a View by itself.
       - PackManager operations may exist before any Application exists.
       - PackManager operations may be requested from an ApplicationRun only
         through permitted mediated surfaces.
       - ListPacks is the general Pack-listing primitive.
-      - AppPack, ViewPack, ContentPack, and ModPack listings are filters
-        over Pack kind.
+      - AppPack, ViewPack, ContentPack, and ModPack listings are filters over
+        Pack kind.
       - SaveBundle-related listing is a separate persistence-aware catalog
         operation and not a Pack-kind filter.
       - SaveBundle itself is not a Pack.
-      - Catalog operations do not lazily rescan the filesystem unless
-        explicit rescan is requested and accepted.
+      - Catalog operations do not lazily rescan the filesystem unless explicit
+        rescan is requested and accepted.
       - Catalog presentation preserves distinctions between existence,
-        visibility, resolution eligibility, dependency satisfaction,
-        selected graph membership, activation state, and capability
-        availability.
+        visibility, resolution eligibility, dependency satisfaction, selected
+        graph membership, activation state, and capability availability.
       - PackManager scopes are explicit.
       - PackManager consumes DA-09 roots/Discovery, DA-10
         identity/visibility, DA-11 resolution, DA-13 dependency/advisory
@@ -1292,13 +1605,24 @@ Downstream Documents:
       - Hard dependency failure remains hard failure unless an accepted
         policy or user decision explicitly resolves it under the owning
         documents.
+      - PackManager may detect strongly connected components.
+      - Strongly connected component detection is not cyclic activation by
+        itself.
+      - A cyclic activation group is a strongly connected component admitted
+        by the accepted activation plan for DA-14 cyclic activation handling.
+      - Cyclic activation group admission does not prove activation success.
       - PackManager repair is explicit, scoped, policy- or user-accepted
         graph-preparation repair.
       - Risk acceptance does not make a risky graph safe.
       - Expected-break evidence does not convert failure into success.
-      - PackManager may prepare selected pack graphs and activation plans.
-      - PackManager graph preparation does not activate, import, execute,
-        or grant ModCallContext gateway authority.
+      - PackManager graph preparation does not activate, import, execute, or
+        grant ModCallContext gateway authority.
+      - Mechanical loaders load what they are instructed to load under the
+        applicable authority boundary.
+      - Mechanical loaders do not own dependency ordering, activation ordering,
+        graph preparation, graph repair, or cyclic activation admission.
+      - Loading material in an order not supported by the accepted activation
+        plan may fail by design.
       - PackManager operations that perform powerful or persistent behavior
         require appropriate permission, policy, persistence, and trace
         handling.
@@ -1307,14 +1631,14 @@ Downstream Documents:
       - DA-29 owns PackManager-domain trace reason identifiers.
       - DA-03 owns the trace substrate, not PackManager semantics.
 
-25.2. OPEN:
-      - concrete operation identifiers, scope vocabulary, ListPacks
-        envelopes, SaveBundle listing envelopes, catalog fields, selected
-        graph schema, activation-plan schema, capability identifiers,
-        command syntax, RPC fields, View embedding, package source/search/
-        install/update/remove protocols, SaveBundle export, active
-        ApplicationRun graph-change policy, and PackManager trace field
-        schema.
+28.2. OPEN:
+      - concrete operation identifiers, scope vocabulary, ListPacks envelopes,
+        SaveBundle listing envelopes, catalog fields, selected graph schema,
+        activation-plan schema, activation-plan identity, activation-plan
+        preview UI, capability identifiers, command syntax, RPC fields, View
+        embedding, package source/search/install/update/remove protocols,
+        SaveBundle export, active ApplicationRun graph-change policy, and
+        PackManager trace field schema.
 
 
 ===============================================================================
@@ -1324,6 +1648,6 @@ END OF DA-29 - PACK MANAGEMENT, CATALOG OPERATIONS AND GRAPH PREPARATION
 --- doc-meta ---
 DOC_ID: DA-29
 DOC_FILE: docs/design/DA-29_PACK_MANAGEMENT_CATALOG_OPERATIONS_AND_GRAPH_PREPARATION.txt
-DOC_REV: 3
-DOC_GIT: 2087583
+DOC_REV: 4
+DOC_GIT: 96ff84c
 ----------------
