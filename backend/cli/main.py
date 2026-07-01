@@ -5,7 +5,8 @@ import sys
 from collections.abc import Sequence
 
 from backend.activation.activationEntry import createPythonActivationEntry
-from backend.activation.activationPlan import ActivationPlan, createActivationPlan
+from backend.activation.activationPlan import createActivationPlan
+from backend.activation.activator import activatePlan
 from backend.adapters.pythonInProcess import PythonInProcessAdapter
 from backend.capabilities.registry import CapabilityRegistry
 from backend.context.modCallContext import ModCallContext
@@ -35,7 +36,7 @@ Commands:
                               invocation.
   activation-sanity         Verify path-based Python activation loading.
 
-  activation-plan-sanity    Verify activation plan generation.
+  activation-plan-sanity    Verify ordered manual activation plan loading.
 
 """
     )
@@ -251,12 +252,16 @@ def runActivationPlanSanity() -> int:
     registry = CapabilityRegistry()
     adapter = PythonInProcessAdapter(sink=sink)
 
-    activatePlanEntries(
+    activatedEntryIds = activatePlan(
         plan=plan,
         registry=registry,
         adapter=adapter,
         sink=sink,
     )
+
+    expectedEntryIds = tuple(entry.entryId for entry in plan.entries)
+    if activatedEntryIds != expectedEntryIds:
+        raise UsageError(f"Unexpected activated entry IDs: expected {expectedEntryIds!r}, got {activatedEntryIds!r}.")
 
     echoCapabilityId = "bootstrap.activationEcho@1"
     reverseCapabilityId = "bootstrapExtra.reverse@1"
@@ -290,8 +295,8 @@ def runActivationPlanSanity() -> int:
     print("Actant activation plan sanity OK")
     print(f"plan: {planId}")
     print("activated:")
-    for entry in plan.entries:
-        print(f"  {entry.entryId}")
+    for entryId in activatedEntryIds:
+        print(f"  {entryId}")
     print("registered:")
     print(f"  {echoCapabilityId}")
     print(f"  {reverseCapabilityId}")
@@ -299,47 +304,6 @@ def runActivationPlanSanity() -> int:
     print(f"  {echoCapabilityId} -> {echoResult}")
     print(f"  {reverseCapabilityId} -> {reverseResult}")
     return SUCCESS
-
-
-def activatePlanEntries(
-    *,
-    plan: ActivationPlan,
-    registry: CapabilityRegistry,
-    adapter: PythonInProcessAdapter,
-    sink: DevTraceSink,
-) -> None:
-    for entry in plan.entries:
-        sink.emit(
-            reason="ActivationPlanEntryStarted",
-            message="activation plan entry started",
-            attrs={
-                "planId": plan.planId,
-                "entryId": entry.entryId,
-                "ownerId": entry.ownerId,
-                "sourcePath": str(entry.sourcePath),
-            },
-        )
-
-        ctx = ModCallContext(
-            ownerId=entry.ownerId,
-            capabilityRegistry=registry,
-        )
-
-        adapter.loadAndCall(
-            entry=entry,
-            ctx=ctx,
-        )
-
-        sink.emit(
-            reason="ActivationPlanEntryCompleted",
-            message="activation plan entry completed",
-            attrs={
-                "planId": plan.planId,
-                "entryId": entry.entryId,
-                "ownerId": entry.ownerId,
-                "sourcePath": str(entry.sourcePath),
-            },
-        )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
