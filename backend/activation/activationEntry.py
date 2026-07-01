@@ -45,16 +45,16 @@ def createPythonActivationEntry(
     sourcePath: Path,
     callableName: str,
 ) -> PythonActivationEntry:
-    entryId = requireExactNonBlackString(entryId, "entryId")
-    ownerId = requireExactNonBlackString(ownerId, "ownerId")
-    callableName = requireExactNonBlackString(callableName, "callableName")
+    cleanEntryId = requireExactNonBlankString(entryId, "entryId")
+    cleanOwnerId = requireExactNonBlankString(ownerId, "ownerId")
+    cleanCallableName = requireExactNonBlankString(callableName, "callableName")
 
     if not isinstance(sourcePath, Path):
         raise UsageError(f"sourcePath must be a pathlib.Path, not {type(sourcePath).__name__}.")
 
     return PythonActivationEntry(
-        entryId=entryId,
-        ownerId=ownerId,
+        entryId=cleanEntryId,
+        ownerId=cleanOwnerId,
         sourcePath=sourcePath,
-        callableName=callableName,
+        callableName=cleanCallableName,
     )
