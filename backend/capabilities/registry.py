@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from backend.core.errors import UsageError
+from backend.core.validation import requireExactNonBlankString
 
 
 type CapabilityHandler = Callable[[object | None], object]
@@ -43,8 +44,8 @@ class CapabilityRegistry:
         ownerId: str,
         handler: CapabilityHandler,
     ) -> None:
-        cleanCapabilityId = requireNonEmptyText(capabilityId, "capabilityId")
-        cleanOwnerId = requireNonEmptyText(ownerId, "ownerId")
+        cleanCapabilityId = requireExactNonBlankString(capabilityId, "capabilityId")
+        cleanOwnerId = requireExactNonBlankString(ownerId, "ownerId")
 
         if not callable(handler):
             raise UsageError(f"Capability handler for {cleanCapabilityId} must be callable")
@@ -60,11 +61,11 @@ class CapabilityRegistry:
         )
 
     def has(self, capabilityId: str) -> bool:
-        cleanCapabilityId = requireNonEmptyText(capabilityId, "capabilityId")
+        cleanCapabilityId = requireExactNonBlankString(capabilityId, "capabilityId")
         return cleanCapabilityId in self._capabilities
 
     def get(self, capabilityId: str) -> RegisteredCapability:
-        cleanCapabilityId = requireNonEmptyText(capabilityId, "capabilityId")
+        cleanCapabilityId = requireExactNonBlankString(capabilityId, "capabilityId")
 
         try:
             return self._capabilities[cleanCapabilityId]
@@ -74,14 +75,3 @@ class CapabilityRegistry:
     def call(self, capabilityId: str, payload: object | None = None) -> object:
         registeredCapability = self.get(capabilityId)
         return registeredCapability.handler(payload)
-
-
-def requireNonEmptyText(value: str, name: str) -> str:
-    if not isinstance(value, str):
-        raise UsageError(f"{name} must be a string.")
-
-    cleanValue = value.strip()
-    if not cleanValue:
-        raise UsageError(f"{name} must not be an empty string.")
-
-    return cleanValue

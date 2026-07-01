@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from backend.capabilities.registry import CapabilityRegistry, CapabilityHandler
-from backend.capabilities.registry import requireNonEmptyText
+from backend.core.validation import requireExactNonBlankString
 
 
 class ModCallContext:
@@ -21,7 +21,7 @@ class ModCallContext:
         ownerId: str,
         capabilityRegistry: CapabilityRegistry,
     ) -> None:
-        self._ownerId = requireNonEmptyText(ownerId, "ownerId")
+        self._ownerId = requireExactNonBlankString(ownerId, "ownerId")
         self._capabilityRegistry = capabilityRegistry
 
     @property

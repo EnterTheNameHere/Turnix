@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from backend.activation.activationEntry import PythonActivationEntry
 from backend.core.errors import UsageError
+from backend.core.validation import requireExactNonBlankString
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,7 @@ def createActivationPlan(
     planId: str,
     entries: tuple[PythonActivationEntry, ...],
 ) -> ActivationPlan:
-    planId = requireExactNonBlackString(planId, "planId")
+    planId = requireExactNonBlankString(planId, "planId")
 
     if not isinstance(entries, tuple):
         raise UsageError(f"entries must be a tuple, not {type(entries).__name__}.")
@@ -42,19 +43,3 @@ def createActivationPlan(
         planId=planId,
         entries=entries,
     )
-
-
-def requireExactNonBlackString(value: object, name: str) -> str:
-    if not isinstance(value, str):
-        raise UsageError(f"{name} must be a string, not {type(value).__name__}.")
-
-    if value == "":
-        raise UsageError(f"{name} must not be an empty string.")
-
-    if value != value.strip():
-        raise UsageError(f"{name} must not contain leading or trailing whitespace.")
-
-    if value.strip() == "":
-        raise UsageError(f"{name} must not be a string containing only whitespace.")
-
-    return value

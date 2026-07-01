@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.core.errors import UsageError
+from backend.core.validation import requireExactNonBlankString
 
 
 @dataclass(frozen=True)
@@ -20,22 +21,6 @@ class PythonActivationEntry:
     ownerId: str
     sourcePath: Path
     callableName: str
-
-
-def requireExactNonBlackString(value: object, name: str) -> str:
-    if not isinstance(value, str):
-        raise UsageError(f"{name} must be a string, not {type(value).__name__}.")
-
-    if value == "":
-        raise UsageError(f"{name} must not be an empty string.")
-
-    if value != value.strip():
-        raise UsageError(f"{name} must not contain leading or trailing whitespace.")
-
-    if value.strip() == "":
-        raise UsageError(f"{name} must not be a string containing only whitespace.")
-
-    return value
 
 
 def createPythonActivationEntry(
