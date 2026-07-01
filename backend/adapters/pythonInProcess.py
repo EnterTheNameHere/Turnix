@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -108,7 +109,18 @@ class PythonInProcessAdapter:
             raise UsageError(f"Module spec has no loader for {sourcePath}")
 
         module = importlib.util.module_from_spec(spec)
-        loader.exec_module(module)
+
+        previousModule = sys.modules.get(moduleName)
+        sys.modules[moduleName] = module
+
+        try:
+            loader.exec_module(module)
+        except Exception:
+            if previousModule is None:
+                sys.modules.pop(moduleName, None)
+            else:
+                sys.modules[moduleName] = previousModule
+            raise
 
         return module
 
