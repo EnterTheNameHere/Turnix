@@ -27,8 +27,8 @@ class DevTraceSink:
 
         if attrText:
             print(f"[dev {timestamp}] {reason}: {message} {attrText}", file=stdout)
-
-        print(f"[dev {timestamp}] {reason}: {message}", file=stdout)
+        else:
+            print(f"[dev {timestamp}] {reason}: {message}", file=stdout)
 
 
 def formatAttrs(attrs: Mapping[str, object] | None) -> str:
