@@ -6,6 +6,7 @@ from collections.abc import Sequence
 
 from backend.activation.activationAdapterKind import ActivationAdapterKind
 from backend.activation.activationEntry import createPythonActivationEntry
+from backend.activation.activationErrors import ActivationError
 from backend.activation.activationPlan import createActivationPlan
 from backend.activation.activator import activatePlan
 from backend.adapters.pythonInProcess import PythonInProcessAdapter
@@ -29,6 +30,7 @@ Usage:
   python -m backend.cli.main capability-sanity
   python -m backend.cli.main activation-sanity
   python -m backend.cli.main activation-plan-sanity
+  python -m backend.cli.main activation-failure-sanity
 
 Commands:
   sanity                    Verify that the backend package can run under
@@ -38,6 +40,8 @@ Commands:
   activation-sanity         Verify path-based Python activation loading.
 
   activation-plan-sanity    Verify ordered manual activation plan loading.
+
+  activation-failure-sanity Verify activation failure wrapping.
 
 """
     )
@@ -255,7 +259,7 @@ def runActivationPlanSanity() -> int:
         ActivationAdapterKind.PYTHON_IN_PROCESS: PythonInProcessAdapter(sink=sink),
     }
 
-    activatedEntryIds = activatePlan(
+    report = activatePlan(
         plan=plan,
         registry=registry,
         adapters=adapters,
@@ -263,8 +267,8 @@ def runActivationPlanSanity() -> int:
     )
 
     expectedEntryIds = tuple(entry.entryId for entry in plan.entries)
-    if activatedEntryIds != expectedEntryIds:
-        raise UsageError(f"Unexpected activated entry IDs: expected {expectedEntryIds!r}, got {activatedEntryIds!r}.")
+    if report.activatedEntryIds != expectedEntryIds:
+        raise UsageError(f"Unexpected activated entry IDs: expected {expectedEntryIds!r}, got {report!r}.")
 
     echoCapabilityId = "bootstrap.activationEcho@1"
     reverseCapabilityId = "bootstrapExtra.reverse@1"
@@ -298,8 +302,8 @@ def runActivationPlanSanity() -> int:
     print("Actant activation plan sanity OK")
     print(f"plan: {planId}")
     print("activated:")
-    for entryId in activatedEntryIds:
-        print(f"  {entryId}")
+    for activatedEntry in report.activatedEntries:
+        print(f"  {activatedEntry}")
     print("registered:")
     print(f"  {echoCapabilityId}")
     print(f"  {reverseCapabilityId}")
@@ -307,6 +311,93 @@ def runActivationPlanSanity() -> int:
     print(f"  {echoCapabilityId} -> {echoResult}")
     print(f"  {reverseCapabilityId} -> {reverseResult}")
     return SUCCESS
+
+
+def runActivationFailureSanity() -> int:
+    sink = DevTraceSink()
+
+    repoRoot = getRepoRoot()
+    planId = "bootstrap.failure-plan"
+    entryId = "first-party.bootstrapBroken.activation"
+    ownerId = "first-party.bootstrapBroken"
+
+    entry = createPythonActivationEntry(
+        entryId=entryId,
+        ownerId=ownerId,
+        sourcePath=repoRoot / "first-party" / "bootstrapBroken" / "activation.py",
+        callableName="onLoad",
+    )
+
+    plan = createActivationPlan(
+        planId=planId,
+        entries=(entry,),
+    )
+
+    sink.emit(
+        reason="ActivationFailureSanityStarted",
+        message="activation failure sanity command started",
+        attrs={
+            "planId": planId,
+            "entryId": entryId,
+            "ownerId": ownerId,
+        },
+    )
+
+    registry = CapabilityRegistry()
+    adapters = {
+        ActivationAdapterKind.PYTHON_IN_PROCESS: PythonInProcessAdapter(sink=sink),
+    }
+
+    try:
+        activatePlan(
+            plan=plan,
+            registry=registry,
+            adapters=adapters,
+            sink=sink,
+        )
+
+    except ActivationError as err:
+        if err.context.planId != planId:
+            raise UsageError(f"Unexpected failure planId: {err.context.planId!r}") from err
+
+        if err.context.entryId != entryId:
+            raise UsageError(f"Unexpected failure entryId: {err.context.entryId!r}") from err
+
+        if err.context.ownerId != ownerId:
+            raise UsageError(f"Unexpected failure ownerId: {err.context.ownerId!r}") from err
+
+        if err.context.adapterKind != ActivationAdapterKind.PYTHON_IN_PROCESS:
+            raise UsageError(f"Unexpected failure adapterKind: {err.context.adapterKind!r}") from err
+
+        if not isinstance(err.cause, RuntimeError):
+            raise UsageError(f"Unexpected failure cause type: {type(err.cause).__name__}") from err
+
+        if str(err.cause) != "Intentional activation failure.":
+            raise UsageError(f"Unexpected failure cause: {err.cause}") from err
+
+        sink.emit(
+            reason="ActivationFailureSanityCompleted",
+            message="activation failure sanity command completed",
+            attrs={
+                "planId": err.context.planId,
+                "entryId": err.context.entryId,
+                "ownerId": err.context.ownerId,
+                "adapterKind": err.context.adapterKind,
+                "causeType": type(err.cause).__name__,
+                "cause": str(err.cause),
+            },
+        )
+
+        print("Actant activation failure sanity OK")
+        print(f"plan: {err.context.planId}")
+        print(f"failed: {err.context.entryId}")
+        print(f"ownerId: {err.context.ownerId}")
+        print(f"adapterKind: {err.context.adapterKind}")
+        print(f"causeType: {type(err.cause).__name__}")
+        print(f"cause: {err.cause}")
+        return SUCCESS
+
+    raise UsageError("activation-failure-sanity expected ActivationError, but activation succeeded.")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -338,6 +429,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             if len(args) != 1:
                 raise UsageError("activation-plan-sanity command takes no arguments.")
             return runActivationPlanSanity()
+
+        if command == "activation-failure-sanity":
+            if len(args) != 1:
+                raise UsageError("activation-failure-sanity command takes no arguments.")
+            return runActivationFailureSanity()
 
         raise UsageError(f"Unknown command: {command}")
 

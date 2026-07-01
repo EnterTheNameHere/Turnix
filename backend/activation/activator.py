@@ -3,10 +3,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from backend.activation.activationAdapter import ActivationAdapter
 from backend.activation.activationAdapterKind import ActivationAdapterKind
 from backend.activation.activationEntry import PythonActivationEntry
+from backend.activation.activationErrors import ActivationError, ActivationFailureContext
 from backend.activation.activationPlan import ActivationPlan
-from backend.adapters.pythonInProcess import PythonInProcessAdapter
+from backend.activation.activationReport import ActivatedEntry, ActivationReport
 from backend.capabilities.registry import CapabilityRegistry
 from backend.context.modCallContext import ModCallContext
 from backend.core.errors import UsageError
@@ -17,17 +19,18 @@ def activatePlan(
     *,
     plan: ActivationPlan,
     registry: CapabilityRegistry,
-    adapters: Mapping[ActivationAdapterKind, PythonInProcessAdapter],
+    adapters: Mapping[ActivationAdapterKind, ActivationAdapter],
     sink: DevTraceSink | None = None,
-) -> tuple[str, ...]:
+) -> ActivationReport:
     """
     Activate entries in plan order.
 
     This function owns activation plan iteration, per-entry adapter selection,
     and per-entry context creation. It does not create the plan, discover Packs,
-    resolve dependencies, verify capabilities, or persist activation state.
+    resolve dependencies, verify capabilities, persist activation state, recover,
+    or rollback.
     """
-    activatedEntryIds: list[str] = []
+    activatedEntries: list[ActivatedEntry] = []
 
     for entry in plan.entries:
         emit(
@@ -40,25 +43,63 @@ def activatePlan(
                 "ownerId": entry.ownerId,
                 "adapterKind": entry.adapterKind,
                 "sourcePath": str(entry.sourcePath),
+                "callableName": entry.callableName,
             },
         )
 
-        adapter = getAdapterForEntry(
-            entry=entry,
-            adapters=adapters,
-        )
+        try:
+            adapter = getAdapterForEntry(
+                entry=entry,
+                adapters=adapters,
+            )
 
-        ctx = ModCallContext(
-            ownerId=entry.ownerId,
-            capabilityRegistry=registry,
-        )
+            ctx = ModCallContext(
+                ownerId=entry.ownerId,
+                capabilityRegistry=registry,
+            )
 
-        adapter.loadAndCall(
-            entry=entry,
-            ctx=ctx,
-        )
+            adapter.loadAndCall(
+                entry=entry,
+                ctx=ctx,
+            )
 
-        activatedEntryIds.append(entry.entryId)
+        except ActivationError:
+            raise
+
+        except Exception as err:
+            emit(
+                sink=sink,
+                reason="ActivationPlanEntryFailed",
+                message="activation plan entry failed",
+                attrs={
+                    "planId": plan.planId,
+                    "entryId": entry.entryId,
+                    "ownerId": entry.ownerId,
+                    "adapterKind": entry.adapterKind,
+                    "sourcePath": str(entry.sourcePath),
+                    "callableName": entry.callableName,
+                    "causeType": type(err).__name__,
+                    "cause": str(err),
+                },
+            )
+
+            raise ActivationError(
+                context=createFailureContext(
+                    plan=plan,
+                    entry=entry,
+                ),
+                cause=err,
+            ) from err
+
+        activatedEntries.append(
+            ActivatedEntry(
+                entryId=entry.entryId,
+                ownerId=entry.ownerId,
+                adapterKind=entry.adapterKind,
+                sourcePath=entry.sourcePath,
+                callableName=entry.callableName,
+            )
+        )
 
         emit(
             sink=sink,
@@ -70,21 +111,40 @@ def activatePlan(
                 "ownerId": entry.ownerId,
                 "adapterKind": entry.adapterKind,
                 "sourcePath": str(entry.sourcePath),
+                "callableName": entry.callableName,
             },
         )
 
-    return tuple(activatedEntryIds)
+    return ActivationReport(
+        planId=plan.planId,
+        activatedEntries=tuple(activatedEntries),
+    )
 
 
 def getAdapterForEntry(
     *,
     entry: PythonActivationEntry,
-    adapters: Mapping[ActivationAdapterKind, PythonInProcessAdapter],
-) -> PythonInProcessAdapter:
+    adapters: Mapping[ActivationAdapterKind, ActivationAdapter],
+) -> ActivationAdapter:
     try:
         return adapters[entry.adapterKind]
     except KeyError as err:
         raise UsageError(f"No activation adapter registered for adapter kind {entry.adapterKind}.") from err
+
+
+def createFailureContext(
+    *,
+    plan: ActivationPlan,
+    entry: PythonActivationEntry,
+) -> ActivationFailureContext:
+    return ActivationFailureContext(
+        planId=plan.planId,
+        entryId=entry.entryId,
+        ownerId=entry.ownerId,
+        adapterKind=entry.adapterKind,
+        sourcePath=entry.sourcePath,
+        callableName=entry.callableName,
+    )
 
 
 def emit(
