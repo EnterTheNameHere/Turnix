@@ -4,6 +4,8 @@ from __future__ import annotations
 import sys
 from collections.abc import Sequence
 
+from backend.capabilities.registry import CapabilityRegistry
+from backend.context.modCallContext import ModCallContext
 from backend.core.errors import UsageError
 from backend.core.paths import getRepoRoot
 from backend.tracing.devTrace import DevTraceSink
@@ -20,9 +22,11 @@ Actant backend command surface
 
 Usage:
   python -m backend.cli.main sanity
+  python -m backend.cli.main capability-sanity
 
 Commands:
   sanity  Verify that the backend package can run under embedded Python.
+  capability-sanity  Verify minimal capability registration and invocation.
 """)
 
 
@@ -70,6 +74,69 @@ def runSanity() -> int:
     return SUCCESS
 
 
+def runCapabilitySanity() -> int:
+    sink = DevTraceSink()
+
+    ownerId = "bootstrap"
+    capabilityId = "bootstrap.echo@1"
+
+    sink.emit(
+        reason="CapabilitySanityStarted",
+        message="capability sanity command started",
+        attrs={
+            "ownerId": ownerId,
+            "capabilityId": capabilityId,
+        },
+    )
+
+    registry = CapabilityRegistry()
+    ctx = ModCallContext(
+        ownerId=ownerId,
+        capabilityRegistry=registry,
+    )
+
+    def echo(payload: object | None) -> object:
+        if not isinstance(payload, dict):
+            raise UsageError(f"echo payload must be a dict, got {type(payload)}")
+
+        text = payload.get("text")
+        if not isinstance(text, str):
+            raise UsageError(f"echo payload must contain 'text' key, got {payload}")
+
+        return {"text": text}
+
+    ctx.registerCapability(capabilityId, echo)
+
+    sink.emit(
+        reason="CapabilityRegistered",
+        message="capability registered through ModCallContext",
+        attrs={
+            "ownerId": ownerId,
+            "capabilityId": capabilityId,
+        },
+    )
+
+    result = registry.call(capabilityId, {"text": "hello"})
+
+    if result != {"text": "hello"}:
+        raise UsageError(f"Unexpected capability result: expected {{'text': 'hello'}}, got {result!r}")
+
+    sink.emit(
+        reason="CapabilitySanityCompleted",
+        message="capability sanity command completed",
+        attrs={
+            "ownerId": ownerId,
+            "capabilityId": capabilityId,
+            "result": result,
+        },
+    )
+
+    print("Actant capability sanity OK")
+    print(f"registered: {capabilityId}")
+    print(f"result: {result}")
+    return SUCCESS
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
 
@@ -84,6 +151,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             if len(args) != 1:
                 raise UsageError("sanity command takes no arguments.")
             return runSanity()
+
+        if command == "capability-sanity":
+            if len(args) != 1:
+                raise UsageError("capability-sanity command takes no arguments.")
+            return runCapabilitySanity()
 
         raise UsageError(f"Unknown command: {command}")
 
