@@ -30,14 +30,14 @@ def createActivationPlan(
     planId = requireExactNonBlankString(planId, "planId")
 
     if not isinstance(entries, tuple):
-        raise UsageError(f"entries must be a tuple, not {type(entries).__name__}.")
+        raise UsageError(f"entries must be a tuple, not {type(entries)}.")
 
     if len(entries) == 0:
         raise UsageError("entries must contain at least one activation entry.")
 
     for index, entry in enumerate(entries):
         if not isinstance(entry, PythonActivationEntry):
-            raise UsageError(f"entries[{index}] must be a PythonActivationEntry, not {type(entry).__name__}.")
+            raise UsageError(f"entries[{index}] must be a PythonActivationEntry, not {type(entry)}.")
 
     return ActivationPlan(
         planId=planId,
