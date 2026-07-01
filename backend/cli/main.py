@@ -1,11 +1,12 @@
 # file: backend/cli/main.py
 from __future__ import annotations
-from backend.adapters.pythonInProcess import PythonInProcessAdapter
-from backend.activation.activationEntry import createPythonActivationEntry
 
 import sys
 from collections.abc import Sequence
 
+from backend.activation.activationEntry import createPythonActivationEntry
+from backend.activation.activationPlan import ActivationPlan, createActivationPlan
+from backend.adapters.pythonInProcess import PythonInProcessAdapter
 from backend.capabilities.registry import CapabilityRegistry
 from backend.context.modCallContext import ModCallContext
 from backend.core.errors import UsageError
@@ -25,11 +26,17 @@ Usage:
   python -m backend.cli.main sanity
   python -m backend.cli.main capability-sanity
   python -m backend.cli.main activation-sanity
+  python -m backend.cli.main activation-plan-sanity
 
 Commands:
-  sanity  Verify that the backend package can run under embedded Python.
-  capability-sanity  Verify minimal capability registration and invocation.
-  activation-sanity  Verify path-based Python activation loading.
+  sanity                    Verify that the backend package can run under
+                              embedded Python.
+  capability-sanity         Verify minimal capability registration and
+                              invocation.
+  activation-sanity         Verify path-based Python activation loading.
+
+  activation-plan-sanity    Verify activation plan generation.
+
 """
     )
 
@@ -207,6 +214,134 @@ def runActivationSanity() -> int:
     return SUCCESS
 
 
+def runActivationPlanSanity() -> int:
+    sink = DevTraceSink()
+
+    repoRoot = getRepoRoot()
+    planId = "bootstrap.plan"
+
+    firstEntry = createPythonActivationEntry(
+        entryId="first-party.bootstrap.activation",
+        ownerId="first-party.bootstrap",
+        sourcePath=repoRoot / "first-party" / "bootstrap" / "activation.py",
+        callableName="onLoad",
+    )
+
+    secondEntry = createPythonActivationEntry(
+        entryId="first-party.bootstrapExtra.activation",
+        ownerId="first-party.bootstrapExtra",
+        sourcePath=repoRoot / "first-party" / "bootstrapExtra" / "activation.py",
+        callableName="onLoad",
+    )
+
+    plan = createActivationPlan(
+        planId=planId,
+        entries=(firstEntry, secondEntry),
+    )
+
+    sink.emit(
+        reason="ActivationPlanSanityStarted",
+        message="activation plan sanity command started",
+        attrs={
+            "planId": planId,
+            "entryCount": len(plan.entries),
+        },
+    )
+
+    registry = CapabilityRegistry()
+    adapter = PythonInProcessAdapter(sink=sink)
+
+    activatePlanEntries(
+        plan=plan,
+        registry=registry,
+        adapter=adapter,
+        sink=sink,
+    )
+
+    echoCapabilityId = "bootstrap.activationEcho@1"
+    reverseCapabilityId = "bootstrapExtra.reverse@1"
+
+    if not registry.has(echoCapabilityId):
+        raise UsageError(f"Missing expected capability: {echoCapabilityId}")
+
+    if not registry.has(reverseCapabilityId):
+        raise UsageError(f"Missing expected capability: {reverseCapabilityId}")
+
+    echoResult = registry.call(echoCapabilityId, {"text": "hello"})
+    reverseResult = registry.call(reverseCapabilityId, {"text": "hello"})
+
+    if echoResult != {"text": "hello"}:
+        raise UsageError(f"Unexpected echo result: expected {{'text': 'hello'}}, got {echoResult!r}.")
+
+    if reverseResult != {"text": "olleh"}:
+        raise UsageError(f"Unexpected reverse result: expected {{'text': 'olleh'}}, got {reverseResult!r}.")
+
+    sink.emit(
+        reason="ActivationPlanSanityCompleted",
+        message="activation plan sanity command completed",
+        attrs={
+            "planId": planId,
+            "entryCount": len(plan.entries),
+            "echoResult": echoResult,
+            "reverseResult": reverseResult,
+        },
+    )
+
+    print("Actant activation plan sanity OK")
+    print(f"plan: {planId}")
+    print("activated:")
+    for entry in plan.entries:
+        print(f"  {entry.entryId}")
+    print("registered:")
+    print(f"  {echoCapabilityId}")
+    print(f"  {reverseCapabilityId}")
+    print("results")
+    print(f"  {echoCapabilityId} -> {echoResult}")
+    print(f"  {reverseCapabilityId} -> {reverseResult}")
+    return SUCCESS
+
+
+def activatePlanEntries(
+    *,
+    plan: ActivationPlan,
+    registry: CapabilityRegistry,
+    adapter: PythonInProcessAdapter,
+    sink: DevTraceSink,
+) -> None:
+    for entry in plan.entries:
+        sink.emit(
+            reason="ActivationPlanEntryStarted",
+            message="activation plan entry started",
+            attrs={
+                "planId": plan.planId,
+                "entryId": entry.entryId,
+                "ownerId": entry.ownerId,
+                "sourcePath": str(entry.sourcePath),
+            },
+        )
+
+        ctx = ModCallContext(
+            ownerId=entry.ownerId,
+            capabilityRegistry=registry,
+        )
+
+        adapter.loadAndCall(
+            entry=entry,
+            ctx=ctx,
+        )
+
+        sink.emit(
+            reason="ActivationPlanEntryCompleted",
+            message="activation plan entry completed",
+            attrs={
+                "planId": plan.planId,
+                "entryId": entry.entryId,
+                "ownerId": entry.ownerId,
+                "sourcePath": str(entry.sourcePath),
+            },
+        )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
 
@@ -231,6 +366,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             if len(args) != 1:
                 raise UsageError("activation-sanity command takes no arguments.")
             return runActivationSanity()
+
+        if command == "activation-plan-sanity":
+            if len(args) != 1:
+                raise UsageError("activation-plan-sanity command takes no arguments.")
+            return runActivationPlanSanity()
 
         raise UsageError(f"Unknown command: {command}")
 
