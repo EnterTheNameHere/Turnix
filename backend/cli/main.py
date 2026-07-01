@@ -303,7 +303,7 @@ def runActivationPlanSanity() -> int:
     print(f"plan: {planId}")
     print("activated:")
     for activatedEntry in report.activatedEntries:
-        print(f"  {activatedEntry}")
+        print(f"  {activatedEntry.entryId}")
     print("registered:")
     print(f"  {echoCapabilityId}")
     print(f"  {reverseCapabilityId}")
