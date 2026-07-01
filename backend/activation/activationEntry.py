@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend.activation.activationAdapterKind import ActivationAdapterKind
 from backend.core.errors import UsageError
 from backend.core.validation import requireExactNonBlankString
 
@@ -21,6 +22,7 @@ class PythonActivationEntry:
     ownerId: str
     sourcePath: Path
     callableName: str
+    adapterKind: ActivationAdapterKind
 
 
 def createPythonActivationEntry(
@@ -42,4 +44,5 @@ def createPythonActivationEntry(
         ownerId=cleanOwnerId,
         sourcePath=sourcePath,
         callableName=cleanCallableName,
+        adapterKind=ActivationAdapterKind.PYTHON_IN_PROCESS,
     )

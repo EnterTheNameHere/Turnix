@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Sequence
 
+from backend.activation.activationAdapterKind import ActivationAdapterKind
 from backend.activation.activationEntry import createPythonActivationEntry
 from backend.activation.activationPlan import createActivationPlan
 from backend.activation.activator import activatePlan
@@ -250,12 +251,14 @@ def runActivationPlanSanity() -> int:
     )
 
     registry = CapabilityRegistry()
-    adapter = PythonInProcessAdapter(sink=sink)
+    adapters = {
+        ActivationAdapterKind.PYTHON_IN_PROCESS: PythonInProcessAdapter(sink=sink),
+    }
 
     activatedEntryIds = activatePlan(
         plan=plan,
         registry=registry,
-        adapter=adapter,
+        adapters=adapters,
         sink=sink,
     )
 
