@@ -7,16 +7,16 @@ from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 
+from backend.activation.activationAdapter import ActivationAdapter
 from backend.activation.activationEntry import PythonActivationEntry
 from backend.context.modCallContext import ModCallContext
 from backend.core.errors import UsageError
 from backend.tracing.devTrace import DevTraceSink
 
-
 type ActivationCallable = Callable[[ModCallContext], object]
 
 
-class PythonInProcessAdapter:
+class PythonInProcessAdapter(ActivationAdapter):
     """
     Loads declared Python activation entries by source file path.
 
