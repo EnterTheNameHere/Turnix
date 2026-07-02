@@ -1,4 +1,4 @@
-# file: backend/activation/activationManifest.py
+# file: backend/activation/activationDeclaration.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,7 +12,7 @@ from backend.core.validation import requireExactNonBlankString
 
 
 @dataclass(frozen=True)
-class ActivationManifest:
+class ActivationDeclaration:
     """
     In-memory manifest-shaped activation group.
 
@@ -24,11 +24,11 @@ class ActivationManifest:
     entries: tuple[ActivationSpec, ...]
 
 
-def createActivationManifest(
+def createActivationDeclaration(
     *,
     planId: str,
     entries: tuple[ActivationSpec, ...],
-) -> ActivationManifest:
+) -> ActivationDeclaration:
     cleanPlanId = requireExactNonBlankString(planId, "planId")
 
     if not isinstance(entries, tuple):
@@ -41,7 +41,7 @@ def createActivationManifest(
         if not isinstance(entry, ActivationSpec):
             raise UsageError(f"entries[{index}] must be an ActivationSpec, not {type(entry).__name__}.")
 
-    return ActivationManifest(
+    return ActivationDeclaration(
         planId=cleanPlanId,
         entries=tuple(entries),
     )
@@ -49,10 +49,10 @@ def createActivationManifest(
 
 def materializeActivationPlan(
     *,
-    manifest: ActivationManifest,
+    manifest: ActivationDeclaration,
     basePath: Path,
 ) -> ActivationPlan:
-    if not isinstance(manifest, ActivationManifest):
+    if not isinstance(manifest, ActivationDeclaration):
         raise UsageError(f"manifest must be an ActivationManifest, not {type(manifest).__name__}.")
 
     return createActivationPlan(
