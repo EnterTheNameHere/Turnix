@@ -14,10 +14,11 @@ from backend.core.validation import requireExactNonBlankString
 @dataclass(frozen=True)
 class ActivationDeclaration:
     """
-    In-memory manifest-shaped activation group.
+    In-memory declaration-shaped activation group.
 
-    This is not manifest file parsing, Pack discovery, dependency solving,
-    version resolution, permission enforcement, or activation lifecycle state.
+    This is not a Pack manifest, manifest file parsing, Pack discovery,
+    dependency solving, version resolution, permission enforcement, or
+    activation lifecycle state.
     """
 
     planId: str
@@ -49,19 +50,19 @@ def createActivationDeclaration(
 
 def materializeActivationPlan(
     *,
-    manifest: ActivationDeclaration,
+    declaration: ActivationDeclaration,
     basePath: Path,
 ) -> ActivationPlan:
-    if not isinstance(manifest, ActivationDeclaration):
-        raise UsageError(f"manifest must be an ActivationManifest, not {type(manifest).__name__}.")
+    if not isinstance(declaration, ActivationDeclaration):
+        raise UsageError(f"declaration must be an ActivationManifest, not {type(declaration).__name__}.")
 
     return createActivationPlan(
-        planId=manifest.planId,
+        planId=declaration.planId,
         entries=tuple(
             materializeActivationEntry(
                 spec=entry,
                 basePath=basePath,
             )
-            for entry in manifest.entries
+            for entry in declaration.entries
         ),
     )
