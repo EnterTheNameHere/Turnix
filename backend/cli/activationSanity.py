@@ -1,13 +1,13 @@
 # file: backend/cli/activationSanity.py
 from __future__ import annotations
-from backend.activation.activationSpec import createActivationSpec
-from backend.activation.activationManifest import createActivationManifest, materializeActivationPlan
 
 from pathlib import PurePosixPath
 
 from backend.activation.activationAdapterKind import ActivationAdapterKind
 from backend.activation.activationEntry import createPythonActivationEntry
 from backend.activation.activationErrors import ActivationError
+from backend.activation.activationManifest import createActivationManifest, materializeActivationPlan
+from backend.activation.activationSpec import createActivationSpec
 from backend.activation.activator import activatePlan
 from backend.adapters.pythonInProcess import PythonInProcessAdapter
 from backend.capabilities.registry import CapabilityRegistry
