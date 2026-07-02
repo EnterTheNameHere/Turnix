@@ -11,7 +11,7 @@ from backend.core.errors import UsageError
 from backend.core.validation import requireExactNonBlankString
 
 
-@dataclass
+@dataclass(frozen=True)
 class ActivationManifest:
     """
     In-memory manifest-shaped activation group.

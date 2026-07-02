@@ -8,7 +8,8 @@ from backend.activation.activationAdapterKind import ActivationAdapterKind
 from backend.core.errors import UsageError
 from backend.core.validation import requireExactNonBlankString
 
-@dataclass
+
+@dataclass(frozen=True)
 class ActivationSpec:
     """
     Manifest-shaped activation entry input.
@@ -65,4 +66,3 @@ def validateActivationSource(source: PurePosixPath) -> PurePosixPath:
         raise UsageError(f"source must not contain '..': {sourceText}")
 
     return source
-
