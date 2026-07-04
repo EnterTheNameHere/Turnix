@@ -54,7 +54,7 @@ def materializeActivationPlan(
     basePath: Path,
 ) -> ActivationPlan:
     if not isinstance(declaration, ActivationDeclaration):
-        raise UsageError(f"declaration must be an ActivationManifest, not {type(declaration).__name__}.")
+        raise UsageError(f"declaration must be an ActivationDeclaration, not {type(declaration).__name__}.")
 
     return createActivationPlan(
         planId=declaration.planId,
