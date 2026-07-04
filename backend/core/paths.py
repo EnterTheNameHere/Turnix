@@ -32,9 +32,7 @@ def findRepoRoot(startPath: Path | None = None) -> Path:
 
 
 def isRepoRoot(path: Path) -> bool:
-    """
-    Checks if the given path is a repository root.
-    """
+    """Checks if the given path is a repository root."""
     return (
         (path / "docs").is_dir()
         and (path / "backend").is_dir()
