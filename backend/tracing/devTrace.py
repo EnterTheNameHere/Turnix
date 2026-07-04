@@ -1,9 +1,12 @@
 # file: backend/tracing/devTrace.py
 from __future__ import annotations
 
-from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from sys import stdout
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 class DevTraceSink:
@@ -22,7 +25,7 @@ class DevTraceSink:
         message: str,
         attrs: Mapping[str, object] | None = None,
     ) -> None:
-        timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        timestamp = datetime.now(UTC).isoformat(timespec="seconds")
         attrText = formatAttrs(attrs)
 
         if attrText:
