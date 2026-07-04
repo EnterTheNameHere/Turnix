@@ -7,10 +7,13 @@ from typing import TYPE_CHECKING, Any, cast
 from backend.activation.activationAdapterKind import ActivationAdapterKind
 from backend.activation.activationDeclaration import ActivationDeclaration, createActivationDeclaration
 from backend.activation.activationSpec import ActivationSpec, createActivationSpec
-from backend.content.contentRoot import ContentRoot
+from backend.content.contentRootCatalog import ContentRootCatalog, getContentRoot
 from backend.core.errors import UsageError
 from backend.core.json5Loader import loadJson5File
 
+if TYPE_CHECKING:
+    from backend.activation.activationDeclarationSource import ActivationDeclarationSource
+    from backend.content.contentRoot import ContentRoot
 
 DECLARATION_SUFFIX = ".json5"
 
@@ -26,6 +29,32 @@ def loadActivationDeclarationFromRoot(
     )
 
 
+def loadActivationDeclarationFromCatalog(
+    *,
+    catalog: ContentRootCatalog,
+    rootId: str,
+    declarationPath: PurePosixPath,
+    ) -> ActivationDeclaration:
+    contentRoot = getContentRoot(catalog=catalog, rootId=rootId)
+
+    return loadActivationDeclarationFromRoot(
+        contentRoot=contentRoot,
+        declarationPath=declarationPath,
+    )
+
+
+def loadActivationDeclarationFromSource(
+    *,
+    catalog: ContentRootCatalog,
+    source: ActivationDeclarationSource,
+) -> ActivationDeclaration:
+    return loadActivationDeclarationFromCatalog(
+        catalog=catalog,
+        rootId=source.rootId,
+        declarationPath=source.declarationPath,
+    )
+
+
 def loadActivationDeclarationFile(
     *,
     basePath: Path,
@@ -36,9 +65,7 @@ def loadActivationDeclarationFile(
         declarationPath=declarationPath,
     )
 
-    return parseActivationDeclarationText(
-        sourcePath=resolvedPath,
-    )
+    return parseActivationDeclarationText(sourcePath=resolvedPath)
 
 
 def resolveActivationDeclarationPath(
@@ -85,10 +112,7 @@ def parseActivationDeclarationText(
     if not isinstance(loaded, dict):
         raise UsageError(f"Activation declaration must be an object: {sourcePath}")
 
-    return parseActivationDeclarationObject(
-        data=loaded,
-        sourcePath=sourcePath,
-    )
+    return parseActivationDeclarationObject(data=loaded, sourcePath=sourcePath)
 
 
 def parseActivationDeclarationObject(
@@ -119,10 +143,7 @@ def parseActivationDeclarationObject(
             )
         )
 
-    return createActivationDeclaration(
-        planId=planId,
-        entries=tuple(entries),
-    )
+    return createActivationDeclaration(planId=planId, entries=tuple(entries))
 
 
 def parseActivationSpecObject(

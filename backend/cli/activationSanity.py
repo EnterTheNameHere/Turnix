@@ -5,7 +5,11 @@ from pathlib import PurePosixPath
 
 from backend.activation.activationAdapterKind import ActivationAdapterKind
 from backend.activation.activationDeclaration import createActivationDeclaration, materializeActivationPlan
-from backend.activation.activationDeclarationLoader import loadActivationDeclarationFromRoot
+from backend.activation.activationDeclarationLoader import loadActivationDeclarationFromSource
+from backend.activation.activationDeclarationSource import (
+    ActivationDeclarationSource,
+    createActivationDeclarationSource,
+)
 from backend.activation.activationEntry import createPythonActivationEntry
 from backend.activation.activationErrors import ActivationError
 from backend.activation.activationSpec import createActivationSpec
@@ -13,6 +17,7 @@ from backend.activation.activator import activatePlan
 from backend.adapters.pythonInProcess import PythonInProcessAdapter
 from backend.capabilities.registry import CapabilityRegistry
 from backend.content.contentRoot import createContentRoot
+from backend.content.contentRootCatalog import createContentRootCatalog, getContentRoot
 from backend.context.modCallContext import ModCallContext
 from backend.core.errors import UsageError
 from backend.core.paths import getRepoRoot
@@ -283,96 +288,116 @@ def runActivationDeclarationSanity() -> int:
     sink = DevTraceSink()
 
     repoRoot = getRepoRoot()
-    contentRoot = createContentRoot(
-        rootId="repo",
-        rootPath=repoRoot,
+    catalog = createContentRootCatalog(
+        roots=(
+            createContentRoot(
+                rootId="repo",
+                rootPath=repoRoot,
+            ),
+        ),
     )
 
-    declarationPath = PurePosixPath("first-party/bootstrap/activation.declaration.json5")
-
-    declaration = loadActivationDeclarationFromRoot(
-        contentRoot=contentRoot,
-        declarationPath=declarationPath,
-    )
-
-    plan = materializeActivationPlan(
-        declaration=declaration,
-        basePath=contentRoot.rootPath,
-    )
-
-    sink.emit(
-        reason="ActivationDeclarationSanityCompleted",
-        message="activation declaration sanity command completed",
-        attrs={
-            "rootId": contentRoot.rootId,
-            "rootPath": str(contentRoot.rootPath),
-            "declarationPath": declarationPath.as_posix(),
-            "planId": plan.planId,
-            "entryCount": len(plan.entries),
-        },
-    )
+    sources = createBootstrapActivationDeclarationSources()
 
     registry = CapabilityRegistry()
     adapters = {
         ActivationAdapterKind.PYTHON_IN_PROCESS: PythonInProcessAdapter(sink=sink),
     }
 
-    report = activatePlan(
-        plan=plan,
-        registry=registry,
-        adapters=adapters,
-        sink=sink,
-    )
-
-    expectedEntryIds = tuple(entry.entryId for entry in plan.entries)
-    if report.activatedEntryIds != expectedEntryIds:
-        raise UsageError(
-            f"Unexpected activated entry IDs: expected {expectedEntryIds!r}, "
-            f"got {report.activatedEntryIds!r}."
+    for source in sources:
+        contentRoot = getContentRoot(
+            catalog=catalog,
+            rootId=source.rootId,
         )
 
-    echoCapabilityId = "bootstrap.activationEcho@1"
-    reverseCapabilityId = "bootstrapExtra.reverse@1"
+        declaration = loadActivationDeclarationFromSource(
+            catalog=catalog,
+            source=source,
+        )
 
-    if not registry.has(echoCapabilityId):
-        raise UsageError(f"Missing expected capability: {echoCapabilityId}")
+        plan = materializeActivationPlan(
+            declaration=declaration,
+            basePath=contentRoot.rootPath,
+        )
 
-    if not registry.has(reverseCapabilityId):
-        raise UsageError(f"Missing expected capability: {reverseCapabilityId}")
+        sink.emit(
+            reason="ActivationDeclarationSanityStarter",
+            message="activation declaration sanity command started",
+            attrs={
+                "rootId": contentRoot.rootId,
+                "rootPath": str(contentRoot.rootPath),
+                "declarationPath": source.declarationPath.as_posix(),
+                "planId": plan.planId,
+                "entryCount": len(plan.entries),
+            },
+        )
 
-    echoResult = registry.call(echoCapabilityId, {"text": "hello"})
-    reverseResult = registry.call(reverseCapabilityId, {"text": "hello"})
+        report = activatePlan(
+            plan=plan,
+            registry=registry,
+            adapters=adapters,
+            sink=sink,
+        )
 
-    if echoResult != {"text": "hello"}:
-        raise UsageError(f"Unexpected echo result: expected {{'text': 'hello'}}, got {echoResult!r}.")
+        expectedEntryIds = tuple(entry.entryId for entry in plan.entries)
+        if report.activatedEntryIds != expectedEntryIds:
+            raise UsageError(
+                f"Unexpected activated entry IDs: expected {expectedEntryIds!r}, "
+                f"got {report.activatedEntryIds!r}.",
+            )
 
-    if reverseResult != {"text": "olleh"}:
-        raise UsageError(f"Unexpected reverse result: expected {{'text': 'olleh'}}, got {reverseResult!r}.")
+        echoCapabilityId = "bootstrap.activationEcho@1"
+        reverseCapabilityId = "bootstrapExtra.reverse@1"
 
-    sink.emit(
-        reason="ActivationDeclarationSanityCompleted",
-        message="activation declaration sanity command completed",
-        attrs={
-            "rootId": contentRoot.rootId,
-            "declarationPath": declarationPath.as_posix(),
-            "planId": report.planId,
-            "entryCount": len(report.activatedEntries),
-            "echoResult": echoResult,
-            "reverseResult": reverseResult,
-        },
-    )
+        if not registry.has(echoCapabilityId):
+            raise UsageError(f"Missing expected capability: {echoCapabilityId}")
 
-    print("Actant activation declaration sanity OK")
-    print(f"root: {contentRoot.rootId}")
-    print(f"declaration: {declarationPath.as_posix()}")
-    print(f"plan: {report.planId}")
-    print("activated:")
-    for activatedEntry in report.activatedEntries:
-        print(f"  {activatedEntry.entryId}")
-    print("registered:")
-    print(f"  {echoCapabilityId}")
-    print(f"  {reverseCapabilityId}")
-    print("results")
-    print(f"  {echoCapabilityId} -> {echoResult}")
-    print(f"  {reverseCapabilityId} -> {reverseResult}")
+        if not registry.has(reverseCapabilityId):
+            raise UsageError(f"Missing expected capability: {reverseCapabilityId}")
+
+        echoResult = registry.call(echoCapabilityId, {"text": "hello"})
+        reverseResult = registry.call(reverseCapabilityId, {"text": "hello"})
+
+        if echoResult != {"text": "hello"}:
+            raise UsageError(f"Unexpected echo result: expected {{'text': 'hello'}}, got {echoResult!r}.")
+
+        if reverseResult != {"text": "olleh"}:
+            raise UsageError(f"Unexpected reverse result: expected {{'text': 'olleh'}}, got {reverseResult!r}.")
+
+        sink.emit(
+            reason="ActivationDeclarationSanityCompleted",
+            message="activation declaration sanity command completed",
+            attrs={
+                "rootId": contentRoot.rootId,
+                "declarationPath": source.declarationPath.as_posix(),
+                "planId": report.planId,
+                "entryCount": len(report.activatedEntries),
+                "echoResult": echoResult,
+                "reverseResult": reverseResult,
+            },
+        )
+
+        print("Actant activation declaration sanity OK")
+        print(f"root: {contentRoot.rootId}")
+        print(f"declaration: {source.declarationPath.as_posix()}")
+        print(f"plan: {report.planId}")
+        print("activated:")
+        for activatedEntry in report.activatedEntries:
+            print(f"  {activatedEntry.entryId}")
+        print("registered:")
+        print(f"  {echoCapabilityId}")
+        print(f"  {reverseCapabilityId}")
+        print("results")
+        print(f"  {echoCapabilityId} -> {echoResult}")
+        print(f"  {reverseCapabilityId} -> {reverseResult}")
+
     return SUCCESS
+
+
+def createBootstrapActivationDeclarationSources() -> tuple[ActivationDeclarationSource, ...]:
+    return (
+        createActivationDeclarationSource(
+            rootId="repo",
+            declarationPath=PurePosixPath("first-party/bootstrap/activation.declaration.json5"),
+        ),
+    )

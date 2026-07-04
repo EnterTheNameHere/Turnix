@@ -75,7 +75,7 @@ def runSanity() -> int:
     if sys.version_info < (3, 12):
         raise UsageError(
             "Python version 3.12 or newer is required. ",
-            f"Current version: {sys.version.split()[0]}."
+            f"Current version: {sys.version.split()[0]}.",
         )
 
     setupPath = repoRoot / "setup.ps1"
@@ -211,7 +211,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Error: {err}", file=sys.stderr)
         return USAGE_ERROR
 
-    except Exception as err:
+    except Exception as err:  # noqa: BLE001
         print(f"Error: {err}", file=sys.stderr)
         return INTERNAL_ERROR
 

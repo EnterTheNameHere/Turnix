@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from backend.core.errors import UsageError
 from backend.core.validation import requireExactNonBlankString
 
-
 type CapabilityHandler = Callable[[object | None], object]
 
 
