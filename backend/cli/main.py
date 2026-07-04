@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 from backend.capabilities.registry import CapabilityRegistry
 from backend.cli.activationSanity import (
+    runActivationDeclarationDiscoveredRunSanity,
+    runActivationDeclarationDiscoverySanity,
     runActivationDeclarationSanity,
     runActivationFailureSanity,
     runActivationPlanSanity,
@@ -35,6 +37,8 @@ Usage:
   python -m backend.cli.main activation-plan-sanity
   python -m backend.cli.main activation-failure-sanity
   python -m backend.cli.main activation-declaration-sanity
+  python -m backend.cli.main activation-declaration-discovery-sanity
+  python .m backend.cli.main activation-declaration-discovered-run-sanity
 
 Commands:
   sanity
@@ -54,6 +58,12 @@ Commands:
 
   activation-declaration-sanity
     Verify loading temporary activation declaration file input.
+
+  activation-declaration-discovery-sanity
+    Verify temporary activation declaration discovery without activation.
+
+  activation-declaration-discovered-run-sanity
+    Verify discovered temporary activation declarations can be activated.
 
 """,
     )
@@ -205,6 +215,16 @@ def main(argv: Sequence[str] | None = None) -> int:  # noqa: C901, PLR0911, PLR0
             if len(args) != 1:
                 raise UsageError("activation-declaration-sanity command takes no arguments.")  # noqa: TRY301
             return runActivationDeclarationSanity()
+
+        if command == "activation-declaration-discovery-sanity":
+            if len(args) != 1:
+                raise UsageError("activation-declaration-discovery-sanity command takes no arguments.")  # noqa: TRY301
+            return runActivationDeclarationDiscoverySanity()
+
+        if command == "activation-declaration-discovered-run-sanity":
+            if len(args) != 1:
+                raise UsageError("activation-declaration-discovered-run-sanity command takes no arguments.")  # noqa: TRY301
+            return runActivationDeclarationDiscoveredRunSanity()
 
         raise UsageError(f"Unknown command: {command}")  # noqa: TRY301
 

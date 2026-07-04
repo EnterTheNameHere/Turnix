@@ -5,16 +5,23 @@ from pathlib import PurePosixPath
 
 from backend.activation.activationAdapterKind import ActivationAdapterKind
 from backend.activation.activationDeclaration import createActivationDeclaration, materializeActivationPlan
+from backend.activation.activationDeclarationDiscovery import (
+    discoverActivationDeclarationSourcesInRoot,
+    hasDiscoveredActivationDeclarationSource,
+)
 from backend.activation.activationDeclarationRunner import runActivationDeclarationSources
 from backend.activation.activationEntry import createPythonActivationEntry
 from backend.activation.activationErrors import ActivationError
 from backend.activation.activationSpec import createActivationSpec
 from backend.activation.activator import activatePlan
 from backend.adapters.pythonInProcess import PythonInProcessAdapter
-from backend.bootstrap.bootstrapActivationSources import createBootstrapActivationDeclarationSources
+from backend.bootstrap.bootstrapActivationSources import (
+    createBootstrapActivationDeclarationDiscoveryScope,
+    createBootstrapActivationDeclarationSources,
+)
 from backend.capabilities.registry import CapabilityRegistry
 from backend.content.contentRoot import createContentRoot
-from backend.content.contentRootCatalog import createContentRootCatalog
+from backend.content.contentRootCatalog import ContentRootCatalog, createContentRootCatalog, getContentRoot
 from backend.context.modCallContext import ModCallContext
 from backend.core.errors import UsageError
 from backend.core.paths import getRepoRoot
@@ -22,6 +29,19 @@ from backend.core.validation import typeName
 from backend.tracing.devTrace import DevTraceSink
 
 SUCCESS = 0
+
+
+def createSanityContentRootCatalog() -> ContentRootCatalog:
+    repoRoot = getRepoRoot()
+
+    return createContentRootCatalog(
+        roots=(
+            createContentRoot(
+                rootId="repo",
+                rootPath=repoRoot,
+            ),
+        ),
+    )
 
 
 def runActivationSanity() -> int:
@@ -285,16 +305,7 @@ def runActivationFailureSanity() -> int:
 def runActivationDeclarationSanity() -> int:
     sink = DevTraceSink()
 
-    repoRoot = getRepoRoot()
-    catalog = createContentRootCatalog(
-        roots=(
-            createContentRoot(
-                rootId="repo",
-                rootPath=repoRoot,
-            ),
-        ),
-    )
-
+    catalog = createSanityContentRootCatalog()
     sources = createBootstrapActivationDeclarationSources()
 
     registry = CapabilityRegistry()
@@ -357,3 +368,137 @@ def runActivationDeclarationSanity() -> int:
     print(f"  {reverseCapabilityId} -> {reverseResult}")
 
     return SUCCESS
+
+
+def runActivationDeclarationDiscoverySanity() -> int:
+    sink = DevTraceSink()
+
+    catalog = createSanityContentRootCatalog()
+    scope = createBootstrapActivationDeclarationDiscoveryScope()
+
+    contentRoot = getContentRoot(
+        catalog=catalog,
+        rootId=scope.rootId,
+    )
+
+    report = discoverActivationDeclarationSourcesInRoot(
+        contentRoot=contentRoot,
+        scope=scope,
+    )
+
+    expectedDeclarationPath = PurePosixPath("first-party/bootstrap/activation.declaration.json5")
+    if not hasDiscoveredActivationDeclarationSource(
+        report=report,
+        rootId="repo",
+        declarationPath=expectedDeclarationPath,
+    ):
+        raise UsageError(
+            f"Expected bootstrap activation declaration source was not discovered: "
+            f"repo:{expectedDeclarationPath.as_posix()}.",
+        )
+
+    sink.emit(
+        reason="ActivationDeclarationDiscoverySanityCompleted",
+        message="activation declaration discovery sanity command completed",
+        attrs={
+            "rootId": report.rootId,
+            "searchBasePath": report.scope.searchBasePath.as_posix(),
+            "filename": report.scope.filename,
+            "sourceCount": len(report.sources),
+        },
+    )
+
+    print("Actant activation declaration discovery sanity OK")
+    print(f"rootId: {report.rootId}")
+    print(f"searchBasePath: {report.scope.searchBasePath.as_posix()}")
+    print(f"filename: {report.scope.filename}")
+    print(f"sources: {len(report.sources)}")
+
+    for source in report.sources:
+        print(f"  {source.rootId}:{source.declarationPath.as_posix()}")
+
+    return SUCCESS
+
+
+def runActivationDeclarationDiscoveredRunSanity() -> int:
+    sink = DevTraceSink()
+
+    catalog = createSanityContentRootCatalog()
+    scope = createBootstrapActivationDeclarationDiscoveryScope()
+
+    contentRoot = getContentRoot(
+        catalog=catalog,
+        rootId=scope.rootId,
+    )
+
+    discoveryReport = discoverActivationDeclarationSourcesInRoot(
+        contentRoot=contentRoot,
+        scope=scope,
+    )
+
+    if not discoveryReport.sources:
+        raise UsageError("Activation declaration discovery returned no sources.")
+
+    registry = CapabilityRegistry()
+    adapters = {
+        ActivationAdapterKind.PYTHON_IN_PROCESS: PythonInProcessAdapter(sink=sink),
+    }
+
+    batchReport = runActivationDeclarationSources(
+        catalog=catalog,
+        sources=discoveryReport.sources,
+        registry=registry,
+        adapters=adapters,
+        sink=sink,
+    )
+
+    echoCapabilityId = "bootstrap.activationEcho@1"
+    reverseCapabilityId = "bootstrapExtra.reverse@1"
+
+    if not registry.has(echoCapabilityId):
+        raise UsageError(f"Missing expected capability: {echoCapabilityId}")
+
+    if not registry.has(reverseCapabilityId):
+        raise UsageError(f"Missing expected capability: {reverseCapabilityId}")
+
+    echoResult = registry.call(echoCapabilityId, {"text": "hello"})
+    reverseResult = registry.call(reverseCapabilityId, {"text": "hello"})
+
+    if echoResult != {"text": "hello"}:
+        raise UsageError(f"Unexpected echo result: expected {{'text': 'hello'}}, got {echoResult!r}.")
+
+    if reverseResult != {"text": "olleh"}:
+        raise UsageError(f"Unexpected reverse result: expected {{'text': 'olleh'}}, got {reverseResult!r}.")
+
+    sink.emit(
+        reason="ActivationDeclarationDiscoveredRunSanityCompleted",
+        message="activation declaration discovered run sanity command completed",
+        attrs={
+            "rootId": discoveryReport.rootId,
+            "sourceCount": len(discoveryReport.sources),
+            "planIds": tuple(run.activationReport.planId for run in batchReport.runs),
+            "echoResult": echoResult,
+            "reverseResult": reverseResult,
+        },
+    )
+
+    print("Actant activation declaration discovered run sanity OK")
+    print(f"rootId: {discoveryReport.rootId}")
+    print(f"discoveredSources: {len(discoveryReport.sources)}")
+
+    for run in batchReport.runs:
+        print(f"  source: {run.source.rootId}:{run.source.declarationPath.as_posix()}")
+        print(f"  plan: {run.activationReport.planId}")
+        print("  activated:")
+        for activatedEntry in run.activationReport.activatedEntries:
+            print(f"    {activatedEntry.entryId}")
+
+    print("registered:")
+    print(f"  {echoCapabilityId}")
+    print(f"  {reverseCapabilityId}")
+    print("results")
+    print(f"  {echoCapabilityId} -> {echoResult}")
+    print(f"  {reverseCapabilityId} -> {reverseResult}")
+
+    return SUCCESS
+
