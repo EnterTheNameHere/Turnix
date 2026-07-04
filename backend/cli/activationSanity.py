@@ -310,48 +310,6 @@ def runActivationDeclarationSanity() -> int:
         sink=sink,
     )
 
-    # for source in sources:
-    #     contentRoot = getContentRoot(
-    #         catalog=catalog,
-    #         rootId=source.rootId,
-    #     )
-
-    #     declaration = loadActivationDeclarationFromSource(
-    #         catalog=catalog,
-    #         source=source,
-    #     )
-
-    #     plan = materializeActivationPlan(
-    #         declaration=declaration,
-    #         basePath=contentRoot.rootPath,
-    #     )
-
-    #     sink.emit(
-    #         reason="ActivationDeclarationSanityStarted",
-    #         message="activation declaration sanity command started",
-    #         attrs={
-    #             "rootId": contentRoot.rootId,
-    #             "rootPath": str(contentRoot.rootPath),
-    #             "declarationPath": source.declarationPath.as_posix(),
-    #             "planId": plan.planId,
-    #             "entryCount": len(plan.entries),
-    #         },
-    #     )
-
-    #     report = activatePlan(
-    #         plan=plan,
-    #         registry=registry,
-    #         adapters=adapters,
-    #         sink=sink,
-    #     )
-
-    #     expectedEntryIds = tuple(entry.entryId for entry in plan.entries)
-    #     if report.activatedEntryIds != expectedEntryIds:
-    #         raise UsageError(
-    #             f"Unexpected activated entry IDs: expected {expectedEntryIds!r}, "
-    #             f"got {report.activatedEntryIds!r}.",
-    #         )
-
     echoCapabilityId = "bootstrap.activationEcho@1"
     reverseCapabilityId = "bootstrapExtra.reverse@1"
 

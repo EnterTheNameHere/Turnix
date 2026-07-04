@@ -30,7 +30,7 @@ def createContentRootCatalog(
 
     for index, root in enumerate(roots):
         if not isinstance(root, ContentRoot):
-            raise UsageError(f"roots[{index}] must be a ContentRoot, not {typeName(roots)}.")
+            raise UsageError(f"roots[{index}] must be a ContentRoot, not {typeName(root)}.")
 
         if root.rootId in rootsById:
             raise UsageError(f"Duplicate content rootId {root.rootId} in roots.")
