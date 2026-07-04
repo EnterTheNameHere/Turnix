@@ -1,11 +1,14 @@
 # file: backend/core/json5Loader.py
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import json5
 
 from backend.core.errors import UsageError
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def loadJson5File(path: Path) -> dict[str, object]:
