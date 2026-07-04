@@ -38,7 +38,7 @@ Usage:
   python -m backend.cli.main activation-failure-sanity
   python -m backend.cli.main activation-declaration-sanity
   python -m backend.cli.main activation-declaration-discovery-sanity
-  python .m backend.cli.main activation-declaration-discovered-run-sanity
+  python -m backend.cli.main activation-declaration-discovered-run-sanity
 
 Commands:
   sanity

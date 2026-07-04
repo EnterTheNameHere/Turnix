@@ -82,7 +82,7 @@ def validateActivationDeclarationDiscoveryFilename(
 
     if cleanFilename == PACK_MANIFEST_FILENAME:
         raise UsageError(
-            f"{PACK_MANIFEST_FILENAME} is reserved for Pack manifest, not activation declaration discovery.",
+            f"{PACK_MANIFEST_FILENAME} is reserved for Pack manifests, not activation declaration discovery.",
         )
 
     if cleanFilename != TEMPORARY_ACTIVATION_DECLARATION_FILENAME:
