@@ -6,6 +6,7 @@ from collections.abc import Sequence
 
 from backend.capabilities.registry import CapabilityRegistry
 from backend.cli.activationSanity import (
+    runActivationDeclarationSanity,
     runActivationFailureSanity,
     runActivationPlanSanity,
     runActivationSanity,
@@ -30,17 +31,26 @@ Usage:
   python -m backend.cli.main activation-sanity
   python -m backend.cli.main activation-plan-sanity
   python -m backend.cli.main activation-failure-sanity
+  python -m backend.cli.main activation-declaration-sanity
 
 Commands:
-  sanity                    Verify that the backend package can run under
-                              embedded Python.
-  capability-sanity         Verify minimal capability registration and
-                              invocation.
-  activation-sanity         Verify path-based Python activation loading.
+  sanity
+    Verify that the backend package can run under embedded Python.
 
-  activation-plan-sanity    Verify ordered manual activation plan loading.
+  capability-sanity
+    Verify minimal capability registration and invocation.
 
-  activation-failure-sanity Verify activation failure wrapping.
+  activation-sanity
+    Verify path-based Python activation loading.
+
+  activation-plan-sanity
+    Verify ordered manual activation plan loading.
+
+  activation-failure-sanity
+    Verify activation failure wrapping.
+
+  activation-declaration-sanity
+    Verify loading temporary activation declaration file input.
 
 """
     )
@@ -187,6 +197,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             if len(args) != 1:
                 raise UsageError("activation-failure-sanity command takes no arguments.")
             return runActivationFailureSanity()
+
+        if command == "activation-declaration-sanity":
+            if len(args) != 1:
+                raise UsageError("activation-declaration-sanity command takes no arguments.")
+            return runActivationDeclarationSanity()
 
         raise UsageError(f"Unknown command: {command}")
 
