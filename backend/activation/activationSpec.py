@@ -6,7 +6,7 @@ from pathlib import PurePosixPath
 
 from backend.activation.activationAdapterKind import ActivationAdapterKind
 from backend.core.errors import UsageError
-from backend.core.validation import requireExactNonBlankString
+from backend.core.validation import requireExactNonBlankString, typeName
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,7 @@ def createActivationSpec(
     cleanCallableName = requireExactNonBlankString(callableName, "callableName")
 
     if not isinstance(adapterKind, ActivationAdapterKind):
-        raise UsageError(f"adapterKind must be an ActivationAdapterKind, not {type(adapterKind).__name__}.")
+        raise UsageError(f"adapterKind must be an ActivationAdapterKind, not {typeName(adapterKind)}.")
 
     cleanSource = validateActivationSource(source)
 
@@ -53,7 +53,7 @@ def createActivationSpec(
 
 def validateActivationSource(source: PurePosixPath) -> PurePosixPath:
     if not isinstance(source, PurePosixPath):
-        raise UsageError(f"source must be a pathlib.PurePosixPath, not {type(source).__name__}.")
+        raise UsageError(f"source must be a pathlib.PurePosixPath, not {typeName(source)}.")
 
     sourceText = source.as_posix()
     if sourceText == ".":

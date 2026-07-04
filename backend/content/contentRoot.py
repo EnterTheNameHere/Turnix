@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from backend.core.errors import UsageError
-from backend.core.validation import requireExactNonBlankString
+from backend.core.validation import requireExactNonBlankString, typeName
 
 
 @dataclass(frozen=True)
@@ -29,7 +29,7 @@ def createContentRoot(
     cleanRootId = requireExactNonBlankString(rootId, "rootId")
 
     if not isinstance(rootPath, Path):
-        raise UsageError(f"rootPath must be a pathlib.Path, not {type(rootPath).__name__}.")
+        raise UsageError(f"rootPath must be a pathlib.Path, not {typeName(rootPath)}.")
 
     return ContentRoot(
         rootId=cleanRootId,

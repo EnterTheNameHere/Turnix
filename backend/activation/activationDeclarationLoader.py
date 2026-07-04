@@ -10,6 +10,7 @@ from backend.activation.activationSpec import ActivationSpec, createActivationSp
 from backend.content.contentRootCatalog import ContentRootCatalog, getContentRoot
 from backend.core.errors import UsageError
 from backend.core.json5Loader import loadJson5File
+from backend.core.validation import typeName
 
 if TYPE_CHECKING:
     from backend.activation.activationDeclarationSource import ActivationDeclarationSource
@@ -74,7 +75,7 @@ def resolveActivationDeclarationPath(
     declarationPath: PurePosixPath,
 ) -> Path:
     if not isinstance(basePath, Path):
-        raise UsageError(f"basePath must be a pathlib.Path, not {type(basePath).__name__}.")
+        raise UsageError(f"basePath must be a pathlib.Path, not {typeName(basePath)}.")
 
     cleanDeclarationPath = validateActivationDeclarationPath(declarationPath)
 
@@ -83,7 +84,7 @@ def resolveActivationDeclarationPath(
 
 def validateActivationDeclarationPath(declarationPath: PurePosixPath) -> PurePosixPath:
     if not isinstance(declarationPath, PurePosixPath):
-        raise UsageError(f"declarationPath must be a pathlib.PurePosixPath, not {type(declarationPath).__name__}.")
+        raise UsageError(f"declarationPath must be a pathlib.PurePosixPath, not {typeName(declarationPath)}.")
 
     declarationText = declarationPath.as_posix()
     if declarationText == ".":
@@ -126,7 +127,7 @@ def parseActivationDeclarationObject(
         sourcePath=sourcePath,
     )
 
-    rawEntries = cast(dict[str, Any],data.get("entries"))
+    rawEntries = cast("dict[str, Any]",data.get("entries"))
     if not isinstance(rawEntries, list):
         raise UsageError(f"Activation declaration must be a list: {sourcePath}.")
 
@@ -140,7 +141,7 @@ def parseActivationDeclarationObject(
                 data=rawEntry,
                 sourcePath=sourcePath,
                 index=index,
-            )
+            ),
         )
 
     return createActivationDeclaration(planId=planId, entries=tuple(entries))
@@ -192,7 +193,7 @@ def parseActivationSpecObject(
     except ValueError as err:
         raise UsageError(
             f"Unsupported activation adapter kind at entries[{index}].adapterKind "
-            f"in {sourcePath}: {adapterKindText}"
+            f"in {sourcePath}: {adapterKindText}",
         ) from err
 
     return createActivationSpec(

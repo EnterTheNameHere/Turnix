@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from backend.core.errors import ActantError
+from backend.core.validation import typeName
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -53,5 +54,5 @@ class ActivationError(ActantError):
             f"adapterKind={context.adapterKind} "
             f"sourcePath={context.sourcePath} "
             f"callableName={context.callableName} "
-            f"{type(cause).__name__}: {cause}",
+            f"{typeName(cause)}: {cause}",
         )

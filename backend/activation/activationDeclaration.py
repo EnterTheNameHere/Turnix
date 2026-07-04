@@ -8,7 +8,7 @@ from backend.activation.activationMaterializer import materializeActivationEntry
 from backend.activation.activationPlan import ActivationPlan, createActivationPlan
 from backend.activation.activationSpec import ActivationSpec
 from backend.core.errors import UsageError
-from backend.core.validation import requireExactNonBlankString
+from backend.core.validation import requireExactNonBlankString, typeName
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -36,14 +36,14 @@ def createActivationDeclaration(
     cleanPlanId = requireExactNonBlankString(planId, "planId")
 
     if not isinstance(entries, tuple):
-        raise UsageError(f"entries must be a tuple, not {type(entries).__name__}.")
+        raise UsageError(f"entries must be a tuple, not {typeName(entries)}.")
 
     if not entries:
         raise UsageError("entries must be non-empty.")
 
     for index, entry in enumerate(entries):
         if not isinstance(entry, ActivationSpec):
-            raise UsageError(f"entries[{index}] must be an ActivationSpec, not {type(entry).__name__}.")
+            raise UsageError(f"entries[{index}] must be an ActivationSpec, not {typeName(entry)}.")
 
     return ActivationDeclaration(
         planId=cleanPlanId,
@@ -57,7 +57,7 @@ def materializeActivationPlan(
     basePath: Path,
 ) -> ActivationPlan:
     if not isinstance(declaration, ActivationDeclaration):
-        raise UsageError(f"declaration must be an ActivationDeclaration, not {type(declaration).__name__}.")
+        raise UsageError(f"declaration must be an ActivationDeclaration, not {typeName(declaration)}.")
 
     return createActivationPlan(
         planId=declaration.planId,

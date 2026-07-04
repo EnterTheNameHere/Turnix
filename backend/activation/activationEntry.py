@@ -6,7 +6,7 @@ from pathlib import Path
 
 from backend.activation.activationAdapterKind import ActivationAdapterKind
 from backend.core.errors import UsageError
-from backend.core.validation import requireExactNonBlankString
+from backend.core.validation import requireExactNonBlankString, typeName
 
 
 @dataclass(frozen=True)
@@ -37,7 +37,7 @@ def createPythonActivationEntry(
     cleanCallableName = requireExactNonBlankString(callableName, "callableName")
 
     if not isinstance(sourcePath, Path):
-        raise UsageError(f"sourcePath must be a pathlib.Path, not {type(sourcePath).__name__}.")
+        raise UsageError(f"sourcePath must be a pathlib.Path, not {typeName(sourcePath)}.")
 
     return PythonActivationEntry(
         entryId=cleanEntryId,

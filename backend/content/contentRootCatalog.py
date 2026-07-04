@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from backend.content.contentRoot import ContentRoot
 from backend.core.errors import UsageError
-from backend.core.validation import requireExactNonBlankString
+from backend.core.validation import requireExactNonBlankString, typeName
 
 
 @dataclass(frozen=True)
@@ -24,13 +24,13 @@ def createContentRootCatalog(
     roots: tuple[ContentRoot, ...],
 ) -> ContentRootCatalog:
     if not isinstance(roots, tuple):
-        raise UsageError(f"roots must be a tuple, not {type(roots)}.__name__.")
+        raise UsageError(f"roots must be a tuple, not {typeName(roots)}.")
 
     rootsById: dict[str, ContentRoot] = {}
 
     for index, root in enumerate(roots):
         if not isinstance(root, ContentRoot):
-            raise UsageError(f"roots[{index}] must be a ContentRoot, not {type(root)}.__name__.")
+            raise UsageError(f"roots[{index}] must be a ContentRoot, not {typeName(roots)}.")
 
         if root.rootId in rootsById:
             raise UsageError(f"Duplicate content rootId {root.rootId} in roots.")
@@ -45,7 +45,7 @@ def getContentRoot(
     rootId: str,
 ) -> ContentRoot:
     if not isinstance(catalog, ContentRootCatalog):
-        raise UsageError(f"catalog must be a ContentRootCatalog, not {type(catalog)}.__name__.")
+        raise UsageError(f"catalog must be a ContentRootCatalog, not {typeName(catalog)}.")
 
     cleanRootId = requireExactNonBlankString(rootId, "rootId")
 

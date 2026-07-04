@@ -6,7 +6,7 @@ from backend.core.errors import UsageError
 
 def requireExactNonBlankString(value: object, name: str) -> str:
     if not isinstance(value, str):
-        raise UsageError(f"{name} must be a string, not {type(value).__name__}.")
+        raise UsageError(f"{name} must be a string, not {typeName(value)}.")
 
     if value == "":
         raise UsageError(f"{name} must not be an empty string.")
@@ -18,3 +18,8 @@ def requireExactNonBlankString(value: object, name: str) -> str:
         raise UsageError(f"{name} must not be a string containing only whitespace.")
 
     return value
+
+
+def typeName(value: object) -> str:
+    """Helper to prevent TypeError("Expected list, got {type(value)}.__name__.") typo."""
+    return type(value).__name__

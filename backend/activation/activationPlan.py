@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from backend.activation.activationEntry import PythonActivationEntry
 from backend.core.errors import UsageError
-from backend.core.validation import requireExactNonBlankString
+from backend.core.validation import requireExactNonBlankString, typeName
 
 
 @dataclass(frozen=True)
@@ -30,14 +30,14 @@ def createActivationPlan(
     planId = requireExactNonBlankString(planId, "planId")
 
     if not isinstance(entries, tuple):
-        raise UsageError(f"entries must be a tuple, not {type(entries)}.")
+        raise UsageError(f"entries must be a tuple, not {typeName(entries)}.")
 
     if len(entries) == 0:
         raise UsageError("entries must contain at least one activation entry.")
 
     for index, entry in enumerate(entries):
         if not isinstance(entry, PythonActivationEntry):
-            raise UsageError(f"entries[{index}] must be a PythonActivationEntry, not {type(entry)}.")
+            raise UsageError(f"entries[{index}] must be a PythonActivationEntry, not {typeName(entry)}.")
 
     return ActivationPlan(
         planId=planId,

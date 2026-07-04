@@ -21,6 +21,7 @@ from backend.content.contentRootCatalog import createContentRootCatalog, getCont
 from backend.context.modCallContext import ModCallContext
 from backend.core.errors import UsageError
 from backend.core.paths import getRepoRoot
+from backend.core.validation import typeName
 from backend.tracing.devTrace import DevTraceSink
 
 SUCCESS = 0
@@ -98,7 +99,7 @@ def runActivationPlanSanity() -> int:
     repoRoot = getRepoRoot()
     planId = "bootstrap.plan"
 
-    manifest = createActivationDeclaration(
+    declaration = createActivationDeclaration(
         planId=planId,
         entries=(
             createActivationSpec(
@@ -119,7 +120,7 @@ def runActivationPlanSanity() -> int:
     )
 
     plan = materializeActivationPlan(
-        declaration=manifest,
+        declaration=declaration,
         basePath=repoRoot,
     )
 
@@ -199,7 +200,7 @@ def runActivationFailureSanity() -> int:
     entryId = "first-party.bootstrapBroken.activation"
     ownerId = "first-party.bootstrapBroken"
 
-    manifest = createActivationDeclaration(
+    declaration = createActivationDeclaration(
         planId=planId,
         entries=(
             createActivationSpec(
@@ -213,7 +214,7 @@ def runActivationFailureSanity() -> int:
     )
 
     plan = materializeActivationPlan(
-        declaration=manifest,
+        declaration=declaration,
         basePath=repoRoot,
     )
 
@@ -254,7 +255,7 @@ def runActivationFailureSanity() -> int:
             raise UsageError(f"Unexpected failure adapterKind: {err.context.adapterKind!r}") from err
 
         if not isinstance(err.cause, RuntimeError):
-            raise UsageError(f"Unexpected failure cause type: {type(err.cause).__name__}") from err
+            raise UsageError(f"Unexpected failure cause type: {typeName(err.cause)}") from err
 
         if str(err.cause) != "Intentional activation failure.":
             raise UsageError(f"Unexpected failure cause: {err.cause}") from err
@@ -267,7 +268,7 @@ def runActivationFailureSanity() -> int:
                 "entryId": err.context.entryId,
                 "ownerId": err.context.ownerId,
                 "adapterKind": err.context.adapterKind,
-                "causeType": type(err.cause).__name__,
+                "causeType": typeName(err.cause),
                 "cause": str(err.cause),
             },
         )
@@ -277,7 +278,7 @@ def runActivationFailureSanity() -> int:
         print(f"failed: {err.context.entryId}")
         print(f"ownerId: {err.context.ownerId}")
         print(f"adapterKind: {err.context.adapterKind}")
-        print(f"causeType: {type(err.cause).__name__}")
+        print(f"causeType: {typeName(err.cause)}")
         print(f"cause: {err.cause}")
         return SUCCESS
 
@@ -321,7 +322,7 @@ def runActivationDeclarationSanity() -> int:
         )
 
         sink.emit(
-            reason="ActivationDeclarationSanityStarter",
+            reason="ActivationDeclarationSanityStarted",
             message="activation declaration sanity command started",
             attrs={
                 "rootId": contentRoot.rootId,

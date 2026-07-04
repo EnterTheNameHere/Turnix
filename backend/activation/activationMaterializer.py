@@ -7,6 +7,7 @@ from backend.activation.activationAdapterKind import ActivationAdapterKind
 from backend.activation.activationEntry import PythonActivationEntry, createPythonActivationEntry
 from backend.activation.activationSpec import ActivationSpec, validateActivationSource
 from backend.core.errors import UsageError
+from backend.core.validation import typeName
 
 
 def materializeActivationEntry(
@@ -21,7 +22,7 @@ def materializeActivationEntry(
     enforcement, sandboxing, or lifecycle state.
     """
     if not isinstance(spec, ActivationSpec):
-        raise UsageError(f"spec must be an ActivationSpec, got {type(spec).__name__}.")
+        raise UsageError(f"spec must be an ActivationSpec, got {typeName(spec)}.")
 
     sourcePath = resolveSpecSourcePath(
         basePath=basePath,
@@ -45,7 +46,7 @@ def resolveSpecSourcePath(
     source: PurePosixPath,
 ) -> Path:
     if not isinstance(basePath, Path):
-        raise UsageError(f"basePath must be a pathlib.Path, got {type(basePath).__name__}.")
+        raise UsageError(f"basePath must be a pathlib.Path, got {typeName(basePath)}.")
 
     cleanSource = validateActivationSource(source)
 

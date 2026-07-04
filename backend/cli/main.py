@@ -14,6 +14,7 @@ from backend.cli.activationSanity import (
 from backend.context.modCallContext import ModCallContext
 from backend.core.errors import UsageError
 from backend.core.paths import getRepoRoot
+from backend.core.validation import typeName
 from backend.tracing.devTrace import DevTraceSink
 
 if TYPE_CHECKING:
@@ -72,19 +73,19 @@ def runSanity() -> int:
         },
     )
 
-    if sys.version_info < (3, 12):
+    if sys.version_info < (3, 12):  # noqa: UP036
         raise UsageError(
-            "Python version 3.12 or newer is required. ",
+            "Python version 3.12 or newer is required. "
             f"Current version: {sys.version.split()[0]}.",
         )
 
     setupPath = repoRoot / "setup.ps1"
     if not setupPath.exists():
-        raise UsageError(f"Repository root sanity failed: missing {setupPath}")
+        raise UsageError(f"Repository root sanity failed: missing {setupPath}.")
 
     backendPath = repoRoot / "backend"
     if not backendPath.exists():
-        raise UsageError(f"Repository root sanity failed: missing {backendPath}")
+        raise UsageError(f"Repository root sanity failed: missing {backendPath}.")
 
     sink.emit(
         reason="BackendSanityCompleted",
@@ -125,11 +126,11 @@ def runCapabilitySanity() -> int:
 
     def echo(payload: object | None) -> object:
         if not isinstance(payload, dict):
-            raise UsageError(f"echo payload must be a dict, got {type(payload)}")
+            raise UsageError(f"echo payload must be a dict, got {typeName(payload)}.")
 
         text = payload.get("text")
         if not isinstance(text, str):
-            raise UsageError(f"echo payload must contain 'text' key, got {payload}")
+            raise UsageError(f"echo payload must contain 'text' key, got {payload}.")
 
         return {"text": text}
 
@@ -147,7 +148,7 @@ def runCapabilitySanity() -> int:
     result = registry.call(capabilityId, {"text": "hello"})
 
     if result != {"text": "hello"}:
-        raise UsageError(f"Unexpected capability result: expected {{'text': 'hello'}}, got {result!r}")
+        raise UsageError(f"Unexpected capability result: expected {{'text': 'hello'}}, got {result!r}.")
 
     sink.emit(
         reason="CapabilitySanityCompleted",
@@ -165,7 +166,7 @@ def runCapabilitySanity() -> int:
     return SUCCESS
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:  # noqa: C901, PLR0911, PLR0912 - TODO: This is temporary
     args = list(sys.argv[1:] if argv is None else argv)
 
     if not args:
@@ -177,41 +178,41 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if command == "sanity":
             if len(args) != 1:
-                raise UsageError("sanity command takes no arguments.")
+                raise UsageError("sanity command takes no arguments.")  # noqa: TRY301
             return runSanity()
 
         if command == "capability-sanity":
             if len(args) != 1:
-                raise UsageError("capability-sanity command takes no arguments.")
+                raise UsageError("capability-sanity command takes no arguments.")  # noqa: TRY301
             return runCapabilitySanity()
 
         if command == "activation-sanity":
             if len(args) != 1:
-                raise UsageError("activation-sanity command takes no arguments.")
+                raise UsageError("activation-sanity command takes no arguments.")  # noqa: TRY301
             return runActivationSanity()
 
         if command == "activation-plan-sanity":
             if len(args) != 1:
-                raise UsageError("activation-plan-sanity command takes no arguments.")
+                raise UsageError("activation-plan-sanity command takes no arguments.")  # noqa: TRY301
             return runActivationPlanSanity()
 
         if command == "activation-failure-sanity":
             if len(args) != 1:
-                raise UsageError("activation-failure-sanity command takes no arguments.")
+                raise UsageError("activation-failure-sanity command takes no arguments.")  # noqa: TRY301
             return runActivationFailureSanity()
 
         if command == "activation-declaration-sanity":
             if len(args) != 1:
-                raise UsageError("activation-declaration-sanity command takes no arguments.")
+                raise UsageError("activation-declaration-sanity command takes no arguments.")  # noqa: TRY301
             return runActivationDeclarationSanity()
 
-        raise UsageError(f"Unknown command: {command}")
+        raise UsageError(f"Unknown command: {command}")  # noqa: TRY301
 
     except UsageError as err:
         print(f"Error: {err}", file=sys.stderr)
         return USAGE_ERROR
 
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:  # noqa: BLE001 - TODO: This is temporary
         print(f"Error: {err}", file=sys.stderr)
         return INTERNAL_ERROR
 

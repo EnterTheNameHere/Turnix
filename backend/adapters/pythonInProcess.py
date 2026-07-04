@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from backend.activation.activationAdapter import ActivationAdapter
 from backend.context.modCallContext import ModCallContext
 from backend.core.errors import UsageError
+from backend.core.validation import typeName
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -81,7 +82,7 @@ class PythonInProcessAdapter(ActivationAdapter):
 
     def _resolveSourcePath(self, sourcePath: Path) -> Path:
         if not isinstance(sourcePath, Path):
-            raise UsageError(f"sourcePath must be a pathlib.Path, got {type(sourcePath)}.")
+            raise UsageError(f"sourcePath must be a pathlib.Path, got {typeName(sourcePath)}.")
 
         resolvedPath = sourcePath.resolve()
 
@@ -106,11 +107,11 @@ class PythonInProcessAdapter(ActivationAdapter):
 
         spec = importlib.util.spec_from_file_location(moduleName, sourcePath)
         if spec is None:
-            raise UsageError(f"Could not create module spec for {sourcePath}")
+            raise UsageError(f"Could not create module spec for {sourcePath}.")
 
         loader = spec.loader
         if loader is None:
-            raise UsageError(f"Module spec has no loader for {sourcePath}")
+            raise UsageError(f"Module spec has no loader for {sourcePath}.")
 
         module = importlib.util.module_from_spec(spec)
 

@@ -7,6 +7,7 @@ from backend.activation.activationErrors import ActivationError, ActivationFailu
 from backend.activation.activationReport import ActivatedEntry, ActivationReport
 from backend.context.modCallContext import ModCallContext
 from backend.core.errors import UsageError
+from backend.core.validation import typeName
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -82,7 +83,7 @@ def activatePlan(
                     "adapterKind": entry.adapterKind,
                     "sourcePath": str(entry.sourcePath),
                     "callableName": entry.callableName,
-                    "causeType": type(err).__name__,
+                    "causeType": typeName(err),
                     "cause": str(err),
                 },
             )
