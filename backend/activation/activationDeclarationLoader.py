@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from backend.activation.activationAdapterKind import ActivationAdapterKind
 from backend.activation.activationDeclaration import ActivationDeclaration, createActivationDeclaration

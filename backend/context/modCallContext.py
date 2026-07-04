@@ -1,8 +1,12 @@
 # file: backend/context/modCallContext.py
 from __future__ import annotations
 
-from backend.capabilities.registry import CapabilityRegistry, CapabilityHandler
+from typing import TYPE_CHECKING
+
 from backend.core.validation import requireExactNonBlankString
+
+if TYPE_CHECKING:
+    from backend.capabilities.registry import CapabilityHandler, CapabilityRegistry
 
 
 class ModCallContext:

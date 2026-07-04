@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from backend.activation.activationMaterializer import materializeActivationEntry
 from backend.activation.activationPlan import ActivationPlan, createActivationPlan
 from backend.activation.activationSpec import ActivationSpec
 from backend.core.errors import UsageError
 from backend.core.validation import requireExactNonBlankString
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @dataclass(frozen=True)

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from backend.capabilities.registry import CapabilityRegistry
 from backend.cli.activationSanity import (
@@ -16,6 +16,8 @@ from backend.core.errors import UsageError
 from backend.core.paths import getRepoRoot
 from backend.tracing.devTrace import DevTraceSink
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 SUCCESS = 0
 USAGE_ERROR = 2

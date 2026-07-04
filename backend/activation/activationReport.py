@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from backend.activation.activationAdapterKind import ActivationAdapterKind
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from backend.activation.activationAdapterKind import ActivationAdapterKind
 
 
 @dataclass(frozen=True)

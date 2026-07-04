@@ -1,10 +1,11 @@
 # file: backend/activation/activationAdapter.py
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from backend.activation.activationEntry import PythonActivationEntry
-from backend.context.modCallContext import ModCallContext
+if TYPE_CHECKING:
+    from backend.activation.activationEntry import PythonActivationEntry
+    from backend.context.modCallContext import ModCallContext
 
 
 class ActivationAdapter(Protocol):

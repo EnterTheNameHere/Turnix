@@ -1,18 +1,22 @@
 # file: backend/activation/activator.py
 from __future__ import annotations
 
-from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
-from backend.activation.activationAdapter import ActivationAdapter
-from backend.activation.activationAdapterKind import ActivationAdapterKind
-from backend.activation.activationEntry import PythonActivationEntry
 from backend.activation.activationErrors import ActivationError, ActivationFailureContext
-from backend.activation.activationPlan import ActivationPlan
 from backend.activation.activationReport import ActivatedEntry, ActivationReport
-from backend.capabilities.registry import CapabilityRegistry
 from backend.context.modCallContext import ModCallContext
 from backend.core.errors import UsageError
-from backend.tracing.devTrace import DevTraceSink
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from backend.activation.activationAdapter import ActivationAdapter
+    from backend.activation.activationAdapterKind import ActivationAdapterKind
+    from backend.activation.activationEntry import PythonActivationEntry
+    from backend.activation.activationPlan import ActivationPlan
+    from backend.capabilities.registry import CapabilityRegistry
+    from backend.tracing.devTrace import DevTraceSink
 
 
 def activatePlan(
