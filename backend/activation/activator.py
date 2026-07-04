@@ -102,7 +102,7 @@ def activatePlan(
                 adapterKind=entry.adapterKind,
                 sourcePath=entry.sourcePath,
                 callableName=entry.callableName,
-            )
+            ),
         )
 
         emit(

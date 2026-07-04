@@ -53,5 +53,5 @@ class ActivationError(ActantError):
             f"adapterKind={context.adapterKind} "
             f"sourcePath={context.sourcePath} "
             f"callableName={context.callableName} "
-            f"{type(cause).__name__}: {cause}"
+            f"{type(cause).__name__}: {cause}",
         )

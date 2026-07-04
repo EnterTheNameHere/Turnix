@@ -54,7 +54,7 @@ Commands:
   activation-declaration-sanity
     Verify loading temporary activation declaration file input.
 
-"""
+""",
     )
 
 
