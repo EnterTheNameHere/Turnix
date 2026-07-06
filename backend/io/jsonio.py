@@ -1,4 +1,4 @@
-# file: backend/core/json5Loader.py
+# file: backend/io/jsonio.py
 from __future__ import annotations
 
 import contextlib

@@ -9,8 +9,8 @@ from backend.activation.activationDeclaration import ActivationDeclaration, crea
 from backend.activation.activationSpec import ActivationSpec, createActivationSpec
 from backend.content.contentRootCatalog import ContentRootCatalog, getContentRoot
 from backend.core.errors import UsageError
-from backend.core.json5Loader import loadJson5File
 from backend.core.validation import typeName
+from backend.io.jsonio import loadJson5File
 
 if TYPE_CHECKING:
     from backend.activation.activationDeclarationSource import ActivationDeclarationSource
