@@ -39,6 +39,12 @@ def uuidv4hex12(*, prefix: str = "") -> str:
     return prefix + str(uuid.uuid4()).replace("-", "")[:12]
 
 
+def uuidv4hex(*, prefix: str = "") -> str:
+    """Returns a hex string from a UUIDv4, optionally with a prefix."""
+    validatePrefix(prefix)
+    return prefix + str(uuid.uuid4().hex)
+
+
 def shortToken(nbytes: int = 12) -> str:
     """Returns a compact opaque token for URLs/cookies."""
     if not isinstance(nbytes, int):
