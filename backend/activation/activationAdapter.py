@@ -48,5 +48,6 @@ class ActivationAdapter(Protocol):
         callableName: str,
         ctx: ModCallContext,
         request: JsonObject | None = None,
+        required: bool = True,
     ) -> object:
         ...
