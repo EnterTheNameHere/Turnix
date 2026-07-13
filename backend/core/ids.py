@@ -9,6 +9,7 @@ import uuid6
 __all__: list[str] = [
     "shortToken",
     "uuidv4",
+    "uuidv4hex",
     "uuidv4hex10",
     "uuidv4hex12",
     "uuidv7",
