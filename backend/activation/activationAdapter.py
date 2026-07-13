@@ -16,8 +16,19 @@ class ActivationAdapter(Protocol):
     load executes the adapter-specific entry and returns its loaded mod
     instance. The returned instance may be reused for multiple calls.
 
-    call invokes the named callable with ctx. When request is supplied, it is
-    passed as the second argument.
+    call invokes the named callable with ctx.
+
+    When request is None, the callable is invoked with only ctx:
+
+        callable(ctx)
+
+    When request is supplied, including an empty object, the callable is
+    invoked with ctx and request:
+
+        callable(ctx, request)
+
+    Therefore, request=None controls the callable signature. It does not mean
+    that None is passed as the request argument.
 
     The adapter does not determine dependency order, activation phases,
     duplicate-loading policy, reuse, unloading, or reloading.
