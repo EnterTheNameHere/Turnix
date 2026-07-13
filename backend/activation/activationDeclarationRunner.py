@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from backend.activation.activationDeclaration import materializeActivationPlan
 from backend.activation.activationDeclarationLoader import loadActivationDeclarationFromSource
 from backend.activation.activationDeclarationSource import ActivationDeclarationSource
-from backend.activation.activator import activatePlan
+from backend.activation.activator import LoadedMod, activatePlan
 from backend.content.contentRootCatalog import ContentRootCatalog, getContentRoot
 from backend.core.errors import UsageError
 from backend.core.validation import typeName
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from backend.activation.activationAdapter import ActivationAdapter
     from backend.activation.activationAdapterKind import ActivationAdapterKind
     from backend.activation.activationReport import ActivationReport
-    from backend.capabilities.registry import CapabilityRegistry
+    from backend.runtime.runtimeServices import RuntimeServices
     from backend.tracing.devTrace import DevTraceSink
 
 
@@ -27,11 +27,14 @@ class ActivationDeclarationRunReport:
     """
     Source-aware activation declaration run result.
 
-    This is not discovery, dependency solving, Pack loading, or lifecycle state.
+    loadedMods contains the live adapter-specific mod instances produced by
+    this run. This is not discovery, dependency solving, Pack loading, or
+    full lifecycle state.
     """
 
     source: ActivationDeclarationSource
     activationReport: ActivationReport
+    loadedMods: tuple[LoadedMod, ...]
 
 
 @dataclass(frozen=True)
@@ -50,12 +53,15 @@ def runActivationDeclarationSource(
     *,
     catalog: ContentRootCatalog,
     source: ActivationDeclarationSource,
-    registry: CapabilityRegistry,
+    runtime: RuntimeServices,
     adapters: Mapping[ActivationAdapterKind, ActivationAdapter],
     sink: DevTraceSink,
 ) -> ActivationDeclarationRunReport:
     if not isinstance(source, ActivationDeclarationSource):
-        raise UsageError(f"source must be an ActivationDeclarationSource, not {typeName(source)}.")
+        raise UsageError(
+            "source must be an ActivationDeclarationSource, "
+            f"not {typeName(source)}.",
+        )
 
     contentRoot = getContentRoot(
         catalog=catalog,
@@ -84,9 +90,9 @@ def runActivationDeclarationSource(
         },
     )
 
-    activationReport = activatePlan(
+    activationReport, loadedMods = activatePlan(
         plan=plan,
-        registry=registry,
+        runtime=runtime,
         adapters=adapters,
         sink=sink,
     )
@@ -112,6 +118,7 @@ def runActivationDeclarationSource(
     return ActivationDeclarationRunReport(
         source=source,
         activationReport=activationReport,
+        loadedMods=loadedMods,
     )
 
 
@@ -119,7 +126,7 @@ def runActivationDeclarationSources(
     *,
     catalog: ContentRootCatalog,
     sources: tuple[ActivationDeclarationSource, ...],
-    registry: CapabilityRegistry,
+    runtime: RuntimeServices,
     adapters: Mapping[ActivationAdapterKind, ActivationAdapter],
     sink: DevTraceSink,
 ) -> ActivationDeclarationBatchReport:
@@ -135,19 +142,19 @@ def runActivationDeclarationSources(
         },
     )
 
-    runs: list[ActivationDeclarationRunReport] = [
+    runs = tuple(
         runActivationDeclarationSource(
             catalog=catalog,
             source=source,
-            registry=registry,
+            runtime=runtime,
             adapters=adapters,
             sink=sink,
         )
         for source in cleanSources
-    ]
+    )
 
     report = ActivationDeclarationBatchReport(
-        runs=tuple(runs),
+        runs=runs,
     )
 
     sink.emit(
@@ -155,7 +162,10 @@ def runActivationDeclarationSources(
         message="activation declaration batch run completed",
         attrs={
             "sourceCount": len(cleanSources),
-            "planIds": tuple(run.activationReport.planId for run in report.runs),
+            "planIds": tuple(
+                run.activationReport.planId
+                for run in report.runs
+            ),
         },
     )
 
@@ -167,7 +177,9 @@ def validateActivationDeclarationSources(
     sources: tuple[ActivationDeclarationSource, ...],
 ) -> tuple[ActivationDeclarationSource, ...]:
     if not isinstance(sources, tuple):
-        raise UsageError(f"sources must be a tuple, not {typeName(sources)}.")
+        raise UsageError(
+            f"sources must be a tuple, not {typeName(sources)}.",
+        )
 
     if not sources:
         raise UsageError("sources must not be empty.")
@@ -176,19 +188,20 @@ def validateActivationDeclarationSources(
 
     for index, source in enumerate(sources):
         if not isinstance(source, ActivationDeclarationSource):
-            raise UsageError(f"sources[{index}] must be an ActivationDeclarationSource, not {typeName(source)}.")
+            raise UsageError(
+                f"sources[{index}] must be an ActivationDeclarationSource, "
+                f"not {typeName(source)}.",
+            )
 
         sourceKey = (
             source.rootId,
-            str(source.declarationPath),
+            source.declarationPath.as_posix(),
         )
         if sourceKey in seenSourceKeys:
             raise UsageError(
-                f"Duplicate activation declaration source: {sourceKey}, "
-                f"declarationPath={source.declarationPath.as_posix()}.",
+                f"Duplicate activation declaration source: {sourceKey}.",
             )
 
         seenSourceKeys.add(sourceKey)
 
     return sources
-
