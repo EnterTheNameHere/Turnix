@@ -1,11 +1,12 @@
 # file: backend/activation/activator.py
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from backend.activation.activationErrors import ActivationError, ActivationFailureContext
 from backend.activation.activationReport import ActivatedEntry, ActivationReport
-from backend.context.modCallContext import ModCallContext
+from backend.context.modCallContext import createModCallContext
 from backend.core.errors import UsageError
 from backend.core.validation import typeName
 
@@ -16,30 +17,39 @@ if TYPE_CHECKING:
     from backend.activation.activationAdapterKind import ActivationAdapterKind
     from backend.activation.activationEntry import PythonActivationEntry
     from backend.activation.activationPlan import ActivationPlan
-    from backend.capabilities.registry import CapabilityRegistry
+    from backend.runtime.runtimeServices import RuntimeServices
     from backend.tracing.devTrace import DevTraceSink
+
+
+@dataclass(frozen=True)
+class LoadedMod:
+    entryId: str
+    ownerId: str
+    adapterKind: ActivationAdapterKind
+    instance: object
 
 
 def activatePlan(
     *,
     plan: ActivationPlan,
-    registry: CapabilityRegistry,
+    runtime: RuntimeServices,
     adapters: Mapping[ActivationAdapterKind, ActivationAdapter],
-    sink: DevTraceSink | None = None,
-) -> ActivationReport:
-    """
-    Activate entries in plan order.
-
-    This function owns activation plan iteration, per-entry adapter selection,
-    and per-entry context creation. It does not create the plan, discover Packs,
-    resolve dependencies, verify capabilities, persist activation state, recover,
-    or rollback.
-    """
+    sink: DevTraceSink,
+) -> tuple[ActivationReport, tuple[LoadedMod, ...]]:
     activatedEntries: list[ActivatedEntry] = []
+    loadedMods: list[LoadedMod] = []
+
+    sink.emit(
+        reason="ActivationPlanStarted",
+        message="activation plan started",
+        attrs={
+            "planId": plan.planId,
+            "entryCount": len(plan.entries),
+        },
+    )
 
     for entry in plan.entries:
-        emit(
-            sink=sink,
+        sink.emit(
             reason="ActivationPlanEntryStarted",
             message="activation plan entry started",
             attrs={
@@ -52,28 +62,35 @@ def activatePlan(
             },
         )
 
+        adapter = getAdapterForEntry(
+            entry=entry,
+            adapters=adapters,
+        )
+        ctx = createModCallContext(
+            applicationId=runtime.applicationId,
+            applicationRunId=runtime.applicationRunId,
+            actingPackId=entry.ownerId,
+            capabilities=runtime.capabilities,
+            hooks=runtime.hooks,
+            memoryTransaction=None,
+            configTransaction=None,
+            io=runtime.io,
+            trace=sink,
+            stageId="activation",
+        )
+
         try:
-            adapter = getAdapterForEntry(
-                entry=entry,
-                adapters=adapters,
-            )
-
-            ctx = ModCallContext(
-                ownerId=entry.ownerId,
-                capabilityRegistry=registry,
-            )
-
-            adapter.loadAndCall(
-                entry=entry,
+            mod = adapter.load(entry=entry)
+            adapter.call(
+                mod=mod,
+                callableName=entry.callableName,
                 ctx=ctx,
             )
-
         except ActivationError:
             raise
 
         except Exception as err:
-            emit(
-                sink=sink,
+            sink.emit(
                 reason="ActivationPlanEntryFailed",
                 message="activation plan entry failed",
                 attrs={
@@ -96,6 +113,9 @@ def activatePlan(
                 cause=err,
             ) from err
 
+        finally:
+            ctx.invalidate()
+
         activatedEntries.append(
             ActivatedEntry(
                 entryId=entry.entryId,
@@ -105,9 +125,16 @@ def activatePlan(
                 callableName=entry.callableName,
             ),
         )
+        loadedMods.append(
+            LoadedMod(
+                entryId=entry.entryId,
+                ownerId=entry.ownerId,
+                adapterKind=entry.adapterKind,
+                instance=mod,
+            ),
+        )
 
-        emit(
-            sink=sink,
+        sink.emit(
             reason="ActivationPlanEntryCompleted",
             message="activation plan entry completed",
             attrs={
@@ -120,10 +147,21 @@ def activatePlan(
             },
         )
 
-    return ActivationReport(
+    report = ActivationReport(
         planId=plan.planId,
         activatedEntries=tuple(activatedEntries),
     )
+
+    sink.emit(
+        reason="ActivationPlanCompleted",
+        message="activation plan completed",
+        attrs={
+            "planId": plan.planId,
+            "activatedEntryIds": report.activatedEntryIds,
+        },
+    )
+
+    return report, tuple(loadedMods)
 
 
 def getAdapterForEntry(
@@ -134,7 +172,10 @@ def getAdapterForEntry(
     try:
         return adapters[entry.adapterKind]
     except KeyError as err:
-        raise UsageError(f"No activation adapter registered for adapter kind {entry.adapterKind}.") from err
+        raise UsageError(
+            f"No activation adapter registered for adapter kind "
+            f"{entry.adapterKind}.",
+        ) from err
 
 
 def createFailureContext(
@@ -149,21 +190,4 @@ def createFailureContext(
         adapterKind=entry.adapterKind,
         sourcePath=entry.sourcePath,
         callableName=entry.callableName,
-    )
-
-
-def emit(
-    *,
-    sink: DevTraceSink | None,
-    reason: str,
-    message: str,
-    attrs: dict[str, object],
-) -> None:
-    if sink is None:
-        return
-
-    sink.emit(
-        reason=reason,
-        message=message,
-        attrs=attrs,
     )
