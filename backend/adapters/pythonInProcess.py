@@ -118,6 +118,7 @@ class PythonInProcessAdapter(ActivationAdapter):
         callableName: str,
         ctx: ModCallContext,
         request: JsonObject | None = None,
+        required: bool = True,
     ) -> object:
         """
         Invoke a callable on a loaded Python mod.
@@ -125,6 +126,9 @@ class PythonInProcessAdapter(ActivationAdapter):
         If request is None, invokes callable(ctx). Otherwise, invokes
         callable(ctx, request). Supplying an empty object therefore still
         selects the two-argument callable form.
+
+        If the callable is absent and required is False, returns None without
+        invoking the mod.
         """
         if not isinstance(mod, PythonLoadedMod):
             raise UsageError(
@@ -140,7 +144,23 @@ class PythonInProcessAdapter(ActivationAdapter):
             module=mod.module,
             callableName=cleanCallableName,
             entryId=mod.entryId,
+            required=required,
         )
+
+        if modCallable is None:
+            self._emit(
+                reason="PythonModCallSkipped",
+                message="optional python mod callable is absent",
+                attrs={
+                    "entryId": mod.entryId,
+                    "ownerId": mod.ownerId,
+                    "sourcePath": str(mod.sourcePath),
+                    "moduleName": mod.moduleName,
+                    "callableName": cleanCallableName,
+                    "required": required,
+                },
+            )
+            return None
 
         self._emit(
             reason="PythonModCallStarted",
@@ -152,10 +172,15 @@ class PythonInProcessAdapter(ActivationAdapter):
                 "moduleName": mod.moduleName,
                 "callableName": cleanCallableName,
                 "hasRequest": request is not None,
+                "required": required,
             },
         )
 
-        result = modCallable(ctx) if request is None else modCallable(ctx, request)
+        result = (
+            modCallable(ctx)
+            if request is None
+            else modCallable(ctx, request)
+        )
 
         self._emit(
             reason="PythonModCallCompleted",
@@ -167,6 +192,7 @@ class PythonInProcessAdapter(ActivationAdapter):
                 "moduleName": mod.moduleName,
                 "callableName": cleanCallableName,
                 "hasRequest": request is not None,
+                "required": required,
             },
         )
 
@@ -241,14 +267,18 @@ class PythonInProcessAdapter(ActivationAdapter):
         module: ModuleType,
         callableName: str,
         entryId: str,
-    ) -> PythonModCallable:
-        if not hasattr(module, callableName):
-            raise UsageError(
-                f"Python mod {entryId} does not define "
-                f"callable {callableName}.",
-            )
+        required: bool,
+    ) -> PythonModCallable | None:
+        candidate = getattr(module, callableName, None)
 
-        candidate = getattr(module, callableName)
+        if candidate is None:
+            if required:
+                raise UsageError(
+                    f"Python mod {entryId} does not define "
+                    f"callable {callableName}.",
+                )
+            return None
+
         if not callable(candidate):
             raise UsageError(
                 f"Python mod {entryId} attribute "
