@@ -24,13 +24,13 @@ def pytest_configure(config: pytest.Config) -> None:
     mode = config.getini("asyncio_mode")
     if mode != "strict":
         raise pytest.UsageError(
-            "tests/conftest.py only supports asyncio_mode='strict' without pytest-asyncio installed"
+            "tests/conftest.py only supports asyncio_mode='strict' without pytest-asyncio installed",
         )
 
     loop_scope = config.getini("asyncio_default_fixture_loop_scope")
     if loop_scope != "function":
         raise pytest.UsageError(
-            "tests/conftest.py only supports asyncio_default_fixture_loop_scope='function'"
+            "tests/conftest.py only supports asyncio_default_fixture_loop_scope='function'",
         )
 
     config.addinivalue_line("markers", "asyncio: mark a test to run inside an event loop")
