@@ -1,9 +1,9 @@
-# file: setup.ps1
+# file: setup314.ps1
 param(
-  [string] $PythonVersion = "3.15.0b4",
+  [string] $PythonVersion = "3.14.6",
 
-  [string] $PythonZipRel = "vendor/python/python-3.15.0b4-embed-amd64.zip",
-  [string] $Sha256Rel    = "vendor/python/python-3.15.0b4-embed-amd64.zip.sha256",
+  [string] $PythonZipRel = "vendor/python/python-3.14.6-embed-amd64.zip",
+  [string] $Sha256Rel    = "vendor/python/python-3.14.6-embed-amd64.zip.sha256",
   [string] $GetPipRel    = "vendor/python/get-pip.py",
 
   [string] $EmbedDir     = "python-embedded",
@@ -21,10 +21,7 @@ function Section([string] $title) {
   Write-Host "=== $title ===" -ForegroundColor Cyan
 }
 
-function Write-Utf8NoBom(
-  [string] $path,
-  [string] $text
-) {
+function Write-Utf8NoBom([string] $path, [string] $text) {
   $encoding = New-Object System.Text.UTF8Encoding($false)
   [System.IO.File]::WriteAllText($path, $text, $encoding)
 }
@@ -54,29 +51,6 @@ function Invoke-NativeChecked(
   }
 
   return $output
-}
-
-function Invoke-EmbeddedPythonChecked(
-  [string] $label,
-  [string] $pythonExe,
-  [string[]] $arguments
-) {
-  # Python 3.15.0b4's Windows embedded distribution resolves the frozen
-  # encodings package against Lib\encodings rather than python315.zip.
-  #
-  # Disabling frozen modules makes encodings and its non-frozen children,
-  # such as encodings.idna, load consistently from the standard-library ZIP.
-  $pythonArguments = [string[]](
-    @(
-      "-X"
-      "frozen_modules=off"
-    ) + $arguments
-  )
-
-  return Invoke-NativeChecked `
-    -label $label `
-    -exe $pythonExe `
-    -arguments $pythonArguments
 }
 
 function Ensure-GitHooks {
@@ -129,14 +103,9 @@ function Ensure-GitHooks {
 function Normalize-EmbeddedPythonPth([string] $embedPath) {
   Section "Embedded Python ._pth"
 
-  $pthCandidates = @(
-    Get-ChildItem `
-      -Path $embedPath `
-      -Filter "python*._pth" `
-      -ErrorAction SilentlyContinue
-  )
+  $pthCandidates = Get-ChildItem -Path $embedPath -Filter "python*._pth" -ErrorAction SilentlyContinue
 
-  if ($pthCandidates.Count -eq 0) {
+  if (-not $pthCandidates -or $pthCandidates.Count -eq 0) {
     throw "No python*._pth file found in: $embedPath"
   }
 
@@ -156,31 +125,18 @@ function Normalize-EmbeddedPythonPth([string] $embedPath) {
     $trimmed = $line.Trim()
 
     if ($trimmed -eq "..") {
-      if (-not $hasRepoRoot) {
-        $newLines.Add("..")
-        $hasRepoRoot = $true
-      }
-
+      $hasRepoRoot = $true
+      $newLines.Add("..")
       continue
     }
 
-    if (
-      $trimmed -eq "Lib\site-packages" -or
-      $trimmed -eq ".\Lib\site-packages"
-    ) {
-      if (-not $hasSitePackages) {
-        $newLines.Add("Lib\site-packages")
-        $hasSitePackages = $true
-      }
-
+    if ($trimmed -eq "Lib\site-packages" -or $trimmed -eq ".\Lib\site-packages") {
+      $hasSitePackages = $true
+      $newLines.Add("Lib\site-packages")
       continue
     }
 
     if ($trimmed -match '^\#\s*import\s+site$') {
-      continue
-    }
-
-    if ($trimmed -eq "import site") {
       continue
     }
 
@@ -204,10 +160,7 @@ function Normalize-EmbeddedPythonPth([string] $embedPath) {
     $newLines.Add("Lib\site-packages")
   }
 
-  while (
-    $newLines.Count -gt 0 -and
-    $newLines[$newLines.Count - 1].Trim() -eq ""
-  ) {
+  while ($newLines.Count -gt 0 -and $newLines[$newLines.Count - 1].Trim() -eq "") {
     $newLines.RemoveAt($newLines.Count - 1)
   }
 
@@ -273,17 +226,6 @@ if _pythonpath:
   }
 }
 
-function Ensure-EmbeddedPythonDirectories([string] $embedPath) {
-  $libPath = Join-Path $embedPath "Lib"
-  $sitePackagesPath = Join-Path $libPath "site-packages"
-
-  New-Item `
-    -ItemType Directory `
-    -Path $sitePackagesPath `
-    -Force |
-    Out-Null
-}
-
 function Ensure-EmbeddedPython {
   Section "Embedded Python"
 
@@ -298,10 +240,7 @@ function Ensure-EmbeddedPython {
   }
 
   if (Test-Path $shaPath) {
-    $expected = (
-      (Get-Content -Path $shaPath -Raw).Trim() -split '\s+'
-    )[0].ToUpperInvariant()
-
+    $expected = ((Get-Content -Path $shaPath -Raw).Trim() -split '\s+')[0].ToUpperInvariant()
     $actual = Get-Sha256 $zipPath
 
     if ($actual -ne $expected) {
@@ -331,23 +270,12 @@ function Ensure-EmbeddedPython {
       Remove-Item $embedPath -Recurse -Force
     }
 
-    New-Item `
-      -ItemType Directory `
-      -Path $embedPath `
-      -Force |
-      Out-Null
+    New-Item -ItemType Directory -Path $embedPath -Force | Out-Null
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $embedPath)
 
-    [System.IO.Compression.ZipFile]::ExtractToDirectory(
-      $zipPath,
-      $embedPath
-    )
-
-    Write-Utf8NoBom `
-      -path $versionPath `
-      -text "$PythonVersion`r`n"
-
+    Write-Utf8NoBom -path $versionPath -text "$PythonVersion`r`n"
     Write-Host "Installed Python $PythonVersion to $embedPath"
   }
 
@@ -355,35 +283,10 @@ function Ensure-EmbeddedPython {
     throw "Embedded python.exe was not found after install: $pythonExe"
   }
 
-  Ensure-EmbeddedPythonDirectories -embedPath $embedPath
   Normalize-EmbeddedPythonPth -embedPath $embedPath
   Ensure-SiteCustomize -embedPath $embedPath
 
   return $pythonExe
-}
-
-function Test-EmbeddedPythonRuntime([string] $pythonExe) {
-  Section "Embedded Python runtime"
-
-  Invoke-EmbeddedPythonChecked `
-    -label "verify embedded standard library" `
-    -pythonExe $pythonExe `
-    -arguments @(
-      "-S"
-      "-c"
-      @'
-import encodings.ascii
-import encodings.cp1252
-import encodings.idna
-import encodings.latin_1
-import json
-import pathlib
-import ssl
-
-print("embedded standard library OK")
-'@
-    ) |
-    Out-Null
 }
 
 function Ensure-Pip([string] $pythonExe) {
@@ -396,57 +299,34 @@ function Ensure-Pip([string] $pythonExe) {
 
   $env:PATH = "$scriptsPath;$env:PATH"
 
-  $pipImportSucceeded = $false
-
-  try {
-    Invoke-EmbeddedPythonChecked `
-      -label "check pip import" `
-      -pythonExe $pythonExe `
-      -arguments @(
-        "-c"
-        "import pip; print('pip', pip.__version__)"
-      ) |
-      Out-Null
-
-    $pipImportSucceeded = $true
-  } catch {
-    Write-Host "pip is not currently importable." -ForegroundColor Yellow
-  }
-
-  if (-not $pipImportSucceeded) {
+  if (Test-Path $pipExe) {
+    Write-Host "pip already installed: $pipExe"
+  } else {
     if (-not (Test-Path $getPipPath)) {
       throw "pip is not installed and get-pip.py is missing: $GetPipRel"
     }
 
-    Invoke-EmbeddedPythonChecked `
+    Invoke-NativeChecked `
       -label "bootstrap pip" `
-      -pythonExe $pythonExe `
-      -arguments @($getPipPath) |
-      Out-Null
-  } elseif (Test-Path $pipExe) {
-    Write-Host "pip launcher found: $pipExe"
-  } else {
-    Write-Host "pip is importable, but Scripts\pip.exe is absent. This setup uses python.exe -m pip." -ForegroundColor Yellow
+      -exe $pythonExe `
+      -arguments @($getPipPath)
   }
 
-  Invoke-EmbeddedPythonChecked `
-    -label "verify pip import" `
-    -pythonExe $pythonExe `
-    -arguments @(
-      "-c"
-      "import pip; print('pip', pip.__version__)"
-    ) |
-    Out-Null
+  if (-not (Test-Path $pipExe)) {
+    throw "pip bootstrap completed, but pip.exe was not found: $pipExe"
+  }
 
-  Invoke-EmbeddedPythonChecked `
+  Invoke-NativeChecked `
+    -label "verify pip import" `
+    -exe $pythonExe `
+    -arguments @("-c", "import pip; print('pip', pip.__version__)") | Out-Null
+
+  Invoke-NativeChecked `
     -label "pip --version" `
-    -pythonExe $pythonExe `
-    -arguments @(
-      "-m"
-      "pip"
-      "--version"
-    ) |
-    Out-Null
+    -exe $pipExe `
+    -arguments @("--version") | Out-Null
+
+  return $pipExe
 }
 
 function Install-Requirements([string] $pythonExe) {
@@ -459,39 +339,23 @@ function Install-Requirements([string] $pythonExe) {
     return
   }
 
-  Invoke-EmbeddedPythonChecked `
+  Invoke-NativeChecked `
     -label "install requirements" `
-    -pythonExe $pythonExe `
-    -arguments @(
-      "-m"
-      "pip"
-      "install"
-      "-r"
-      $requirementsPath
-    ) |
-    Out-Null
+    -exe $pythonExe `
+    -arguments @("-m", "pip", "install", "-r", $requirementsPath) | Out-Null
 }
 
 Ensure-GitHooks
 
 $pythonExe = Ensure-EmbeddedPython
-
-Test-EmbeddedPythonRuntime `
-  -pythonExe $pythonExe
-
-Ensure-Pip `
-  -pythonExe $pythonExe
-
-Install-Requirements `
-  -pythonExe $pythonExe
+$pipExe = Ensure-Pip -pythonExe $pythonExe
+Install-Requirements -pythonExe $pythonExe
 
 Write-Host ""
 Write-Host "Setup complete." -ForegroundColor Green
 Write-Host ""
-
 Write-Host "Python:" -ForegroundColor Green
-Write-Host "  .\python-embedded\python.exe -X frozen_modules=off"
+Write-Host "  .\python-embedded\python.exe"
 Write-Host ""
-
 Write-Host "pip:" -ForegroundColor Green
-Write-Host "  .\python-embedded\python.exe -X frozen_modules=off -m pip --version"
+Write-Host "  .\python-embedded\python.exe -m pip --version"
