@@ -1,0 +1,2630 @@
+===============================================================================
+ACTANT_LANGUAGE_AGNOSTIC_INTEROPERABILITY_VISION_BASE
+===============================================================================
+
+Purpose
+-------
+
+This document establishes a broad working overview of what Actant is trying to
+achieve in language-agnostic modularity and interoperability.
+
+It is intentionally wider than tracing.
+
+Tracing is one important subsystem and one demanding consumer of the
+interoperability platform, but the overall goal is larger:
+
+- Packs may be implemented in different languages
+- adapters may run in different processes, runtimes, machines, or environments
+- backend internals remain the authoritative orchestrator
+- creator-facing platform concepts remain coherent across languages
+- services, capabilities, calls, streams, context, state access, tracing, and
+  runtime control remain interoperable
+- implementation language, transport, serialization format, and process shape
+  remain replaceable details rather than platform identity
+
+This document is not a commitment to one final architecture.
+
+It preserves the current ideal design space, including tensions, weaknesses,
+conflicts, expensive requirements, and ideas that may later be simplified or
+removed when implementation reality demands it.
+
+It should be read as:
+
+    what Actant wants to be able to express
+    what problems must be solved to reach that vision
+    which existing systems provide useful precedent
+    which solution directions remain available
+
+It should not be read as:
+
+    a finalized implementation specification
+    a compatibility promise
+    a mandatory selection of one existing technology
+    a claim that every described feature must exist in the first implementation
+
+
+===============================================================================
+01. THE BROAD VISION
+===============================================================================
+
+Actant aims to be one modular platform whose Packs may be implemented in
+different languages and may execute in different environments, while preserving
+one coherent platform model.
+
+A Pack implemented in Python and a Pack implemented in JavaScript may implement
+the same Actant service contract.
+
+For example:
+
+    Python Pack
+        implements LlmProvider
+        registers itself as a service
+        exposes llm.stream@1
+
+    JavaScript Pack
+        implements LlmProvider
+        registers itself as a service
+        exposes llm.stream@1
+
+From the perspective of Actant capability invocation, these implementations are
+equivalent.
+
+The caller should not need to care whether the selected implementation is:
+
+- a Python object in the backend process
+- Python code loaded by PythonInProcessAdapter
+- Python code in another process
+- JavaScript in a browser
+- JavaScript in Node
+- a future native component
+- a future WebAssembly component
+- another language supported by another adapter
+
+Once registration, activation, permissions, service wiring, and capability
+availability are complete, a caller should be able to invoke:
+
+    llm.stream@1
+
+The selected implementation receives the call through its adapter boundary and
+executes the operation according to the same Actant contract.
+
+The language and transport may change.
+
+The platform concept should not.
+
+
+===============================================================================
+02. WHY THE SCOPE IS LARGE
+===============================================================================
+
+This is not merely an RPC problem.
+
+A complete system must address several related but distinct concerns:
+
+- language-neutral contracts
+- service registration
+- capability registration
+- implementation identity
+- adapter identity
+- invocation routing
+- object and resource identity
+- value serialization
+- large-value transfer
+- streams
+- subscriptions
+- cancellation
+- errors and exceptions
+- authority
+- permissions
+- context propagation
+- persistent state access
+- local ephemeral state
+- lifecycle
+- reconnection
+- sequencing
+- acknowledgement
+- duplication
+- retry
+- synchronization of registries and projections
+- tracing
+- diagnostics
+- loss and incomplete evidence
+- host and client modes
+- command surfaces
+- interactive runtime operation
+
+Existing systems often solve one or several of these very well.
+
+Few systems solve the exact combination Actant wants.
+
+This may mean:
+
+- Actant has unusually specific requirements
+- Actant is combining several established problem families
+- some desired transparency may be too expensive
+- some concepts may need to remain explicitly remote or asynchronous
+- some parts may require custom design
+- some apparent unification may later need to be split
+- some desirable features may conflict with simplicity, reliability, or
+  performance
+
+These tensions should remain visible at this stage.
+
+
+===============================================================================
+03. PLATFORM IDENTITY AND IMPLEMENTATION INDEPENDENCE
+===============================================================================
+
+Actant platform meaning should be defined by:
+
+- contracts
+- guarantees
+- authority boundaries
+- orchestration semantics
+- lifecycle semantics
+- continuity behavior
+- observable outcomes
+- creator-facing concepts
+
+Actant platform meaning should not be defined by:
+
+- Python
+- JavaScript
+- FastAPI
+- Starlette
+- Uvicorn
+- Electron
+- WebSocket
+- JSON
+- one process
+- one operating system
+- one adapter
+- one frontend
+- one current repository layout
+
+A direct Python call, a WebSocket message, a subprocess IPC frame, and a future
+native ABI call may all realize the same logical invocation boundary.
+
+This implies several layers:
+
+    platform contract
+        what the operation means
+
+    language binding
+        how the operation appears in Python, JavaScript, or another language
+
+    adapter realization
+        how the implementation is loaded and called
+
+    invocation representation
+        how target, operation, arguments, context, and result are represented
+
+    channel or RPC
+        how the invocation crosses a boundary
+
+    transport
+        how bytes, frames, messages, or direct calls are carried
+
+    codec
+        how values are encoded
+
+    authoritative backend execution
+        where platform-owned checks, routing, persistence, and orchestration occur
+
+These layers may collapse in a local implementation.
+
+Their meanings should not collapse.
+
+
+===============================================================================
+04. BACKEND AUTHORITY AND ORCHESTRATION
+===============================================================================
+
+Backend internals are the authoritative orchestrator of the Actant runtime.
+
+They own or mediate platform-wide truth such as:
+
+- accepted Pack discovery results
+- resolution
+- activation
+- service registration
+- capability availability
+- invocation routing
+- permission checks
+- Application identity
+- ApplicationRun identity
+- memory authority
+- transaction and commit authority
+- persistent configuration
+- save persistence
+- adapter registration
+- runtime lifecycle
+- trace ingestion
+- authoritative trace storage
+- graph reconstruction
+- controlled access to retained platform data
+
+This does not mean adapters or Packs have no authority.
+
+A Pack may remain authoritative for its own implementation-local state and
+behavior.
+
+An adapter may remain authoritative for:
+
+- its own execution environment
+- loaded remote object identity
+- its own process-local resources
+- its own transport session
+- implementation-local scheduling
+- local runtime errors
+- local object lifecycle
+- local stream production
+- local trace production before backend ingestion
+
+A Pack may remain authoritative for:
+
+- its algorithm
+- its model-client state
+- its local caches
+- its local resource use
+- its own domain decisions
+- its implementation-specific behavior
+
+However, these local authorities do not replace backend platform authority.
+
+The backend remains the orchestrator that decides how those implementations
+participate in Actant.
+
+Registration is therefore crucial.
+
+An implementation becomes available to Actant only after it registers through
+the proper backend-mediated boundary.
+
+Examples:
+
+- a provider implementation registers as LlmProvider@1
+- a capability implementation registers llm.stream@1
+- an adapter registers an implementation target
+- a stream registers a stream identity
+- a remote context facade is created for a specific invocation
+- a service registration becomes part of the backend-authoritative registry
+
+The backend does not need to own every local variable.
+
+It does need to own the accepted platform meaning of the registration.
+
+
+===============================================================================
+05. LOCAL AUTHORITY VERSUS DURABLE AUTHORITY
+===============================================================================
+
+Code running in an adapter may hold local values.
+
+Examples:
+
+- JavaScript variables
+- Python object fields
+- local caches
+- in-memory conversation state
+- pending requests
+- temporary buffers
+- local model-client handles
+- local stream state
+
+These values are valid within that runtime.
+
+They are not automatically durable Actant state.
+
+If the adapter process crashes, disconnects, reloads, or is restarted, local
+values may be lost.
+
+That loss is not necessarily a platform bug.
+
+Adapters are primarily execution boundaries.
+
+They are not, by default, the long-term persistence authority for Applications.
+
+For data that must survive:
+
+- an ApplicationRun ending
+- the Actant runtime stopping
+- the adapter restarting
+- the process crashing
+- the host being restarted
+- a future migration to another adapter implementation
+
+the preferable path is:
+
+    Pack implementation
+        -> adapter-side Memory facade
+        -> adapter invocation boundary
+        -> backend Memory authority
+        -> transaction and commit
+        -> persistent Application state
+
+This does not forbid adapters from using local storage.
+
+It establishes a distinction:
+
+    local adapter storage
+        implementation-local
+        potentially ephemeral
+        not guaranteed across runs
+        not automatically part of Application persistence
+
+    backend-mediated Memory
+        Application-visible
+        transactionally controlled
+        persistable
+        restorable
+        durable across ApplicationRuns and runtime runs according to backend
+        persistence guarantees
+
+A Pack that keeps important state only in local variables accepts that the state
+may disappear.
+
+A Pack that needs durable continuity should save it through the backend-owned
+facade.
+
+
+===============================================================================
+06. ACTANT SYNCHRONIZES CONTRACTS, NOT LANGUAGE HEAPS
+===============================================================================
+
+The platform should not attempt to synchronize arbitrary Python and JavaScript
+object graphs.
+
+That approach would create severe problems:
+
+- cycles
+- unsupported types
+- object identity confusion
+- stale mirrors
+- accidental authority duplication
+- huge payloads
+- conflicting mutations
+- impossible lifecycle tracking
+- hidden network latency
+- fragile versioning
+- serialization failure
+- security leakage
+- implicit persistence expectations
+
+The stronger direction is:
+
+    Actant synchronizes:
+        declared contracts
+        values
+        identities
+        handles
+        operations
+        streams
+        updates
+        evidence
+
+    Actant does not synchronize:
+        arbitrary language heaps
+        unrestricted backend objects
+        live local references across incompatible runtimes
+        implicit authority through copied objects
+
+A Python object may realize a contract.
+
+A JavaScript object may realize the same contract.
+
+The contract is portable.
+
+The heap object is not.
+
+
+===============================================================================
+07. LANGUAGE-NEUTRAL CONTRACTS
+===============================================================================
+
+A central requirement is a language-neutral way to define platform interfaces.
+
+For example:
+
+    interface LlmProvider@1
+        stream(request: LlmStreamRequest)
+            -> stream<LlmStreamItem>
+
+A contract needs to define more than a method name.
+
+It may need to define:
+
+- interface identity
+- interface version
+- operation identity
+- argument names
+- argument types
+- result types
+- stream item types
+- error categories
+- cancellation behavior
+- timeout interpretation
+- ownership of returned resources
+- whether calls are idempotent
+- whether calls may be retried
+- whether the operation is local-only or boundary-capable
+- whether the operation requires a particular capability
+- whether the operation may return handles
+- whether the operation is long-running
+- trace correlation requirements
+
+A language binding then maps the contract to a language-native surface.
+
+Python might expose:
+
+    async for item in provider.stream(request):
+        ...
+
+JavaScript might expose:
+
+    for await (const item of provider.stream(request)) {
+        ...
+    }
+
+The syntax differs.
+
+The contract meaning remains the same.
+
+
+===============================================================================
+08. REAL-WORLD OPTION: gRPC AND PROTOCOL BUFFERS
+===============================================================================
+
+gRPC demonstrates the service-contract model.
+
+It provides:
+
+- interface definition
+- generated language bindings
+- request and response schemas
+- unary calls
+- client streaming
+- server streaming
+- bidirectional streaming
+- deadlines
+- cancellation
+- metadata
+- typed errors
+- per-stream ordering
+
+This points Actant toward an option where capabilities and services are described
+as explicit versioned operation contracts.
+
+Possible Actant direction inspired by gRPC:
+
+    capability llm.stream@1
+        input LlmStreamRequest
+        output stream<LlmStreamItem>
+        errors LlmErrorEnvelope
+        cancellation supported
+        deadline optional
+
+Advantages:
+
+- explicit contracts
+- strong tooling
+- code generation
+- cross-language consistency
+- clear operation boundaries
+- mature streaming model
+
+Weaknesses for Actant:
+
+- gRPC focuses primarily on services and methods
+- dynamic object references require additional application design
+- remote ModCallContext-like resources do not fit naturally without handles
+- backend-authoritative facades would need a separate object-reference model
+
+Therefore gRPC is a strong option for:
+
+- service invocation
+- capability invocation
+- streaming contracts
+- generated bindings
+
+It is not by itself a full solution for dynamic remote platform objects.
+
+
+===============================================================================
+09. REAL-WORLD OPTION: CAP'N PROTO RPC
+===============================================================================
+
+Cap'n Proto RPC demonstrates first-class remote interface references.
+
+It distinguishes:
+
+- structs passed by value
+- interfaces passed by reference
+
+A method may return another callable interface.
+
+This is highly relevant to:
+
+- remote ModCallContext
+- Memory facades
+- Trace emitters
+- stream handles
+- capability callers
+- adapter-exported implementation objects
+
+Possible Actant direction inspired by Cap'n Proto:
+
+    RemoteModCallContext
+        memory: reference<MemoryFacade@1>
+        trace: reference<TraceEmitter@1>
+        capabilities: reference<CapabilityCaller@1>
+
+Advantages:
+
+- natural dynamic object references
+- explicit interfaces
+- callable handles
+- remote object identity
+- reference lifetime concepts
+- promise pipelining possibilities
+- less need to serialize entire objects
+
+Potential mismatch:
+
+- possession of a capability reference often implies authority
+- Actant may want backend permission checks to remain authoritative even when a
+  handle is possessed
+- Actant may require handles to be valid only with matching invocation, adapter,
+  connection, principal, or ApplicationRun context
+
+Therefore Cap'n Proto is a strong option for:
+
+- by-value versus by-reference distinction
+- dynamic remote facades
+- callable object handles
+- reference-oriented protocols
+
+Actant may adopt the reference model without adopting pure possession-based
+authority.
+
+
+===============================================================================
+10. REAL-WORLD OPTION: WEBASSEMBLY COMPONENT MODEL AND WIT
+===============================================================================
+
+The WebAssembly Component Model and WIT demonstrate:
+
+- language-neutral interface definitions
+- typed imports and exports
+- canonical value types
+- generated bindings
+- resource handles
+- ownership distinctions
+- lifting and lowering between language-native and canonical values
+- component composition
+
+This is highly relevant even if Actant does not require WebAssembly.
+
+Possible Actant direction inspired by WIT:
+
+    Actant interface definition
+        -> canonical Actant value model
+        -> Python binding
+        -> JavaScript binding
+        -> future language bindings
+
+A resource may represent:
+
+- stream
+- memory facade
+- transaction
+- context
+- job
+- value reference
+- adapter implementation object
+
+Advantages:
+
+- clear separation between interface and implementation language
+- canonical cross-language types
+- resource handles
+- strong ownership semantics
+- generated bindings
+- suitable for same-process and cross-process adaptation
+
+Weaknesses:
+
+- Component Model does not by itself solve network transport
+- reconnection, acknowledgement, retries, and distributed tracing remain
+  separate concerns
+- backend orchestration and permission semantics remain Actant-specific
+
+This system points toward an option where Actant defines:
+
+- an interface definition language or schema
+- a canonical value model
+- a canonical invocation model
+- resource semantics
+- language binding rules
+
+Transport remains a separate layer.
+
+
+===============================================================================
+11. REAL-WORLD OPTION: FUCHSIA FIDL
+===============================================================================
+
+Fuchsia FIDL demonstrates language-neutral IPC protocols with:
+
+- generated bindings
+- asynchronous methods
+- protocol endpoints
+- resource handles
+- explicit ownership
+- handle transfer
+- schema evolution
+- structured errors
+
+This is especially relevant to resource lifetime.
+
+Actant handles may need categories such as:
+
+    borrowed
+        valid only during one call
+
+    invocation-scoped
+        valid until invocation ends
+
+    ApplicationRun-scoped
+        valid while one ApplicationRun exists
+
+    adapter-session-scoped
+        valid while one adapter session exists
+
+    runtime-scoped
+        valid while one Actant runtime exists
+
+    persistent identity
+        survives runtime restart through backend persistence
+
+Possible advantages:
+
+- explicit lifetime discipline
+- ownership transfer rules
+- clear async boundary
+- generated bindings
+- strong IPC precedent
+
+Potential limitation:
+
+- FIDL is designed around a particular operating system IPC environment
+- Actant needs broader transport and runtime diversity
+
+The useful option is to borrow the ownership and lifetime rigor without copying
+the full runtime model.
+
+
+===============================================================================
+12. REAL-WORLD OPTION: D-BUS
+===============================================================================
+
+D-Bus demonstrates explicit exported protocol objects with:
+
+- service identity
+- object paths
+- interfaces
+- methods
+- signals
+- properties
+- introspection
+- object-manager synchronization
+
+This is relevant because it avoids arbitrary transparent remote objects.
+
+An adapter might export:
+
+    adapter session:
+        adapter_123
+
+    remote object:
+        provider_456
+
+    interface:
+        LlmProvider@1
+
+    operation:
+        stream
+
+The object is an explicitly exported protocol object.
+
+It is not an arbitrary JavaScript object exposed to the backend.
+
+D-Bus ObjectManager also demonstrates a useful synchronization pattern:
+
+    initial object snapshot
+    interface added
+    interface removed
+    property changed
+
+Actant could use similar patterns for:
+
+- registered services
+- capabilities
+- active Applications
+- ApplicationRuns
+- adapters
+- clients
+- discovered Packs
+- trace subscriptions
+- jobs
+- PackManager state
+
+Advantages:
+
+- explicit object identity
+- interface identity
+- introspection
+- dynamic object registration
+- event delivery
+- snapshot plus updates
+
+Weaknesses:
+
+- D-Bus type and transport assumptions may be too limiting
+- network distribution and large streams are not its strongest area
+- Actant needs stronger backend authority and persistence integration
+
+This points toward an option where remote implementations are explicit exported
+objects with versioned interfaces rather than transparent heap objects.
+
+
+===============================================================================
+13. REAL-WORLD OPTION: ACTOR SYSTEMS
+===============================================================================
+
+Actor systems such as Erlang, Akka, and Orleans demonstrate:
+
+- state ownership by one actor
+- identity independent of physical location
+- asynchronous message passing
+- no shared mutable heap assumption
+- runtime-managed activation
+- failure isolation
+- location-transparent references
+
+This strongly supports the principle:
+
+    state belongs somewhere
+    messages cross boundaries
+    mutable object graphs do not
+
+An adapter-hosted LlmProvider can be considered actor-like:
+
+    implementationId
+        owns local provider state
+        receives invocation messages
+        emits results and streams
+        may fail independently
+
+Advantages:
+
+- clear state ownership
+- concurrency model
+- location independence
+- message-based execution
+- failure isolation
+
+Weaknesses:
+
+- Actant is not primarily an actor runtime
+- backend Memory, capabilities, transactions, and Pack lifecycle need stronger
+  central orchestration
+- actor transparency may hide remote failure and latency
+
+Actor systems offer an option for implementation identity and message processing,
+but not a complete Actant platform model.
+
+
+===============================================================================
+14. REAL-WORLD OPTION: RAY
+===============================================================================
+
+Ray demonstrates:
+
+- remote functions
+- remote actors
+- object references
+- asynchronous result handles
+- distributed object storage
+- passing references instead of repeatedly copying values
+
+This is useful for:
+
+- large prompts
+- images
+- audio
+- model outputs
+- retained intermediate values
+- asynchronously produced results
+
+Possible Actant direction inspired by Ray:
+
+    invocation returns ValueRef
+    ValueRef identifies backend-retained or adapter-retained value
+    consumer fetches or streams the value when needed
+
+Advantages:
+
+- avoids repeated large serialization
+- separates identity from materialization
+- supports asynchronous availability
+- useful for distributed values
+
+Weaknesses:
+
+- Ray is a distributed-compute runtime rather than a language-neutral plugin
+  platform
+- authority and persistence semantics differ
+- object references may point to cluster-owned data rather than backend-owned
+  Application state
+
+The relevant option is reference-based large-value transport, not adoption of
+Ray's entire model.
+
+
+===============================================================================
+15. REAL-WORLD OPTION: APACHE ARROW FLIGHT
+===============================================================================
+
+Arrow Flight demonstrates a control-plane/data-plane split.
+
+It uses RPC-like control messages while transferring large structured data
+through an efficient specialized streaming representation.
+
+Possible Actant direction:
+
+    control plane
+        invocation
+        identity
+        metadata
+        errors
+        tracing
+        handles
+        stream setup
+
+    data plane
+        images
+        audio
+        tensors
+        large text
+        files
+        model payloads
+        bulk state transfer
+
+Advantages:
+
+- JSON or another simple codec need not carry every byte
+- specialized large-value transfer can evolve independently
+- control messages remain inspectable and portable
+
+Weaknesses:
+
+- introduces more protocol layers
+- requires lifecycle and reference management
+- may be unnecessary for small payloads
+
+This provides an option for avoiding an ever-growing universal JSON envelope.
+
+
+===============================================================================
+16. REAL-WORLD OPTION: THRIFT AND CORBA
+===============================================================================
+
+Thrift and CORBA demonstrate the long-standing idea of:
+
+    define an interface once
+    generate language bindings
+    marshal calls across boundaries
+
+They also demonstrate a major danger:
+
+    making remote calls appear too much like local calls
+
+Remote calls differ from local calls because they may involve:
+
+- latency
+- timeout
+- disconnect
+- uncertain delivery
+- uncertain execution outcome
+- duplicate messages
+- retries
+- serialization failure
+- version mismatch
+- partial streams
+- cancellation races
+
+The lesson is not to avoid ergonomic facades.
+
+The lesson is to avoid hiding boundary behavior when it affects correctness.
+
+An Actant language binding may feel native.
+
+It should still expose asynchronous, failure, cancellation, and lifetime
+semantics honestly.
+
+
+===============================================================================
+17. CANONICAL VALUE MODEL
+===============================================================================
+
+Actant likely needs a canonical portable value model independent of JSON.
+
+Possible categories include:
+
+- null
+- boolean
+- integer
+- floating-point
+- string
+- ordered sequence
+- string-keyed mapping
+- typed record
+- enum
+- optional value
+- result
+- error envelope
+- binary value
+- value reference
+- resource handle
+- stream item
+- timestamp
+- duration
+- identifier
+
+JSON can encode many of these.
+
+It cannot naturally encode all of them without conventions.
+
+Potential options:
+
+Option A:
+    JSON is the canonical value model.
+
+Advantages:
+    simplest
+    universal
+    inspectable
+
+Weaknesses:
+    weak integer guarantees
+    binary encoding overhead
+    limited type identity
+    ambiguous tagged structures
+    inefficient for large values
+
+Option B:
+    Actant defines its own canonical value model and JSON is one codec.
+
+Advantages:
+    transport and codec independence
+    richer types
+    future binary codecs
+    clearer contract semantics
+
+Weaknesses:
+    more specification work
+    code generation or runtime validation needed
+
+Option C:
+    adopt or adapt an existing schema system such as Protocol Buffers, WIT,
+    Cap'n Proto, or another IDL.
+
+Advantages:
+    mature tooling
+    existing generators
+    strong type rules
+
+Weaknesses:
+    may impose assumptions incompatible with Actant
+    resource and authority semantics may still need custom extensions
+
+
+===============================================================================
+18. VALUES VERSUS REFERENCES
+===============================================================================
+
+The protocol must distinguish values from references.
+
+Values are copied or serialized:
+
+- strings
+- numbers
+- request DTOs
+- configuration snapshots
+- trace attributes
+- stream items
+- small memory values
+
+References retain identity:
+
+- ModCallContext facade
+- Memory facade
+- transaction
+- service implementation
+- stream
+- subscription
+- job
+- loaded remote object
+- large retained value
+- trace span or trace emitter
+- ApplicationRun-scoped resource
+
+Possible options:
+
+Option A:
+    all references are opaque string IDs.
+
+Advantages:
+    easy to serialize
+    easy to implement
+
+Weaknesses:
+    weak typing
+    easy to misuse
+    lifetime and interface meaning remain external
+
+Option B:
+    typed handles.
+
+Example:
+
+    handle<MemoryFacade@1>
+    handle<TraceEmitter@1>
+    handle<LlmStream@1>
+
+Advantages:
+    better validation
+    clearer contracts
+    better generated bindings
+    easier lifetime rules
+
+Weaknesses:
+    more schema complexity
+
+Option C:
+    first-class interface references, as in capability RPC.
+
+Advantages:
+    natural remote object model
+    dynamic composition
+
+Weaknesses:
+    authority semantics may become too implicit
+    reference lifetime management becomes central
+
+
+===============================================================================
+19. HANDLE AUTHORITY
+===============================================================================
+
+A handle must not accidentally become unrestricted authority.
+
+Possible models:
+
+Option A:
+    possession grants authority.
+
+This resembles object-capability systems.
+
+Advantages:
+    elegant
+    composable
+    delegation is natural
+
+Weaknesses:
+    leakage is dangerous
+    backend permission model may be bypassed
+    difficult to reconcile with connection and invocation scope
+
+Option B:
+    handle identifies target only.
+
+Every call also validates:
+
+- authenticated principal
+- adapter session
+- invocation identity
+- ApplicationRun
+- Pack owner
+- granted capability
+- handle lifetime
+- operation permission
+
+Advantages:
+    strong backend control
+    explicit revocation
+    safer for untrusted adapters
+
+Weaknesses:
+    more checks
+    more context
+    less elegant delegation
+
+Option C:
+    mixed model.
+
+Some handles carry narrow delegated authority.
+Others are identifiers that still require backend authorization.
+
+This may be useful, but it risks conceptual complexity.
+
+No final model is selected.
+
+
+===============================================================================
+20. MODCALLCONTEXT ACROSS AN ADAPTER BOUNDARY
+===============================================================================
+
+A remote ModCallContext should not be a serialized copy of the backend object.
+
+It should be a language-native facade over backend-owned operations.
+
+Conceptually:
+
+    backend ModCallContext authority
+        <- invocation protocol ->
+    adapter-side ModCallContext facade
+
+The adapter-side facade may expose:
+
+- immutable invocation metadata
+- Application identity
+- ApplicationRun identity
+- Pack identity
+- owner identity
+- capability call facade
+- Memory facade
+- trace facade
+- transaction facade
+- configuration projection
+- cancellation state
+- invocation identity
+
+A possible transferred descriptor may contain:
+
+- contextId
+- invocationId
+- ownerId
+- applicationId
+- applicationRunId
+- adapterInstanceId
+- loadedModId
+- capability descriptors
+- Memory handle
+- transaction handle
+- trace context
+- cancellation handle
+- context version
+- expiry or lifetime information
+
+This is illustrative, not a fixed schema.
+
+Important principle:
+
+    the facade may mimic the creator-facing ModCallContext concept
+    it does not reimplement backend authority
+
+For example:
+
+    JavaScript:
+        await ctx.memory.read("history")
+
+The JavaScript facade sends a structured call.
+
+The backend:
+
+- validates context lifetime
+- validates permission
+- performs the read
+- returns a serialized value
+
+The facade looks local enough to be usable.
+
+The operation remains backend-owned.
+
+
+===============================================================================
+21. MEMORY AND PERSISTENCE
+===============================================================================
+
+Memory should remain authoritative in backend internals.
+
+Possible remote operations include:
+
+- read
+- readMany
+- write
+- delete
+- append
+- patch
+- compare-and-set
+- begin transaction
+- commit
+- rollback
+- subscribe to changes
+- request snapshot
+
+The exact Memory API is not decided.
+
+Possible synchronization options:
+
+Option A:
+    every operation is remote.
+
+Advantages:
+    simplest authority model
+    no stale local mirror
+    every mutation is controlled
+
+Weaknesses:
+    high call volume
+    latency
+    fat RPC traffic
+
+Option B:
+    send a read-only snapshot with the invocation.
+
+Advantages:
+    fast local reads
+    fewer calls
+
+Weaknesses:
+    snapshot may become stale
+    large payload
+    cannot represent all state
+    must not be treated as writable authority
+
+Option C:
+    cached facade with revision and invalidation.
+
+Advantages:
+    efficient repeated reads
+    supports synchronization
+
+Weaknesses:
+    significantly more complex
+    sequence gaps and resync required
+    stale-read semantics must be explicit
+
+Option D:
+    batch access.
+
+Advantages:
+    retains backend authority
+    reduces round trips
+
+Weaknesses:
+    requires callers or bindings to plan batches
+
+These options may coexist by use case.
+
+
+===============================================================================
+22. SERVICE AND CAPABILITY REGISTRATION
+===============================================================================
+
+A remote implementation cannot register a live language object directly into
+backend internals.
+
+It must register a language-neutral implementation descriptor.
+
+Possible fields include:
+
+- service contract identity
+- capability identity
+- implementationId
+- ownerId
+- adapterInstanceId
+- remoteObjectId
+- exported operations
+- interface versions
+- declared features
+- stream support
+- cancellation support
+- health state
+- lifecycle state
+
+For a local Python implementation, the backend target may contain a Python object
+reference.
+
+For a remote JavaScript implementation, the backend target may contain:
+
+- adapter session
+- remote object ID
+- exported interface
+- operation mapping
+
+The backend registry should see one logical implementation category.
+
+Only the adapter invocation layer needs to understand how the target is reached.
+
+Possible registration models:
+
+Option A:
+    register capabilities only.
+
+Advantages:
+    simple
+    caller invokes capability directly
+
+Weaknesses:
+    service identity and implementation grouping may be lost
+
+Option B:
+    register service implementation, then derive capabilities.
+
+Advantages:
+    richer service model
+    implementation metadata centralized
+
+Weaknesses:
+    more lifecycle and schema complexity
+
+Option C:
+    register exported object with interfaces.
+
+Advantages:
+    supports D-Bus-like and Cap'n Proto-like object models
+    one object may expose several contracts
+
+Weaknesses:
+    object lifecycle becomes more complex
+
+
+===============================================================================
+23. INVOCATION IDENTITY
+===============================================================================
+
+One logical invocation may involve many transport messages.
+
+For example:
+
+    invocation request
+    acknowledgement
+    accepted-work response
+    stream open
+    stream items
+    progress updates
+    trace records
+    cancellation request
+    final result
+    final error
+
+Therefore these identities should remain distinct:
+
+- invocationId
+- RPC message ID
+- capabilityId
+- serviceId
+- implementationId
+- adapterInstanceId
+- streamId
+- subscriptionId
+- jobId
+- spanId
+- ApplicationRunId
+
+An invocation identity may provide the stable correlation point.
+
+Possible lifecycle:
+
+    invocation created
+    invocation accepted
+    implementation entered
+    stream opened
+    invocation completed
+    invocation failed
+    invocation cancelled
+    invocation detached
+    invocation result retained
+
+No final invocation lifecycle is selected.
+
+
+===============================================================================
+24. SYNC VERSUS ASYNC
+===============================================================================
+
+If an operation can cross a process or language boundary, synchronous-only APIs
+become difficult.
+
+Local Python can call:
+
+    value = memory.read(...)
+
+Remote JavaScript naturally requires:
+
+    value = await memory.read(...)
+
+Possible options:
+
+Option A:
+    all boundary-capable operations are async in every language.
+
+Advantages:
+    honest semantics
+    portable
+    local and remote implementations share one contract
+
+Weaknesses:
+    more cumbersome for simple local operations
+
+Option B:
+    language binding exposes sync and async variants.
+
+Advantages:
+    ergonomic local use
+
+Weaknesses:
+    larger API
+    semantic divergence
+    sync variant may block or be unavailable remotely
+
+Option C:
+    immutable context metadata is local, operations are async.
+
+Example:
+
+    ctx.applicationId
+    ctx.ownerId
+
+    await ctx.memory.read(...)
+    await ctx.capabilities.call(...)
+
+This appears promising but is not finalized.
+
+
+===============================================================================
+25. STREAMING
+===============================================================================
+
+Streaming is a core requirement because llm.stream@1 is fundamental.
+
+A portable stream model may need:
+
+- stream identity
+- item type
+- item sequence
+- open
+- next item
+- completion
+- failure
+- cancellation
+- backpressure
+- late items
+- disconnect
+- resumption or non-resumption
+- retained final result
+- trace correlation
+
+Possible styles:
+
+Option A:
+    message series.
+
+    StreamOpened
+    StreamItem
+    StreamItem
+    StreamCompleted
+
+Advantages:
+    transport-friendly
+    explicit
+
+Weaknesses:
+    more state management
+
+Option B:
+    remote iterator handle.
+
+    stream = call(...)
+    item = await stream.next()
+
+Advantages:
+    natural resource model
+    pull-based backpressure
+
+Weaknesses:
+    more round trips
+    handle lifetime complexity
+
+Option C:
+    push subscription.
+
+Advantages:
+    efficient continuous delivery
+
+Weaknesses:
+    backpressure and disconnect complexity
+
+Option D:
+    transport-native stream abstraction.
+
+Advantages:
+    performance
+
+Weaknesses:
+    transport coupling
+
+Different operations may select different styles while preserving common stream
+semantics.
+
+
+===============================================================================
+26. SEQUENCING
+===============================================================================
+
+Several distinct sequence domains may exist:
+
+- RPC lane sequence
+- producer trace sequence
+- stream item sequence
+- subscription update sequence
+- object-registry revision
+- memory revision
+- transaction revision
+- adapter-local event sequence
+- storage ingress sequence
+
+These sequences must not share one ambiguous meaning.
+
+Each sequence needs:
+
+- scope
+- owner
+- counter lifetime
+- reset conditions
+- gap meaning
+- duplicate meaning
+- ordering guarantee
+- relation to reconnect
+- relation to replay
+
+For example:
+
+    rpcLaneSequence
+        orders messages in one sender lane
+
+    traceProducerSequence
+        orders records produced by one producer session
+
+    streamSequence
+        orders items in one stream
+
+    registryRevision
+        orders authoritative registry changes
+
+One sequence cannot replace all others.
+
+
+===============================================================================
+27. ACKNOWLEDGEMENT
+===============================================================================
+
+Acknowledgement is a major source of ambiguity.
+
+Possible acknowledgement levels include:
+
+- transport received bytes or frame
+- message decoded
+- envelope validated
+- routing accepted
+- handler accepted
+- adapter accepted invocation
+- backend accepted trace record
+- record persisted
+- final work completed
+
+These are not equivalent.
+
+A future protocol may use:
+
+Option A:
+    one narrow ACK meaning.
+
+Example:
+    message received and parsed
+
+Advantages:
+    simple
+
+Weaknesses:
+    additional states need separate messages
+
+Option B:
+    typed acknowledgement stages.
+
+Example:
+    received
+    validated
+    accepted
+    persisted
+
+Advantages:
+    precise
+    useful for reliability
+
+Weaknesses:
+    more protocol traffic and complexity
+
+Option C:
+    ACK remains transport-only; semantic acceptance uses normal replies/events.
+
+Advantages:
+    strong conceptual separation
+
+Weaknesses:
+    more message categories
+
+Important invariant:
+
+    acknowledgement must not silently imply final operation success
+
+
+===============================================================================
+28. REGISTRY AND OBJECT SYNCHRONIZATION
+===============================================================================
+
+Actant clients and adapters may need synchronized projections of backend-owned
+registries.
+
+Examples:
+
+- discovered Packs
+- accepted Packs
+- services
+- capabilities
+- adapters
+- Applications
+- ApplicationRuns
+- jobs
+- clients
+- views
+- configuration
+- trace records
+- PackManager operations
+
+A likely reusable pattern is:
+
+    subscribe
+        -> initial snapshot
+        -> ordered updates
+        -> sequence gap detection
+        -> resynchronization
+
+Possible options:
+
+Option A:
+    full snapshot on every request.
+
+Advantages:
+    simple correctness
+
+Weaknesses:
+    inefficient for large or frequently changing registries
+
+Option B:
+    snapshot plus updates.
+
+Advantages:
+    common and scalable
+    proven by D-Bus ObjectManager and many state-sync systems
+
+Weaknesses:
+    revision tracking
+    gap handling
+    reconnect complexity
+
+Option C:
+    query on demand only.
+
+Advantages:
+    minimal synchronization state
+
+Weaknesses:
+    poor for live UI and monitoring
+
+Option D:
+    event sourcing projection.
+
+Advantages:
+    rich history and reconstruction
+
+Weaknesses:
+    expensive and may confuse trace with committed state
+
+No one model must apply to every registry.
+
+
+===============================================================================
+29. COMMAND AND RUNTIMEHOST MODEL
+===============================================================================
+
+Actant runs as an executable.
+
+Without a supplied command, it starts an interactive mode.
+
+The interactive command environment may support:
+
+- discovery
+- listing Packs
+- creating Applications
+- loading Applications
+- running AppPacks
+- stopping Applications
+- configuration changes
+- PackManager operations
+- host mode
+- client mode
+- trace inspection
+- runtime diagnostics
+
+A one-shot command and an interactive command should ideally reach the same
+underlying operation.
+
+For example:
+
+    actant discover
+
+and:
+
+    actant
+    > discover
+
+may both produce a structured CommandRequest.
+
+A remote client may send the same semantic command through RPC.
+
+The architecture should distinguish:
+
+- entry surface
+- command parsing
+- command request
+- RuntimeHost operation
+- backend-authoritative execution
+- structured result
+- long-running operation
+- final outcome
+
+Possible entry surfaces include:
+
+- command line
+- interactive shell
+- local frontend
+- remote client
+- launcher
+- test harness
+- automation
+
+The operation semantics should not depend on which entry surface produced the
+request.
+
+
+===============================================================================
+30. HOST AND CLIENT MODES
+===============================================================================
+
+Host mode exposes controlled runtime surfaces.
+
+Possible exposed areas:
+
+- command invocation
+- application control
+- Pack discovery
+- PackManager
+- trace subscriptions
+- client sessions
+- adapter connections
+- service and capability state
+- configuration projections
+- runtime diagnostics
+
+Client mode connects to another RuntimeHost.
+
+A local interactive shell may then route eligible commands to the remote host.
+
+Possible modes include:
+
+- standalone local runtime
+- interactive local runtime
+- headless host
+- host with local client
+- remote client
+- test host
+- frontend-attached host
+
+This means RPC must not be designed only as:
+
+    Python backend <-> browser frontend
+
+It may need to support:
+
+- backend <-> browser adapter
+- host <-> remote Actant client
+- backend <-> subprocess adapter
+- backend <-> remote Pack runtime
+- testing channels
+- local in-process channels
+
+WebSocket may remain one transport.
+
+It should not define the whole protocol.
+
+
+===============================================================================
+31. RPC AS GLUE
+===============================================================================
+
+The word "message" historically includes function-call-like invocation.
+
+Actant may treat a logical call as:
+
+    target
+    operation
+    arguments
+    context
+    expected result shape
+
+A direct Python call realizes that message through the language ABI.
+
+A remote JavaScript call realizes it through serialization and RPC.
+
+The platform abstraction is therefore not necessarily "WebSocket RPC."
+
+It is closer to:
+
+    language-neutral invocation and synchronization protocol
+
+Possible transport realizations include:
+
+- direct in-process call
+- WebSocket
+- local socket
+- subprocess IPC
+- stdio
+- shared memory
+- native ABI
+- WebAssembly component call
+- test channel
+
+The same logical operation may use different realizations.
+
+
+===============================================================================
+32. JSON AS BASELINE
+===============================================================================
+
+JSON is the most portable starting point.
+
+Advantages:
+
+- supported by nearly every language
+- inspectable
+- easy to debug
+- suitable for control messages
+- already familiar
+- low implementation barrier
+
+Weaknesses:
+
+- verbose
+- inefficient
+- weak binary support
+- type ambiguity
+- integer-range differences
+- repeated serialization overhead
+- large object growth
+- poor fit for streams and large payloads
+- pressure to build one giant envelope
+
+Possible directions:
+
+Option A:
+    keep JSON as the universal format.
+
+Option B:
+    JSON is the minimum required codec; faster codecs are optional.
+
+Option C:
+    JSON control plane plus specialized binary data plane.
+
+Option D:
+    use a generated binary schema system from the beginning.
+
+The semantic protocol should ideally survive codec replacement.
+
+
+===============================================================================
+33. LARGE VALUES AND DATA PLANE
+===============================================================================
+
+Not all values should be embedded directly in invocation messages.
+
+Large or specialized values may include:
+
+- images
+- audio
+- video
+- tensors
+- files
+- model weights
+- long prompt histories
+- large memory snapshots
+- datasets
+- trace batches
+
+Possible options:
+
+- chunked transfer
+- binary frame
+- shared-memory reference
+- backend ValueRef
+- adapter ValueRef
+- streamed file-like resource
+- content-addressed retained value
+- specialized codec
+
+The control message may carry:
+
+- value identity
+- type
+- size
+- integrity information
+- ownership
+- lifetime
+- retrieval method
+
+Tracing should normally record a reference, summary, or digest rather than embed
+the full payload.
+
+
+===============================================================================
+34. ERROR AND EXCEPTION INTEROPERABILITY
+===============================================================================
+
+A live Python exception cannot be transferred into JavaScript as the same object.
+
+A live JavaScript Error cannot become a native Python exception class.
+
+The protocol needs structured error representation.
+
+Possible fields:
+
+- error category
+- language
+- type name
+- qualified type name
+- message
+- code
+- stack
+- attributes
+- cause
+- retry information
+- trace correlation
+- invocation identity
+
+The design should distinguish:
+
+- domain failure
+- remote exception
+- adapter failure
+- protocol failure
+- transport failure
+- serialization failure
+- permission rejection
+- cancellation
+- timeout
+- invalid handle
+- expired context
+
+Possible options:
+
+Option A:
+    one universal error envelope with category fields.
+
+Option B:
+    typed per-contract errors plus generic infrastructure errors.
+
+Option C:
+    language-specific exception detail nested inside a portable outer envelope.
+
+The distinction between normal failure and exceptional termination is also
+important for tracing.
+
+
+===============================================================================
+35. CANCELLATION
+===============================================================================
+
+Cancellation is a request or state transition, not guaranteed arbitrary execution
+termination.
+
+Possible targets:
+
+- local pending wait
+- stream
+- subscription
+- invocation
+- job
+- adapter work
+- ApplicationRun operation
+- transport request
+
+Possible outcomes:
+
+- cancellation accepted
+- cancellation refused
+- already completed
+- implementation stopped
+- implementation continued
+- detached
+- late result arrived
+- transport disconnected before confirmation
+
+A cancel message should not automatically mean:
+
+- the job is cancelled
+- the implementation stopped
+- the stream produced no later items
+- the adapter failed
+- the transport failed
+
+Cancellation semantics belong to the target operation and lifecycle.
+
+
+===============================================================================
+36. RECONNECTION AND IDENTITY
+===============================================================================
+
+Transport identity, adapter identity, invocation identity, and persistent object
+identity should remain distinct.
+
+A reconnect may create:
+
+- a new transport connection
+- a new channel
+- a new generation
+- the same client identity
+- the same adapter identity
+- a resumed subscription
+- a new adapter session
+- invalidation of old handles
+
+Possible handle behaviors after reconnect:
+
+Option A:
+    all handles expire.
+
+Advantages:
+    simple and safe
+
+Weaknesses:
+    no transparent recovery
+
+Option B:
+    selected handles are reconnectable.
+
+Advantages:
+    better continuity
+
+Weaknesses:
+    requires persistent identity and resynchronization
+
+Option C:
+    handles map to durable backend identities but must be rebound.
+
+This may be appropriate for:
+
+- Application
+- ApplicationRun
+- job
+- retained value
+
+but not for:
+
+- live ModCallContext
+- active transaction
+- process-local stream
+
+
+===============================================================================
+37. TRACING AS A CONSUMER OF INTEROPERABILITY
+===============================================================================
+
+Tracing will use nearly every interoperability mechanism.
+
+Remote tracing may require:
+
+- trace context transfer
+- producer identity
+- producer session identity
+- event IDs
+- span IDs
+- producer sequence
+- local monotonic time
+- local wall-clock time
+- invocation identity
+- parent links
+- causal links
+- trace record serialization
+- acknowledgement
+- batching
+- backpressure
+- loss evidence
+- reconnect behavior
+- backend ingestion
+- storage
+- reconstruction
+
+A remote Pack may expose a language-native facade:
+
+    ctx.trace.event("ProviderRequestReceived")
+        .attr("model", model)
+        .emit()
+
+The facade may send a trace emission request through the adapter.
+
+The backend remains authoritative for:
+
+- ingress validation
+- accepted producer identity
+- normalization
+- receipt time
+- storage
+- retention
+- reconstruction
+- access
+
+The producer may remain authoritative for:
+
+- local event creation
+- local ordering
+- local timestamps
+- local exception evidence
+- local operation meaning
+
+Tracing therefore acts as a demanding test case for the broader interoperability
+platform.
+
+
+===============================================================================
+38. TRACE ORDERING OPTIONS
+===============================================================================
+
+Possible ordering signals include:
+
+- producer-local sequence
+- producer monotonic timestamp
+- producer wall-clock timestamp
+- UUIDv7 timestamp
+- RPC lane sequence
+- stream sequence
+- backend receipt time
+- storage persistence order
+- explicit causal links
+- explicit parent links
+- invocation lifecycle links
+
+No single signal provides universal total order.
+
+Possible design options:
+
+Option A:
+    only explicit causal links are semantically authoritative.
+
+Option B:
+    causal links plus producer sequence provide partial order.
+
+Option C:
+    reconstruct confidence levels from all available signals.
+
+Option D:
+    require stronger synchronization barriers for selected operations.
+
+The reconstructor should not fabricate certainty that the evidence does not
+support.
+
+
+===============================================================================
+39. DIRECT CALLS AND FREE-THREADED EXECUTION
+===============================================================================
+
+PythonInProcessAdapter can use direct calls.
+
+That does not remove the adapter boundary.
+
+It also does not guarantee trivial ordering forever.
+
+Future free-threaded Python and concurrent execution may cause trace emissions,
+stream items, callbacks, and state changes to compete.
+
+Possible approaches:
+
+- lock-protected producer sequence
+- atomic counter
+- task-local sequence plus thread identity
+- one adapter-local emission queue
+- centralized trace emitter
+- no total local order beyond explicit causality
+- per-invocation sequence rather than process-global sequence
+
+This issue is shared with remote adapters, though the implementation mechanics
+differ.
+
+
+===============================================================================
+40. SECURITY AND TRUST
+===============================================================================
+
+Remote adapters and Packs may send:
+
+- malformed IDs
+- fake timestamps
+- forged owner IDs
+- fake principal IDs
+- invalid parent links
+- oversized values
+- duplicate messages
+- invalid handles
+- stale context
+- misleading exception stacks
+- excessive trace volume
+
+The backend should validate remote evidence and calls.
+
+Possible controls:
+
+- schema validation
+- connection-bound producer identity
+- invocation-bound handles
+- capability checks
+- rate limits
+- size limits
+- depth limits
+- field allowlists
+- redaction
+- sequence validation
+- duplicate detection
+- context expiry
+- namespace enforcement
+- structured rejection
+
+Correlation metadata should not grant authority by itself.
+
+
+===============================================================================
+41. INTROSPECTION AND TOOLING
+===============================================================================
+
+A language-agnostic modular platform benefits from introspection.
+
+Possible introspectable information:
+
+- registered services
+- capability contracts
+- exported interfaces
+- operation signatures
+- adapter implementation targets
+- versions
+- stream support
+- cancellation support
+- handle types
+- lifetime rules
+- schema definitions
+- trace reason vocabularies
+- command descriptors
+- current runtime objects
+
+Possible options:
+
+Option A:
+    static generated metadata.
+
+Option B:
+    runtime introspection endpoint.
+
+Option C:
+    both static contract schemas and runtime instance introspection.
+
+D-Bus and generated-IDL systems provide useful precedent.
+
+
+===============================================================================
+42. POSSIBLE OVERALL ARCHITECTURE
+===============================================================================
+
+A broad conceptual architecture may be:
+
+    Pack implementation
+        -> language-native Actant binding
+        -> adapter runtime
+        -> canonical invocation/context model
+        -> direct-call channel or RPCChannel
+        -> transport
+        -> backend adapter gateway
+        -> authoritative services and capabilities
+        -> backend Memory, transactions, tracing, and persistence
+
+For local PythonInProcessAdapter, several layers may collapse into direct method
+calls.
+
+For JavaScript, they may become serialized requests and streams.
+
+For a future WebAssembly adapter, they may become canonical ABI calls.
+
+For a subprocess adapter, they may use local IPC.
+
+The semantic roles should remain recognizable in every realization.
+
+
+===============================================================================
+43. OPTIONS FOR THE OVERALL STYLE
+===============================================================================
+
+Option A: service-first platform
+
+Most operations are capability or service calls.
+
+Resources are represented through IDs.
+
+Advantages:
+    simpler
+    close to gRPC
+    easy to generate
+
+Weaknesses:
+    ModCallContext and dynamic resources become awkward
+
+Option B: distributed-object platform
+
+Interfaces and remote references are first-class.
+
+Advantages:
+    natural facades
+    composable resources
+    close to Cap'n Proto
+
+Weaknesses:
+    lifetime and authority complexity
+    danger of excessive transparency
+
+Option C: component-contract platform
+
+Interfaces, resources, values, and imports/exports are defined canonically.
+
+Transport is separate.
+
+Advantages:
+    close to WIT/FIDL
+    strong language neutrality
+    clear ownership
+
+Weaknesses:
+    requires substantial specification and binding work
+
+Option D: hybrid
+
+- service contracts for stable capabilities
+- typed handles for dynamic resources
+- canonical values for data
+- streams for ongoing output
+- snapshots plus updates for registries
+- backend authority for persistence
+
+Advantages:
+    fits many requirements
+
+Weaknesses:
+    potentially large and complex
+    may become the "monstrous" architecture this document is trying to expose
+
+No option is selected here.
+
+
+===============================================================================
+44. IMPORTANT TENSIONS
+===============================================================================
+
+Ergonomic local appearance
+    versus
+honest remote semantics
+
+Language-native freedom
+    versus
+cross-language coherence
+
+Backend authority
+    versus
+adapter-local autonomy
+
+Portable JSON
+    versus
+performance and strong typing
+
+Transparent proxies
+    versus
+explicit latency, failure, and lifetime
+
+One universal protocol
+    versus
+specialized interaction types
+
+Rich dynamic objects
+    versus
+simple service contracts
+
+Persistent continuity
+    versus
+ephemeral adapter-local state
+
+Fine-grained facade calls
+    versus
+RPC volume
+
+Strong ordering
+    versus
+concurrency and distribution
+
+Reliable tracing
+    versus
+non-blocking execution
+
+General handles
+    versus
+typed and scoped resources
+
+Reconnection transparency
+    versus
+clear lifetime invalidation
+
+These tensions should not be hidden.
+
+
+===============================================================================
+45. WHAT MAY BE ESSENTIAL
+===============================================================================
+
+The following appear central to the vision:
+
+- one platform contract across languages
+- backend-authoritative orchestration
+- adapter-mediated execution
+- language-neutral operation contracts
+- explicit implementation registration
+- distinction between values and references
+- typed or at least scoped handles
+- backend-owned durable Memory
+- local adapter state treated as potentially ephemeral
+- streaming
+- cancellation
+- structured errors
+- invocation identity
+- trace correlation
+- transport independence
+- codec independence where practical
+- direct calls preserving boundary meaning
+- host and client support
+- structured command model
+- snapshot/update synchronization for selected registries
+- explicit lifecycle and authority boundaries
+
+The exact realization of each remains open.
+
+
+===============================================================================
+46. WHAT MAY BE OPTIONAL OR DEFERRED
+===============================================================================
+
+The following may be valuable but not immediately necessary:
+
+- generated bindings
+- custom IDL
+- binary codec
+- native ABI adapter
+- WebAssembly component adapter
+- reconnectable remote handles
+- promise pipelining
+- distributed object delegation
+- transparent property synchronization
+- large-value shared memory
+- cross-machine adapters
+- typed acknowledgement stages
+- universal introspection
+- automatic registry delta synchronization
+- trace-order confidence scoring
+- durable remote stream resumption
+
+The architecture should avoid making these impossible, but it need not implement
+them all immediately.
+
+
+===============================================================================
+47. WORKING PRINCIPLES
+===============================================================================
+
+1. Actant is one platform across languages.
+
+2. Backend internals remain the authoritative orchestrator.
+
+3. Packs and adapters may retain local authority over their own implementation
+   state and behavior.
+
+4. Durable Application state should flow through backend-owned Memory and
+   persistence surfaces.
+
+5. Adapter-local values are potentially ephemeral unless explicitly persisted.
+
+6. Same language or same process does not erase the adapter boundary.
+
+7. Direct calls are an optimization of dispatch, not a change in platform
+   meaning.
+
+8. Actant synchronizes contracts, values, references, operations, streams, and
+   evidence rather than arbitrary object heaps.
+
+9. Transport is replaceable.
+
+10. JSON may be a baseline codec without becoming platform identity.
+
+11. A language-native facade may mimic an Actant concept without reimplementing
+    backend authority.
+
+12. Correlation metadata does not grant authority.
+
+13. Acknowledgement does not imply final operation success.
+
+14. Transport failure, adapter failure, domain failure, and cancellation remain
+    distinct.
+
+15. Tracing is one consumer of the interoperability platform, not the whole
+    platform.
+
+16. The current ideal design may contain weaknesses and conflicts.
+
+17. Options should remain visible until implementation evidence justifies
+    selection or removal.
+
+
+===============================================================================
+48. NEXT EXPLORATION AREAS
+===============================================================================
+
+Useful next areas include:
+
+- define the canonical Actant invocation shape
+- define contract identity and versioning
+- define values versus references
+- define handle categories and lifetime
+- define service and capability registration
+- define remote implementation descriptors
+- define invocation identity
+- define ModCallContext facade shape
+- define Memory facade behavior
+- define streams
+- define cancellation
+- define error envelopes
+- define synchronization snapshot/update mechanics
+- define transport-neutral channel expectations
+- define RPC acknowledgement levels
+- define producer and sequence identities
+- define trace context transfer
+- define large-value references
+- define host/client command routing
+- compare using an existing IDL versus an Actant-specific schema
+- identify the minimum practical subset for current implementation
+- identify extension holes for later features
+
+
+===============================================================================
+END OF ACTANT_LANGUAGE_AGNOSTIC_INTEROPERABILITY_VISION_BASE
+===============================================================================

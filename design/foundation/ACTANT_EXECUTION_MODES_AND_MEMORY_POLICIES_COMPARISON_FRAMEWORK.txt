@@ -1,0 +1,1572 @@
+===============================================================================
+ACTANT_EXECUTION_MODES_AND_MEMORY_POLICIES_COMPARISON_FRAMEWORK
+===============================================================================
+
+Purpose
+-------
+
+This document defines a reusable comparison framework for exploring execution
+modes and Memory concurrency policies in Actant.
+
+It exists because concurrency, distribution, synchronization, and transactional
+state management do not have one universally correct solution. Different
+workloads may require conflicting guarantees. A policy that is excellent for
+ordered conversational state and deterministic pipelines may be inappropriate
+for high-volume append-only input, parallel analysis, distributed workers, or
+independently mutable state regions.
+
+The framework therefore does not select one universal mode. It provides a
+repeatable way to define, compare, combine, constrain, and explain multiple
+modes and policies, including alternatives whose guarantees conflict.
+
+The intended use is:
+
+- paste this document into a design thread;
+- define one or more candidate modes or policies;
+- compare them using the same vocabulary;
+- expose guarantees, costs, limitations, dangers, and creator obligations;
+- avoid treating one implementation technique as universal truth;
+- preserve differences between scheduling, Memory isolation, synchronization,
+  transaction resolution, distribution, and persistence.
+
+This document is not a final Actant specification. It is a working analytical
+and rehydration tool.
+
+
+===============================================================================
+01. CORE PRINCIPLE
+===============================================================================
+
+Actant may support multiple execution modes and Memory policies.
+
+A mode or policy is correct only relative to:
+
+- workload;
+- required consistency;
+- acceptable latency;
+- acceptable complexity;
+- failure model;
+- distribution model;
+- creator expectations;
+- persistence requirements;
+- performance requirements;
+- determinism requirements.
+
+The platform should not assume:
+
+    one mode is correct for everything
+
+It may instead support:
+
+    one safe default
+    plus additional explicit modes for workloads needing different trade-offs
+
+Some modes may be incompatible inside one protected scope. Some may be
+composable across different scopes. Some may govern scheduling. Some may govern
+Memory. Some may apply only to selected data types, operations, or address
+regions.
+
+
+===============================================================================
+02. EXECUTION MODE VERSUS MEMORY POLICY
+===============================================================================
+
+These concepts should remain distinct.
+
+02.1. Execution mode
+
+An execution mode defines how Actant schedules and permits units of work to run.
+
+It may define:
+
+- whether callbacks run sequentially or concurrently;
+- whether multiple operations may be active;
+- whether participants may overlap;
+- whether external work may enter during active execution;
+- what execution ownership means;
+- where serialization boundaries exist;
+- whether suspension retains logical ownership.
+
+Examples:
+
+- SerializedExecutionMode;
+- dependency-wave execution;
+- parallel participant execution;
+- snapshot observer execution.
+
+02.2. Memory policy
+
+A Memory policy defines how reads, writes, conflicts, visibility, validation,
+and commit are handled.
+
+It may define:
+
+- which value a read observes;
+- whether writes are isolated;
+- whether locks exist;
+- whether revisions are checked;
+- whether conflicts are detected;
+- whether conflicting writes wait, fail, retry, or merge;
+- whether selected operations are commutative;
+- whether snapshots are stable.
+
+Examples:
+
+- exclusive transaction;
+- optimistic validation;
+- locking;
+- disjoint-address policy;
+- append-only merge;
+- compare-and-set.
+
+An execution mode may use one or more Memory policies. A Memory policy may be
+usable under more than one execution mode.
+
+
+===============================================================================
+03. SHARED MEMORY MODEL
+===============================================================================
+
+Candidate modes and policies should preserve the following baseline unless they
+explicitly state otherwise.
+
+03.1. Addressed Memory
+
+Memory is addressable. A read requests a Memory address.
+
+An address may later be represented as:
+
+- a flat key;
+- a hierarchical path;
+- a typed address;
+- a region and key;
+- another platform-owned form.
+
+03.2. Layered visibility
+
+A child layer begins without copying parent data. It contains only what is
+needed for its own identity and local state, such as:
+
+- layer identity;
+- parent identity or link;
+- lifecycle state;
+- local writes;
+- local deletions;
+- optional concurrency metadata;
+- optional child links.
+
+A read resolves from the current layer toward its ancestors. The first layer
+that defines an active value or deletion determines the result.
+
+03.3. Local writes
+
+A write affects the current writable layer. It does not directly mutate the
+parent.
+
+03.4. Relative commit
+
+A child commit promotes its accepted delta into its parent. It does not
+necessarily persist durably.
+
+03.5. Relative rollback
+
+A rollback discards unresolved local state. It does not automatically revert
+already accepted parent truth.
+
+03.6. Durable commit
+
+Only an appropriate outer authority commits accepted state into persistent
+Memory.
+
+03.7. Active value
+
+The active value is relative to a Memory view. It is the first visible value
+found through that view's ancestry. Two sibling transactions may therefore have
+different active values for the same address.
+
+03.8. Snapshot values
+
+A value returned into a host-language variable is normally a snapshot. It does
+not automatically update when Memory changes. A MemoryCell or equivalent facade
+may provide repeated active reads, but previously extracted host-language values
+remain unchanged.
+
+
+===============================================================================
+04. REQUIRED DISTINCTIONS
+===============================================================================
+
+Every analysis should preserve these distinctions.
+
+04.1. Atomic read
+
+One read returns one coherent value.
+
+04.2. Atomic write
+
+One write is applied as one indivisible Memory operation.
+
+04.3. Atomic read-modify-write
+
+A sequence such as:
+
+    read counter
+    add one
+    write counter
+
+is protected against interference. Atomic reads and writes alone do not provide
+this guarantee.
+
+04.4. Transaction isolation
+
+A transaction's combined reads and writes obey a defined visibility and
+interference model.
+
+04.5. Scheduling serialization
+
+Only one managed unit executes at a time. This may provide effective
+read-modify-write safety without fine-grained concurrency mechanisms.
+
+04.6. Persistence atomicity
+
+A durable commit either becomes accepted persistent truth or does not. This is
+distinct from transaction isolation during execution.
+
+04.7. Transport delivery
+
+A remote message arrived. This does not imply operation success, Memory commit,
+or persistence.
+
+04.8. Operation success
+
+The bounded operation achieved its own success condition. This does not
+necessarily imply its parent accepted the result.
+
+04.9. Parent acceptance
+
+The parent accepted the child's delta. This does not necessarily imply durable
+persistence.
+
+04.10. Durable acceptance
+
+The outer persistence authority accepted and stored the state.
+
+
+===============================================================================
+05. PROTECTED SCOPE
+===============================================================================
+
+Every mode and policy must define its scope.
+
+Possible scopes include:
+
+- whole RuntimeHost;
+- Application;
+- ApplicationRun;
+- operation;
+- pipeline;
+- stage;
+- participant group;
+- participant;
+- Memory region;
+- address subtree;
+- exact address;
+- service;
+- adapter session.
+
+Questions:
+
+- What exactly is protected?
+- Can two Applications use the same mode independently?
+- Can one pipeline use a stricter mode than its parent?
+- Can selected Memory regions use special policies?
+- Can child scopes weaken parent guarantees?
+- Can child scopes strengthen parent guarantees?
+- What happens when scopes overlap?
+
+
+===============================================================================
+06. EXECUTION UNIT
+===============================================================================
+
+Each mode must define what it schedules.
+
+Possible execution units:
+
+- Pack callback;
+- participant invocation;
+- stage;
+- pipeline run;
+- operation;
+- capability call;
+- service method;
+- command;
+- job step;
+- external event handler.
+
+Questions:
+
+- What begins and ends one execution unit?
+- May the unit suspend?
+- May it call child operations?
+- May it stream?
+- May it wait for remote work?
+- Does it retain ownership while suspended?
+- Can another unit run during suspension?
+- Does child execution count as part of the same unit?
+
+
+===============================================================================
+07. SCHEDULING GUARANTEE
+===============================================================================
+
+Every execution mode should state:
+
+- how many units may execute at once;
+- whether execution order is deterministic;
+- whether order follows the Pack graph;
+- whether unrelated units may overlap;
+- whether dependency waves exist;
+- whether external events may enter;
+- whether observers may run concurrently;
+- whether background work is managed or unmanaged.
+
+Example guarantee:
+
+    At most one stateful participant callback may actively execute within one
+    Application at a time.
+
+Example non-guarantee:
+
+    Unmanaged threads and external systems may continue running, but they may
+    not mutate authoritative Application Memory except through controlled
+    operations.
+
+
+===============================================================================
+08. READ VISIBILITY
+===============================================================================
+
+Each Memory policy must define what a read sees.
+
+Possible models:
+
+- latest active value in the current ancestry;
+- stable transaction snapshot;
+- latest committed persistent value;
+- latest parent value at time of read;
+- cached value with revision;
+- eventually updated projection;
+- explicitly stale snapshot.
+
+Questions:
+
+- Does a transaction see parent commits made after it starts?
+- Does a participant see earlier sibling commits?
+- Does it see later sibling commits?
+- Does it see external writes?
+- Are repeatable reads guaranteed?
+- Can two reads of the same address return different values?
+- Is visibility fixed at transaction start, read time, or commit time?
+- Does a read record a revision dependency?
+
+
+===============================================================================
+09. WRITE VISIBILITY
+===============================================================================
+
+Each policy must define when a write becomes visible.
+
+Possible visibility points:
+
+- immediately inside the writer's layer;
+- after child commit into parent;
+- after stage commit;
+- after pipeline commit;
+- after operation commit;
+- after durable persistence;
+- after asynchronous replication.
+
+Questions:
+
+- Who can observe uncommitted writes?
+- Do later siblings see committed child writes?
+- Do concurrent siblings see one another?
+- Can external clients observe tentative state?
+- Are streams allowed to expose tentative results?
+- Are tentative values marked as tentative?
+
+
+===============================================================================
+10. READ-MODIFY-WRITE GUARANTEE
+===============================================================================
+
+Every mode or policy should answer:
+
+    Is this safe?
+
+        value = read(address)
+        write(address, transform(value))
+
+Possible answers:
+
+- always safe inside the protected execution scope;
+- safe only with a lock;
+- safe only with revision validation;
+- unsafe; use an atomic update primitive;
+- safe only for commutative operations;
+- safe only under exclusive address ownership.
+
+If unsafe, define supported alternatives:
+
+- compare-and-set;
+- write-if-revision;
+- atomic increment;
+- append;
+- patch;
+- lock;
+- retrying transaction.
+
+
+===============================================================================
+11. EXTERNAL INPUT AND EXTERNAL WRITES
+===============================================================================
+
+External units may produce data while an operation is active.
+
+Examples:
+
+- ASR transcription;
+- network event;
+- client command;
+- sensor data;
+- filesystem watcher;
+- remote adapter result;
+- model callback;
+- timer.
+
+Each mode must define whether external input:
+
+- writes directly;
+- is denied;
+- waits;
+- is queued;
+- becomes a new operation;
+- enters an append-only inbox;
+- is merged;
+- creates a conflict;
+- is visible immediately;
+- is visible only to future operations.
+
+Questions:
+
+- Can external work alter persistent Memory?
+- Can it alter an active transaction?
+- Can it target the same address?
+- What if the active transaction already read that address?
+- What if the external input is time-sensitive?
+- What if the external unit disconnects before acknowledgement?
+
+
+===============================================================================
+12. SIBLING BEHAVIOR
+===============================================================================
+
+Sibling layers share a parent but do not share writable local state.
+
+A policy should define:
+
+- whether siblings may run concurrently;
+- whether siblings begin from the same parent revision;
+- whether one sibling sees another's commit;
+- whether sibling commit order matters;
+- whether conflicts are detected;
+- whether merges are possible;
+- whether one sibling may invalidate another;
+- whether one failure affects others.
+
+Possible models:
+
+- strictly sequential siblings;
+- parallel siblings from one snapshot;
+- dependency-ordered waves;
+- independently owned disjoint regions;
+- commutative sibling updates.
+
+
+===============================================================================
+13. ADDRESS CONFLICT MODEL
+===============================================================================
+
+Concurrency requires a definition of overlap.
+
+13.1. Exact-key conflict
+
+Only identical addresses conflict.
+
+Advantage:
+    simple
+
+Danger:
+    parent-object replacement may overwrite descendant changes
+
+13.2. Hierarchical conflict
+
+Parent and descendant addresses overlap.
+
+Example:
+
+    write conversation.messages
+    conflicts with
+    write conversation.messages.18
+
+Advantage:
+    safer for structured values
+
+Danger:
+    more expensive and restrictive
+
+13.3. Region-based conflict
+
+Addresses belong to named regions.
+
+Example:
+
+    conversation/*
+    audio/*
+    configuration/*
+
+Advantage:
+    manageable locking and policy assignment
+
+Danger:
+    coarse conflicts
+
+13.4. Structured patch conflict
+
+Writes declare precise field or collection operations.
+
+Advantage:
+    better concurrency
+
+Danger:
+    complex semantics
+
+13.5. Immutable object revision
+
+The entire value is replaced with revision validation.
+
+Advantage:
+    simple model
+
+Danger:
+    large value copying and coarse conflicts
+
+
+===============================================================================
+14. READ SET AND WRITE SET
+===============================================================================
+
+Policies should state whether they track:
+
+- addresses read;
+- revisions read;
+- addresses written;
+- deletions;
+- range reads;
+- collection queries;
+- negative reads, such as observing absence;
+- derived dependencies.
+
+Read sets matter because a transaction may make decisions from values it never
+writes.
+
+Example:
+
+    read balance = 100
+    decide discount = true
+
+An external write changes balance to 20. Even if the transaction does not write
+balance, its result may now be invalid.
+
+Possible tracking levels:
+
+- none;
+- write set only;
+- exact-address read set;
+- hierarchical read set;
+- revision snapshot;
+- declared dependency set;
+- application-defined validation.
+
+
+===============================================================================
+15. COMMIT VALIDATION
+===============================================================================
+
+Every policy must define what is checked before commit.
+
+Possible checks:
+
+- no check;
+- parent unchanged;
+- written addresses unchanged;
+- read addresses unchanged;
+- expected revisions match;
+- locks still held;
+- declared invariants pass;
+- merge function succeeds;
+- operation result accepted;
+- persistence preconditions pass.
+
+Possible outcomes:
+
+- commit;
+- conflict;
+- retry;
+- reject;
+- wait;
+- merge;
+- escalate to parent;
+- require manual resolution.
+
+
+===============================================================================
+16. CONFLICT RESOLUTION
+===============================================================================
+
+A conflict policy may choose:
+
+- fail immediately;
+- retry automatically;
+- retry only when declared safe;
+- wait and revalidate;
+- choose one writer;
+- use Pack order;
+- use priority;
+- merge;
+- call a domain resolver;
+- preserve both versions;
+- queue a follow-up operation.
+
+Questions:
+
+- Is conflict a normal result or exception?
+- Which layer rolls back?
+- Is retry a new attempt?
+- Is retry idempotent?
+- Are external side effects repeated?
+- Is the chosen resolution deterministic?
+- Is the conflict traceable?
+
+
+===============================================================================
+17. RETRY BEHAVIOR
+===============================================================================
+
+Retry should normally create a new attempt.
+
+Each attempt should have:
+
+- attempt identity;
+- Memory layer;
+- base revision;
+- trace span;
+- result;
+- terminal outcome.
+
+A mode should define:
+
+- who requests retry;
+- who authorizes retry;
+- maximum attempts;
+- backoff;
+- whether inputs are replayable;
+- whether external side effects are safe;
+- whether streams may be repeated;
+- whether the new attempt uses latest parent state;
+- whether partial external effects require compensation.
+
+
+===============================================================================
+18. CANCELLATION
+===============================================================================
+
+Every mode should define cancellation behavior.
+
+Questions:
+
+- Is cancellation a request or guaranteed stop?
+- Which unit receives it?
+- Does the Memory layer roll back?
+- Can cleanup write to Memory?
+- Can late results arrive?
+- Can the unit detach?
+- Does cancellation propagate to children?
+- Does child cancellation fail the parent?
+- Can commit race with cancellation?
+- What trace evidence is required?
+
+
+===============================================================================
+19. REFERENCES AND MEMORY CELLS
+===============================================================================
+
+A Memory reference should be treated as an address facade, not a magical
+host-language reference.
+
+Possible operations:
+
+    cell.read()
+    cell.write(value)
+    cell.delete()
+    cell.readWithRevision()
+    cell.writeIfRevision(revision, value)
+    cell.update(operation)
+
+A policy should define:
+
+- which Memory view the cell is bound to;
+- whether it survives commit;
+- whether it survives rollback;
+- whether it may be passed to another participant;
+- whether it may cross adapters;
+- whether it is cached;
+- whether reads resolve on every access;
+- whether it receives invalidation;
+- what happens after expiry.
+
+Important invariant:
+
+    a local value previously returned from cell.read() is a snapshot
+
+Actant cannot generally mutate arbitrary variables inside host languages.
+
+
+===============================================================================
+20. REMOTE ADAPTER BEHAVIOR
+===============================================================================
+
+Every mode and policy must explain remote behavior.
+
+Questions:
+
+- Is each read a remote call?
+- Are reads batched?
+- Are writes buffered locally?
+- Is a snapshot sent at invocation start?
+- How are revisions represented?
+- Who owns the authoritative layer?
+- Can the adapter request commit?
+- Does backend commit automatically on callback success?
+- What happens on disconnect?
+- What happens to buffered writes?
+- Are handles invocation-scoped?
+- Can stale remote calls arrive after rollback?
+- How are duplicates detected?
+
+
+===============================================================================
+21. PERSISTENCE BEHAVIOR
+===============================================================================
+
+The policy should distinguish in-memory transaction commit from durable commit.
+
+Questions:
+
+- When does persistence occur?
+- Is durable commit synchronous?
+- Can persistence fail after operation success?
+- Is there a journal?
+- Is commit atomic?
+- Are partial writes possible?
+- Is persistence retried?
+- Is the result retained when persistence fails?
+- Does the parent remain active?
+- Can durable storage be remote?
+- How are revisions assigned?
+
+
+===============================================================================
+22. TRACE OBLIGATIONS
+===============================================================================
+
+Each mode should identify trace evidence needed to explain its behavior.
+
+Possible evidence:
+
+- mode selected;
+- protected scope;
+- layer created;
+- base revision;
+- read dependency recorded;
+- write staged;
+- lock acquired;
+- lock wait;
+- lock released;
+- conflict detected;
+- validation passed;
+- validation failed;
+- merge attempted;
+- merge succeeded;
+- retry created;
+- child committed;
+- child rolled back;
+- external input queued;
+- external write denied;
+- durable commit attempted;
+- durable commit succeeded;
+- durable commit failed.
+
+Trace remains evidence. It does not become state authority.
+
+
+===============================================================================
+23. PERFORMANCE CHARACTERISTICS
+===============================================================================
+
+Each mode should evaluate:
+
+- maximum concurrency;
+- expected latency;
+- lock contention;
+- serialization overhead;
+- RPC volume;
+- revision-check cost;
+- Memory lookup depth;
+- merge cost;
+- retry frequency;
+- persistence cost;
+- trace volume;
+- memory overhead;
+- scalability across Applications;
+- scalability across machines.
+
+The simplest semantics may have poor throughput. The highest concurrency may
+have unacceptable reasoning and implementation cost.
+
+
+===============================================================================
+24. DETERMINISM
+===============================================================================
+
+Each mode should define whether results are:
+
+- deterministic;
+- deterministic under a fixed Pack graph;
+- deterministic only without external timing;
+- deterministic after conflict resolution;
+- nondeterministic by design;
+- eventually convergent.
+
+Questions:
+
+- Does callback scheduling affect the result?
+- Does message arrival order affect the result?
+- Does retry timing affect the result?
+- Does Pack order resolve conflicts?
+- Can two valid executions produce different accepted state?
+- Is that difference acceptable?
+
+
+===============================================================================
+25. FAILURE MODEL
+===============================================================================
+
+Each definition should consider:
+
+- callback exception;
+- process crash;
+- adapter crash;
+- RuntimeHost crash;
+- network disconnect;
+- timeout;
+- duplicate delivery;
+- late delivery;
+- persistence failure;
+- lock owner disappearance;
+- partial stream delivery;
+- malformed request;
+- stale handle;
+- conflict;
+- cancellation.
+
+For each failure:
+
+- what state remains active?
+- what state rolls back?
+- what is persisted?
+- what may be retried?
+- what evidence remains?
+- what result is surfaced?
+
+
+===============================================================================
+26. SECURITY AND TRUST
+===============================================================================
+
+A mode should state what is trusted.
+
+Possible untrusted behavior:
+
+- incorrect declared access set;
+- forged revision;
+- stale write;
+- oversized mutation;
+- invalid address;
+- unauthorized region;
+- duplicate request;
+- late request;
+- fabricated commit request;
+- denial-of-service through lock retention.
+
+Backend validation may include:
+
+- address permission;
+- operation permission;
+- layer ownership;
+- handle lifetime;
+- revision validity;
+- size limits;
+- access declaration enforcement;
+- duplicate detection;
+- rate limits.
+
+
+===============================================================================
+27. CREATOR EXPERIENCE
+===============================================================================
+
+Each mode should assess what the Pack creator must understand.
+
+Questions:
+
+- Must the creator know about revisions?
+- Must she acquire locks?
+- Must she re-read values?
+- Must she declare read/write regions?
+- Must callbacks be idempotent?
+- Must she handle conflicts?
+- Must she use special atomic operations?
+- Can she rely on sequential Pack ordering?
+- Are stale snapshots possible?
+- How are errors surfaced?
+- Can safe defaults hide complexity without hiding correctness-relevant facts?
+
+
+===============================================================================
+28. IMPLEMENTATION COMPLEXITY
+===============================================================================
+
+Each mode should estimate complexity in:
+
+- backend;
+- adapter;
+- language binding;
+- Memory store;
+- persistence layer;
+- trace reconstruction;
+- PackManager;
+- testing;
+- creator documentation;
+- debugging.
+
+A theoretically strong mode may be unsuitable if its implementation complexity
+exceeds its practical value.
+
+
+===============================================================================
+29. COMPOSABILITY
+===============================================================================
+
+A mode or policy should define whether it can coexist with others.
+
+Questions:
+
+- Can an Application use SerializedExecutionMode while one append-only region
+  accepts concurrent writes?
+- Can a SnapshotObserverMode observer run during serialized stateful execution?
+- Can optimistic child work exist under a locked parent?
+- Can a child weaken parent isolation?
+- Can two policies govern one address?
+- Which policy wins when scopes overlap?
+- Is mode transition allowed during an operation?
+- Can a Pack request a stronger policy?
+- Can a Pack request a weaker policy?
+
+
+===============================================================================
+30. DEFAULT AND OPT-IN STATUS
+===============================================================================
+
+Every mode should be classified as one of:
+
+- platform default;
+- Application default;
+- operation opt-in;
+- Pack-declared;
+- Memory-region policy;
+- internal optimization;
+- experimental;
+- unsupported combination.
+
+A safe default should be understandable and predictable. More advanced modes
+should be explicit.
+
+
+===============================================================================
+31. DANGER CHECKLIST
+===============================================================================
+
+Every mode analysis should check for:
+
+- lost updates;
+- dirty reads;
+- non-repeatable reads;
+- phantom reads;
+- stale snapshots;
+- write skew;
+- deadlock;
+- livelock;
+- starvation;
+- priority inversion;
+- duplicate side effects;
+- retry storms;
+- lock leaks;
+- stale handles;
+- late writes;
+- split-brain authority;
+- hidden nondeterminism;
+- unbounded queues;
+- unbounded transaction lifetime;
+- remote callback holding a global lock;
+- persistence failure after visible output;
+- trace loss hiding conflict;
+- creator misunderstanding;
+- cross-language semantic mismatch.
+
+
+===============================================================================
+32. STANDARD EXECUTION MODE DEFINITION TEMPLATE
+===============================================================================
+
+Use this template when defining an execution mode.
+
+-------------------------------------------------------------------------------
+Mode name
+-------------------------------------------------------------------------------
+
+Classification:
+    Execution mode
+
+Intent:
+    What workload or problem the mode addresses.
+
+Protected scope:
+    RuntimeHost, Application, ApplicationRun, operation, pipeline, stage,
+    participant group, or another scope.
+
+Execution unit:
+    What is scheduled and serialized or allowed to overlap.
+
+Scheduling guarantee:
+    Exact concurrency and ordering guarantee.
+
+Suspension behavior:
+    Whether ownership remains while awaiting I/O or remote work.
+
+Child execution:
+    Whether children run inside the same ownership or separately.
+
+External input behavior:
+    Deny, queue, wait, merge, independent operation, or another policy.
+
+Required Memory policy:
+    Which Memory policy or policies support this mode.
+
+Read visibility:
+    What values executing units observe.
+
+Write visibility:
+    When writes become visible to others.
+
+Read-modify-write guarantee:
+    Whether larger update sequences are safe.
+
+Sibling behavior:
+    Sequential, parallel, dependency waves, or another model.
+
+Commit behavior:
+    How child and parent commits work.
+
+Conflict behavior:
+    What constitutes conflict and how it resolves.
+
+Retry behavior:
+    Whether retry is supported and how attempts are represented.
+
+Cancellation behavior:
+    How cancellation affects execution and Memory.
+
+Remote adapter behavior:
+    How the guarantee survives RPC and disconnect.
+
+Trace obligations:
+    Evidence required for reconstruction.
+
+Determinism:
+    What outcomes are deterministic.
+
+Creator responsibilities:
+    What Pack authors must do correctly.
+
+Strengths:
+    Main advantages.
+
+Limitations:
+    Main restrictions and costs.
+
+Dangers:
+    Specific failure or misuse risks.
+
+Compatible policies:
+    Which Memory policies may be combined.
+
+Incompatible policies:
+    Which policies would violate guarantees.
+
+Likely use cases:
+    Workloads for which the mode is appropriate.
+
+Unsuitable use cases:
+    Workloads for which the mode is inappropriate.
+
+Implementation options:
+    Multiple possible mechanisms, without selecting one prematurely.
+
+Open questions:
+    Unresolved semantics.
+
+
+===============================================================================
+33. STANDARD MEMORY POLICY DEFINITION TEMPLATE
+===============================================================================
+
+Use this template when defining a Memory policy.
+
+-------------------------------------------------------------------------------
+Policy name
+-------------------------------------------------------------------------------
+
+Classification:
+    Memory concurrency, isolation, merge, or persistence policy.
+
+Intent:
+    What consistency or performance problem it addresses.
+
+Applicable scope:
+    Application, operation, region, address, data type, or another scope.
+
+Address model:
+    Exact key, hierarchical path, region, structured patch, or another model.
+
+Read model:
+    Latest active, stable snapshot, committed-only, cached, or another model.
+
+Write model:
+    Local delta, direct operation, buffered batch, commutative operation, etc.
+
+Read set tracking:
+    None, exact, hierarchical, revision-based, declared, or another model.
+
+Write set tracking:
+    None, exact, hierarchical, patch-based, or another model.
+
+Version model:
+    Global revision, per-address revision, per-region revision, vector-like
+    version, or none.
+
+Lock model:
+    None, read/write, exclusive, region, subtree, lease, or another model.
+
+Read-modify-write:
+    Safe, unsafe, revision-guarded, lock-guarded, or operation-specific.
+
+Commit validation:
+    Checks performed before parent promotion.
+
+Conflict definition:
+    Exact conditions that constitute a conflict.
+
+Conflict resolution:
+    Fail, wait, retry, merge, priority, Pack order, or domain resolver.
+
+External write behavior:
+    How writes outside the active ancestry are handled.
+
+Sibling behavior:
+    Visibility and merge semantics.
+
+Reference behavior:
+    Meaning and lifetime of MemoryCell or equivalent.
+
+Remote behavior:
+    Batching, caching, revision checks, duplicate handling.
+
+Persistence relationship:
+    How in-memory commit relates to durable commit.
+
+Trace obligations:
+    Required evidence.
+
+Determinism:
+    Whether resolution is deterministic.
+
+Creator responsibilities:
+    Required declarations or APIs.
+
+Strengths:
+    Main advantages.
+
+Limitations:
+    Main restrictions and costs.
+
+Dangers:
+    Lost updates, stale reads, deadlocks, retry duplication, etc.
+
+Compatible execution modes:
+    Modes that can safely use the policy.
+
+Incompatible execution modes:
+    Modes whose guarantees conflict.
+
+Likely use cases:
+    Appropriate workloads.
+
+Unsuitable use cases:
+    Inappropriate workloads.
+
+Implementation options:
+    Known real-world mechanisms that could realize the policy.
+
+Open questions:
+    Unresolved semantics.
+
+
+===============================================================================
+34. STANDARD COMPARISON MATRIX
+===============================================================================
+
+When comparing several modes or policies, evaluate them across:
+
+- correctness simplicity;
+- creator simplicity;
+- deterministic behavior;
+- read consistency;
+- write consistency;
+- read-modify-write safety;
+- nested transaction support;
+- remote adapter suitability;
+- external input handling;
+- parallelism;
+- latency;
+- throughput;
+- lock risk;
+- retry risk;
+- merge complexity;
+- persistence integration;
+- traceability;
+- failure recovery;
+- implementation complexity;
+- testing complexity;
+- scalability;
+- compatibility with Pack ordering;
+- compatibility with layered Memory;
+- compatibility with host/client distribution.
+
+Use qualitative ratings only when the underlying meaning is explained. Do not
+reduce the decision to one score.
+
+
+===============================================================================
+35. BASELINE MODE: SERIALIZEDEXECUTIONMODE
+===============================================================================
+
+Classification:
+    Execution mode
+
+Intent:
+    Provide the simplest strong state consistency model for Actant-managed
+    stateful callbacks.
+
+Protected scope:
+    Initially expected to be one Application, though narrower scopes may later
+    be explored.
+
+Execution unit:
+    One Actant-managed stateful participant callback or equivalent bounded unit.
+
+Scheduling guarantee:
+    At most one protected stateful execution unit actively executes at a time.
+
+Suspension behavior:
+    The unit may physically suspend while awaiting I/O or remote work, but it
+    retains logical exclusive ownership unless the mode explicitly permits
+    re-entry.
+
+Child execution:
+    Child work may execute within the same ownership chain or be serialized as
+    nested controlled execution.
+
+External input behavior:
+    External state-changing input should normally be queued as a future
+    operation, denied, or explicitly routed through an allowed special policy.
+
+Required Memory policy:
+    Exclusive ancestry-local writable transaction.
+
+Read visibility:
+    Reads resolve through the current transaction ancestry.
+
+Write visibility:
+    Writes become visible inside the current layer immediately and to later
+    managed participants only after promotion into an ancestor they can see.
+
+Read-modify-write guarantee:
+    Safe within the protected execution, provided state access remains under
+    Actant control.
+
+Sibling behavior:
+    Sequential by default.
+
+Commit behavior:
+    Child delta promotes into parent on accepted completion.
+
+Conflict behavior:
+    No managed participant conflict should occur inside the protected scope.
+    External conflict must be prevented or separately handled.
+
+Retry behavior:
+    Retry creates a new attempt and new child layer.
+
+Cancellation behavior:
+    Normally rolls back unresolved child state; exact parent semantics remain
+    operation-owned.
+
+Remote adapter behavior:
+    Remote callbacks may hold logical ownership while executing. This is simple
+    semantically but may cause long blocking periods.
+
+Trace obligations:
+    Execution ownership granted, child layer created, callback entered, child
+    committed or rolled back, ownership released.
+
+Determinism:
+    Strong, subject to external I/O and explicit nondeterministic Pack behavior.
+
+Creator responsibilities:
+    Use Actant Memory APIs and avoid unmanaged authoritative state mutation.
+
+Strengths:
+    Simple reasoning, safe read-modify-write, deterministic propagation, easy
+    nested commit and rollback.
+
+Limitations:
+    Low concurrency, blocking risk, long remote operations delay unrelated work.
+
+Dangers:
+    Unmanaged background mutation, re-entrant calls, global execution ownership
+    held across slow remote execution, queue growth.
+
+Likely use cases:
+    Conversational Memory, ordered pipelines, game-like state transitions,
+    initial platform implementation.
+
+Unsuitable use cases:
+    High-volume independent updates, long-running parallel analysis, sensor
+    ingestion requiring immediate concurrent writes.
+
+Implementation options:
+    Application execution lease, serialized queue, event loop, mutex-protected
+    dispatcher, actor-like mailbox.
+
+Open questions:
+    Re-entrancy, scope width, read-only observers, long streams, child operation
+    scheduling, external event queue.
+
+
+===============================================================================
+36. CANDIDATE EXECUTION MODES FOR FUTURE ANALYSIS
+===============================================================================
+
+These names are placeholders for structured exploration.
+
+36.1. SerializedExecutionMode
+
+One managed stateful unit at a time.
+
+36.2. DependencyWaveExecutionMode
+
+Participants run in graph-derived waves. Participants in one wave may execute
+concurrently when dependency rules allow.
+
+36.3. ParallelParticipantExecutionMode
+
+Selected participants run concurrently under an explicit Memory policy.
+
+36.4. SnapshotObserverMode
+
+Read-only or non-authoritative work runs against a stable snapshot while
+authoritative execution continues.
+
+36.5. RegionPartitionedExecutionMode
+
+Concurrent work is allowed when each unit owns a distinct Memory region.
+
+36.6. ExternalEventIngestionMode
+
+External producers submit events through a controlled ingestion path, possibly
+concurrently with other work.
+
+These are analytical candidates, not accepted platform modes.
+
+
+===============================================================================
+37. CANDIDATE MEMORY POLICIES FOR FUTURE ANALYSIS
+===============================================================================
+
+37.1. ExclusiveTransactionPolicy
+
+One writable transaction controls the protected scope.
+
+37.2. DisjointAddressPolicy
+
+Concurrent writes are allowed when access regions do not overlap.
+
+37.3. OptimisticValidationPolicy
+
+Work proceeds from revisions or snapshots and validates dependencies at commit.
+
+37.4. LockingPolicy
+
+Transactions acquire explicit locks over addresses, regions, or subtrees.
+
+37.5. CompareAndSetPolicy
+
+Writes succeed only when an expected revision or value still matches.
+
+37.6. CommutativeOperationPolicy
+
+Only operations with defined merge semantics may execute concurrently.
+
+37.7. AppendOnlyPolicy
+
+Concurrent producers append independent entries without overwriting prior
+entries.
+
+37.8. SnapshotReadPolicy
+
+Reads observe a stable historical view and do not automatically see later
+commits.
+
+37.9. DomainMergePolicy
+
+A domain-provided function resolves selected conflicting deltas.
+
+These are analytical candidates, not commitments.
+
+
+===============================================================================
+38. REAL-WORLD SOLUTION FAMILIES TO CONSULT
+===============================================================================
+
+Future analysis should draw from established systems such as:
+
+- database isolation levels;
+- optimistic concurrency control;
+- pessimistic locking;
+- multiversion concurrency control;
+- compare-and-swap;
+- actor mailboxes;
+- event loops;
+- software transactional memory;
+- immutable persistent data structures;
+- event sourcing;
+- append-only logs;
+- CRDTs;
+- distributed consensus;
+- leases;
+- idempotency keys;
+- transactional outbox patterns;
+- workflow engines;
+- saga and compensation patterns;
+- snapshot isolation;
+- serializable transactions;
+- read-copy-update;
+- lock-free and wait-free structures.
+
+These systems solve different problem subsets. They should be presented as
+options and precedents, not automatically combined into one Actant solution.
+
+
+===============================================================================
+39. ANALYSIS RULES
+===============================================================================
+
+When using this framework:
+
+1. Do not select a mechanism before defining the required guarantee.
+
+2. Do not use "atomic" without stating the boundary.
+
+3. Do not use "current value" without naming the Memory view.
+
+4. Do not use "commit" without naming the parent or persistence boundary.
+
+5. Do not treat transport delivery as execution success.
+
+6. Do not assume a live reference updates copied host-language values.
+
+7. Do not assume atomic reads and writes make read-modify-write safe.
+
+8. Do not assume concurrent disjoint writes are safe without defining address
+   overlap.
+
+9. Do not assume retry is safe when external side effects exist.
+
+10. Do not assume one policy should govern every Memory region.
+
+11. Preserve multiple candidate solutions until requirements eliminate them.
+
+12. State which real-world mechanisms a proposed mode resembles.
+
+13. State where the analogy to those systems stops.
+
+14. Prefer examples where terminology may be ambiguous.
+
+15. Keep backend authority separate from physical storage location.
+
+
+===============================================================================
+40. REHYDRATION INSTRUCTION
+===============================================================================
+
+When this document is provided in a future thread, the assistant should:
+
+- treat execution modes and Memory policies as separate concepts;
+- avoid choosing one universal concurrency solution;
+- define candidate modes using the standard templates;
+- compare guarantees before implementation techniques;
+- provide common real-world approaches and their trade-offs;
+- preserve SerializedExecutionMode as the baseline safe model;
+- treat advanced modes as explicit alternatives;
+- explain concurrency concepts in relation to Actant's layered Memory;
+- use examples involving Packs, pipelines, external input, nested layers,
+  remote adapters, and persistence;
+- identify dangers, failure cases, and creator obligations;
+- remain honest where distributed-system trade-offs prevent perfect guarantees.
+
+
+===============================================================================
+END OF ACTANT_EXECUTION_MODES_AND_MEMORY_POLICIES_COMPARISON_FRAMEWORK
+===============================================================================
