@@ -1,71 +1,184 @@
-# file: backend/core/validation.py
+# file: backend/core/validation.py ; version: 2
 from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import PurePosixPath
-from typing import Any
+from typing import cast
 
-from backend.core.errors import UsageError
+__all__: list[str] = [
+    "requireExactNonBlankString",
+    "requireInteger",
+    "requireMapping",
+    "requireNonBlankString",
+    "requireOptionalExactNonBlankString",
+    "requireRelativePurePosixPath",
+    "requireString",
+    "typeName",
+]
+
 
 
 def typeName(value: object) -> str:
-    """Helper to prevent TypeError("Expected list, got {type(value)}.__name__.") typo."""
-    return type(value).__name__
+    """
+    Returns a readable runtime type name for diagnostics.
+
+    Built-in types use only their qualified name. Other types include their
+    defining module to avoid ambiguous diagnostics.
+    """
+    valueType = type(value)
+
+    if valueType.__module__ == "builtins":
+        return valueType.__qualname__
+
+    return f"{valueType.__module__}.{valueType.__qualname__}"
+
+
+def requireString(
+    value: object,
+    name: str,
+) -> str:
+    """
+    Require a Python string.
+
+    Raises:
+        TypeError:
+            If value is not a string.
+
+    """
+    if not isinstance(value, str):
+        raise TypeError(f"{name} must be a string, not {typeName(value)}.")
+
+    return value
+
+
+def requireNonBlankString(value: object, name: str) -> str:
+    """
+    Require a string containing at least one non-whitespace character.
+
+    Raises:
+        TypeError:
+            If value is not a string.
+        ValueError:
+            If value is blank.
+
+    """
+    string = requireString(value, name)
+
+    if not string.strip():
+        raise ValueError(f"{name} must not be blank.")
+
+    return string
 
 
 def requireExactNonBlankString(value: object, name: str) -> str:
-    if not isinstance(value, str):
-        raise UsageError(f"{name} must be a string, not {typeName(value)}.")
+    """
+    Require a non-blank string without surrounding whitespace.
 
-    if value == "":
-        raise UsageError(f"{name} must not be an empty string.")
+    The value is not normalized. Leading or trailing whitespace is rejected
+    so the returned string is exactly the string supplied by the caller.
 
-    strippedValue = value.strip()
+    Raises:
+        TypeError:
+            If value is not a string.
+        ValueError:
+            If value is blank or contains leading or trailing whitespace.
 
-    if strippedValue == "":
-        raise UsageError(f"{name} must not be a string containing only whitespace.")
+    """
+    string = requireNonBlankString(value, name)
 
-    if value != strippedValue:
-        raise UsageError(f"{name} must not contain leading or trailing whitespace.")
+    if string != string.strip():
+        raise ValueError(
+            f"{name} must not contain leading or trailing whitespace.",
+        )
 
-    return value
+    return string
 
 
-def requireMapping(value: object, name: str) -> Mapping[Any, Any]:
+def requireMapping(value: object, name: str) -> Mapping[object, object]:
+    """
+    Require a mapping value.
+
+    Raises:
+        TypeError:
+            If value does not implement the Mapping protocol.
+
+    """
     if not isinstance(value, Mapping):
-        raise UsageError(f"{name} must be an object, not {typeName(value)}.")
-    return value
+        raise TypeError(f"{name} must be a mapping, not {typeName(value)}.")
+
+    return cast(Mapping[object, object], value)
 
 
-def requireOptionalString(value: object, name: str) -> str | None:
+def requireOptionalExactNonBlankString(value: object, name: str) -> str | None:
+    """
+    Require either None or a non-blank string without surrounding whitespace.
+
+    Raises:
+        TypeError:
+            If value is neither None nor a string.
+        ValueError:
+            If value is blank or contains leading or trailing whitespace.
+
+    """
     if value is None:
         return None
+
     return requireExactNonBlankString(value, name)
 
 
+def requireInteger(value: object, name: str) -> int:
+    """
+    Require a Python integer while rejecting bool.
+
+    Python bool is a subclass of int, but boolean values are not accepted as
+    integers by this validator.
+
+    Raises:
+        TypeError:
+            If value is not an integer or is a boolean.
+
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be an integer, not {typeName(value)}.")
+
+    return value
+
+
+
 def requireRelativePurePosixPath(value: object, name: str) -> PurePosixPath:
-    if isinstance(value, str):
-        path = PurePosixPath(value)
-    elif isinstance(value, PurePosixPath):
-        path = value
-    else:
-        raise UsageError(f"{name} must be a relative POSIX path string, not {typeName(value)}.")
+    """
+    Require a non-empty relative POSIX path that remains inside its root.
 
-    text = path.as_posix()
+    This validator rejects absolute paths, parent traversal, backslashes, and
+    values that normalize to the current directory. It does not require fully
+    canonical authored path syntax; harmless normalization such as ``a/./b``
+    remains accepted.
 
-    if text == ".":
-        raise UsageError(f"{name} must not be empty.")
+    Raises:
+        TypeError:
+            If value is not a string.
+        ValueError:
+            if value is blank, contains surrounding whitespace, uses a
+            backslash, is absolute, identifies the current directory, or
+            contains parent traversal.
+
+    """
+    string = requireExactNonBlankString(value, name)
+
+    if "\\" in string:
+        raise ValueError(f"{name} must use '/' as its path separator.")
+
+    path = PurePosixPath(string)
 
     if path.is_absolute():
-        raise UsageError(f"{name} must be relative: {text}.")
+        raise ValueError(f"{name} must be a relative POSIX path.")
 
-    if "\\" in text:
-        raise UsageError(f"{name} must use POSIX '/' separators, not backslashes: {text}.")
+    if path == PurePosixPath("."):
+        raise ValueError(f"{name} must identify a path.")
 
-    if ".." in path.parts:
-        raise UsageError(f"{name} must not contain '..': {text}.")
-
-    if any(part != part.strip() for part in path.parts):
-        raise UsageError(f"{name} path segments must not contain leading or trailing whitespace: {text}.")
+    if any(part == ".." for part in path.parts):
+        raise ValueError(
+            f"{name} must not traverse outside its containing root.",
+        )
 
     return path
