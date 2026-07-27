@@ -1,60 +1,84 @@
-# file: backend/core/ids.py
+# file: backend/core/ids.py ; version: 1
 from __future__ import annotations
 
-import secrets
 import uuid
+from dataclasses import dataclass
+from typing import ClassVar, Self
 
-import uuid6
+from backend.core.validation import requireExactNonBlankString, typeName
 
 __all__: list[str] = [
-    "shortToken",
-    "uuidv4",
-    "uuidv4hex",
-    "uuidv4hex10",
-    "uuidv4hex12",
-    "uuidv7",
+    "Uuid7Id",
 ]
 
 
-def uuidv7(*, prefix: str = "") -> str:
-    """Returns a UUIDv7 string, time-ordered, optionally with a prefix."""
-    validatePrefix(prefix)
-    return prefix + str(uuid6.uuid7())
+@dataclass(frozen=True, slots=True)
+class Uuid7Id:
+    """
+    Base value object for typed Actant runtime identifiers.
 
+    Concrete domains define identity types by deriving from this class.
+    Instances of different concrete identity types are never equal, even
+    when they contain the same UUID value.
+    """
 
-def uuidv4(*, prefix: str = "") -> str:
-    """Returns a UUIDv4 string, optionally with a prefix."""
-    validatePrefix(prefix)
-    return prefix + str(uuid.uuid4())
+    UUID_VERSION: ClassVar[int] = 7
 
+    value: uuid.UUID
 
-def uuidv4hex10(*, prefix: str = "") -> str:
-    """Returns 10 hex characters from a UUIDv4, optionally with a prefix."""
-    validatePrefix(prefix)
-    return prefix + str(uuid.uuid4()).replace("-", "")[:10]
+    def __post_init__(self) -> None:
+        """
+        Validate the UUID value.
 
+        Raises:
+            TypeError:
+                If value is not a UUID.
+            ValueError:
+                If value is not a UUIDv7.
 
-def uuidv4hex12(*, prefix: str = "") -> str:
-    """Returns 12 hex characters from a UUIDv4, optionally with a prefix."""
-    validatePrefix(prefix)
-    return prefix + str(uuid.uuid4()).replace("-", "")[:12]
+        """
+        if not isinstance(self.value, uuid.UUID):
+            raise TypeError(
+                f"value must be a uuid.UUID, not {typeName(self.value)}.",
+            )
 
+        if self.value.version != self.UUID_VERSION:
+            raise ValueError("value must be a UUIDv7.")
 
-def uuidv4hex(*, prefix: str = "") -> str:
-    """Returns a hex string from a UUIDv4, optionally with a prefix."""
-    validatePrefix(prefix)
-    return prefix + str(uuid.uuid4().hex)
+    def __str__(self) -> str:
+        """Return the canonical UUID string."""
+        return str(self.value)
 
+    @classmethod
+    def new(cls) -> Self:
+        """Create a new identifier containing a UUIDv7 value."""
+        return cls(uuid.uuid7())
 
-def shortToken(nbytes: int = 12) -> str:
-    """Returns a compact opaque token for URLs/cookies."""
-    if not isinstance(nbytes, int):
-        raise TypeError("nbytes must be an int")
-    if nbytes < 1:
-        raise ValueError("nbytes must be greater than 0")
-    return secrets.token_urlsafe(nbytes)
+    @classmethod
+    def parse(cls, value: object, name: str = "value") -> Self:
+        """
+        Parse a UUIDv7 identity from its canonical string representation.
 
+        Raises:
+            TypeError:
+                If value is not a string.
+            ValueError:
+                If value is not a canonical UUIDv7 string.
 
-def validatePrefix(prefix: str) -> None:
-    if not isinstance(prefix, str):
-        raise TypeError("prefix must be a str")
+        """
+        text = requireExactNonBlankString(value, name)
+
+        try:
+            parsed = uuid.UUID(text)
+        except ValueError as err:
+            raise ValueError(f"{name} must be a UUIDv7 string.") from err
+
+        if str(parsed) != text:
+            raise ValueError(
+                f"{name} must use canonical lowercase UUIDv7 syntax.",
+            )
+
+        if parsed.version != cls.UUID_VERSION:
+            raise ValueError(f"{name} must be a UUIDv7.")
+
+        return cls(parsed)
