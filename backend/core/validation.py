@@ -1,4 +1,4 @@
-# file: backend/core/validation.py ; version: 2
+# file: backend/core/validation.py ; version: 4
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -6,16 +6,19 @@ from pathlib import PurePosixPath
 from typing import cast
 
 __all__: list[str] = [
+    "requireBool",
     "requireExactNonBlankString",
+    "requireFloat",
     "requireInteger",
     "requireMapping",
     "requireNonBlankString",
     "requireOptionalExactNonBlankString",
+    "requireOptionalPositiveInteger",
+    "requirePositiveFloat",
     "requireRelativePurePosixPath",
     "requireString",
     "typeName",
 ]
-
 
 
 def typeName(value: object) -> str:
@@ -126,6 +129,44 @@ def requireOptionalExactNonBlankString(value: object, name: str) -> str | None:
     return requireExactNonBlankString(value, name)
 
 
+def requireFloat(value: object, name: str) -> float:
+    """
+    Require an int or float and return it as a float.
+
+    Boolean values are rejected even though bool is a subclass of int.
+
+    Raises:
+        TypeError:
+            If value is not an int or float, or is a boolean.
+
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(
+            f"{name} must be an int or float, not {typeName(value)}.",
+        )
+
+    return float(value)
+
+
+def requirePositiveFloat(value: object, name: str) -> float:
+    """
+    Require a positive numeric value and return it as a float.
+
+    Raises:
+        TypeError:
+            If value is not an int or float, or is a boolean.
+        ValueError:
+            If value is not greater than zero.
+
+    """
+    number = requireFloat(value, name)
+
+    if number <= 0:
+        raise ValueError(f"{name} must be greater than zero.")
+
+    return number
+
+
 def requireInteger(value: object, name: str) -> int:
     """
     Require a Python integer while rejecting bool.
@@ -143,6 +184,42 @@ def requireInteger(value: object, name: str) -> int:
 
     return value
 
+
+def requireOptionalPositiveInteger(value: object, name: str) -> int | None:
+    """
+    Require either None or an integer greater than zero.
+
+    Raises:
+        TypeError:
+            If value is neither None nor an integer, or is a boolean.
+        ValueError:
+            If value is not greater than zero.
+
+    """
+    if value is None:
+        return None
+
+    cleanValue = requireInteger(value, name)
+
+    if cleanValue < 1:
+        raise ValueError(f"{name} must be greater than zero.")
+
+    return cleanValue
+
+
+def requireBool(value: object, name: str) -> bool:
+    """
+    Require a Python bool.
+
+    Raises:
+        TypeError:
+            If value is not a bool.
+
+    """
+    if not isinstance(value, bool):
+        raise TypeError(f"{name} must be a bool, not {typeName(value)}.")
+
+    return value
 
 
 def requireRelativePurePosixPath(value: object, name: str) -> PurePosixPath:
