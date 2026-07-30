@@ -1,7 +1,9 @@
-# file: backend/llm/errors.py ; version 5
+# file: backend/llm/errors.py ; version 6
 from __future__ import annotations
 
 from backend.core.errors import ActantError
+from backend.core.validation import requireExactNonBlankString, requireNonBlankString, typeName
+from backend.pack.packCodeEntry import PackCodeEntryInstanceId
 
 __all__: list[str] = [
     "LlmError",
@@ -30,9 +32,21 @@ class LlmInputRejectedError(LlmError):
         message: str,
         *,
         purposeId: str,
-        ownerId: str,
+        ownerId: PackCodeEntryInstanceId,
         reason: str,
     ) -> None:
+        """Initializes an LLM input-rejection error."""
+        requireNonBlankString(message, "message")
+        requireExactNonBlankString(purposeId, "purposeId")
+
+        if not isinstance(ownerId, PackCodeEntryInstanceId):
+            raise TypeError(
+                "ownerId must be a PackCodeEntryInstanceId; "
+                f"got {typeName(ownerId)}.",
+            )
+
+        requireNonBlankString(reason, "reason")
+
         super().__init__(message)
         self.purposeId = purposeId
         self.ownerId = ownerId
