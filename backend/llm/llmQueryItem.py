@@ -1,4 +1,4 @@
-# file: backend/llm/llmQueryItem.py ; version: 3
+# file: backend/llm/llmQueryItem.py ; version: 5
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -8,6 +8,7 @@ from backend.core.immutableValue import ImmutableValue, ImmutableValueFreezer
 from backend.core.validation import requireBool, requireExactNonBlankString, requireInteger, requireString, typeName
 from backend.llm.errors import LlmPipelineStateError, LlmPromptBudgetError
 from backend.llm.llmTypes import LlmPromptBudget
+from backend.pack.packCodeEntry import PackCodeEntryInstanceId
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -20,22 +21,47 @@ __all__: list[str] = [
     "LlmQueryItemFilter",
     "LlmQueryItemFilterContext",
     "LlmQueryItemFilterResult",
+    "LlmQueryItemId",
     "LlmQueryItemIdentity",
     "validateUniqueQueryItemIdentities",
 ]
 
 
 @dataclass(frozen=True, slots=True)
+class LlmQueryItemId:
+    """Represents an identifier assigned to one LLM query item."""
+
+    value: str
+
+    def __post_init__(self) -> None:
+        """Validates the LLM query-item identifier."""
+        requireExactNonBlankString(self.value, "value")
+
+    def __str__(self) -> str:
+        """Returns the underlying query-item identifier."""
+        return self.value
+
+
+@dataclass(frozen=True, slots=True)
 class LlmQueryItemIdentity:
     """Represents the structured run-local identity of one query item."""
 
-    ownerId: str
-    itemId: str
+    ownerId: PackCodeEntryInstanceId
+    itemId: LlmQueryItemId
 
     def __post_init__(self) -> None:
         """Validates the query-item identity."""
-        requireExactNonBlankString(self.ownerId, "ownerId")
-        requireExactNonBlankString(self.itemId, "itemId")
+        if not isinstance(self.ownerId, PackCodeEntryInstanceId):
+            raise TypeError(
+                "ownerId must be a PackCodeEntryInstanceId; "
+                f"got {typeName(self.ownerId)}.",
+            )
+
+        if not isinstance(self.itemId, LlmQueryItemId):
+            raise TypeError(
+                "itemId must be an LlmQueryItemId; "
+                f"got {typeName(self.itemId)}.",
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +84,10 @@ class LlmQueryItem:
     def __post_init__(self) -> None:
         """Validates and freezes the query-item values."""
         if not isinstance(self.identity, LlmQueryItemIdentity):
-            raise TypeError("identity must be an LlmQueryItemIdentity.")
+            raise TypeError(
+                "identity must be an LlmQueryItemIdentity; "
+                f"got {typeName(self.identity)}.",
+            )
         requireString(self.content, "content")
         requireInteger(self.importance, "importance")
         requireBool(self.mandatory, "mandatory")
@@ -167,7 +196,7 @@ class LlmQueryItemFilterResult:
         if overlappingIdentities:
             identity = min(
                 overlappingIdentities,
-                key=lambda item: (item.ownerId, item.itemId),
+                key=lambda item: (str(item.ownerId), item.itemId.value),
             )
             raise ValueError(
                 f"A query item must not be both selected and excluded; "
