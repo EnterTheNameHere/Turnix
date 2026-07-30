@@ -1,4 +1,4 @@
-# file: backend/llm/llmPipelineStages.py ; version: 1
+# file: backend/llm/llmProcessingPipelineStages.py ; version: 1
 from __future__ import annotations
 
 PREPARE_INPUT = "llm.prepare-input"
