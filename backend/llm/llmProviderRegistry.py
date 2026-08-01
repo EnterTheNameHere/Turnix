@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from backend.core.validation import requireExactNonBlankString, typeName
+from backend.core.validation import requireExactNonBlankString, requireInstance, typeName
 from backend.llm.errors import (
     LlmProviderAlreadyRegisteredError,
     LlmProviderContractError,
@@ -33,11 +33,7 @@ class LlmStreamProviderRegistrationEntry:
         """Validates the LLM stream-provider registration entry."""
         requireExactNonBlankString(self.providerName, "providerName")
 
-        if not isinstance(self.ownerId, PackCodeEntryInstanceId):
-            raise TypeError(
-                "ownerId must be a PackCodeEntryInstanceId; "
-                f"got {typeName(self.ownerId)}.",
-            )
+        requireInstance(self.ownerId, PackCodeEntryInstanceId, "ownerId")
 
         _validateProviderContract(self.provider)
 
