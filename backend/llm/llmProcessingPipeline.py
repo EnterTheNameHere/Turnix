@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from backend.core.immutableValue import ImmutableValueFreezer
-from backend.core.validation import requireInteger, requireString, typeName
+from backend.core.validation import requireInstance, requireInteger, requireString, typeName
 from backend.llm.errors import LlmPipelineStateError, LlmPromptBudgetError, LlmProviderProtocolError
 from backend.llm.llmProcessingPipelineRun import (
     LlmProcessingRequest,
@@ -88,11 +88,7 @@ class LlmProcessingPipeline:
 
     def run(self, request: LlmProcessingRequest) -> LlmProcessingRunResult:
         """Runs one complete transactional LLM processing pipeline."""
-        if not isinstance(request, LlmProcessingRequest):
-            raise TypeError(
-                "request must be an LlmProcessingRequest; "
-                f"got {typeName(request)}.",
-            )
+        requireInstance(request, LlmProcessingRequest, "request")
 
         freezer = ImmutableValueFreezer()
         rawSource = {} if request.rawInput is None else request.rawInput
@@ -115,12 +111,11 @@ class LlmProcessingPipeline:
                 model=request.model,
                 providerOptions=providerOptions,
             )
-            if not isinstance(profile, LlmExecutionProfile):
-                raise LlmProviderProtocolError(
-                    "Provider getExecutionProfile() returned an "
-                    "invalid result; expected LlmExecutionProfile, "
-                    f"got {typeName(profile)}.",
-                )
+            requireInstance(
+                profile,
+                LlmExecutionProfile,
+                "Provider getExecutionProfile()",
+            )
 
             tokenEstimator = (
                 profile.tokenEstimator
@@ -173,11 +168,7 @@ class LlmProcessingPipeline:
                 ),
             )
 
-            if not isinstance(builtPrompt, str):
-                raise LlmPipelineStateError(
-                    "The prompt builder returned a non-string prompt; "
-                    f"got {typeName(builtPrompt)}.",
-                )
+            requireInstance(builtPrompt, str, "builtPrompt")
 
             run.currentPrompt = builtPrompt
             self._runHooks(BUILD_PROMPT, "after", run)
@@ -191,10 +182,7 @@ class LlmProcessingPipeline:
             )
             self._runHooks(PREPARE_ENGINE_CALL, "after", run)
 
-            if not isinstance(run.callRequest, LlmCallRequest):
-                raise LlmPipelineStateError(
-                    "PREPARE_ENGINE_CALL left no valid call request.",
-                )
+            requireInstance(run.callRequest, LlmCallRequest, "callRequest")
 
             self._consumeProviderStream(
                 provider=provider,
