@@ -9,10 +9,12 @@ __all__: list[str] = [
     "requireBool",
     "requireExactNonBlankString",
     "requireFloat",
+    "requireInstance",
     "requireInteger",
     "requireMapping",
     "requireNonBlankString",
     "requireOptionalExactNonBlankString",
+    "requireOptionalInstance",
     "requireOptionalPositiveInteger",
     "requirePositiveFloat",
     "requireRelativePurePosixPath",
@@ -259,3 +261,32 @@ def requireRelativePurePosixPath(value: object, name: str) -> PurePosixPath:
         )
 
     return path
+
+
+def requireInstance[T](
+    value: object,
+    expectedType: type[T],
+    name: str,
+) -> T:
+    """Returns value if it is an instance of the expected type."""
+    cleanName = requireExactNonBlankString(name, "name")
+
+    if not isinstance(value, expectedType):
+        raise TypeError(
+            f"{cleanName} must be an instance of {expectedType.__name__}; "
+            f"got {typeName(value)}.",
+        )
+
+    return value
+
+
+def requireOptionalInstance[T](
+    value: object,
+    expectedType: type[T],
+    name: str,
+) -> T | None:
+    """Returns None or value if it is an instance of the expected type."""
+    if value is None:
+        return None
+
+    return requireInstance(value, expectedType, name)
