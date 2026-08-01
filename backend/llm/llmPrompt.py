@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from backend.core.immutableValue import ImmutableValueFreezer
-from backend.core.validation import requireExactNonBlankString, typeName
+from backend.core.validation import requireExactNonBlankString, requireInstance
 from backend.llm.llmQueryItem import LlmQueryItem, validateUniqueQueryItemIdentities
 from backend.llm.llmTypes import LlmPromptBudget
 from backend.pack.packCodeEntry import PackCodeEntryInstanceId
@@ -50,17 +50,8 @@ class LlmProcessedInput:
 
     def __post_init__(self) -> None:
         """Validates the processed-input contribution."""
-        if not isinstance(self.ownerId, PackCodeEntryInstanceId):
-            raise TypeError(
-                "ownerId must be a PackCodeEntryInstanceId; "
-                f"got {typeName(self.ownerId)}.",
-            )
-
-        if not isinstance(self.inputId, LlmProcessedInputId):
-            raise TypeError(
-                "inputId must be an LlmProcessedInputId; "
-                f"got {typeName(self.inputId)}.",
-            )
+        requireInstance(self.ownerId, PackCodeEntryInstanceId, "ownerId")
+        requireInstance(self.inputId, LlmProcessedInputId, "inputId")
 
         frozenValue = ImmutableValueFreezer().freeze(self.value, "value")
         object.__setattr__(self, "value", frozenValue)
@@ -86,41 +77,25 @@ class LlmPromptBuilderContext:
         )
         object.__setattr__(self, "rawInput", frozenRawInput)
 
-        if not isinstance(self.processedInput, tuple):
-            raise TypeError(
-                "processedInput must be a tuple; "
-                f"got {typeName(self.processedInput)}.",
-            )
+        requireInstance(self.processedInput, tuple, "processedInput")
 
         for index, contribution in enumerate(self.processedInput):
-            if not isinstance(contribution, LlmProcessedInput):
-                raise TypeError(
-                    f"processedInput[{index}] must be an LlmProcessedInput; "
-                    f"got {typeName(contribution)}.",
-                )
+            requireInstance(
+                contribution,
+                LlmProcessedInput,
+                f"processedInput[{index}]",
+            )
 
         validateUniqueProcessedInputIdentities(self.processedInput)
 
-        if not isinstance(self.selectedItems, tuple):
-            raise TypeError(
-                "selectedItems must be a tuple; "
-                f"got {typeName(self.selectedItems)}.",
-            )
+        requireInstance(self.selectedItems, tuple, "selectedItems")
 
         for index, item in enumerate(self.selectedItems):
-            if not isinstance(item, LlmQueryItem):
-                raise TypeError(
-                    f"selectedItems[{index}] must be an LlmQueryItem; "
-                    f"got {typeName(item)}.",
-                )
+            requireInstance(item, LlmQueryItem, f"selectedItems[{index}]")
 
         validateUniqueQueryItemIdentities(self.selectedItems)
 
-        if not isinstance(self.budget, LlmPromptBudget):
-            raise TypeError(
-                "budget must be an LlmPromptBudget; "
-                f"got {typeName(self.budget)}.",
-            )
+        requireInstance(self.budget, LlmPromptBudget, "budget")
 
 
 class LlmPromptBuilder(Protocol):
