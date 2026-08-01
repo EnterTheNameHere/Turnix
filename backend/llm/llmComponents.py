@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from backend.core.validation import requireExactNonBlankString, typeName
+from backend.core.validation import requireExactNonBlankString, requireInstance, typeName
 from backend.llm.llmPrompt import DefaultLlmPromptBuilder, LlmPromptBuilder
 from backend.llm.llmQueryItem import DefaultLlmQueryItemFilter, LlmQueryItemFilter
 from backend.pack.packCodeEntry import PackCodeEntryInstanceId
@@ -90,11 +90,7 @@ class LlmStageComponentRegistry:
         queryItemFilter: LlmQueryItemFilter,
     ) -> None:
         """Replaces the active order-zero query-item filter."""
-        if not isinstance(ownerId, PackCodeEntryInstanceId):
-            raise TypeError(
-                "ownerId must be a PackCodeEntryInstanceId; "
-                f"got {typeName(ownerId)}.",
-            )
+        requireInstance(ownerId, PackCodeEntryInstanceId, "ownerId")
         validateQueryItemFilter(queryItemFilter)
         self._queryItemFilterOwner = ownerId
         self._queryItemFilter = queryItemFilter
@@ -106,11 +102,7 @@ class LlmStageComponentRegistry:
         promptBuilder: LlmPromptBuilder,
     ) -> None:
         """Replaces the active order-zero prompt builder."""
-        if not isinstance(ownerId, PackCodeEntryInstanceId):
-            raise TypeError(
-                "ownerId must be a PackCodeEntryInstanceId; "
-                f"got {typeName(ownerId)}.",
-            )
+        requireInstance(ownerId, PackCodeEntryInstanceId, "ownerId")
         validatePromptBuilder(promptBuilder)
         self._promptBuilderOwner = ownerId
         self._promptBuilder = promptBuilder
