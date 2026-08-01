@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
-from backend.core.validation import requireInteger, typeName
+from backend.core.validation import requireInstance, requireInteger, typeName
 from backend.llm.llmProcessingPipelineStages import LlmProcessingPipelineStageId
 from backend.llm.llmStageContext import LlmStageContext
 from backend.pack.packCodeEntry import PackCodeEntryInstanceId
@@ -35,17 +35,8 @@ class LlmHookRegistrationEntry:
 
     def __post_init__(self) -> None:
         """Validates the LLM hook registration entry."""
-        if not isinstance(self.stageId, LlmProcessingPipelineStageId):
-            raise TypeError(
-                "stageId must be an LlmProcessingPipelineStageId; "
-                f"got {typeName(self.stageId)}.",
-            )
-
-        if not isinstance(self.ownerId, PackCodeEntryInstanceId):
-            raise TypeError(
-                "ownerId must be a PackCodeEntryInstanceId; "
-                f"got {typeName(self.ownerId)}.",
-            )
+        requireInstance(self.stageId, LlmProcessingPipelineStageId, "stageId")
+        requireInstance(self.ownerId, PackCodeEntryInstanceId, "ownerId")
 
         if self.position not in ("before", "after"):
             raise ValueError("position must be 'before' or 'after'.")
@@ -99,11 +90,7 @@ class LlmHookRegistry:
         position: LlmHookPosition,
     ) -> tuple[LlmHookRegistrationEntry, ...]:
         """Returns an ordered immutable snapshot of matching hooks."""
-        if not isinstance(stageId, LlmProcessingPipelineStageId):
-            raise TypeError(
-                "stageId must be an LlmProcessingPipelineStageId; "
-                f"got {typeName(stageId)}.",
-            )
+        requireInstance(stageId, LlmProcessingPipelineStageId, "stageId")
 
         if position not in ("before", "after"):
             raise ValueError("position must be 'before' or 'after'.")
