@@ -1,4 +1,4 @@
-# file: backend/processing/llmProcessingPipeline.py ; version 3
+# file: backend/llm/llmProcessingPipeline.py ; version 3
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
