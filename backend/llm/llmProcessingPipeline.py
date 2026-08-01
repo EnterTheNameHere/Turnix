@@ -103,7 +103,6 @@ class LlmProcessingPipeline:
         transaction = self._transactionManager.beginLlmPipelineTransaction(
             runId=runId,
         )
-        committed = False
 
         def executePipeline() -> LlmProcessingRunResult:
             components = self._componentRegistry.snapshot()
