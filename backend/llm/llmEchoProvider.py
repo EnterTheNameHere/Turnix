@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from backend.core.validation import typeName
+from backend.core.validation import requireInstance
 from backend.llm.llmTypes import LlmCallRequest, LlmExecutionProfile, LlmStreamEvent, LlmStreamProvider
 
 if TYPE_CHECKING:
@@ -35,11 +35,7 @@ class LlmEchoProvider(LlmStreamProvider):
 
     def stream(self, request: LlmCallRequest) -> Iterator[LlmStreamEvent]:
         """Yields the request prompt followed by a completion event."""
-        if not isinstance(request, LlmCallRequest):
-            raise TypeError(
-                "request must be an LlmCallRequest; "
-                f"got {typeName(request)}.",
-            )
+        requireInstance(request, LlmCallRequest, "request")
 
         yield LlmStreamEvent(
             eventType="delta",
