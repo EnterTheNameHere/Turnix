@@ -6,7 +6,14 @@ from typing import TYPE_CHECKING
 
 from backend.core.ids import Uuid7Id
 from backend.core.immutableValue import ImmutableValue, ImmutableValueFreezer
-from backend.core.validation import requireExactNonBlankString, requireInteger, requireString, typeName
+from backend.core.validation import (
+    requireExactNonBlankString,
+    requireInstance,
+    requireInteger,
+    requireOptionalInstance,
+    requireString,
+    typeName,
+)
 from backend.llm.errors import LlmPipelineStateError, LlmPromptBudgetError
 from backend.llm.llmPrompt import LlmProcessedInput, LlmProcessedInputId
 from backend.llm.llmQueryItem import LlmQueryItem, LlmQueryItemFilterResult, LlmQueryItemId, LlmQueryItemIdentity
@@ -65,14 +72,11 @@ class LlmProcessingRequest:
         )
         object.__setattr__(self, "providerOptions", frozenProviderOptions)
 
-        if self.promptBudget is not None and not isinstance(
+        requireOptionalInstance(
             self.promptBudget,
             LlmPromptBudget,
-        ):
-            raise TypeError(
-                "promptBudget must be an LlmPromptBudget; "
-                f"got {typeName(self.promptBudget)}.",
-            )
+            "promptBudget",
+        )
         if self.streamObserver is not None and not callable(
             self.streamObserver,
         ):
@@ -119,23 +123,9 @@ class LlmProcessingRunResult:
 
     def __post_init__(self) -> None:
         """Validates the LLM processing-run result."""
-        if not isinstance(self.runId, LlmProcessingRunId):
-            raise TypeError(
-                "runId must be an LlmProcessingRunId; "
-                f"got {typeName(self.runId)}.",
-            )
-
-        if not isinstance(self.callRequest, LlmCallRequest):
-            raise TypeError(
-                "callRequest must be an LlmCallRequest; "
-                f"got {typeName(self.callRequest)}.",
-            )
-
-        if not isinstance(self.response, LlmResponse):
-            raise TypeError(
-                "response must be an LlmResponse; "
-                f"got {typeName(self.response)}.",
-            )
+        requireInstance(self.runId, LlmProcessingRunId, "runId")
+        requireInstance(self.callRequest, LlmCallRequest, "callRequest")
+        requireInstance(self.response, LlmResponse, "response")
 
 
 @dataclass(slots=True)
@@ -171,11 +161,7 @@ class LlmProcessingRun:
 
     def __post_init__(self) -> None:
         """Validates and freezes the initial LLM processing-run state."""
-        if not isinstance(self.runId, LlmProcessingRunId):
-            raise TypeError(
-                "runId must be an LlmProcessingRunId; "
-                f"got {typeName(self.runId)}.",
-            )
+        requireInstance(self.runId, LlmProcessingRunId, "runId")
 
         requireExactNonBlankString(self.purposeId, "purposeId")
         requireExactNonBlankString(self.providerName, "providerName")
@@ -195,17 +181,12 @@ class LlmProcessingRun:
         )
         self.providerOptions = frozenProviderOptions
 
-        if not isinstance(self.executionProfile, LlmExecutionProfile):
-            raise TypeError(
-                "executionProfile must be an LlmExecutionProfile; "
-                f"got {typeName(self.executionProfile)}.",
-            )
-
-        if not isinstance(self.budget, LlmPromptBudget):
-            raise TypeError(
-                "budget must be an LlmPromptBudget; "
-                f"got {typeName(self.budget)}.",
-            )
+        requireInstance(
+            self.executionProfile,
+            LlmExecutionProfile,
+            "executionProfile",
+        )
+        requireInstance(self.budget, LlmPromptBudget, "budget")
 
         if not callable(getattr(self.tokenEstimator, "estimateTokens", None)):
             raise TypeError(
@@ -235,17 +216,8 @@ class LlmProcessingRun:
         value: object,
     ) -> None:
         """Adds one owned processed-input contribution."""
-        if not isinstance(ownerId, PackCodeEntryInstanceId):
-            raise TypeError(
-                "ownerId must be a PackCodeEntryInstanceId; "
-                f"got {typeName(ownerId)}.",
-            )
-
-        if not isinstance(inputId, LlmProcessedInputId):
-            raise TypeError(
-                "inputId must be an LlmProcessedInputId; "
-                f"got {typeName(inputId)}.",
-            )
+        requireInstance(ownerId, PackCodeEntryInstanceId, "ownerId")
+        requireInstance(inputId, LlmProcessedInputId, "inputId")
 
         identity = (ownerId, inputId)
 
@@ -313,11 +285,7 @@ class LlmProcessingRun:
 
     def removeQueryItem(self, identity: LlmQueryItemIdentity) -> None:
         """Removes one query item and any current filter selection."""
-        if not isinstance(identity, LlmQueryItemIdentity):
-            raise TypeError(
-                "identity must be an LlmQueryItemIdentity; "
-                f"got {typeName(identity)}.",
-            )
+        requireInstance(identity, LlmQueryItemIdentity, "identity")
 
         for index, item in enumerate(self.queryItems):
             if item.identity == identity:
@@ -337,11 +305,7 @@ class LlmProcessingRun:
 
     def setFilterResult(self, result: LlmQueryItemFilterResult) -> None:
         """Validates and applies one query-item filter result."""
-        if not isinstance(result, LlmQueryItemFilterResult):
-            raise TypeError(
-                "result must be an LlmQueryItemFilterResult; "
-                f"got {typeName(result)}.",
-            )
+        requireInstance(result, LlmQueryItemFilterResult, "result")
 
         originalItemsByIdentity = {
             item.identity: item
@@ -465,11 +429,7 @@ class LlmProcessingRun:
         value: object,
     ) -> None:
         """Adds one namespaced immutable response-data value."""
-        if not isinstance(ownerId, PackCodeEntryInstanceId):
-            raise TypeError(
-                "ownerId must be a PackCodeEntryInstanceId; "
-                f"got {typeName(ownerId)}.",
-            )
+        requireInstance(ownerId, PackCodeEntryInstanceId, "ownerId")
 
         cleanKey = requireExactNonBlankString(key, "key")
         fullKey = f"{ownerId.value}:{cleanKey}"
