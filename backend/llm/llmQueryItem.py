@@ -5,7 +5,14 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 from backend.core.immutableValue import ImmutableValue, ImmutableValueFreezer
-from backend.core.validation import requireBool, requireExactNonBlankString, requireInteger, requireString, typeName
+from backend.core.validation import (
+    requireBool,
+    requireExactNonBlankString,
+    requireInstance,
+    requireInteger,
+    requireString,
+    typeName,
+)
 from backend.llm.errors import LlmPipelineStateError, LlmPromptBudgetError
 from backend.llm.llmTypes import LlmPromptBudget
 from backend.pack.packCodeEntry import PackCodeEntryInstanceId
@@ -51,17 +58,8 @@ class LlmQueryItemIdentity:
 
     def __post_init__(self) -> None:
         """Validates the query-item identity."""
-        if not isinstance(self.ownerId, PackCodeEntryInstanceId):
-            raise TypeError(
-                "ownerId must be a PackCodeEntryInstanceId; "
-                f"got {typeName(self.ownerId)}.",
-            )
-
-        if not isinstance(self.itemId, LlmQueryItemId):
-            raise TypeError(
-                "itemId must be an LlmQueryItemId; "
-                f"got {typeName(self.itemId)}.",
-            )
+        requireInstance(self.ownerId, PackCodeEntryInstanceId, "ownerId")
+        requireInstance(self.itemId, LlmQueryItemId, "itemId")
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,11 +81,7 @@ class LlmQueryItem:
 
     def __post_init__(self) -> None:
         """Validates and freezes the query-item values."""
-        if not isinstance(self.identity, LlmQueryItemIdentity):
-            raise TypeError(
-                "identity must be an LlmQueryItemIdentity; "
-                f"got {typeName(self.identity)}.",
-            )
+        requireInstance(self.identity, LlmQueryItemIdentity, "identity")
         requireString(self.content, "content")
         requireInteger(self.importance, "importance")
         requireBool(self.mandatory, "mandatory")
@@ -117,10 +111,7 @@ class LlmQueryItemFilterContext:
 
     def __post_init__(self) -> None:
         """Validates the query-item filter context."""
-        if not isinstance(self.queryItems, tuple):
-            raise TypeError(
-                f"queryItems must be a tuple; got {typeName(self.queryItems)}.",
-            )
+        requireInstance(self.queryItems, tuple, "queryItems")
 
         for index, item in enumerate(self.queryItems):
             if not isinstance(item, LlmQueryItem):
@@ -131,11 +122,7 @@ class LlmQueryItemFilterContext:
 
         validateUniqueQueryItemIdentities(self.queryItems)
 
-        if not isinstance(self.budget, LlmPromptBudget):
-            raise TypeError(
-                "budget must be an LlmPromptBudget; "
-                f"got {typeName(self.budget)}.",
-            )
+        requireInstance(self.budget, LlmPromptBudget, "budget")
 
         if not callable(
             getattr(self.tokenEstimator, "estimateTokens", None),
@@ -154,31 +141,14 @@ class LlmQueryItemFilterResult:
 
     def __post_init__(self) -> None:
         """Validates the query-item filter result."""
-        if not isinstance(self.selectedItems, tuple):
-            raise TypeError(
-                "selectedItems must be a tuple; "
-                f"got {typeName(self.selectedItems)}.",
-            )
-
-        if not isinstance(self.excludedItems, tuple):
-            raise TypeError(
-                "excludedItems must be a tuple; "
-                f"got {typeName(self.excludedItems)}.",
-            )
+        requireInstance(self.selectedItems, tuple, "selectedItems")
+        requireInstance(self.excludedItems, tuple, "excludedItems")
 
         for index, item in enumerate(self.selectedItems):
-            if not isinstance(item, LlmQueryItem):
-                raise TypeError(
-                    f"selectedItems[{index}] must be an LlmQueryItem; "
-                    f"got {typeName(item)}.",
-                )
+            requireInstance(item, LlmQueryItem, f"selectedItems[{index}]")
 
         for index, item in enumerate(self.excludedItems):
-            if not isinstance(item, LlmQueryItem):
-                raise TypeError(
-                    f"excludedItems[{index}] must be an LlmQueryItem; "
-                    f"got {typeName(item)}.",
-                )
+            requireInstance(item, LlmQueryItem, f"excludedItems[{index}]")
 
         validateUniqueQueryItemIdentities(self.selectedItems)
         validateUniqueQueryItemIdentities(self.excludedItems)
