@@ -1,9 +1,8 @@
-# file: backend/core/validation.py ; version: 4
+# file: backend/core/validation.py ; version: 6
 from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import PurePosixPath
-from typing import cast
 
 __all__: list[str] = [
     "requireBool",
@@ -15,6 +14,7 @@ __all__: list[str] = [
     "requireNonBlankString",
     "requireOptionalExactNonBlankString",
     "requireOptionalInstance",
+    "requireOptionalNonNegativeInteger",
     "requireOptionalPositiveInteger",
     "requirePositiveFloat",
     "requireRelativePurePosixPath",
@@ -38,31 +38,31 @@ def typeName(value: object) -> str:
     return f"{valueType.__module__}.{valueType.__qualname__}"
 
 
-def requireString(
-    value: object,
-    name: str,
-) -> str:
+def requireString(value: str, name: str) -> str:
     """
-    Require a Python string.
+    Require an exact built-in Python string.
 
     Raises:
         TypeError:
-            If value is not a string.
+            If value is not an exact built-in string.
 
     """
-    if not isinstance(value, str):
-        raise TypeError(f"{name} must be a string, not {typeName(value)}.")
+    if type(value) is not str:
+        raise TypeError(
+            f"{name} must be an exact built-in string; "
+            f"received {typeName(value)}.",
+        )
 
     return value
 
 
-def requireNonBlankString(value: object, name: str) -> str:
+def requireNonBlankString(value: str, name: str) -> str:
     """
-    Require a string containing at least one non-whitespace character.
+    Require an exact built-in Python string containing non-whitespace content.
 
     Raises:
         TypeError:
-            If value is not a string.
+            If value is not an exact built-in string.
         ValueError:
             If value is blank.
 
@@ -75,16 +75,16 @@ def requireNonBlankString(value: object, name: str) -> str:
     return string
 
 
-def requireExactNonBlankString(value: object, name: str) -> str:
+def requireExactNonBlankString(value: str, name: str) -> str:
     """
-    Require a non-blank string without surrounding whitespace.
+    Require an exact built-in Python string without surrounding whitespace.
 
     The value is not normalized. Leading or trailing whitespace is rejected
     so the returned string is exactly the string supplied by the caller.
 
     Raises:
         TypeError:
-            If value is not a string.
+            If value is not an exact built-in string.
         ValueError:
             If value is blank or contains leading or trailing whitespace.
 
@@ -99,7 +99,10 @@ def requireExactNonBlankString(value: object, name: str) -> str:
     return string
 
 
-def requireMapping(value: object, name: str) -> Mapping[object, object]:
+def requireMapping(
+    value: Mapping[object, object],
+    name: str,
+) -> Mapping[object, object]:
     """
     Require a mapping value.
 
@@ -111,16 +114,16 @@ def requireMapping(value: object, name: str) -> Mapping[object, object]:
     if not isinstance(value, Mapping):
         raise TypeError(f"{name} must be a mapping, not {typeName(value)}.")
 
-    return cast(Mapping[object, object], value)
+    return value
 
 
-def requireOptionalExactNonBlankString(value: object, name: str) -> str | None:
+def requireOptionalExactNonBlankString(value: str | None, name: str) -> str | None:
     """
-    Require either None or a non-blank string without surrounding whitespace.
+    Require either None or an exact built-in Python string without surrounding whitespace.
 
     Raises:
         TypeError:
-            If value is neither None nor a string.
+            If value is neither None nor an exact built-in string.
         ValueError:
             If value is blank or contains leading or trailing whitespace.
 
@@ -131,32 +134,33 @@ def requireOptionalExactNonBlankString(value: object, name: str) -> str | None:
     return requireExactNonBlankString(value, name)
 
 
-def requireFloat(value: object, name: str) -> float:
+def requireFloat(value: float | int, name: str) -> float:  # noqa: PYI041
     """
-    Require an int or float and return it as a float.
+    Require an exact built-in Python int or float and return it as a float.
 
-    Boolean values are rejected even though bool is a subclass of int.
+    Boolean values and subclasses of int or float are rejected.
 
     Raises:
         TypeError:
-            If value is not an int or float, or is a boolean.
+            If value is not an exact built-in int or float.
 
     """
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if type(value) not in (int, float):
         raise TypeError(
-            f"{name} must be an int or float, not {typeName(value)}.",
+            f"{name} must be an exact built-in int or float; "
+            f"received {typeName(value)}.",
         )
 
     return float(value)
 
 
-def requirePositiveFloat(value: object, name: str) -> float:
+def requirePositiveFloat(value: float | int, name: str) -> float:  # noqa: PYI041
     """
-    Require a positive numeric value and return it as a float.
+    Require a positive exact built-in Python int or float and return a float.
 
     Raises:
         TypeError:
-            If value is not an int or float, or is a boolean.
+            If value is not an exact built-in int or float.
         ValueError:
             If value is not greater than zero.
 
@@ -169,31 +173,33 @@ def requirePositiveFloat(value: object, name: str) -> float:
     return number
 
 
-def requireInteger(value: object, name: str) -> int:
+def requireInteger(value: int, name: str) -> int:
     """
-    Require a Python integer while rejecting bool.
+    Require an exact built-in Python integer.
 
-    Python bool is a subclass of int, but boolean values are not accepted as
-    integers by this validator.
+    Boolean values and subclasses of int are rejected.
 
     Raises:
         TypeError:
-            If value is not an integer or is a boolean.
+            If value is not an exact built-in integer.
 
     """
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"{name} must be an integer, not {typeName(value)}.")
+    if type(value) is not int:
+        raise TypeError(
+            f"{name} must be an exact built-in integer; "
+            f"received {typeName(value)}.",
+        )
 
     return value
 
 
-def requireOptionalPositiveInteger(value: object, name: str) -> int | None:
+def requireOptionalPositiveInteger(value: int | None, name: str) -> int | None:
     """
-    Require either None or an integer greater than zero.
+    Require either None or an exact built-in Python integer greater than or equal to zero.
 
     Raises:
         TypeError:
-            If value is neither None nor an integer, or is a boolean.
+            If value is neither None nor an exact built-in integer.
         ValueError:
             If value is not greater than zero.
 
@@ -209,22 +215,47 @@ def requireOptionalPositiveInteger(value: object, name: str) -> int | None:
     return cleanValue
 
 
-def requireBool(value: object, name: str) -> bool:
+def requireOptionalNonNegativeInteger(value: int | None, name: str) -> int | None:
     """
-    Require a Python bool.
+    Require None or an exact built-in integer greater than or equal to zero.
 
     Raises:
         TypeError:
-            If value is not a bool.
+            If value is neither None nor an exact built-in integer.
+        ValueError:
+            If value is negative.
 
     """
-    if not isinstance(value, bool):
-        raise TypeError(f"{name} must be a bool, not {typeName(value)}.")
+    if value is None:
+        return None
+
+    cleanValue = requireInteger(value, name)
+
+    if cleanValue < 0:
+        raise ValueError(f"{name} must not be negative.")
+
+    return cleanValue
+
+
+def requireBool(value: bool, name: str) -> bool:  # noqa: FBT001
+    """
+    Require an exact built-in Python bool.
+
+    Raises:
+        TypeError:
+            If value is not an exact built-in bool.
+
+    """
+    if type(value) is not bool:
+        raise TypeError(
+            f"{name} must be an exact built-in bool; "
+            f"received {typeName(value)}.",
+        )
 
     return value
 
 
-def requireRelativePurePosixPath(value: object, name: str) -> PurePosixPath:
+def requireRelativePurePosixPath(value: str, name: str) -> PurePosixPath:
     """
     Require a non-empty relative POSIX path that remains inside its root.
 
@@ -235,9 +266,9 @@ def requireRelativePurePosixPath(value: object, name: str) -> PurePosixPath:
 
     Raises:
         TypeError:
-            If value is not a string.
+            If value is not an exact built-in string.
         ValueError:
-            if value is blank, contains surrounding whitespace, uses a
+            If value is blank, contains surrounding whitespace, uses a
             backslash, is absolute, identifies the current directory, or
             contains parent traversal.
 
