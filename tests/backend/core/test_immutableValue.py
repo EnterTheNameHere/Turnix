@@ -1,4 +1,4 @@
-# file: tests/backend/core/test_immutableValue.py ; version: 2
+# file: tests/backend/core/test_immutableValue.py ; version: 3
 from __future__ import annotations
 
 from collections import UserDict, UserList
@@ -237,7 +237,7 @@ def testFreezeCreatesSnapshotIndependentFromSource(
     frozen = freezer.freeze(source)
 
     sourceItems.append(3)
-    sourceMetadata["metadata"] = "changed"
+    sourceMetadata["status"] = "changed"
     source["new"] = "value"
 
     assert frozen == {
@@ -426,7 +426,7 @@ def testFreezeRejectsSetValues(
     with pytest.raises(
         TypeError,
         match=(
-            r"Value at input must not be a set. "
+            r"Value at input must not be a set\. "
             r"Convert it to a deterministically ordered sequence\."
         ),
     ):
@@ -442,7 +442,7 @@ def testFreezeRejectsCallable(
     with pytest.raises(
         TypeError,
         match=(
-            r"Value at input\['callback'\] must not be a callable; "
+            r"Value at input\['callback'\] must not be callable; "
             r"received .*function\."
         ),
     ):
@@ -749,7 +749,10 @@ def testConstructorRejectsInvalidLimitType(
 ) -> None:
     with pytest.raises(
         TypeError,
-        match=rf"{argumentName} must be an integer",
+        match=(
+            rf"{argumentName} must be an exact built-in integer; "
+            r"received .*\."
+        ),
     ):
         ImmutableValueFreezer(**arguments)
 
@@ -771,7 +774,7 @@ def testFreezeRejectsScalarSubclass(
         TypeError,
         match=(
             r"Scalar value at input must use an exact built-in type; "
-            rf"received {typePattern}"
+            rf"received {typePattern}\."
         ),
     ):
         freezer.freeze(value, "input")
@@ -812,8 +815,8 @@ def testFreezeRejectsCallableContainer(
     with pytest.raises(
         TypeError,
         match=(
-            r"Value at input must not be a callable; "
-            rf"received {typePattern}"
+            r"Value at input must not be callable; "
+            rf"received {typePattern}\."
         ),
     ):
         freezer.freeze(value, "input")
@@ -887,4 +890,47 @@ def testFreezeCountsRepeatedContainerAtEachLocation() -> None:
                 "left": shared,
                 "right": shared,
             },
+        )
+
+
+@pytest.mark.parametrize(
+    ("value", "renderedValue"),
+    [
+        (float("nan"), "nan"),
+        (float("inf"), "inf"),
+        (float("-inf"), "-inf"),
+    ],
+)
+def testFreezeRejectsNonFiniteFloat(
+    freezer: ImmutableValueFreezer,
+    value: float,
+    renderedValue: str,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"Float value at input must be finite; "
+            rf"received {renderedValue}\."
+        ),
+    ):
+        freezer.freeze(value, "input")
+
+
+def testFreezeReportsNestedNonFiniteFloatPath(
+    freezer: ImmutableValueFreezer,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"Float value at input\['metrics'\]\['score'\] "
+            r"must be finite; received inf\."
+        ),
+    ):
+        freezer.freeze(
+            {
+                "metrics": {
+                    "score": float("inf"),
+                },
+            },
+            "input",
         )
