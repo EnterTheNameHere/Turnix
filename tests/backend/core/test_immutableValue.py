@@ -334,7 +334,7 @@ def testFreezeMappingRejectsNonMapping(
 ) -> None:
     with pytest.raises(
         TypeError,
-        match=r"attributes must be a mapping, not list\.",
+        match=r"attributes must be a mapping; received list\.",
     ):
         freezer.freezeMapping(
             [],  # ty:ignore[invalid-argument-type]
