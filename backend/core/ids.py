@@ -1,4 +1,4 @@
-# file: backend/core/ids.py ; version: 1
+# file: backend/core/ids.py ; version: 2
 from __future__ import annotations
 
 import uuid
@@ -9,6 +9,8 @@ from backend.core.validation import requireExactNonBlankString, typeName
 
 __all__: list[str] = [
     "Uuid7Id",
+    "requireOptionalUuid7Id",
+    "requireUuid7Id",
 ]
 
 
@@ -55,7 +57,7 @@ class Uuid7Id:
         return cls(uuid.uuid7())
 
     @classmethod
-    def parse(cls, value: object, name: str = "value") -> Self:
+    def parse(cls, value: str, name: str = "value") -> Self:
         """
         Parse a UUIDv7 identity from its canonical string representation.
 
@@ -82,3 +84,49 @@ class Uuid7Id:
             raise ValueError(f"{name} must be a UUIDv7.")
 
         return cls(parsed)
+
+
+def requireUuid7Id[T: Uuid7Id](value: T, name: str) -> T:
+    """
+    Validates that value is a UUIDv7 identifier.
+
+    Subclasses of Uuid7Id are accepted so concrete typed ID domains such as
+    TraceEventId, TraceSpanId, and TraceProducerId preserve their own type.
+
+    Raises:
+        TypeError:
+            If value is not a UUIDv7 identifier,
+            or name is not an exact built-in string.
+        ValueError:
+            If name is blank or contains surrounding whitespace.
+
+    """
+    cleanName = requireExactNonBlankString(name, "name")
+
+    if not isinstance(value, Uuid7Id):
+        raise TypeError(
+            f"{cleanName} must be a Uuid7Id identifier; "
+            f"received {typeName(value)}.",
+        )
+
+    return value
+
+
+def requireOptionalUuid7Id[T: Uuid7Id](value: T | None, name: str) -> T | None:
+    """
+    Validates that value is None or a UUIDv7 identifier.
+
+    Raises:
+        TypeError:
+            If value is neither None nor a UUIDv7 identifier,
+            or name is not an exact built-in string.
+        ValueError:
+            If name is blank or contains surrounding whitespace.
+
+    """
+    cleanName = requireExactNonBlankString(name, "name")
+
+    if value is None:
+        return None
+
+    return requireUuid7Id(value, cleanName)
