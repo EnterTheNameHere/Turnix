@@ -1,4 +1,4 @@
-# file: tests/backend/core/test_validation.py ; version: 3
+# file: tests/backend/core/test_validation.py ; version: 4
 from __future__ import annotations
 
 from collections import UserDict
@@ -16,12 +16,14 @@ from backend.core.validation import (
     requireInteger,
     requireMapping,
     requireNonBlankString,
+    requireNonNegativeInteger,
     requireOptionalExactNonBlankString,
     requireOptionalInstance,
     requireOptionalNonNegativeInteger,
     requireOptionalPositiveInteger,
     requirePositiveFiniteFloat,
     requirePositiveFloat,
+    requirePositiveInteger,
     requireRelativePurePosixPath,
     requireString,
     typeName,
@@ -430,6 +432,7 @@ def testRequirePositiveFloatReturnsPositiveFloat(
     [
         0,
         0.0,
+        -0.0,
         -1,
         -1.5,
         float("-inf"),
@@ -475,6 +478,7 @@ def testRequirePositiveFiniteFloatReturnsSupportedValue(
     [
         0,
         0.0,
+        -0.0,
         -1,
         -1.5,
     ],
@@ -552,6 +556,114 @@ def testRequireIntegerRejectsInvalidType(
         ),
     ):
         requireInteger(value, "value")  # ty:ignore[invalid-argument-type]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        1,
+        10,
+    ],
+)
+def testRequirePositiveIntegerReturnsPositiveInteger(
+    value: int,
+) -> None:
+    returned = requirePositiveInteger(value, "value")
+
+    assert returned is value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        0,
+        -1,
+    ],
+)
+def testRequirePositiveIntegerRejectsNonPositiveValue(
+    value: int,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"value must be greater than zero\.",
+    ):
+        requirePositiveInteger(value, "value")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        True,
+        1.0,
+        "1",
+        _IntegerSubclass(1),
+    ],
+)
+def testRequirePositiveIntegerRejectsInvalidType(
+    value: object,
+) -> None:
+    with pytest.raises(
+        TypeError,
+        match=(
+            r"value must be an exact built-in integer; "
+            r"received .+\."
+        ),
+    ):
+        requirePositiveInteger(
+            value,  # ty:ignore[invalid-argument-type]
+            "value",
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        0,
+        1,
+        10,
+    ],
+)
+def testRequireNonNegativeIntegerReturnsNonNegativeInteger(
+    value: int,
+) -> None:
+    returned = requireNonNegativeInteger(value, "value")
+
+    assert returned is value
+
+
+def testRequireNonNegativeIntegerRejectsNegativeValue() -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"value must not be negative\.",
+    ):
+        requireNonNegativeInteger(-1, "value")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        True,
+        1.0,
+        "1",
+        _IntegerSubclass(1),
+    ],
+)
+def testRequireNonNegativeIntegerRejectsInvalidType(
+    value: object,
+) -> None:
+    with pytest.raises(
+        TypeError,
+        match=(
+            r"value must be an exact built-in integer; "
+            r"received .+\."
+        ),
+    ):
+        requireNonNegativeInteger(
+            value,  # ty:ignore[invalid-argument-type]
+            "value",
+        )
 
 
 @pytest.mark.parametrize(
@@ -727,6 +839,7 @@ def testRequireRelativePurePosixPathReturnsPath(
             "../file.txt",
             r"value must not traverse outside its containing root\.",
         ),
+        ("a/..", r"value must not traverse outside its containing root\."),
     ],
 )
 def testRequireRelativePurePosixPathRejectsInvalidPath(
@@ -768,14 +881,17 @@ def testRequireInstanceAcceptsSubclassInstance() -> None:
 
 
 def testRequireInstanceRejectsWrongInstanceType() -> None:
-    with pytest.raises(
-        TypeError,
-        match=(
-            r"value must be an instance of _ExampleBase; "
-            r"received str\."
-        ),
-    ):
+    expectedTypeName = (
+        f"{_ExampleBase.__module__}.{_ExampleBase.__qualname__}"
+    )
+
+    with pytest.raises(TypeError) as err:
         requireInstance("value", _ExampleBase, "value")
+
+    assert str(err.value) == (
+        f"value must be an instance of "
+        f"{expectedTypeName}; received str."
+    )
 
 
 def testRequireInstanceRejectsInvalidExpectedType() -> None:
@@ -803,15 +919,17 @@ def testRequireOptionalInstanceReturnsInstance() -> None:
 
 
 def testRequireOptionalInstanceRejectsWrongInstanceType() -> None:
-    with pytest.raises(
-        TypeError,
-        match=(
-            r"value must be an instance of _ExampleBase; "
-            r"received str\."
-        ),
-    ):
+    expectedTypeName = (
+        f"{_ExampleBase.__module__}.{_ExampleBase.__qualname__}"
+    )
+
+    with pytest.raises(TypeError) as err:
         requireOptionalInstance("value", _ExampleBase, "value")
 
+    assert str(err.value) == (
+        f"value must be an instance of "
+        f"{expectedTypeName}; received str."
+    )
 
 def testRequireOptionalInstanceValidatesExpectedTypeForNone() -> None:
     with pytest.raises(
@@ -848,6 +966,8 @@ def testPublicValidatorsRejectBlankDiagnosticName(
         lambda: requirePositiveFloat(1, name),
         lambda: requirePositiveFiniteFloat(1, name),
         lambda: requireInteger(1, name),
+        lambda: requirePositiveInteger(1, name),
+        lambda: requireNonNegativeInteger(1, name),
         lambda: requireOptionalPositiveInteger(None, name),
         lambda: requireOptionalNonNegativeInteger(None, name),
         lambda: requireBool(True, name),  # noqa: FBT003
@@ -887,6 +1007,8 @@ def testPublicValidatorsRejectDiagnosticNameWithWhitespace(
         lambda: requirePositiveFloat(1, name),
         lambda: requirePositiveFiniteFloat(1, name),
         lambda: requireInteger(1, name),
+        lambda: requirePositiveInteger(1, name),
+        lambda: requireNonNegativeInteger(1, name),
         lambda: requireOptionalPositiveInteger(None, name),
         lambda: requireOptionalNonNegativeInteger(None, name),
         lambda: requireBool(True, name),  # noqa: FBT003
@@ -917,6 +1039,8 @@ def testPublicValidatorsRejectNonStringDiagnosticName() -> None:
         lambda: requirePositiveFloat(1, name),
         lambda: requirePositiveFiniteFloat(1, name),
         lambda: requireInteger(1, name),
+        lambda: requirePositiveInteger(1, name),
+        lambda: requireNonNegativeInteger(1, name),
         lambda: requireOptionalPositiveInteger(None, name),
         lambda: requireOptionalNonNegativeInteger(None, name),
         lambda: requireBool(True, name),  # noqa: FBT003
@@ -947,6 +1071,8 @@ def testPublicValidatorsRejectStringSubclassDiagnosticName() -> None:
         lambda: requirePositiveFloat(1, name),
         lambda: requirePositiveFiniteFloat(1, name),
         lambda: requireInteger(1, name),
+        lambda: requirePositiveInteger(1, name),
+        lambda: requireNonNegativeInteger(1, name),
         lambda: requireOptionalPositiveInteger(None, name),
         lambda: requireOptionalNonNegativeInteger(None, name),
         lambda: requireBool(True, name),  # noqa: FBT003
