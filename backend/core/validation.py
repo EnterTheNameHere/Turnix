@@ -1,4 +1,4 @@
-# file: backend/core/validation.py ; version: 10
+# file: backend/core/validation.py ; version: 12
 from __future__ import annotations
 
 import math
@@ -14,31 +14,43 @@ __all__: list[str] = [
     "requireInteger",
     "requireMapping",
     "requireNonBlankString",
+    "requireNonNegativeInteger",
     "requireOptionalExactNonBlankString",
     "requireOptionalInstance",
     "requireOptionalNonNegativeInteger",
     "requireOptionalPositiveInteger",
     "requirePositiveFiniteFloat",
     "requirePositiveFloat",
+    "requirePositiveInteger",
     "requireRelativePurePosixPath",
     "requireString",
     "typeName",
 ]
 
 
-def typeName(value: object) -> str:
+def _typeNameFromType(valueType: type[object]) -> str:
     """
     Returns a readable runtime type name for diagnostics.
 
     Built-in types use only their qualified name. Other types include their
     defining module to avoid ambiguous diagnostics.
     """
-    valueType = type(value)
 
     if valueType.__module__ == "builtins":
         return valueType.__qualname__
 
     return f"{valueType.__module__}.{valueType.__qualname__}"
+
+
+def typeName(value: object) -> str:
+    """
+    Returns a readable runtime type name for diagnostics.
+
+    The name is derived from type(value). Built-in types use only their
+    qualified name. Other types include their defining module to avoid
+    ambiguous diagnostics.
+    """
+    return _typeNameFromType(type(value))
 
 
 def _requireValidDiagnosticName(name: str) -> str:
@@ -371,6 +383,54 @@ def requireInteger(value: int, name: str) -> int:
     return value
 
 
+def requirePositiveInteger(value: int, name: str) -> int:
+    """
+    Validates that value is an exact built-in Python integer greater than
+    zero.
+
+    Raises:
+        TypeError:
+            If value is not an exact built-in integer, or name is
+            not an exact built-in string.
+        ValueError:
+            If value is not greater than zero or name is blank or
+            contains surrounding whitespace.
+
+    """
+    cleanName = _requireValidDiagnosticName(name)
+
+    cleanValue = requireInteger(value, cleanName)
+
+    if cleanValue <= 0:
+        raise ValueError(f"{cleanName} must be greater than zero.")
+
+    return cleanValue
+
+
+def requireNonNegativeInteger(value: int, name: str) -> int:
+    """
+    Validates that value is an exact built-in Python integer greater than
+    or equal to zero.
+
+    Raises:
+        TypeError:
+            If value is not an exact built-in integer, or name is
+            not an exact built-in string.
+        ValueError:
+            If value is negative or name is blank or contains surrounding
+            whitespace.
+
+    """
+    cleanName = _requireValidDiagnosticName(name)
+
+    cleanValue = requireInteger(value, cleanName)
+
+    if cleanValue < 0:
+        raise ValueError(f"{cleanName} must not be negative.")
+
+    return cleanValue
+
+
 def requireOptionalPositiveInteger(value: int | None, name: str) -> int | None:
     """
     Validates that value is None or an exact built-in integer greater
@@ -390,12 +450,7 @@ def requireOptionalPositiveInteger(value: int | None, name: str) -> int | None:
     if value is None:
         return None
 
-    cleanValue = requireInteger(value, cleanName)
-
-    if cleanValue <= 0:
-        raise ValueError(f"{cleanName} must be greater than zero.")
-
-    return cleanValue
+    return requirePositiveInteger(value, cleanName)
 
 
 def requireOptionalNonNegativeInteger(
@@ -420,12 +475,7 @@ def requireOptionalNonNegativeInteger(
     if value is None:
         return None
 
-    cleanValue = requireInteger(value, cleanName)
-
-    if cleanValue < 0:
-        raise ValueError(f"{cleanName} must not be negative.")
-
-    return cleanValue
+    return requireNonNegativeInteger(value, cleanName)
 
 
 def requireBool(value: bool, name: str) -> bool:  # noqa: FBT001
@@ -521,7 +571,7 @@ def requireInstance[T](
     if not isinstance(value, cleanExpectedType):
         raise TypeError(
             f"{cleanName} must be an instance of "
-            f"{cleanExpectedType.__name__}; "
+            f"{_typeNameFromType(cleanExpectedType)}; "
             f"received {typeName(value)}.",
         )
 
