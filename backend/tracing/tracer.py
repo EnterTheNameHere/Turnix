@@ -1104,10 +1104,12 @@ class Tracer:
         if domain is None:
             return default
 
-        if domain == "":
+        cleanDomain = requireString(domain, "domain")
+
+        if cleanDomain == "":
             return ""
 
-        return requireName(domain, "domain")
+        return requireName(cleanDomain, "domain")
 
     def _registerTraceType(
         self,
