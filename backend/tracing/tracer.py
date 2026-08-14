@@ -1,4 +1,4 @@
-# file: backend/tracing/tracer.py ; version: 4
+# file: backend/tracing/tracer.py ; version: 5
 from __future__ import annotations
 
 import contextlib
@@ -511,7 +511,11 @@ class Tracer:
         Adds one trace destination.
 
         All currently registered trace-type definitions are offered to the
-        destination before it becomes active for record delivery.
+        destination before it becomes active for record delivery. Successful
+        definition delivery is remembered by the publisher. Definitions whose
+        initial delivery fails remain pending for that destination and may be
+        retried by later publisher activity before dependent records are
+        written.
 
         Args:
             destination:

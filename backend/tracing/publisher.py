@@ -1,4 +1,4 @@
-# file: backend/tracing/publisher.py ; version: 2
+# file: backend/tracing/publisher.py ; version: 3
 from __future__ import annotations
 
 import contextvars
@@ -59,10 +59,15 @@ class TracePublisher:
     isolated and reported through TraceEmergencyReporter rather than being
     propagated through ordinary tracing.
 
-    Before a record is written to a destination, the publisher ensures that
-    the record's registered trace-type definition has been delivered
-    successfully to that destination. Failed definition delivery is retried
-    when later evidence referencing the definition is published.
+    Definition-delivery state is tracked independently for each destination and
+    only after successful delivery. Failed definition delivery remains pending
+    and may be retried by later definition publication or when a record
+    referencing that definition is published.
+
+    Before a record is written to a destination, the publisher ensures that the
+    record's registered trace-type definition has been delivered successfully
+    to that destination. A record is withheld from a destination while its
+    required definition remains undelivered.
 
     Recursive ordinary tracing from destination delivery is prohibited.
     Publication activity is tracked with context-local state that remains
@@ -82,13 +87,18 @@ class TracePublisher:
         """
         Initializes a trace publisher.
 
+        Initial destinations are activated one at a time. Each is immediately
+        offered every trace-type definition registered at the time it is added.
+        Definition delivery is tracked per destination only after successful
+        writeTraceTypeDefinition() completion; failed initial deliveries remain
+        pending for later retry.
+
         Args:
             getTraceTypeDefinitions:
                 Callable returning a snapshot of currently registered
                 trace-type definitions keyed by deterministic identity.
             destinations:
-                Initial destinations to activate. Each destination receives
-                all definitions registered at the time it is added.
+                Initial destinations to activate.
             emergencyReporter:
                 Reporter used for destination and recursive-publication
                 failures. When omitted, a default reporter is created.
@@ -274,9 +284,15 @@ class TracePublisher:
         """
         Publishes one registered definition to every active destination.
 
-        Destinations that already accepted the definition are skipped. A
-        destination that raises while accepting it is reported through the
-        emergency channel and remains eligible for a later retry.
+        Successful delivery is tracked independently for each destination and
+        only after writeTraceTypeDefinition() returns successfully. A
+        destination that raises is reported through the emergency channel
+        and remains eligible for later retry.
+
+        A pending definition may be retried by a later explicit definition
+        publication or when publication of a record referencing that definition
+        requires successful delivery. Definitions already delivered
+        successfully to an active destination are not redelivered.
 
         Args:
             definition:
@@ -304,11 +320,16 @@ class TracePublisher:
         """
         Publishes one immutable record to every active destination.
 
-        The record's definition must still be registered. For each destination,
-        that definition is delivered successfully before the record itself is
-        written. If definition delivery fails for one destination, the record
-        is skipped for that destination while publication continues to the
-        others.
+        The record's trace-type definition must still be present in the active
+        registry. For each destination, the publisher ensures that definition
+        has been delivered successfully before writing the record. If an
+        earlier definition-delivery attempt failed, delivery is retried as part
+        of record publication.
+
+        The record is written to a destination only after its referenced
+        definition has been delivered successfully. If definition delivery
+        still fails, the record is withheld from that destination while
+        publication continues independently to other destinations.
 
         Args:
             record:
