@@ -1,4 +1,4 @@
-# file: backend/tracing/context.py ; version: 2
+# file: backend/tracing/context.py ; version: 3
 from __future__ import annotations
 
 import asyncio
@@ -226,6 +226,15 @@ class TraceRuntimeContext:
     """
     Owns context-local tracing span and correlation state.
 
+    A runtime context is independent of any individual Tracer lifecycle and
+    may be shared by multiple trace producers. Ambient correlations may
+    therefore be observed by multiple producers.
+
+    Ambient span contexts remain producer-specific. A tracer may consume an
+    ambient span only when that span belongs to its own trace producer; sharing
+    this runtime context does not make span structure transferable between
+    producers.
+
     Span and correlation state are stored in ContextVars so values naturally
     follow Python execution-context propagation, including asyncio context
     copying.
@@ -357,6 +366,10 @@ class TraceCorrelationScope:
     """
     Installs nested Actant correlation identities for one lexical scope.
 
+    A correlation scope modifies one TraceRuntimeContext and is independent of
+    the lifecycle of any Tracer using that context. Multiple trace producers
+    may therefore observe the same ambient correlations.
+
     Every override has three states:
 
     - UNSET inherits the currently ambient value.
@@ -382,6 +395,7 @@ class TraceCorrelationScope:
         Args:
             runtimeContext:
                 Runtime context whose ambient correlations the scope modifies.
+                Its lifetime is independent of any Tracer using that context.
             actantRunId:
                 Actant-run override. UNSET inherits the ambient value, None
                 clears it, and Uuid7Id replaces it.
