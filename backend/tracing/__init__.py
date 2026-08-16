@@ -1,17 +1,165 @@
-# file: backend/tracing/__init__.py
+# file: backend/tracing/__init__.py ; version: 2
 """
-Tracing namespace for Actant platform implementation code.
+Provides Actant tracing infrastructure.
 
-This package is reserved for tracing-related implementation, but the current
-bootstrap code does not implement the DA-03 trace substrate yet.
+The package defines deterministic trace-type identifiers, immutable trace
+records, event and span emission, runtime context propagation, correlation
+contexts, exception snapshots, publication, destinations, and terminal
+presentation.
 
-At this stage, backend.tracing.devTrace provides disposable development
-diagnostics only. It is not retained causal proof, not replay evidence, not
-audit evidence, not debugger evidence, and not committed-state authority.
+Trace-type definitions are content-addressed through canonical JSON and
+SHA-256 identities so emitted evidence can refer to stable portable
+definitions. Tracers maintain producer-local sequence ordering, explicit
+span relationships, and immutable record content while isolating destination
+failures from ordinary tracing operations.
 
-When real DA-03 tracing is implemented, this package may grow substrate,
-even, span, DAG, retention, writer, and reader modules without changing the
-temporary status of existing bootstrap diagnostics retroactively.
+The package also provides emergency reporting for tracing-infrastructure
+failures that cannot safely be reported through tracing itself.
 """
+from __future__ import annotations
 
-__all__: list[str] = []
+from backend.tracing.builders import TraceEventBuilder, TraceSpanBuilder
+from backend.tracing.canonical import canonicalJson
+from backend.tracing.context import (
+    TraceCorrelationContext,
+    TraceCorrelationScope,
+    TraceRuntimeContext,
+    TraceSpanContext,
+)
+from backend.tracing.destinations import (
+    TraceDestination,
+    TraceSinkDestination,
+)
+from backend.tracing.emergency import TraceEmergencyReporter
+from backend.tracing.errors import (
+    TraceBuilderConsumedError,
+    TraceClosedError,
+    TraceContextError,
+    TraceDestinationContractError,
+    TraceError,
+    TraceExplicitTypeOverrideError,
+    TraceInvariantError,
+    TraceRecursivePublicationError,
+    TraceSpanOwnershipError,
+    TraceSpanStateError,
+    TraceTypeConflictError,
+    TraceTypeDefinitionCollisionError,
+    TraceTypeDefinitionNotFoundError,
+    TraceTypeRegistrationError,
+    TraceUnknownOutcomeError,
+    TraceUseError,
+)
+from backend.tracing.exceptionSnapshot import (
+    ExceptionSnapshot,
+    captureExceptionSnapshot,
+)
+from backend.tracing.ids import (
+    TraceEventId,
+    TraceProducerId,
+    TraceSpanId,
+    TraceTypeDefinitionId,
+)
+from backend.tracing.publisher import TracePublisher
+from backend.tracing.recordFactory import TraceRecordFactory
+from backend.tracing.records import TraceRecord
+from backend.tracing.references import TraceReference, TraceReferenceInput, normalizeTraceReferences
+from backend.tracing.spans import ActiveTraceSpan
+from backend.tracing.terminalDestination import (
+    TerminalColorMode,
+    TerminalTraceDestination,
+)
+from backend.tracing.tracer import TRACE_SPAN_ABANDONED, Tracer
+from backend.tracing.typeDefinitions import (
+    DEFAULT_CANCELLED,
+    DEFAULT_COMPLETED,
+    DEFAULT_ERRORED,
+    DEFAULT_EVENT,
+    DEFAULT_FAILED,
+    DEFAULT_STARTED,
+    STANDARD_TRACE_SPAN_OUTCOMES,
+    TRACE_EVENT,
+    TRACE_SPAN,
+    TRACE_TYPE_DEFINITION_SCHEMA_VERSION,
+    TraceEventType,
+    TraceGeneratedType,
+    TraceSpanType,
+    TraceTypeDefinition,
+    TraceTypeDefinitionKind,
+)
+from backend.tracing.typeRegistry import (
+    TraceTypeRegistration,
+    TraceTypeRegistry,
+)
+from backend.tracing.validation import (
+    TRACE_LEVELS,
+    TRACE_RECORD_KINDS,
+    TraceLevel,
+    TraceRecordKind,
+)
+
+__all__: list[str] = [
+    "DEFAULT_CANCELLED",
+    "DEFAULT_COMPLETED",
+    "DEFAULT_ERRORED",
+    "DEFAULT_EVENT",
+    "DEFAULT_FAILED",
+    "DEFAULT_STARTED",
+    "STANDARD_TRACE_SPAN_OUTCOMES",
+    "TRACE_EVENT",
+    "TRACE_LEVELS",
+    "TRACE_RECORD_KINDS",
+    "TRACE_SPAN",
+    "TRACE_SPAN_ABANDONED",
+    "TRACE_TYPE_DEFINITION_SCHEMA_VERSION",
+    "ActiveTraceSpan",
+    "ExceptionSnapshot",
+    "TerminalColorMode",
+    "TerminalTraceDestination",
+    "TraceBuilderConsumedError",
+    "TraceClosedError",
+    "TraceContextError",
+    "TraceCorrelationContext",
+    "TraceCorrelationScope",
+    "TraceDestination",
+    "TraceDestinationContractError",
+    "TraceEmergencyReporter",
+    "TraceError",
+    "TraceEventBuilder",
+    "TraceEventId",
+    "TraceEventType",
+    "TraceExplicitTypeOverrideError",
+    "TraceGeneratedType",
+    "TraceInvariantError",
+    "TraceLevel",
+    "TraceProducerId",
+    "TracePublisher",
+    "TraceRecord",
+    "TraceRecordFactory",
+    "TraceRecordKind",
+    "TraceRecursivePublicationError",
+    "TraceReference",
+    "TraceReferenceInput",
+    "TraceRuntimeContext",
+    "TraceSinkDestination",
+    "TraceSpanBuilder",
+    "TraceSpanContext",
+    "TraceSpanId",
+    "TraceSpanOwnershipError",
+    "TraceSpanStateError",
+    "TraceSpanType",
+    "TraceTypeConflictError",
+    "TraceTypeDefinition",
+    "TraceTypeDefinitionCollisionError",
+    "TraceTypeDefinitionId",
+    "TraceTypeDefinitionKind",
+    "TraceTypeDefinitionNotFoundError",
+    "TraceTypeRegistration",
+    "TraceTypeRegistrationError",
+    "TraceTypeRegistry",
+    "TraceUnknownOutcomeError",
+    "TraceUseError",
+    "Tracer",
+    "canonicalJson",
+    "captureExceptionSnapshot",
+    "normalizeTraceReferences",
+]
