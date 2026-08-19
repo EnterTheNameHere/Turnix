@@ -1,15 +1,16 @@
-# file: backend/tracing/publisher.py ; version: 3
+# file: backend/tracing/publisher.py ; version: 4
 from __future__ import annotations
 
 import contextvars
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
-from backend.core.validation import requireInstance
-from backend.tracing.destinations import TraceDestination, TraceSinkDestination
+from backend.core.validation import requireInstance, typeName
+from backend.tracing.destinations import TraceDestination
 from backend.tracing.emergency import TraceEmergencyReporter
 from backend.tracing.errors import TraceDestinationContractError, TraceInvariantError
+from backend.tracing.ids import TraceDestinationRegistrationId
 from backend.tracing.records import TraceRecord
 from backend.tracing.typeDefinitions import TraceTypeDefinition
 
@@ -18,15 +19,13 @@ if TYPE_CHECKING:
 
     from backend.tracing.ids import TraceEventId, TraceTypeDefinitionId
 
-__all__: list[str] = [
-    "TracePublisher",
-]
+__all__: list[str] = []  # No public API
 
 
 @dataclass(slots=True)
 class _TracePublicationState:
     """
-    Shares publication activity across copied execution contexts.
+    Shares active publication state across copied execution contexts.
 
     The mutable active flag is intentionally stored inside the ContextVar
     value. Execution contexts copied while publication is active therefore
@@ -37,41 +36,80 @@ class _TracePublicationState:
     active: bool = True
 
 
+@dataclass(frozen=True, slots=True)
+class TraceDestinationRegistrationInfo:
+    """Describes one destination registration without exposing delivery state."""
+
+    registrationId: TraceDestinationRegistrationId
+    destination: TraceDestination
+    destinationType: str
+
+
+@dataclass(frozen=True, slots=True)
+class TraceDestinationHealthTransition:
+    """Describes one edge-triggered destination health transition."""
+
+    registration: TraceDestinationRegistrationInfo
+    state: str
+    operation: str | None = None
+    errorType: str | None = None
+    errorMessage: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TraceDestinationRemovalResult:
+    """Describes one removed registration and its final delivery-health state."""
+
+    registration: TraceDestinationRegistrationInfo
+    wasFailed: bool
+    failureOperation: str | None = None
+    failureErrorType: str | None = None
+    failureErrorMessage: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _TraceDestinationAddResult:
+    """Returns registration and health effects from one add operation."""
+
+    registration: TraceDestinationRegistrationInfo
+    isNew: bool
+    transitions: tuple[TraceDestinationHealthTransition, ...] = ()
+
+
 @dataclass(slots=True)
 class _TraceDestinationEntry:
-    """
-    Stores one destination and its successful definition-delivery state.
+    """Owns delivery and health state for one Tracer-local registration."""
 
-    A definition identity is added to deliveredDefinitionIds only after the
-    destination returns successfully from writeTraceTypeDefinition().
-    """
+    registration: TraceDestinationRegistrationInfo
+    deliveredDefinitionIds: set[TraceTypeDefinitionId] = field(
+        default_factory=set,
+    )
+    failedDefinitionIds: set[TraceTypeDefinitionId] = field(
+        default_factory=set,
+    )
+    recordFailureActive: bool = False
+    failureEpisodeOperation: str | None = None
+    failureEpisodeErrorType: str | None = None
+    failureEpisodeErrorMessage: str | None = None
 
-    destination: TraceDestination
-    deliveredDefinitionIds: set[TraceTypeDefinitionId]
+    def isFailed(self) -> bool:
+        """Returns whether any known delivery failure remains unresolved."""
+        return bool(self.failedDefinitionIds) or self.recordFailureActive
 
 
 class TracePublisher:
     """
-    Publishes trace definitions and records without retaining record history.
+    Coordinates destination delivery for exactly one Tracer lifecycle.
 
-    Publication is serialized across threads so destinations observe one
-    consistent definition-and-record delivery order. Destination failures are
-    isolated and reported through TraceEmergencyReporter rather than being
-    propagated through ordinary tracing.
+    The publisher is internal Tracer-owned machinery. It owns registration
+    identity, per-registration definition delivery, health episode state,
+    recursive-publication protection, and destination failure isolation.
 
-    Definition-delivery state is tracked independently for each destination and
-    only after successful delivery. Failed definition delivery remains pending
-    and may be retried by later definition publication or when a record
-    referencing that definition is published.
-
-    Before a record is written to a destination, the publisher ensures that the
-    record's registered trace-type definition has been delivered successfully
-    to that destination. A record is withheld from a destination while its
-    required definition remains undelivered.
-
-    Recursive ordinary tracing from destination delivery is prohibited.
-    Publication activity is tracked with context-local state that remains
-    correct across copied asyncio execution contexts.
+    Destination health is edge-triggered. The first unresolved delivery
+    failure transitions a registration from healthy to failed. Further
+    failures in the same episode are suppressed. Recovery is emitted only
+    after every failed definition has later been delivered successfully and a
+    failed record-delivery state, if any, has also been cleared by success.
     """
 
     def __init__(
@@ -81,27 +119,26 @@ class TracePublisher:
             TraceTypeDefinitionId,
             TraceTypeDefinition,
         ]],
-        destinations: Iterable[TraceDestination] = (),
-        emergencyReporter: TraceEmergencyReporter | None = None,
+        destinations: Iterable[TraceDestination],
+        emergencyReporter: TraceEmergencyReporter,
     ) -> None:
         """
-        Initializes a trace publisher.
+        Initializes one internal publisher and its initial registrations.
 
-        Initial destinations are activated one at a time. Each is immediately
-        offered every trace-type definition registered at the time it is added.
-        Definition delivery is tracked per destination only after successful
-        writeTraceTypeDefinition() completion; failed initial deliveries remain
-        pending for later retry.
+        Initial destination failures are retained as pending health
+        transitions so the owning Tracer can publish ordinary infrastructure
+        evidence after construction has established its complete tracing
+        machinery.
 
         Args:
             getTraceTypeDefinitions:
                 Callable returning a snapshot of currently registered
                 trace-type definitions keyed by deterministic identity.
             destinations:
-                Initial destinations to activate.
+                Initial destinations to register.
             emergencyReporter:
-                Reporter used for destination and recursive-publication
-                failures. When omitted, a default reporter is created.
+                Reporter used for destination-health and recursive-publication
+                diagnostics.
 
         Raises:
             TypeError:
@@ -116,17 +153,14 @@ class TracePublisher:
             raise TypeError("getTraceTypeDefinitions must be callable.")
 
         self._getTraceTypeDefinitions = getTraceTypeDefinitions
-        self._emergencyReporter = (
-            TraceEmergencyReporter()
-            if emergencyReporter is None
-            else requireInstance(
-                emergencyReporter,
-                TraceEmergencyReporter,
-                "emergencyReporter",
-            )
+        self._emergencyReporter = requireInstance(
+            emergencyReporter,
+            TraceEmergencyReporter,
+            "emergencyReporter",
         )
         self._lock = threading.RLock()
         self._destinationEntries: list[_TraceDestinationEntry] = []
+        self._initialAddResults: list[_TraceDestinationAddResult] = []
         self._publicationState: contextvars.ContextVar[
             _TracePublicationState | None
         ] = contextvars.ContextVar(
@@ -135,19 +169,13 @@ class TracePublisher:
         )
 
         for destination in destinations:
-            self.addDestination(destination)
-
-        if not self._destinationEntries:
-            self._destinationEntries.append(
-                _TraceDestinationEntry(
-                    destination=TraceSinkDestination(),
-                    deliveredDefinitionIds=set(),
-                ),
-            )
+            result = self.addDestination(destination)
+            if result.isNew:
+                self._initialAddResults.append(result)
 
     def isPublishing(self) -> bool:
         """
-        Returns whether destination delivery is active in this context.
+        Returns whether destination publication is active in this context.
 
         Returns:
             True when the current execution context is inside an active
@@ -159,83 +187,143 @@ class TracePublisher:
 
     def reportRecursiveTracingAttempt(self) -> None:
         """
-        Reports a recursive tracing attempt through the emergency channel.
+        Reports one recursive ordinary tracing attempt out-of-band.
 
         This method reports only the recursion condition. Callers remain
         responsible for raising the appropriate tracing API error.
         """
         self._emergencyReporter.reportRecursivePublication(eventId=None)
 
-    def addDestination(self, destination: TraceDestination) -> None:
+    def getDestinationCount(self) -> int:
         """
-        Adds one destination after attempting current definition delivery.
+        Returns the number of active destination registrations.
 
-        Addition is idempotent by destination object identity. Before the
-        destination becomes active, every currently registered trace-type
-        definition is offered to it. Failed definition writes are reported and
-        remain undelivered so future record publication can retry them.
+        Returns:
+            Number of currently active destination registrations.
 
-        The implicit sink destination is removed when the first real
-        destination is added.
+        """
+        with self._lock:
+            return len(self._destinationEntries)
+
+    def getRegistrations(
+        self,
+    ) -> tuple[TraceDestinationRegistrationInfo, ...]:
+        """
+        Returns a stable snapshot of current destination registrations.
+
+        Returns:
+            Registration information in current publisher order.
+
+        """
+        with self._lock:
+            return tuple(
+                entry.registration
+                for entry in self._destinationEntries
+            )
+
+    def takeInitialAddResults(self) -> tuple[_TraceDestinationAddResult, ...]:
+        """
+        Returns and clears ordered initial destination-add results.
+
+        Each result describes one unique registration created during publisher
+        initialization together with any destination-health transitions caused
+        while initial trace-type definitions were offered.
+
+        Returns:
+            Initial add results in registration order.
+
+        """
+        with self._lock:
+            results = tuple(self._initialAddResults)
+            self._initialAddResults.clear()
+            return results
+
+    def addDestination(
+        self,
+        destination: TraceDestination,
+    ) -> _TraceDestinationAddResult:
+        """
+        Adds one destination and initializes definition-delivery state.
+
+        Addition is idempotent by destination object identity. Removing and
+        later re-adding the same object creates a new registration identity.
+
+        Before the destination becomes active, every currently registered
+        trace-type definition is offered to it. Failed definition writes are
+        reported and remain undelivered so future publication can retry them.
 
         Args:
             destination:
                 Destination to add.
 
+        Returns:
+            Registration result describing whether a new registration was
+            created and any health transitions caused by initial definition
+            delivery.
+
         Raises:
             TraceDestinationContractError:
                 If destination does not expose callable
                 writeTraceTypeDefinition() and write() operations.
+            TraceInvariantError:
+                If this internal operation unexpectedly enters recursive
+                destination publication.
 
         """
         cleanDestination = _requireDestination(destination)
 
         with self._lock:
-            if any(
-                entry.destination is cleanDestination
-                for entry in self._destinationEntries
-            ):
-                return
+            for entry in self._destinationEntries:
+                if entry.registration.destination is cleanDestination:
+                    return _TraceDestinationAddResult(
+                        registration=entry.registration,
+                        isNew=False,
+                    )
 
-            entry = _TraceDestinationEntry(
+            registration = TraceDestinationRegistrationInfo(
+                registrationId=TraceDestinationRegistrationId.new(),
                 destination=cleanDestination,
-                deliveredDefinitionIds=set(),
+                destinationType=typeName(cleanDestination),
             )
+            entry = _TraceDestinationEntry(registration=registration)
+            transitions: list[TraceDestinationHealthTransition] = []
             definitions = self._getTraceTypeDefinitions()
 
             with self._publicationGuard(eventId=None) as allowed:
                 if not allowed:
-                    return
+                    raise TraceInvariantError(
+                        "Private TracePublisher addDestination() entered "
+                        "recursive publication.",
+                    )
 
                 for definition in definitions.values():
-                    self._writeDefinition(entry, definition)
-
-            if (
-                len(self._destinationEntries) == 1
-                and isinstance(
-                    self._destinationEntries[0].destination,
-                    TraceSinkDestination,
-                )
-            ):
-                self._destinationEntries.clear()
+                    self._writeDefinition(entry, definition, transitions)
 
             self._destinationEntries.append(entry)
+            return _TraceDestinationAddResult(
+                registration=registration,
+                isNew=True,
+                transitions=tuple(transitions),
+            )
 
-    def removeDestination(self, destination: TraceDestination) -> bool:
+    def removeDestination(
+        self,
+        destination: TraceDestination,
+    ) -> TraceDestinationRemovalResult | None:
         """
-        Removes one active destination by object identity.
+        Removes one active destination registration by object identity.
 
-        When removal leaves no active destination, an implicit
-        TraceSinkDestination is installed so the publisher always retains a
-        valid delivery target.
+        Publisher-level removal only mutates registration state. Enforcement
+        of the Tracer invariant requiring at least one active destination
+        belongs to the owning Tracer.
 
         Args:
             destination:
                 Destination object to remove.
 
         Returns:
-            True when the exact destination object was active and removed,
-            otherwise False.
+            Removal information when the exact destination object was active,
+            including its final failure-episode state; otherwise None.
 
         Raises:
             TraceDestinationContractError:
@@ -247,42 +335,29 @@ class TracePublisher:
 
         with self._lock:
             for index, entry in enumerate(self._destinationEntries):
-                if entry.destination is cleanDestination:
+                if entry.registration.destination is cleanDestination:
+                    result = TraceDestinationRemovalResult(
+                        registration=entry.registration,
+                        wasFailed=entry.isFailed(),
+                        failureOperation=entry.failureEpisodeOperation,
+                        failureErrorType=entry.failureEpisodeErrorType,
+                        failureErrorMessage=entry.failureEpisodeErrorMessage,
+                    )
                     del self._destinationEntries[index]
+                    return result
 
-                    if not self._destinationEntries:
-                        self._destinationEntries.append(
-                            _TraceDestinationEntry(
-                                destination=TraceSinkDestination(),
-                                deliveredDefinitionIds=set(),
-                            ),
-                        )
-
-                    return True
-
-            return False
-
-    def getDestinations(self) -> tuple[TraceDestination, ...]:
-        """
-        Returns a stable snapshot of active destinations.
-
-        Returns:
-            A tuple containing destination objects in current publication
-            order.
-
-        """
-        with self._lock:
-            return tuple(
-                entry.destination
-                for entry in self._destinationEntries
-            )
+            return None
 
     def publishTraceTypeDefinition(
         self,
         definition: TraceTypeDefinition,
-    ) -> None:
+        *,
+        excludeRegistrationIds: frozenset[
+            TraceDestinationRegistrationId
+        ] = frozenset(),
+    ) -> tuple[TraceDestinationHealthTransition, ...]:
         """
-        Publishes one registered definition to every active destination.
+        Publishes one registered definition and returns health transitions.
 
         Successful delivery is tracked independently for each destination and
         only after writeTraceTypeDefinition() returns successfully. A
@@ -290,17 +365,26 @@ class TracePublisher:
         and remains eligible for later retry.
 
         A pending definition may be retried by a later explicit definition
-        publication or when publication of a record referencing that definition
-        requires successful delivery. Definitions already delivered
-        successfully to an active destination are not redelivered.
+        publication or when publication of a record referencing that
+        definition requires successful delivery. Definitions already
+        delivered successfully to an active destination are not redelivered.
 
         Args:
             definition:
                 Registered trace-type definition to publish.
+            excludeRegistrationIds:
+                Destination registrations that must not receive this
+                definition during this publication.
+
+        Returns:
+            Edge-triggered destination-health transitions caused by the
+            publication, in destination processing order.
 
         Raises:
             TypeError:
                 If definition is not a TraceTypeDefinition.
+            TraceInvariantError:
+                If this internal operation unexpectedly becomes recursive.
 
         """
         cleanDefinition = requireInstance(
@@ -308,17 +392,32 @@ class TracePublisher:
             TraceTypeDefinition,
             "definition",
         )
+        transitions: list[TraceDestinationHealthTransition] = []
 
         with self._lock, self._publicationGuard(eventId=None) as allowed:
             if not allowed:
-                return
+                raise TraceInvariantError(
+                    "Private TracePublisher definition publication became "
+                    "recursive.",
+                )
 
             for entry in tuple(self._destinationEntries):
-                self._writeDefinition(entry, cleanDefinition)
+                if entry.registration.registrationId in excludeRegistrationIds:
+                    continue
+                self._writeDefinition(entry, cleanDefinition, transitions)
 
-    def publish(self, record: TraceRecord) -> None:
+        return tuple(transitions)
+
+    def publish(
+        self,
+        record: TraceRecord,
+        *,
+        excludeRegistrationIds: frozenset[
+            TraceDestinationRegistrationId
+        ] = frozenset(),
+    ) -> tuple[TraceDestinationHealthTransition, ...]:
         """
-        Publishes one immutable record to every active destination.
+        Publishes one record and returns edge-triggered health transitions.
 
         The record's trace-type definition must still be present in the active
         registry. For each destination, the publisher ensures that definition
@@ -334,25 +433,37 @@ class TracePublisher:
         Args:
             record:
                 Immutable trace record to publish.
+            excludeRegistrationIds:
+                Destination registrations that must not receive this record or
+                definition retries during this publication.
+
+        Returns:
+            Edge-triggered destination-health transitions caused by the
+            publication, in destination processing order.
 
         Raises:
             TypeError:
                 If record is not a TraceRecord.
             TraceInvariantError:
                 If the record references a trace-type definition that is not
-                present in the active registry snapshot.
+                present in the active registry snapshot, or this internal
+                operation unexpectedly becomes recursive.
 
         """
         cleanRecord = requireInstance(record, TraceRecord, "record")
+        transitions: list[TraceDestinationHealthTransition] = []
 
-        with self._lock, self._publicationGuard(eventId=cleanRecord.eventId) as allowed:
+        with (
+            self._lock,
+            self._publicationGuard(eventId=cleanRecord.eventId) as allowed,
+        ):
             if not allowed:
-                return
+                raise TraceInvariantError(
+                    "Private TracePublisher record publication became recursive.",
+                )
 
             definitions = self._getTraceTypeDefinitions()
-            definition = definitions.get(
-                cleanRecord.traceTypeDefinitionId,
-            )
+            definition = definitions.get(cleanRecord.traceTypeDefinitionId)
             if definition is None:
                 raise TraceInvariantError(
                     "Trace record references an unregistered trace-type "
@@ -363,18 +474,68 @@ class TracePublisher:
                 )
 
             for entry in tuple(self._destinationEntries):
-                if not self._writeDefinition(entry, definition):
+                if entry.registration.registrationId in excludeRegistrationIds:
                     continue
 
-                self._writeRecord(entry.destination, cleanRecord)
+                self._retryFailedDefinitions(entry, definitions, transitions)
+                if not self._writeDefinition(entry, definition, transitions):
+                    continue
+
+                self._writeRecord(entry, cleanRecord, transitions)
+
+        return tuple(transitions)
+
+    def _retryFailedDefinitions(
+        self,
+        entry: _TraceDestinationEntry,
+        definitions: Mapping[TraceTypeDefinitionId, TraceTypeDefinition],
+        transitions: list[TraceDestinationHealthTransition],
+    ) -> None:
+        """
+        Retries every failed definition still registered for one destination.
+
+        Args:
+            entry:
+                Destination entry whose failed definition deliveries are
+                retried.
+            definitions:
+                Current active trace-type definitions keyed by deterministic
+                identity.
+            transitions:
+                Mutable transition collector receiving any failure or recovery
+                edges caused by retry attempts.
+
+        Raises:
+            TraceInvariantError:
+                If the destination's failed-definition state references an
+                identity no longer present in the active registry.
+
+        """
+        remaining = set(entry.failedDefinitionIds)
+        for definitionId, definition in definitions.items():
+            if definitionId not in remaining:
+                continue
+            remaining.remove(definitionId)
+            self._writeDefinition(entry, definition, transitions)
+
+        if remaining:
+            missing = ", ".join(
+                str(definitionId)
+                for definitionId in remaining
+            )
+            raise TraceInvariantError(
+                "Destination health state references unregistered trace-type "
+                f"definitions: {missing}.",
+            )
 
     def _writeDefinition(
         self,
         entry: _TraceDestinationEntry,
         definition: TraceTypeDefinition,
+        transitions: list[TraceDestinationHealthTransition],
     ) -> bool:
         """
-        Ensures one definition has been delivered to one destination.
+        Ensures one definition has been delivered to one registration.
 
         Successful delivery is remembered by deterministic definition
         identity. Failed delivery is reported but not marked complete so a
@@ -385,6 +546,9 @@ class TracePublisher:
                 Destination entry whose delivery state is updated.
             definition:
                 Definition to deliver.
+            transitions:
+                Mutable transition collector receiving any failure or recovery
+                edge caused by this delivery attempt.
 
         Returns:
             True when the definition was already delivered or this attempt
@@ -395,46 +559,162 @@ class TracePublisher:
         if definitionId in entry.deliveredDefinitionIds:
             return True
 
+        wasFailed = entry.isFailed()
+
         try:
-            entry.destination.writeTraceTypeDefinition(definition)
+            entry.registration.destination.writeTraceTypeDefinition(definition)
         except Exception as err:  # noqa: BLE001
-            self._emergencyReporter.reportDestinationFailure(
+            entry.failedDefinitionIds.add(definitionId)
+            self._recordFailureTransition(
+                entry,
+                wasFailed=wasFailed,
                 operation="writeTraceTypeDefinition",
-                destination=entry.destination,
                 err=err,
+                transitions=transitions,
             )
             return False
 
         entry.deliveredDefinitionIds.add(definitionId)
+        entry.failedDefinitionIds.discard(definitionId)
+        self._recordRecoveryTransition(
+            entry,
+            wasFailed=wasFailed,
+            transitions=transitions,
+        )
         return True
 
     def _writeRecord(
         self,
-        destination: TraceDestination,
+        entry: _TraceDestinationEntry,
         record: TraceRecord,
+        transitions: list[TraceDestinationHealthTransition],
     ) -> None:
         """
-        Writes one record while isolating destination failures.
+        Writes one record while isolating ordinary destination failures.
 
         Args:
-            destination:
-                Destination receiving the record.
+            entry:
+                Destination entry whose record-delivery state is updated.
             record:
                 Immutable record to deliver.
+            transitions:
+                Mutable transition collector receiving any failure or recovery
+                edge caused by the write attempt.
 
         """
+        wasFailed = entry.isFailed()
+
         try:
-            destination.write(record)
+            entry.registration.destination.write(record)
         except Exception as err:  # noqa: BLE001
-            self._emergencyReporter.reportDestinationFailure(
+            entry.recordFailureActive = True
+            self._recordFailureTransition(
+                entry,
+                wasFailed=wasFailed,
                 operation="write",
-                destination=destination,
                 err=err,
+                transitions=transitions,
             )
+            return
+
+        entry.recordFailureActive = False
+        self._recordRecoveryTransition(
+            entry,
+            wasFailed=wasFailed,
+            transitions=transitions,
+        )
+
+    def _recordFailureTransition(
+        self,
+        entry: _TraceDestinationEntry,
+        *,
+        wasFailed: bool,
+        operation: str,
+        err: Exception,
+        transitions: list[TraceDestinationHealthTransition],
+    ) -> None:
+        """
+        Records only the first transition into one unresolved failure episode.
+
+        Args:
+            entry:
+                Destination entry whose health state changed.
+            wasFailed:
+                Whether the entry was already failed before the operation.
+            operation:
+                Destination operation that raised.
+            err:
+                Exception raised by the destination.
+            transitions:
+                Mutable transition collector receiving the failed edge.
+
+        """
+        if wasFailed or not entry.isFailed():
+            return
+
+        entry.failureEpisodeOperation = operation
+        entry.failureEpisodeErrorType = typeName(err)
+        entry.failureEpisodeErrorMessage = _safeString(err)
+        transition = TraceDestinationHealthTransition(
+            registration=entry.registration,
+            state="failed",
+            operation=entry.failureEpisodeOperation,
+            errorType=entry.failureEpisodeErrorType,
+            errorMessage=entry.failureEpisodeErrorMessage,
+        )
+        transitions.append(transition)
+        self._emergencyReporter.reportDestinationFailure(
+            operation=operation,
+            registrationId=entry.registration.registrationId,
+            destination=entry.registration.destination,
+            err=err,
+        )
+
+    def _recordRecoveryTransition(
+        self,
+        entry: _TraceDestinationEntry,
+        *,
+        wasFailed: bool,
+        transitions: list[TraceDestinationHealthTransition],
+    ) -> None:
+        """
+        Records recovery when every unresolved delivery failure has cleared.
+
+        The returned transition retains the first failure details from the
+        completed episode before those details are cleared from live state.
+
+        Args:
+            entry:
+                Destination entry whose health may have recovered.
+            wasFailed:
+                Whether the entry was failed before the successful operation.
+            transitions:
+                Mutable transition collector receiving the recovered edge.
+
+        """
+        if not wasFailed or entry.isFailed():
+            return
+
+        transitions.append(
+            TraceDestinationHealthTransition(
+                registration=entry.registration,
+                state="recovered",
+                operation=entry.failureEpisodeOperation,
+                errorType=entry.failureEpisodeErrorType,
+                errorMessage=entry.failureEpisodeErrorMessage,
+            ),
+        )
+        entry.failureEpisodeOperation = None
+        entry.failureEpisodeErrorType = None
+        entry.failureEpisodeErrorMessage = None
+        self._emergencyReporter.reportDestinationRecovered(
+            registrationId=entry.registration.registrationId,
+            destination=entry.registration.destination,
+        )
 
     class _PublicationGuard:
         """
-        Guards one destination-publication scope against recursive tracing.
+        Guards one destination-publication scope against recursion.
 
         The guard stores a mutable publication-state object in a ContextVar.
         Copies of the current execution context therefore share the active
@@ -488,7 +768,11 @@ class TracePublisher:
 
         def __exit__(self, *args: object) -> bool:
             """
-            Ends destination publication and restores prior context state.
+            Ends publication and restores prior context state.
+
+            The shared active state is cleared before ContextVar restoration so
+            execution contexts copied during publication cannot remain
+            permanently marked as publishing.
 
             Args:
                 *args:
@@ -500,14 +784,11 @@ class TracePublisher:
                 suppressed.
 
             """
-            state = self._state
-            token = self._token
+            if self._state is not None:
+                self._state.active = False
 
-            if state is not None:
-                state.active = False
-
-            if token is not None:
-                self._publisher._publicationState.reset(token)
+            if self._token is not None:
+                self._publisher._publicationState.reset(self._token)
 
             return False
 
@@ -517,7 +798,7 @@ class TracePublisher:
         eventId: TraceEventId | None,
     ) -> _PublicationGuard:
         """
-        Creates one publication guard.
+        Creates one publication guard bound to this publisher.
 
         Args:
             eventId:
@@ -532,7 +813,7 @@ class TracePublisher:
 
 def _requireDestination(destination: object) -> TraceDestination:
     """
-    Validates the runtime trace-destination contract.
+    Validates the runtime trace-destination structural contract.
 
     Runtime validation intentionally checks only that the two required
     operations exist and are callable. Signature introspection is avoided so
@@ -562,3 +843,22 @@ def _requireDestination(destination: object) -> TraceDestination:
         )
 
     return cast(TraceDestination, destination)
+
+
+def _safeString(value: object) -> str:
+    """
+    Returns best-effort text without propagating conversion failures.
+
+    Args:
+        value:
+            Object whose string representation is requested.
+
+    Returns:
+        String representation of value, or a fixed fallback if conversion
+        raises an ordinary exception.
+
+    """
+    try:
+        return str(value)
+    except Exception:  # noqa: BLE001
+        return "<message unavailable>"
