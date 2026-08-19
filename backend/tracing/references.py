@@ -1,4 +1,4 @@
-# file: backend/tracing/references.py ; version: 2
+# file: backend/tracing/references.py ; version: 3
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -41,9 +41,8 @@ class TraceReference:
             TypeError:
                 If kind or id is not an exact built-in string.
             ValueError:
-                If kind is not a valid tracing name, id is blank or contains
-                surrounding whitespace, or a diagnostic-name contract is
-                violated.
+                If kind is not a valid tracing name, or id is blank or contains
+                surrounding whitespace.
 
         """
         requireName(self.kind, "kind")
@@ -92,12 +91,11 @@ def normalizeTraceReferences(
     values: tuple[TraceReferenceInput, ...],
 ) -> tuple[TraceReference, ...]:
     """
-    Normalizes trace-reference inputs and removes later duplicates.
+    Normalizes exact-tuple reference input and removes later duplicates.
 
-    Each input may be an existing TraceReference or an exact two-item tuple
-    containing a reference kind and either a string or Uuid7Id identity.
-    Duplicate normalized references are removed while preserving the first
-    occurrence and relative order of all retained references.
+    The outer collection is intentionally strict. Higher-level tracing APIs
+    promise an immutable tuple boundary and do not silently coerce lists or
+    arbitrary iterables into valid evidence input.
 
     Args:
         values:
@@ -109,12 +107,19 @@ def normalizeTraceReferences(
 
     Raises:
         TypeError:
-            If an input is not a TraceReference or exact two-item tuple, or
-            tuple contents have unsupported types.
+            If values is not an exact built-in tuple, an input is neither a
+            TraceReference nor an exact two-item tuple, or tuple contents have
+            unsupported types.
         ValueError:
             If a reference kind or identity violates its validation contract.
 
     """
+    if type(values) is not tuple:
+        raise TypeError(
+            "values must be an exact built-in tuple; "
+            f"received {typeName(values)}.",
+        )
+
     normalized: list[TraceReference] = []
     seen: set[TraceReference] = set()
 
@@ -123,10 +128,12 @@ def normalizeTraceReferences(
             reference = value
         elif type(value) is tuple and len(value) == 2:  # noqa: PLR2004
             rawId = value[1]
-            reference = TraceReference.fromIdentity(
-                value[0],
-                rawId,
-            )
+            if not isinstance(rawId, str | Uuid7Id):
+                raise TypeError(
+                    f"causedBy[{index}][1] must be a string or Uuid7Id; "
+                    f"received {typeName(rawId)}.",
+                )
+            reference = TraceReference.fromIdentity(value[0], rawId)
         else:
             raise TypeError(
                 f"causedBy[{index}] must be a TraceReference or "
