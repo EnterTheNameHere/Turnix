@@ -1,4 +1,4 @@
-# file: backend/tracing/typeRegistry.py ; version: 2
+# file: backend/tracing/typeRegistry.py ; version: 3
 from __future__ import annotations
 
 import threading
@@ -18,10 +18,7 @@ from backend.tracing.typeDefinitions import TraceTypeDefinition
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-__all__: list[str] = [
-    "TraceTypeRegistration",
-    "TraceTypeRegistry",
-]
+__all__: list[str] = []  # No public API
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,7 +51,7 @@ class TraceTypeRegistration:
 
 class TraceTypeRegistry:
     """
-    Owns active trace-type definitions for one Actant lifecycle.
+    Owns active trace-type definitions for one Tracer lifecycle.
 
     Definitions are indexed both by trace-type name and deterministic
     content-derived identity. A name may refer to only one definition during
