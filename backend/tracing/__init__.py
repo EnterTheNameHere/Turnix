@@ -1,20 +1,21 @@
-# file: backend/tracing/__init__.py ; version: 2
+# file: backend/tracing/__init__.py ; version: 3
 """
 Provides Actant tracing infrastructure.
 
 The package defines deterministic trace-type identifiers, immutable trace
 records, event and span emission, runtime context propagation, correlation
-contexts, exception snapshots, publication, destinations, and terminal
-presentation.
+contexts, exception snapshots, destination delivery, emergency reporting,
+and terminal presentation.
 
 Trace-type definitions are content-addressed through canonical JSON and
 SHA-256 identities so emitted evidence can refer to stable portable
 definitions. Tracers maintain producer-local sequence ordering, explicit
-span relationships, and immutable record content while isolating destination
-failures from ordinary tracing operations.
+span relationships, and immutable record content while isolating ordinary
+tracing from destination failures.
 
-The package also provides emergency reporting for tracing-infrastructure
-failures that cannot safely be reported through tracing itself.
+Tracer-owned record factories, type registries, publishers, and their mutable
+registration state are internal implementation machinery and are not exposed
+through the package API.
 """
 from __future__ import annotations
 
@@ -36,6 +37,7 @@ from backend.tracing.errors import (
     TraceClosedError,
     TraceContextError,
     TraceDestinationContractError,
+    TraceDestinationStateError,
     TraceError,
     TraceExplicitTypeOverrideError,
     TraceInvariantError,
@@ -54,13 +56,12 @@ from backend.tracing.exceptionSnapshot import (
     captureExceptionSnapshot,
 )
 from backend.tracing.ids import (
+    TraceDestinationRegistrationId,
     TraceEventId,
     TraceProducerId,
     TraceSpanId,
     TraceTypeDefinitionId,
 )
-from backend.tracing.publisher import TracePublisher
-from backend.tracing.recordFactory import TraceRecordFactory
 from backend.tracing.records import TraceRecord
 from backend.tracing.references import TraceReference, TraceReferenceInput, normalizeTraceReferences
 from backend.tracing.spans import ActiveTraceSpan
@@ -68,7 +69,18 @@ from backend.tracing.terminalDestination import (
     TerminalColorMode,
     TerminalTraceDestination,
 )
-from backend.tracing.tracer import TRACE_SPAN_ABANDONED, Tracer
+from backend.tracing.tracer import (
+    TRACE_DESTINATION_ADDED,
+    TRACE_DESTINATION_FAILED,
+    TRACE_DESTINATION_RECOVERED,
+    TRACE_DESTINATION_REMOVED,
+    TRACE_PRODUCER_READY,
+    TRACE_PRODUCER_STOPPED,
+    TRACE_PRODUCER_STOPPING,
+    TRACE_SPAN_ABANDONED,
+    TraceProducerStartContext,
+    Tracer,
+)
 from backend.tracing.typeDefinitions import (
     DEFAULT_CANCELLED,
     DEFAULT_COMPLETED,
@@ -86,10 +98,6 @@ from backend.tracing.typeDefinitions import (
     TraceTypeDefinition,
     TraceTypeDefinitionKind,
 )
-from backend.tracing.typeRegistry import (
-    TraceTypeRegistration,
-    TraceTypeRegistry,
-)
 from backend.tracing.validation import (
     TRACE_LEVELS,
     TRACE_RECORD_KINDS,
@@ -105,8 +113,15 @@ __all__: list[str] = [
     "DEFAULT_FAILED",
     "DEFAULT_STARTED",
     "STANDARD_TRACE_SPAN_OUTCOMES",
+    "TRACE_DESTINATION_ADDED",
+    "TRACE_DESTINATION_FAILED",
+    "TRACE_DESTINATION_RECOVERED",
+    "TRACE_DESTINATION_REMOVED",
     "TRACE_EVENT",
     "TRACE_LEVELS",
+    "TRACE_PRODUCER_READY",
+    "TRACE_PRODUCER_STOPPED",
+    "TRACE_PRODUCER_STOPPING",
     "TRACE_RECORD_KINDS",
     "TRACE_SPAN",
     "TRACE_SPAN_ABANDONED",
@@ -122,6 +137,8 @@ __all__: list[str] = [
     "TraceCorrelationScope",
     "TraceDestination",
     "TraceDestinationContractError",
+    "TraceDestinationRegistrationId",
+    "TraceDestinationStateError",
     "TraceEmergencyReporter",
     "TraceError",
     "TraceEventBuilder",
@@ -132,9 +149,8 @@ __all__: list[str] = [
     "TraceInvariantError",
     "TraceLevel",
     "TraceProducerId",
-    "TracePublisher",
+    "TraceProducerStartContext",
     "TraceRecord",
-    "TraceRecordFactory",
     "TraceRecordKind",
     "TraceRecursivePublicationError",
     "TraceReference",
@@ -153,9 +169,7 @@ __all__: list[str] = [
     "TraceTypeDefinitionId",
     "TraceTypeDefinitionKind",
     "TraceTypeDefinitionNotFoundError",
-    "TraceTypeRegistration",
     "TraceTypeRegistrationError",
-    "TraceTypeRegistry",
     "TraceUnknownOutcomeError",
     "TraceUseError",
     "Tracer",
