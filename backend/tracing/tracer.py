@@ -1,11 +1,14 @@
-# file: backend/tracing/tracer.py ; version: 5
+# file: backend/tracing/tracer.py ; version: 6
 from __future__ import annotations
 
 import contextlib
 import threading
+from collections import deque
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Self, cast
 
-from backend.core.validation import requireInstance, requireString
+from backend.core.validation import requireBool, requireInstance, requireString
 from backend.tracing.builders import TraceEventBuilder, TraceSpanBuilder
 from backend.tracing.context import (
     UNSET,
@@ -18,11 +21,21 @@ from backend.tracing.emergency import TraceEmergencyReporter
 from backend.tracing.errors import (
     TraceClosedError,
     TraceContextError,
+    TraceDestinationStateError,
     TraceExplicitTypeOverrideError,
     TraceRecursivePublicationError,
     TraceSpanStateError,
 )
-from backend.tracing.publisher import TracePublisher
+from backend.tracing.ids import (
+    TraceDestinationRegistrationId,
+    TraceProducerId,
+)
+from backend.tracing.publisher import (
+    TraceDestinationHealthTransition,
+    TraceDestinationRegistrationInfo,
+    TraceDestinationRemovalResult,
+    TracePublisher,
+)
 from backend.tracing.recordFactory import TraceRecordFactory
 from backend.tracing.references import (
     TraceReferenceInput,
@@ -46,7 +59,7 @@ from backend.tracing.validation import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterable, Mapping
+    from collections.abc import Generator, Iterable
 
     from backend.core.ids import Uuid7Id
     from backend.tracing.destinations import TraceDestination
@@ -59,10 +72,21 @@ if TYPE_CHECKING:
     from backend.tracing.records import TraceRecord
 
 __all__: list[str] = [
+    "TRACE_DESTINATION_ADDED",
+    "TRACE_DESTINATION_FAILED",
+    "TRACE_DESTINATION_RECOVERED",
+    "TRACE_DESTINATION_REMOVED",
+    "TRACE_PRODUCER_READY",
+    "TRACE_PRODUCER_STOPPED",
+    "TRACE_PRODUCER_STOPPING",
     "TRACE_SPAN_ABANDONED",
+    "TraceProducerStartContext",
     "Tracer",
 ]
 
+
+_TRACE_INTERNAL_ORIGIN = "actant.tracing"
+_HEALTH_TRANSITION_DRAIN_LIMIT = 256
 
 TRACE_SPAN_ABANDONED = TraceEventType(
     name="trace.span-abandoned",
@@ -73,15 +97,116 @@ TRACE_SPAN_ABANDONED = TraceEventType(
         displayName="Span abandoned",
     ),
 )
+TRACE_PRODUCER_READY = TraceEventType(
+    name="trace.producer-ready",
+    domain="",
+    event=TraceGeneratedType(
+        label="trace.producer-ready",
+        level="info",
+        displayName="Trace producer ready",
+    ),
+)
+TRACE_PRODUCER_STOPPING = TraceEventType(
+    name="trace.producer-stopping",
+    domain="",
+    event=TraceGeneratedType(
+        label="trace.producer-stopping",
+        level="info",
+        displayName="Trace producer stopping",
+    ),
+)
+TRACE_PRODUCER_STOPPED = TraceEventType(
+    name="trace.producer-stopped",
+    domain="",
+    event=TraceGeneratedType(
+        label="trace.producer-stopped",
+        level="info",
+        displayName="Trace producer stopped",
+    ),
+)
+TRACE_DESTINATION_ADDED = TraceEventType(
+    name="trace.destination-added",
+    domain="",
+    event=TraceGeneratedType(
+        label="trace.destination-added",
+        level="info",
+        displayName="Trace destination added",
+    ),
+)
+TRACE_DESTINATION_REMOVED = TraceEventType(
+    name="trace.destination-removed",
+    domain="",
+    event=TraceGeneratedType(
+        label="trace.destination-removed",
+        level="info",
+        displayName="Trace destination removed",
+    ),
+)
+TRACE_DESTINATION_FAILED = TraceEventType(
+    name="trace.destination-failed",
+    domain="",
+    event=TraceGeneratedType(
+        label="trace.destination-failed",
+        level="warning",
+        displayName="Trace destination failed",
+    ),
+)
+TRACE_DESTINATION_RECOVERED = TraceEventType(
+    name="trace.destination-recovered",
+    domain="",
+    event=TraceGeneratedType(
+        label="trace.destination-recovered",
+        level="info",
+        displayName="Trace destination recovered",
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class TraceProducerStartContext:
+    """
+    Describes owner-supplied context for one newly created trace producer.
+
+    The context is descriptive evidence only. Supplying a predecessor does not
+    resume its sequence, reuse its producer identity, or request recovery. The
+    component above tracing remains responsible for deciding why a new Tracer
+    should exist.
+    """
+
+    predecessorProducerId: TraceProducerId | None = None
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        """
+        Validates optional predecessor identity and machine-readable reason.
+
+        Raises:
+            TypeError:
+                If predecessorProducerId is present and is not a
+                TraceProducerId, or reason is not an exact built-in string.
+            ValueError:
+                If reason is present and does not satisfy tracing-name syntax.
+
+        """
+        if self.predecessorProducerId is not None:
+            requireInstance(
+                self.predecessorProducerId,
+                TraceProducerId,
+                "predecessorProducerId",
+            )
+
+        if self.reason is not None:
+            requireName(self.reason, "reason")
 
 
 class Tracer:
     """
     Coordinates trace types, runtime context, span lifecycles, and publication.
 
-    One Tracer owns one TraceRecordFactory producer identity and therefore one
-    producer-local evidence sequence. TraceSpanContext instances from another
-    producer are rejected for structural containment.
+    One Tracer owns one internal record factory and therefore exactly one trace
+    producer identity, producer-local evidence sequence, and monotonic-clock
+    domain. TraceSpanContext instances from another producer are rejected for
+    structural containment.
 
     Active span lifecycle ownership remains local to the thread and asyncio
     task that started each span. Transferable TraceSpanContext values convey
@@ -92,43 +217,64 @@ class Tracer:
     lifecycle transition may begin. Operations already admitted complete
     before shutdown takes ownership of remaining active spans.
 
-    Destination publication is delegated to TracePublisher, while emergency
-    reporting remains isolated from ordinary tracing.
+    Destination publication is delegated to internal Tracer-owned delivery
+    machinery, while emergency reporting remains isolated from ordinary
+    tracing.
     """
 
     def __init__(
         self,
         *,
         origin: str | None = None,
-        destinations: Iterable[TraceDestination] = (),
+        destinations: Iterable[TraceDestination],
         runtimeContext: TraceRuntimeContext | None = None,
-        recordFactory: TraceRecordFactory | None = None,
+        startContext: TraceProducerStartContext | None = None,
+        includeExceptionStacks: bool = True,
         emergencyReporter: TraceEmergencyReporter | None = None,
     ) -> None:
         """
-        Initializes one tracing lifecycle.
+        Initializes one complete tracing lifecycle.
+
+        A Tracer owns exactly one producer, record factory, type registry,
+        and publisher. None of those mutable internals are injectable or
+        exposed. At least one destination is required; intentional discard
+        must be explicit by supplying TraceSinkDestination. Initial
+        destination-membership evidence is attempted and producer readiness
+        is emitted before construction returns.
+
+        startContext is descriptive only. It records owner-supplied context
+        about why this new producer exists and never causes tracing itself to
+        restart, resume, or recover another producer.
 
         Args:
             origin:
-                Default origin used by parentless evidence when no explicit
-                origin is supplied.
+                Default origin used by parentless ordinary evidence when no
+                explicit origin is supplied.
             destinations:
-                Initial trace destinations.
+                Initial trace destinations. At least one destination is
+                required. Duplicate objects are registered once by identity.
             runtimeContext:
-                Runtime context providing ambient spans and correlations.
-                When omitted, a new independent context is created.
-            recordFactory:
-                Record factory owning the producer identity and sequence.
-                When omitted, a new factory is created.
+                Runtime context providing ambient spans and correlations. None
+                creates an independent context.
+            startContext:
+                Optional descriptive relationship to earlier producer evidence.
+            includeExceptionStacks:
+                Default controlling whether captured exception snapshots
+                include formatted stack information.
             emergencyReporter:
-                Reporter for failures that cannot be safely published
-                through ordinary tracing.
+                Out-of-band reporter for failures that cannot safely be
+                represented through ordinary tracing.
 
         Raises:
             TypeError:
-                If supplied runtime components violate their runtime contracts.
+                If a supplied component or option violates its runtime type
+                contract.
             ValueError:
-                If origin is not a valid trace name.
+                If destinations is empty, origin is invalid, or startContext
+                contains invalid descriptive values.
+            TraceDestinationContractError:
+                If an initial destination does not satisfy the runtime
+                destination contract.
 
         """
         self._defaultOrigin = (
@@ -143,13 +289,13 @@ class Tracer:
                 "runtimeContext",
             )
         )
-        self._recordFactory = (
-            TraceRecordFactory()
-            if recordFactory is None
+        self._startContext = (
+            TraceProducerStartContext()
+            if startContext is None
             else requireInstance(
-                recordFactory,
-                TraceRecordFactory,
-                "recordFactory",
+                startContext,
+                TraceProducerStartContext,
+                "startContext",
             )
         )
         self._emergencyReporter = (
@@ -161,22 +307,56 @@ class Tracer:
                 "emergencyReporter",
             )
         )
+        self._recordFactory = TraceRecordFactory(
+            includeExceptionStacks=requireBool(
+                includeExceptionStacks,
+                "includeExceptionStacks",
+            ),
+        )
         self._traceTypeRegistry = TraceTypeRegistry()
         self._traceTypeLock = threading.RLock()
         self._activeSpanLock = threading.RLock()
         self._lifecycleLock = threading.RLock()
         self._activeSpans: dict[TraceSpanId, ActiveTraceSpan] = {}
+        self._healthTransitionQueue: deque[
+            TraceDestinationHealthTransition
+        ] = deque()
+        self._drainingHealthTransitions = False
         self._closing = False
         self._closed = False
 
-        self._traceTypeRegistry.register(TRACE_EVENT.getDefinition())
-        self._traceTypeRegistry.register(TRACE_SPAN.getDefinition())
+        cleanDestinations = tuple(destinations)
+        if not cleanDestinations:
+            raise ValueError(
+                "Tracer requires at least one destination. Supply "
+                "TraceSinkDestination explicitly when intentional discard "
+                "is required.",
+            )
+
+        for traceType in (
+            TRACE_EVENT,
+            TRACE_SPAN,
+            TRACE_SPAN_ABANDONED,
+            TRACE_PRODUCER_READY,
+            TRACE_PRODUCER_STOPPING,
+            TRACE_PRODUCER_STOPPED,
+            TRACE_DESTINATION_ADDED,
+            TRACE_DESTINATION_REMOVED,
+            TRACE_DESTINATION_FAILED,
+            TRACE_DESTINATION_RECOVERED,
+        ):
+            self._traceTypeRegistry.register(traceType.getDefinition())
 
         self._publisher = TracePublisher(
             getTraceTypeDefinitions=self.getTraceTypeDefinitions,
-            destinations=destinations,
+            destinations=cleanDestinations,
             emergencyReporter=self._emergencyReporter,
         )
+
+        for result in self._publisher.takeInitialAddResults():
+            self._healthTransitionQueue.extend(result.transitions)
+            self._publishDestinationAdded(result.registration)
+        self._publishProducerReady()
 
     def __enter__(self) -> Self:
         """
@@ -196,6 +376,11 @@ class Tracer:
     def __exit__(self, *args: object) -> bool:
         """
         Closes this tracer on synchronous context-manager exit.
+
+        Args:
+            *args:
+                Standard context-manager exception information, which is not
+                inspected by the Tracer.
 
         Returns:
             False so exceptions from the managed body are never suppressed.
@@ -221,6 +406,11 @@ class Tracer:
     async def __aexit__(self, *args: object) -> bool:
         """
         Closes this tracer on asynchronous context-manager exit.
+
+        Args:
+            *args:
+                Standard context-manager exception information, which is not
+                inspected by the Tracer.
 
         Returns:
             False so exceptions from the managed body are never suppressed.
@@ -332,7 +522,8 @@ class Tracer:
             attributes:
                 Optional immutable-value-compatible event attributes.
             exception:
-                Optional exception snapshot to attach.
+                Optional exception to capture and attach as an immutable
+                snapshot.
             exceptionAttributes:
                 Optional catcher-owned attributes for exception capture.
             includeExceptionStack:
@@ -418,7 +609,8 @@ class Tracer:
             attributes:
                 Optional immutable-value-compatible span-start attributes.
             exception:
-                Optional exception snapshot to attach to span-start evidence.
+                Optional exception to capture and attach to span-start
+                evidence.
             exceptionAttributes:
                 Optional catcher-owned attributes for exception capture.
             includeExceptionStack:
@@ -508,63 +700,93 @@ class Tracer:
 
     def addDestination(self, destination: TraceDestination) -> None:
         """
-        Adds one trace destination.
+        Adds one destination registration and attempts to trace the membership
+        change.
 
-        All currently registered trace-type definitions are offered to the
-        destination before it becomes active for record delivery. Successful
-        definition delivery is remembered by the publisher. Definitions whose
-        initial delivery fails remain pending for that destination and may be
-        retried by later publisher activity before dependent records are
-        written.
+        Addition is idempotent by destination object identity. Removing and
+        later re-adding the same object creates a new registration identity.
 
         Args:
             destination:
-                Structurally compatible trace destination.
+                Structurally compatible destination to activate.
 
         Raises:
             TraceClosedError:
-                If the tracer is closing or closed.
+                If the Tracer is closing or closed.
             TraceDestinationContractError:
-                If destination does not satisfy the runtime contract.
+                If destination does not satisfy the runtime destination
+                contract.
             TraceRecursivePublicationError:
                 If called recursively from destination delivery.
 
         """
         with self._ordinaryOperation():
-            self._publisher.addDestination(destination)
+            result = self._publisher.addDestination(destination)
+            if not result.isNew:
+                return
+
+            self._healthTransitionQueue.extend(result.transitions)
+            self._publishDestinationAdded(result.registration)
 
     def removeDestination(self, destination: TraceDestination) -> bool:
         """
-        Removes one trace destination by identity.
+        Removes one destination while preserving at least one active output.
+
+        The final configured destination cannot be removed. Callers must add a
+        replacement first; intentional discard is represented by an explicit
+        TraceSinkDestination registration rather than an implicit silent sink.
 
         Args:
             destination:
-                Destination object to remove.
+                Destination object to remove by identity.
 
         Returns:
-            True if the exact active destination was removed.
+            True when the exact destination object was active and removed;
+            otherwise False.
 
         Raises:
             TraceClosedError:
-                If the tracer is closing or closed.
+                If the Tracer is closing or closed.
             TraceDestinationContractError:
-                If destination does not satisfy the runtime contract.
+                If destination does not satisfy the runtime destination
+                contract.
+            TraceDestinationStateError:
+                If destination is the final active destination.
             TraceRecursivePublicationError:
                 If called recursively from destination delivery.
 
         """
         with self._ordinaryOperation():
-            return self._publisher.removeDestination(destination)
+            registrations = self._publisher.getRegistrations()
+            if (
+                len(registrations) == 1
+                and registrations[0].destination is destination
+            ):
+                raise TraceDestinationStateError(
+                    "Cannot remove the final trace destination. Add a "
+                    "replacement destination first.",
+                )
 
-    def getPublisher(self) -> TracePublisher:
+            removal = self._publisher.removeDestination(destination)
+            if removal is None:
+                return False
+
+            self._publishDestinationRemoved(removal)
+            return True
+
+    def getTraceProducerId(self) -> TraceProducerId:
         """
-        Returns the trace publisher.
+        Returns the immutable producer identifier owned by this Tracer.
+
+        The identifier remains useful after close for relating replacement
+        producer start context to this completed producer lifecycle.
 
         Returns:
-            Publisher coordinating this tracer's destinations.
+            Producer identifier associated with this Tracer's sequence and
+            monotonic-clock domain.
 
         """
-        return self._publisher
+        return self._recordFactory.getTraceProducerId()
 
     def getTraceTypeDefinitions(
         self,
@@ -593,6 +815,8 @@ class Tracer:
             Registered definition.
 
         Raises:
+            TypeError:
+                If traceTypeDefinitionId is not a TraceTypeDefinitionId.
             TraceTypeDefinitionNotFoundError:
                 If no active definition has the supplied identity.
 
@@ -614,7 +838,12 @@ class Tracer:
 
     def close(self) -> None:
         """
-        Closes the tracer and abandons remaining active spans.
+        Closes this producer lifecycle and abandons remaining active spans.
+
+        Ordered lifecycle evidence is attempted while the internal publisher is
+        still valid: producer-stopping is emitted after ordinary admission is
+        closed; producer-stopped is emitted after active-span cleanup and
+        immediately before the Tracer becomes closed.
 
         Shutdown is serialized against ordinary tracing operations. Once this
         method enters the closing state, no new ordinary event emission, span
@@ -645,15 +874,17 @@ class Tracer:
             )
 
         with self._lifecycleLock:
-            if self._closed:
-                return
-
-            if self._closing:
+            if self._closed or self._closing:
                 return
 
             self._closing = True
 
             try:
+                self._publishLifecycleBestEffort(
+                    TRACE_PRODUCER_STOPPING,
+                    "Trace producer is stopping.",
+                )
+
                 with self._activeSpanLock:
                     activeSpans = tuple(self._activeSpans.values())
 
@@ -682,6 +913,11 @@ class Tracer:
                         self._emergencyReporter.reportAbandonmentFailure(
                             spanId=activeSpan.spanId,
                             err=err,
+                        )
+
+                self._publishLifecycleBestEffort(
+                    TRACE_PRODUCER_STOPPED,
+                    "Trace producer stopped.",
                         )
             finally:
                 self._closed = True
@@ -837,6 +1073,34 @@ class Tracer:
         """
         Resolves, emits, installs, and registers one active span.
 
+        Args:
+            traceType:
+                Span type to resolve, or None for TRACE_SPAN.
+            domain:
+                Optional domain override.
+            level:
+                Optional span-start presentation-level override.
+            message:
+                Human-readable span-start message.
+            label:
+                Optional record-local start label.
+            attributes:
+                Optional span-start attributes.
+            exception:
+                Optional exception to capture.
+            exceptionAttributes:
+                Optional catcher-owned exception attributes.
+            includeExceptionStack:
+                Optional exception-stack override.
+            parent:
+                Optional explicit structural parent context.
+            origin:
+                Optional explicit root origin.
+            causedBy:
+                Causal or logical evidence references.
+            useAmbient:
+                Whether ambient structural parent context may be selected.
+
         Returns:
             Lifecycle owner for the started span.
 
@@ -950,6 +1214,24 @@ class Tracer:
         """
         Materializes terminal evidence for one owned active span.
 
+        Args:
+            activeSpan:
+                Active span to end.
+            recordType:
+                Terminal span record type.
+            level:
+                Terminal span presentation-level.
+            message:
+                Human-readable span-end message.
+            attributes:
+                Optional terminal span attributes.
+            exceptionSnapshot:
+                Optional terminal span exception snapshot.
+            outcome:
+                Terminal span outcome.
+            causedBy:
+                Causal or logical evidence references.
+
         Returns:
             Immutable terminal span record.
 
@@ -987,6 +1269,14 @@ class Tracer:
 
         Exception-specific attributes and stack overrides are invalid without
         an attached exception.
+
+        Args:
+            exception:
+                Exception to capture, or None.
+            exceptionAttributes:
+                Optional catcher-owned exception attributes.
+            includeExceptionStack:
+                Optional stack-inclusion override.
 
         Returns:
             Captured immutable exception snapshot, or None when no exception
@@ -1033,6 +1323,15 @@ class Tracer:
         Explicit or ambient span contexts must belong to this tracer's record
         producer. Parentless evidence requires either an explicit origin or the
         tracer's configured default.
+
+        Args:
+            explicitSpan:
+                Explicit structural span context, or None.
+            explicitOrigin:
+                Explicit origin for parentless evidence, or None.
+            useAmbient:
+                Whether an ambient span may be selected when no explicit
+                relationship is supplied.
 
         Returns:
             A pair containing resolved structural span context and resolved
@@ -1086,6 +1385,10 @@ class Tracer:
         Structural span correlations take precedence. Missing values are filled
         from the current ambient correlation context.
 
+        Args:
+            spanContext:
+                Structural span context, or None.
+
         Returns:
             Immutable resolved correlation context.
 
@@ -1100,6 +1403,12 @@ class Tracer:
     def _resolveDomain(self, domain: str | None, default: str) -> str:
         """
         Resolves an optional domain override against a type default.
+
+        Args:
+            domain:
+                Optional domain override, or None.
+            default:
+                Default domain value.
 
         Returns:
             Resolved domain string.
@@ -1122,6 +1431,10 @@ class Tracer:
         """
         Registers one definition and publishes it when newly introduced.
 
+        Args:
+            definition:
+                Trace type definition to register.
+
         Returns:
             Canonical registered definition instance.
 
@@ -1130,15 +1443,37 @@ class Tracer:
             registration = self._traceTypeRegistry.register(definition)
 
             if registration.isNew:
-                self._publisher.publishTraceTypeDefinition(
+                transitions = self._publisher.publishTraceTypeDefinition(
                     registration.definition,
                 )
+                self._queueDestinationHealthTransitions(transitions)
 
             return registration.definition
 
-    def _publishRecord(self, record: TraceRecord) -> None:
-        """Publishes one already materialized trace record."""
-        self._publisher.publish(record)
+    def _publishRecord(
+        self,
+        record: TraceRecord,
+        *,
+        excludeRegistrationIds: frozenset[
+            TraceDestinationRegistrationId
+        ] = frozenset(),
+    ) -> None:
+        """
+        Publishes one record and drains resulting destination health edges.
+
+        Args:
+            record:
+                Record to publish.
+            excludeRegistrationIds:
+                Registration identifiers that must not receive this record or
+                definition retries performed during its publication.
+
+        """
+        transitions = self._publisher.publish(
+            record,
+            excludeRegistrationIds=excludeRegistrationIds,
+        )
+        self._queueDestinationHealthTransitions(transitions)
 
     def _finishActiveSpan(self, activeSpan: ActiveTraceSpan) -> None:
         """
@@ -1209,8 +1544,21 @@ class Tracer:
         """
         Performs one abandonment while the tracer lifecycle lock is held.
 
+        Args:
+            activeSpan:
+                Lifecycle owner to abandon.
+            restoreIfOwned:
+                Whether current-owner context leases should be unwound.
+
         Returns:
             True if activeSpan transitioned to abandoned during this call.
+
+        Raises:
+            TraceSpanStateError:
+                If requested current-owner restoration cannot reconcile the
+                ambient span stack with active lifecycle bookkeeping.
+            TraceContextError:
+                If an owned ContextVar lease cannot be restored.
 
         """
         with self._activeSpanLock:
@@ -1301,6 +1649,345 @@ class Tracer:
             if currentSpan is targetSpan:
                 return
 
+    def _publishProducerReady(self) -> None:
+        """Publishes readiness evidence for this new producer."""
+        attributes: dict[str, object] = {
+            "destinationCount": self._publisher.getDestinationCount(),
+        }
+        causedBy: tuple[TraceReferenceInput, ...] = ()
+
+        if self._startContext.reason is not None:
+            attributes["startReason"] = self._startContext.reason
+
+        predecessor = self._startContext.predecessorProducerId
+        if predecessor is not None:
+            causedBy = (("trace.producer", predecessor),)
+
+        self._emitEvent(
+            traceType=TRACE_PRODUCER_READY,
+            domain=None,
+            level=None,
+            message="Trace producer is ready.",
+            label=None,
+            attributes=cast(Mapping[object, object], attributes),
+            exception=None,
+            exceptionAttributes=None,
+            includeExceptionStack=None,
+            span=None,
+            origin=_TRACE_INTERNAL_ORIGIN,
+            causedBy=causedBy,
+            useAmbient=False,
+            internalEmission=True,
+        )
+
+    def _publishLifecycleBestEffort(
+        self,
+        traceType: TraceEventType,
+        message: str,
+    ) -> None:
+        """
+        Publishes one lifecycle event without obstructing cleanup on failure.
+
+        Args:
+            traceType:
+                Trace event type to publish.
+            message:
+                Message to publish.
+
+        """
+        try:
+            self._emitEvent(
+                traceType=traceType,
+                domain=None,
+                level=None,
+                message=message,
+                label=None,
+                attributes=None,
+                exception=None,
+                exceptionAttributes=None,
+                includeExceptionStack=None,
+                span=None,
+                origin=_TRACE_INTERNAL_ORIGIN,
+                causedBy=(),
+                useAmbient=False,
+                internalEmission=True,
+            )
+        except Exception as err:  # noqa: BLE001
+            self._emergencyReporter.reportContextFailure(
+                "Trace producer lifecycle evidence failed: "
+                f"{type(err).__name__}: {err}",
+            )
+
+    def _publishDestinationAdded(
+        self,
+        registration: TraceDestinationRegistrationInfo,
+    ) -> None:
+        """
+        Publishes best-effort evidence that one registration became active.
+
+        Destination membership has already changed when this method is called.
+        Failure to publish the membership evidence is therefore reported
+        through the emergency path and never rolls back or recharacterizes the
+        completed configuration mutation.
+
+        Args:
+            registration:
+                Registration that successfully became active.
+
+        """
+        try:
+            self._publishDestinationMembershipEvent(
+                traceType=TRACE_DESTINATION_ADDED,
+                message="Trace destination was added.",
+                registration=registration,
+            )
+        except Exception as err:  # noqa: BLE001
+            self._emergencyReporter.reportContextFailure(
+                "Trace destination-added evidence failed for registration "
+                f"{registration.registrationId}: "
+                f"{type(err).__name__}: {err}",
+            )
+
+    def _publishDestinationRemoved(
+        self,
+        removal: TraceDestinationRemovalResult,
+    ) -> None:
+        """
+        Publishes best-effort evidence that one registration was removed.
+
+        Destination membership has already changed when this method is called.
+        Failure to publish the membership evidence is therefore reported
+        through the emergency path and never rolls back or recharacterizes the
+        completed configuration mutation.
+
+        Args:
+            removal:
+                Completed removal and the registration's final delivery-health
+                state.
+
+        """
+        extraAttributes: dict[str, object] = {
+            "wasFailed": removal.wasFailed,
+        }
+        if removal.failureOperation is not None:
+            extraAttributes["failedOperation"] = removal.failureOperation
+        if removal.failureErrorType is not None:
+            extraAttributes["failureErrorType"] = removal.failureErrorType
+        if removal.failureErrorMessage is not None:
+            extraAttributes["failureErrorMessage"] = removal.failureErrorMessage
+
+        try:
+            self._publishDestinationMembershipEvent(
+                traceType=TRACE_DESTINATION_REMOVED,
+                message="Trace destination was removed.",
+                registration=removal.registration,
+                extraAttributes=extraAttributes,
+            )
+        except Exception as err:  # noqa: BLE001
+            self._emergencyReporter.reportContextFailure(
+                "Trace destination-removed evidence failed for registration "
+                f"{removal.registration.registrationId}: "
+                f"{type(err).__name__}: {err}",
+            )
+
+    def _publishDestinationMembershipEvent(
+        self,
+        *,
+        traceType: TraceEventType,
+        message: str,
+        registration: TraceDestinationRegistrationInfo,
+        extraAttributes: Mapping[str, object] | None = None,
+    ) -> None:
+        """
+        Publishes one destination membership transition.
+
+        Args:
+            traceType:
+                Trace event type to publish.
+            message:
+                Message to publish.
+            registration:
+                Registration whose membership transition is being published.
+            extraAttributes:
+                Additional membership-evidence attributes to merge with the
+                registration identity and destination type.
+
+        """
+        attributes: dict[str, object] = {
+            "registrationId": str(registration.registrationId),
+            "destinationType": registration.destinationType,
+        }
+        if extraAttributes is not None:
+            attributes.update(extraAttributes)
+
+        self._emitEvent(
+            traceType=traceType,
+            domain=None,
+            level=None,
+            message=message,
+            label=None,
+            attributes=cast(Mapping[object, object], attributes),
+            exception=None,
+            exceptionAttributes=None,
+            includeExceptionStack=None,
+            span=None,
+            origin=_TRACE_INTERNAL_ORIGIN,
+            causedBy=(),
+            useAmbient=False,
+            internalEmission=True,
+        )
+
+    def _queueDestinationHealthTransitions(
+        self,
+        transitions: tuple[TraceDestinationHealthTransition, ...],
+    ) -> None:
+        """
+        Queues and drains edge-triggered destination-health evidence.
+
+        Publishing one health transition may itself produce further destination
+        health transitions. Nested drain attempts therefore append to the
+        shared queue and return, leaving the outer drain to process newly
+        queued edges.
+
+        Processing is bounded by _HEALTH_TRANSITION_DRAIN_LIMIT. Exceeding the
+        bound clears remaining transitions and reports the condition through
+        the emergency channel to prevent unbounded failure/recovery churn.
+
+        Args:
+            transitions:
+                Newly observed destination-health edges to append before
+                draining.
+
+        """
+        if transitions:
+            self._healthTransitionQueue.extend(transitions)
+
+        if not self._healthTransitionQueue or self._drainingHealthTransitions:
+            return
+
+        self._drainingHealthTransitions = True
+        processed = 0
+
+        try:
+            while self._healthTransitionQueue:
+                processed += 1
+                if processed > _HEALTH_TRANSITION_DRAIN_LIMIT:
+                    self._healthTransitionQueue.clear()
+                    self._emergencyReporter.reportContextFailure(
+                        "Trace destination health transitions exceeded the "
+                        "bounded drain limit; further transition evidence "
+                        "was suppressed to prevent recursive failure churn.",
+                    )
+                    return
+
+                transition = self._healthTransitionQueue.popleft()
+                self._publishDestinationHealthTransition(transition)
+        finally:
+            self._drainingHealthTransitions = False
+
+    def _publishDestinationHealthTransition(
+        self,
+        transition: TraceDestinationHealthTransition,
+    ) -> None:
+        """
+        Publishes evidence for one destination-health transition.
+
+        Args:
+            transition:
+                Transition to publish.
+
+        """
+        registration = transition.registration
+        attributes: dict[str, object] = {
+            "registrationId": str(registration.registrationId),
+            "destinationType": registration.destinationType,
+        }
+
+        if transition.state == "failed":
+            traceType = TRACE_DESTINATION_FAILED
+            message = "Trace destination entered a failed delivery state."
+            if transition.operation is not None:
+                attributes["operation"] = transition.operation
+            if transition.errorType is not None:
+                attributes["errorType"] = transition.errorType
+            if transition.errorMessage is not None:
+                attributes["errorMessage"] = transition.errorMessage
+        elif transition.state == "recovered":
+            traceType = TRACE_DESTINATION_RECOVERED
+            message = "Trace destination recovered delivery health."
+            if transition.operation is not None:
+                attributes["failedOperation"] = transition.operation
+            if transition.errorType is not None:
+                attributes["failureErrorType"] = transition.errorType
+            if transition.errorMessage is not None:
+                attributes["failureErrorMessage"] = transition.errorMessage
+        else:
+            self._emergencyReporter.reportContextFailure(
+                "Unknown trace destination health transition state: "
+                f"{transition.state!r}.",
+            )
+            return
+
+        record = self._materializeInternalEvent(
+            traceType=traceType,
+            message=message,
+            attributes=cast(Mapping[object, object], attributes),
+        )
+        excludeRegistrationIds = (
+            frozenset({registration.registrationId})
+            if transition.state == "failed"
+            else frozenset()
+        )
+        self._publishRecord(
+            record,
+            excludeRegistrationIds=excludeRegistrationIds,
+        )
+
+    def _materializeInternalEvent(
+        self,
+        *,
+        traceType: TraceEventType,
+        message: str,
+        attributes: Mapping[object, object] | None,
+    ) -> TraceRecord:
+        """
+        Materializes parentless intrinsic evidence without nested API use.
+
+        Args:
+            traceType:
+                Intrinsic event type to materialize.
+            message:
+                Human-readable evidence message.
+            attributes:
+                Optional intrinsic evidence attributes.
+
+        Returns:
+            Immutable parentless intrinsic event record.
+
+        """
+        definition = self._traceTypeRegistry.register(
+            traceType.getDefinition(),
+        ).definition
+        generated = definition.event
+        if generated is None:
+            raise TraceContextError(
+                "Intrinsic trace event resolved without event metadata.",
+            )
+
+        return self._recordFactory.createEvent(
+            domain=definition.domain,
+            recordType=generated.label,
+            traceTypeDefinitionId=definition.traceTypeDefinitionId,
+            level=generated.level,
+            message=requireString(message, "message"),
+            attributes=attributes,
+            exceptionSnapshot=None,
+            spanContext=None,
+            origin=_TRACE_INTERNAL_ORIGIN,
+            causedBy=(),
+            correlations=self._runtimeContext.getCurrentCorrelations(),
+        )
+
     def _publishSpanAbandonment(self, activeSpan: ActiveTraceSpan) -> None:
         """
         Publishes best-effort evidence for one completed abandonment
@@ -1354,7 +2041,8 @@ class Tracer:
             activeSpan:
                 Span whose managed finalization or recovery failed.
             err:
-                Failure to report through the emergency channel.
+                Exception raised while finalizing or recovering the managed
+                span.
 
         """
         self._emergencyReporter.reportContextFailure(
@@ -1390,7 +2078,7 @@ class Tracer:
         """
         if (
             spanContext.traceProducerId
-            != self._recordFactory.getTraceProducerId()
+            != self.getTraceProducerId()
         ):
             raise TraceContextError(
                 "TraceSpanContext belongs to another trace producer.",
@@ -1422,15 +2110,15 @@ class Tracer:
     @contextlib.contextmanager
     def _internalEmissionOperation(self) -> Generator[None]:
         """
-        Admits tracer-owned diagnostic emission outside ordinary lifecycle
+        Admits tracer-owned intrinsic emission outside ordinary lifecycle
         rules.
 
         Internal emission may run while the tracer is open or closing. This
-        supports abandonment evidence produced both by managed-span recovery
-        and by close(). It is never permitted after the tracer is closed.
+        supports producer lifecycle, destination-health, membership, and
+        abandonment evidence. It is never permitted after the tracer is closed.
 
         Yields:
-            Control while internal diagnostic emission is permitted.
+            Control while internal intrinsic emission is permitted.
 
         Raises:
             TraceClosedError:
