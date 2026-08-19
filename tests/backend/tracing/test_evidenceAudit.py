@@ -1,18 +1,20 @@
-# file: tests/backend/tracing/test_evidenceAudit.py ; version: 2
+# file: tests/backend/tracing/test_evidenceAudit.py ; version: 3
 from __future__ import annotations
 
 from backend.tracing import (
     TraceEventType,
     TraceGeneratedType,
     Tracer,
+    TraceRecord,
     TraceSpanType,
+    TraceTypeDefinition,
 )
 from tests.backend.tracing.helpers import CollectingDestination
 
 
 def testPublishedEvidenceIsSelfConsistentAndDefinitionOrdered() -> None:
-    destination = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
+    collector = CollectingDestination()
+    tracer = Tracer(origin="actant.test", destinations=(collector,))
     pipelineType = TraceSpanType(
         name="pipeline.run",
         domain="pipeline",
@@ -29,7 +31,7 @@ def testPublishedEvidenceIsSelfConsistentAndDefinitionOrdered() -> None:
     )
 
     pipeline = tracer.span(pipelineType).start()
-    tracer.event(decisionType).attr("accepted", True).emit()
+    tracer.event(decisionType).attr("accepted", True).emit()  # noqa: FBT003
     stage = tracer.span(stageType).start()
     stageContext = stage.getContext()
     stage.complete()
@@ -38,34 +40,43 @@ def testPublishedEvidenceIsSelfConsistentAndDefinitionOrdered() -> None:
 
     definitions = {
         definition.traceTypeDefinitionId: definition
-        for definition in destination.definitions
+        for definition in collector.definitions
     }
     startsBySpanId = {
         record.spanId: record
-        for record in destination.records
+        for record in collector.records
         if record.kind == "spanStart"
     }
 
-    assert [record.sequence for record in sorted(
-        destination.records,
-        key=lambda record: record.sequence,
-    )] == list(range(1, len(destination.records) + 1))
+    assert [
+        record.sequence
+        for record in sorted(
+            collector.records,
+            key=lambda record: record.sequence,
+        )
+    ] == list(range(1, len(collector.records) + 1))
 
-    for record in destination.records:
+    for record in collector.records:
         assert record.traceTypeDefinitionId in definitions
+
         definitionIndex = next(
             index
-            for index, (operation, value) in enumerate(destination.operations)
+            for index, (operation, value) in enumerate(collector.operations)
             if (
                 operation == "definition"
+                and isinstance(value, TraceTypeDefinition)
                 and value.traceTypeDefinitionId
                 == record.traceTypeDefinitionId
             )
         )
         recordIndex = next(
             index
-            for index, (operation, value) in enumerate(destination.operations)
-            if operation == "record" and value.eventId == record.eventId
+            for index, (operation, value) in enumerate(collector.operations)
+            if (
+                operation == "record"
+                and isinstance(value, TraceRecord)
+                and value.eventId == record.eventId
+            )
         )
         assert definitionIndex < recordIndex
 

@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_typeDefinitions.py ; version: 2
+# file: tests/backend/tracing/test_typeDefinitions.py ; version: 3
 from __future__ import annotations
 
 import pytest
@@ -11,8 +11,8 @@ from backend.tracing import (
     TraceSpanType,
     TraceTypeConflictError,
     TraceTypeDefinition,
-    TraceTypeRegistry,
 )
+from backend.tracing.typeRegistry import TraceTypeRegistry
 
 
 def testDefaultDefinitionsUseEmptyDomain() -> None:
@@ -51,11 +51,17 @@ def testEveryDefaultAndCustomMemberAffectsDefinitionId() -> None:
     base = TraceSpanType(name="pipeline.run")
     changedLevel = TraceSpanType(
         name="pipeline.run",
-        failed=TraceGeneratedType("failed", "error"), # normally warning level
+        failed=TraceGeneratedType(
+            "failed",
+            "error",
+        ),  # Normally warning level.
     )
     changedLabel = TraceSpanType(
         name="pipeline.run",
-        failed=TraceGeneratedType("aborted", "warning"), # normally failed label
+        failed=TraceGeneratedType(
+            "aborted",
+            "warning",
+        ), # Normally failed label.
     )
     changedOutcome = TraceSpanType(
         name="pipeline.run",

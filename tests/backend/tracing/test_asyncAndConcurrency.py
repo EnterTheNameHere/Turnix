@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_asyncAndConcurrency.py ; version: 2
+# file: tests/backend/tracing/test_asyncAndConcurrency.py ; version: 3
 from __future__ import annotations
 
 import asyncio
@@ -16,7 +16,7 @@ from backend.tracing import (
     TraceRuntimeContext,
     TraceTypeDefinition,
 )
-from tests.backend.tracing.helpers import CollectingDestination
+from tests.backend.tracing.helpers import CollectingDestination, checkpointDestination, recordsAfter
 
 
 class OneShotDelayedDestination:
@@ -62,17 +62,6 @@ class NewTypeRecursiveDestination:
             self.error = err
 
 
-class InterruptingDestination:
-    def writeTraceTypeDefinition(
-        self,
-        definition: TraceTypeDefinition,
-    ) -> None:
-        return
-
-    def write(self, record: TraceRecord) -> None:
-        raise KeyboardInterrupt
-
-
 def testCopiedAsyncContextDoesNotStayPermanentlyMarkedAsPublishing() -> None:
     async def run() -> None:
         collector = CollectingDestination()
@@ -84,7 +73,13 @@ def testCopiedAsyncContextDoesNotStayPermanentlyMarkedAsPublishing() -> None:
         assert delayed.task is not None
         await delayed.task
 
-        assert [record.message for record in collector.records] == [
+        ordinaryMessages = [
+            record.message
+            for record in collector.records
+            if record.message in {"initial", "delayed"}
+        ]
+
+        assert ordinaryMessages == [
             "initial",
             "delayed",
         ]
@@ -112,7 +107,22 @@ def testRecursiveDestinationCannotRegisterTypeOrConsumeSequence() -> None:
         definition.name != "destination.recursive"
         for definition in tracer.getTraceTypeDefinitions().values()
     )
-    assert [record.sequence for record in collector.records] == [1, 2]
+
+    orderedRecords = sorted(
+        collector.records,
+        key=lambda record: record.sequence,
+    )
+    assert [record.sequence for record in orderedRecords] == list(
+        range(1, len(orderedRecords) + 1),
+    )
+
+    ordinaryMessages = [
+        record.message
+        for record in orderedRecords
+        if record.message in {"first", "second"}
+    ]
+    assert ordinaryMessages == ["first", "second"]
+
     assert "TRACE RECURSION" in emergencyStream.getvalue()
 
 
@@ -120,6 +130,8 @@ def testInheritedSpanContextCanEmitAndCreateChildInAnotherTask() -> None:
     async def run() -> None:
         collector = CollectingDestination()
         tracer = Tracer(origin="actant.test", destinations=(collector,))
+        checkpoint = checkpointDestination(collector)
+
         parent = tracer.span().start()
 
         async def childTask() -> None:
@@ -130,7 +142,11 @@ def testInheritedSpanContextCanEmitAndCreateChildInAnotherTask() -> None:
         await asyncio.create_task(childTask())
         parent.complete()
 
-        parentStart, event, childStart, childEnd, parentEnd = collector.records
+        parentStart, event, childStart, childEnd, parentEnd = recordsAfter(
+            collector,
+            checkpoint,
+        )
+
         assert event.spanId == parentStart.spanId
         assert childStart.parentSpanId == parentStart.spanId
         assert childEnd.spanId == childStart.spanId
@@ -154,27 +170,47 @@ def testCloseUnwindsNestedAmbientSpansInReverseOrder() -> None:
 
     assert runtimeContext.getCurrentSpan() is None
     assert tracer.getActiveSpanCount() == 0
-    assert [record.spanId for record in collector.records[-2:]] == [
+
+    abandonmentRecords = [
+        record
+        for record in collector.records
+        if record.type == "trace.span-abandoned"
+    ]
+
+    assert [record.spanId for record in abandonmentRecords] == [
         child.spanId,
         parent.spanId,
     ]
-    assert all(
-        record.type == "trace.span-abandoned"
-        for record in collector.records[-2:]
-    )
 
 
 def testDestinationProcessControlBaseExceptionPropagates() -> None:
+    class InterruptionDestination:
+        def __init__(self) -> None:
+            self.interrupt = False
+
+        def writeTraceTypeDefinition(
+            self,
+            definition: TraceTypeDefinition,
+        ) -> None:
+            return
+
+        def write(self, record: TraceRecord) -> None:
+            if self.interrupt:
+                raise KeyboardInterrupt
+
+    destination = InterruptionDestination()
     tracer = Tracer(
         origin="actant.test",
-        destinations=(InterruptingDestination(),),
+        destinations=(destination,),
     )
+
+    destination.interrupt = True
 
     with pytest.raises(KeyboardInterrupt):
         tracer.event().emit()
 
 
-def testConcurrentEmissionHaveUniqueContiguousProducerSequence() -> None:
+def testConcurrentEmissionsHaveUniqueContiguousProducerSequence() -> None:
     collector = CollectingDestination()
     tracer = Tracer(origin="actant.test", destinations=(collector,))
 
@@ -188,7 +224,7 @@ def testConcurrentEmissionHaveUniqueContiguousProducerSequence() -> None:
         try:
             barrier.wait()
             for _ in range(recordsPerThread):
-                tracer.event().emit()
+                tracer.event().message("concurrent-test-event").emit()
         except BaseException as err:  # noqa: BLE001
             with errorsLock:
                 errors.append(err)
@@ -210,8 +246,16 @@ def testConcurrentEmissionHaveUniqueContiguousProducerSequence() -> None:
     )
     sequences = [record.sequence for record in orderedRecords]
     monotonicTimes = [record.timestampMonotonicNs for record in orderedRecords]
-    expectedCount = threadCount * recordsPerThread
 
-    assert len(sequences) == expectedCount
-    assert sequences == list(range(1, expectedCount + 1))
+    expectedEventCount = threadCount * recordsPerThread
+    emittedRecords = [
+        record
+        for record in orderedRecords
+        if record.message == "concurrent-test-event"
+    ]
+
+    assert len(emittedRecords) == expectedEventCount
+
+    assert len(sequences) == len(set(sequences))
+    assert sequences == list(range(1, len(sequences) + 1))
     assert monotonicTimes == sorted(monotonicTimes)

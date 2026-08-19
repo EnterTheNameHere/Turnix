@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_spanLifecycleRecovery.py ; version: 1
+# file: tests/backend/tracing/test_spanLifecycleRecovery.py ; version: 2
 from __future__ import annotations
 
 import threading
@@ -15,7 +15,7 @@ from backend.tracing import (
     TraceSpanStateError,
     TraceTypeDefinition,
 )
-from tests.backend.tracing.helpers import CollectingDestination
+from tests.backend.tracing.helpers import CollectingDestination, checkpointDestination, recordsAfter
 
 
 class BlockingRecordDestination:
@@ -47,18 +47,21 @@ class BlockingRecordDestination:
 def testManagedParentRecoveryAbandonsAmbientChildBeforeParent() -> None:
     collector = CollectingDestination()
     tracer = Tracer(origin="actant.test", destinations=(collector,))
+    checkpoint = checkpointDestination(collector)
 
     with tracer.span().start() as parent:
         child = tracer.span().start()
 
+    records = recordsAfter(collector, checkpoint)
+
     assert tracer.getActiveSpanCount() == 0
-    assert [record.type for record in collector.records] == [
+    assert [record.type for record in records] == [
         "trace.span.started",
         "trace.span.started",
         "trace.span-abandoned",
         "trace.span-abandoned",
     ]
-    assert [record.spanId for record in collector.records[-2:]] == [
+    assert [record.spanId for record in records[-2:]] == [
         child.spanId,
         parent.spanId,
     ]
@@ -359,10 +362,10 @@ def testCloseFallsBackToNonRestoringAbandonmentAfterLeaseRestoreFailure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     emergencyStream = StringIO()
-    destination = CollectingDestination()
+    collector = CollectingDestination()
     tracer = Tracer(
         origin="actant.test",
-        destinations=(destination,),
+        destinations=(collector,),
         emergencyReporter=TraceEmergencyReporter(stream=emergencyStream),
     )
     span = tracer.span().start()
@@ -378,13 +381,19 @@ def testCloseFallsBackToNonRestoringAbandonmentAfterLeaseRestoreFailure(
 
     tracer.close()
 
+    relatedRecords = [
+        record
+        for record in collector.records
+        if record.spanId == span.spanId
+    ]
+
     assert tracer.getActiveSpanCount() == 0
     assert tracer._getCurrentSpanContext() == spanContext  # noqa: SLF001
-    assert [record.kind for record in destination.records] == [
+    assert [record.kind for record in relatedRecords] == [
         "spanStart",
         "event",
     ]
-    assert destination.records[-1].type == "trace.span-abandoned"
+    assert relatedRecords[-1].type == "trace.span-abandoned"
     assert "intentional context restoration failure" in (
         emergencyStream.getvalue()
     )

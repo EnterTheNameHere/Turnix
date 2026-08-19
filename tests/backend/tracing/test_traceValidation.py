@@ -158,18 +158,19 @@ def testRequireDisplayNamePreservesArbitraryExactString(
 
 
 @pytest.mark.parametrize(
-    "validator",
+    ("validator", "args"),
     [
-        requireName,
-        requireOutcomeName,
-        requireOrigin,
-        requireDisplayName,
-        requireTraceLevel,
-        requireTraceRecordKind,
+        (requireName, (StringSubclass("info"), "value")),
+        (requireOutcomeName, (StringSubclass("info"),)),
+        (requireOrigin, (StringSubclass("info"),)),
+        (requireDisplayName, (StringSubclass("info"),)),
+        (requireTraceLevel, (StringSubclass("info"),)),
+        (requireTraceRecordKind, (StringSubclass("info"),)),
     ],
 )
 def testTracingStringValidatorsRejectStringSubclass(
     validator: Callable[..., object],
+    args: tuple[object, ...],
 ) -> None:
     with pytest.raises(TypeError):
-        validator(StringSubclass("info"))
+        validator(*args)

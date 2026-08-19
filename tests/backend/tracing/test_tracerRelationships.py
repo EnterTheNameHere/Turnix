@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_tracerRelationships.py ; version: 3
+# file: tests/backend/tracing/test_tracerRelationships.py ; version: 4
 from __future__ import annotations
 
 import pytest
@@ -13,16 +13,16 @@ from backend.tracing import (
     TraceSpanType,
     TraceUnknownOutcomeError,
 )
-from tests.backend.tracing.helpers import CollectingDestination
+from tests.backend.tracing.helpers import CollectingDestination, checkpointDestination, createSinkTracer, recordsAfter
 
 
-def testParentLessEventUsesTracerOrigin() -> None:
-    destination = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
+def testParentlessEventUsesTracerOrigin() -> None:
+    collector = CollectingDestination()
+    tracer = Tracer(origin="actant.test", destinations=(collector,))
 
     tracer.event().message("started").emit()
 
-    record = destination.records[-1]
+    record = collector.records[-1]
     assert record.origin == "actant.test"
     assert record.kind == "event"
     assert record.spanId is None
@@ -30,8 +30,9 @@ def testParentLessEventUsesTracerOrigin() -> None:
 
 
 def testNestedRelationshipsAndSpanStartRegistrationAreExplicit() -> None:
-    destination = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
+    collector = CollectingDestination()
+    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    checkpoint = checkpointDestination(collector)
     pipelineType = TraceSpanType(name="pipeline.run", domain="pipeline")
     stageType = TraceSpanType(name="pipeline.stage", domain="pipeline")
 
@@ -42,8 +43,9 @@ def testNestedRelationshipsAndSpanStartRegistrationAreExplicit() -> None:
     stageEndId = stage.complete()
     pipelineEndId = pipeline.complete()
 
-    pipelineStart, event, stageStart, stageEvent, stageEnd, pipelineEnd = (
-        destination.records
+    pipelineStart, event, stageStart, stageEvent, stageEnd, pipelineEnd = recordsAfter(
+        collector,
+        checkpoint,
     )
 
     assert pipelineStart.kind == "spanStart"
@@ -75,31 +77,31 @@ def testNestedRelationshipsAndSpanStartRegistrationAreExplicit() -> None:
 
 
 def testLateEventCanReferenceEndedSpanThroughTransferredContext() -> None:
-    destination = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
+    collector = CollectingDestination()
+    tracer = Tracer(origin="actant.test", destinations=(collector,))
     span = tracer.span().start()
     spanContext = span.getContext()
     span.complete()
 
     tracer.event().span(spanContext).message("late").emit()
 
-    lateRecord = destination.records[-1]
+    lateRecord = collector.records[-1]
     assert lateRecord.kind == "event"
     assert lateRecord.spanId == spanContext.spanId
     assert lateRecord.spanStartEventId == spanContext.spanStartEventId
 
 
 def testDefaultCustomOutcomeUsesDefaultDefinitionWithoutRegistration() -> None:
-    destination = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
+    collector = CollectingDestination()
+    tracer = Tracer(origin="actant.test", destinations=(collector,))
     initialDefinitions = tracer.getTraceTypeDefinitions()
     span = tracer.span().start()
 
-    # Custom outcome on default trace span type does not create trace type
-    # definition, but allows use of unregistered custom outcome
+    # A custom outcome on the default trace span type does not create a new
+    # trace type definition; it remains a record-local outcome override.
     span.end("superseded")
 
-    endRecord = destination.records[-1]
+    endRecord = collector.records[-1]
     assert endRecord.outcome == "superseded"
     assert endRecord.type == "trace.span.superseded"
     assert (
@@ -110,17 +112,17 @@ def testDefaultCustomOutcomeUsesDefaultDefinitionWithoutRegistration() -> None:
 
 
 def testExplicitSpanTypeRejectsUnknownOutcome() -> None:
-    tracer = Tracer(origin="actant.test")
+    tracer = createSinkTracer()
     explicitSpan = tracer.span(TraceSpanType(name="pipeline.run")).start()
 
     with pytest.raises(TraceUnknownOutcomeError):
-        explicitSpan.end("superseded") # explicitSpan doesn't have superseded outcome
+        explicitSpan.end("superseded")  # explicitSpan doesn't have superseded outcome
 
     explicitSpan.complete()
 
 
 def testExplicitSpanTypeUsesDeclaredCustomOutcome() -> None:
-    destination = CollectingDestination()
+    collector = CollectingDestination()
     explicitTraceType = TraceSpanType(
         name="pipeline.run",
         customOutcomes={
@@ -131,18 +133,18 @@ def testExplicitSpanTypeUsesDeclaredCustomOutcome() -> None:
             ),
         },
     )
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
+    tracer = Tracer(origin="actant.test", destinations=(collector,))
 
     tracer.span(explicitTraceType).start().end("superseded")
 
-    record = destination.records[-1]
+    record = collector.records[-1]
     assert record.type == "pipeline.run.replaced"
     assert record.outcome == "superseded"
     assert record.level == "warning"
 
 
 def testBuilderIsConsumedByEmitAttempt() -> None:
-    tracer = Tracer(origin="actant.test")
+    tracer = createSinkTracer()
     builder = tracer.event(TraceEventType(name="pipeline.ready"))
     builder.emit()
 
@@ -151,12 +153,16 @@ def testBuilderIsConsumedByEmitAttempt() -> None:
 
 
 def testSpanDurationMatchesMonotonicRecordTimestamps() -> None:
-    destination = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
+    collector = CollectingDestination()
+    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    checkpoint = checkpointDestination(collector)
 
     tracer.span().start().complete()
 
-    startRecord, endRecord = destination.records
+    startRecord, endRecord = recordsAfter(
+        collector,
+        checkpoint,
+    )
     assert endRecord.durationNs == (
         endRecord.timestampMonotonicNs
         - startRecord.timestampMonotonicNs
@@ -164,7 +170,7 @@ def testSpanDurationMatchesMonotonicRecordTimestamps() -> None:
 
 
 def testEventBuilderIsConsumedByFailedEmissionAttempt() -> None:
-    tracer = Tracer(origin="actant.test")
+    tracer = createSinkTracer()
     builder = tracer.event().attr("unsupported", object())
 
     with pytest.raises(TypeError):
@@ -178,7 +184,7 @@ def testEventBuilderIsConsumedByFailedEmissionAttempt() -> None:
 
 
 def testSpanBuilderIsConsumedByFailedStartAttempt() -> None:
-    tracer = Tracer(origin="actant.test")
+    tracer = createSinkTracer()
     builder = tracer.span().attr("unsupported", object())
 
     with pytest.raises(TypeError):
@@ -191,7 +197,7 @@ def testSpanBuilderIsConsumedByFailedStartAttempt() -> None:
 
 
 def testBuilderCreatedBeforeCloseDoesNotReserveEmissionPermission() -> None:
-    tracer = Tracer(origin="actant.test")
+    tracer = createSinkTracer()
     builder = tracer.event()
 
     tracer.close()
@@ -208,15 +214,15 @@ def testDomainOverrideValidatesStringBeforeTestingForEmptyDomain() -> None:
         def __eq__(self, other: object) -> bool:
             return other == ""
 
-    tracer = Tracer(origin="actant.test")
+    tracer = createSinkTracer()
     deceptiveValue = EqualToEmpty()
 
     with pytest.raises(TypeError):
         tracer.emitEvent(
-            domain=deceptiveValue, # ty: ignore[invalid-argument-type]
+            domain=deceptiveValue,  # ty: ignore[invalid-argument-type]
         )
 
     with pytest.raises(TypeError):
         tracer.event().domain(
-            deceptiveValue, # ty: ignore[invalid-argument-type]
+            deceptiveValue,  # ty: ignore[invalid-argument-type]
         )

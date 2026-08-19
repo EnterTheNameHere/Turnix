@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_contextAndExceptions.py ; version: 2
+# file: tests/backend/tracing/test_contextAndExceptions.py ; version: 3
 from __future__ import annotations
 
 import asyncio
@@ -12,7 +12,7 @@ from backend.tracing import (
     TraceSpanOwnershipError,
     captureExceptionSnapshot,
 )
-from tests.backend.tracing.helpers import CollectingDestination
+from tests.backend.tracing.helpers import CollectingDestination, createSinkTracer
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,8 +26,8 @@ class ApplicationId(Uuid7Id): # TODO: replace when real class exists
 
 
 def testCorrelationContextIsAppliedAndTransferredWithSpan() -> None:
-    destination = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
+    collector = CollectingDestination()
+    tracer = Tracer(origin="actant.test", destinations=(collector,))
     actantRunId = ActantRunId.new()
     applicationId = ApplicationId.new()
 
@@ -39,13 +39,13 @@ def testCorrelationContextIsAppliedAndTransferredWithSpan() -> None:
     with tracer.correlations(applicationId=applicationId):
         tracer.event().span(context).emit()
 
-    lateRecord = destination.records[-1]
+    lateRecord = collector.records[-1]
     assert lateRecord.actantRunId == actantRunId
     assert lateRecord.applicationId == applicationId
 
 
 def testAnotherTaskCannotEndOwnedSpan() -> None:
-    tracer = Tracer(origin="actant.test")
+    tracer = createSinkTracer()
 
     async def run() -> None:
         span = tracer.span().start()
@@ -62,7 +62,7 @@ def testAnotherTaskCannotEndOwnedSpan() -> None:
 
 def testExceptionSnapshotCapturesExceptionAndCatcherInformation() -> None:
     error = RuntimeError("broken")
-    error.code = "E_BROKEN"
+    error.code = "E_BROKEN"  # ty: ignore[unresolved-attribute]
     error.add_note("observed at adapter boundary")
 
     snapshot = captureExceptionSnapshot(
@@ -79,24 +79,24 @@ def testExceptionSnapshotCapturesExceptionAndCatcherInformation() -> None:
 
 
 def testManagedSpanCompletesOnNormalExit() -> None:
-    destination = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
+    collector = CollectingDestination()
+    tracer = Tracer(origin="actant.test", destinations=(collector,))
 
     with tracer.span().start():
         tracer.event().emit()
 
-    assert destination.records[-1].kind == "spanEnd"
-    assert destination.records[-1].outcome == "completed"
+    assert collector.records[-1].kind == "spanEnd"
+    assert collector.records[-1].outcome == "completed"
 
 
 def testManagedSpanErrorsAndPropagatesEscapingException() -> None:
-    destination = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
+    collector = CollectingDestination()
+    tracer = Tracer(origin="actant.test", destinations=(collector,))
 
     with pytest.raises(RuntimeError, match="broken"), tracer.span().start():
         raise RuntimeError("broken")
 
-    endRecord = destination.records[-1]
+    endRecord = collector.records[-1]
     assert endRecord.kind == "spanEnd"
     assert endRecord.outcome == "errored"
     assert endRecord.exceptionSnapshot is not None
@@ -105,14 +105,14 @@ def testManagedSpanErrorsAndPropagatesEscapingException() -> None:
 
 def testManagedSpanCancelsAndPropagatesCancellation() -> None:
     async def run() -> None:
-        destination = CollectingDestination()
-        tracer = Tracer(origin="actant.test", destinations=(destination,))
+        collector = CollectingDestination()
+        tracer = Tracer(origin="actant.test", destinations=(collector,))
 
         with pytest.raises(asyncio.CancelledError):
             async with tracer.span().start():
                 raise asyncio.CancelledError
 
-        endRecord = destination.records[-1]
+        endRecord = collector.records[-1]
         assert endRecord.kind == "spanEnd"
         assert endRecord.outcome == "cancelled"
         assert endRecord.exceptionSnapshot is not None
@@ -122,8 +122,8 @@ def testManagedSpanCancelsAndPropagatesCancellation() -> None:
 
 def testTransferredSpanPreservesExistingCorrelationAgainstAmbientConflict(
 ) -> None:
-    destination = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
+    collector = CollectingDestination()
+    tracer = Tracer(origin="actant.test", destinations=(collector,))
     originalRunId = ActantRunId.new()
     conflictingRunId = ActantRunId.new()
 
@@ -135,4 +135,4 @@ def testTransferredSpanPreservesExistingCorrelationAgainstAmbientConflict(
     with tracer.correlations(actantRunId=conflictingRunId):
         tracer.event().span(context).emit()
 
-    assert destination.records[-1].actantRunId == originalRunId
+    assert collector.records[-1].actantRunId == originalRunId

@@ -1,8 +1,9 @@
-# file: tests/backend/tracing/test_runtimeContext.py ; version: 1
+# file: tests/backend/tracing/test_runtimeContext.py ; version: 2
 from __future__ import annotations
 
 import asyncio
 import threading
+from io import StringIO
 
 import pytest
 
@@ -11,8 +12,10 @@ from backend.tracing import (
     TraceContextError,
     TraceCorrelationContext,
     TraceCorrelationScope,
+    TraceEmergencyReporter,
     Tracer,
     TraceRuntimeContext,
+    TraceSinkDestination,
 )
 from tests.backend.tracing.helpers import CollectingDestination
 
@@ -31,18 +34,18 @@ class ApplicationRunId(Uuid7Id):
 
 def testSharedRuntimeContextCorrelationsAreObservedByMultipleTracers() -> None:
     runtimeContext = TraceRuntimeContext()
-    firstDestination = CollectingDestination()
-    secondDestination = CollectingDestination()
+    firstCollector = CollectingDestination()
+    secondCollector = CollectingDestination()
 
     firstTracer = Tracer(
         origin="actant.first",
         runtimeContext=runtimeContext,
-        destinations=(firstDestination,),
+        destinations=(firstCollector,),
     )
     secondTracer = Tracer(
         origin="actant.second",
         runtimeContext=runtimeContext,
-        destinations=(secondDestination,),
+        destinations=(secondCollector,),
     )
     applicationId = ApplicationId.new()
 
@@ -50,18 +53,25 @@ def testSharedRuntimeContextCorrelationsAreObservedByMultipleTracers() -> None:
         firstTracer.event().emit()
         secondTracer.event().emit()
 
-    assert firstDestination.records[-1].applicationId == applicationId
-    assert secondDestination.records[-1].applicationId == applicationId
+    assert firstCollector.records[-1].applicationId == applicationId
+    assert secondCollector.records[-1].applicationId == applicationId
 
 
 def testCorrelationScopeRemainsUsableAfterCreatingTracerCloses() -> None:
     runtimeContext = TraceRuntimeContext()
-    firstTracer = Tracer(origin="actant.first", runtimeContext=runtimeContext)
-    destination = CollectingDestination()
+    sink = TraceSinkDestination()
+    emergencyStream = StringIO()
+    firstTracer = Tracer(
+        origin="actant.first",
+        destinations=(sink,),
+        runtimeContext=runtimeContext,
+        emergencyReporter=TraceEmergencyReporter(stream=emergencyStream),
+    )
+    collector = CollectingDestination()
     secondTracer = Tracer(
         origin="actant.second",
         runtimeContext=runtimeContext,
-        destinations=(destination,),
+        destinations=(collector,),
     )
     applicationId = ApplicationId.new()
 
@@ -71,14 +81,20 @@ def testCorrelationScopeRemainsUsableAfterCreatingTracerCloses() -> None:
     with scope:
         secondTracer.event().emit()
 
-    assert destination.records[-1].applicationId == applicationId
+    assert collector.records[-1].applicationId == applicationId
 
 
 def testSharedRuntimeContextDoesNotMakeAmbientSpanCrossProducer() -> None:
     runtimeContext = TraceRuntimeContext()
-    firstTracer = Tracer(origin="actant.first", runtimeContext=runtimeContext)
+    sink = TraceSinkDestination()
+    firstTracer = Tracer(
+        origin="actant.first",
+        destinations=(sink,),
+        runtimeContext=runtimeContext,
+    )
     secondTracer = Tracer(
         origin="actant.second",
+        destinations=(sink,),
         runtimeContext=runtimeContext,
     )
 
@@ -229,7 +245,7 @@ def testCorrelationScopeCannotRestoreFromAnotherThread() -> None:
     assert runtimeContext.getCurrentCorrelations().applicationId is None
 
 
-def testNewThreadObserverEmptyDefaultCorrelationContext() -> None:
+def testNewThreadObservesEmptyDefaultCorrelationContext() -> None:
     runtimeContext = TraceRuntimeContext()
     observed: list[TraceCorrelationContext] = []
 

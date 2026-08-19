@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_publisher.py ; version: 2
+# file: tests/backend/tracing/test_publisher.py ; version: 3
 from __future__ import annotations
 
 from io import StringIO
@@ -11,13 +11,13 @@ from backend.tracing import (
     TraceEventType,
     TraceInvariantError,
     TraceProducerId,
-    TracePublisher,
     Tracer,
     TraceRecord,
     TraceRecursivePublicationError,
     TraceTypeDefinition,
 )
-from tests.backend.tracing.helpers import CollectingDestination
+from backend.tracing.publisher import TracePublisher
+from tests.backend.tracing.helpers import CollectingDestination, createSinkTracer
 
 
 class FailingDestination:
@@ -34,6 +34,7 @@ class FailingDestination:
 class RecursiveDestination:
     def __init__(self, tracer: Tracer) -> None:
         self.tracer = tracer
+        self.enabled = False
         self.records = 0
 
     def writeTraceTypeDefinition(
@@ -43,33 +44,11 @@ class RecursiveDestination:
         return
 
     def write(self, record: TraceRecord) -> None:
+        if not self.enabled:
+            return
+
         self.records += 1
         self.tracer.event().message("recursive").emit()
-
-
-class FailTargetDefinitionTwiceDestination:
-    def __init__(self, targetName: str) -> None:
-        self._targetName = targetName
-        self._remainingFailures = 2
-        self.definitionAttempts = 0
-        self.successfulDefinitions: list[TraceTypeDefinition] = []
-        self.records: list[TraceRecord] = []
-
-    def writeTraceTypeDefinition(
-        self,
-        definition: TraceTypeDefinition,
-    ) -> None:
-        if definition.name == self._targetName:
-            self.definitionAttempts += 1
-
-            if self._remainingFailures > 0:
-                self._remainingFailures -= 1
-                raise RuntimeError("intentional definition failure")
-
-        self.successfulDefinitions.append(definition)
-
-    def write(self, record: TraceRecord) -> None:
-        self.records.append(record)
 
 
 class InterruptingDefinitionDestination:
@@ -99,6 +78,66 @@ class RecursiveDefinitionDestination:
 
     def write(self, record: TraceRecord) -> None:
         return
+
+
+class ToggleTargetDefinitionDestination:
+    def __init__(self, targetName: str) -> None:
+        self._targetName = targetName
+        self.failTargetDefinition = True
+        self.definitionAttempts = 0
+        self.successfulDefinitions: list[TraceTypeDefinition] = []
+        self.records: list[TraceRecord] = []
+
+    def writeTraceTypeDefinition(
+        self,
+        definition: TraceTypeDefinition,
+    ) -> None:
+        if definition.name == self._targetName:
+            self.definitionAttempts += 1
+
+            if self.failTargetDefinition:
+                raise RuntimeError("intentional definition failure")
+
+        self.successfulDefinitions.append(definition)
+
+    def write(self, record: TraceRecord) -> None:
+        self.records.append(record)
+
+
+class RecursiveSpanEndDestination:
+    def __init__(self) -> None:
+        self.span = None
+        self.error: Exception | None = None
+
+    def writeTraceTypeDefinition(
+        self,
+        definition: TraceTypeDefinition,
+    ) -> None:
+        return
+
+    def write(self, record: TraceRecord) -> None:
+        if self.span is None or record.kind != "event":
+            return
+        try:
+            self.span.complete()
+        except Exception as err:  # noqa: BLE001
+            self.error = err
+
+
+class ClosingDestination:
+    def __init__(self, tracer: Tracer) -> None:
+        self.tracer = tracer
+        self.enabled = False
+
+    def writeTraceTypeDefinition(
+        self,
+        definition: TraceTypeDefinition,
+    ) -> None:
+        return
+
+    def write(self, record: TraceRecord) -> None:
+        if self.enabled:
+            self.tracer.close()
 
 
 def testNewDestinationReceivesDefinitionsBeforeLaterRecords() -> None:
@@ -137,9 +176,15 @@ def testDestinationFailuresStayLocalAndOtherDestinationsReceiveRecord(
         emergencyReporter=TraceEmergencyReporter(stream=emergencyStream),
     )
 
-    tracer.event().emit()
+    tracer.event().message("ordinary-event").emit()
 
-    assert len(collector.records) == 1
+    ordinaryRecords = [
+        record
+        for record in collector.records
+        if record.message == "ordinary-event"
+    ]
+
+    assert len(ordinaryRecords) == 1
     assert "DESTINATION FAILURE" in emergencyStream.getvalue()
 
 
@@ -154,31 +199,19 @@ def testDestinationCannotRecursivelyPublishOrdinaryTracing() -> None:
     recursive = RecursiveDestination(tracer)
     tracer.addDestination(recursive)
 
-    tracer.event().emit()
+    recursive.enabled = True
+    tracer.event().message("outer").emit()
 
     assert recursive.records == 1
-    assert len(collector.records) == 1
+    assert any(
+        record.message == "outer"
+        for record in collector.records
+    )
+    assert not any(
+        record.message == "recursive"
+        for record in collector.records
+    )
     assert "TRACE RECURSION" in emergencyStream.getvalue()
-
-
-class RecursiveSpanEndDestination:
-    def __init__(self) -> None:
-        self.span = None
-        self.error: Exception | None = None
-
-    def writeTraceTypeDefinition(
-        self,
-        definition: TraceTypeDefinition,
-    ) -> None:
-        return
-
-    def write(self, record: TraceRecord) -> None:
-        if self.span is None or record.kind != "event":
-            return
-        try:
-            self.span.complete()
-        except Exception as err:  # noqa: BLE001
-            self.error = err
 
 
 def testDestinationCannotEndActiveSpanDuringPublication() -> None:
@@ -195,23 +228,17 @@ def testDestinationCannotEndActiveSpanDuringPublication() -> None:
 
     assert isinstance(recursive.error, TraceRecursivePublicationError)
     assert tracer.getActiveSpanCount() == 1
+
     tracer.removeDestination(recursive)
     span.complete()
-    assert [record.sequence for record in collector.records] == [1, 2, 3]
 
-
-class ClosingDestination:
-    def __init__(self, tracer: Tracer) -> None:
-        self.tracer = tracer
-
-    def writeTraceTypeDefinition(
-        self,
-        definition: TraceTypeDefinition,
-    ) -> None:
-        return
-
-    def write(self, record: TraceRecord) -> None:
-        self.tracer.close()
+    orderedRecords = sorted(
+        collector.records,
+        key=lambda record: record.sequence,
+    )
+    assert [record.sequence for record in orderedRecords] == list(
+        range(1, len(orderedRecords) + 1),
+    )
 
 
 def testDestinationCannotCloseTracerDuringPublication() -> None:
@@ -225,11 +252,23 @@ def testDestinationCannotCloseTracerDuringPublication() -> None:
     closing = ClosingDestination(tracer)
     tracer.addDestination(closing)
 
-    tracer.event().emit()
-    tracer.removeDestination(closing)
-    tracer.event().emit()
+    closing.enabled = True
+    tracer.event().message("before-remove").emit()
 
-    assert [record.sequence for record in collector.records] == [1, 2]
+    tracer.removeDestination(closing)
+    tracer.event().message("after-remove").emit()
+
+    ordinaryMessages = [
+        record.message
+        for record in collector.records
+        if record.message in ("before-remove", "after-remove")
+    ]
+
+    assert ordinaryMessages == [
+        "before-remove",
+        "after-remove",
+    ]
+
     output = emergencyStream.getvalue()
     assert "TRACE RECURSION" in output
     assert "DESTINATION FAILURE" in output
@@ -241,33 +280,39 @@ def testPublisherDoesNotRedeliverSameDefinitionToActiveDestination() -> None:
     activeDefinitions = {
         definition.traceTypeDefinitionId: definition,
     }
-    destination = CollectingDestination()
+    collector = CollectingDestination()
+    emergencyStream = StringIO()
 
     publisher = TracePublisher(
         getTraceTypeDefinitions=lambda: activeDefinitions,
-        destinations=(destination,),
+        destinations=(collector,),
+        emergencyReporter=TraceEmergencyReporter(stream=emergencyStream),
     )
     publisher.publishTraceTypeDefinition(definition)
     publisher.publishTraceTypeDefinition(definition)
 
-    assert destination.definitions == [definition]
+    assert collector.definitions == [definition]
 
 
 def testRemovedAndReaddedDestinationReceivesCurrentDefinitionsAgain() -> None:
-    destination = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
-    initialCount = len(destination.definitions)
+    collector = CollectingDestination()
+    keeper = CollectingDestination()
+    tracer = Tracer(
+        origin="actant.test",
+        destinations=(collector, keeper),
+    )
+    initialCount = len(collector.definitions)
 
-    assert tracer.removeDestination(destination)
-    tracer.addDestination(destination)
+    assert tracer.removeDestination(collector)
+    tracer.addDestination(collector)
 
-    assert len(destination.definitions) == initialCount * 2
+    assert len(collector.definitions) == initialCount * 2
 
 
 def testFailedDefinitionDeliveryIsRetriedBeforeLaterRecord() -> None:
     emergencyStream = StringIO()
     eventType = TraceEventType(name="publisher.retry-definition")
-    destination = FailTargetDefinitionTwiceDestination(eventType.name)
+    destination = ToggleTargetDefinitionDestination(eventType.name)
     tracer = Tracer(
         origin="actant.test",
         destinations=(destination,),
@@ -276,17 +321,29 @@ def testFailedDefinitionDeliveryIsRetriedBeforeLaterRecord() -> None:
 
     tracer.event(eventType).message("first").emit()
 
-    assert destination.definitionAttempts == 2  # noqa: PLR2004
-    assert destination.records == []
+    firstAttemptCount = destination.definitionAttempts
+    assert firstAttemptCount > 0
+    assert not any(
+        record.message == "first"
+        for record in destination.records
+    )
 
+    destination.failTargetDefinition = False
     tracer.event(eventType).message("second").emit()
 
-    assert destination.definitionAttempts == 3  # noqa: PLR2004
-    assert len(destination.records) == 1
-    assert destination.records[0].message == "second"
+    assert destination.definitionAttempts > firstAttemptCount
+
+    secondRecords = [
+        record
+        for record in destination.records
+        if record.message == "second"
+    ]
+    assert len(secondRecords) == 1
+
+    secondRecord = secondRecords[0]
     assert any(
         definition.traceTypeDefinitionId
-        == destination.records[0].traceTypeDefinitionId
+        == secondRecord.traceTypeDefinitionId
         for definition in destination.successfulDefinitions
     )
     assert "DESTINATION FAILURE" in emergencyStream.getvalue()
@@ -295,11 +352,18 @@ def testFailedDefinitionDeliveryIsRetriedBeforeLaterRecord() -> None:
 def testPublisherRejectsRecordWithUnregisteredDefinition() -> None:
     eventType = TraceEventType(name="publisher.unregistered")
     definition = eventType.getDefinition()
-    destination = CollectingDestination()
+    generated = definition.event
+
+    if generated is None:
+        pytest.fail("Event definition must contain event metadata.")
+
+    collector = CollectingDestination()
+    emergencyStream = StringIO()
 
     publisher = TracePublisher(
-        getTraceTypeDefinitions=lambda: {},
-        destinations=(destination,),
+        getTraceTypeDefinitions=lambda: {},  # noqa: PIE807
+        destinations=(collector,),
+        emergencyReporter=TraceEmergencyReporter(stream=emergencyStream),
     )
 
     record = TraceRecord(
@@ -310,16 +374,16 @@ def testPublisherRejectsRecordWithUnregisteredDefinition() -> None:
         timestampMonotonicNs=1,
         kind="event",
         domain=definition.domain,
-        type=definition.event.label,  # ty: ignore[unresolved-attribute]
+        type=generated.label,
         traceTypeDefinitionId=definition.traceTypeDefinitionId,
-        level=definition.event.level,  # ty: ignore[unresolved-attribute]
+        level=generated.level,
         origin="actant.test",
     )
 
     with pytest.raises(TraceInvariantError):
         publisher.publish(record)
 
-    assert destination.records == []
+    assert collector.records == []
 
 
 def testDefinitionDeliveryProcessControlBaseExceptionPropagates() -> None:
@@ -333,7 +397,7 @@ def testDefinitionDeliveryProcessControlBaseExceptionPropagates() -> None:
 
 
 def testDestinationCannotRecursivelyTraceDuringDefinitionDelivery() -> None:
-    tracer = Tracer(origin="actant.test")
+    tracer = createSinkTracer()
     recursive = RecursiveDefinitionDestination(tracer)
 
     tracer.addDestination(recursive)

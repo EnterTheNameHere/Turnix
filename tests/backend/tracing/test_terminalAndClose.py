@@ -18,10 +18,13 @@ if TYPE_CHECKING:
 
 
 class FailOnWriteStream(StringIO):
-    def __init__(self, failOnWrite: int) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self._failOnWrite = failOnWrite
+        self._failOnWrite: int | None = None
         self.writeCount = 0
+
+    def arm(self, failOnWrite: int) -> None:
+        self._failOnWrite = self.writeCount + failOnWrite
 
     def write(self, value: str) -> int:
         self.writeCount += 1
@@ -30,6 +33,7 @@ class FailOnWriteStream(StringIO):
             raise OSError("intentional stream write failure")
 
         return super().write(value)
+
 
 def testTerminalShowsTypeHumanLabelAndNoIds() -> None:
     stream = StringIO()
@@ -136,7 +140,7 @@ def testTerminalDoesNotMislabelCustomOutcomeUsingStandardTypeText() -> None:
 
 def testTerminalPrimaryStartFailureDoesNotCommitDisplayNesting() -> None:
     emergencyStream = StringIO()
-    stream = FailOnWriteStream(failOnWrite=1)
+    stream = FailOnWriteStream()
     terminal = TerminalTraceDestination(
         stream=stream,
         colorMode="never",
@@ -149,6 +153,7 @@ def testTerminalPrimaryStartFailureDoesNotCommitDisplayNesting() -> None:
         emergencyReporter=TraceEmergencyReporter(stream=emergencyStream),
     )
 
+    stream.arm(1)
     span = tracer.span().start()
     tracer.event().message("after failed start").emit()
 
@@ -163,7 +168,7 @@ def testTerminalPrimaryStartFailureDoesNotCommitDisplayNesting() -> None:
 
 def testTerminalEndCommitsDisplayCleanupBeforeDetailFailure() -> None:
     emergencyStream = StringIO()
-    stream = FailOnWriteStream(failOnWrite=3)
+    stream = FailOnWriteStream()
     terminal = TerminalTraceDestination(
         stream=stream,
         colorMode="never",
@@ -179,6 +184,7 @@ def testTerminalEndCommitsDisplayCleanupBeforeDetailFailure() -> None:
     span = tracer.span().start()
     spanContext = span.getContext()
 
+    stream.arm(2)
     span.complete(
         attributes={
             "detailed": "fails after primary line",
@@ -225,9 +231,10 @@ def testTerminalTimestampFormattingFallsBackToExactUnixNanoseconds(
 
     tracer.event().message("fallback timestamp").emit()
 
-    record = collector.records[0]
-
-    assert (
-        f"[unix-ns:{record.timestampUnixNs}]"
-        in stream.getvalue()
+    record = next(
+        record
+        for record in collector.records
+        if record.message == "fallback timestamp"
     )
+
+    assert f"[unix-ns:{record.timestampUnixNs}]" in stream.getvalue()

@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_semanticCompleteness.py ; version: 2
+# file: tests/backend/tracing/test_semanticCompleteness.py ; version: 3
 from __future__ import annotations
 
 import hashlib
@@ -19,12 +19,13 @@ from backend.tracing import (
     Tracer,
     TraceRecord,
     TraceReference,
+    TraceSinkDestination,
     TraceSpanId,
     TraceSpanStateError,
     TraceSpanType,
     canonicalJson,
 )
-from tests.backend.tracing.helpers import CollectingDestination
+from tests.backend.tracing.helpers import CollectingDestination, checkpointDestination, createSinkTracer, recordsAfter
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +50,7 @@ def testCanonicalJsonUsesPortableStableRepresentation() -> None:
         name="portable.event",
     ).getDefinition().traceTypeDefinitionId
     assert str(definitionId).startswith("sha256:")
-    assert len(expected) == 64
+    assert len(expected) == 64  # noqa: PLR2004
 
 
 @pytest.mark.parametrize(
@@ -66,12 +67,12 @@ def testCanonicalJsonRejectsUnsupportedPortableValues(value: object) -> None:
 
 
 def testCanonicalJsonRejectsLoneSurrogate() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError):  # noqa: PT011
         canonicalJson("\ud800")
 
 
 def testSpanDefinitionRejectsDuplicateGeneratedLabels() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError):  # noqa: PT011
         TraceSpanType(
             name="pipeline.run",
             failed=TraceGeneratedType("completed", "warning"),
@@ -79,7 +80,8 @@ def testSpanDefinitionRejectsDuplicateGeneratedLabels() -> None:
 
 
 def testParentlessEvidenceRequiresOrigin() -> None:
-    tracer = Tracer()
+    sink = TraceSinkDestination()
+    tracer = Tracer(destinations=(sink,))
 
     with pytest.raises(TraceContextError):
         tracer.event().emit()
@@ -89,7 +91,7 @@ def testParentlessEvidenceRequiresOrigin() -> None:
 
 
 def testExplicitSpanAndOriginConflictIsRejectedByDirectAndFluentApis() -> None:
-    tracer = Tracer(origin="actant.test")
+    tracer = createSinkTracer()
     span = tracer.span().start()
     context = span.getContext()
 
@@ -106,14 +108,14 @@ def testExplicitSpanAndOriginConflictIsRejectedByDirectAndFluentApis() -> None:
 
 
 def testDefaultCustomOutcomeOverridesAreRecordLocal() -> None:
-    destination = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
+    collector = CollectingDestination()
+    tracer = Tracer(origin="actant.test", destinations=(collector,))
     definitionsBefore = tracer.getTraceTypeDefinitions()
     span = tracer.span().start()
 
     span.end("custom", label="discarded", level="warning")
 
-    record = destination.records[-1]
+    record = collector.records[-1]
     assert record.outcome == "custom"
     assert record.type == "trace.span.discarded"
     assert record.level == "warning"
@@ -125,7 +127,7 @@ def testDefaultCustomOutcomeOverridesAreRecordLocal() -> None:
 
 
 def testDeclaredSpanTypeRejectsRecordLocalLabelOverride() -> None:
-    tracer = Tracer(origin="actant.test")
+    tracer = createSinkTracer()
     span = tracer.span(TraceSpanType(name="pipeline.run")).start()
 
     with pytest.raises(TraceExplicitTypeOverrideError):
@@ -135,8 +137,8 @@ def testDeclaredSpanTypeRejectsRecordLocalLabelOverride() -> None:
 
 
 def testLaterBuilderAttributesReplaceEarlierValues() -> None:
-    destination = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
+    collector = CollectingDestination()
+    tracer = Tracer(origin="actant.test", destinations=(collector,))
 
     (
         tracer.event()
@@ -146,15 +148,17 @@ def testLaterBuilderAttributesReplaceEarlierValues() -> None:
         .emit()
     )
 
-    assert destination.records[-1].attributes == {
+    assert collector.records[-1].attributes == {
         "attempt": 3,
         "delay": 0.5,
     }
 
 
 def testDirectAndFluentEventApisProduceEquivalentSemantics() -> None:
-    destination = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
+    collector = CollectingDestination()
+    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    checkpoint = checkpointDestination(collector)
+
     eventType = TraceEventType(
         name="pipeline.retry-scheduled",
         domain="pipeline",
@@ -180,7 +184,7 @@ def testDirectAndFluentEventApisProduceEquivalentSemantics() -> None:
         causedBy=(cause,),
     )
 
-    first, second = destination.records
+    first, second = recordsAfter(collector, checkpoint)
     comparedFields = (
         "kind",
         "domain",
@@ -207,8 +211,8 @@ def testDirectAndFluentEventApisProduceEquivalentSemantics() -> None:
 
 
 def testTraceReferencesAcceptTypedIdsAndDeduplicate() -> None:
-    destination = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
+    collector = CollectingDestination()
+    tracer = Tracer(origin="actant.test", destinations=(collector,))
     jobId = JobId.new()
     eventId = TraceEventId.new()
 
@@ -220,15 +224,17 @@ def testTraceReferencesAcceptTypedIdsAndDeduplicate() -> None:
         ),
     )
 
-    assert destination.records[-1].causedBy == (
+    assert collector.records[-1].causedBy == (
         TraceReference(kind="job", id=str(jobId)),
         TraceReference(kind="trace.event", id=str(eventId)),
     )
 
 
 def testRejectedEndAttributesLeaveSpanActiveAndDoNotConsumeSequence() -> None:
-    destination = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
+    collector = CollectingDestination()
+    tracer = Tracer(origin="actant.test", destinations=(collector,))
+    checkpoint = checkpointDestination(collector)
+
     span = tracer.span().start()
 
     with pytest.raises(TypeError):
@@ -237,15 +243,17 @@ def testRejectedEndAttributesLeaveSpanActiveAndDoNotConsumeSequence() -> None:
     assert tracer.getActiveSpanCount() == 1
     span.complete()
 
-    assert [record.sequence for record in destination.records] == [1, 2]
-    assert [record.kind for record in destination.records] == [
+    spanStart, spanEnd = recordsAfter(collector, checkpoint)
+
+    assert spanEnd.sequence == spanStart.sequence + 1
+    assert [spanStart.kind, spanEnd.kind] == [
         "spanStart",
         "spanEnd",
     ]
 
 
 def testParentSpanCannotEndWhileNestedChildIsAmbient() -> None:
-    tracer = Tracer(origin="actant.test")
+    tracer = createSinkTracer()
     parent = tracer.span().start()
     child = tracer.span().start()
 
@@ -282,13 +290,13 @@ def testImportedSpanEndMayOmitDuration() -> None:
 
 
 def testDefaultEventLabelOverrideIsRecordLocal() -> None:
-    destination = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
+    collector = CollectingDestination()
+    tracer = Tracer(origin="actant.test", destinations=(collector,))
     definitionsBefore = tracer.getTraceTypeDefinitions()
 
     tracer.event().label("creator.notice").emit()
 
-    record = destination.records[-1]
+    record = collector.records[-1]
     assert record.type == "creator.notice"
     assert (
         record.traceTypeDefinitionId
@@ -298,23 +306,28 @@ def testDefaultEventLabelOverrideIsRecordLocal() -> None:
 
 
 def testDefaultSpanStartLabelOverrideIsRecordLocal() -> None:
-    destination = CollectingDestination()
-    tracer = Tracer(origin="actant.test", destinations=(destination,))
+    collector = CollectingDestination()
+    tracer = Tracer(origin="actant.test", destinations=(collector,))
     definitionsBefore = tracer.getTraceTypeDefinitions()
 
     span = tracer.span().label("opened").start()
     span.complete()
 
-    assert destination.records[0].type == "trace.span.opened"
+    spanOpened = [
+        record
+        for record in collector.records
+        if record.type == "trace.span.opened"
+    ]
+    assert len(spanOpened) == 1
     assert (
-        destination.records[0].traceTypeDefinitionId
+        spanOpened[0].traceTypeDefinitionId
         == TRACE_SPAN.getDefinition().traceTypeDefinitionId
     )
     assert tracer.getTraceTypeDefinitions() == definitionsBefore
 
 
 def testDeclaredEventTypeRejectsRecordLocalLabelOverride() -> None:
-    tracer = Tracer(origin="actant.test")
+    tracer = createSinkTracer()
 
     with pytest.raises(TraceExplicitTypeOverrideError):
         tracer.event(TraceEventType(name="pipeline.ready")).label(

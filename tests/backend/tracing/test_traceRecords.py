@@ -18,6 +18,10 @@ from backend.tracing import (
 
 def _parentlessEvent() -> TraceRecord:
     definition = TRACE_EVENT.getDefinition()
+    generated = definition.event
+
+    if generated is None:
+        pytest.fail("TRACE_EVENT definition must contain event metadata.")
 
     return TraceRecord(
         eventId=TraceEventId.new(),
@@ -27,9 +31,9 @@ def _parentlessEvent() -> TraceRecord:
         timestampMonotonicNs=200,
         kind="event",
         domain="",
-        type=TRACE_EVENT.event.label,  # ty: ignore[unresolved-attribute]
+        type=generated.label,
         traceTypeDefinitionId=definition.traceTypeDefinitionId,
-        level=TRACE_EVENT.event.level,  # ty: ignore[unresolved-attribute]
+        level=generated.level,
         origin="test.runtime",
     )
 

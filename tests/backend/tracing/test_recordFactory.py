@@ -1,4 +1,4 @@
-# file: tests/backend/tracing/test_recordFactory.py ; version: 1
+# file: tests/backend/tracing/test_recordFactory.py ; version: 2
 from __future__ import annotations
 
 import pytest
@@ -10,9 +10,9 @@ from backend.tracing import (
     TraceEventId,
     TraceInvariantError,
     TraceRecord,
-    TraceRecordFactory,
     TraceSpanContext,
 )
+from backend.tracing.recordFactory import TraceRecordFactory
 
 
 def _createParentlessEvent(
@@ -22,7 +22,8 @@ def _createParentlessEvent(
 ) -> TraceRecord:
     definition = TRACE_EVENT.getDefinition()
     generated = definition.event
-    assert generated is not None
+    if generated is None:
+        pytest.fail("TRACE_EVENT definition must contain event metadata.")
 
     return factory.createEvent(
         domain=definition.domain,
@@ -46,7 +47,8 @@ def _createRootSpanStart(
 ) -> TraceRecord:
     definition = TRACE_SPAN.getDefinition()
     generated = definition.started
-    assert generated is not None
+    if generated is None:
+        pytest.fail("TRACE_SPAN definition must contain start metadata.")
 
     return factory.createSpanStart(
         spanId=factory.newSpanId(),
@@ -97,7 +99,8 @@ def testRejectedAttributesDoNotConsumeProducerSequence() -> None:
     factory = TraceRecordFactory()
     definition = TRACE_EVENT.getDefinition()
     generated = definition.event
-    assert generated is not None
+    if generated is None:
+        pytest.fail("TRACE_EVENT definition must contain event metadata.")
 
     with pytest.raises(TypeError):
         factory.createEvent(
