@@ -1,4 +1,4 @@
-# file: backend/tracing/emergency.py ; version: 2
+# file: backend/tracing/emergency.py ; version: 3
 from __future__ import annotations
 
 import sys
@@ -9,7 +9,7 @@ from backend.core.validation import requireString, typeName
 
 if TYPE_CHECKING:
     from backend.tracing.destinations import TraceDestination
-    from backend.tracing.ids import TraceEventId, TraceSpanId
+    from backend.tracing.ids import TraceDestinationRegistrationId, TraceEventId, TraceSpanId
 
 __all__: list[str] = [
     "TraceEmergencyReporter",
@@ -18,15 +18,20 @@ __all__: list[str] = [
 
 class TraceEmergencyReporter:
     """
-    Reports tracing-infrastructure failures without using tracing itself.
+    Reports tracing-infrastructure diagnostics without using tracing itself.
 
     Emergency reporting is deliberately isolated from the ordinary tracing
-    pipeline so destination, publication, context, and finalization failures
-    can be surfaced without risking recursive trace emission.
+    pipeline so destination-health transitions and publication, context, and
+    finalization failures can be surfaced without risking recursive trace
+    emission.
 
-    Writes are serialized across threads. Failures raised by the configured
-    stream are suppressed so emergency reporting does not replace or mask the
-    tracing failure being reported.
+    Destination-health episode tracking is owned by the Publisher. This
+    reporter does not deduplicate failures or determine recovery; callers
+    report only the health transitions that should be surfaced.
+
+    Writes are serialized across threads. Ordinary exceptions raised by the
+    configured stream are suppressed so emergency reporting does not replace
+    or mask the tracing failure being reported.
     """
 
     def __init__(
@@ -50,28 +55,63 @@ class TraceEmergencyReporter:
         self,
         *,
         operation: str,
+        registrationId: TraceDestinationRegistrationId,
         destination: TraceDestination,
         err: Exception,
     ) -> None:
         """
-        Reports failure of one trace-destination operation.
+        Reports entry into a failed destination-delivery health episode.
 
-        The diagnostic identifies the failed operation, destination runtime
-        type, exception runtime type, and best-effort exception message.
+        The diagnostic identifies the registration, operation that began the
+        failure episode, destination runtime type, exception runtime type, and
+        best-effort exception message.
+
+        Health-state tracking and repeated-failure suppression are owned by the
+        caller; this method writes one supplied diagnostic without maintaining
+        destination state.
 
         Args:
             operation:
-                Human-readable name of the failed destination operation.
+                Name of the destination operation that began the failure
+                episode.
+            registrationId:
+                Registration identifier whose delivery health became failed.
             destination:
-                Destination whose operation failed.
+                Destination associated with the failed registration.
             err:
-                Exception raised by the destination.
+                Exception that began the failure episode.
 
         """
         self._write(
             "[ACTANT TRACE DESTINATION FAILURE] "
-            f"{operation} failed for {typeName(destination)}: "
+            f"registration={registrationId} {operation} failed for "
+            f"{typeName(destination)}: "
             f"{typeName(err)}: {self._safeString(err)}",
+        )
+
+    def reportDestinationRecovered(
+        self,
+        *,
+        registrationId: TraceDestinationRegistrationId,
+        destination: TraceDestination,
+    ) -> None:
+        """
+        Reports recovery of one failed destination-delivery health episode.
+
+        Recovery determination is owned by the caller; this method writes one
+        supplied recovery diagnostic without maintaining destination state.
+
+        Args:
+            registrationId:
+                Registration identifier whose delivery health recovered.
+            destination:
+                Destination associated with the recovered registration.
+
+        """
+        self._write(
+            "[ACTANT TRACE DESTINATION RECOVERED] "
+            f"registration={registrationId} "
+            f"destination={typeName(destination)}.",
         )
 
     def reportRecursivePublication(
@@ -106,14 +146,14 @@ class TraceEmergencyReporter:
 
         Args:
             spanId:
-                Identifier of the span whose abandonment could not be
-                reported normally.
+                Identifier of the span whose abandonment evidence could not be
+                published normally.
             err:
                 Exception raised while publishing abandonment evidence.
 
         """
         self._write(
-            "[ACTANT TRACE ABANDONMENT FAILURE] Could not publish misuse "
+            "[ACTANT TRACE ABANDONMENT FAILURE] Could not publish abandonment "
             f"evidence for span {spanId}: {typeName(err)}: "
             f"{self._safeString(err)}",
         )
