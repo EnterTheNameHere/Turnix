@@ -1,4 +1,4 @@
-# file: backend/tracing/ids.py ; version: 2
+# file: backend/tracing/ids.py ; version: 3
 from __future__ import annotations
 
 import hashlib
@@ -9,11 +9,18 @@ from backend.core.ids import Uuid7Id
 from backend.core.validation import requireExactNonBlankString
 
 __all__: list[str] = [
+    "TraceDestinationRegistrationId",
     "TraceEventId",
     "TraceProducerId",
     "TraceSpanId",
     "TraceTypeDefinitionId",
 ]
+
+
+class TraceDestinationRegistrationId(Uuid7Id):
+    """Identifies one destination registration within one Tracer lifecycle."""
+
+    __slots__ = ()
 
 
 class TraceEventId(Uuid7Id):
