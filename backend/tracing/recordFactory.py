@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from backend.core.immutableValue import ImmutableValue, ImmutableValueFreezer
 from backend.core.validation import requireBool, requireInstance, requireNonNegativeInteger
 from backend.tracing.context import TraceCorrelationContext, TraceSpanContext
-from backend.tracing.errors import TraceInvariantError
+from backend.tracing.errors import TraceContextError, TraceInvariantError
 from backend.tracing.exceptionSnapshot import (
     ExceptionSnapshot,
     captureExceptionSnapshot,
@@ -27,20 +27,20 @@ if TYPE_CHECKING:
     from backend.tracing.references import TraceReference
     from backend.tracing.validation import TraceLevel
 
-__all__: list[str] = [
-    "TraceRecordFactory",
-]
+__all__: list[str] = []  # No public API
 
 
 class TraceRecordFactory:
     """
-    Creates normalized records for one trace producer.
+    Creates normalized records for one Tracer-owned trace producer.
 
-    The factory owns one producer identity, producer-local sequence, and
-    monotonic-clock domain. Sequence allocation is serialized across threads
-    and committed only after a complete TraceRecord has been constructed
-    successfully, so rejected record creation does not create gaps in the
-    producer sequence.
+    The factory is internal Tracer-owned machinery. One factory belongs to one
+    Tracer lifecycle and owns that Tracer's producer identity, producer-local
+    sequence, and monotonic-clock domain.
+
+    Sequence allocation is serialized across threads and committed only after
+    a complete TraceRecord has been constructed successfully, so rejected
+    record creation does not create gaps in the producer sequence.
 
     Record attributes are frozen before sequence allocation begins. The
     resulting TraceRecord independently freezes them again so the record
@@ -50,17 +50,13 @@ class TraceRecordFactory:
     def __init__(
         self,
         *,
-        traceProducerId: TraceProducerId | None = None,
         freezer: ImmutableValueFreezer | None = None,
         includeExceptionStacks: bool = True,
     ) -> None:
         """
-        Initializes a trace-record factory.
+        Initializes one Tracer-owned trace-record factory.
 
         Args:
-            traceProducerId:
-                Producer identity that owns records created by this factory.
-                When omitted, a new TraceProducerId is generated.
             freezer:
                 Immutable-value freezer used to normalize record attributes.
                 When omitted, a default ImmutableValueFreezer is created.
@@ -70,19 +66,11 @@ class TraceRecordFactory:
 
         Raises:
             TypeError:
-                If traceProducerId, freezer, or includeExceptionStacks has an
-                unsupported runtime type.
+                If freezer or includeExceptionStacks has an unsupported
+                runtime type.
 
         """
-        self._traceProducerId = (
-            TraceProducerId.new()
-            if traceProducerId is None
-            else requireInstance(
-                traceProducerId,
-                TraceProducerId,
-                "traceProducerId",
-            )
-        )
+        self._traceProducerId = TraceProducerId.new()
         self._freezer = (
             ImmutableValueFreezer()
             if freezer is None
@@ -100,8 +88,8 @@ class TraceRecordFactory:
         Returns the trace producer identifier.
 
         Returns:
-            The identity owning this factory's sequence and monotonic-clock
-            domain.
+            The producer identifier associated with this factory's sequence and
+            monotonic-clock domain.
 
         """
         return self._traceProducerId
@@ -153,7 +141,7 @@ class TraceRecordFactory:
 
         Args:
             err:
-                Exception whose diagnostic state is captured.
+                Base exception whose diagnostic state is captured.
             catcherAttributes:
                 Optional tracing metadata supplied by the exception catcher.
             includeStack:
@@ -247,6 +235,9 @@ class TraceRecordFactory:
             spanContext,
             "spanContext",
         )
+        if cleanSpanContext is not None:
+            self._requireCompatibleSpanContext(cleanSpanContext)
+
         cleanCorrelations = requireInstance(
             correlations,
             TraceCorrelationContext,
@@ -361,6 +352,9 @@ class TraceRecordFactory:
             parentContext,
             "parentContext",
         )
+        if cleanParentContext is not None:
+            self._requireCompatibleSpanContext(cleanParentContext)
+
         cleanCorrelations = requireInstance(
             correlations,
             TraceCorrelationContext,
@@ -476,6 +470,8 @@ class TraceRecordFactory:
             TraceSpanContext,
             "spanContext",
         )
+        self._requireCompatibleSpanContext(cleanSpanContext)
+
         cleanCorrelations = requireInstance(
             correlations,
             TraceCorrelationContext,
@@ -531,6 +527,16 @@ class TraceRecordFactory:
 
         return self._materializeRecord(buildRecord)
 
+    def _requireCompatibleSpanContext(
+        self,
+        spanContext: TraceSpanContext,
+    ) -> None:
+        """Requires structural span context to belong to this producer."""
+        if spanContext.traceProducerId != self._traceProducerId:
+            raise TraceContextError(
+                "TraceSpanContext belongs to another trace producer.",
+            )
+
     def _materializeRecord(
         self,
         buildRecord: Callable[
@@ -541,9 +547,11 @@ class TraceRecordFactory:
         """
         Materializes one record and commits its producer sequence on success.
 
-        The producer sequence lock remains held while the envelope is created
-        and the TraceRecord is validated. If record construction raises, the
-        candidate sequence remains available for the next successful record.
+        The producer sequence lock remains held while the event identity,
+        candidate sequence, and timestamps are generated and while TraceRecord
+        construction and validation complete. If record construction raises,
+        the candidate sequence remains available for the next successful
+        record.
         """
         with self._sequenceLock:
             eventId = TraceEventId.new()
