@@ -1,4 +1,4 @@
-# file: backend/tracing/destinations.py ; version: 2
+# file: backend/tracing/destinations.py ; version: 3
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
@@ -14,13 +14,26 @@ __all__: list[str] = [
 
 
 class TraceDestination(Protocol):
-    """Receives trace-type definitions and immutable trace records."""
+    """
+    Receives trace definitions and immutable records from one or more Tracers.
+
+    A destination object may be registered with multiple Tracers. Each Tracer
+    owns an independent Publisher and registration state, so calls from
+    different Tracers may occur concurrently. A destination instance that is
+    shared between Tracers must therefore serialize or otherwise make its own
+    mutable state thread-safe.
+
+    Equivalent trace-type definitions may be delivered more than once when a
+    destination is shared by independent Tracers or is removed and re-added.
+    Implementations must treat repeated equivalent definition delivery as
+    idempotent.
+    """
 
     def writeTraceTypeDefinition(
         self,
         definition: TraceTypeDefinition,
     ) -> None:
-        """Receives one current-lifecycle trace-type definition."""
+        """Receives one trace-type definition."""
         ...
 
     def write(self, record: TraceRecord) -> None:
