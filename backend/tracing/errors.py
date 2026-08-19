@@ -1,4 +1,4 @@
-# file: backend/tracing/errors.py ; version: 3
+# file: backend/tracing/errors.py ; version: 4
 from __future__ import annotations
 
 from backend.core.errors import ActantError, CoreInvariantError
@@ -8,6 +8,7 @@ __all__: list[str] = [
     "TraceClosedError",
     "TraceContextError",
     "TraceDestinationContractError",
+    "TraceDestinationStateError",
     "TraceError",
     "TraceExplicitTypeOverrideError",
     "TraceInvariantError",
@@ -81,6 +82,10 @@ class TraceTypeDefinitionNotFoundError(TraceError, KeyError):
 
 class TraceDestinationContractError(TraceUseError):
     """Raised when an object does not implement the destination contract."""
+
+
+class TraceDestinationStateError(TraceUseError):
+    """Raised when destination membership would invalidate a live Tracer."""
 
 
 class TraceInvariantError(TraceError, CoreInvariantError):
