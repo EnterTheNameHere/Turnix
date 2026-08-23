@@ -1,9 +1,10 @@
-# file: backend/values/validation.py ; version: 1
+# file: backend/values/validation.py ; version: 2
 from __future__ import annotations
 
 from backend.core.validation import requireExactNonBlankString, typeName
 
 __all__: list[str] = [
+    "requireRelativeValueAddress",
     "requireValueAddress",
     "requireValueAddressSegment",
 ]
@@ -249,3 +250,50 @@ def _wrapSegmentDiagnostic(
     ]
 
     return ValueError("\n".join(wrappedLines))
+
+
+def requireRelativeValueAddress(value: str, name: str) -> str:
+    """
+    Validates one canonical relative address in the Actant Value System.
+
+    RelativeValueAddress uses the same canonical textual grammar as
+    ValueAddress, but its semantic meaning is different. A relative address
+    does not identify a complete Value System identity by itself. It requires
+    a base ValueAddress before it can be resolved to one.
+
+    Relative addresses:
+        - contain lowercase ASCII characters only;
+        - consist of one or more non-empty segments;
+        - use "/" as the only segment separator;
+        - use no escape syntax;
+        - are validated as already canonical and are never normalized.
+
+    Relative addressing does not provide filesystem-style traversal. "." and
+    ".." are not special traversal components and are invalid under the current
+    ValueAddress segment grammar because a segment cannot begin with ".". A
+    period may otherwise appear inside a segment according to ordinary
+    ValueAddress segment grammar, but bears no special meaning.
+
+    This validator deliberately delegates canonical syntax validation to
+    requireValueAddress(). Absolute and relative Value System addresses use
+    the same textual grammar; their distinction is semantic and represented
+    by their respective value-object types.
+
+    Args:
+        value:
+            Relative address text to validate.
+        name:
+            Diagnostic name used when reporting invalid input.
+
+    Returns:
+        The original validated string unchanged.
+
+    Raises:
+        TypeError:
+            If value or name is not an exact built-in string.
+        ValueError:
+            If value is not canonical ValueAddress syntax or name is blank or
+            contains surrounding whitespace.
+
+    """
+    return requireValueAddress(value, name)
