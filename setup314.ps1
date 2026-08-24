@@ -78,26 +78,58 @@ function Ensure-GitHooks {
     throw "setup.ps1 must be run from the repository root.`nRepository root: $resolvedRepoRoot`nScript root:     $resolvedRoot"
   }
 
-  $hooksDir = Join-Path $root ".githooks"
-  if (-not (Test-Path $hooksDir)) {
+  $hooksSourceDir = Join-Path $root ".githooks"
+  if (-not (Test-Path $hooksSourceDir)) {
     throw "Missing .githooks directory."
   }
 
-  & git config core.hooksPath ".githooks"
-
-  $configured = (& git config --get core.hooksPath).Trim()
-  if ($configured -ne ".githooks") {
-    throw "Failed to configure Git hooks path. Expected '.githooks', got '$configured'."
+  $preCommitSource = Join-Path $hooksSourceDir "pre-commit"
+  if (-not (Test-Path $preCommitSource)) {
+    Write-Host "No .githooks/pre-commit found. No pre-commit hook will be installed." -ForegroundColor Yellow
+    return
   }
 
-  Write-Host "Configured Git core.hooksPath = .githooks"
+  # Do not use .githooks as Git's live hooks directory.
+  # Git LFS also respects core.hooksPath and would install its hooks there.
+  & git config --local --unset-all core.hooksPath 2>$null
 
-  $preCommit = Join-Path $hooksDir "pre-commit"
-  if (Test-Path $preCommit) {
-    Write-Host "Found pre-commit hook: $preCommit"
-  } else {
-    Write-Host "No .githooks/pre-commit found yet. Hooks path is registered, but no pre-commit hook will run." -ForegroundColor Yellow
+  # Make sure a global/system core.hooksPath is not taking over.
+  $configuredHooksPath = (& git config --get core.hooksPath 2>$null)
+  if ($configuredHooksPath) {
+    throw "core.hooksPath is still configured outside the repository: '$configuredHooksPath'. Remove that setting before continuing."
   }
+
+  # With core.hooksPath unset, this resolves to Git's normal .git/hooks directory.
+  $hooksDir = (& git rev-parse --git-path hooks).Trim()
+  if (-not [System.IO.Path]::IsPathRooted($hooksDir)) {
+    $hooksDir = Join-Path $root $hooksDir
+  }
+
+  if (-not (Test-Path $hooksDir)) {
+    New-Item -ItemType Directory -Path $hooksDir -Force | Out-Null
+  }
+
+  $preCommitTarget = Join-Path $hooksDir "pre-commit"
+
+  # Runtime trampoline -> tracked repository hook.
+  $hook = @'
+#!/bin/sh
+
+repo_root="$(git rev-parse --show-toplevel)" || exit 1
+exec "$repo_root/.githooks/pre-commit" "$@"
+'@
+
+  # LF is important for shell hooks.
+  $hook = $hook -replace "`r`n", "`n"
+
+  [System.IO.File]::WriteAllText(
+    $preCommitTarget,
+    $hook,
+    [System.Text.UTF8Encoding]::new($false)
+  )
+
+  Write-Host "Installed pre-commit hook: $preCommitTarget"
+  Write-Host "Hook source: .githooks/pre-commit"
 }
 
 function Normalize-EmbeddedPythonPth([string] $embedPath) {
