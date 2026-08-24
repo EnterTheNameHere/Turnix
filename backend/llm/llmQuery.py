@@ -13,8 +13,8 @@ from backend.core.validation import (
     requireString,
     typeName,
 )
-from backend.llm.errors import LlmPipelineStateError, LlmPromptBudgetError
-from backend.llm.llmTypes import LlmPromptBudget
+from backend.llm.errors import LlmPipelineStateError, LlmQueryBudgetError
+from backend.llm.llmTypes import LlmQueryBudget, LlmQuery
 from backend.pack.packCodeEntry import PackCodeEntryInstanceId
 
 if TYPE_CHECKING:
@@ -24,12 +24,14 @@ if TYPE_CHECKING:
 
 __all__: list[str] = [
     "DefaultLlmQueryItemFilter",
+    "LlmQueryBuildContext",
+    "LlmQueryBuildResult",
+    "LlmQueryBuilder",
     "LlmQueryItem",
-    "LlmQueryItemFilter",
-    "LlmQueryItemFilterContext",
-    "LlmQueryItemFilterResult",
     "LlmQueryItemId",
     "LlmQueryItemIdentity",
+    "estimateLlmQueryTokens",
+    "validateLlmQueryBuildResult",
     "validateUniqueQueryItemIdentities",
 ]
 
@@ -72,7 +74,8 @@ class LlmQueryItem:
     """
 
     identity: LlmQueryItemIdentity
-    content: str
+    contentType: str
+    payload: str
     importance: int
     mandatory: bool = False
     estimatedTokens: int | None = None
@@ -82,7 +85,7 @@ class LlmQueryItem:
     def __post_init__(self) -> None:
         """Validates and freezes the query-item values."""
         requireInstance(self.identity, LlmQueryItemIdentity, "identity")
-        requireString(self.content, "content")
+        requireString(self.payload, "content")
         requireInteger(self.importance, "importance")
         requireBool(self.mandatory, "mandatory")
 
@@ -106,7 +109,7 @@ class LlmQueryItemFilterContext:
     """Represents immutable input supplied to the active query-item filter."""
 
     queryItems: tuple[LlmQueryItem, ...]
-    budget: LlmPromptBudget
+    budget: LlmQueryBudget
     tokenEstimator: LlmTokenEstimator
 
     def __post_init__(self) -> None:
@@ -122,7 +125,7 @@ class LlmQueryItemFilterContext:
 
         validateUniqueQueryItemIdentities(self.queryItems)
 
-        requireInstance(self.budget, LlmPromptBudget, "budget")
+        requireInstance(self.budget, LlmQueryBudget, "budget")
 
         if not callable(
             getattr(self.tokenEstimator, "estimateTokens", None),
@@ -209,8 +212,8 @@ class DefaultLlmQueryItemFilter:
             indexedItems,
             selectedIndices,
             context.tokenEstimator,
-        ) > context.budget.maxPromptTokens:
-            raise LlmPromptBudgetError(
+        ) > context.budget.maxInputTokens:
+            raise LlmQueryBudgetError(
                 "Mandatory query items exceed the prompt budget.",
             )
 
@@ -230,7 +233,7 @@ class DefaultLlmQueryItemFilter:
                 tentative,
                 context.tokenEstimator,
             )
-            if tokenCount <= context.budget.maxPromptTokens:
+            if tokenCount <= context.budget.maxInputTokens:
                 selectedIndices = tentative
 
         selected = tuple(
@@ -250,6 +253,34 @@ class DefaultLlmQueryItemFilter:
         )
 
 
+@dataclass (frozen=True, slots=True)
+class LlmQueryBuildContext:
+
+    queryItems: tuple[LlmQueryItem, ...]
+    budget: LlmQueryBudget
+    tokenEstimator: LlmTokenEstimator
+
+
+@dataclass(frozen=True, slots=True)
+class LlmQueryBuildResult:
+
+    query: LlmQuery
+    selectedItems: tuple[LlmQueryItem, ...]
+    excludedItems: tuple[LlmQueryItem, ...]
+
+
+class LlmQueryBuilder(Protocol):
+    """Defines the replaceable contract that selects items and builds a query."""
+
+    def build(self, context: LlmQueryBuildContext) -> LlmQueryBuildResult:
+        """Selects candidate items and constructs one complete LlmQuery."""
+        ...
+
+
+class DefaultLlmQueryBuilder:
+    pass
+
+
 def validateUniqueQueryItemIdentities(
     queryItems: Sequence[LlmQueryItem],
 ) -> None:
@@ -266,6 +297,20 @@ def validateUniqueQueryItemIdentities(
         seen.add(item.identity)
 
 
+def estimateLlmQueryTokens(
+    tokenEstimator: LlmTokenEstimator,
+    query: LlmQuery,
+) -> int:
+    pass
+
+
+def validateLlmQueryBuildResult(
+    *,
+    result:
+):
+    pass
+
+
 def _estimateSelectionTokens(
     indexedItems: Sequence[tuple[int, LlmQueryItem]],
     selectedIndices: set[int],
@@ -273,7 +318,7 @@ def _estimateSelectionTokens(
 ) -> int:
     """Estimates the prompt tokens used by the selected query items."""
     content = "\n\n".join(
-        item.content
+        item.payload
         for index, item in indexedItems
         if index in selectedIndices
     )
