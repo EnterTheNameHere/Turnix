@@ -1,22 +1,27 @@
-# file: backend/llm/errors.py ; version 6
+# file: backend/llm/errors.py ; version: 7
 from __future__ import annotations
 
 from backend.core.errors import ActantError
-from backend.core.validation import requireExactNonBlankString, requireNonBlankString, typeName
+from backend.core.validation import (
+    requireExactNonBlankString,
+    requireInstance,
+    requireNonBlankString,
+)
 from backend.pack.packCodeEntry import PackCodeEntryInstanceId
 
 __all__: list[str] = [
     "LlmError",
     "LlmInputRejectedError",
     "LlmPipelineStateError",
-    "LlmPromptBudgetError",
     "LlmProviderAlreadyRegisteredError",
     "LlmProviderConnectionError",
     "LlmProviderContractError",
     "LlmProviderError",
     "LlmProviderNotRegisteredError",
     "LlmProviderProtocolError",
+    "LlmProviderRequestError",
     "LlmProviderUnavailableError",
+    "LlmQueryBudgetError",
 ]
 
 
@@ -25,7 +30,7 @@ class LlmError(ActantError):
 
 
 class LlmInputRejectedError(LlmError):
-    """Raised when a hook rejects the pipeline input."""
+    """Raised when a hook rejects the current pipeline input."""
 
     def __init__(
         self,
@@ -38,13 +43,7 @@ class LlmInputRejectedError(LlmError):
         """Initializes an LLM input-rejection error."""
         requireNonBlankString(message, "message")
         requireExactNonBlankString(purposeId, "purposeId")
-
-        if not isinstance(ownerId, PackCodeEntryInstanceId):
-            raise TypeError(
-                "ownerId must be a PackCodeEntryInstanceId; "
-                f"got {typeName(ownerId)}.",
-            )
-
+        requireInstance(ownerId, PackCodeEntryInstanceId, "ownerId")
         requireNonBlankString(reason, "reason")
 
         super().__init__(message)
@@ -57,8 +56,8 @@ class LlmPipelineStateError(LlmError):
     """Raised when a pipeline stage leaves the run in an invalid state."""
 
 
-class LlmPromptBudgetError(LlmError):
-    """Raised when a prompt cannot fit within the effective budget."""
+class LlmQueryBudgetError(LlmError):
+    """Raised when LLM inference input cannot satisfy the effective query budget."""
 
 
 class LlmProviderError(LlmError):
@@ -77,6 +76,10 @@ class LlmProviderContractError(LlmProviderError):
     """Raised when a provider object violates the provider interface contract."""
 
 
+class LlmProviderRequestError(LlmProviderError):
+    """Raised when a provider cannot execute a supplied call request."""
+
+
 class LlmProviderUnavailableError(LlmProviderError):
     """Raised when a registered LLM provider is currently unavailable."""
 
@@ -86,4 +89,4 @@ class LlmProviderConnectionError(LlmProviderError):
 
 
 class LlmProviderProtocolError(LlmProviderError):
-    """Raised when an LLM provider violates its protocol contract."""
+    """Raised when an LLM provider violates its streaming protocol contract."""
