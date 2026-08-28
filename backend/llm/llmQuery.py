@@ -1,4 +1,4 @@
-# file: backend/llm/llmQueryItem.py ; version: 5
+# file: backend/llm/llmQuery.py ; version: 7
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -10,12 +10,12 @@ from backend.core.validation import (
     requireExactNonBlankString,
     requireInstance,
     requireInteger,
-    requireString,
+    requireNonNegativeInteger,
     typeName,
 )
 from backend.llm.errors import LlmPipelineStateError, LlmQueryBudgetError
-from backend.llm.llmTypes import LlmQueryBudget, LlmQuery
-from backend.pack.packCodeEntry import PackCodeEntryInstanceId
+from backend.llm.llmOwner import LlmOwner, requireLlmOwner
+from backend.llm.llmTypes import LlmQuery, LlmQueryBudget
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -23,277 +23,374 @@ if TYPE_CHECKING:
     from backend.llm.llmTypes import LlmTokenEstimator
 
 __all__: list[str] = [
-    "DefaultLlmQueryItemFilter",
+    "DefaultLlmQueryBuilder",
     "LlmQueryBuildContext",
-    "LlmQueryBuildResult",
     "LlmQueryBuilder",
     "LlmQueryItem",
     "LlmQueryItemId",
     "LlmQueryItemIdentity",
     "estimateLlmQueryTokens",
-    "validateLlmQueryBuildResult",
+    "validateBuiltLlmQuery",
     "validateUniqueQueryItemIdentities",
 ]
 
 
+_ALLOWED_QUERY_ITEM_ID_FIRST_CHARACTERS = frozenset(
+    "abcdefghijklmnopqrstuvwxyz0123456789",
+)
+_ALLOWED_QUERY_ITEM_ID_CHARACTERS = frozenset(
+    "abcdefghijklmnopqrstuvwxyz0123456789._-",
+)
+
+
 @dataclass(frozen=True, slots=True)
 class LlmQueryItemId:
-    """Represents an identifier assigned to one LLM query item."""
+    """
+    Identifies one QueryItem within an LLM owner namespace for a processing
+    run.
+
+    Query-item identifiers are machine-facing identity rather than human-facing
+    labels. An item's complete run-local identity is the pair of its LlmOwner
+    and this identifier.
+
+    value:
+
+        - is an exact built-in string;
+        - contains ASCII characters only;
+        - starts with a lowercase ASCII letter or digit;
+        - otherwise contains only lowercase ASCII letters, digits, ".", "_",
+          and "-";
+        - is never normalized, trimmed, or case-folded.
+
+    The identifier need only be unique within one owner's QueryItems for the
+    processing run. LlmQueryItemIdentity combines it with the owner identity to
+    provide the complete run-local identity.
+    """
 
     value: str
 
     def __post_init__(self) -> None:
-        """Validates the LLM query-item identifier."""
-        requireExactNonBlankString(self.value, "value")
+        """Validates the canonical QueryItem identifier."""
+        cleanValue = requireExactNonBlankString(self.value, "value")
+
+        if not cleanValue.isascii():
+            invalidCharacter = next(
+                character
+                for character in cleanValue
+                if not character.isascii()
+            )
+            raise ValueError(
+                "value must contain ASCII characters only.\n"
+                f"received: {cleanValue!r}\n"
+                f"invalid character: {invalidCharacter!r}",
+            )
+
+        firstCharacter = cleanValue[0]
+        if firstCharacter not in _ALLOWED_QUERY_ITEM_ID_FIRST_CHARACTERS:
+            raise ValueError(
+                "value must start with a lowercase ASCII letter or digit.\n"
+                f"received: {cleanValue!r}\n"
+                f"invalid first character: {firstCharacter!r}",
+            )
+
+        for character in cleanValue[1:]:
+            if character not in _ALLOWED_QUERY_ITEM_ID_CHARACTERS:
+                raise ValueError(
+                    f"value contains invalid character {character!r}.\n"
+                    f"received: {cleanValue!r}\n"
+                    "QueryItem identifiers allow only lowercase ASCII "
+                    'letters, digits, ".", "_", and "-".',
+                )
 
     def __str__(self) -> str:
-        """Returns the underlying query-item identifier."""
+        """Returns the canonical QueryItem identifier."""
         return self.value
 
 
 @dataclass(frozen=True, slots=True)
 class LlmQueryItemIdentity:
-    """Represents the structured run-local identity of one query item."""
+    """
+    Identifies one QueryItem uniquely within an LLM processing run.
 
-    ownerId: PackCodeEntryInstanceId
+    ownerId identifies the backend or Pack participant that produced the item.
+    itemId identifies the item within that owner's run-local namespace.
+
+    Keeping producer identity separate from the item identifier prevents
+    independently acting components from having to coordinate one global
+    QueryItem identifier namespace.
+    """
+
+    ownerId: LlmOwner
     itemId: LlmQueryItemId
 
     def __post_init__(self) -> None:
-        """Validates the query-item identity."""
-        requireInstance(self.ownerId, PackCodeEntryInstanceId, "ownerId")
+        """Validates the structured run-local QueryItem identity."""
+        requireLlmOwner(self.ownerId, "ownerId")
         requireInstance(self.itemId, LlmQueryItemId, "itemId")
 
 
 @dataclass(frozen=True, slots=True)
 class LlmQueryItem:
     """
-    Represents one prompt-ready candidate contribution.
+    Represents one transient candidate contribution to an LLM query.
 
-    estimatedTokens is an advisory cached estimate. The active run estimator
-    remains authoritative.
+    A QueryItem describes information that may participate in one dynamically
+    constructed inference query. It is not itself the final provider-facing
+    query representation.
+
+    identity provides run-local producer-qualified identity.
+
+    contentType identifies the semantic representation contract of payload.
+    Generic filtering and pipeline infrastructure treat payload as opaque.
+    Query builders decide how selected content types are interpreted and
+    assembled into a complete LlmQuery.
+
+    payload is deliberately not copied, recursively frozen, serialized, or
+    coerced by this class. The producer is responsible for ensuring that its
+    observable meaning remains stable while the QueryItem is observable during
+    the processing run.
+
+    importance is a relative selection hint. Larger values represent greater
+    preference for inclusion. It is deliberately unbounded and may be negative;
+    filtering policies define how relative importance affects selection.
+
+    mandatory requests inclusion of the item. Mandatory status does not permit
+    filtering or query construction to exceed the effective query budget.
+
+    estimatedInputTokens is optional advisory information supplied by the item
+    producer. It may assist custom policies, diagnostics, or inspection, but it
+    is not authoritative for query budgeting. Representation-aware selection
+    cost and complete-query estimation remain authoritative.
+
+    category is optional semantic classification available to filtering and
+    other LLM-domain components. It does not affect identity.
+
+    metadata contains recursively frozen generic auxiliary information suitable
+    for deterministic framework inspection without interpreting payload.
     """
 
     identity: LlmQueryItemIdentity
     contentType: str
-    payload: str
+    payload: object
     importance: int
     mandatory: bool = False
-    estimatedTokens: int | None = None
+    estimatedInputTokens: int | None = None
     category: str | None = None
     metadata: Mapping[str, ImmutableValue] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Validates and freezes the query-item values."""
+        """Validates the QueryItem values and freezes generic metadata."""
         requireInstance(self.identity, LlmQueryItemIdentity, "identity")
-        requireString(self.payload, "content")
+        requireExactNonBlankString(self.contentType, "contentType")
         requireInteger(self.importance, "importance")
         requireBool(self.mandatory, "mandatory")
 
-        if self.estimatedTokens is not None:
-            requireInteger(self.estimatedTokens, "estimatedTokens")
-            if self.estimatedTokens < 0:
-                raise ValueError("estimatedTokens must not be negative.")
+        if self.estimatedInputTokens is not None:
+            requireNonNegativeInteger(
+                self.estimatedInputTokens,
+                "estimatedInputTokens",
+            )
 
         if self.category is not None:
             requireExactNonBlankString(self.category, "category")
 
-        frozen = ImmutableValueFreezer().freezeMapping(
+        frozenMetadata = ImmutableValueFreezer().freezeMapping(
             self.metadata,
             "metadata",
         )
-        object.__setattr__(self, "metadata", frozen)
+        object.__setattr__(self, "metadata", frozenMetadata)
 
 
 @dataclass(frozen=True, slots=True)
-class LlmQueryItemFilterContext:
-    """Represents immutable input supplied to the active query-item filter."""
+class LlmQueryBuildContext:
+    """
+    Represents the immutable input supplied to one query builder invocation.
 
-    queryItems: tuple[LlmQueryItem, ...]
-    budget: LlmQueryBudget
-    tokenEstimator: LlmTokenEstimator
+    selectedItems contains only QueryItems that survived the filtering stage,
+    in their established query order. The builder constructs the complete
+    LlmQuery representation from this ordered selection.
 
-    def __post_init__(self) -> None:
-        """Validates the query-item filter context."""
-        requireInstance(self.queryItems, tuple, "queryItems")
-
-        for index, item in enumerate(self.queryItems):
-            if not isinstance(item, LlmQueryItem):
-                raise TypeError(
-                    f"queryItems[{index}] must be an LlmQueryItem; "
-                    f"got {typeName(item)}.",
-                )
-
-        validateUniqueQueryItemIdentities(self.queryItems)
-
-        requireInstance(self.budget, LlmQueryBudget, "budget")
-
-        if not callable(
-            getattr(self.tokenEstimator, "estimateTokens", None),
-        ):
-            raise TypeError(
-                "tokenEstimator must expose a callable estimateTokens(text).",
-            )
-
-
-@dataclass(frozen=True, slots=True)
-class LlmQueryItemFilterResult:
-    """Selected and excluded items produced by a query-item filter."""
+    Query construction does not own selection policy. A builder must not add,
+    remove, reorder, replace, or mutate the selected QueryItems through this
+    context.
+    """
 
     selectedItems: tuple[LlmQueryItem, ...]
-    excludedItems: tuple[LlmQueryItem, ...]
 
     def __post_init__(self) -> None:
-        """Validates the query-item filter result."""
+        """Validates the query-builder input context."""
         requireInstance(self.selectedItems, tuple, "selectedItems")
-        requireInstance(self.excludedItems, tuple, "excludedItems")
 
         for index, item in enumerate(self.selectedItems):
             requireInstance(item, LlmQueryItem, f"selectedItems[{index}]")
 
-        for index, item in enumerate(self.excludedItems):
-            requireInstance(item, LlmQueryItem, f"excludedItems[{index}]")
-
         validateUniqueQueryItemIdentities(self.selectedItems)
-        validateUniqueQueryItemIdentities(self.excludedItems)
-
-        selectedIdentities = {
-            item.identity
-            for item in self.selectedItems
-        }
-        excludedIdentities = {
-            item.identity
-            for item in self.excludedItems
-        }
-        overlappingIdentities = selectedIdentities & excludedIdentities
-
-        if overlappingIdentities:
-            identity = min(
-                overlappingIdentities,
-                key=lambda item: (str(item.ownerId), item.itemId.value),
-            )
-            raise ValueError(
-                f"A query item must not be both selected and excluded; "
-                f"ownerId={identity.ownerId!r}, "
-                f"itemId={identity.itemId!r}.",
-            )
-
-        # TODO: The pipeline must verify the context-dependent invariants:
-        #       - every candidate appears exactly once;
-        #       - final selection fits the budget.
-
-
-class LlmQueryItemFilter(Protocol):
-    """Defines the contract for replaceable query-item filters."""
-
-    def filter(
-        self,
-        context: LlmQueryItemFilterContext,
-    ) -> LlmQueryItemFilterResult:
-        """Filters candidate query items under the supplied prompt budget."""
-        ...
-
-
-class DefaultLlmQueryItemFilter:
-    """Selects mandatory and high-importance items under a token budget."""
-
-    def filter(
-        self,
-        context: LlmQueryItemFilterContext,
-    ) -> LlmQueryItemFilterResult:
-        """Selects query items using the default deterministic policy."""
-        indexedItems = tuple(enumerate(context.queryItems))
-        selectedIndices: set[int] = {
-            index
-            for index, item in indexedItems
-            if item.mandatory
-        }
-
-        if _estimateSelectionTokens(
-            indexedItems,
-            selectedIndices,
-            context.tokenEstimator,
-        ) > context.budget.maxInputTokens:
-            raise LlmQueryBudgetError(
-                "Mandatory query items exceed the prompt budget.",
-            )
-
-        optionalItems = sorted(
-            (
-                (index, item)
-                for index, item in indexedItems
-                if not item.mandatory
-            ),
-            key=lambda entry: (-entry[1].importance, entry[0]),
-        )
-
-        for index, _item in optionalItems:
-            tentative = selectedIndices | {index}
-            tokenCount = _estimateSelectionTokens(
-                indexedItems,
-                tentative,
-                context.tokenEstimator,
-            )
-            if tokenCount <= context.budget.maxInputTokens:
-                selectedIndices = tentative
-
-        selected = tuple(
-            item
-            for index, item in indexedItems
-            if index in selectedIndices
-        )
-        excluded = tuple(
-            item
-            for index, item in indexedItems
-            if index not in selectedIndices
-        )
-
-        return LlmQueryItemFilterResult(
-            selectedItems=selected,
-            excludedItems=excluded,
-        )
-
-
-@dataclass (frozen=True, slots=True)
-class LlmQueryBuildContext:
-
-    queryItems: tuple[LlmQueryItem, ...]
-    budget: LlmQueryBudget
-    tokenEstimator: LlmTokenEstimator
-
-
-@dataclass(frozen=True, slots=True)
-class LlmQueryBuildResult:
-
-    query: LlmQuery
-    selectedItems: tuple[LlmQueryItem, ...]
-    excludedItems: tuple[LlmQueryItem, ...]
 
 
 class LlmQueryBuilder(Protocol):
-    """Defines the replaceable contract that selects items and builds a query."""
+    """
+    Constructs complete query representations from selected QueryItems.
 
-    def build(self, context: LlmQueryBuildContext) -> LlmQueryBuildResult:
-        """Selects candidate items and constructs one complete LlmQuery."""
+    Query building and QueryItem filtering are distinct responsibilities.
+    Filtering decides which candidate information participates. A builder
+    interprets the already-selected QueryItems and constructs their complete
+    provider-neutral LlmQuery representation.
+
+    estimateSelectionTokens() provides the representation-aware cost capability
+    required by filtering. For any ordered QueryItem selection, it must
+    estimate the same representation semantics that build() would construct
+    from that selection. This allows filtering to reason about complete-query
+    cost without receiving query-construction authority or inspecting the
+    constructed query.
+
+    Implementations must treat supplied QueryItems and their payloads as
+    read-only. For the same ordered selection and token estimator within one
+    processing run, estimateSelectionTokens() must return stable results.
+
+    build() must preserve the semantic participation and ordering of the
+    selectedItems supplied through LlmQueryBuildContext.
+    Representation-specific transformation is expected; changing which
+    QueryItems participate is not.
+    """
+
+    def estimateSelectionTokens(
+        self,
+        queryItems: tuple[LlmQueryItem, ...],
+        tokenEstimator: LlmTokenEstimator,
+    ) -> int:
+        """
+        Estimates complete-query input cost for one ordered QueryItem selection.
+
+        Args:
+            queryItems:
+                Proposed selected QueryItems in their intended query order.
+            tokenEstimator:
+                Active provider/model estimator for complete LlmQuery objects.
+
+        Returns:
+            An exact built-in non-negative integer estimating the input-token
+            usage of the complete query representation build() would produce.
+
+        """
+        ...
+
+    def build(self, context: LlmQueryBuildContext) -> LlmQuery:
+        """
+        Constructs one complete provider-neutral query.
+
+        Args:
+            context:
+                Ordered QueryItems selected by the filtering stage.
+
+        Returns:
+            The complete LlmQuery representation for the selected items.
+
+        """
         ...
 
 
 class DefaultLlmQueryBuilder:
-    pass
+    """
+    Builds the built-in ``text/plain`` query representation.
+
+    Every selected QueryItem must use contentType ``text/plain`` and an exact
+    built-in str payload.
+
+    Selected payloads are retained in supplied order and joined using two
+    newline characters. No additional normalization, trimming, escaping, role
+    assignment, or other semantic transformation is performed.
+
+    An empty selection produces an empty ``text/plain`` query.
+
+    Richer query representations replace this builder rather than flattening
+    structured, multimodal, or otherwise non-text content in generic pipeline
+    code.
+    """
+
+    def estimateSelectionTokens(
+        self,
+        queryItems: tuple[LlmQueryItem, ...],
+        tokenEstimator: LlmTokenEstimator,
+    ) -> int:
+        """
+        Estimates the complete built-in plain-text query representation.
+
+        The estimate is derived by constructing exactly the same representation
+        build() would produce and applying the active complete-query token
+        estimator to it.
+        """
+        query = self.build(LlmQueryBuildContext(selectedItems=queryItems))
+        return estimateLlmQueryTokens(tokenEstimator, query)
+
+    def build(self, context: LlmQueryBuildContext) -> LlmQuery:
+        """
+        Constructs a ``text/plain`` query from selected QueryItems.
+
+        Raises:
+            LlmPipelineStateError:
+                If any selected QueryItem is not compatible with the built-in
+                plain-text representation.
+
+        """
+        requireInstance(context, LlmQueryBuildContext, "context")
+
+        textParts: list[str] = []
+
+        for item in context.selectedItems:
+            if (
+                item.contentType != "text/plain"
+                or type(item.payload) is not str
+            ):
+                raise LlmPipelineStateError(
+                    "DefaultLlmQueryBuilder only accepts text/plain query "
+                    "items with exact built-in str payloads; "
+                    f"ownerId={item.identity.ownerId!r}, "
+                    f"itemId={item.identity.itemId!r}, "
+                    f"contentType={item.contentType!r}, "
+                    f"payloadType={typeName(item.payload)}.",
+                )
+
+            textParts.append(item.payload)
+
+        return LlmQuery(
+            formatId="text/plain",
+            payload="\n\n".join(textParts),
+        )
 
 
 def validateUniqueQueryItemIdentities(
     queryItems: Sequence[LlmQueryItem],
 ) -> None:
-    """Validates that query-item identities are unique within the run."""
+    """
+    Validates that an ordered QueryItem collection contains unique identities.
+
+    Identity uniqueness is based exclusively on LlmQueryItemIdentity. QueryItem
+    equality and payload equality are deliberately not evaluated because
+    payloads are opaque and may define arbitrary equality behaviour.
+
+    Args:
+        queryItems:
+            QueryItems whose run-local identities must be unique.
+
+    Raises:
+        TypeError:
+            If any element is not an LlmQueryItem.
+        ValueError:
+            If two QueryItems use the same LlmQueryItemIdentity.
+
+    """
     seen: set[LlmQueryItemIdentity] = set()
 
-    for item in queryItems:
+    for index, item in enumerate(queryItems):
+        requireInstance(item, LlmQueryItem, f"queryItems[{index}]")
+
         if item.identity in seen:
             raise ValueError(
-                "Duplicate LLM query item identity: "
+                "Duplicate LLM query item identity; "
                 f"ownerId={item.identity.ownerId!r}, "
                 f"itemId={item.identity.itemId!r}.",
             )
+
         seen.add(item.identity)
 
 
@@ -301,42 +398,95 @@ def estimateLlmQueryTokens(
     tokenEstimator: LlmTokenEstimator,
     query: LlmQuery,
 ) -> int:
-    pass
+    """
+    Returns one validated input-token estimate for a complete LlmQuery.
 
+    The token estimator is an extension boundary. Returning anything other than
+    an exact built-in non-negative integer is therefore treated as invalid LLM
+    pipeline state rather than ordinary budget exhaustion.
 
-def validateLlmQueryBuildResult(
-    *,
-    result:
-):
-    pass
+    Args:
+        tokenEstimator:
+            Active provider/model complete-query token estimator.
+        query:
+            Complete query whose input-token usage is estimated.
 
+    Returns:
+        The exact built-in non-negative token estimate.
 
-def _estimateSelectionTokens(
-    indexedItems: Sequence[tuple[int, LlmQueryItem]],
-    selectedIndices: set[int],
-    tokenEstimator: LlmTokenEstimator,
-) -> int:
-    """Estimates the prompt tokens used by the selected query items."""
-    content = "\n\n".join(
-        item.payload
-        for index, item in indexedItems
-        if index in selectedIndices
-    )
+    Raises:
+        TypeError:
+            If tokenEstimator does not expose callable
+            estimateInputTokens(query), or query is not an LlmQuery.
+        LlmPipelineStateError:
+            If the estimator returns a value that violates its runtime
+            contract.
 
-    estimated = tokenEstimator.estimateTokens(content)
+    """
+    requireInstance(query, LlmQuery, "query")
 
-    try:
-        estimated = requireInteger(estimated, "LlmTokenEstimator estimate")
-    except TypeError as err:
+    if not callable(getattr(tokenEstimator, "estimateInputTokens", None)):
+        raise TypeError(
+            "tokenEstimator must expose callable estimateInputTokens(query); "
+            f"received {typeName(tokenEstimator)}.",
+        )
+
+    estimated = tokenEstimator.estimateInputTokens(query)
+
+    if type(estimated) is not int:
         raise LlmPipelineStateError(
             "LlmTokenEstimator returned a non-integer estimate; "
-            f"got {typeName(estimated)}.",
-        ) from err
+            f"received {typeName(estimated)}.",
+        )
 
     if estimated < 0:
         raise LlmPipelineStateError(
             "LlmTokenEstimator returned a negative estimate; "
-            f"got {estimated}.",
+            f"received: {estimated}.",
         )
 
     return estimated
+
+
+def validateBuiltLlmQuery(
+    *,
+    query: LlmQuery,
+    budget: LlmQueryBudget,
+    tokenEstimator: LlmTokenEstimator,
+) -> None:
+    """
+    Validates one complete built query against the effective input budget.
+
+    This validation is authoritative for the complete representation actually
+    produced by query construction. Selection-cost estimates used during
+    filtering do not replace this final complete-query budget check.
+
+    Args:
+        query:
+            Complete query to validate.
+        budget:
+            Effective input-token budget for the processing run.
+        tokenEstimator:
+            Active provider/model estimator for complete queries.
+
+    Raises:
+        TypeError:
+            If query or budget has an invalid runtime type, or tokenEstimator
+            does not satisfy its structural runtime contract.
+        LlmPipelineStateError:
+            If tokenEstimator returns an invalid estimate.
+        LlmQueryBudgetError:
+            If the complete built query exceeds the effective input budget.
+
+    """
+    requireInstance(query, LlmQuery, "query")
+    requireInstance(budget, LlmQueryBudget, "budget")
+
+    estimatedTokens = estimateLlmQueryTokens(tokenEstimator, query)
+
+    if estimatedTokens > budget.maxInputTokens:
+        raise LlmQueryBudgetError(
+            "Constructed query exceeds the effective query budget; "
+            f"estimatedInputTokens={estimatedTokens}, "
+            f"maxInputTokens={budget.maxInputTokens}.",
+        )
