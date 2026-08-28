@@ -1,4 +1,4 @@
-# file: backend/llm/llmQueryFilter.py ; version: 3
+# file: backend/llm/llmQueryFilter.py ; version: 4
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -45,7 +45,12 @@ class LlmQuerySelectionCostEstimator(Protocol):
         - must provide stable results for the same ordered selection during one
           processing run.
 
-    The pipeline validates the returned runtime value before using it.
+    The capability does not promise that cost is additive or monotonic as items
+    are added. Filtering policies must evaluate the complete selections whose
+    costs they depend on rather than deriving those costs from individual item
+    estimates.
+
+    The pipeline validates returned runtime values before using them.
     """
 
     def estimateSelectionTokens(
@@ -71,7 +76,7 @@ class LlmQuerySelectionCostEstimator(Protocol):
 @dataclass(frozen=True, slots=True)
 class LlmQueryItemFilterContext:
     """
-    Represents the immutable inputs supplied to one query-item filter.
+    Represents the inputs supplied to one query-item filter invocation.
 
     queryItems is the complete ordered candidate universe visible to the
     filtering component. Candidate order is significant and must be preserved
@@ -82,6 +87,11 @@ class LlmQueryItemFilterContext:
 
     selectionCostEstimator provides representation-aware cost information
     without exposing query construction or the constructed representation.
+
+    The context object and its candidate tuple are immutable. The cost
+    capability is an injected run-scoped collaborator rather than recursively
+    frozen state; its contract requires stable estimates for identical ordered
+    selections during the run.
     """
 
     queryItems: tuple[LlmQueryItem, ...]
@@ -119,11 +129,11 @@ class LlmQueryItemFilterResult:
 
     Both tuples contain existing QueryItems. This object validates invariants
     that can be established without knowing the original candidate universe:
-    item types, uniqueness within each partition, and disjointness between the
-    two partitions.
+    element types, identity uniqueness within each partition, and disjointness
+    between the two partitions.
 
-    Validation against the complete candidate universe, mandatory-item rules,
-    ordering, and the effective query budget is performed separately by
+    Validation against the original candidate universe, mandatory-item rules,
+    candidate-relative ordering, and the effective query budget is performed by
     validateLlmQueryItemFilterResult().
     """
 
@@ -131,7 +141,7 @@ class LlmQueryItemFilterResult:
     excludedItems: tuple[LlmQueryItem, ...]
 
     def __post_init__(self) -> None:
-        """Validates locally provable filter-result invariants."""
+        """Validates filter-result invariants independent of candidate context."""
         requireInstance(self.selectedItems, tuple, "selectedItems")
         requireInstance(self.excludedItems, tuple, "excludedItems")
 
@@ -146,9 +156,18 @@ class LlmQueryItemFilterResult:
         selectedIdentities = {item.identity for item in self.selectedItems}
         excludedIdentities = {item.identity for item in self.excludedItems}
 
-        if selectedIdentities & excludedIdentities:
+        overlappingIdentities = selectedIdentities & excludedIdentities
+        if overlappingIdentities:
+            identity = min(
+                overlappingIdentities,
+                key=lambda value: (
+                    str(value.ownerId),
+                    value.itemId.value,
+                ),
+            )
             raise ValueError(
-                "A query item must not be both selected and excluded.",
+                "A QueryItem must not be both selected and excluded; "
+                f"ownerId={identity.ownerId!r}, itemId={identity.itemId!r}.",
             )
 
 
@@ -167,8 +186,9 @@ class LlmQueryItemFilter(Protocol):
         - preserves candidate-relative order within each partition;
         - keeps the selected set within the effective query budget.
 
-    Filtering selects information participation. It does not transform
-    QueryItems, synthesize replacements, or determine the final query
+    Filtering determines which candidate information participates in the
+    inference. It does not transform QueryItems, synthesize replacements,
+    reorder participating information, or determine the final query
     representation.
     """
 
@@ -195,21 +215,29 @@ class DefaultLlmQueryItemFilter:
     """
     Implements deterministic greedy importance-based QueryItem selection.
 
-    All mandatory candidates are selected first. If the mandatory selection
-    alone exceeds the effective budget, filtering fails with
-    LlmQueryBudgetError.
+    All mandatory candidates form the minimum acceptable selection. Their
+    complete representation-aware cost is evaluated first. If that
+    mandatory-only selection exceeds the effective query budget, filtering
+    fails immediately with LlmQueryBudgetError.
 
-    Optional candidates are then considered by descending importance. Original
-    candidate order breaks equal-importance ties. Each candidate is added when
-    the complete tentative selection fits the budget according to the supplied
-    representation-aware cost estimator.
+    The policy does not add optional information in an attempt to make an
+    over-budget mandatory selection cheaper through representation or
+    tokenization effects. A mandatory-only selection that cannot fit is treated
+    as an unsatisfiable query budget for this policy.
 
-    A candidate that does not fit is skipped, and later candidates are still
-    considered. Consequently, a lower-importance but cheaper candidate may be
-    selected after a higher-importance candidate was excluded.
+    Optional candidates are considered by descending importance. Original
+    candidate order breaks equal-importance ties. For each candidate, the
+    complete tentative selection is evaluated using the supplied
+    representation-aware cost capability.
 
-    This policy is intentionally greedy and deterministic. It does not claim to
-    find a globally optimal combination of optional QueryItems.
+    A candidate whose tentative selection exceeds budget is skipped, and later
+    candidates are still considered. Consequently, a lower-importance but
+    cheaper candidate may be selected after a higher-importance candidate was
+    excluded.
+
+    This policy is deterministic and greedy. It does not assume additive
+    per-item token costs and does not claim to find a globally optimal
+    combination of optional QueryItems.
     """
 
     def filter(
@@ -228,6 +256,8 @@ class DefaultLlmQueryItemFilter:
             The complete selected/excluded candidate partition.
 
         Raises:
+            TypeError:
+                If context is not an LlmQueryItemFilterContext.
             LlmQueryBudgetError:
                 If the mandatory candidate selection alone exceeds the
                 effective query budget.
@@ -235,6 +265,8 @@ class DefaultLlmQueryItemFilter:
                 If the selection-cost capability returns an invalid estimate.
 
         """
+        requireInstance(context, LlmQueryItemFilterContext, "context")
+
         indexedItems = tuple(enumerate(context.queryItems))
 
         selectedIndices = {
@@ -266,10 +298,8 @@ class DefaultLlmQueryItemFilter:
             tentativeIndices = selectedIndices | {index}
             tentativeItems = _itemsAtIndices(indexedItems, tentativeIndices)
 
-            if (
-                _estimateSelectionTokens(context, tentativeItems)
-                <= context.budget.maxInputTokens
-            ):
+            tentativeTokens = _estimateSelectionTokens(context, tentativeItems)
+            if tentativeTokens <= context.budget.maxInputTokens:
                 selectedIndices = tentativeIndices
 
         return LlmQueryItemFilterResult(
@@ -290,7 +320,8 @@ def validateLlmQueryItemFilterResult(
     """
     Validates one filter result against its filtering context.
 
-    context.queryItems is the authoritative candidate universe.
+    context.queryItems is the sole authoritative candidate universe.
+
     The result must:
 
         - account for every candidate exactly once;
@@ -301,15 +332,17 @@ def validateLlmQueryItemFilterResult(
         - keep the selected representation within the effective query budget.
 
     QueryItem equality is deliberately not used for identity or ordering
-    validation because QueryItem payloads are opaque and may define arbitrary
-    equality behaviour.
+    validation. QueryItem payloads are opaque and may define arbitrary,
+    expensive, non-Boolean, or side-effecting equality behaviour. Framework
+    validation uses LlmQueryItemIdentity and previously established object
+    identity instead.
 
     Args:
         result:
             Filter result to validate.
         context:
-            Original filtering context that produced the candidate universe,
-            effective budget, and selection-cost capability.
+            Original filtering context containing the authoritative candidate
+            universe, effective budget, and selection-cost capability.
 
     Raises:
         TypeError:
@@ -327,8 +360,6 @@ def validateLlmQueryItemFilterResult(
     requireInstance(context, LlmQueryItemFilterContext, "context")
 
     candidates = context.queryItems
-    validateUniqueQueryItemIdentities(candidates)
-
     originals = {item.identity: item for item in candidates}
     returnedItems = result.selectedItems + result.excludedItems
 
@@ -337,14 +368,14 @@ def validateLlmQueryItemFilterResult(
 
         if original is None:
             raise LlmPipelineStateError(
-                "The query-item filter returned an unknown query item; "
+                "The query-item filter returned an unknown QueryItem; "
                 f"ownerId={item.identity.ownerId!r}, "
                 f"itemId={item.identity.itemId!r}.",
             )
 
         if item is not original:
             raise LlmPipelineStateError(
-                "The query-item filter must return the original query-item "
+                "The query-item filter must return the original QueryItem "
                 "instances; "
                 f"ownerId={item.identity.ownerId!r}, "
                 f"itemId={item.identity.itemId!r}.",
@@ -355,7 +386,7 @@ def validateLlmQueryItemFilterResult(
     for candidate in candidates:
         if candidate.identity not in returnedIdentities:
             raise LlmPipelineStateError(
-                "The query-item filter omitted a candidate query item; "
+                "The query-item filter omitted a candidate QueryItem; "
                 f"ownerId={candidate.identity.ownerId!r}, "
                 f"itemId={candidate.identity.itemId!r}.",
             )
@@ -368,7 +399,7 @@ def validateLlmQueryItemFilterResult(
             and candidate.identity not in selectedIdentitySet
         ):
             raise LlmPipelineStateError(
-                "The query-item filter excluded a mandatory query item; "
+                "The query-item filter excluded a mandatory QueryItem; "
                 f"ownerId={candidate.identity.ownerId!r}, "
                 f"itemId={candidate.identity.itemId!r}.",
             )
@@ -381,7 +412,7 @@ def validateLlmQueryItemFilterResult(
     if selectedIdentities != expectedSelectedIdentities:
         raise LlmPipelineStateError(
             "The query-item filter changed the relative order "
-            "of selected query items.",
+            "of selected QueryItems.",
         )
 
     excludedIdentities = tuple(item.identity for item in result.excludedItems)
@@ -395,7 +426,7 @@ def validateLlmQueryItemFilterResult(
     if excludedIdentities != expectedExcludedIdentities:
         raise LlmPipelineStateError(
             "The query-item filter changed the relative order "
-            "of excluded query items.",
+            "of excluded QueryItems.",
         )
 
     estimatedTokens = _estimateSelectionTokens(context, result.selectedItems)
@@ -414,10 +445,9 @@ def _estimateSelectionTokens(
     """
     Returns one validated representation-aware token estimate.
 
-    Invalid extension-component output is translated to
-    LlmPipelineStateError because an invalid estimate represents a violation of
-    the active selection-cost capability contract rather than ordinary query
-    budget exhaustion.
+    Invalid cost-capability output is LlmPipelineStateError because it
+    represents violation of the active run's component contract rather than
+    ordinary inability to satisfy the query budget.
     """
     estimated = context.selectionCostEstimator.estimateSelectionTokens(
         queryItems,
@@ -442,6 +472,11 @@ def _itemsAtIndices(
     indexedItems: tuple[tuple[int, LlmQueryItem], ...],
     indices: set[int],
 ) -> tuple[LlmQueryItem, ...]:
-    """Returns indexed QueryItems selected by index in original run order."""
+    """
+    Returns QueryItems whose indices are selected, preserving candidate order.
+
+    indexedItems and indices are internal values created by the default filter;
+    this helper does not define an independent public validation boundary.
+    """
     return tuple(item for index, item in indexedItems if index in indices)
 
