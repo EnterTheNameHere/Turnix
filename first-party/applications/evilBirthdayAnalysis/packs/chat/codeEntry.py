@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, time, timedelta
+from bisect import bisect_left
+from datetime import date, datetime, time, timedelta
 
 _TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 _TIME_FORMAT = "%H:%M:%S"
-_parsedCache: dict[tuple[str, str], tuple[list[dict[str, object]], datetime]] = {}
+_parsedCache: dict[tuple[str, str], tuple[list[dict[str, object]], list[datetime], datetime]] = {}
 
 
 def _parseLine(line: str, lineNumber: int) -> dict[str, object]:
@@ -39,18 +40,40 @@ def _parseTime(value: str, *, fieldName: str) -> time:
         raise ValueError(f"Application config {fieldName} must be HH:MM:SS, got {value!r}.") from err
 
 
-def _inferMediaZero(records: list[dict[str, object]], chatStartTime: str) -> datetime:
-    if not records:
+def _candidateDates(first: date, last: date) -> set[date]:
+    candidates = {first - timedelta(days=1), first, last, last + timedelta(days=1)}
+    current = first
+    while current <= last:
+        candidates.add(current)
+        current += timedelta(days=1)
+    return candidates
+
+
+def _distanceToCoverage(candidate: datetime, first: datetime, last: datetime) -> float:
+    if candidate < first:
+        return (first - candidate).total_seconds()
+    if candidate > last:
+        return (candidate - last).total_seconds()
+    return 0.0
+
+
+def _inferMediaZero(timestamps: list[datetime], chatStartTime: str) -> datetime:
+    if not timestamps:
         raise ValueError("Cannot align an empty chat file.")
-    firstTimestamp = records[0].get("timestamp")
-    if not isinstance(firstTimestamp, datetime):
-        raise RuntimeError("Parsed chat timestamp has an invalid internal type.")
+    firstTimestamp = timestamps[0]
+    lastTimestamp = timestamps[-1]
     clock = _parseTime(chatStartTime, fieldName="chatStartTime")
-    candidates = [
-        datetime.combine(firstTimestamp.date() + timedelta(days=dayOffset), clock)
-        for dayOffset in (-1, 0, 1)
-    ]
-    return min(candidates, key=lambda candidate: abs((candidate - firstTimestamp).total_seconds()))
+    candidates = [datetime.combine(candidateDate, clock) for candidateDate in _candidateDates(firstTimestamp.date(), lastTimestamp.date())]
+    distances = [(candidate, _distanceToCoverage(candidate, firstTimestamp, lastTimestamp)) for candidate in candidates]
+    minimum = min(distance for _, distance in distances)
+    best = sorted(candidate for candidate, distance in distances if distance == minimum)
+    if len(best) != 1:
+        rendered = ", ".join(candidate.strftime(_TIMESTAMP_FORMAT) for candidate in best)
+        raise ValueError(
+            "chatStartTime is ambiguous across the chat file's date range; "
+            f"candidate media-zero timestamps are: {rendered}.",
+        )
+    return best[0]
 
 
 def _finiteSeconds(payload: dict[str, object], key: str) -> float:
@@ -63,17 +86,28 @@ def _finiteSeconds(payload: dict[str, object], key: str) -> float:
     return result
 
 
-def _records(ctx, chatPath: str, chatStartTime: str) -> tuple[list[dict[str, object]], datetime]:
+def _records(ctx, chatPath: str, chatStartTime: str) -> tuple[list[dict[str, object]], list[datetime], datetime]:
     key = (chatPath, chatStartTime)
     cached = _parsedCache.get(key)
     if cached is not None:
         return cached
-    parsed = [
-        _parseLine(line, lineNumber)
-        for lineNumber, line in enumerate(ctx.io.readLines(chatPath), start=1)
-    ]
-    mediaZero = _inferMediaZero(parsed, chatStartTime)
-    cached = (parsed, mediaZero)
+
+    parsed = [_parseLine(line, lineNumber) for lineNumber, line in enumerate(ctx.io.readLines(chatPath), start=1)]
+    timestamps: list[datetime] = []
+    previous: datetime | None = None
+    for record in parsed:
+        timestamp = record.get("timestamp")
+        if not isinstance(timestamp, datetime):
+            raise RuntimeError("Parsed chat timestamp has an invalid internal type.")
+        if previous is not None and timestamp < previous:
+            raise ValueError(
+                f"Chat records must be chronological; physical line {record['lineNumber']} moves backward in time.",
+            )
+        timestamps.append(timestamp)
+        previous = timestamp
+
+    mediaZero = _inferMediaZero(timestamps, chatStartTime)
+    cached = (parsed, timestamps, mediaZero)
     _parsedCache[key] = cached
     return cached
 
@@ -91,19 +125,17 @@ def _select(ctx, payload):
     if endVideo < startVideo:
         raise ValueError("Chat selector produced an inverted video-time window.")
 
-    parsedRecords, mediaZeroWall = _records(ctx, chatPath, chatStartTime)
+    parsedRecords, timestamps, mediaZeroWall = _records(ctx, chatPath, chatStartTime)
     startWall = mediaZeroWall + timedelta(seconds=startVideo)
     endWall = mediaZeroWall + timedelta(seconds=endVideo)
 
+    startIndex = bisect_left(timestamps, startWall)
+    endIndex = bisect_left(timestamps, endWall)
     records: list[dict[str, object]] = []
-    for record in parsedRecords:
-        timestamp = record["timestamp"]
-        if not isinstance(timestamp, datetime):
-            raise RuntimeError("Parsed chat timestamp has an invalid internal type.")
-        if startWall <= timestamp < endWall:
-            retained = dict(record)
-            retained.pop("timestamp")
-            records.append(retained)
+    for record in parsedRecords[startIndex:endIndex]:
+        retained = dict(record)
+        retained.pop("timestamp")
+        records.append(retained)
 
     return {
         "sourcePath": chatPath,
