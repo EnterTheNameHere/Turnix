@@ -68,11 +68,10 @@ def _batchSnapshot(config: dict[str, object]) -> dict[str, object]:
     start = definition.get("start")
     end = definition.get("end")
     step = definition.get("stepSeconds", 600)
-    chunk = definition.get("chatChunkSeconds", step)
     if type(start) is not str or type(end) is not str:
         raise ValueError("analysisBatch.start/end must be HH:MM:SS strings.")
-    if type(step) is not int or step <= 0 or type(chunk) is not int or chunk <= 0:
-        raise ValueError("analysisBatch stepSeconds/chatChunkSeconds must be positive integers.")
+    if type(step) is not int or step <= 0:
+        raise ValueError("analysisBatch.stepSeconds must be a positive integer.")
     startSeconds = _timeSeconds(start, fieldName="analysisBatch.start")
     endSeconds = _timeSeconds(end, fieldName="analysisBatch.end")
     if endSeconds <= startSeconds:
@@ -83,7 +82,6 @@ def _batchSnapshot(config: dict[str, object]) -> dict[str, object]:
         "startSeconds": startSeconds,
         "endSeconds": endSeconds,
         "stepSeconds": step,
-        "chatChunkSeconds": chunk,
     }
 
 
@@ -112,11 +110,8 @@ def _buildQueryItems(ctx, payload):
     profile = inputValue.get("profile")
     window = inputValue.get("window")
     promptName = inputValue.get("promptName")
-    chatChunkSeconds = inputValue.get("chatChunkSeconds")
     if not isinstance(profile, dict) or not isinstance(window, dict) or type(promptName) is not str:
         raise ValueError("Processing input requires profile, window and promptName.")
-    if type(chatChunkSeconds) is not int or chatChunkSeconds <= 0:
-        raise ValueError("Processing input chatChunkSeconds must be a positive integer.")
 
     previous = _itemMap(payload)
     items: list[QueryItem] = []
@@ -148,44 +143,21 @@ def _buildQueryItems(ctx, payload):
     startVideo = _requireWindowSecond(window, "transcriptStartSeconds")
     endVideo = _requireWindowSecond(window, "transcriptEndSeconds")
     transcriptId = f"transcript:{startVideo}-{endVideo}"
-    transcript = ctx.capabilities.call(
-        "evilAnalysis.transcript@1",
-        {"videoStartSeconds": startVideo, "videoEndSeconds": endVideo},
-    )
-    if not isinstance(transcript, dict):
-        raise RuntimeError("Transcript capability returned an invalid snapshot.")
-    items.append(
-        QueryItem(
+    transcriptItem = previous.get(transcriptId)
+    if transcriptItem is None:
+        transcript = ctx.capabilities.call(
+            "evilAnalysis.transcript@1",
+            {"videoStartSeconds": startVideo, "videoEndSeconds": endVideo},
+        )
+        if not isinstance(transcript, dict):
+            raise RuntimeError("Transcript capability returned an invalid snapshot.")
+        transcriptItem = QueryItem(
             itemId=transcriptId,
             kind="transcript",
             content=transcript["text"],
             metadata={"source": _plain(transcript)},
         )
-    )
-
-    chatStart = _requireWindowSecond(window, "chatStartSeconds")
-    chatEnd = _requireWindowSecond(window, "chatEndSeconds")
-    for chunkStart in range(chatStart, chatEnd, chatChunkSeconds):
-        chunkEnd = min(chunkStart + chatChunkSeconds, chatEnd)
-        itemId = f"chat:{chunkStart}-{chunkEnd}"
-        cached = previous.get(itemId)
-        if cached is not None:
-            items.append(cached)
-            continue
-        chat = ctx.capabilities.call(
-            "evilAnalysis.chat@1",
-            {"videoStartSeconds": chunkStart, "videoEndSeconds": chunkEnd},
-        )
-        if not isinstance(chat, dict):
-            raise RuntimeError("Chat capability returned an invalid snapshot.")
-        items.append(
-            QueryItem(
-                itemId=itemId,
-                kind="chat",
-                content=chat["text"],
-                metadata={"source": _plain(chat), "videoStartSeconds": chunkStart, "videoEndSeconds": chunkEnd},
-            )
-        )
+    items.append(transcriptItem)
     return items
 
 
@@ -210,13 +182,6 @@ def _buildQuery(_ctx, payload):
         for item in byKind.get(kind, []):
             sections.append(f"{heading}\n{item.content}")
 
-    chatItems = sorted(
-        byKind.get("chat", []),
-        key=lambda item: int(item.metadata.get("videoStartSeconds", 0)),
-    )
-    if chatItems:
-        sections.append("CHAT WINDOW\n" + "\n".join(item.content for item in chatItems if item.content))
-
     inputValue = payload["input"]
     return {
         "formatId": "text/plain",
@@ -226,6 +191,7 @@ def _buildQuery(_ctx, payload):
             "promptName": inputValue["promptName"],
             "windowIndex": inputValue["windowIndex"],
             "videoStartSeconds": inputValue["window"]["transcriptStartSeconds"],
+            "chatIncluded": False,
         },
     }
 
@@ -296,8 +262,6 @@ def _run(ctx, payload):
         raise RuntimeError("Profile snapshot has invalid settings.")
     transcriptBefore = _nonNegativeIntegerSeconds(settings, "transcriptBeforeSeconds", 0)
     transcriptAfter = _nonNegativeIntegerSeconds(settings, "transcriptAfterSeconds", 600)
-    chatBefore = _nonNegativeIntegerSeconds(settings, "chatBeforeSeconds", 1800)
-    chatAfter = _nonNegativeIntegerSeconds(settings, "chatAfterSeconds", 1800)
 
     llmConfig = ctx.config.get("llm")
     if not isinstance(llmConfig, dict) or type(llmConfig.get("provider")) is not str:
@@ -324,13 +288,11 @@ def _run(ctx, payload):
             "windowIndex": windowIndex,
             "profile": profile,
             "promptName": promptName,
-            "chatChunkSeconds": batch["chatChunkSeconds"],
             "window": {
                 "positionSeconds": position,
                 "transcriptStartSeconds": transcriptStart,
                 "transcriptEndSeconds": transcriptEnd,
-                "chatStartSeconds": transcriptStart - chatBefore,
-                "chatEndSeconds": transcriptEnd + chatAfter,
+                "chatIncluded": False,
             },
         }
         processingResult = ctx.llm.runProcessing(
