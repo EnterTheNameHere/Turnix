@@ -18,6 +18,17 @@ def _timeSeconds(value: str, *, fieldName: str) -> float:
     return float(hours * 3600 + minutes * 60 + seconds)
 
 
+def _formatStreamTime(seconds: float) -> str:
+    if not math.isfinite(seconds):
+        raise ValueError("Stream-relative timestamp must be finite.")
+    wholeSeconds = math.floor(seconds)
+    sign = "-" if wholeSeconds < 0 else ""
+    absolute = abs(wholeSeconds)
+    hours, remainder = divmod(absolute, 3600)
+    minutes, secondsValue = divmod(remainder, 60)
+    return f"{sign}{hours:02d}:{minutes:02d}:{secondsValue:02d}"
+
+
 def _finiteSeconds(payload: dict[str, object], key: str) -> float:
     value = payload.get(key)
     if type(value) not in {int, float}:
@@ -61,6 +72,7 @@ def _select(ctx, payload):
         raise ValueError("Transcript JSON must contain segments[].")
 
     selectedSegments: list[dict[str, object]] = []
+    renderedSegments: list[str] = []
     for segmentIndex, segment in enumerate(segments):
         if not isinstance(segment, dict) or not isinstance(segment.get("words"), list):
             raise ValueError(f"Transcript segment {segmentIndex} must contain words[].")
@@ -77,9 +89,18 @@ def _select(ctx, payload):
             if endValue > startTranscript and startValue < endTranscript:
                 selectedWords.append({"word": text, "start": startValue, "end": endValue})
         if selectedWords:
-            selectedSegments.append({"segmentIndex": segmentIndex, "words": selectedWords})
+            firstWordStart = float(selectedWords[0]["start"])
+            segmentText = " ".join(str(word["word"]) for word in selectedWords)
+            selectedSegments.append(
+                {
+                    "segmentIndex": segmentIndex,
+                    "streamStartSeconds": firstWordStart,
+                    "streamStartTime": _formatStreamTime(firstWordStart),
+                    "words": selectedWords,
+                }
+            )
+            renderedSegments.append(f"{_formatStreamTime(firstWordStart)} {segmentText}")
 
-    text = " ".join(word["word"] for segment in selectedSegments for word in segment["words"])
     return {
         "sourcePath": transcriptPath,
         "streamStartTime": streamStartTime,
@@ -89,7 +110,7 @@ def _select(ctx, payload):
         "transcriptStartSeconds": startTranscript,
         "transcriptEndSeconds": endTranscript,
         "segments": selectedSegments,
-        "text": text,
+        "text": "\n".join(renderedSegments),
     }
 
 
