@@ -202,10 +202,7 @@ def _buildQueryItems(ctx, payload):
                 itemId=transcriptId,
                 kind="transcript",
                 content=transcript["text"],
-                metadata={
-                    "offsetSeconds": int(chunk["offsetSeconds"]),
-                    "source": _plain(transcript),
-                },
+                metadata={"source": _plain(transcript)},
             )
         items.append(transcriptItem)
     return items
