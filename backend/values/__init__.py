@@ -5,6 +5,11 @@ from backend.values.layer import InMemoryValueLayer, ValueLayer
 from backend.values.payload import Chunk, ChunkValueRef, InlineValueRef, InMemoryChunkStore, ValueRef
 from backend.values.sentinels import MISSING
 from backend.values.transaction import ValueTransaction
+from backend.values.validation import (
+    requireRelativeValueAddress,
+    requireValueAddress,
+    requireValueAddressSegment,
+)
 
 __all__ = [
     "Chunk",
@@ -22,4 +27,7 @@ __all__ = [
     "ValueLayer",
     "ValueRef",
     "ValueTransaction",
+    "requireRelativeValueAddress",
+    "requireValueAddress",
+    "requireValueAddressSegment",
 ]
