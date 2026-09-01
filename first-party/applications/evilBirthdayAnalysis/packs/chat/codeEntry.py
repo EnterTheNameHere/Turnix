@@ -1,10 +1,11 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chat/codeEntry.py ; version: 2
+# file: first-party/applications/evilBirthdayAnalysis/packs/chat/codeEntry.py ; version: 3
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 
 _TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
+_TIME_FORMAT = "%H:%M:%S"
 
 
 def _parseLine(line: str, lineNumber: int) -> dict[str, object]:
@@ -31,6 +32,27 @@ def _parseLine(line: str, lineNumber: int) -> dict[str, object]:
     }
 
 
+def _parseTime(value: str, *, fieldName: str) -> time:
+    try:
+        return datetime.strptime(value, _TIME_FORMAT).time()
+    except ValueError as err:
+        raise ValueError(f"Application config {fieldName} must be HH:MM:SS, got {value!r}.") from err
+
+
+def _inferMediaZero(records: list[dict[str, object]], chatStartTime: str) -> datetime:
+    if not records:
+        raise ValueError("Cannot align an empty chat file.")
+    firstTimestamp = records[0].get("timestamp")
+    if not isinstance(firstTimestamp, datetime):
+        raise RuntimeError("Parsed chat timestamp has an invalid internal type.")
+    clock = _parseTime(chatStartTime, fieldName="chatStartTime")
+    candidates = [
+        datetime.combine(firstTimestamp.date() + timedelta(days=dayOffset), clock)
+        for dayOffset in (-1, 0, 1)
+    ]
+    return min(candidates, key=lambda candidate: abs((candidate - firstTimestamp).total_seconds()))
+
+
 def _nonNegativeSeconds(settings: dict[str, object], key: str, default: float) -> float:
     value = settings.get(key, default)
     if type(value) not in {int, float}:
@@ -45,17 +67,9 @@ def _select(ctx, payload):
     if not isinstance(payload, dict) or not isinstance(payload.get("profile"), dict) or not isinstance(payload.get("transcript"), dict):
         raise ValueError("Chat selection requires profile and transcript window snapshots.")
     chatPath = ctx.config.get("chatFile")
-    alignment = ctx.config.get("alignment")
-    if type(chatPath) is not str or not isinstance(alignment, dict) or type(alignment.get("wallClockAtMediaZero")) is not str:
-        raise ValueError("chatFile and alignment.wallClockAtMediaZero must be configured.")
-    try:
-        mediaZero = datetime.fromisoformat(alignment["wallClockAtMediaZero"])
-    except ValueError as err:
-        raise ValueError("alignment.wallClockAtMediaZero must be an ISO date-time.") from err
-    if mediaZero.tzinfo is not None:
-        raise ValueError(
-            "alignment.wallClockAtMediaZero must be timezone-naive because the source chat format contains no timezone.",
-        )
+    chatStartTime = ctx.config.get("chatStartTime")
+    if type(chatPath) is not str or type(chatStartTime) is not str:
+        raise ValueError("chatFile and chatStartTime must be configured.")
 
     profile = payload["profile"]
     settings = profile.get("settings")
@@ -69,20 +83,26 @@ def _select(ctx, payload):
             raise ValueError(f"Chat Pack does not support profile {other!r}.")
 
     try:
-        transcriptStart = float(payload["transcript"]["startSeconds"])
-        transcriptEnd = float(payload["transcript"]["endSeconds"])
+        videoStart = float(payload["transcript"]["videoStartSeconds"])
+        videoEnd = float(payload["transcript"]["videoEndSeconds"])
     except (KeyError, TypeError, ValueError) as err:
-        raise ValueError("Transcript snapshot must contain numeric startSeconds/endSeconds.") from err
-    if not math.isfinite(transcriptStart) or not math.isfinite(transcriptEnd) or transcriptEnd < transcriptStart:
-        raise ValueError("Transcript snapshot contains an invalid time window.")
+        raise ValueError("Transcript snapshot must contain numeric videoStartSeconds/videoEndSeconds.") from err
+    if not math.isfinite(videoStart) or not math.isfinite(videoEnd) or videoEnd < videoStart:
+        raise ValueError("Transcript snapshot contains an invalid video-time window.")
 
-    startMedia = transcriptStart - chatBefore
-    endMedia = transcriptEnd + chatAfter
-    startWall = mediaZero + timedelta(seconds=startMedia)
-    endWall = mediaZero + timedelta(seconds=endMedia)
+    parsedRecords = [
+        _parseLine(line, lineNumber)
+        for lineNumber, line in enumerate(ctx.io.readLines(chatPath), start=1)
+    ]
+    mediaZeroWall = _inferMediaZero(parsedRecords, chatStartTime)
+
+    startVideo = videoStart - chatBefore
+    endVideo = videoEnd + chatAfter
+    startWall = mediaZeroWall + timedelta(seconds=startVideo)
+    endWall = mediaZeroWall + timedelta(seconds=endVideo)
+
     records: list[dict[str, object]] = []
-    for lineNumber, line in enumerate(ctx.io.readLines(chatPath), start=1):
-        record = _parseLine(line, lineNumber)
+    for record in parsedRecords:
         timestamp = record["timestamp"]
         if not isinstance(timestamp, datetime):
             raise RuntimeError("Parsed chat timestamp has an invalid internal type.")
@@ -90,9 +110,13 @@ def _select(ctx, payload):
             retained = dict(record)
             retained.pop("timestamp")
             records.append(retained)
+
     return {
         "sourcePath": chatPath,
-        "wallClockAtMediaZero": alignment["wallClockAtMediaZero"],
+        "chatStartTime": chatStartTime,
+        "wallClockAtMediaZero": mediaZeroWall.strftime(_TIMESTAMP_FORMAT),
+        "videoStartSeconds": startVideo,
+        "videoEndSeconds": endVideo,
         "startWallClock": startWall.strftime(_TIMESTAMP_FORMAT),
         "endWallClock": endWall.strftime(_TIMESTAMP_FORMAT),
         "records": records,
