@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
@@ -38,14 +37,13 @@ def _timeSeconds(value: str, *, fieldName: str) -> int:
     return hours * 3600 + minutes * 60 + seconds
 
 
-def _nonNegativeSeconds(settings: dict[str, object], key: str, default: float) -> float:
+def _nonNegativeIntegerSeconds(settings: dict[str, object], key: str, default: int) -> int:
     value = settings.get(key, default)
-    if type(value) not in {int, float}:
-        raise TypeError(f"Profile setting {key!r} must be numeric.")
-    result = float(value)
-    if not math.isfinite(result) or result < 0:
-        raise ValueError(f"Profile setting {key!r} must be a finite non-negative number.")
-    return result
+    if type(value) is not int:
+        raise TypeError(f"Profile setting {key!r} must be an exact integer number of seconds.")
+    if value < 0:
+        raise ValueError(f"Profile setting {key!r} must be non-negative.")
+    return value
 
 
 def _profileSnapshot(config: dict[str, object]) -> dict[str, object]:
@@ -59,7 +57,7 @@ def _profileSnapshot(config: dict[str, object]) -> dict[str, object]:
         raise LookupError(f"Active profile is not defined: {name}.") from err
     if not isinstance(definition, dict) or type(definition.get("description")) is not str:
         raise ValueError(f"Profile {name!r} requires a description.")
-    settings = {key: _plain(value) for key, value in definition.items() if key != "description" and key != "anchor"}
+    settings = {key: _plain(value) for key, value in definition.items() if key != "description"}
     return {"name": name, "description": definition["description"], "settings": settings}
 
 
@@ -98,6 +96,13 @@ def _itemMap(payload: dict[str, object]) -> dict[str, QueryItem]:
         item = QueryItem.fromSnapshot(snapshot)
         result[item.itemId] = item
     return result
+
+
+def _requireWindowSecond(window: dict[str, object], key: str) -> int:
+    value = window.get(key)
+    if type(value) is not int:
+        raise TypeError(f"Processing window {key!r} must be an exact integer second offset.")
+    return value
 
 
 def _buildQueryItems(ctx, payload):
@@ -140,9 +145,9 @@ def _buildQueryItems(ctx, payload):
         )
     items.append(promptItem)
 
-    startVideo = float(window["transcriptStartSeconds"])
-    endVideo = float(window["transcriptEndSeconds"])
-    transcriptId = f"transcript:{int(startVideo)}-{int(endVideo)}"
+    startVideo = _requireWindowSecond(window, "transcriptStartSeconds")
+    endVideo = _requireWindowSecond(window, "transcriptEndSeconds")
+    transcriptId = f"transcript:{startVideo}-{endVideo}"
     transcript = ctx.capabilities.call(
         "evilAnalysis.transcript@1",
         {"videoStartSeconds": startVideo, "videoEndSeconds": endVideo},
@@ -158,8 +163,8 @@ def _buildQueryItems(ctx, payload):
         )
     )
 
-    chatStart = int(window["chatStartSeconds"])
-    chatEnd = int(window["chatEndSeconds"])
+    chatStart = _requireWindowSecond(window, "chatStartSeconds")
+    chatEnd = _requireWindowSecond(window, "chatEndSeconds")
     for chunkStart in range(chatStart, chatEnd, chatChunkSeconds):
         chunkEnd = min(chunkStart + chatChunkSeconds, chatEnd)
         itemId = f"chat:{chunkStart}-{chunkEnd}"
@@ -207,7 +212,7 @@ def _buildQuery(_ctx, payload):
 
     chatItems = sorted(
         byKind.get("chat", []),
-        key=lambda item: float(item.metadata.get("videoStartSeconds", 0)),
+        key=lambda item: int(item.metadata.get("videoStartSeconds", 0)),
     )
     if chatItems:
         sections.append("CHAT WINDOW\n" + "\n".join(item.content for item in chatItems if item.content))
@@ -225,12 +230,27 @@ def _buildQuery(_ctx, payload):
     }
 
 
-def _resultRecord(ctx, *, batchId: str, inputValue: dict[str, object], processingResult) -> dict[str, object]:
-    llmResult = processingResult.llm
-    return {
+def _finalizeWindow(ctx, payload):
+    if not isinstance(payload, dict) or not isinstance(payload.get("input"), dict) or not isinstance(payload.get("llm"), dict):
+        raise ValueError("FINALIZE requires processing input and LLM evidence.")
+    inputValue = payload["input"]
+    llm = payload["llm"]
+    query = llm.get("query")
+    response = llm.get("response")
+    if not isinstance(query, dict) or not isinstance(response, dict):
+        raise ValueError("FINALIZE requires query and response evidence.")
+    exactPayload = query.get("payload")
+    if type(exactPayload) is not str:
+        raise TypeError("Evil Birthday analysis finalization expects a text/plain string query payload.")
+
+    batchId = inputValue.get("batchId")
+    if type(batchId) is not str:
+        raise ValueError("Processing input batchId must be a string.")
+
+    record = {
         "resultId": newRuntimeId(),
         "batchId": batchId,
-        "processingRunId": processingResult.processingRunId,
+        "processingRunId": payload["processingRunId"],
         "createdAt": datetime.now(UTC).isoformat(),
         "application": {
             "applicationId": ctx.identity.applicationId,
@@ -238,26 +258,26 @@ def _resultRecord(ctx, *, batchId: str, inputValue: dict[str, object], processin
         },
         "profile": _plain(inputValue["profile"]),
         "window": _plain(inputValue["window"]),
-        "queryItems": [item.snapshot() for item in processingResult.queryItems],
+        "queryItems": _plain(payload["queryItems"]),
         "llm": {
-            "provider": llmResult.providerName,
-            "providerOwnerId": llmResult.providerOwnerId,
-            "model": llmResult.model,
-            "requestedProviderOptions": _plain(llmResult.providerOptions),
-            "executionProfile": {
-                "contextWindowTokens": llmResult.executionProfile.contextWindowTokens,
-                "metadata": _plain(llmResult.executionProfile.metadata),
-            },
-            "providerMetadata": _plain(llmResult.providerMetadata),
+            "provider": llm.get("providerName"),
+            "providerOwnerId": llm.get("providerOwnerId"),
+            "model": llm.get("model"),
+            "requestedProviderOptions": _plain(llm.get("providerOptions", {})),
+            "executionProfile": _plain(llm.get("executionProfile", {})),
+            "providerMetadata": _plain(llm.get("providerMetadata", {})),
+            "observerErrors": _plain(llm.get("observerErrors", [])),
         },
         "llamaCpp": _plain(ctx.config.get("llamaCpp", {})),
         "input": {
-            "formatId": llmResult.query.formatId,
-            "exactPayload": llmResult.query.payload,
-            "metadata": _plain(llmResult.query.metadata),
+            "formatId": query.get("formatId"),
+            "exactPayload": exactPayload,
+            "metadata": _plain(query.get("metadata", {})),
         },
-        "response": {"rawText": llmResult.rawText},
+        "response": {"rawText": response.get("rawText", "")},
     }
+    saved = ctx.capabilities.call("evilAnalysis.results@1", record)
+    return {"result": record, "saved": saved}
 
 
 def _run(ctx, payload):
@@ -274,10 +294,10 @@ def _run(ctx, payload):
     settings = profile["settings"]
     if not isinstance(settings, dict):
         raise RuntimeError("Profile snapshot has invalid settings.")
-    transcriptBefore = _nonNegativeSeconds(settings, "transcriptBeforeSeconds", 0.0)
-    transcriptAfter = _nonNegativeSeconds(settings, "transcriptAfterSeconds", 600.0)
-    chatBefore = _nonNegativeSeconds(settings, "chatBeforeSeconds", 1800.0)
-    chatAfter = _nonNegativeSeconds(settings, "chatAfterSeconds", 1800.0)
+    transcriptBefore = _nonNegativeIntegerSeconds(settings, "transcriptBeforeSeconds", 0)
+    transcriptAfter = _nonNegativeIntegerSeconds(settings, "transcriptAfterSeconds", 600)
+    chatBefore = _nonNegativeIntegerSeconds(settings, "chatBeforeSeconds", 1800)
+    chatAfter = _nonNegativeIntegerSeconds(settings, "chatAfterSeconds", 1800)
 
     llmConfig = ctx.config.get("llm")
     if not isinstance(llmConfig, dict) or type(llmConfig.get("provider")) is not str:
@@ -318,20 +338,22 @@ def _run(ctx, payload):
             inputValue=inputValue,
             buildQueryItemsCapabilityId="evilAnalysis.buildQueryItems@1",
             buildQueryCapabilityId="evilAnalysis.buildQuery@1",
+            finalizeCapabilityId="evilAnalysis.finalizeWindow@1",
             providerName=llmConfig["provider"],
             model=model,
             providerOptions=providerOptions,
             streamObserver=observer,
         )
-        record = _resultRecord(ctx, batchId=batchId, inputValue=inputValue, processingResult=processingResult)
-        saved = ctx.capabilities.call("evilAnalysis.results@1", record)
+        finalized = processingResult.finalizeResult
+        if not isinstance(finalized, dict) or not isinstance(finalized.get("result"), dict) or not isinstance(finalized.get("saved"), dict):
+            raise RuntimeError("Window finalization returned an invalid result.")
         results.append(
             {
                 "windowIndex": windowIndex,
                 "positionSeconds": position,
                 "processingRunId": processingResult.processingRunId,
-                "result": record,
-                "saved": saved,
+                "result": finalized["result"],
+                "saved": finalized["saved"],
             }
         )
 
@@ -341,4 +363,5 @@ def _run(ctx, payload):
 def onLoad(ctx):
     ctx.capabilities.register("evilAnalysis.buildQueryItems@1", _buildQueryItems)
     ctx.capabilities.register("evilAnalysis.buildQuery@1", _buildQuery)
+    ctx.capabilities.register("evilAnalysis.finalizeWindow@1", _finalizeWindow)
     ctx.capabilities.register("evilAnalysis.run@1", _run)
