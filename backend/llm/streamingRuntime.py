@@ -60,12 +60,13 @@ class StreamingLlmResult:
 
 @dataclass(frozen=True, slots=True)
 class LlmProcessingResult:
-    """Completed ProcessingRun plus streamed provider evidence."""
+    """Completed ProcessingRun plus streamed provider and finalization evidence."""
 
     processingRunId: str
     queryItems: tuple[QueryItem, ...]
     reusableQueryItems: tuple[QueryItem, ...]
     llm: StreamingLlmResult
+    finalizeResult: object | None = None
 
 
 class LlmProcessingPipeline:
@@ -75,6 +76,12 @@ class LlmProcessingPipeline:
     overlapping ProcessingRuns do not repeatedly commit the same large source
     material. Filtering affects only the accepted query for the current run; it
     does not erase reusable items prepared by BUILD_QUERY_ITEMS.
+
+    Optional application finalization executes after all authoritative state has
+    been staged and validated, but before the outer transaction commits. A
+    finalization failure therefore aborts the ProcessingRun rather than leaving
+    an authoritative success whose required application-side result was not
+    produced.
     """
 
     def __init__(
@@ -125,6 +132,8 @@ class LlmProcessingPipeline:
         model: str | None = None,
         providerOptions: Mapping[str, ImmutableValue] | None = None,
         filterQueryItemsCapabilityId: str | None = None,
+        finalizeCapabilityId: str | None = None,
+        finalizeInput: object | None = None,
         streamObserver: Callable[[LlmStreamEvent], None] | None = None,
     ) -> LlmProcessingResult:
         if self._state is None or self._capabilityInvoker is None:
@@ -229,6 +238,20 @@ class LlmProcessingPipeline:
             )
 
             run.enterStage(ProcessingStage.FINALIZE)
+            finalizeResult = None
+            if finalizeCapabilityId is not None:
+                finalizeResult = self._capabilityInvoker(
+                    finalizeCapabilityId,
+                    self._finalizePayload(
+                        run=run,
+                        inputValue=inputValue,
+                        finalizeInput=finalizeInput,
+                        reusableItems=reusableItems,
+                        acceptedItems=acceptedItems,
+                        llmResult=llmResult,
+                    ),
+                )
+
             transaction.commit()
             committed = True
             run.complete()
@@ -238,6 +261,7 @@ class LlmProcessingPipeline:
                 queryItems=acceptedItems,
                 reusableQueryItems=reusableItems,
                 llm=llmResult,
+                finalizeResult=finalizeResult,
             )
         except Exception:
             run.fail()
@@ -312,6 +336,42 @@ class LlmProcessingPipeline:
             evidence["payloadBytes"] = len(query.payload)
             evidence["payloadSha256"] = hashlib.sha256(query.payload).hexdigest()
         return evidence
+
+    @staticmethod
+    def _finalizePayload(
+        *,
+        run: ProcessingRun,
+        inputValue: object,
+        finalizeInput: object | None,
+        reusableItems: tuple[QueryItem, ...],
+        acceptedItems: tuple[QueryItem, ...],
+        llmResult: StreamingLlmResult,
+    ) -> dict[str, object]:
+        return {
+            "processingRunId": run.processingRunId,
+            "input": inputValue,
+            "finalizeInput": finalizeInput,
+            "reusableQueryItems": [item.snapshot() for item in reusableItems],
+            "queryItems": [item.snapshot() for item in acceptedItems],
+            "llm": {
+                "providerName": llmResult.providerName,
+                "providerOwnerId": llmResult.providerOwnerId,
+                "model": llmResult.model,
+                "providerOptions": plainImmutableValue(llmResult.providerOptions),
+                "executionProfile": {
+                    "contextWindowTokens": llmResult.executionProfile.contextWindowTokens,
+                    "metadata": plainImmutableValue(llmResult.executionProfile.metadata),
+                },
+                "providerMetadata": plainImmutableValue(llmResult.providerMetadata),
+                "observerErrors": list(llmResult.observerErrors),
+                "query": {
+                    "formatId": llmResult.query.formatId,
+                    "payload": llmResult.query.payload,
+                    "metadata": plainImmutableValue(llmResult.query.metadata),
+                },
+                "response": {"rawText": llmResult.rawText},
+            },
+        }
 
     def _resolveExecution(
         self,
