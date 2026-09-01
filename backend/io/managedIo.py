@@ -1,4 +1,4 @@
-# file: backend/io/managedIo.py ; version: 3
+# file: backend/io/managedIo.py ; version: 4
 from __future__ import annotations
 
 import contextlib
@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from backend.core.errors import ActantError
 from backend.core.runtimeIds import newRuntimeId
 
 __all__ = [
@@ -20,8 +21,8 @@ __all__ = [
 ]
 
 
-class IoError(RuntimeError):
-    """Base error for Actant-mediated file operations."""
+class IoError(ActantError, RuntimeError):
+    """Base error for declared Actant-mediated file-operation failures."""
 
 
 class IoPathError(IoError):
@@ -89,31 +90,31 @@ class ManagedIo:
         temporary = resolved.with_name(f".{resolved.name}.{newRuntimeId()}.tmp")
         try:
             resolved.parent.mkdir(parents=True, exist_ok=True)
-            temporary.write_text(text, encoding="utf-8", newline="\n")
+            temporary.write_text(text, encoding="utf-8")
             temporary.replace(resolved)
         except PermissionError as err:
-            with contextlib.suppress(OSError):
-                temporary.unlink()
             raise IoPermissionError(f"Permission denied while writing {resolved}.") from err
         except OSError as err:
+            raise IoWriteError(f"Failed to atomically write {resolved}: {err}.") from err
+        finally:
             with contextlib.suppress(OSError):
-                temporary.unlink()
-            raise IoWriteError(f"Failed atomic write to {resolved}: {err}.") from err
+                temporary.unlink(missing_ok=True)
 
     def writeJsonAtomic(self, path: str | Path, value: object) -> None:
+        resolved = self._path(path)
         try:
             text = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + "\n"
         except (TypeError, ValueError) as err:
-            raise IoEncodeError(f"Value is not deterministically JSON serializable: {err}.") from err
-        self.writeTextAtomic(path, text)
+            raise IoEncodeError(f"Value cannot be encoded as JSON for {resolved}: {err}.") from err
+        self.writeTextAtomic(resolved, text)
 
     @staticmethod
     def _path(path: str | Path) -> Path:
+        if isinstance(path, Path):
+            return path.expanduser().resolve()
+        if type(path) is not str or not path:
+            raise IoPathError("I/O path must be a non-empty string or pathlib.Path.")
         try:
-            if isinstance(path, Path):
-                return path.expanduser().resolve()
-            if type(path) is str and path:
-                return Path(path).expanduser().resolve()
-        except (OSError, RuntimeError) as err:
-            raise IoPathError(f"Failed to resolve I/O path {path!r}: {err}.") from err
-        raise TypeError("path must be a pathlib.Path or non-empty exact built-in string.")
+            return Path(path).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError) as err:
+            raise IoPathError(f"Invalid I/O path {path!r}: {err}.") from err
