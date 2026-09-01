@@ -1,6 +1,7 @@
-# file: backend/runtime/runtimeHost.py ; version: 3
+# file: backend/runtime/runtimeHost.py ; version: 4
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from threading import RLock
 
@@ -21,6 +22,10 @@ class RuntimeHost:
     All capability execution enters one re-entrant ApplicationRun lane. Nested
     capability calls remain legal, while unrelated callers cannot execute the
     same ApplicationRun concurrently merely because Python threads are available.
+
+    Bootstrap configuration is detached at construction and exposed only as
+    snapshots. Caller-owned mutable dictionaries therefore cannot silently
+    change later Pack invocations after the ApplicationRun has started.
     """
 
     def __init__(self, *, application: Application | None = None, config: dict[str, object] | None = None) -> None:
@@ -29,9 +34,14 @@ class RuntimeHost:
         self.capabilities = CapabilityRegistry()
         self.llmProviders = LlmProviderRegistry()
         self.llmPipeline = StreamingLlmPipeline(providers=self.llmProviders)
-        self.config = {} if config is None else dict(config)
+        self._config = {} if config is None else deepcopy(config)
         self._codeEntries: dict[str, tuple[CodeEntryIdentity, Path]] = {}
         self._lane = RLock()
+
+    @property
+    def config(self) -> dict[str, object]:
+        """Returns a detached snapshot of the runtime bootstrap configuration."""
+        return deepcopy(self._config)
 
     def start(self) -> None:
         with self._lane:
@@ -57,7 +67,7 @@ class RuntimeHost:
             llmProviders=self.llmProviders,
             llmPipeline=self.llmPipeline,
             registrationScope=registrationScope,
-            config=self.config,
+            config=self._config,
             capabilityInvoker=lambda capabilityId, payload=None: self.invokeCapability(capabilityId, payload),
         )
 
