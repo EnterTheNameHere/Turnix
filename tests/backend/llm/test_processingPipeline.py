@@ -198,3 +198,31 @@ def test_processing_commit_does_not_require_query_payload_to_be_json_encodable()
     runRecord = state.load(f"processing/opaque/runs/{result.processingRunId}")
     assert runRecord["query"]["payloadType"] == "object"
     assert "payload" not in runRecord["query"]
+
+
+def test_finalize_failure_aborts_processing_state():
+    state = CommittedValueLayer()
+
+    def invoke(capabilityId, payload):
+        if capabilityId == "build-items@1":
+            return [QueryItem(itemId="final", kind="test", content="final")]
+        if capabilityId == "build-query@1":
+            return {"formatId": "text/plain", "payload": "final"}
+        if capabilityId == "finalize@1":
+            assert payload["llm"]["response"]["rawText"] == "ok"
+            raise RuntimeError("persistence failed")
+        raise AssertionError(capabilityId)
+
+    pipeline = LlmProcessingPipeline(providers=_providers(), state=state, capabilityInvoker=invoke)
+    with pytest.raises(RuntimeError, match="persistence failed"):
+        pipeline.runProcessing(
+            memoryKey="finalize",
+            inputValue={},
+            buildQueryItemsCapabilityId="build-items@1",
+            buildQueryCapabilityId="build-query@1",
+            finalizeCapabilityId="finalize@1",
+            providerName="good",
+        )
+
+    assert state.load("processing/finalize/currentqueryitems") is not None
+    assert state.revisionId("processing/finalize/currentqueryitems") == 0
