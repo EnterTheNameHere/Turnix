@@ -1,4 +1,4 @@
-# file: backend/packs/runtime.py ; version: 3
+# file: backend/packs/runtime.py ; version: 4
 from __future__ import annotations
 
 import importlib.util
@@ -45,6 +45,8 @@ class ManualActivationPlan:
         packIds = tuple(value["packs"])
         if not all(type(item) is str and item for item in packIds):
             raise ValueError("Every activation plan Pack identity must be a non-empty string.")
+        if len(set(packIds)) != len(packIds):
+            raise ValueError("Manual activation plan must not contain the same Pack identity more than once.")
         return cls(packIds=packIds)
 
 
@@ -65,11 +67,19 @@ class PackResolver:
                 if not isinstance(entriesSource, list):
                     raise ValueError(f"Pack {packId!r} has invalid codeEntries.")
                 entries: list[CodeEntryDefinition] = []
+                seenEntryIds: set[str] = set()
                 for item in entriesSource:
                     if not isinstance(item, dict) or type(item.get("id")) is not str or type(item.get("source")) is not str:
                         raise ValueError(f"Pack {packId!r} has an invalid CodeEntry declaration.")
-                    entries.append(CodeEntryDefinition(codeEntryId=item["id"], source=item["source"]))
-                matches.append(PackDefinition(packId=packId, root=manifestPath.parent, codeEntries=tuple(entries)))
+                    entryId = item["id"]
+                    source = item["source"]
+                    if not entryId or not source:
+                        raise ValueError(f"Pack {packId!r} CodeEntry id/source must not be blank.")
+                    if entryId in seenEntryIds:
+                        raise ValueError(f"Pack {packId!r} declares duplicate CodeEntry id {entryId!r}.")
+                    seenEntryIds.add(entryId)
+                    entries.append(CodeEntryDefinition(codeEntryId=entryId, source=source))
+                matches.append(PackDefinition(packId=packId, root=manifestPath.parent.resolve(), codeEntries=tuple(entries)))
         if not matches:
             raise LookupError(f"Pack was not found: {packId}.")
         if len(matches) != 1:
@@ -86,21 +96,52 @@ class _LoadedCodeEntry:
     state: object | None
 
 
+@dataclass(slots=True)
+class _LoadedPack:
+    pack: PackDefinition
+    entries: tuple[_LoadedCodeEntry, ...]
+    registrationScope: RegistrationScope
+
+
 class PackLoader:
-    """Mechanical loader/activator for an already ordered manual Pack plan."""
+    """Mechanical loader/activator for an already ordered manual Pack plan.
+
+    The loader performs no dependency solving or reordering. Its intelligence
+    is limited to enforcing lifecycle integrity for the exact Pack sequence it
+    was given.
+    """
 
     def __init__(self, *, host: RuntimeHost, resolver: PackResolver) -> None:
         self._host = host
         self._resolver = resolver
-        self._loaded: list[_LoadedCodeEntry] = []
+        self._loadedPacks: list[_LoadedPack] = []
 
     def activate(self, plan: ManualActivationPlan) -> None:
-        for packId in plan.packIds:
-            self.activatePack(self._resolver.requireSingle(packId))
+        self._host.requireActive()
+        checkpoint = len(self._loadedPacks)
+        try:
+            for packId in plan.packIds:
+                self.activatePack(self._resolver.requireSingle(packId))
+        except Exception as activationError:
+            cleanupErrors = self._closeLoadedPacks(self._loadedPacks[checkpoint:])
+            del self._loadedPacks[checkpoint:]
+            if cleanupErrors:
+                raise ExceptionGroup(
+                    "Activation plan failed and cleanup also reported errors.",
+                    [activationError, *cleanupErrors],
+                ) from None
+            raise
 
     def activatePack(self, pack: PackDefinition) -> None:
+        self._host.requireActive()
+        if any(item.pack.packId == pack.packId for item in self._loadedPacks):
+            raise RuntimeError(f"Pack is already active in this ApplicationRun: {pack.packId}.")
+
         scope = RegistrationScope()
-        activated: list[_LoadedCodeEntry] = []
+        entries: list[_LoadedCodeEntry] = []
+        loadedModules: list[ModuleType] = []
+        registeredOwners: list[str] = []
+
         try:
             for definition in pack.codeEntries:
                 instanceId = newRuntimeId()
@@ -112,57 +153,96 @@ class PackLoader:
                     codeEntryInstanceId=instanceId,
                 )
                 module = self._loadModule(pack=pack, definition=definition, instanceId=instanceId)
+                loadedModules.append(module)
                 context = self._host.createContext(identity=identity, packRoot=pack.root, registrationScope=scope)
                 try:
                     callback = getattr(module, "onLoad", None)
                     state = None if callback is None else callback(context)
                 finally:
                     context.invalidate()
-                activated.append(_LoadedCodeEntry(identity=identity, pack=pack, module=module, state=state))
+                entries.append(_LoadedCodeEntry(identity=identity, pack=pack, module=module, state=state))
+
+            # Owners become resolvable before their registrations become public.
+            # Publication remains the final externally visible activation step.
+            for item in entries:
+                self._host.registerCodeEntry(item.identity, item.pack.root)
+                registeredOwners.append(item.identity.codeEntryInstanceId)
             scope.publish()
-        except Exception:
+
+        except Exception as activationError:
             scope.withdraw()
-            for item in reversed(activated):
-                callback = getattr(item.module, "onUnload", None)
-                if callback is not None:
-                    try:
-                        cleanupScope = RegistrationScope()
-                        context = self._host.createContext(identity=item.identity, packRoot=item.pack.root,
-                                                           registrationScope=cleanupScope)
-                        try:
-                            callback(context, item.state)
-                        finally:
-                            context.invalidate()
-                            cleanupScope.withdraw()
-                    except Exception:
-                        pass
+            for ownerId in reversed(registeredOwners):
+                self._host.unregisterCodeEntry(ownerId)
+
+            cleanupErrors = self._unloadEntries(entries)
+            for module in reversed(loadedModules):
+                sys.modules.pop(module.__name__, None)
+
+            if cleanupErrors:
+                raise ExceptionGroup(
+                    f"Pack {pack.packId!r} activation failed and cleanup also reported errors.",
+                    [activationError, *cleanupErrors],
+                ) from None
             raise
-        self._loaded.extend(activated)
-        for item in activated:
-            self._host.registerCodeEntry(item.identity, item.pack.root)
+
+        self._loadedPacks.append(_LoadedPack(pack=pack, entries=tuple(entries), registrationScope=scope))
 
     def close(self) -> None:
-        for item in reversed(self._loaded):
+        cleanupErrors = self._closeLoadedPacks(tuple(self._loadedPacks))
+        self._loadedPacks.clear()
+        if cleanupErrors:
+            raise ExceptionGroup("PackLoader cleanup reported errors.", cleanupErrors)
+
+    def _closeLoadedPacks(self, packs: tuple[_LoadedPack, ...] | list[_LoadedPack]) -> list[Exception]:
+        errors: list[Exception] = []
+        for loadedPack in reversed(tuple(packs)):
+            # Remove public participation first so no new invocation starts
+            # while CodeEntry resources are being torn down.
+            loadedPack.registrationScope.withdraw()
+            errors.extend(self._unloadEntries(list(loadedPack.entries)))
+            for item in reversed(loadedPack.entries):
+                self._host.unregisterCodeEntry(item.identity.codeEntryInstanceId)
+                sys.modules.pop(item.module.__name__, None)
+        return errors
+
+    def _unloadEntries(self, entries: list[_LoadedCodeEntry]) -> list[Exception]:
+        errors: list[Exception] = []
+        for item in reversed(entries):
             callback = getattr(item.module, "onUnload", None)
-            if callback is not None:
-                scope = RegistrationScope()
-                context = self._host.createContext(identity=item.identity, packRoot=item.pack.root, registrationScope=scope)
-                try:
-                    callback(context, item.state)
-                finally:
-                    context.invalidate()
-                    scope.withdraw()
-            self._host.capabilities.unregisterOwnedBy(item.identity.codeEntryInstanceId)
-            self._host.llmProviders.unregisterOwnedBy(item.identity.codeEntryInstanceId)
-            sys.modules.pop(item.module.__name__, None)
-        self._loaded.clear()
+            if callback is None:
+                continue
+            cleanupScope = RegistrationScope()
+            context = self._host.createContext(
+                identity=item.identity,
+                packRoot=item.pack.root,
+                registrationScope=cleanupScope,
+            )
+            try:
+                callback(context, item.state)
+            except Exception as err:
+                errors.append(err)
+            finally:
+                context.invalidate()
+                cleanupScope.withdraw()
+        return errors
 
     @staticmethod
     def _loadModule(*, pack: PackDefinition, definition: CodeEntryDefinition, instanceId: str) -> ModuleType:
-        sourcePath = (pack.root / definition.source).resolve()
+        packRoot = pack.root.resolve()
+        sourcePath = (packRoot / definition.source).resolve()
+        if not sourcePath.is_relative_to(packRoot):
+            raise ValueError(
+                f"CodeEntry source escapes Pack root for {pack.packId!r}/{definition.codeEntryId!r}: {definition.source!r}.",
+            )
         if not sourcePath.is_file():
             raise FileNotFoundError(f"CodeEntry source does not exist: {sourcePath}.")
-        moduleName = f"_actant_{pack.packId.replace('.', '_')}_{definition.codeEntryId.replace('.', '_')}_{instanceId.replace('-', '_')}"
+        if sourcePath.suffix != ".py":
+            raise ValueError(f"Python CodeEntry source must use a .py file: {sourcePath}.")
+
+        moduleName = (
+            f"_actant_{pack.packId.replace('.', '_')}_"
+            f"{definition.codeEntryId.replace('.', '_')}_{instanceId.replace('-', '_')}"
+        )
         spec = importlib.util.spec_from_file_location(moduleName, sourcePath)
         if spec is None or spec.loader is None:
             raise RuntimeError(f"Could not create Python module spec for {sourcePath}.")
