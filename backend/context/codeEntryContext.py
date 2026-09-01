@@ -5,12 +5,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from backend.core.immutableValue import ImmutableValueFreezer
+from backend.llm.errors import LlmProviderProtocolError
+from backend.llm.llmTypes import LlmExecutionProfile, LlmQuery
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from backend.capabilities.runtime import CapabilityHandler, CapabilityRegistry
     from backend.core.immutableValue import ImmutableValue
     from backend.io.managedIo import ManagedIo
-    from backend.llm.llmTypes import LlmQuery, LlmStreamEvent, LlmStreamProvider
+    from backend.llm.llmTypes import LlmStreamEvent, LlmStreamProvider
     from backend.llm.streamingRuntime import LlmProcessingPipeline, LlmProcessingResult, LlmProviderRegistry, StreamingLlmResult
     from backend.registration import RegistrationScope
 
@@ -95,6 +99,33 @@ class _LlmFacade:
         if not self._allowRegistration:
             raise RuntimeError("LLM provider registration is not available in this invocation Context.")
         self._registry.register(self._scope, ownerId=self._ownerId, name=name, provider=provider)
+
+    def estimateInputTokens(
+        self,
+        *,
+        providerName: str,
+        query: LlmQuery,
+        model: str | None = None,
+        providerOptions: Mapping[str, ImmutableValue] | None = None,
+    ) -> int:
+        """Returns provider/model-aware input-token usage without starting inference."""
+        self._requireValid()
+        if not isinstance(query, LlmQuery):
+            raise TypeError("query must be an LlmQuery.")
+        registration = self._registry.requireRegistration(providerName)
+        options = ImmutableValueFreezer().freezeMapping(providerOptions, "providerOptions")
+        profile = registration.value.getExecutionProfile(model=model, providerOptions=options)
+        if not isinstance(profile, LlmExecutionProfile):
+            raise LlmProviderProtocolError("Provider getExecutionProfile() returned an invalid value.")
+        estimator = profile.tokenEstimator
+        if estimator is None:
+            raise RuntimeError(f"LLM provider {providerName!r} does not expose an input-token estimator.")
+        result = estimator.estimateInputTokens(query)
+        if type(result) is not int or result < 0:
+            raise LlmProviderProtocolError(
+                f"LLM provider {providerName!r} token estimator returned an invalid value: {result!r}.",
+            )
+        return result
 
     def run(
         self,
