@@ -1,4 +1,3 @@
-# file: backend/context/codeEntryContext.py ; version: 4
 from __future__ import annotations
 
 from copy import deepcopy
@@ -12,7 +11,7 @@ if TYPE_CHECKING:
     from backend.core.immutableValue import ImmutableValue
     from backend.io.managedIo import ManagedIo
     from backend.llm.llmTypes import LlmQuery, LlmStreamEvent, LlmStreamProvider
-    from backend.llm.streamingRuntime import LlmProviderRegistry, StreamingLlmPipeline, StreamingLlmResult
+    from backend.llm.streamingRuntime import LlmProcessingPipeline, LlmProcessingResult, LlmProviderRegistry, StreamingLlmResult
     from backend.registration import RegistrationScope
 
 __all__ = ["CodeEntryContext", "CodeEntryIdentity"]
@@ -45,9 +44,16 @@ class _IoFacade:
 
 
 class _CapabilityFacade:
-    def __init__(self, *, ownerId: str, registry: CapabilityRegistry, scope: RegistrationScope,
-                 invoker: Callable[[str, object | None], object], requireValid: Callable[[], None],
-                 allowRegistration: bool) -> None:
+    def __init__(
+        self,
+        *,
+        ownerId: str,
+        registry: CapabilityRegistry,
+        scope: RegistrationScope,
+        invoker: Callable[[str, object | None], object],
+        requireValid: Callable[[], None],
+        allowRegistration: bool,
+    ) -> None:
         self._ownerId = ownerId
         self._registry = registry
         self._scope = scope
@@ -67,8 +73,16 @@ class _CapabilityFacade:
 
 
 class _LlmFacade:
-    def __init__(self, *, ownerId: str, registry: LlmProviderRegistry, scope: RegistrationScope,
-                 pipeline: StreamingLlmPipeline, requireValid: Callable[[], None], allowRegistration: bool) -> None:
+    def __init__(
+        self,
+        *,
+        ownerId: str,
+        registry: LlmProviderRegistry,
+        scope: RegistrationScope,
+        pipeline: LlmProcessingPipeline,
+        requireValid: Callable[[], None],
+        allowRegistration: bool,
+    ) -> None:
         self._ownerId = ownerId
         self._registry = registry
         self._scope = scope
@@ -82,13 +96,45 @@ class _LlmFacade:
             raise RuntimeError("LLM provider registration is not available in this invocation Context.")
         self._registry.register(self._scope, ownerId=self._ownerId, name=name, provider=provider)
 
-    def run(self, *, providerName: str, query: LlmQuery, model: str | None = None,
-            providerOptions: Mapping[str, ImmutableValue] | None = None,
-            streamObserver: Callable[[LlmStreamEvent], None] | None = None) -> StreamingLlmResult:
+    def run(
+        self,
+        *,
+        providerName: str,
+        query: LlmQuery,
+        model: str | None = None,
+        providerOptions: Mapping[str, ImmutableValue] | None = None,
+        streamObserver: Callable[[LlmStreamEvent], None] | None = None,
+    ) -> StreamingLlmResult:
         self._requireValid()
         return self._pipeline.run(
             providerName=providerName,
             query=query,
+            model=model,
+            providerOptions=providerOptions,
+            streamObserver=streamObserver,
+        )
+
+    def runProcessing(
+        self,
+        *,
+        memoryKey: str,
+        inputValue: object,
+        buildQueryItemsCapabilityId: str,
+        buildQueryCapabilityId: str,
+        providerName: str,
+        model: str | None = None,
+        providerOptions: Mapping[str, ImmutableValue] | None = None,
+        filterQueryItemsCapabilityId: str | None = None,
+        streamObserver: Callable[[LlmStreamEvent], None] | None = None,
+    ) -> LlmProcessingResult:
+        self._requireValid()
+        return self._pipeline.runProcessing(
+            memoryKey=memoryKey,
+            inputValue=inputValue,
+            buildQueryItemsCapabilityId=buildQueryItemsCapabilityId,
+            buildQueryCapabilityId=buildQueryCapabilityId,
+            filterQueryItemsCapabilityId=filterQueryItemsCapabilityId,
+            providerName=providerName,
             model=model,
             providerOptions=providerOptions,
             streamObserver=streamObserver,
@@ -105,18 +151,22 @@ class CodeEntryIdentity:
 
 
 class CodeEntryContext:
-    """Fresh invocation-scoped gateway supplied to Pack CodeEntry code.
+    """Fresh invocation-scoped gateway supplied to Pack CodeEntry code."""
 
-    Every authority-bearing facade checks this Context's lifetime. Registration
-    authority is also invocation-specific: activation callbacks receive it,
-    while ordinary capability and unload callbacks do not silently create
-    registrations that would disappear when their temporary scope closes.
-    """
-
-    def __init__(self, *, identity: CodeEntryIdentity, packRoot: Path, io: ManagedIo, capabilities: CapabilityRegistry,
-                 llmProviders: LlmProviderRegistry, llmPipeline: StreamingLlmPipeline, registrationScope: RegistrationScope,
-                 config: dict[str, object], capabilityInvoker: Callable[[str, object | None], object],
-                 allowRegistration: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        identity: CodeEntryIdentity,
+        packRoot: Path,
+        io: ManagedIo,
+        capabilities: CapabilityRegistry,
+        llmProviders: LlmProviderRegistry,
+        llmPipeline: LlmProcessingPipeline,
+        registrationScope: RegistrationScope,
+        config: dict[str, object],
+        capabilityInvoker: Callable[[str, object | None], object],
+        allowRegistration: bool = False,
+    ) -> None:
         self.identity = identity
         self.packRoot = packRoot
         self.config = deepcopy(config)
