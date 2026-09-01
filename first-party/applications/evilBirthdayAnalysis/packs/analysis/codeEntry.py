@@ -37,15 +37,6 @@ def _timeSeconds(value: str, *, fieldName: str) -> int:
     return hours * 3600 + minutes * 60 + seconds
 
 
-def _nonNegativeIntegerSeconds(settings: dict[str, object], key: str, default: int) -> int:
-    value = settings.get(key, default)
-    if type(value) is not int:
-        raise TypeError(f"Profile setting {key!r} must be an exact integer number of seconds.")
-    if value < 0:
-        raise ValueError(f"Profile setting {key!r} must be non-negative.")
-    return value
-
-
 def _profileSnapshot(config: dict[str, object]) -> dict[str, object]:
     name = config.get("activeProfile")
     profiles = config.get("profiles")
@@ -85,6 +76,50 @@ def _batchSnapshot(config: dict[str, object]) -> dict[str, object]:
     }
 
 
+def _contextGeometry(settings: dict[str, object]) -> tuple[int, tuple[int, ...]]:
+    chunkSeconds = settings.get("chunkSeconds", 600)
+    offsets = settings.get("contextOffsetsSeconds", [0, -600, -1800])
+    if type(chunkSeconds) is not int or chunkSeconds <= 0:
+        raise ValueError("Profile setting 'chunkSeconds' must be a positive exact integer number of seconds.")
+    if not isinstance(offsets, list) or not offsets or any(type(offset) is not int for offset in offsets):
+        raise TypeError("Profile setting 'contextOffsetsSeconds' must be a non-empty list of exact integer offsets.")
+    if len(set(offsets)) != len(offsets):
+        raise ValueError("Profile setting 'contextOffsetsSeconds' must not contain duplicate offsets.")
+    if 0 not in offsets:
+        raise ValueError("Profile setting 'contextOffsetsSeconds' must contain the current offset 0.")
+    return chunkSeconds, tuple(offsets)
+
+
+def _streamStartVideoSeconds(config: dict[str, object]) -> int:
+    streamStartTime = config.get("streamStartTime")
+    if type(streamStartTime) is not str:
+        raise ValueError("streamStartTime must be configured as HH:MM:SS.")
+    return _timeSeconds(streamStartTime, fieldName="streamStartTime")
+
+
+def _windowChunks(
+    *,
+    positionSeconds: int,
+    chunkSeconds: int,
+    offsetsSeconds: tuple[int, ...],
+    streamStartVideoSeconds: int,
+) -> list[dict[str, int]]:
+    chunks: list[dict[str, int]] = []
+    for offsetSeconds in offsetsSeconds:
+        streamStartSeconds = positionSeconds + offsetSeconds
+        streamEndSeconds = streamStartSeconds + chunkSeconds
+        chunks.append(
+            {
+                "offsetSeconds": offsetSeconds,
+                "streamStartSeconds": streamStartSeconds,
+                "streamEndSeconds": streamEndSeconds,
+                "videoStartSeconds": streamStartSeconds + streamStartVideoSeconds,
+                "videoEndSeconds": streamEndSeconds + streamStartVideoSeconds,
+            }
+        )
+    return chunks
+
+
 def _itemMap(payload: dict[str, object]) -> dict[str, QueryItem]:
     previous = payload.get("previousQueryItems", [])
     if not isinstance(previous, list):
@@ -96,11 +131,17 @@ def _itemMap(payload: dict[str, object]) -> dict[str, QueryItem]:
     return result
 
 
-def _requireWindowSecond(window: dict[str, object], key: str) -> int:
-    value = window.get(key)
-    if type(value) is not int:
-        raise TypeError(f"Processing window {key!r} must be an exact integer second offset.")
-    return value
+def _windowChunkList(window: dict[str, object]) -> list[dict[str, object]]:
+    chunks = window.get("chunks")
+    if not isinstance(chunks, list) or not chunks:
+        raise ValueError("Processing window requires a non-empty chunks list.")
+    for chunk in chunks:
+        if not isinstance(chunk, dict):
+            raise TypeError("Processing window chunks must be objects.")
+        for key in ("offsetSeconds", "streamStartSeconds", "streamEndSeconds", "videoStartSeconds", "videoEndSeconds"):
+            if type(chunk.get(key)) is not int:
+                raise TypeError(f"Processing window chunk {key!r} must be an exact integer second offset.")
+    return chunks
 
 
 def _buildQueryItems(ctx, payload):
@@ -140,24 +181,33 @@ def _buildQueryItems(ctx, payload):
         )
     items.append(promptItem)
 
-    startVideo = _requireWindowSecond(window, "transcriptStartSeconds")
-    endVideo = _requireWindowSecond(window, "transcriptEndSeconds")
-    transcriptId = f"transcript:{startVideo}-{endVideo}"
-    transcriptItem = previous.get(transcriptId)
-    if transcriptItem is None:
-        transcript = ctx.capabilities.call(
-            "evilAnalysis.transcript@1",
-            {"videoStartSeconds": startVideo, "videoEndSeconds": endVideo},
-        )
-        if not isinstance(transcript, dict):
-            raise RuntimeError("Transcript capability returned an invalid snapshot.")
-        transcriptItem = QueryItem(
-            itemId=transcriptId,
-            kind="transcript",
-            content=transcript["text"],
-            metadata={"source": _plain(transcript)},
-        )
-    items.append(transcriptItem)
+    for chunk in _windowChunkList(window):
+        streamStart = int(chunk["streamStartSeconds"])
+        streamEnd = int(chunk["streamEndSeconds"])
+        transcriptId = f"transcript:{streamStart}-{streamEnd}"
+        transcriptItem = previous.get(transcriptId)
+        if transcriptItem is None:
+            transcript = ctx.capabilities.call(
+                "evilAnalysis.transcript@1",
+                {
+                    "videoStartSeconds": int(chunk["videoStartSeconds"]),
+                    "videoEndSeconds": int(chunk["videoEndSeconds"]),
+                },
+            )
+            if not isinstance(transcript, dict) or type(transcript.get("text")) is not str:
+                raise RuntimeError("Transcript capability returned an invalid snapshot.")
+            if not transcript["text"]:
+                continue
+            transcriptItem = QueryItem(
+                itemId=transcriptId,
+                kind="transcript",
+                content=transcript["text"],
+                metadata={
+                    "offsetSeconds": int(chunk["offsetSeconds"]),
+                    "source": _plain(transcript),
+                },
+            )
+        items.append(transcriptItem)
     return items
 
 
@@ -190,15 +240,15 @@ def _buildQuery(_ctx, payload):
             "profileName": inputValue["profile"]["name"],
             "promptName": inputValue["promptName"],
             "windowIndex": inputValue["windowIndex"],
-            "videoStartSeconds": inputValue["window"]["transcriptStartSeconds"],
+            "streamPositionSeconds": inputValue["window"]["positionSeconds"],
             "chatIncluded": False,
         },
     }
 
 
-def _preparedChatSnapshot(ctx, window: dict[str, object]) -> dict[str, object]:
-    startVideo = _requireWindowSecond(window, "chatStartSeconds")
-    endVideo = _requireWindowSecond(window, "chatEndSeconds")
+def _preparedChatChunk(ctx, chunk: dict[str, object]) -> dict[str, object]:
+    startVideo = int(chunk["videoStartSeconds"])
+    endVideo = int(chunk["videoEndSeconds"])
     chat = ctx.capabilities.call(
         "evilAnalysis.chat@1",
         {"videoStartSeconds": startVideo, "videoEndSeconds": endVideo},
@@ -236,8 +286,9 @@ def _preparedChatSnapshot(ctx, window: dict[str, object]) -> dict[str, object]:
     )
     metadata = {key: _plain(chat[key]) for key in metadataKeys if key in chat}
     return {
-        "prepared": True,
-        "includedInPrompt": False,
+        "offsetSeconds": int(chunk["offsetSeconds"]),
+        "streamStartSeconds": int(chunk["streamStartSeconds"]),
+        "streamEndSeconds": int(chunk["streamEndSeconds"]),
         "text": text,
         "metadata": metadata,
         "statistics": {
@@ -248,6 +299,28 @@ def _preparedChatSnapshot(ctx, window: dict[str, object]) -> dict[str, object]:
             "characterCount": len(text),
             "utf8ByteCount": len(text.encode("utf-8")),
         },
+    }
+
+
+def _preparedChatSnapshot(ctx, window: dict[str, object]) -> dict[str, object]:
+    chunks = [_preparedChatChunk(ctx, chunk) for chunk in _windowChunkList(window)]
+    statisticKeys = (
+        "sourceRecordCount",
+        "includedRecordCount",
+        "suppressedRecordCount",
+        "renderedLineCount",
+        "characterCount",
+        "utf8ByteCount",
+    )
+    totals = {
+        key: sum(int(chunk["statistics"][key]) for chunk in chunks)
+        for key in statisticKeys
+    }
+    return {
+        "prepared": True,
+        "includedInPrompt": False,
+        "chunks": chunks,
+        "statistics": totals,
     }
 
 
@@ -321,10 +394,8 @@ def _run(ctx, payload):
     settings = profile["settings"]
     if not isinstance(settings, dict):
         raise RuntimeError("Profile snapshot has invalid settings.")
-    transcriptBefore = _nonNegativeIntegerSeconds(settings, "transcriptBeforeSeconds", 0)
-    transcriptAfter = _nonNegativeIntegerSeconds(settings, "transcriptAfterSeconds", 600)
-    chatBefore = _nonNegativeIntegerSeconds(settings, "chatBeforeSeconds", 1800)
-    chatAfter = _nonNegativeIntegerSeconds(settings, "chatAfterSeconds", 1800)
+    chunkSeconds, offsetsSeconds = _contextGeometry(settings)
+    streamStartVideoSeconds = _streamStartVideoSeconds(ctx.config)
 
     llmConfig = ctx.config.get("llm")
     if not isinstance(llmConfig, dict) or type(llmConfig.get("provider")) is not str:
@@ -344,16 +415,18 @@ def _run(ctx, payload):
     results: list[dict[str, object]] = []
     positions = range(batch["startSeconds"], batch["endSeconds"], batch["stepSeconds"])
     for windowIndex, position in enumerate(positions):
-        transcriptStart = position - transcriptBefore
-        transcriptEnd = position + transcriptAfter
-        chatStart = transcriptStart - chatBefore
-        chatEnd = transcriptEnd + chatAfter
+        chunks = _windowChunks(
+            positionSeconds=position,
+            chunkSeconds=chunkSeconds,
+            offsetsSeconds=offsetsSeconds,
+            streamStartVideoSeconds=streamStartVideoSeconds,
+        )
         window = {
             "positionSeconds": position,
-            "transcriptStartSeconds": transcriptStart,
-            "transcriptEndSeconds": transcriptEnd,
-            "chatStartSeconds": chatStart,
-            "chatEndSeconds": chatEnd,
+            "chunkSeconds": chunkSeconds,
+            "contextOffsetsSeconds": list(offsetsSeconds),
+            "streamStartVideoSeconds": streamStartVideoSeconds,
+            "chunks": chunks,
             "chatPrepared": True,
             "chatIncluded": False,
         }
