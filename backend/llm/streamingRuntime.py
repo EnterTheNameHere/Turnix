@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from backend.core.immutableValue import ImmutableValue
 from backend.llm.errors import LlmProviderProtocolError
 from backend.llm.llmTypes import LlmCallRequest, LlmExecutionProfile, LlmQuery, LlmStreamEvent, LlmStreamProvider
-from backend.processing.runtime import ProcessingRun, ProcessingStage, QueryItem
+from backend.processing.runtime import ProcessingRun, ProcessingStage, QueryItem, plainImmutableValue
 from backend.registration import Registration, RegistrationRegistry, RegistrationScope
 from backend.values.sentinels import MISSING
 
@@ -163,24 +163,25 @@ class LlmProcessingPipeline:
             )
 
             run.enterStage(ProcessingStage.UPDATE_QUERY_ITEMS)
-            transaction.set(queryItemsAddress, [item.snapshot() for item in items])
+            queryItemSnapshots = [item.snapshot() for item in items]
+            transaction.set(queryItemsAddress, queryItemSnapshots)
             transaction.set(
                 f"processing/{memoryKey}/runs/{run.processingRunId}",
                 {
                     "processingRunId": run.processingRunId,
-                    "queryItems": [item.snapshot() for item in items],
+                    "queryItems": queryItemSnapshots,
                     "query": {
                         "formatId": llmResult.query.formatId,
                         "payload": llmResult.query.payload,
-                        "metadata": dict(llmResult.query.metadata),
+                        "metadata": plainImmutableValue(llmResult.query.metadata),
                     },
                     "response": {"rawText": llmResult.rawText},
                     "provider": {
                         "name": llmResult.providerName,
                         "ownerId": llmResult.providerOwnerId,
                         "model": llmResult.model,
-                        "options": dict(llmResult.providerOptions),
-                        "metadata": dict(llmResult.providerMetadata),
+                        "options": plainImmutableValue(llmResult.providerOptions),
+                        "metadata": plainImmutableValue(llmResult.providerMetadata),
                     },
                 },
             )
@@ -283,16 +284,19 @@ class LlmProcessingPipeline:
     def _emitTrace(self, reason: str, run: ProcessingRun, extra: dict[str, object]) -> None:
         if self._trace is None:
             return
-        self._trace(
-            reason,
-            {
-                "processingRunId": run.processingRunId,
-                "pipelineId": run.pipelineId,
-                "stage": run.stage.value,
-                **extra,
-            },
-        )
+        try:
+            self._trace(
+                reason,
+                {
+                    "processingRunId": run.processingRunId,
+                    "pipelineId": run.pipelineId,
+                    "stage": run.stage.value,
+                    **extra,
+                },
+            )
+        except Exception:
+            # Trace evidence must not decide processing-state correctness.
+            return
 
 
-# Compatibility name for callers that only need the direct streaming portion.
 StreamingLlmPipeline = LlmProcessingPipeline
