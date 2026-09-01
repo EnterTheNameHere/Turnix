@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 5
+# file: backend/runtime/runtimeHost.py ; version: 6
 from __future__ import annotations
 
 from copy import deepcopy
@@ -89,7 +89,8 @@ class RuntimeHost:
         if not self.applicationRun.active:
             raise RuntimeError("ApplicationRun is not active.")
 
-    def createContext(self, *, identity: CodeEntryIdentity, packRoot: Path, registrationScope: RegistrationScope) -> CodeEntryContext:
+    def createContext(self, *, identity: CodeEntryIdentity, packRoot: Path, registrationScope: RegistrationScope,
+                      allowRegistration: bool = False) -> CodeEntryContext:
         self.requireActive()
         return CodeEntryContext(
             identity=identity,
@@ -101,6 +102,7 @@ class RuntimeHost:
             registrationScope=registrationScope,
             config=self._config,
             capabilityInvoker=lambda capabilityId, payload=None: self.invokeCapability(capabilityId, payload),
+            allowRegistration=allowRegistration,
         )
 
     def registerCodeEntry(self, identity: CodeEntryIdentity, packRoot: Path) -> None:
