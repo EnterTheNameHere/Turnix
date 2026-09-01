@@ -1,6 +1,7 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chat/codeEntry.py ; version: 1
+# file: first-party/applications/evilBirthdayAnalysis/packs/chat/codeEntry.py ; version: 2
 from __future__ import annotations
 
+import math
 from datetime import datetime, timedelta
 
 _TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -30,6 +31,16 @@ def _parseLine(line: str, lineNumber: int) -> dict[str, object]:
     }
 
 
+def _nonNegativeSeconds(settings: dict[str, object], key: str, default: float) -> float:
+    value = settings.get(key, default)
+    if type(value) not in {int, float}:
+        raise TypeError(f"Profile setting {key!r} must be numeric.")
+    result = float(value)
+    if not math.isfinite(result) or result < 0:
+        raise ValueError(f"Profile setting {key!r} must be a finite non-negative number.")
+    return result
+
+
 def _select(ctx, payload):
     if not isinstance(payload, dict) or not isinstance(payload.get("profile"), dict) or not isinstance(payload.get("transcript"), dict):
         raise ValueError("Chat selection requires profile and transcript window snapshots.")
@@ -37,28 +48,48 @@ def _select(ctx, payload):
     alignment = ctx.config.get("alignment")
     if type(chatPath) is not str or not isinstance(alignment, dict) or type(alignment.get("wallClockAtMediaZero")) is not str:
         raise ValueError("chatFile and alignment.wallClockAtMediaZero must be configured.")
-    mediaZero = datetime.fromisoformat(alignment["wallClockAtMediaZero"])
+    try:
+        mediaZero = datetime.fromisoformat(alignment["wallClockAtMediaZero"])
+    except ValueError as err:
+        raise ValueError("alignment.wallClockAtMediaZero must be an ISO date-time.") from err
+    if mediaZero.tzinfo is not None:
+        raise ValueError(
+            "alignment.wallClockAtMediaZero must be timezone-naive because the source chat format contains no timezone.",
+        )
+
     profile = payload["profile"]
     settings = profile.get("settings")
     if not isinstance(settings, dict):
         raise ValueError("Profile settings must be an object.")
     match profile.get("name"):
         case "0-10-30-profile":
-            chatBefore = float(settings.get("chatBeforeSeconds", 1800))
-            chatAfter = float(settings.get("chatAfterSeconds", 1800))
+            chatBefore = _nonNegativeSeconds(settings, "chatBeforeSeconds", 1800.0)
+            chatAfter = _nonNegativeSeconds(settings, "chatAfterSeconds", 1800.0)
         case other:
             raise ValueError(f"Chat Pack does not support profile {other!r}.")
-    startMedia = float(payload["transcript"]["startSeconds"]) - chatBefore
-    endMedia = float(payload["transcript"]["endSeconds"]) + chatAfter
+
+    try:
+        transcriptStart = float(payload["transcript"]["startSeconds"])
+        transcriptEnd = float(payload["transcript"]["endSeconds"])
+    except (KeyError, TypeError, ValueError) as err:
+        raise ValueError("Transcript snapshot must contain numeric startSeconds/endSeconds.") from err
+    if not math.isfinite(transcriptStart) or not math.isfinite(transcriptEnd) or transcriptEnd < transcriptStart:
+        raise ValueError("Transcript snapshot contains an invalid time window.")
+
+    startMedia = transcriptStart - chatBefore
+    endMedia = transcriptEnd + chatAfter
     startWall = mediaZero + timedelta(seconds=startMedia)
     endWall = mediaZero + timedelta(seconds=endMedia)
     records: list[dict[str, object]] = []
     for lineNumber, line in enumerate(ctx.io.readLines(chatPath), start=1):
         record = _parseLine(line, lineNumber)
-        if startWall <= record["timestamp"] <= endWall:
-            record = dict(record)
-            record.pop("timestamp")
-            records.append(record)
+        timestamp = record["timestamp"]
+        if not isinstance(timestamp, datetime):
+            raise RuntimeError("Parsed chat timestamp has an invalid internal type.")
+        if startWall <= timestamp <= endWall:
+            retained = dict(record)
+            retained.pop("timestamp")
+            records.append(retained)
     return {
         "sourcePath": chatPath,
         "wallClockAtMediaZero": alignment["wallClockAtMediaZero"],
