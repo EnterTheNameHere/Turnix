@@ -1,7 +1,9 @@
-# file: backend/values/committed.py ; version: 1
+# file: backend/values/committed.py ; version: 2
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
+from threading import RLock
 
 from backend.values.address import ValueAddress
 from backend.values.payload import InMemoryChunkStore, ValueRef, decodeJsonValue, encodeJsonValue
@@ -21,45 +23,64 @@ class _CommittedRevision:
 
 
 class CommittedValueLayer:
-    """Authoritative revisioned value layer backed by immutable ValueRefs."""
+    """Authoritative revisioned value layer backed by immutable ValueRefs.
+
+    Commit conflict validation and revision replacement occur under one lock so
+    two concurrent outer transactions cannot both validate against the same
+    base revision and silently overwrite each other.
+    """
 
     def __init__(self, *, chunkStore: InMemoryChunkStore | None = None) -> None:
         self.chunkStore = chunkStore or InMemoryChunkStore()
         self._values: dict[ValueAddress, _CommittedRevision] = {}
+        self._lock = RLock()
 
     def load(self, address: str | ValueAddress) -> object:
         key = address if isinstance(address, ValueAddress) else ValueAddress(address)
-        revision = self._values.get(key)
+        with self._lock:
+            revision = self._values.get(key)
         if revision is None:
             return MISSING
         return decodeJsonValue(revision.valueRef, store=self.chunkStore)
 
     def revisionId(self, address: str | ValueAddress) -> int:
         key = address if isinstance(address, ValueAddress) else ValueAddress(address)
-        revision = self._values.get(key)
-        return 0 if revision is None else revision.revisionId
+        with self._lock:
+            revision = self._values.get(key)
+            return 0 if revision is None else revision.revisionId
 
     def openTransaction(self) -> "CommittedValueTransaction":
         return CommittedValueTransaction(root=self, parent=None)
 
     def _commit(self, staged: dict[ValueAddress, object], bases: dict[ValueAddress, int]) -> None:
-        for address, baseRevisionId in bases.items():
-            current = self.revisionId(address)
-            if current != baseRevisionId:
-                raise StateConflictError(
-                    f"State conflict at {address}: transaction observed revision {baseRevisionId}, current revision is {current}.",
-                )
+        # Encode first. Representation failures therefore cannot occur after
+        # authoritative mutation has started.
         encoded = {address: encodeJsonValue(value, store=self.chunkStore) for address, value in staged.items()}
-        replacements: dict[ValueAddress, _CommittedRevision] = {}
-        for address, valueRef in encoded.items():
-            current = self._values.get(address)
-            nextRevision = 1 if current is None else current.revisionId + 1
-            replacements[address] = _CommittedRevision(revisionId=nextRevision, valueRef=valueRef)
-        self._values.update(replacements)
+
+        with self._lock:
+            for address, baseRevisionId in bases.items():
+                currentRevision = self._values.get(address)
+                current = 0 if currentRevision is None else currentRevision.revisionId
+                if current != baseRevisionId:
+                    raise StateConflictError(
+                        f"State conflict at {address}: transaction observed revision {baseRevisionId}, current revision is {current}.",
+                    )
+
+            replacements: dict[ValueAddress, _CommittedRevision] = {}
+            for address, valueRef in encoded.items():
+                current = self._values.get(address)
+                nextRevision = 1 if current is None else current.revisionId + 1
+                replacements[address] = _CommittedRevision(revisionId=nextRevision, valueRef=valueRef)
+            self._values.update(replacements)
 
 
 class CommittedValueTransaction:
-    """Nested speculative transaction with root-authoritative conflict detection."""
+    """Nested speculative transaction with root-authoritative conflict detection.
+
+    Values are detached when staged, loaded, and promoted between nested
+    transactions. Mutable caller aliases therefore cannot modify transaction
+    state without an explicit set().
+    """
 
     def __init__(self, *, root: CommittedValueLayer, parent: "CommittedValueTransaction | None") -> None:
         self._root = root
@@ -79,20 +100,17 @@ class CommittedValueTransaction:
         self._requireActive()
         key = address if isinstance(address, ValueAddress) else ValueAddress(address)
         self._captureBase(key)
-        if key in self._staged:
-            return self._staged[key]
-        if self._parent is not None:
-            return self._parent._loadVisible(key)
-        return self._root.load(key)
+        return self._snapshot(self._loadVisible(key))
 
     def set(self, address: str | ValueAddress, value: object) -> None:
         self._requireActive()
         key = address if isinstance(address, ValueAddress) else ValueAddress(address)
         self._captureBase(key)
+        detached = self._snapshot(value)
         # Encoding now validates deterministic authoritative representation;
         # the created temporary ref is intentionally discarded until commit.
-        encodeJsonValue(value, store=InMemoryChunkStore())
-        self._staged[key] = value
+        encodeJsonValue(detached, store=InMemoryChunkStore())
+        self._staged[key] = detached
 
     def commit(self) -> None:
         self._requireActive()
@@ -121,11 +139,12 @@ class CommittedValueTransaction:
 
     def _acceptChild(self, staged: dict[ValueAddress, object], bases: dict[ValueAddress, int]) -> None:
         self._requireActive()
+        detached = {address: self._snapshot(value) for address, value in staged.items()}
         for address, base in bases.items():
             existing = self._bases.setdefault(address, base)
             if existing != base:
                 raise StateConflictError(f"Nested transaction base revision disagreement at {address}.")
-        self._staged.update(staged)
+        self._staged.update(detached)
 
     def _finish(self, state: str) -> None:
         self._staged.clear()
@@ -141,3 +160,12 @@ class CommittedValueTransaction:
     def _requireNoChildren(self) -> None:
         if self._children:
             raise RuntimeError("Transaction has unresolved active child transactions.")
+
+    @staticmethod
+    def _snapshot(value: object) -> object:
+        if value is MISSING:
+            return MISSING
+        try:
+            return deepcopy(value)
+        except Exception as err:
+            raise TypeError(f"Transaction value cannot be detached: {type(value).__qualname__}.") from err
