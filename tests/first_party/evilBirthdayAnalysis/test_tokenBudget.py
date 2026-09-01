@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 
 _CODE_ENTRY = (
     Path(__file__).parents[3]
@@ -58,3 +60,32 @@ def test_measure_returns_only_input_token_count(monkeypatch):
     monkeypatch.setattr(tokenBudget, "_estimateText", lambda _ctx, text: len(text))
 
     assert tokenBudget._measure(_Ctx(), {"text": "abcd"}) == {"inputTokens": 4}
+
+
+def test_timeout_rejects_non_finite_values():
+    class Ctx:
+        config = {
+            "llm": {"providerOptions": {"timeoutSeconds": float("nan")}},
+            "llamaCpp": {"baseUrl": "http://127.0.0.1:8080"},
+        }
+
+    with pytest.raises(ValueError, match="positive finite"):
+        tokenBudget._timeoutSeconds(Ctx())
+
+
+def test_baseUrl_strips_whitespace_and_rejects_non_http_scheme():
+    class SpacedCtx:
+        config = {"llamaCpp": {"baseUrl": "  http://127.0.0.1:8080/  "}}
+
+    assert tokenBudget._baseUrl(SpacedCtx()) == "http://127.0.0.1:8080"
+
+    class BadCtx:
+        config = {"llamaCpp": {"baseUrl": "file:///tmp/llama"}}
+
+    with pytest.raises(ValueError, match="http:// or https://"):
+        tokenBudget._baseUrl(BadCtx())
+
+
+def test_postJson_rejects_relative_endpoint_before_network_access():
+    with pytest.raises(ValueError, match="absolute HTTP path"):
+        tokenBudget._postJson(_Ctx(), "tokenize", {})
