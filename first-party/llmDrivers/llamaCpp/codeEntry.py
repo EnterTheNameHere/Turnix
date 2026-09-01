@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 3
+# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 4
 from __future__ import annotations
 
 import json
@@ -63,7 +63,11 @@ class LlamaCppStreamProvider:
             if selected.mmprojPath is not None:
                 metadata["mmprojPath"] = str(selected.mmprojPath)
         return LlmExecutionProfile(
-            contextWindowTokens=None if selected is None else selected.contextWindowTokens,
+            contextWindowTokens=(
+                selected.contextWindowTokens
+                if selected is not None
+                else self.driver.externalContextWindowTokens
+            ),
             tokenEstimator=None,
             metadata=metadata,
         )
@@ -87,7 +91,7 @@ class LlamaCppStreamProvider:
             with urlRequest.urlopen(httpRequest, timeout=options.timeoutSeconds) as response:
                 yield from _readEvents(response)
         except HTTPError as err:
-            active = "" if selected is None else f" for managed model {selected.name!r}"
+            active = "" if selected is None else f" for model {selected.name!r}"
             raise LlmProviderConnectionError(
                 f"llama.cpp returned HTTP {err.code} for {endpoint}{active}.",
             ) from err
@@ -229,6 +233,14 @@ def _optionalPositiveInt(value: object, name: str) -> int | None:
     return None if value is None else _positiveInt(value, name)
 
 
+def _optionalNonNegativeInt(value: object, name: str) -> int | None:
+    if value is None:
+        return None
+    if type(value) is not int or value < 0:
+        raise ValueError(f"{name} must be a non-negative exact integer.")
+    return value
+
+
 def _stringList(value: object, name: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not all(type(item) is str for item in value):
         raise ValueError(f"{name} must be a list of strings.")
@@ -256,6 +268,10 @@ class LlamaCppDriver:
         if type(baseUrl) is not str or not baseUrl.strip():
             raise ValueError("llamaCpp.baseUrl must be a non-blank string.")
         self.baseUrl = baseUrl.rstrip("/")
+        self.externalContextWindowTokens = _optionalPositiveInt(
+            self.config.get("contextWindowTokens"),
+            "llamaCpp.contextWindowTokens",
+        )
 
         self.executable: Path | None = None
         if self.manageServer:
@@ -271,7 +287,7 @@ class LlamaCppDriver:
         if self.models:
             if defaultValue is None:
                 if len(self.models) != 1:
-                    raise ValueError("llamaCpp.defaultModel is required when multiple managed models are configured.")
+                    raise ValueError("llamaCpp.defaultModel is required when multiple models are configured.")
                 defaultValue = next(iter(self.models))
             if type(defaultValue) is not str or defaultValue not in self.models:
                 raise ValueError("llamaCpp.defaultModel must name one configured model.")
@@ -323,7 +339,7 @@ class LlamaCppDriver:
                 raw.get("contextWindowTokens", self.config.get("contextWindowTokens")),
                 f"llamaCpp.models[{name!r}].contextWindowTokens",
             )
-            gpuLayers = _optionalPositiveInt(
+            gpuLayers = _optionalNonNegativeInt(
                 raw.get("gpuLayers", self.config.get("gpuLayers")),
                 f"llamaCpp.models[{name!r}].gpuLayers",
             )
@@ -348,15 +364,18 @@ class LlamaCppDriver:
             self.ensureModel(self.defaultModel)
 
     def ensureModel(self, model: str | None) -> LlamaCppModel | None:
-        if not self.manageServer:
+        if not self.models:
             return None
         selectedName = self.defaultModel if model is None else model
         if selectedName is None:
-            raise RuntimeError("Managed llama.cpp has no model selected.")
+            raise RuntimeError("llama.cpp has no model selected.")
         try:
             selected = self.models[selectedName]
         except KeyError as err:
-            raise LookupError(f"Managed llama.cpp model is not configured: {selectedName!r}.") from err
+            raise LookupError(f"llama.cpp model is not configured: {selectedName!r}.") from err
+
+        if not self.manageServer:
+            return selected
         if self.activeModelName == selectedName and self.process is not None and self.process.poll() is None:
             return selected
 
