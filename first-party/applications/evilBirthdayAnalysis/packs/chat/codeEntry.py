@@ -68,6 +68,30 @@ def _parseTime(value: str, *, fieldName: str) -> time:
         raise ValueError(f"Application config {fieldName} must be HH:MM:SS, got {value!r}.") from err
 
 
+def _offsetSeconds(value: str, *, fieldName: str) -> float:
+    parts = value.split(":")
+    if len(parts) != 3:
+        raise ValueError(f"Application config {fieldName} must be HH:MM:SS, got {value!r}.")
+    try:
+        hours, minutes, seconds = (int(part) for part in parts)
+    except ValueError as err:
+        raise ValueError(f"Application config {fieldName} must be HH:MM:SS, got {value!r}.") from err
+    if hours < 0 or not 0 <= minutes < 60 or not 0 <= seconds < 60:
+        raise ValueError(f"Application config {fieldName} must be HH:MM:SS, got {value!r}.")
+    return float(hours * 3600 + minutes * 60 + seconds)
+
+
+def _formatStreamTime(seconds: float) -> str:
+    if not math.isfinite(seconds):
+        raise ValueError("Stream-relative timestamp must be finite.")
+    wholeSeconds = math.floor(seconds)
+    sign = "-" if wholeSeconds < 0 else ""
+    absolute = abs(wholeSeconds)
+    hours, remainder = divmod(absolute, 3600)
+    minutes, secondsValue = divmod(remainder, 60)
+    return f"{sign}{hours:02d}:{minutes:02d}:{secondsValue:02d}"
+
+
 def _candidateDates(first: date, last: date) -> set[date]:
     candidates = {first - timedelta(days=1), first, last, last + timedelta(days=1)}
     current = first
@@ -375,6 +399,7 @@ def _analyzeRecords(
     composites: list[dict[str, object]],
     *,
     includeFromTimestamp: datetime | None = None,
+    streamZeroWall: datetime | None = None,
 ) -> list[str]:
     rendered: list[str] = []
     openBatches: dict[tuple[str, int], tuple[datetime, dict[str, object], int]] = {}
@@ -387,16 +412,25 @@ def _analyzeRecords(
         if type(username) is not str or type(message) is not str or not isinstance(timestamp, datetime) or type(timeText) is not str:
             raise RuntimeError("Parsed chat record has invalid internal analysis fields.")
         includeRecord = includeFromTimestamp is None or timestamp >= includeFromTimestamp
+        renderedTime = timeText
+        streamTimeSeconds: float | None = None
+        if streamZeroWall is not None:
+            streamTimeSeconds = (timestamp - streamZeroWall).total_seconds()
+            renderedTime = _formatStreamTime(streamTimeSeconds)
 
         generated = _generatedEvent(username, message)
         if generated is not None:
             eventType = generated["type"]
-            record["analysis"] = {"kind": "generatedEvent", "event": generated, "includedInText": includeRecord}
+            analysis = {"kind": "generatedEvent", "event": generated, "includedInText": includeRecord}
+            if streamTimeSeconds is not None:
+                analysis["streamTimeSeconds"] = streamTimeSeconds
+                analysis["streamTime"] = renderedTime
+            record["analysis"] = analysis
             if eventType == "subscriptionGiftBatch":
                 key = (username.casefold(), int(generated["tier"]))
                 openBatches[key] = (timestamp, generated, int(record["lineNumber"]))
                 if includeRecord:
-                    rendered.append(f"{timeText} {username}: {_eventText(generated)}")
+                    rendered.append(f"{renderedTime} {username}: {_eventText(generated)}")
                 continue
             if eventType == "subscriptionGift":
                 key = (username.casefold(), int(generated["tier"]))
@@ -408,33 +442,45 @@ def _analyzeRecords(
                     expected = int(batchEvent.get("count", 0))
                     if 0 <= age <= _GIFT_BATCH_MAX_SECONDS and isinstance(recipients, list) and len(recipients) < expected:
                         recipients.append(generated["recipient"])
-                        record["analysis"] = {
+                        analysis = {
                             "kind": "generatedEvent",
                             "event": generated,
                             "includedInText": False,
                             "partOfGiftBatchLineNumber": batchLine,
                         }
+                        if streamTimeSeconds is not None:
+                            analysis["streamTimeSeconds"] = streamTimeSeconds
+                            analysis["streamTime"] = renderedTime
+                        record["analysis"] = analysis
                         if len(recipients) >= expected:
                             openBatches.pop(key, None)
                         continue
                     openBatches.pop(key, None)
                 if includeRecord:
-                    rendered.append(f"{timeText} {username}: {_eventText(generated)}")
+                    rendered.append(f"{renderedTime} {username}: {_eventText(generated)}")
                 continue
             if includeRecord:
-                rendered.append(f"{timeText} {username}: {_eventText(generated)}")
+                rendered.append(f"{renderedTime} {username}: {_eventText(generated)}")
             continue
 
         botEvent = _knownBotEvent(username, message)
         if botEvent is not None:
-            record["analysis"] = {"kind": "botEvent", "event": botEvent, "includedInText": False}
+            analysis = {"kind": "botEvent", "event": botEvent, "includedInText": False}
+            if streamTimeSeconds is not None:
+                analysis["streamTimeSeconds"] = streamTimeSeconds
+                analysis["streamTime"] = renderedTime
+            record["analysis"] = analysis
             continue
 
         spans = _lexMessage(message, emotes, composites)
         compactMessage = _renderSpans(spans)
-        record["analysis"] = {"kind": "userMessage", "spans": spans, "includedInText": includeRecord}
+        analysis = {"kind": "userMessage", "spans": spans, "includedInText": includeRecord}
+        if streamTimeSeconds is not None:
+            analysis["streamTimeSeconds"] = streamTimeSeconds
+            analysis["streamTime"] = renderedTime
+        record["analysis"] = analysis
         if includeRecord:
-            rendered.append(f"{timeText} {username}: {compactMessage}")
+            rendered.append(f"{renderedTime} {username}: {compactMessage}")
 
     return rendered
 
@@ -444,8 +490,11 @@ def _select(ctx, payload):
         raise ValueError("Chat selection requires an object payload.")
     chatPath = ctx.config.get("chatFile")
     chatStartTime = ctx.config.get("chatStartTime")
+    streamStartTime = ctx.config.get("streamStartTime")
     if type(chatPath) is not str or type(chatStartTime) is not str:
         raise ValueError("chatFile and chatStartTime must be configured.")
+    if type(streamStartTime) is not str:
+        raise ValueError("Application config streamStartTime must be an HH:MM:SS video offset.")
 
     startVideo = _finiteSeconds(payload, "videoStartSeconds")
     endVideo = _finiteSeconds(payload, "videoEndSeconds")
@@ -454,6 +503,8 @@ def _select(ctx, payload):
 
     parsedRecords, timestamps, mediaZeroWall = _records(ctx, chatPath, chatStartTime)
     emotes, composites = _vocabulary(ctx)
+    streamStartVideoSeconds = _offsetSeconds(streamStartTime, fieldName="streamStartTime")
+    streamZeroWall = mediaZeroWall + timedelta(seconds=streamStartVideoSeconds)
     startWall = mediaZeroWall + timedelta(seconds=startVideo)
     endWall = mediaZeroWall + timedelta(seconds=endVideo)
 
@@ -463,7 +514,13 @@ def _select(ctx, payload):
     analysisStartIndex = bisect_left(timestamps, lookbackWall)
 
     analysisRecords = [dict(record) for record in parsedRecords[analysisStartIndex:endIndex]]
-    rendered = _analyzeRecords(analysisRecords, emotes, composites, includeFromTimestamp=startWall)
+    rendered = _analyzeRecords(
+        analysisRecords,
+        emotes,
+        composites,
+        includeFromTimestamp=startWall,
+        streamZeroWall=streamZeroWall,
+    )
 
     selectedOffset = startIndex - analysisStartIndex
     selectedRecords = analysisRecords[selectedOffset:]
@@ -476,9 +533,14 @@ def _select(ctx, payload):
     return {
         "sourcePath": chatPath,
         "chatStartTime": chatStartTime,
+        "streamStartTime": streamStartTime,
+        "streamStartVideoSeconds": streamStartVideoSeconds,
         "wallClockAtMediaZero": mediaZeroWall.strftime(_TIMESTAMP_FORMAT),
+        "wallClockAtStreamZero": streamZeroWall.strftime(_TIMESTAMP_FORMAT),
         "videoStartSeconds": startVideo,
         "videoEndSeconds": endVideo,
+        "streamStartSeconds": startVideo - streamStartVideoSeconds,
+        "streamEndSeconds": endVideo - streamStartVideoSeconds,
         "startWallClock": startWall.strftime(_TIMESTAMP_FORMAT),
         "endWallClock": endWall.strftime(_TIMESTAMP_FORMAT),
         "records": records,
