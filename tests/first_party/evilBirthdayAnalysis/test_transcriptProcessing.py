@@ -90,6 +90,30 @@ def test_selector_uses_first_retained_word_when_window_starts_inside_segment():
     assert selected["segments"][0]["streamStartSeconds"] == 2.1
 
 
+def test_selector_returns_empty_for_chunk_wholly_before_transcript_start():
+    transcript._sourceCache.clear()
+    source = {
+        "segments": [
+            {
+                "words": [
+                    {"word": "first", "start": 0.0, "end": 0.5},
+                    {"word": "words", "start": 0.6, "end": 1.0},
+                ]
+            }
+        ]
+    }
+
+    selected = transcript._select(
+        _Ctx(source),
+        {"videoStartSeconds": -67, "videoEndSeconds": 533},
+    )
+
+    assert selected["transcriptStartSeconds"] == -600.0
+    assert selected["transcriptEndSeconds"] == 0.0
+    assert selected["segments"] == []
+    assert selected["text"] == ""
+
+
 def test_stream_time_formatter_floors_fractional_seconds_and_supports_negative_values():
     assert transcript._formatStreamTime(12.999) == "00:00:12"
     assert transcript._formatStreamTime(-0.001) == "-00:00:01"
