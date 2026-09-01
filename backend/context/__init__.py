@@ -1,10 +1,3 @@
-# file: backend/context/__init__.py
-"""
-Platform-created call context for controlled Actant runtime participation.
+from backend.context.codeEntryContext import CodeEntryContext, CodeEntryIdentity
 
-Context objects are the intended surface passed to future activation code.
-They prevent bootstrap code from teaching Pack-facing code to import backend
-internals directly as an authority path.
-"""
-
-__all__: list[str] = []
+__all__ = ["CodeEntryContext", "CodeEntryIdentity"]

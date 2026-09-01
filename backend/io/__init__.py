@@ -1,4 +1,3 @@
-# file: backend/io/__init__.py
-"""Controlled runtime I/O surfaces."""
+from backend.io.managedIo import IoDecodeError, IoError, IoNotFoundError, IoWriteError, ManagedIo
 
-__all__: list[str] = []
+__all__ = ["IoDecodeError", "IoError", "IoNotFoundError", "IoWriteError", "ManagedIo"]

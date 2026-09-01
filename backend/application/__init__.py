@@ -1,5 +1,3 @@
-# file: backend/application/__init__.py
-"""Application runtime assembly."""
-from __future__ import annotations
+from backend.application.runtime import Application, ApplicationRun
 
-__all__: list[str] = []
+__all__ = ["Application", "ApplicationRun"]
