@@ -1,3 +1,21 @@
-from backend.io.managedIo import IoDecodeError, IoError, IoNotFoundError, IoWriteError, ManagedIo
+from backend.io.managedIo import (
+    IoDecodeError,
+    IoEncodeError,
+    IoError,
+    IoNotFoundError,
+    IoPathError,
+    IoPermissionError,
+    IoWriteError,
+    ManagedIo,
+)
 
-__all__ = ["IoDecodeError", "IoError", "IoNotFoundError", "IoWriteError", "ManagedIo"]
+__all__ = [
+    "IoDecodeError",
+    "IoEncodeError",
+    "IoError",
+    "IoNotFoundError",
+    "IoPathError",
+    "IoPermissionError",
+    "IoWriteError",
+    "ManagedIo",
+]
