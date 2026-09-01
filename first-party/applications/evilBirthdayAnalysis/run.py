@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 3
+# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 4
 from __future__ import annotations
 
 import argparse
@@ -82,9 +82,15 @@ def main() -> int:
             raise job.error
         result = job.result
         if isinstance(result, dict):
-            saved = result.get("saved")
-            if isinstance(saved, dict) and saved.get("path"):
-                sys.stdout.write(f"\n\nSaved result: {saved['path']}\n")
+            results = result.get("results")
+            if isinstance(results, list):
+                sys.stdout.write(f"\n\nCompleted {len(results)} analysis windows.\n")
+                for entry in results:
+                    if not isinstance(entry, dict):
+                        continue
+                    saved = entry.get("saved")
+                    if isinstance(saved, dict) and saved.get("path"):
+                        sys.stdout.write(f"[{entry.get('windowIndex')}] {saved['path']}\n")
         return 0
     finally:
         try:
