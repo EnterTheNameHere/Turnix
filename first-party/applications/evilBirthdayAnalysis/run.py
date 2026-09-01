@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 4
+# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 5
 from __future__ import annotations
 
 import argparse
@@ -23,7 +23,7 @@ def _normalizePath(value: object, *, configDirectory: Path) -> object:
 
 def _normalizePaths(config: dict[str, object], *, configDirectory: Path) -> dict[str, object]:
     normalized = dict(config)
-    for key in ("promptsFile", "transcriptFile", "chatFile", "outputDirectory"):
+    for key in ("promptsFile", "transcriptFile", "chatFile", "chatEmotesFile", "outputDirectory"):
         if key in normalized:
             normalized[key] = _normalizePath(normalized[key], configDirectory=configDirectory)
 
