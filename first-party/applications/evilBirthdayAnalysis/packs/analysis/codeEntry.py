@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 3
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 4
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -48,15 +48,21 @@ def _run(ctx, payload):
     request = {} if payload is None else payload
     if not isinstance(request, dict):
         raise ValueError("Analysis request must be an object.")
+
+    # Resolve mutable application configuration once at task preparation time.
+    # Everything below uses these snapshots so an edited source/config file
+    # cannot silently change one already-started analysis task halfway through.
     profile = _profileSnapshot(ctx.config)
     promptName = ctx.config.get("activePrompt")
     if type(promptName) is not str:
         raise ValueError("activePrompt must be configured.")
+
     prompt = ctx.capabilities.call("evilAnalysis.prompts@1", {"name": promptName})
     transcript = ctx.capabilities.call("evilAnalysis.transcript@1", {"profile": profile})
     chat = ctx.capabilities.call("evilAnalysis.chat@1", {"profile": profile, "transcript": transcript})
     if not all(isinstance(item, dict) for item in (prompt, transcript, chat)):
         raise RuntimeError("Analysis source capabilities returned invalid snapshots.")
+
     finalInput = _composeInput(prompt, profile, transcript, chat)
     llmConfig = ctx.config.get("llm")
     if not isinstance(llmConfig, dict) or type(llmConfig.get("provider")) is not str:
@@ -64,16 +70,27 @@ def _run(ctx, payload):
     providerOptions = llmConfig.get("providerOptions", {})
     if not isinstance(providerOptions, dict):
         raise ValueError("llm.providerOptions must be an object.")
+    model = llmConfig.get("model")
+    if model is not None and type(model) is not str:
+        raise ValueError("llm.model must be null or a string.")
+
     observer = request.get("streamObserver")
     if observer is not None and not callable(observer):
         raise TypeError("streamObserver must be callable when supplied.")
+
+    query = LlmQuery(
+        formatId="text/plain",
+        payload=finalInput,
+        metadata={"profileName": profile["name"], "promptName": prompt["name"]},
+    )
     llmResult = ctx.llm.run(
         providerName=llmConfig["provider"],
-        query=LlmQuery(formatId="text/plain", payload=finalInput, metadata={"profileName": profile["name"], "promptName": prompt["name"]}),
-        model=llmConfig.get("model"),
+        query=query,
+        model=model,
         providerOptions=providerOptions,
         streamObserver=observer,
     )
+
     resultId = newRuntimeId()
     record = {
         "resultId": resultId,
@@ -87,14 +104,19 @@ def _run(ctx, payload):
         "sources": {"transcript": _plain(transcript), "chat": _plain(chat)},
         "llm": {
             "provider": llmResult.providerName,
+            "providerOwnerId": llmResult.providerOwnerId,
             "model": llmResult.model,
             "requestedProviderOptions": _plain(llmResult.providerOptions),
+            "executionProfile": {
+                "contextWindowTokens": llmResult.executionProfile.contextWindowTokens,
+                "metadata": _plain(llmResult.executionProfile.metadata),
+            },
             "providerMetadata": _plain(llmResult.providerMetadata),
         },
         "llamaCpp": _plain(ctx.config.get("llamaCpp", {})),
         "input": {
             "formatId": llmResult.query.formatId,
-            "exactPayload": finalInput,
+            "exactPayload": llmResult.query.payload,
             "metadata": _plain(llmResult.query.metadata),
         },
         "response": {"rawText": llmResult.rawText},
