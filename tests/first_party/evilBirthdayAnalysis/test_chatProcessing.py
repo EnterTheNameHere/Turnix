@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
-from datetime import datetime
 from pathlib import Path
+
+import pytest
 
 
 _CODE_ENTRY = (
@@ -41,6 +42,28 @@ COMPOSITES = [
 ]
 
 
+class _Io:
+    def __init__(self, *, lines: tuple[str, ...] = (), vocabulary: dict[str, object] | None = None):
+        self._lines = lines
+        self._vocabulary = vocabulary or {"emotes": EMOTES, "composites": []}
+
+    def readLines(self, _path):
+        return self._lines
+
+    def readJson(self, _path):
+        return self._vocabulary
+
+
+class _Ctx:
+    def __init__(self, *, lines: tuple[str, ...] = (), vocabulary: dict[str, object] | None = None):
+        self.io = _Io(lines=lines, vocabulary=vocabulary)
+        self.config = {
+            "chatFile": "chat.txt",
+            "chatStartTime": "19:20:00",
+            "chatEmotesFile": "chatEmotes.json",
+        }
+
+
 def _record(line: str, lineNumber: int = 1):
     return chat._parseLine(line, lineNumber)
 
@@ -70,6 +93,14 @@ def test_lexMessage_collapses_repeated_emotes_and_explicit_multiplier():
     ]
     assert explicit == repeated
     assert chat._renderSpans(repeated) == "vedalHeart x5"
+
+
+def test_explicit_multiplier_applies_to_occurrence_before_adjacent_merge():
+    spans = chat._lexMessage("vedalHeart x2 vedalHeart x2", EMOTES, COMPOSITES)
+    mixed = chat._lexMessage("vedalHeart vedalHeart x2", EMOTES, COMPOSITES)
+
+    assert spans[0]["count"] == 4
+    assert mixed[0]["count"] == 3
 
 
 def test_lexMessage_preserves_mixed_order_and_confirmed_composite():
@@ -129,6 +160,38 @@ def test_generated_gift_batch_collapses_named_followups():
     assert records[3]["analysis"]["includedInText"] is False
 
 
+def test_selector_reconstructs_gift_batch_from_pre_window_lookback():
+    chat._parsedCache.clear()
+    lines = (
+        "[2024-03-25 19:19:59] #vedal987 mybraza: mybraza is gifting 2 Tier 1 Subs to vedal987's community! They've gifted a total of 126 in the channel!",
+        "[2024-03-25 19:20:00] #vedal987 mybraza: mybraza gifted a Tier 1 sub to Aemable!",
+        "[2024-03-25 19:20:01] #vedal987 viewer: HAPPY BIRTHDAY",
+        "[2024-03-25 19:20:02] #vedal987 mybraza: mybraza gifted a Tier 1 sub to OtherUser!",
+        "[2024-03-25 19:20:10] #vedal987 viewer2: hello",
+    )
+    ctx = _Ctx(lines=lines)
+
+    selected = chat._select(ctx, {"videoStartSeconds": 0, "videoEndSeconds": 10})
+
+    assert selected["text"] == "19:20:01 viewer: HAPPY BIRTHDAY\n19:20:10 viewer2: hello".rsplit("\n", 1)[0]
+    assert [record["lineNumber"] for record in selected["records"]] == [2, 3, 4]
+    assert selected["records"][0]["analysis"]["includedInText"] is False
+    assert selected["records"][2]["analysis"]["includedInText"] is False
+    assert all(record["lineNumber"] != 1 for record in selected["records"])
+
+
+def test_selector_is_half_open_at_end_boundary():
+    chat._parsedCache.clear()
+    lines = (
+        "[2024-03-25 19:20:00] #vedal987 first: included",
+        "[2024-03-25 19:20:10] #vedal987 second: excluded",
+    )
+    selected = chat._select(_Ctx(lines=lines), {"videoStartSeconds": 0, "videoEndSeconds": 10})
+
+    assert [record["username"] for record in selected["records"]] == ["first"]
+    assert selected["text"] == "19:20:00 first: included"
+
+
 def test_known_fossabot_automation_is_retained_but_not_rendered():
     records = [
         _record("[2024-03-25 19:30:09] #vedal987 fossabot: @RatK1ngg_, Your message is too long [warning]", 1),
@@ -144,6 +207,15 @@ def test_known_fossabot_automation_is_retained_but_not_rendered():
     assert records[0]["analysis"]["includedInText"] is False
 
 
+def test_unknown_fossabot_message_survives_as_user_message():
+    records = [_record("[2024-03-25 19:30:25] #vedal987 fossabot: an unfamiliar future message")]
+
+    rendered = chat._analyzeRecords(records, EMOTES, COMPOSITES)
+
+    assert rendered == ["19:30:25 fossabot: an unfamiliar future message"]
+    assert records[0]["analysis"]["kind"] == "userMessage"
+
+
 def test_compact_render_omits_date_and_channel_but_keeps_username():
     records = [_record("[2024-03-25 20:23:09] #vedal987 thegrimreapercz: <3 <3 <3 <3 WE LOVE YOU EVIL")]
 
@@ -151,3 +223,30 @@ def test_compact_render_omits_date_and_channel_but_keeps_username():
 
     assert rendered == ["20:23:09 thegrimreapercz: <3 x4 WE LOVE YOU EVIL"]
     assert records[0]["rawLine"].startswith("[2024-03-25 20:23:09] #vedal987")
+
+
+def test_vocabulary_rejects_unknown_composite_tokens():
+    ctx = _Ctx(
+        vocabulary={
+            "emotes": {"Tutel": {}},
+            "composites": [{"tokens": ["ReallyGunPul", "Tutel"]}],
+        }
+    )
+
+    with pytest.raises(ValueError, match="unknown emote"):
+        chat._vocabulary(ctx)
+
+
+def test_vocabulary_rejects_duplicate_composite_patterns():
+    ctx = _Ctx(
+        vocabulary={
+            "emotes": {"ReallyGunPull": {}, "Tutel": {}},
+            "composites": [
+                {"tokens": ["ReallyGunPull", "Tutel"]},
+                {"tokens": ["ReallyGunPull", "Tutel"]},
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="Duplicate chat composite"):
+        chat._vocabulary(ctx)
