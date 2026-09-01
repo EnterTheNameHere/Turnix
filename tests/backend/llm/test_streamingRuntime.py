@@ -5,8 +5,9 @@ from backend.registration import RegistrationScope
 
 class Provider:
     def getExecutionProfile(self, *, model, providerOptions):
-        del model, providerOptions
-        return LlmExecutionProfile()
+        assert model == "model-a"
+        assert providerOptions["temperature"] == 0.5
+        return LlmExecutionProfile(contextWindowTokens=8192, metadata={"providerProfile": "test"})
 
     def stream(self, request):
         assert request.query.payload == "hello"
@@ -24,7 +25,12 @@ def test_stream_is_consumed_incrementally_and_requires_completion():
     result = StreamingLlmPipeline(providers=providers).run(
         providerName="test",
         query=LlmQuery(formatId="text/plain", payload="hello"),
+        model="model-a",
+        providerOptions={"temperature": 0.5},
         streamObserver=observed.append,
     )
     assert result.rawText == "ab"
+    assert result.providerOwnerId == "provider-entry"
+    assert result.executionProfile.contextWindowTokens == 8192
+    assert result.executionProfile.metadata["providerProfile"] == "test"
     assert [event.eventType for event in observed] == ["delta", "delta", "completed"]
