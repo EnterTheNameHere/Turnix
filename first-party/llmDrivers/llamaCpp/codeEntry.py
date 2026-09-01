@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 5
+# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 6
 from __future__ import annotations
 
 import json
@@ -13,7 +13,7 @@ from urllib.error import HTTPError, URLError
 
 from backend.core.immutableValue import ImmutableValue, ImmutableValueFreezer
 from backend.llm.errors import LlmProviderConnectionError, LlmProviderProtocolError
-from backend.llm.llmTypes import LlmCallRequest, LlmExecutionProfile, LlmStreamEvent
+from backend.llm.llmTypes import LlmCallRequest, LlmExecutionProfile, LlmQuery, LlmStreamEvent
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,7 +36,42 @@ class LlamaCppModel:
     contextWindowTokens: int | None
     gpuLayers: int | None
     threads: int | None
+    parallelSlots: int
     extraArgs: tuple[str, ...]
+
+
+class LlamaCppTokenEstimator:
+    """Exact text/plain query estimator backed by the active llama.cpp model."""
+
+    def __init__(self, *, driver: "LlamaCppDriver", timeoutSeconds: float) -> None:
+        self._driver = driver
+        self._timeoutSeconds = timeoutSeconds
+
+    def estimateInputTokens(self, query: LlmQuery) -> int:
+        if query.formatId != "text/plain" or type(query.payload) is not str:
+            raise ValueError("llama.cpp token estimation supports exact-string text/plain queries only.")
+        templated = self._driver.postJson(
+            "/apply-template",
+            {"messages": [{"role": "user", "content": query.payload}]},
+            timeoutSeconds=self._timeoutSeconds,
+        )
+        prompt = templated.get("prompt")
+        if type(prompt) is not str:
+            raise LlmProviderProtocolError("llama.cpp /apply-template response does not contain a string prompt.")
+        tokenized = self._driver.postJson(
+            "/tokenize",
+            {
+                "content": prompt,
+                "add_special": False,
+                "parse_special": True,
+                "with_pieces": False,
+            },
+            timeoutSeconds=self._timeoutSeconds,
+        )
+        tokens = tokenized.get("tokens")
+        if not isinstance(tokens, list):
+            raise LlmProviderProtocolError("llama.cpp /tokenize response does not contain a tokens list.")
+        return len(tokens)
 
 
 class LlamaCppStreamProvider:
@@ -58,6 +93,7 @@ class LlamaCppStreamProvider:
                 {
                     "activeModel": selected.name,
                     "modelPath": str(selected.modelPath),
+                    "parallelSlots": selected.parallelSlots,
                 },
             )
             if selected.mmprojPath is not None:
@@ -68,7 +104,7 @@ class LlamaCppStreamProvider:
                 if selected is not None
                 else self.driver.externalContextWindowTokens
             ),
-            tokenEstimator=None,
+            tokenEstimator=LlamaCppTokenEstimator(driver=self.driver, timeoutSeconds=options.timeoutSeconds),
             metadata=metadata,
         )
 
@@ -99,8 +135,14 @@ class LlamaCppStreamProvider:
             raise LlmProviderConnectionError(f"Failed communicating with llama.cpp at {endpoint}.") from err
 
 
-def _optionalFloat(source: Mapping[str, ImmutableValue], key: str, *, minimum: float | None = None,
-                   maximum: float | None = None, strictlyPositive: bool = False) -> float | None:
+def _optionalFloat(
+    source: Mapping[str, ImmutableValue],
+    key: str,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+    strictlyPositive: bool = False,
+) -> float | None:
     value = source.get(key)
     if value is None:
         return None
@@ -199,7 +241,11 @@ def _readEvents(response) -> Iterator[LlmStreamEvent]:
             raise LlmProviderProtocolError("llama.cpp stream chunk must be a JSON object.")
         if "error" in chunk:
             raise LlmProviderProtocolError(f"llama.cpp stream reported an error: {chunk['error']!r}.")
-        metadataSource = {key: chunk[key] for key in ("model", "usage", "timings", "system_fingerprint") if key in chunk}
+        metadataSource = {
+            key: chunk[key]
+            for key in ("model", "usage", "timings", "system_fingerprint")
+            if key in chunk
+        }
         metadata = ImmutableValueFreezer().freezeMapping(metadataSource, "llamaCppStreamMetadata")
         finalMetadata.update(metadata)
         choices = chunk.get("choices", [])
@@ -247,6 +293,11 @@ def _stringList(value: object, name: str) -> tuple[str, ...]:
     return tuple(value)
 
 
+def _rejectParallelArg(extraArgs: tuple[str, ...], name: str) -> None:
+    if any(argument in {"--parallel", "-np"} for argument in extraArgs):
+        raise ValueError(f"{name} must use parallelSlots instead of --parallel/-np in extraArgs.")
+
+
 class LlamaCppDriver:
     """Long-lived CodeEntry-owned llama-server and model-residency manager."""
 
@@ -258,9 +309,9 @@ class LlamaCppDriver:
         self.manageServer = manageValue
 
         hostValue = self.config.get("host", "127.0.0.1")
-        if type(hostValue) is not str or not hostValue:
+        if type(hostValue) is not str or not hostValue.strip():
             raise ValueError("llamaCpp.host must be a non-empty string.")
-        self.host = hostValue
+        self.host = hostValue.strip()
         self.port = _positiveInt(self.config.get("port", 8080), "llamaCpp.port")
         if self.port > 65535:
             raise ValueError("llamaCpp.port must not exceed 65535.")
@@ -268,7 +319,7 @@ class LlamaCppDriver:
         baseUrl = self.config.get("baseUrl", managedBaseUrl)
         if type(baseUrl) is not str or not baseUrl.strip():
             raise ValueError("llamaCpp.baseUrl must be a non-blank string.")
-        self.baseUrl = baseUrl.rstrip("/")
+        self.baseUrl = baseUrl.strip().rstrip("/")
         if self.manageServer and self.baseUrl != managedBaseUrl:
             raise ValueError(
                 "Managed llama.cpp baseUrl must identify the server Actant launches at "
@@ -353,7 +404,15 @@ class LlamaCppDriver:
                 raw.get("threads", self.config.get("threads")),
                 f"llamaCpp.models[{name!r}].threads",
             )
-            extra = raw.get("extraArgs", self.config.get("extraArgs", []))
+            parallelSlots = _positiveInt(
+                raw.get("parallelSlots", self.config.get("parallelSlots", 1)),
+                f"llamaCpp.models[{name!r}].parallelSlots",
+            )
+            extra = _stringList(
+                raw.get("extraArgs", self.config.get("extraArgs", [])),
+                f"llamaCpp.models[{name!r}].extraArgs",
+            )
+            _rejectParallelArg(extra, f"llamaCpp.models[{name!r}].extraArgs")
             models[name] = LlamaCppModel(
                 name=name,
                 modelPath=modelPath,
@@ -361,7 +420,8 @@ class LlamaCppDriver:
                 contextWindowTokens=contextWindow,
                 gpuLayers=gpuLayers,
                 threads=threads,
-                extraArgs=_stringList(extra, f"llamaCpp.models[{name!r}].extraArgs"),
+                parallelSlots=parallelSlots,
+                extraArgs=extra,
             )
         return models
 
@@ -389,7 +449,7 @@ class LlamaCppDriver:
         self._startModel(selected)
         return selected
 
-    def _startModel(self, model: LlamaCppModel) -> None:
+    def _serverArgs(self, model: LlamaCppModel) -> list[str]:
         if self.executable is None:
             raise RuntimeError("Managed llama.cpp executable is unavailable.")
         args = [
@@ -400,6 +460,8 @@ class LlamaCppDriver:
             self.host,
             "--port",
             str(self.port),
+            "--parallel",
+            str(model.parallelSlots),
         ]
         if model.contextWindowTokens is not None:
             args += ["-c", str(model.contextWindowTokens)]
@@ -410,11 +472,17 @@ class LlamaCppDriver:
         if model.mmprojPath is not None:
             args += ["--mmproj", str(model.mmprojPath)]
         args.extend(model.extraArgs)
+        return args
 
+    def _startModel(self, model: LlamaCppModel) -> None:
+        args = self._serverArgs(model)
         self.process = subprocess.Popen(args, stdin=subprocess.DEVNULL)
         self.activeModelName = model.name
         try:
-            self._waitReady(float(self.config.get("startupTimeoutSeconds", 120.0)))
+            timeoutValue = self.config.get("startupTimeoutSeconds", 120.0)
+            if type(timeoutValue) not in {int, float}:
+                raise ValueError("llamaCpp.startupTimeoutSeconds must be numeric.")
+            self._waitReady(float(timeoutValue))
         except Exception:
             self.stop()
             raise
@@ -435,6 +503,32 @@ class LlamaCppDriver:
                 pass
             time.sleep(0.2)
         raise TimeoutError(f"llama-server did not become ready within {timeoutSeconds} seconds.")
+
+    def postJson(self, endpoint: str, payload: dict[str, object], *, timeoutSeconds: float) -> dict[str, object]:
+        if type(endpoint) is not str or not endpoint.startswith("/"):
+            raise ValueError("llama.cpp endpoint must be an absolute HTTP path.")
+        if not math.isfinite(timeoutSeconds) or timeoutSeconds <= 0:
+            raise ValueError("llama.cpp HTTP timeout must be a positive finite number.")
+        request = urlRequest.Request(
+            f"{self.baseUrl}{endpoint}",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urlRequest.urlopen(request, timeout=timeoutSeconds) as response:
+                raw = response.read()
+        except HTTPError as err:
+            raise LlmProviderConnectionError(f"llama.cpp returned HTTP {err.code} for {endpoint}.") from err
+        except (URLError, TimeoutError) as err:
+            raise LlmProviderConnectionError(f"Failed communicating with llama.cpp at {endpoint}.") from err
+        try:
+            decoded = json.loads(raw.decode("utf-8", errors="strict"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as err:
+            raise LlmProviderProtocolError(f"llama.cpp returned invalid JSON from {endpoint}.") from err
+        if not isinstance(decoded, dict):
+            raise LlmProviderProtocolError(f"llama.cpp returned a non-object JSON response from {endpoint}.")
+        return decoded
 
     def stop(self) -> None:
         process, self.process = self.process, None
