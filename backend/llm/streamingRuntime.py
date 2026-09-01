@@ -1,4 +1,4 @@
-# file: backend/llm/streamingRuntime.py ; version: 2
+# file: backend/llm/streamingRuntime.py ; version: 3
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 
 from backend.core.immutableValue import ImmutableValue
 from backend.llm.errors import LlmProviderProtocolError
-from backend.llm.llmTypes import LlmCallRequest, LlmQuery, LlmStreamEvent, LlmStreamProvider
-from backend.registration import RegistrationRegistry, RegistrationScope
+from backend.llm.llmTypes import LlmCallRequest, LlmExecutionProfile, LlmQuery, LlmStreamEvent, LlmStreamProvider
+from backend.registration import Registration, RegistrationRegistry, RegistrationScope
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -26,8 +26,12 @@ class LlmProviderRegistry:
             raise TypeError("provider must satisfy the LlmStreamProvider contract.")
         scope.register(self._registry, ownerId=ownerId, name=name, value=provider)
 
+    def requireRegistration(self, name: str) -> Registration[LlmStreamProvider]:
+        """Returns the immutable published registration captured for one run."""
+        return self._registry.require(name)
+
     def require(self, name: str) -> LlmStreamProvider:
-        return self._registry.require(name).value
+        return self.requireRegistration(name).value
 
     def unregisterOwnedBy(self, ownerId: str) -> None:
         self._registry.unregisterOwnedBy(ownerId)
@@ -40,13 +44,20 @@ class StreamingLlmResult:
     query: LlmQuery
     model: str | None
     providerName: str
+    providerOwnerId: str
     providerOptions: Mapping[str, ImmutableValue]
+    executionProfile: LlmExecutionProfile
     rawText: str
     providerMetadata: Mapping[str, ImmutableValue] = field(default_factory=dict)
 
 
 class StreamingLlmPipeline:
-    """Minimal provider-neutral streaming execution path with strict completion semantics."""
+    """Minimal provider-neutral streaming execution path with strict completion semantics.
+
+    Provider registration is resolved exactly once per run. Removing or replacing
+    a registry entry therefore affects future runs without changing the provider
+    object and ownership evidence already captured by an in-flight run.
+    """
 
     def __init__(self, *, providers: LlmProviderRegistry) -> None:
         self._providers = providers
@@ -54,9 +65,14 @@ class StreamingLlmPipeline:
     def run(self, *, providerName: str, query: LlmQuery, model: str | None = None,
             providerOptions: Mapping[str, ImmutableValue] | None = None,
             streamObserver: Callable[[LlmStreamEvent], None] | None = None) -> StreamingLlmResult:
-        provider = self._providers.require(providerName)
+        registration = self._providers.requireRegistration(providerName)
+        provider = registration.value
         options = {} if providerOptions is None else providerOptions
         request = LlmCallRequest(query=query, model=model, providerOptions=options)
+        profile = provider.getExecutionProfile(model=request.model, providerOptions=request.providerOptions)
+        if not isinstance(profile, LlmExecutionProfile):
+            raise LlmProviderProtocolError("Provider getExecutionProfile() returned an invalid value.")
+
         parts: list[str] = []
         completed = False
         finalMetadata: Mapping[str, ImmutableValue] = {}
@@ -76,5 +92,13 @@ class StreamingLlmPipeline:
                 streamObserver(event)
         if not completed:
             raise LlmProviderProtocolError("Provider stream ended without a completed event.")
-        return StreamingLlmResult(query=query, model=model, providerName=providerName, providerOptions=options,
-                                  rawText="".join(parts), providerMetadata=finalMetadata)
+        return StreamingLlmResult(
+            query=request.query,
+            model=request.model,
+            providerName=providerName,
+            providerOwnerId=registration.ownerId,
+            providerOptions=request.providerOptions,
+            executionProfile=profile,
+            rawText="".join(parts),
+            providerMetadata=finalMetadata,
+        )
