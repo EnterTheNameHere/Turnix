@@ -6,6 +6,7 @@ from backend.llm.streamingRuntime import LlmProcessingPipeline, LlmProviderRegis
 from backend.processing.runtime import QueryItem
 from backend.registration import RegistrationScope
 from backend.values.committed import CommittedValueLayer
+from backend.values.sentinels import MISSING
 
 
 class CompletingProvider:
@@ -224,5 +225,5 @@ def test_finalize_failure_aborts_processing_state():
             providerName="good",
         )
 
-    assert state.load("processing/finalize/currentqueryitems") is not None
+    assert state.load("processing/finalize/currentqueryitems") is MISSING
     assert state.revisionId("processing/finalize/currentqueryitems") == 0
