@@ -1,10 +1,11 @@
-# file: backend/values/committed.py ; version: 3
+# file: backend/values/committed.py ; version: 4
 from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
 from threading import RLock
 
+from backend.core.errors import ActantError
 from backend.values.address import ValueAddress
 from backend.values.payload import ChunkValueRef, InMemoryChunkStore, ValueRef, decodeJsonValue, encodeJsonValue
 from backend.values.sentinels import MISSING
@@ -12,7 +13,7 @@ from backend.values.sentinels import MISSING
 __all__ = ["CommittedValueLayer", "CommittedValueTransaction", "StateConflictError"]
 
 
-class StateConflictError(RuntimeError):
+class StateConflictError(ActantError, RuntimeError):
     """Raised when authoritative state changed after a transaction first touched a key."""
 
 
@@ -67,9 +68,6 @@ class CommittedValueLayer:
                         f"State conflict at {address}: transaction observed revision {baseRevisionId}, current revision is {current}.",
                     )
 
-            # Promote immutable payload material only after conflict validation.
-            # Chunk-store insertion precedes authoritative references, so a
-            # storage failure cannot create a committed reference to missing data.
             for valueRef in encoded.values():
                 if isinstance(valueRef, ChunkValueRef):
                     self.chunkStore.put(temporaryStore.require(valueRef.chunkId))
@@ -115,8 +113,6 @@ class CommittedValueTransaction:
         key = address if isinstance(address, ValueAddress) else ValueAddress(address)
         self._captureBase(key)
         detached = self._snapshot(value)
-        # Encoding now validates deterministic authoritative representation;
-        # the created temporary ref is intentionally discarded until commit.
         encodeJsonValue(detached, store=InMemoryChunkStore())
         self._staged[key] = detached
 
