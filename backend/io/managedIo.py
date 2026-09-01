@@ -1,4 +1,4 @@
-# file: backend/io/managedIo.py ; version: 2
+# file: backend/io/managedIo.py ; version: 3
 from __future__ import annotations
 
 import contextlib
@@ -8,19 +8,40 @@ from typing import Any
 
 from backend.core.runtimeIds import newRuntimeId
 
-__all__ = ["IoError", "IoNotFoundError", "IoDecodeError", "IoWriteError", "ManagedIo"]
+__all__ = [
+    "IoDecodeError",
+    "IoEncodeError",
+    "IoError",
+    "IoNotFoundError",
+    "IoPathError",
+    "IoPermissionError",
+    "IoWriteError",
+    "ManagedIo",
+]
 
 
 class IoError(RuntimeError):
     """Base error for Actant-mediated file operations."""
 
 
+class IoPathError(IoError):
+    """Raised when an I/O path cannot be resolved or is not usable as requested."""
+
+
 class IoNotFoundError(IoError):
     """Raised when an explicitly requested file does not exist."""
 
 
+class IoPermissionError(IoError):
+    """Raised when the operating system denies an Actant-mediated file operation."""
+
+
 class IoDecodeError(IoError):
     """Raised when file bytes cannot be decoded or parsed as requested."""
+
+
+class IoEncodeError(IoError):
+    """Raised when a requested structured value cannot be encoded."""
 
 
 class IoWriteError(IoError):
@@ -28,7 +49,12 @@ class IoWriteError(IoError):
 
 
 class ManagedIo:
-    """Central Actant file-I/O service used by Pack-facing Context facades."""
+    """Central Actant file-I/O service used by Pack-facing Context facades.
+
+    Language-facing Pack code receives only Context facades around this object.
+    All filesystem exceptions are translated here so Pack implementations do
+    not need language-specific error handling for ordinary supported I/O.
+    """
 
     def readText(self, path: str | Path) -> str:
         resolved = self._path(path)
@@ -36,6 +62,8 @@ class ManagedIo:
             return resolved.read_text(encoding="utf-8")
         except FileNotFoundError as err:
             raise IoNotFoundError(f"File does not exist: {resolved}.") from err
+        except PermissionError as err:
+            raise IoPermissionError(f"Permission denied while reading {resolved}.") from err
         except UnicodeDecodeError as err:
             raise IoDecodeError(f"File is not valid UTF-8: {resolved}.") from err
         except OSError as err:
@@ -58,11 +86,15 @@ class ManagedIo:
         if type(text) is not str:
             raise TypeError("text must be an exact built-in string.")
         resolved = self._path(path)
-        resolved.parent.mkdir(parents=True, exist_ok=True)
         temporary = resolved.with_name(f".{resolved.name}.{newRuntimeId()}.tmp")
         try:
+            resolved.parent.mkdir(parents=True, exist_ok=True)
             temporary.write_text(text, encoding="utf-8", newline="\n")
             temporary.replace(resolved)
+        except PermissionError as err:
+            with contextlib.suppress(OSError):
+                temporary.unlink()
+            raise IoPermissionError(f"Permission denied while writing {resolved}.") from err
         except OSError as err:
             with contextlib.suppress(OSError):
                 temporary.unlink()
@@ -70,15 +102,18 @@ class ManagedIo:
 
     def writeJsonAtomic(self, path: str | Path, value: object) -> None:
         try:
-            text = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+            text = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + "\n"
         except (TypeError, ValueError) as err:
-            raise IoWriteError(f"Value is not JSON serializable: {err}.") from err
+            raise IoEncodeError(f"Value is not deterministically JSON serializable: {err}.") from err
         self.writeTextAtomic(path, text)
 
     @staticmethod
     def _path(path: str | Path) -> Path:
-        if isinstance(path, Path):
-            return path.expanduser().resolve()
-        if type(path) is str and path:
-            return Path(path).expanduser().resolve()
+        try:
+            if isinstance(path, Path):
+                return path.expanduser().resolve()
+            if type(path) is str and path:
+                return Path(path).expanduser().resolve()
+        except (OSError, RuntimeError) as err:
+            raise IoPathError(f"Failed to resolve I/O path {path!r}: {err}.") from err
         raise TypeError("path must be a pathlib.Path or non-empty exact built-in string.")
