@@ -42,3 +42,25 @@ def test_scope_preflight_prevents_partial_publication():
         pass
     else:
         raise AssertionError("Pack publication was partial")
+
+
+def test_published_scope_withdraws_only_its_exact_registrations():
+    registry = RegistrationRegistry[object]()
+    scope = RegistrationScope()
+    registration = scope.register(registry, ownerId="entry-a", name="alpha", value=1)
+    scope.publish()
+    assert registry.require("alpha") is registration
+
+    scope.withdraw()
+    try:
+        registry.require("alpha")
+    except LookupError:
+        pass
+    else:
+        raise AssertionError("published scope withdrawal left registration visible")
+
+    replacementScope = RegistrationScope()
+    replacement = replacementScope.register(registry, ownerId="entry-b", name="alpha", value=2)
+    replacementScope.publish()
+    scope.withdraw()
+    assert registry.require("alpha") is replacement
