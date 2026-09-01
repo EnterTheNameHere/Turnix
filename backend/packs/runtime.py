@@ -1,4 +1,4 @@
-# file: backend/packs/runtime.py ; version: 5
+# file: backend/packs/runtime.py ; version: 6
 from __future__ import annotations
 
 import importlib.util
@@ -163,6 +163,13 @@ class PackLoader:
                 )
                 module = self._loadModule(pack=pack, definition=definition, instanceId=instanceId)
                 loadedModules.append(module)
+
+                # Once module code has executed, the CodeEntry may already own
+                # resources. Make it cleanup-eligible before invoking onLoad so
+                # a failing callback still receives a best-effort onUnload with
+                # state=None rather than relying on every Pack to self-clean.
+                loadedEntry = _LoadedCodeEntry(identity=identity, pack=pack, module=module, state=None)
+                entries.append(loadedEntry)
                 context = self._host.createContext(
                     identity=identity,
                     packRoot=pack.root,
@@ -171,13 +178,10 @@ class PackLoader:
                 )
                 try:
                     callback = getattr(module, "onLoad", None)
-                    state = None if callback is None else callback(context)
+                    loadedEntry.state = None if callback is None else callback(context)
                 finally:
                     context.invalidate()
-                entries.append(_LoadedCodeEntry(identity=identity, pack=pack, module=module, state=state))
 
-            # Owners become resolvable before their registrations become public.
-            # Publication remains the final externally visible activation step.
             for item in entries:
                 self._host.registerCodeEntry(item.identity, item.pack.root)
                 registeredOwners.append(item.identity.codeEntryInstanceId)
@@ -224,8 +228,6 @@ class PackLoader:
         errors: list[Exception] = []
         for loadedPack in reversed(tuple(packs)):
             self._host.trace("pack-unload-started", attributes={"packId": loadedPack.pack.packId})
-            # Remove public participation first so no new invocation starts
-            # while CodeEntry resources are being torn down.
             loadedPack.registrationScope.withdraw()
             packErrors = self._unloadEntries(list(loadedPack.entries))
             errors.extend(packErrors)
