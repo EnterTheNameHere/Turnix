@@ -125,6 +125,8 @@ class _LlmFacade:
         model: str | None = None,
         providerOptions: Mapping[str, ImmutableValue] | None = None,
         filterQueryItemsCapabilityId: str | None = None,
+        finalizeCapabilityId: str | None = None,
+        finalizeInput: object | None = None,
         streamObserver: Callable[[LlmStreamEvent], None] | None = None,
     ) -> LlmProcessingResult:
         self._requireValid()
@@ -134,6 +136,8 @@ class _LlmFacade:
             buildQueryItemsCapabilityId=buildQueryItemsCapabilityId,
             buildQueryCapabilityId=buildQueryCapabilityId,
             filterQueryItemsCapabilityId=filterQueryItemsCapabilityId,
+            finalizeCapabilityId=finalizeCapabilityId,
+            finalizeInput=finalizeInput,
             providerName=providerName,
             model=model,
             providerOptions=providerOptions,
