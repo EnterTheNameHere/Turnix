@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping as MappingABC
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Mapping
@@ -13,7 +14,17 @@ __all__ = [
     "ProcessingRunOutcome",
     "ProcessingStage",
     "QueryItem",
+    "plainImmutableValue",
 ]
+
+
+def plainImmutableValue(value: ImmutableValue) -> object:
+    """Converts recursively immutable runtime metadata into plain JSON-compatible material."""
+    if isinstance(value, MappingABC):
+        return {key: plainImmutableValue(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [plainImmutableValue(item) for item in value]
+    return value
 
 
 class ProcessingStage(StrEnum):
@@ -57,7 +68,7 @@ class QueryItem:
             "itemId": self.itemId,
             "kind": self.kind,
             "content": self.content,
-            "metadata": dict(self.metadata),
+            "metadata": plainImmutableValue(self.metadata),
         }
 
     @classmethod
