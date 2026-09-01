@@ -1,4 +1,4 @@
-# file: backend/values/committed.py ; version: 2
+# file: backend/values/committed.py ; version: 3
 from __future__ import annotations
 
 from copy import deepcopy
@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from threading import RLock
 
 from backend.values.address import ValueAddress
-from backend.values.payload import InMemoryChunkStore, ValueRef, decodeJsonValue, encodeJsonValue
+from backend.values.payload import ChunkValueRef, InMemoryChunkStore, ValueRef, decodeJsonValue, encodeJsonValue
 from backend.values.sentinels import MISSING
 
 __all__ = ["CommittedValueLayer", "CommittedValueTransaction", "StateConflictError"]
@@ -27,7 +27,9 @@ class CommittedValueLayer:
 
     Commit conflict validation and revision replacement occur under one lock so
     two concurrent outer transactions cannot both validate against the same
-    base revision and silently overwrite each other.
+    base revision and silently overwrite each other. Payload encoding is staged
+    in a temporary Chunk store; failed conflict validation therefore does not
+    leave newly encoded unreachable Chunks in the authoritative store.
     """
 
     def __init__(self, *, chunkStore: InMemoryChunkStore | None = None) -> None:
@@ -53,9 +55,8 @@ class CommittedValueLayer:
         return CommittedValueTransaction(root=self, parent=None)
 
     def _commit(self, staged: dict[ValueAddress, object], bases: dict[ValueAddress, int]) -> None:
-        # Encode first. Representation failures therefore cannot occur after
-        # authoritative mutation has started.
-        encoded = {address: encodeJsonValue(value, store=self.chunkStore) for address, value in staged.items()}
+        temporaryStore = InMemoryChunkStore()
+        encoded = {address: encodeJsonValue(value, store=temporaryStore) for address, value in staged.items()}
 
         with self._lock:
             for address, baseRevisionId in bases.items():
@@ -65,6 +66,13 @@ class CommittedValueLayer:
                     raise StateConflictError(
                         f"State conflict at {address}: transaction observed revision {baseRevisionId}, current revision is {current}.",
                     )
+
+            # Promote immutable payload material only after conflict validation.
+            # Chunk-store insertion precedes authoritative references, so a
+            # storage failure cannot create a committed reference to missing data.
+            for valueRef in encoded.values():
+                if isinstance(valueRef, ChunkValueRef):
+                    self.chunkStore.put(temporaryStore.require(valueRef.chunkId))
 
             replacements: dict[ValueAddress, _CommittedRevision] = {}
             for address, valueRef in encoded.items():
