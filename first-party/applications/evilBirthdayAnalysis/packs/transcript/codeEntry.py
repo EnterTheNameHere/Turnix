@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/transcript/codeEntry.py ; version: 3
+# file: first-party/applications/evilBirthdayAnalysis/packs/transcript/codeEntry.py ; version: 4
 from __future__ import annotations
 
 import math
@@ -90,7 +90,7 @@ def _select(ctx, payload):
         if selectedWords:
             selectedSegments.append({"segmentIndex": segmentIndex, "words": selectedWords})
 
-    text = "".join(word["word"] for segment in selectedSegments for word in segment["words"])
+    text = " ".join(word["word"] for segment in selectedSegments for word in segment["words"])
     return {
         "sourcePath": transcriptPath,
         "streamStartTime": streamStartTime,
