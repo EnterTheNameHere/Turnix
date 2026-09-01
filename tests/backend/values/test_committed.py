@@ -52,3 +52,21 @@ def test_nested_commit_only_promotes_to_parent_until_outer_commit():
     assert outer.load("value") == "staged"
     outer.commit()
     assert layer.load("value") == "staged"
+
+
+def test_parent_is_suspended_while_child_transaction_is_active():
+    layer = CommittedValueLayer()
+    outer = layer.openTransaction()
+    outer.set("value", "parent")
+    child = outer.openTransaction()
+
+    with pytest.raises(RuntimeError, match="unresolved active child"):
+        outer.load("value")
+    with pytest.raises(RuntimeError, match="unresolved active child"):
+        outer.set("value", "ambiguous")
+    with pytest.raises(RuntimeError, match="unresolved active child"):
+        outer.openTransaction()
+
+    child.set("value", "child")
+    child.commit()
+    assert outer.load("value") == "child"
