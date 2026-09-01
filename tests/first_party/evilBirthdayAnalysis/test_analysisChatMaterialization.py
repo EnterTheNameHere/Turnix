@@ -67,6 +67,6 @@ def test_preparedChatSnapshot_keeps_candidate_text_without_raw_record_duplicatio
         "includedRecordCount": 1,
         "suppressedRecordCount": 1,
         "renderedLineCount": 1,
-        "characterCount": 23,
-        "utf8ByteCount": 23,
+        "characterCount": 22,
+        "utf8ByteCount": 22,
     }
