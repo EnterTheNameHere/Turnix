@@ -75,3 +75,26 @@ def test_successful_pack_is_visible_until_loader_close(tmp_path: Path):
     finally:
         loader.close()
         host.stop()
+
+
+def test_failing_onload_is_best_effort_unloaded_with_none_state(tmp_path: Path):
+    marker = tmp_path / "cleanup.txt"
+    _writePack(
+        tmp_path,
+        "test.cleanup",
+        "def onLoad(ctx):\n"
+        "    raise RuntimeError('load exploded')\n\n"
+        "def onUnload(ctx, state):\n"
+        f"    ctx.io.writeTextAtomic({str(marker)!r}, repr(state))\n",
+    )
+
+    host = RuntimeHost()
+    host.start()
+    loader = PackLoader(host=host, resolver=PackResolver(roots=(tmp_path,)))
+    try:
+        with pytest.raises(RuntimeError, match="load exploded"):
+            loader.activate(ManualActivationPlan(packIds=("test.cleanup",)))
+        assert marker.read_text(encoding="utf-8") == "None"
+    finally:
+        loader.close()
+        host.stop()
