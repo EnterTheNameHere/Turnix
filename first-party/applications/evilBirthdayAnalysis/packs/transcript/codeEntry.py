@@ -74,7 +74,7 @@ def _select(ctx, payload):
             startValue, endValue = float(start), float(end)
             if not math.isfinite(startValue) or not math.isfinite(endValue) or startValue < 0 or endValue < startValue:
                 raise ValueError(f"Transcript word {segmentIndex}:{wordIndex} has invalid timing order.")
-            if endValue >= startTranscript and startValue <= endTranscript:
+            if endValue > startTranscript and startValue < endTranscript:
                 selectedWords.append({"word": text, "start": startValue, "end": endValue})
         if selectedWords:
             selectedSegments.append({"segmentIndex": segmentIndex, "words": selectedWords})
