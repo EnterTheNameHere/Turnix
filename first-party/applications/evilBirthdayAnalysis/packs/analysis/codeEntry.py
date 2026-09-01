@@ -10,6 +10,7 @@ _CONTEXT_TEXT = (
     'Context: "Evil," also known as "Evil Neuro," is the name of the AI VTuber character being analyzed. '
     'She is presented as Neuro-sama\'s "evil" sister. This material comes from Evil\'s birthday stream.'
 )
+_CHAT_LAYOUTS = frozenset({"separate", "interleaved"})
 
 
 def _plain(value):
@@ -88,6 +89,16 @@ def _contextGeometry(settings: dict[str, object]) -> tuple[int, tuple[int, ...]]
     if 0 not in offsets:
         raise ValueError("Profile setting 'contextOffsetsSeconds' must contain the current offset 0.")
     return chunkSeconds, tuple(offsets)
+
+
+def _chatPresentation(settings: Mapping[str, object]) -> tuple[bool, str]:
+    includeChat = settings.get("includeChat", False)
+    layout = settings.get("chatLayout", "separate")
+    if type(includeChat) is not bool:
+        raise TypeError("Profile setting 'includeChat' must be a boolean.")
+    if type(layout) is not str or layout not in _CHAT_LAYOUTS:
+        raise ValueError("Profile setting 'chatLayout' must be 'separate' or 'interleaved'.")
+    return includeChat, layout
 
 
 def _streamStartVideoSeconds(config: dict[str, object]) -> int:
@@ -247,6 +258,7 @@ def _chatQueryItems(
                     "streamStartSeconds": float(streamTimeSeconds),
                     "lineNumber": lineNumber,
                     "username": username,
+                    "streamTime": streamTime,
                     "analysis": _plain(analysis),
                     "source": {
                         "sourcePath": chat.get("sourcePath"),
@@ -333,8 +345,19 @@ def _chatAuthor(item: QueryItem) -> str:
     return value
 
 
+def _chatStreamTime(item: QueryItem) -> str:
+    value = item.metadata.get("streamTime")
+    if type(value) is not str or not value:
+        raise RuntimeError(f"Chat QueryItem {item.itemId!r} has no non-empty streamTime metadata.")
+    return value
+
+
+def _orderedChat(items: list[QueryItem]) -> list[QueryItem]:
+    return sorted(items, key=lambda item: (_streamStart(item), _chatLineNumber(item)))
+
+
 def _sanitizePromptSections(ctx, sections: list[str], chatItems: list[QueryItem]) -> tuple[list[str], dict[str, int]]:
-    orderedChat = sorted(chatItems, key=lambda item: (_streamStart(item), _chatLineNumber(item)))
+    orderedChat = _orderedChat(chatItems)
     authors = [_chatAuthor(item) for item in orderedChat]
     resolution = ctx.capabilities.call(
         "evilAnalysis.identity@1",
@@ -361,6 +384,57 @@ def _sanitizePromptSections(ctx, sections: list[str], chatItems: list[QueryItem]
     }
 
 
+def _chatLine(item: QueryItem) -> str:
+    return f"{_chatStreamTime(item)} {_chatAuthor(item)}: {item.content}"
+
+
+def _timedEvidenceKey(item: QueryItem) -> tuple[float, int, int]:
+    if item.kind == "transcript":
+        segmentIndex = item.metadata.get("segmentIndex", 0)
+        if type(segmentIndex) is not int:
+            raise RuntimeError(f"Transcript QueryItem {item.itemId!r} has invalid segmentIndex metadata.")
+        return (_streamStart(item), 0, segmentIndex)
+    if item.kind == "chat":
+        return (_streamStart(item), 1, _chatLineNumber(item))
+    raise RuntimeError(f"Unsupported timed evidence QueryItem kind: {item.kind!r}.")
+
+
+def _evidenceSections(
+    *,
+    transcriptItems: list[QueryItem],
+    chatItems: list[QueryItem],
+    includeChat: bool,
+    chatLayout: str,
+) -> list[str]:
+    transcriptItems = sorted(transcriptItems, key=_streamStart)
+    chatItems = _orderedChat(chatItems)
+
+    if not includeChat:
+        if not transcriptItems:
+            return []
+        return ["TRANSCRIPT WINDOW\n" + "\n".join(item.content for item in transcriptItems)]
+
+    if chatLayout == "separate":
+        sections: list[str] = []
+        if transcriptItems:
+            sections.append("TRANSCRIPT WINDOW\n" + "\n".join(item.content for item in transcriptItems))
+        if chatItems:
+            sections.append("CHAT WINDOW\n" + "\n".join(_chatLine(item) for item in chatItems))
+        return sections
+
+    if chatLayout == "interleaved":
+        timedItems = sorted([*transcriptItems, *chatItems], key=_timedEvidenceKey)
+        lines: list[str] = []
+        for item in timedItems:
+            if item.kind == "transcript":
+                lines.append(f"TRANSCRIPT {item.content}")
+            else:
+                lines.append(f"CHAT {_chatLine(item)}")
+        return [] if not lines else ["CHRONOLOGICAL EVIDENCE\n" + "\n".join(lines)]
+
+    raise RuntimeError(f"Unsupported chat layout after validation: {chatLayout!r}.")
+
+
 def _buildQuery(ctx, payload):
     if not isinstance(payload, dict) or not isinstance(payload.get("input"), dict):
         raise ValueError("BUILD_QUERY requires an input object.")
@@ -372,6 +446,13 @@ def _buildQuery(ctx, payload):
     for item in items:
         byKind.setdefault(item.kind, []).append(item)
 
+    inputValue = payload["input"]
+    profile = inputValue.get("profile")
+    if not isinstance(profile, dict) or not isinstance(profile.get("settings", {}), dict):
+        raise ValueError("BUILD_QUERY requires profile settings.")
+    settings = profile.get("settings", {})
+    includeChat, chatLayout = _chatPresentation(settings)
+
     sections: list[str] = []
     for kind, heading in (
         ("context", "CONTEXT"),
@@ -381,13 +462,17 @@ def _buildQuery(ctx, payload):
         for item in byKind.get(kind, []):
             sections.append(f"{heading}\n{item.content}")
 
-    transcriptItems = sorted(byKind.get("transcript", []), key=_streamStart)
-    if transcriptItems:
-        sections.append("TRANSCRIPT WINDOW\n" + "\n".join(item.content for item in transcriptItems))
+    chatItems = byKind.get("chat", [])
+    sections.extend(
+        _evidenceSections(
+            transcriptItems=byKind.get("transcript", []),
+            chatItems=chatItems,
+            includeChat=includeChat,
+            chatLayout=chatLayout,
+        )
+    )
+    sections, identityStatistics = _sanitizePromptSections(ctx, sections, chatItems)
 
-    sections, identityStatistics = _sanitizePromptSections(ctx, sections, byKind.get("chat", []))
-
-    inputValue = payload["input"]
     return {
         "formatId": "text/plain",
         "payload": "\n\n".join(sections),
@@ -396,7 +481,8 @@ def _buildQuery(ctx, payload):
             "promptName": inputValue["promptName"],
             "windowIndex": inputValue["windowIndex"],
             "streamPositionSeconds": inputValue["window"]["positionSeconds"],
-            "chatIncluded": False,
+            "chatIncluded": includeChat,
+            "chatLayout": chatLayout,
             "identitySanitized": True,
             **identityStatistics,
         },
@@ -459,7 +545,7 @@ def _preparedChatChunk(ctx, chunk: dict[str, object]) -> dict[str, object]:
     }
 
 
-def _preparedChatSnapshot(ctx, window: dict[str, object]) -> dict[str, object]:
+def _preparedChatSnapshot(ctx, window: dict[str, object], *, includedInPrompt: bool) -> dict[str, object]:
     chunks = [_preparedChatChunk(ctx, chunk) for chunk in _windowChunkList(window)]
     statisticKeys = (
         "sourceRecordCount",
@@ -475,7 +561,7 @@ def _preparedChatSnapshot(ctx, window: dict[str, object]) -> dict[str, object]:
     }
     return {
         "prepared": True,
-        "includedInPrompt": False,
+        "includedInPrompt": includedInPrompt,
         "chunks": chunks,
         "statistics": totals,
     }
@@ -552,6 +638,7 @@ def _run(ctx, payload):
     if not isinstance(settings, dict):
         raise RuntimeError("Profile snapshot has invalid settings.")
     chunkSeconds, offsetsSeconds = _contextGeometry(settings)
+    includeChat, chatLayout = _chatPresentation(settings)
     streamStartVideoSeconds = _streamStartVideoSeconds(ctx.config)
 
     llmConfig = ctx.config.get("llm")
@@ -585,7 +672,8 @@ def _run(ctx, payload):
             "streamStartVideoSeconds": streamStartVideoSeconds,
             "chunks": chunks,
             "chatPrepared": True,
-            "chatIncluded": False,
+            "chatIncluded": includeChat,
+            "chatLayout": chatLayout,
         }
         inputValue = {
             "batchId": batchId,
@@ -594,7 +682,7 @@ def _run(ctx, payload):
             "promptName": promptName,
             "window": window,
         }
-        preparedChat = _preparedChatSnapshot(ctx, window)
+        preparedChat = _preparedChatSnapshot(ctx, window, includedInPrompt=includeChat)
         processingResult = ctx.llm.runProcessing(
             memoryKey="evilbirthday",
             inputValue=inputValue,
