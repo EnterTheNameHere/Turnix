@@ -196,6 +196,61 @@ def _buildQuery(_ctx, payload):
     }
 
 
+def _preparedChatSnapshot(ctx, window: dict[str, object]) -> dict[str, object]:
+    startVideo = _requireWindowSecond(window, "chatStartSeconds")
+    endVideo = _requireWindowSecond(window, "chatEndSeconds")
+    chat = ctx.capabilities.call(
+        "evilAnalysis.chat@1",
+        {"videoStartSeconds": startVideo, "videoEndSeconds": endVideo},
+    )
+    if not isinstance(chat, dict) or type(chat.get("text")) is not str or not isinstance(chat.get("records"), list):
+        raise RuntimeError("Chat capability returned an invalid snapshot.")
+
+    text = chat["text"]
+    records = chat["records"]
+    includedCount = 0
+    suppressedCount = 0
+    for record in records:
+        if not isinstance(record, dict):
+            raise RuntimeError("Chat capability returned an invalid record.")
+        analysis = record.get("analysis")
+        included = isinstance(analysis, dict) and analysis.get("includedInText") is True
+        if included:
+            includedCount += 1
+        else:
+            suppressedCount += 1
+
+    metadataKeys = (
+        "sourcePath",
+        "chatStartTime",
+        "streamStartTime",
+        "streamStartVideoSeconds",
+        "wallClockAtMediaZero",
+        "wallClockAtStreamZero",
+        "videoStartSeconds",
+        "videoEndSeconds",
+        "streamStartSeconds",
+        "streamEndSeconds",
+        "startWallClock",
+        "endWallClock",
+    )
+    metadata = {key: _plain(chat[key]) for key in metadataKeys if key in chat}
+    return {
+        "prepared": True,
+        "includedInPrompt": False,
+        "text": text,
+        "metadata": metadata,
+        "statistics": {
+            "sourceRecordCount": len(records),
+            "includedRecordCount": includedCount,
+            "suppressedRecordCount": suppressedCount,
+            "renderedLineCount": 0 if not text else text.count("\n") + 1,
+            "characterCount": len(text),
+            "utf8ByteCount": len(text.encode("utf-8")),
+        },
+    }
+
+
 def _finalizeWindow(ctx, payload):
     if not isinstance(payload, dict) or not isinstance(payload.get("input"), dict) or not isinstance(payload.get("llm"), dict):
         raise ValueError("FINALIZE requires processing input and LLM evidence.")
@@ -208,6 +263,11 @@ def _finalizeWindow(ctx, payload):
     exactPayload = query.get("payload")
     if type(exactPayload) is not str:
         raise TypeError("Evil Birthday analysis finalization expects a text/plain string query payload.")
+
+    finalizeInput = payload.get("finalizeInput")
+    if not isinstance(finalizeInput, dict) or not isinstance(finalizeInput.get("chat"), dict):
+        raise ValueError("FINALIZE requires prepared chat evidence.")
+    preparedChat = finalizeInput["chat"]
 
     batchId = inputValue.get("batchId")
     if type(batchId) is not str:
@@ -225,6 +285,7 @@ def _finalizeWindow(ctx, payload):
         "profile": _plain(inputValue["profile"]),
         "window": _plain(inputValue["window"]),
         "queryItems": _plain(payload["queryItems"]),
+        "chat": _plain(preparedChat),
         "llm": {
             "provider": llm.get("providerName"),
             "providerOwnerId": llm.get("providerOwnerId"),
@@ -262,6 +323,8 @@ def _run(ctx, payload):
         raise RuntimeError("Profile snapshot has invalid settings.")
     transcriptBefore = _nonNegativeIntegerSeconds(settings, "transcriptBeforeSeconds", 0)
     transcriptAfter = _nonNegativeIntegerSeconds(settings, "transcriptAfterSeconds", 600)
+    chatBefore = _nonNegativeIntegerSeconds(settings, "chatBeforeSeconds", 1800)
+    chatAfter = _nonNegativeIntegerSeconds(settings, "chatAfterSeconds", 1800)
 
     llmConfig = ctx.config.get("llm")
     if not isinstance(llmConfig, dict) or type(llmConfig.get("provider")) is not str:
@@ -283,24 +346,32 @@ def _run(ctx, payload):
     for windowIndex, position in enumerate(positions):
         transcriptStart = position - transcriptBefore
         transcriptEnd = position + transcriptAfter
+        chatStart = transcriptStart - chatBefore
+        chatEnd = transcriptEnd + chatAfter
+        window = {
+            "positionSeconds": position,
+            "transcriptStartSeconds": transcriptStart,
+            "transcriptEndSeconds": transcriptEnd,
+            "chatStartSeconds": chatStart,
+            "chatEndSeconds": chatEnd,
+            "chatPrepared": True,
+            "chatIncluded": False,
+        }
         inputValue = {
             "batchId": batchId,
             "windowIndex": windowIndex,
             "profile": profile,
             "promptName": promptName,
-            "window": {
-                "positionSeconds": position,
-                "transcriptStartSeconds": transcriptStart,
-                "transcriptEndSeconds": transcriptEnd,
-                "chatIncluded": False,
-            },
+            "window": window,
         }
+        preparedChat = _preparedChatSnapshot(ctx, window)
         processingResult = ctx.llm.runProcessing(
             memoryKey="evilbirthday",
             inputValue=inputValue,
             buildQueryItemsCapabilityId="evilAnalysis.buildQueryItems@1",
             buildQueryCapabilityId="evilAnalysis.buildQuery@1",
             finalizeCapabilityId="evilAnalysis.finalizeWindow@1",
+            finalizeInput={"chat": preparedChat},
             providerName=llmConfig["provider"],
             model=model,
             providerOptions=providerOptions,
