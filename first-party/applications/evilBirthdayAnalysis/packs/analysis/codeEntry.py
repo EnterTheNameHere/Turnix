@@ -258,7 +258,6 @@ def _chatQueryItems(
                     "streamStartSeconds": float(streamTimeSeconds),
                     "lineNumber": lineNumber,
                     "username": username,
-                    "streamTime": streamTime,
                     "analysis": _plain(analysis),
                     "source": {
                         "sourcePath": chat.get("sourcePath"),
@@ -346,9 +345,12 @@ def _chatAuthor(item: QueryItem) -> str:
 
 
 def _chatStreamTime(item: QueryItem) -> str:
-    value = item.metadata.get("streamTime")
+    analysis = item.metadata.get("analysis")
+    if not isinstance(analysis, Mapping):
+        raise RuntimeError(f"Chat QueryItem {item.itemId!r} has no analysis metadata.")
+    value = analysis.get("streamTime")
     if type(value) is not str or not value:
-        raise RuntimeError(f"Chat QueryItem {item.itemId!r} has no non-empty streamTime metadata.")
+        raise RuntimeError(f"Chat QueryItem {item.itemId!r} has no non-empty analysis.streamTime metadata.")
     return value
 
 
