@@ -101,6 +101,19 @@ def _chatPresentation(settings: Mapping[str, object]) -> tuple[bool, str]:
     return includeChat, layout
 
 
+def _chatBudgetFraction(config: Mapping[str, object]) -> float:
+    definition = config.get("chatBudget", {})
+    if not isinstance(definition, Mapping):
+        raise TypeError("Application config chatBudget must be an object.")
+    value = definition.get("optionalContextMaxFraction", 0.60)
+    if type(value) not in {int, float}:
+        raise TypeError("chatBudget.optionalContextMaxFraction must be numeric.")
+    result = float(value)
+    if not 0.0 <= result <= 1.0:
+        raise ValueError("chatBudget.optionalContextMaxFraction must be between 0 and 1 inclusive.")
+    return result
+
+
 def _streamStartVideoSeconds(config: dict[str, object]) -> int:
     streamStartTime = config.get("streamStartTime")
     if type(streamStartTime) is not str:
@@ -437,6 +450,205 @@ def _evidenceSections(
     raise RuntimeError(f"Unsupported chat layout after validation: {chatLayout!r}.")
 
 
+def _fixedSections(byKind: dict[str, list[QueryItem]]) -> list[str]:
+    sections: list[str] = []
+    for kind, heading in (
+        ("context", "CONTEXT"),
+        ("analysis-profile", "ANALYSIS PROFILE"),
+        ("prompt", "ANALYSIS INSTRUCTION"),
+    ):
+        for item in byKind.get(kind, []):
+            sections.append(f"{heading}\n{item.content}")
+    return sections
+
+
+def _renderPrompt(
+    ctx,
+    *,
+    byKind: dict[str, list[QueryItem]],
+    allChatItems: list[QueryItem],
+    presentedChatItems: list[QueryItem],
+    includeChat: bool,
+    chatLayout: str,
+) -> tuple[str, dict[str, int]]:
+    sections = _fixedSections(byKind)
+    sections.extend(
+        _evidenceSections(
+            transcriptItems=byKind.get("transcript", []),
+            chatItems=presentedChatItems,
+            includeChat=includeChat,
+            chatLayout=chatLayout,
+        )
+    )
+    sections, identityStatistics = _sanitizePromptSections(ctx, sections, allChatItems)
+    return "\n\n".join(sections), identityStatistics
+
+
+def _measurePromptTokens(ctx, text: str) -> int:
+    measured = ctx.capabilities.call("evilAnalysis.tokenBudget@1", {"text": text})
+    if not isinstance(measured, dict) or type(measured.get("inputTokens")) is not int or measured["inputTokens"] < 0:
+        raise RuntimeError("Token budget capability returned invalid token evidence.")
+    return int(measured["inputTokens"])
+
+
+def _inputTokenBudget(execution: object) -> tuple[int, int]:
+    if not isinstance(execution, dict):
+        raise ValueError("BUILD_QUERY requires resolved execution evidence for chat budgeting.")
+    contextWindow = execution.get("contextWindowTokens")
+    if type(contextWindow) is not int or contextWindow <= 0:
+        raise RuntimeError("Chat budgeting requires a known positive model context window.")
+    providerOptions = execution.get("providerOptions", {})
+    if not isinstance(providerOptions, dict):
+        raise RuntimeError("Resolved execution providerOptions must be an object.")
+    reservedResponse = providerOptions.get("maxTokens", 0)
+    if reservedResponse is None:
+        reservedResponse = 0
+    if type(reservedResponse) is not int or reservedResponse < 0:
+        raise RuntimeError("Chat budgeting requires maxTokens to be a non-negative exact integer when configured.")
+    maxInput = contextWindow - reservedResponse
+    if maxInput <= 0:
+        raise RuntimeError(
+            f"Model context window ({contextWindow}) does not leave input capacity after reserving "
+            f"{reservedResponse} response tokens."
+        )
+    return maxInput, reservedResponse
+
+
+def _chatByOffset(window: dict[str, object], chatItems: list[QueryItem]) -> dict[int, list[QueryItem]]:
+    result: dict[int, list[QueryItem]] = {}
+    for chunk in _windowChunkList(window):
+        offset = int(chunk["offsetSeconds"])
+        start = float(chunk["streamStartSeconds"])
+        end = float(chunk["streamEndSeconds"])
+        result[offset] = [item for item in chatItems if start <= _streamStart(item) < end]
+    return result
+
+
+def _budgetedChat(
+    ctx,
+    *,
+    inputValue: dict[str, object],
+    execution: object,
+    byKind: dict[str, list[QueryItem]],
+    allChatItems: list[QueryItem],
+    chatLayout: str,
+) -> tuple[list[QueryItem], dict[str, object], dict[str, int]]:
+    window = inputValue.get("window")
+    if not isinstance(window, dict):
+        raise ValueError("BUILD_QUERY requires a processing window for chat budgeting.")
+
+    maxInputTokens, reservedResponseTokens = _inputTokenBudget(execution)
+    optionalFraction = _chatBudgetFraction(ctx.config)
+    byOffset = _chatByOffset(window, allChatItems)
+    currentItems = _orderedChat(byOffset.get(0, []))
+
+    baseText, identityStatistics = _renderPrompt(
+        ctx,
+        byKind=byKind,
+        allChatItems=allChatItems,
+        presentedChatItems=[],
+        includeChat=True,
+        chatLayout=chatLayout,
+    )
+    baseTokens = _measurePromptTokens(ctx, baseText)
+
+    mandatoryText, identityStatistics = _renderPrompt(
+        ctx,
+        byKind=byKind,
+        allChatItems=allChatItems,
+        presentedChatItems=currentItems,
+        includeChat=True,
+        chatLayout=chatLayout,
+    )
+    mandatoryTokens = _measurePromptTokens(ctx, mandatoryText)
+    if mandatoryTokens > maxInputTokens:
+        position = window.get("positionSeconds")
+        chunkSeconds = window.get("chunkSeconds")
+        raise RuntimeError(
+            "Required current chat window cannot fit the model input budget: "
+            f"stream position {position!r}, chunkSeconds {chunkSeconds!r}, required query {mandatoryTokens} tokens, "
+            f"available input {maxInputTokens} tokens after reserving {reservedResponseTokens} response tokens."
+        )
+
+    optionalOffsets = sorted((offset for offset in byOffset if offset != 0), reverse=True)
+    optionalItems: list[QueryItem] = []
+    optionalPriority: list[QueryItem] = []
+    for offset in optionalOffsets:
+        chunkItems = byOffset[offset]
+        optionalItems.extend(chunkItems)
+        optionalPriority.extend(
+            sorted(chunkItems, key=lambda item: (_streamStart(item), _chatLineNumber(item)), reverse=True)
+        )
+
+    availableChatTokens = max(0, maxInputTokens - baseTokens)
+    fractionLimit = int(availableChatTokens * optionalFraction)
+    absoluteRemaining = max(0, maxInputTokens - mandatoryTokens)
+    optionalTokenLimit = min(fractionLimit, absoluteRemaining)
+
+    selectedOptional: list[QueryItem] = []
+    finalTokens = mandatoryTokens
+    for item in optionalPriority:
+        candidateOptional = [*selectedOptional, item]
+        candidatePresented = [*currentItems, *candidateOptional]
+        candidateText, _ = _renderPrompt(
+            ctx,
+            byKind=byKind,
+            allChatItems=allChatItems,
+            presentedChatItems=candidatePresented,
+            includeChat=True,
+            chatLayout=chatLayout,
+        )
+        candidateTokens = _measurePromptTokens(ctx, candidateText)
+        optionalCost = max(0, candidateTokens - mandatoryTokens)
+        if candidateTokens <= maxInputTokens and optionalCost <= optionalTokenLimit:
+            selectedOptional.append(item)
+            finalTokens = candidateTokens
+
+    fullPresented = [*currentItems, *optionalItems]
+    fullText, _ = _renderPrompt(
+        ctx,
+        byKind=byKind,
+        allChatItems=allChatItems,
+        presentedChatItems=fullPresented,
+        includeChat=True,
+        chatLayout=chatLayout,
+    )
+    fullTokens = _measurePromptTokens(ctx, fullText)
+
+    selectedOptionalIds = {item.itemId for item in selectedOptional}
+    selectedByOffset = {
+        str(offset): sum(1 for item in byOffset[offset] if item.itemId in selectedOptionalIds)
+        for offset in optionalOffsets
+    }
+    requestedByOffset = {str(offset): len(byOffset[offset]) for offset in optionalOffsets}
+    optionalTruncated = len(selectedOptional) != len(optionalItems)
+    warnings: list[str] = []
+    if optionalTruncated:
+        warnings.append(
+            "Older chat context exceeded its optional token allowance; lower-priority messages were omitted from the prompt."
+        )
+
+    evidence = {
+        "maxInputTokens": maxInputTokens,
+        "reservedResponseTokens": reservedResponseTokens,
+        "baseQueryTokens": baseTokens,
+        "requiredCurrentChatTokens": max(0, mandatoryTokens - baseTokens),
+        "requiredQueryTokens": mandatoryTokens,
+        "availableChatTokens": availableChatTokens,
+        "optionalContextMaxFraction": optionalFraction,
+        "optionalTokenLimit": optionalTokenLimit,
+        "optionalRequestedTokens": max(0, fullTokens - mandatoryTokens),
+        "optionalIncludedTokens": max(0, finalTokens - mandatoryTokens),
+        "optionalRequestedItemCount": len(optionalItems),
+        "optionalIncludedItemCount": len(selectedOptional),
+        "optionalRequestedByOffset": requestedByOffset,
+        "optionalIncludedByOffset": selectedByOffset,
+        "optionalTruncated": optionalTruncated,
+        "warnings": warnings,
+    }
+    return [*currentItems, *selectedOptional], evidence, identityStatistics
+
+
 def _buildQuery(ctx, payload):
     if not isinstance(payload, dict) or not isinstance(payload.get("input"), dict):
         raise ValueError("BUILD_QUERY requires an input object.")
@@ -454,40 +666,55 @@ def _buildQuery(ctx, payload):
         raise ValueError("BUILD_QUERY requires profile settings.")
     settings = profile.get("settings", {})
     includeChat, chatLayout = _chatPresentation(settings)
-
-    sections: list[str] = []
-    for kind, heading in (
-        ("context", "CONTEXT"),
-        ("analysis-profile", "ANALYSIS PROFILE"),
-        ("prompt", "ANALYSIS INSTRUCTION"),
-    ):
-        for item in byKind.get(kind, []):
-            sections.append(f"{heading}\n{item.content}")
-
     chatItems = byKind.get("chat", [])
-    sections.extend(
-        _evidenceSections(
-            transcriptItems=byKind.get("transcript", []),
-            chatItems=chatItems,
-            includeChat=includeChat,
+
+    chatBudget: dict[str, object] | None = None
+    if includeChat:
+        presentedChat, chatBudget, identityStatistics = _budgetedChat(
+            ctx,
+            inputValue=inputValue,
+            execution=payload.get("execution"),
+            byKind=byKind,
+            allChatItems=chatItems,
             chatLayout=chatLayout,
         )
+    else:
+        presentedChat = []
+        _, identityStatistics = _renderPrompt(
+            ctx,
+            byKind=byKind,
+            allChatItems=chatItems,
+            presentedChatItems=[],
+            includeChat=False,
+            chatLayout=chatLayout,
+        )
+
+    text, identityStatistics = _renderPrompt(
+        ctx,
+        byKind=byKind,
+        allChatItems=chatItems,
+        presentedChatItems=presentedChat,
+        includeChat=includeChat,
+        chatLayout=chatLayout,
     )
-    sections, identityStatistics = _sanitizePromptSections(ctx, sections, chatItems)
+
+    metadata: dict[str, object] = {
+        "profileName": inputValue["profile"]["name"],
+        "promptName": inputValue["promptName"],
+        "windowIndex": inputValue["windowIndex"],
+        "streamPositionSeconds": inputValue["window"]["positionSeconds"],
+        "chatIncluded": includeChat,
+        "chatLayout": chatLayout,
+        "identitySanitized": True,
+        **identityStatistics,
+    }
+    if chatBudget is not None:
+        metadata["chatBudget"] = chatBudget
 
     return {
         "formatId": "text/plain",
-        "payload": "\n\n".join(sections),
-        "metadata": {
-            "profileName": inputValue["profile"]["name"],
-            "promptName": inputValue["promptName"],
-            "windowIndex": inputValue["windowIndex"],
-            "streamPositionSeconds": inputValue["window"]["positionSeconds"],
-            "chatIncluded": includeChat,
-            "chatLayout": chatLayout,
-            "identitySanitized": True,
-            **identityStatistics,
-        },
+        "payload": text,
+        "metadata": metadata,
     }
 
 
