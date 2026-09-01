@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-_USERNAME_BOUNDARY = r"[A-Za-z0-9_]"
+_USERNAME_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 
 
 def _definedUsers(config: dict[str, object]) -> dict[str, str]:
@@ -15,6 +15,8 @@ def _definedUsers(config: dict[str, object]) -> dict[str, str]:
     for username, value in definition.items():
         if type(username) is not str or not username:
             raise ValueError("definedUsers keys must be non-empty usernames.")
+        if _USERNAME_TOKEN_RE.fullmatch(username) is None:
+            raise ValueError(f"definedUsers key {username!r} must use username characters [A-Za-z0-9_].")
         if not isinstance(value, dict) or type(value.get("identity")) is not str or not value["identity"]:
             raise ValueError(f"definedUsers[{username!r}] must define a non-empty identity string.")
         folded = username.casefold()
@@ -32,6 +34,8 @@ def _authorList(payload: dict[str, object]) -> list[str]:
     authors = payload.get("authors", [])
     if not isinstance(authors, list) or any(type(author) is not str or not author for author in authors):
         raise TypeError("Identity resolution authors must be a list of non-empty strings.")
+    if any(_USERNAME_TOKEN_RE.fullmatch(author) is None for author in authors):
+        raise ValueError("Identity resolution authors must use username characters [A-Za-z0-9_].")
     return authors
 
 
@@ -58,44 +62,42 @@ def _identityMap(authors: list[str], definedUsers: dict[str, str]) -> dict[str, 
     return identities
 
 
-def _replacementDefinitions(
+def _replacementMap(
     authors: list[str],
     identities: dict[str, str],
     definedUsers: dict[str, str],
-) -> list[tuple[str, str]]:
-    replacements: dict[str, tuple[str, str]] = {}
+) -> dict[str, str]:
+    replacements = dict(definedUsers)
     for author in authors:
         folded = author.casefold()
-        replacements.setdefault(folded, (author, identities[folded]))
-    for rawUsername, identity in definedUsers.items():
-        replacements.setdefault(rawUsername, (rawUsername, identity))
-    return sorted(replacements.values(), key=lambda item: len(item[0]), reverse=True)
+        replacements[folded] = identities[folded]
+    return replacements
 
 
-def _replaceKnownIdentities(text: str, replacements: list[tuple[str, str]]) -> str:
-    result = text
-    for rawUsername, identity in replacements:
-        pattern = re.compile(
-            rf"(?<!{_USERNAME_BOUNDARY}){re.escape(rawUsername)}(?!{_USERNAME_BOUNDARY})",
-            re.IGNORECASE,
-        )
-        result = pattern.sub(identity, result)
-    return result
+def _replaceKnownIdentities(text: str, replacements: dict[str, str]) -> str:
+    """Replaces complete username tokens in one linear scan of text."""
+
+    if not replacements or not text:
+        return text
+
+    def replace(match: re.Match[str]) -> str:
+        token = match.group(0)
+        return replacements.get(token.casefold(), token)
+
+    return _USERNAME_TOKEN_RE.sub(replace, text)
 
 
 def _assertNoRawAnonymousIdentity(texts: list[str], authors: list[str], definedUsers: dict[str, str]) -> None:
-    checked: set[str] = set()
-    for author in authors:
-        folded = author.casefold()
-        if folded in definedUsers or folded in checked:
-            continue
-        checked.add(folded)
-        pattern = re.compile(
-            rf"(?<!{_USERNAME_BOUNDARY}){re.escape(author)}(?!{_USERNAME_BOUNDARY})",
-            re.IGNORECASE,
-        )
-        if any(pattern.search(text) is not None for text in texts):
-            raise RuntimeError(f"Identity sanitization left a non-preserved raw username in rendered text: {author!r}.")
+    anonymous = {author.casefold() for author in authors if author.casefold() not in definedUsers}
+    if not anonymous:
+        return
+    for text in texts:
+        for match in _USERNAME_TOKEN_RE.finditer(text):
+            if match.group(0).casefold() in anonymous:
+                raise RuntimeError(
+                    "Identity sanitization left a non-preserved raw username in rendered text: "
+                    f"{match.group(0)!r}."
+                )
 
 
 def _resolveAndSanitize(ctx, payload):
@@ -106,7 +108,7 @@ def _resolveAndSanitize(ctx, payload):
     texts = _textList(payload)
     definedUsers = _definedUsers(ctx.config)
     identities = _identityMap(authors, definedUsers)
-    replacements = _replacementDefinitions(authors, identities, definedUsers)
+    replacements = _replacementMap(authors, identities, definedUsers)
 
     displayAuthors = [identities[author.casefold()] for author in authors]
     sanitizedTexts = [_replaceKnownIdentities(text, replacements) for text in texts]
