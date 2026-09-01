@@ -144,6 +144,120 @@ def _windowChunkList(window: dict[str, object]) -> list[dict[str, object]]:
     return chunks
 
 
+def _transcriptQueryItems(
+    transcript: dict[str, object],
+    *,
+    previous: dict[str, QueryItem],
+) -> list[QueryItem]:
+    segments = transcript.get("segments")
+    if not isinstance(segments, list):
+        raise RuntimeError("Transcript capability returned invalid segments.")
+
+    items: list[QueryItem] = []
+    for segment in segments:
+        if not isinstance(segment, dict) or type(segment.get("segmentIndex")) is not int:
+            raise RuntimeError("Transcript capability returned an invalid segment snapshot.")
+        words = segment.get("words")
+        if not isinstance(words, list) or not words:
+            raise RuntimeError("Transcript capability returned a segment without words.")
+        firstWord = words[0]
+        lastWord = words[-1]
+        if not isinstance(firstWord, dict) or not isinstance(lastWord, dict):
+            raise RuntimeError("Transcript capability returned invalid word snapshots.")
+        start = firstWord.get("start")
+        end = lastWord.get("end")
+        if type(start) not in {int, float} or type(end) not in {int, float}:
+            raise RuntimeError("Transcript capability returned invalid word timing.")
+        streamStartSeconds = float(start)
+        streamEndSeconds = float(end)
+        segmentIndex = int(segment["segmentIndex"])
+        itemId = f"transcript:{segmentIndex}:{streamStartSeconds!r}-{streamEndSeconds!r}"
+        previousItem = previous.get(itemId)
+        if previousItem is not None:
+            items.append(previousItem)
+            continue
+
+        streamTime = segment.get("streamStartTime")
+        if type(streamTime) is not str:
+            raise RuntimeError("Transcript capability returned invalid stream time.")
+        text = " ".join(str(word.get("word", "")) for word in words if isinstance(word, dict)).strip()
+        if not text:
+            continue
+        items.append(
+            QueryItem(
+                itemId=itemId,
+                kind="transcript",
+                content=f"{streamTime} {text}",
+                metadata={
+                    "streamStartSeconds": streamStartSeconds,
+                    "streamEndSeconds": streamEndSeconds,
+                    "segmentIndex": segmentIndex,
+                    "source": {
+                        "sourcePath": transcript.get("sourcePath"),
+                        "streamStartVideoSeconds": transcript.get("streamStartVideoSeconds"),
+                    },
+                },
+            )
+        )
+    return items
+
+
+def _chatQueryItems(
+    chat: dict[str, object],
+    *,
+    previous: dict[str, QueryItem],
+) -> list[QueryItem]:
+    records = chat.get("records")
+    if not isinstance(records, list):
+        raise RuntimeError("Chat capability returned invalid records.")
+
+    items: list[QueryItem] = []
+    for record in records:
+        if not isinstance(record, dict):
+            raise RuntimeError("Chat capability returned an invalid record.")
+        analysis = record.get("analysis")
+        if not isinstance(analysis, dict) or analysis.get("includedInText") is not True:
+            continue
+        lineNumber = record.get("lineNumber")
+        username = record.get("username")
+        message = record.get("message")
+        streamTimeSeconds = analysis.get("streamTimeSeconds")
+        streamTime = analysis.get("streamTime")
+        if (
+            type(lineNumber) is not int
+            or type(username) is not str
+            or type(message) is not str
+            or type(streamTimeSeconds) not in {int, float}
+            or type(streamTime) is not str
+        ):
+            raise RuntimeError("Chat capability returned invalid query-item evidence.")
+
+        itemId = f"chat:{lineNumber}"
+        previousItem = previous.get(itemId)
+        if previousItem is not None:
+            items.append(previousItem)
+            continue
+
+        items.append(
+            QueryItem(
+                itemId=itemId,
+                kind="chat",
+                content=message,
+                metadata={
+                    "streamStartSeconds": float(streamTimeSeconds),
+                    "lineNumber": lineNumber,
+                    "username": username,
+                    "analysis": _plain(analysis),
+                    "source": {
+                        "sourcePath": chat.get("sourcePath"),
+                        "timestampText": record.get("timestampText"),
+                    },
+                },
+            )
+        )
+    return items
+
+
 def _buildQueryItems(ctx, payload):
     if not isinstance(payload, dict) or not isinstance(payload.get("input"), dict):
         raise ValueError("BUILD_QUERY_ITEMS requires an input object.")
@@ -182,30 +296,27 @@ def _buildQueryItems(ctx, payload):
     items.append(promptItem)
 
     for chunk in _windowChunkList(window):
-        streamStart = int(chunk["streamStartSeconds"])
-        streamEnd = int(chunk["streamEndSeconds"])
-        transcriptId = f"transcript:{streamStart}-{streamEnd}"
-        transcriptItem = previous.get(transcriptId)
-        if transcriptItem is None:
-            transcript = ctx.capabilities.call(
-                "evilAnalysis.transcript@1",
-                {
-                    "videoStartSeconds": int(chunk["videoStartSeconds"]),
-                    "videoEndSeconds": int(chunk["videoEndSeconds"]),
-                },
-            )
-            if not isinstance(transcript, dict) or type(transcript.get("text")) is not str:
-                raise RuntimeError("Transcript capability returned an invalid snapshot.")
-            if not transcript["text"]:
-                continue
-            transcriptItem = QueryItem(
-                itemId=transcriptId,
-                kind="transcript",
-                content=transcript["text"],
-                metadata={"source": _plain(transcript)},
-            )
-        items.append(transcriptItem)
+        selector = {
+            "videoStartSeconds": int(chunk["videoStartSeconds"]),
+            "videoEndSeconds": int(chunk["videoEndSeconds"]),
+        }
+        transcript = ctx.capabilities.call("evilAnalysis.transcript@1", selector)
+        if not isinstance(transcript, dict) or type(transcript.get("text")) is not str:
+            raise RuntimeError("Transcript capability returned an invalid snapshot.")
+        items.extend(_transcriptQueryItems(transcript, previous=previous))
+
+        chat = ctx.capabilities.call("evilAnalysis.chat@1", selector)
+        if not isinstance(chat, dict) or type(chat.get("text")) is not str:
+            raise RuntimeError("Chat capability returned an invalid snapshot.")
+        items.extend(_chatQueryItems(chat, previous=previous))
     return items
+
+
+def _streamStart(item: QueryItem) -> float:
+    value = item.metadata.get("streamStartSeconds")
+    if type(value) not in {int, float}:
+        raise RuntimeError(f"Timestamped QueryItem {item.itemId!r} has no numeric streamStartSeconds metadata.")
+    return float(value)
 
 
 def _buildQuery(_ctx, payload):
@@ -224,10 +335,13 @@ def _buildQuery(_ctx, payload):
         ("context", "CONTEXT"),
         ("analysis-profile", "ANALYSIS PROFILE"),
         ("prompt", "ANALYSIS INSTRUCTION"),
-        ("transcript", "TRANSCRIPT WINDOW"),
     ):
         for item in byKind.get(kind, []):
             sections.append(f"{heading}\n{item.content}")
+
+    transcriptItems = sorted(byKind.get("transcript", []), key=_streamStart)
+    if transcriptItems:
+        sections.append("TRANSCRIPT WINDOW\n" + "\n".join(item.content for item in transcriptItems))
 
     inputValue = payload["input"]
     return {
