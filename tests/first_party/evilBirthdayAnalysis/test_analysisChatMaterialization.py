@@ -100,9 +100,9 @@ def _queryItems() -> list[QueryItem]:
             content="replying to viewer_name",
             metadata={
                 "streamStartSeconds": 46.0,
-                "streamTime": "00:00:46",
                 "lineNumber": 21,
                 "username": "vedal987",
+                "analysis": {"streamTime": "00:00:46"},
             },
         ),
         QueryItem(
@@ -111,9 +111,9 @@ def _queryItems() -> list[QueryItem]:
             content="GIGAEVIL",
             metadata={
                 "streamStartSeconds": 45.0,
-                "streamTime": "00:00:45",
                 "lineNumber": 20,
                 "username": "viewer_name",
+                "analysis": {"streamTime": "00:00:45"},
             },
         ),
         QueryItem(
@@ -268,7 +268,7 @@ def test_transcriptQueryItems_reuse_same_absolute_evidence_item():
     assert items[0] is existing
 
 
-def test_chatQueryItems_keep_timestamped_internal_identity_and_render_time():
+def test_chatQueryItems_keep_existing_metadata_shape_and_render_time_in_analysis():
     chat = {
         "sourcePath": "data/chat.txt",
         "records": [
@@ -302,8 +302,10 @@ def test_chatQueryItems_keep_timestamped_internal_identity_and_render_time():
     assert items[0].kind == "chat"
     assert items[0].content == "GIGAEVIL"
     assert items[0].metadata["streamStartSeconds"] == 45.0
-    assert items[0].metadata["streamTime"] == "00:00:45"
     assert items[0].metadata["username"] == "viewer_name"
+    assert "streamTime" not in items[0].metadata
+    assert items[0].metadata["analysis"]["streamTime"] == "00:00:45"
+    assert analysis._chatStreamTime(items[0]) == "00:00:45"
 
 
 def test_buildQuery_can_keep_chat_excluded_while_still_sanitizing_transcript_mentions():
