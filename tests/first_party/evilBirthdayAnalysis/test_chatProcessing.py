@@ -55,12 +55,19 @@ class _Io:
 
 
 class _Ctx:
-    def __init__(self, *, lines: tuple[str, ...] = (), vocabulary: dict[str, object] | None = None):
+    def __init__(
+        self,
+        *,
+        lines: tuple[str, ...] = (),
+        vocabulary: dict[str, object] | None = None,
+        streamStartTime: str = "00:00:00",
+    ):
         self.io = _Io(lines=lines, vocabulary=vocabulary)
         self.config = {
             "chatFile": "chat.txt",
             "chatStartTime": "19:20:00",
             "chatEmotesFile": "chatEmotes.json",
+            "streamStartTime": streamStartTime,
         }
 
 
@@ -173,7 +180,7 @@ def test_selector_reconstructs_gift_batch_from_pre_window_lookback():
 
     selected = chat._select(ctx, {"videoStartSeconds": 0, "videoEndSeconds": 10})
 
-    assert selected["text"] == "19:20:01 viewer: HAPPY BIRTHDAY\n19:20:10 viewer2: hello".rsplit("\n", 1)[0]
+    assert selected["text"] == "00:00:01 viewer: HAPPY BIRTHDAY"
     assert [record["lineNumber"] for record in selected["records"]] == [2, 3, 4]
     assert selected["records"][0]["analysis"]["includedInText"] is False
     assert selected["records"][2]["analysis"]["includedInText"] is False
@@ -189,7 +196,29 @@ def test_selector_is_half_open_at_end_boundary():
     selected = chat._select(_Ctx(lines=lines), {"videoStartSeconds": 0, "videoEndSeconds": 10})
 
     assert [record["username"] for record in selected["records"]] == ["first"]
-    assert selected["text"] == "19:20:00 first: included"
+    assert selected["text"] == "00:00:00 first: included"
+
+
+def test_selector_renders_stream_relative_time_and_preserves_wall_clock_source():
+    chat._parsedCache.clear()
+    lines = (
+        "[2024-03-25 19:28:52] #vedal987 before: pre-stream",
+        "[2024-03-25 19:28:53] #vedal987 zero: stream-start",
+        "[2024-03-25 19:28:58] #vedal987 after: five-seconds",
+    )
+    selected = chat._select(
+        _Ctx(lines=lines, streamStartTime="00:08:53"),
+        {"videoStartSeconds": 532, "videoEndSeconds": 544},
+    )
+
+    assert selected["text"] == (
+        "-00:00:01 before: pre-stream\n"
+        "00:00:00 zero: stream-start\n"
+        "00:00:05 after: five-seconds"
+    )
+    assert selected["records"][0]["timestampText"] == "2024-03-25 19:28:52"
+    assert selected["records"][0]["analysis"]["streamTime"] == "-00:00:01"
+    assert selected["wallClockAtStreamZero"] == "2024-03-25 19:28:53"
 
 
 def test_known_fossabot_automation_is_retained_but_not_rendered():
