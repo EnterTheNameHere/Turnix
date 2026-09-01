@@ -17,7 +17,12 @@ __all__ = ["RuntimeHost"]
 
 
 class RuntimeHost:
-    """Running host boundary coordinating controlled surfaces for one ApplicationRun."""
+    """Running host boundary coordinating controlled surfaces for one ApplicationRun.
+
+    Tracing is evidence only. Trace publication or tracer-close failures are
+    deliberately isolated here so loss of observability cannot alter runtime
+    lifecycle, capability execution, Job outcome, or authoritative state.
+    """
 
     def __init__(
         self,
@@ -53,14 +58,19 @@ class RuntimeHost:
         message: str = "",
         attributes: dict[str, object] | None = None,
         level: str = "info",
-    ) -> None:
-        self.tracer.emitEvent(
-            domain="runtime",
-            level=level,
-            message=message,
-            label=reason,
-            attributes={} if attributes is None else attributes,
-        )
+    ) -> bool:
+        """Attempts to emit runtime evidence without affecting execution semantics."""
+        try:
+            self.tracer.emitEvent(
+                domain="runtime",
+                level=level,
+                message=message,
+                label=reason,
+                attributes={} if attributes is None else attributes,
+            )
+        except Exception:
+            return False
+        return True
 
     def start(self) -> None:
         with self._lane:
@@ -86,7 +96,10 @@ class RuntimeHost:
             )
             self.applicationRun.stop()
             if self._ownsTracer:
-                self.tracer.close()
+                try:
+                    self.tracer.close()
+                except Exception:
+                    pass
 
     def requireActive(self) -> None:
         if not self.applicationRun.active:
