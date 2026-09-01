@@ -8,6 +8,14 @@ from backend.registration import RegistrationScope
 from backend.runtime.runtimeHost import RuntimeHost
 
 
+class RaisingTracer:
+    def emitEvent(self, **_kwargs):
+        raise RuntimeError("trace destination failed")
+
+    def close(self):
+        raise RuntimeError("trace close failed")
+
+
 def test_application_run_is_non_restartable_and_requires_active_work():
     host = RuntimeHost()
     assert host.applicationRun.state is ApplicationRunState.CREATED
@@ -54,3 +62,14 @@ def test_non_activation_context_rejects_registration():
         context.invalidate()
         scope.withdraw()
         host.stop()
+
+
+def test_trace_publication_failure_does_not_change_runtime_lifecycle():
+    host = RuntimeHost(tracer=RaisingTracer())
+
+    host.start()
+    assert host.applicationRun.state is ApplicationRunState.ACTIVE
+    assert host.trace("test") is False
+
+    host.stop()
+    assert host.applicationRun.state is ApplicationRunState.STOPPED
