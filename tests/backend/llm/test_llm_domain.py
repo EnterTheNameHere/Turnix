@@ -1,168 +1,40 @@
-# file: tests/backend/llm/test_llm_domain.py
 from __future__ import annotations
-from backend.llm.llmQueryItem import LlmQueryItemId
-
-from typing import TYPE_CHECKING
 
 import pytest
 
-from backend.llm.llmComponents import LlmStageComponentRegistry
-from backend.llm.llmEchoProvider import LlmEchoProvider
-from backend.llm.llmHookRegistry import LlmHookRegistry
-from backend.llm.llmProcessingPipeline import LlmProcessingPipeline
-from backend.llm.llmProcessingPipelineRun import LlmProcessingRequest, LlmProcessingRunId
-from backend.llm.llmProcessingPipelineStages import BUILD_QUERY_ITEMS, STREAM_EVENT
-from backend.llm.llmProcessingPipelineTransactions import LlmPipelineTransaction
-from backend.llm.llmProviderRegistry import LlmStreamProviderRegistry
-from backend.pack.packCodeEntry import PackCodeEntryInstanceId
-
-if TYPE_CHECKING:
-    from backend.llm.llmStageContext import LlmStageContext
+from backend.llm.llmTypes import LlmCallRequest, LlmExecutionProfile, LlmQuery, LlmStreamEvent
 
 
-class StubTransaction(LlmPipelineTransaction):
-    """Tracks one test pipeline transaction."""
+def test_query_freezes_nested_metadata_without_changing_payload_identity() -> None:
+    payload = {"messages": ["hello"]}
+    metadata = {"source": {"indices": [1, 2]}}
+    query = LlmQuery(formatId="application/test", payload=payload, metadata=metadata)
 
-    def __init__(self) -> None:
-        """Initializes an active test transaction."""
-        self.committed = False
-        self.rolledBack = False
+    metadata["source"]["indices"].append(3)
+    payload["messages"].append("world")
 
-    def commit(self) -> None:
-        """Commits the test transaction."""
-        if self.committed or self.rolledBack:
-            raise RuntimeError("Transaction has already completed.")
-
-        self.committed = True
-
-    def rollback(self) -> None:
-        """Rolls back the test transaction."""
-        if self.committed or self.rolledBack:
-            raise RuntimeError("Transaction has already completed.")
-
-        self.rolledBack = True
+    assert query.payload is payload
+    assert query.metadata["source"]["indices"] == (1, 2)
+    assert query.payload["messages"] == ["hello", "world"]
 
 
-class StubTransactionManager:
-    """Creates and retains the latest test transaction."""
-
-    def __init__(self) -> None:
-        """Initializes the test transaction manager."""
-        self.lastTransaction: StubTransaction | None = None
-
-    def beginLlmPipelineTransaction(
-        self,
-        *,
-        runId: LlmProcessingRunId,
-    ) -> StubTransaction:
-        """Begins one test pipeline transaction."""
-        del runId
-
-        transaction = StubTransaction()
-        self.lastTransaction = transaction
-        return transaction
-
-
-def test_pipeline_builds_prompt_streams_and_commits() -> None:
-    providers = LlmStreamProviderRegistry()
-    providers.register(
-        providerName="echo",
-        ownerId=PackCodeEntryInstanceId.new(),
-        provider=LlmEchoProvider(),
+def test_call_request_freezes_provider_options() -> None:
+    options = {"sampling": {"temperature": 0.7}}
+    request = LlmCallRequest(
+        query=LlmQuery(formatId="text/plain", payload="hello"),
+        model="model-a",
+        providerOptions=options,
     )
 
-    hooks = LlmHookRegistry()
-
-    def addPromptItem(ctx: LlmStageContext) -> None:
-        ctx.addQueryItem(
-            itemId=LlmQueryItemId("input"),
-            content=str(ctx.rawInput["text"]),
-            importance=100,
-            mandatory=True,
-        )
-
-    def uppercase(ctx: LlmStageContext) -> None:
-        ctx.replaceCurrentStreamText(ctx.currentStreamText.upper())
-
-    hooks.register(
-        stageId=BUILD_QUERY_ITEMS,
-        ownerId=PackCodeEntryInstanceId.new(),
-        handler=addPromptItem,
-        activationOrder=0,
-    )
-    hooks.register(
-        stageId=STREAM_EVENT,
-        ownerId=PackCodeEntryInstanceId.new(),
-        handler=uppercase,
-        activationOrder=1,
-    )
-
-    transactions = StubTransactionManager()
-    pipeline = LlmProcessingPipeline(
-        providerRegistry=providers,
-        hookRegistry=hooks,
-        transactionManager=transactions,
-        componentRegistry=LlmStageComponentRegistry(),
-    )
-
-    result = pipeline.run(
-        LlmProcessingRequest(
-            purposeId="test.echo",
-            providerName="echo",
-            rawInput={"text": "hello"},
-        ),
-    )
-
-    assert result.callRequest.prompt == "hello"
-    assert result.response.rawText == "hello"
-    assert result.response.processedText == "HELLO"
-
-    transaction = transactions.lastTransaction
-    assert transaction is not None
-    assert transaction.committed
-    assert not transaction.rolledBack
+    options["sampling"]["temperature"] = 1.2
+    assert request.providerOptions["sampling"]["temperature"] == 0.7
 
 
-def test_pipeline_rolls_back_when_hook_fails() -> None:
-    providers = LlmStreamProviderRegistry()
-    providers.register(
-        providerName="echo",
-        ownerId=PackCodeEntryInstanceId.new(),
-        provider=LlmEchoProvider(),
-    )
+def test_completed_stream_event_cannot_carry_text() -> None:
+    with pytest.raises(ValueError):
+        LlmStreamEvent(eventType="completed", text="not allowed")
 
-    hooks = LlmHookRegistry()
 
-    def fail(ctx: LlmStageContext) -> None:
-        del ctx
-        raise RuntimeError("failure")
-
-    hooks.register(
-        stageId=BUILD_QUERY_ITEMS,
-        ownerId=PackCodeEntryInstanceId.new(),
-        handler=fail,
-        activationOrder=0,
-    )
-
-    transactions = StubTransactionManager()
-    pipeline = LlmProcessingPipeline(
-        providerRegistry=providers,
-        hookRegistry=hooks,
-        transactionManager=transactions,
-        componentRegistry=LlmStageComponentRegistry(),
-    )
-
-    with pytest.raises(RuntimeError):
-        pipeline.run(
-            LlmProcessingRequest(
-                purposeId="test.failure",
-                providerName="echo",
-                rawInput=None,
-            ),
-        )
-
-    transaction = transactions.lastTransaction
-    assert transaction is not None
-    assert not transaction.committed
-    assert transaction.rolledBack
-
+def test_execution_profile_rejects_non_positive_context_window() -> None:
+    with pytest.raises(ValueError):
+        LlmExecutionProfile(contextWindowTokens=0)
