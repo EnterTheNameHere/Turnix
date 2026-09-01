@@ -57,6 +57,30 @@ class _Ctx:
         self.capabilities = _Capabilities()
 
 
+class _BuildQueryCapabilities:
+    def __init__(self):
+        self.payload = None
+
+    def call(self, capabilityId, payload):
+        assert capabilityId == "evilAnalysis.identity@1"
+        self.payload = payload
+        texts = [
+            text.replace("viewer_name", "anonymized_1").replace("vedal987", "Vedal")
+            for text in payload["texts"]
+        ]
+        return {
+            "displayAuthors": ["anonymized_1" if author == "viewer_name" else "Vedal" for author in payload["authors"]],
+            "texts": texts,
+            "anonymousIdentityCount": 1,
+            "preservedIdentityCount": 1,
+        }
+
+
+class _BuildQueryCtx:
+    def __init__(self):
+        self.capabilities = _BuildQueryCapabilities()
+
+
 def test_windowChunks_translate_stream_relative_ranges_to_video_time():
     chunks = analysis._windowChunks(
         positionSeconds=0,
@@ -212,13 +236,29 @@ def test_chatQueryItems_keep_timestamped_internal_identity_but_only_in_chat_kind
     assert items[0].metadata["username"] == "viewer_name"
 
 
-def test_buildQuery_retrieves_transcript_by_type_and_orders_it_by_stream_time_while_chat_stays_out():
+def test_buildQuery_sanitizes_final_prompt_from_chat_identity_namespace_while_chat_stays_out():
     items = [
         QueryItem(itemId="context", kind="context", content="context"),
         QueryItem(itemId="profile", kind="analysis-profile", content="profile"),
         QueryItem(itemId="prompt", kind="prompt", content="prompt"),
-        QueryItem(itemId="t2", kind="transcript", content="00:00:48 second", metadata={"streamStartSeconds": 48.0}),
-        QueryItem(itemId="chat:20", kind="chat", content="GIGAEVIL", metadata={"streamStartSeconds": 45.0, "username": "viewer_name"}),
+        QueryItem(
+            itemId="t2",
+            kind="transcript",
+            content="00:00:48 viewer_name mentioned vedal987",
+            metadata={"streamStartSeconds": 48.0},
+        ),
+        QueryItem(
+            itemId="chat:21",
+            kind="chat",
+            content="this must remain excluded",
+            metadata={"streamStartSeconds": 46.0, "lineNumber": 21, "username": "vedal987"},
+        ),
+        QueryItem(
+            itemId="chat:20",
+            kind="chat",
+            content="GIGAEVIL",
+            metadata={"streamStartSeconds": 45.0, "lineNumber": 20, "username": "viewer_name"},
+        ),
         QueryItem(itemId="t1", kind="transcript", content="00:00:45 first", metadata={"streamStartSeconds": 45.0}),
     ]
     payload = {
@@ -230,15 +270,22 @@ def test_buildQuery_retrieves_transcript_by_type_and_orders_it_by_stream_time_wh
         },
         "queryItems": [item.snapshot() for item in items],
     }
+    ctx = _BuildQueryCtx()
 
-    query = analysis._buildQuery(None, payload)
+    query = analysis._buildQuery(ctx, payload)
 
+    assert ctx.capabilities.payload["authors"] == ["viewer_name", "vedal987"]
     assert query["payload"] == (
         "CONTEXT\ncontext\n\n"
         "ANALYSIS PROFILE\nprofile\n\n"
         "ANALYSIS INSTRUCTION\nprompt\n\n"
-        "TRANSCRIPT WINDOW\n00:00:45 first\n00:00:48 second"
+        "TRANSCRIPT WINDOW\n00:00:45 first\n00:00:48 anonymized_1 mentioned Vedal"
     )
-    assert "GIGAEVIL" not in query["payload"]
     assert "viewer_name" not in query["payload"]
+    assert "vedal987" not in query["payload"]
+    assert "GIGAEVIL" not in query["payload"]
+    assert "this must remain excluded" not in query["payload"]
     assert query["metadata"]["chatIncluded"] is False
+    assert query["metadata"]["identitySanitized"] is True
+    assert query["metadata"]["anonymousIdentityCount"] == 1
+    assert query["metadata"]["preservedIdentityCount"] == 1
