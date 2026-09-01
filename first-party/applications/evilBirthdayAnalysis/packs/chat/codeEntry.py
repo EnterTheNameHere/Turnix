@@ -1,4 +1,3 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chat/codeEntry.py ; version: 3
 from __future__ import annotations
 
 import math
@@ -6,6 +5,7 @@ from datetime import datetime, time, timedelta
 
 _TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 _TIME_FORMAT = "%H:%M:%S"
+_parsedCache: dict[tuple[str, str], tuple[list[dict[str, object]], datetime]] = {}
 
 
 def _parseLine(line: str, lineNumber: int) -> dict[str, object]:
@@ -53,51 +53,45 @@ def _inferMediaZero(records: list[dict[str, object]], chatStartTime: str) -> dat
     return min(candidates, key=lambda candidate: abs((candidate - firstTimestamp).total_seconds()))
 
 
-def _nonNegativeSeconds(settings: dict[str, object], key: str, default: float) -> float:
-    value = settings.get(key, default)
+def _finiteSeconds(payload: dict[str, object], key: str) -> float:
+    value = payload.get(key)
     if type(value) not in {int, float}:
-        raise TypeError(f"Profile setting {key!r} must be numeric.")
+        raise TypeError(f"Chat selector {key!r} must be numeric.")
     result = float(value)
-    if not math.isfinite(result) or result < 0:
-        raise ValueError(f"Profile setting {key!r} must be a finite non-negative number.")
+    if not math.isfinite(result):
+        raise ValueError(f"Chat selector {key!r} must be finite.")
     return result
 
 
+def _records(ctx, chatPath: str, chatStartTime: str) -> tuple[list[dict[str, object]], datetime]:
+    key = (chatPath, chatStartTime)
+    cached = _parsedCache.get(key)
+    if cached is not None:
+        return cached
+    parsed = [
+        _parseLine(line, lineNumber)
+        for lineNumber, line in enumerate(ctx.io.readLines(chatPath), start=1)
+    ]
+    mediaZero = _inferMediaZero(parsed, chatStartTime)
+    cached = (parsed, mediaZero)
+    _parsedCache[key] = cached
+    return cached
+
+
 def _select(ctx, payload):
-    if not isinstance(payload, dict) or not isinstance(payload.get("profile"), dict) or not isinstance(payload.get("transcript"), dict):
-        raise ValueError("Chat selection requires profile and transcript window snapshots.")
+    if not isinstance(payload, dict):
+        raise ValueError("Chat selection requires an object payload.")
     chatPath = ctx.config.get("chatFile")
     chatStartTime = ctx.config.get("chatStartTime")
     if type(chatPath) is not str or type(chatStartTime) is not str:
         raise ValueError("chatFile and chatStartTime must be configured.")
 
-    profile = payload["profile"]
-    settings = profile.get("settings")
-    if not isinstance(settings, dict):
-        raise ValueError("Profile settings must be an object.")
-    match profile.get("name"):
-        case "0-10-30-profile":
-            chatBefore = _nonNegativeSeconds(settings, "chatBeforeSeconds", 1800.0)
-            chatAfter = _nonNegativeSeconds(settings, "chatAfterSeconds", 1800.0)
-        case other:
-            raise ValueError(f"Chat Pack does not support profile {other!r}.")
+    startVideo = _finiteSeconds(payload, "videoStartSeconds")
+    endVideo = _finiteSeconds(payload, "videoEndSeconds")
+    if endVideo < startVideo:
+        raise ValueError("Chat selector produced an inverted video-time window.")
 
-    try:
-        videoStart = float(payload["transcript"]["videoStartSeconds"])
-        videoEnd = float(payload["transcript"]["videoEndSeconds"])
-    except (KeyError, TypeError, ValueError) as err:
-        raise ValueError("Transcript snapshot must contain numeric videoStartSeconds/videoEndSeconds.") from err
-    if not math.isfinite(videoStart) or not math.isfinite(videoEnd) or videoEnd < videoStart:
-        raise ValueError("Transcript snapshot contains an invalid video-time window.")
-
-    parsedRecords = [
-        _parseLine(line, lineNumber)
-        for lineNumber, line in enumerate(ctx.io.readLines(chatPath), start=1)
-    ]
-    mediaZeroWall = _inferMediaZero(parsedRecords, chatStartTime)
-
-    startVideo = videoStart - chatBefore
-    endVideo = videoEnd + chatAfter
+    parsedRecords, mediaZeroWall = _records(ctx, chatPath, chatStartTime)
     startWall = mediaZeroWall + timedelta(seconds=startVideo)
     endWall = mediaZeroWall + timedelta(seconds=endVideo)
 
@@ -106,7 +100,7 @@ def _select(ctx, payload):
         timestamp = record["timestamp"]
         if not isinstance(timestamp, datetime):
             raise RuntimeError("Parsed chat timestamp has an invalid internal type.")
-        if startWall <= timestamp <= endWall:
+        if startWall <= timestamp < endWall:
             retained = dict(record)
             retained.pop("timestamp")
             records.append(retained)
