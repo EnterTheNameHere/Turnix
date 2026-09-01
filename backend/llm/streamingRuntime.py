@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -12,7 +13,7 @@ from backend.values.sentinels import MISSING
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
-    from backend.values.committed import CommittedValueLayer
+    from backend.values.committed import CommittedValueLayer, CommittedValueTransaction
 
 __all__ = [
     "LlmProcessingPipeline",
@@ -54,6 +55,7 @@ class StreamingLlmResult:
     executionProfile: LlmExecutionProfile
     rawText: str
     providerMetadata: Mapping[str, ImmutableValue] = field(default_factory=dict)
+    observerErrors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,11 +64,18 @@ class LlmProcessingResult:
 
     processingRunId: str
     queryItems: tuple[QueryItem, ...]
+    reusableQueryItems: tuple[QueryItem, ...]
     llm: StreamingLlmResult
 
 
 class LlmProcessingPipeline:
-    """Reusable staged LLM pipeline with optional ApplicationRun committed memory."""
+    """Reusable staged LLM pipeline with optional ApplicationRun committed memory.
+
+    Reusable QueryItems are committed individually and referenced by identity so
+    overlapping ProcessingRuns do not repeatedly commit the same large source
+    material. Filtering affects only the accepted query for the current run; it
+    does not erase reusable items prepared by BUILD_QUERY_ITEMS.
+    """
 
     def __init__(
         self,
@@ -125,7 +134,8 @@ class LlmProcessingPipeline:
 
         transaction = self._state.openTransaction()
         run = ProcessingRun(pipelineId=f"llm:{memoryKey}", transaction=transaction)
-        queryItemsAddress = f"processing/{memoryKey}/queryitems"
+        currentItemsAddress = f"processing/{memoryKey}/currentqueryitems"
+        committed = False
         try:
             run.enterStage(ProcessingStage.RESOLVE_EXECUTION_PROFILE)
             registration, provider, options, profile = self._resolveExecution(
@@ -142,39 +152,44 @@ class LlmProcessingPipeline:
                 "metadata": plainImmutableValue(profile.metadata),
             }
 
-            previous = transaction.load(queryItemsAddress)
-            previousSnapshots = [] if previous is MISSING else previous
-            if not isinstance(previousSnapshots, list):
-                raise RuntimeError(f"Committed QueryItem memory at {queryItemsAddress!r} is invalid.")
+            previousSnapshots = self._loadCurrentQueryItems(
+                transaction=transaction,
+                memoryKey=memoryKey,
+                currentItemsAddress=currentItemsAddress,
+            )
 
-            stageInput = {
-                "input": inputValue,
-                "previousQueryItems": previousSnapshots,
-                "execution": executionSnapshot,
-            }
             run.enterStage(ProcessingStage.BUILD_QUERY_ITEMS)
-            built = self._capabilityInvoker(buildQueryItemsCapabilityId, stageInput)
-            items = self._requireQueryItems(built, stage="BUILD_QUERY_ITEMS")
+            built = self._capabilityInvoker(
+                buildQueryItemsCapabilityId,
+                {
+                    "input": inputValue,
+                    "previousQueryItems": previousSnapshots,
+                    "execution": executionSnapshot,
+                },
+            )
+            reusableItems = self._requireQueryItems(built, stage="BUILD_QUERY_ITEMS")
+            self._stageReusableQueryItems(transaction, memoryKey=memoryKey, items=reusableItems)
 
+            acceptedItems = reusableItems
             if filterQueryItemsCapabilityId is not None:
                 run.enterStage(ProcessingStage.FILTER_QUERY_ITEMS)
                 filtered = self._capabilityInvoker(
                     filterQueryItemsCapabilityId,
                     {
                         "input": inputValue,
-                        "queryItems": [item.snapshot() for item in items],
+                        "queryItems": [item.snapshot() for item in reusableItems],
                         "execution": executionSnapshot,
                     },
                 )
-                items = self._requireQueryItems(filtered, stage="FILTER_QUERY_ITEMS")
-            run.queryItems = items
+                acceptedItems = self._requireQueryItems(filtered, stage="FILTER_QUERY_ITEMS")
+            run.queryItems = acceptedItems
 
             run.enterStage(ProcessingStage.BUILD_QUERY)
             builtQuery = self._capabilityInvoker(
                 buildQueryCapabilityId,
                 {
                     "input": inputValue,
-                    "queryItems": [item.snapshot() for item in items],
+                    "queryItems": [item.snapshot() for item in acceptedItems],
                     "execution": executionSnapshot,
                 },
             )
@@ -193,21 +208,18 @@ class LlmProcessingPipeline:
             )
 
             run.enterStage(ProcessingStage.UPDATE_QUERY_ITEMS)
-            queryItemSnapshots = [item.snapshot() for item in items]
-            transaction.set(queryItemsAddress, queryItemSnapshots)
+            transaction.set(currentItemsAddress, [item.itemId for item in reusableItems])
             transaction.set(
                 f"processing/{memoryKey}/runs/{run.processingRunId}",
                 {
                     "processingRunId": run.processingRunId,
-                    "queryItems": queryItemSnapshots,
-                    "query": {
-                        "formatId": llmResult.query.formatId,
-                        "payload": llmResult.query.payload,
-                        "metadata": plainImmutableValue(llmResult.query.metadata),
-                    },
+                    "reusableQueryItemIds": [item.itemId for item in reusableItems],
+                    "acceptedQueryItemIds": [item.itemId for item in acceptedItems],
+                    "query": self._queryEvidence(llmResult.query),
                     "response": {"rawText": llmResult.rawText},
                     "execution": executionSnapshot,
                     "providerMetadata": plainImmutableValue(llmResult.providerMetadata),
+                    "observerErrors": list(llmResult.observerErrors),
                 },
             )
             transaction.set(
@@ -217,17 +229,88 @@ class LlmProcessingPipeline:
 
             run.enterStage(ProcessingStage.FINALIZE)
             transaction.commit()
+            committed = True
             run.complete()
-            self._emitTrace("processing-run-completed", run, {"queryItemCount": len(items)})
-            return LlmProcessingResult(processingRunId=run.processingRunId, queryItems=items, llm=llmResult)
+            self._emitTrace("processing-run-completed", run, {"queryItemCount": len(acceptedItems)})
+            return LlmProcessingResult(
+                processingRunId=run.processingRunId,
+                queryItems=acceptedItems,
+                reusableQueryItems=reusableItems,
+                llm=llmResult,
+            )
         except Exception:
             run.fail()
-            try:
-                transaction.abort()
-            except RuntimeError:
-                pass
+            if not committed:
+                try:
+                    transaction.abort()
+                except RuntimeError:
+                    pass
             self._emitTrace("processing-run-failed", run, {})
             raise
+
+    def _loadCurrentQueryItems(
+        self,
+        *,
+        transaction: CommittedValueTransaction,
+        memoryKey: str,
+        currentItemsAddress: str,
+    ) -> list[dict[str, object]]:
+        currentIds = transaction.load(currentItemsAddress)
+        if currentIds is MISSING:
+            return []
+        if not isinstance(currentIds, list) or not all(type(itemId) is str for itemId in currentIds):
+            raise RuntimeError(f"Committed QueryItem index at {currentItemsAddress!r} is invalid.")
+
+        snapshots: list[dict[str, object]] = []
+        for itemId in currentIds:
+            address = self._queryItemAddress(memoryKey, itemId)
+            snapshot = transaction.load(address)
+            if not isinstance(snapshot, dict):
+                raise RuntimeError(f"Committed QueryItem {itemId!r} is missing or invalid.")
+            if snapshot.get("itemId") != itemId:
+                raise RuntimeError(f"Committed QueryItem identity mismatch at {address!r}.")
+            snapshots.append(snapshot)
+        return snapshots
+
+    def _stageReusableQueryItems(
+        self,
+        transaction: CommittedValueTransaction,
+        *,
+        memoryKey: str,
+        items: tuple[QueryItem, ...],
+    ) -> None:
+        for item in items:
+            address = self._queryItemAddress(memoryKey, item.itemId)
+            snapshot = item.snapshot()
+            existing = transaction.load(address)
+            if existing is MISSING:
+                transaction.set(address, snapshot)
+                continue
+            if existing != snapshot:
+                raise RuntimeError(
+                    f"QueryItem identity {item.itemId!r} resolved to different content within processing memory.",
+                )
+
+    @staticmethod
+    def _queryItemAddress(memoryKey: str, itemId: str) -> str:
+        digest = hashlib.sha256(itemId.encode("utf-8")).hexdigest()
+        return f"processing/{memoryKey}/items/{digest}"
+
+    @staticmethod
+    def _queryEvidence(query: LlmQuery) -> dict[str, object]:
+        evidence: dict[str, object] = {
+            "formatId": query.formatId,
+            "metadata": plainImmutableValue(query.metadata),
+            "payloadType": type(query.payload).__qualname__,
+        }
+        if type(query.payload) is str:
+            encoded = query.payload.encode("utf-8")
+            evidence["payloadBytes"] = len(encoded)
+            evidence["payloadSha256"] = hashlib.sha256(encoded).hexdigest()
+        elif type(query.payload) is bytes:
+            evidence["payloadBytes"] = len(query.payload)
+            evidence["payloadSha256"] = hashlib.sha256(query.payload).hexdigest()
+        return evidence
 
     def _resolveExecution(
         self,
@@ -265,6 +348,7 @@ class LlmProcessingPipeline:
         parts: list[str] = []
         completed = False
         finalMetadata: Mapping[str, ImmutableValue] = {}
+        observerErrors: list[str] = []
         for index, event in enumerate(provider.stream(request)):
             if not isinstance(event, LlmStreamEvent):
                 raise LlmProviderProtocolError(f"Provider yielded non-LlmStreamEvent at index {index}.")
@@ -280,7 +364,11 @@ class LlmProcessingPipeline:
             else:
                 raise LlmProviderProtocolError(f"Unsupported provider event {event.eventType!r}.")
             if streamObserver is not None:
-                streamObserver(event)
+                try:
+                    streamObserver(event)
+                except Exception as err:
+                    observerErrors.append(f"{type(err).__qualname__}: {err}")
+                    self._emitObserverFailure(processingRun, err)
         if not completed:
             raise LlmProviderProtocolError("Provider stream ended without a completed event.")
         if processingRun is not None:
@@ -294,6 +382,7 @@ class LlmProcessingPipeline:
             executionProfile=profile,
             rawText="".join(parts),
             providerMetadata=finalMetadata,
+            observerErrors=tuple(observerErrors),
         )
 
     @staticmethod
@@ -320,6 +409,17 @@ class LlmProcessingPipeline:
         if not isinstance(metadata, dict):
             raise TypeError("Built query metadata must be an object.")
         return LlmQuery(formatId=value.get("formatId"), payload=value.get("payload"), metadata=metadata)
+
+    def _emitObserverFailure(self, run: ProcessingRun | None, err: Exception) -> None:
+        if self._trace is None:
+            return
+        attributes: dict[str, object] = {"errorType": type(err).__qualname__, "message": str(err)}
+        if run is not None:
+            attributes["processingRunId"] = run.processingRunId
+        try:
+            self._trace("stream-observer-failed", attributes)
+        except Exception:
+            return
 
     def _emitTrace(self, reason: str, run: ProcessingRun, extra: dict[str, object]) -> None:
         if self._trace is None:
