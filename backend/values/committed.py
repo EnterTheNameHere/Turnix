@@ -1,4 +1,4 @@
-# file: backend/values/committed.py ; version: 4
+# file: backend/values/committed.py ; version: 5
 from __future__ import annotations
 
 from copy import deepcopy
@@ -24,14 +24,7 @@ class _CommittedRevision:
 
 
 class CommittedValueLayer:
-    """Authoritative revisioned value layer backed by immutable ValueRefs.
-
-    Commit conflict validation and revision replacement occur under one lock so
-    two concurrent outer transactions cannot both validate against the same
-    base revision and silently overwrite each other. Payload encoding is staged
-    in a temporary Chunk store; failed conflict validation therefore does not
-    leave newly encoded unreachable Chunks in the authoritative store.
-    """
+    """Authoritative revisioned value layer backed by immutable ValueRefs."""
 
     def __init__(self, *, chunkStore: InMemoryChunkStore | None = None) -> None:
         self.chunkStore = chunkStore or InMemoryChunkStore()
@@ -83,9 +76,10 @@ class CommittedValueLayer:
 class CommittedValueTransaction:
     """Nested speculative transaction with root-authoritative conflict detection.
 
-    Values are detached when staged, loaded, and promoted between nested
-    transactions. Mutable caller aliases therefore cannot modify transaction
-    state without an explicit set().
+    Nested transactions form a strict stack. While a child transaction remains
+    active, its parent is suspended for public reads, writes, and creation of
+    another child. This prevents ambiguous sibling ordering and parent mutation
+    from racing semantically with child promotion inside one transaction tree.
     """
 
     def __init__(self, *, root: CommittedValueLayer, parent: "CommittedValueTransaction | None") -> None:
@@ -100,16 +94,19 @@ class CommittedValueTransaction:
 
     def openTransaction(self) -> "CommittedValueTransaction":
         self._requireActive()
+        self._requireNoChildren()
         return CommittedValueTransaction(root=self._root, parent=self)
 
     def load(self, address: str | ValueAddress) -> object:
         self._requireActive()
+        self._requireNoChildren()
         key = address if isinstance(address, ValueAddress) else ValueAddress(address)
         self._captureBase(key)
         return self._snapshot(self._loadVisible(key))
 
     def set(self, address: str | ValueAddress, value: object) -> None:
         self._requireActive()
+        self._requireNoChildren()
         key = address if isinstance(address, ValueAddress) else ValueAddress(address)
         self._captureBase(key)
         detached = self._snapshot(value)
@@ -163,7 +160,7 @@ class CommittedValueTransaction:
 
     def _requireNoChildren(self) -> None:
         if self._children:
-            raise RuntimeError("Transaction has unresolved active child transactions.")
+            raise RuntimeError("Transaction has an unresolved active child transaction.")
 
     @staticmethod
     def _snapshot(value: object) -> object:
