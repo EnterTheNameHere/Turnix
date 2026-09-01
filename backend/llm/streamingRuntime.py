@@ -182,6 +182,7 @@ class LlmProcessingPipeline:
                     },
                 )
                 acceptedItems = self._requireQueryItems(filtered, stage="FILTER_QUERY_ITEMS")
+                self._requireFilteredSubset(reusableItems, acceptedItems)
             run.queryItems = acceptedItems
 
             run.enterStage(ProcessingStage.BUILD_QUERY)
@@ -398,6 +399,16 @@ class LlmProcessingPipeline:
             identities.add(item.itemId)
             items.append(item)
         return tuple(items)
+
+    @staticmethod
+    def _requireFilteredSubset(source: tuple[QueryItem, ...], filtered: tuple[QueryItem, ...]) -> None:
+        sourceById = {item.itemId: item for item in source}
+        for item in filtered:
+            original = sourceById.get(item.itemId)
+            if original is None:
+                raise ValueError(f"FILTER_QUERY_ITEMS introduced unknown QueryItem {item.itemId!r}.")
+            if original != item:
+                raise ValueError(f"FILTER_QUERY_ITEMS modified QueryItem {item.itemId!r}; filtering may only select items.")
 
     @staticmethod
     def _requireQuery(value: object) -> LlmQuery:
