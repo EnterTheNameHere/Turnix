@@ -1,7 +1,8 @@
-# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 1
+# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 2
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 import time
 import urllib.request as urlRequest
@@ -31,15 +32,23 @@ class LlamaCppStreamProvider:
     """Provider-neutral streaming adapter for an OpenAI-compatible llama-server."""
 
     def __init__(self, *, baseUrl: str, contextWindowTokens: int | None = None) -> None:
+        if type(baseUrl) is not str or not baseUrl.strip():
+            raise ValueError("llama.cpp baseUrl must be a non-blank string.")
+        if contextWindowTokens is not None and (type(contextWindowTokens) is not int or contextWindowTokens <= 0):
+            raise ValueError("contextWindowTokens must be a positive exact integer when supplied.")
         self.baseUrl = baseUrl.rstrip("/")
         self.contextWindowTokens = contextWindowTokens
 
     def getExecutionProfile(self, *, model: str | None, providerOptions: Mapping[str, ImmutableValue]) -> LlmExecutionProfile:
-        del model, providerOptions
+        del model
+        options = _parseInferenceOptions(providerOptions)
         return LlmExecutionProfile(
             contextWindowTokens=self.contextWindowTokens,
             tokenEstimator=None,
-            metadata={"baseUrl": self.baseUrl},
+            metadata={
+                "baseUrl": self.baseUrl,
+                "timeoutSeconds": options.timeoutSeconds,
+            },
         )
 
     def stream(self, request: LlmCallRequest) -> Iterator[LlmStreamEvent]:
@@ -61,20 +70,53 @@ class LlamaCppStreamProvider:
             raise LlmProviderConnectionError(f"Failed communicating with llama.cpp at {endpoint}.") from err
 
 
+def _optionalFloat(source: Mapping[str, ImmutableValue], key: str, *, minimum: float | None = None,
+                   maximum: float | None = None, strictlyPositive: bool = False) -> float | None:
+    value = source.get(key)
+    if value is None:
+        return None
+    if type(value) not in {int, float}:
+        raise TypeError(f"llama.cpp provider option {key!r} must be numeric.")
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"llama.cpp provider option {key!r} must be finite.")
+    if strictlyPositive and result <= 0:
+        raise ValueError(f"llama.cpp provider option {key!r} must be positive.")
+    if minimum is not None and result < minimum:
+        raise ValueError(f"llama.cpp provider option {key!r} must be >= {minimum}.")
+    if maximum is not None and result > maximum:
+        raise ValueError(f"llama.cpp provider option {key!r} must be <= {maximum}.")
+    return result
+
+
+def _optionalInt(source: Mapping[str, ImmutableValue], key: str, *, positive: bool = False) -> int | None:
+    value = source.get(key)
+    if value is None:
+        return None
+    if type(value) is not int:
+        raise TypeError(f"llama.cpp provider option {key!r} must be an exact integer.")
+    if positive and value <= 0:
+        raise ValueError(f"llama.cpp provider option {key!r} must be positive.")
+    return value
+
+
 def _parseInferenceOptions(source: Mapping[str, ImmutableValue]) -> LlamaCppOptions:
     allowed = {"temperature", "maxTokens", "topP", "topK", "minP", "repeatPenalty", "seed", "timeoutSeconds"}
     unknown = set(source) - allowed
     if unknown:
         raise ValueError(f"Unsupported llama.cpp provider option: {min(unknown)!r}.")
+
+    temperature = _optionalFloat(source, "temperature", minimum=0.0)
+    timeout = _optionalFloat(source, "timeoutSeconds", strictlyPositive=True)
     return LlamaCppOptions(
-        temperature=float(source.get("temperature", 0.7)),
-        maxTokens=None if source.get("maxTokens") is None else int(source["maxTokens"]),
-        topP=None if source.get("topP") is None else float(source["topP"]),
-        topK=None if source.get("topK") is None else int(source["topK"]),
-        minP=None if source.get("minP") is None else float(source["minP"]),
-        repeatPenalty=None if source.get("repeatPenalty") is None else float(source["repeatPenalty"]),
-        seed=None if source.get("seed") is None else int(source["seed"]),
-        timeoutSeconds=float(source.get("timeoutSeconds", 120.0)),
+        temperature=0.7 if temperature is None else temperature,
+        maxTokens=_optionalInt(source, "maxTokens", positive=True),
+        topP=_optionalFloat(source, "topP", minimum=0.0, maximum=1.0),
+        topK=_optionalInt(source, "topK", positive=True),
+        minP=_optionalFloat(source, "minP", minimum=0.0, maximum=1.0),
+        repeatPenalty=_optionalFloat(source, "repeatPenalty", strictlyPositive=True),
+        seed=_optionalInt(source, "seed"),
+        timeoutSeconds=120.0 if timeout is None else timeout,
     )
 
 
@@ -110,7 +152,10 @@ def _readEvents(response) -> Iterator[LlmStreamEvent]:
     for rawLine in response:
         if not isinstance(rawLine, bytes):
             raise LlmProviderProtocolError("llama.cpp stream produced a non-bytes line.")
-        line = rawLine.decode("utf-8", errors="strict").rstrip("\r\n")
+        try:
+            line = rawLine.decode("utf-8", errors="strict").rstrip("\r\n")
+        except UnicodeDecodeError as err:
+            raise LlmProviderProtocolError("llama.cpp stream contained invalid UTF-8.") from err
         if not line or not line.startswith("data:"):
             continue
         data = line[5:].strip()
@@ -154,8 +199,13 @@ class LlamaCppDriver:
         self.config = dict(config)
         host = str(self.config.get("host", "127.0.0.1"))
         port = int(self.config.get("port", 8080))
+        if not 1 <= port <= 65535:
+            raise ValueError("llamaCpp.port must be between 1 and 65535.")
         self.baseUrl = str(self.config.get("baseUrl", f"http://{host}:{port}"))
-        self.contextWindowTokens = None if self.config.get("contextWindowTokens") is None else int(self.config["contextWindowTokens"])
+        contextWindow = self.config.get("contextWindowTokens")
+        if contextWindow is not None and (type(contextWindow) is not int or contextWindow <= 0):
+            raise ValueError("llamaCpp.contextWindowTokens must be a positive exact integer.")
+        self.contextWindowTokens = contextWindow
         self.process: subprocess.Popen[bytes] | None = None
 
     def start(self) -> None:
@@ -165,6 +215,10 @@ class LlamaCppDriver:
             raise RuntimeError("llama-server is already managed by this CodeEntry instance.")
         executable = Path(str(self.config["executable"])).resolve()
         model = Path(str(self.config["modelPath"])).resolve()
+        if not executable.is_file():
+            raise FileNotFoundError(f"llama-server executable does not exist: {executable}.")
+        if not model.is_file():
+            raise FileNotFoundError(f"llama.cpp model does not exist: {model}.")
         args = [str(executable), "-m", str(model), "--host", str(self.config.get("host", "127.0.0.1")),
                 "--port", str(int(self.config.get("port", 8080)))]
         if self.contextWindowTokens is not None:
@@ -174,15 +228,24 @@ class LlamaCppDriver:
         if self.config.get("threads") is not None:
             args += ["-t", str(int(self.config["threads"]))]
         if self.config.get("mmprojPath"):
-            args += ["--mmproj", str(Path(str(self.config["mmprojPath"])).resolve())]
+            mmproj = Path(str(self.config["mmprojPath"])).resolve()
+            if not mmproj.is_file():
+                raise FileNotFoundError(f"llama.cpp mmproj does not exist: {mmproj}.")
+            args += ["--mmproj", str(mmproj)]
         extra = self.config.get("extraArgs", [])
         if not isinstance(extra, list) or not all(type(item) is str for item in extra):
             raise ValueError("llamaCpp.extraArgs must be a list of strings.")
         args.extend(extra)
         self.process = subprocess.Popen(args, stdin=subprocess.DEVNULL)
-        self._waitReady(float(self.config.get("startupTimeoutSeconds", 120.0)))
+        try:
+            self._waitReady(float(self.config.get("startupTimeoutSeconds", 120.0)))
+        except Exception:
+            self.stop()
+            raise
 
     def _waitReady(self, timeoutSeconds: float) -> None:
+        if not math.isfinite(timeoutSeconds) or timeoutSeconds <= 0:
+            raise ValueError("llamaCpp.startupTimeoutSeconds must be a positive finite number.")
         deadline = time.monotonic() + timeoutSeconds
         health = f"{self.baseUrl.rstrip('/')}/health"
         while time.monotonic() < deadline:
@@ -195,7 +258,6 @@ class LlamaCppDriver:
             except (URLError, HTTPError, TimeoutError):
                 pass
             time.sleep(0.2)
-        self.stop()
         raise TimeoutError(f"llama-server did not become ready within {timeoutSeconds} seconds.")
 
     def stop(self) -> None:
@@ -215,11 +277,15 @@ def onLoad(ctx):
     if not isinstance(config, dict):
         raise ValueError("llamaCpp configuration must be an object.")
     driver = LlamaCppDriver(config)
-    driver.start()
-    ctx.llm.registerProvider(
-        "llama.cpp",
-        LlamaCppStreamProvider(baseUrl=driver.baseUrl, contextWindowTokens=driver.contextWindowTokens),
-    )
+    try:
+        driver.start()
+        ctx.llm.registerProvider(
+            "llama.cpp",
+            LlamaCppStreamProvider(baseUrl=driver.baseUrl, contextWindowTokens=driver.contextWindowTokens),
+        )
+    except Exception:
+        driver.stop()
+        raise
     return driver
 
 
