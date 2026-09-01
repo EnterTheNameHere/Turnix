@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 2
+# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 3
 from __future__ import annotations
 
 import argparse
@@ -14,23 +14,42 @@ from backend.packs.runtime import ManualActivationPlan, PackLoader, PackResolver
 from backend.runtime.runtimeHost import RuntimeHost  # noqa: E402
 
 
+def _normalizePath(value: object, *, configDirectory: Path) -> object:
+    if type(value) is not str:
+        return value
+    path = Path(value)
+    return str(path if path.is_absolute() else (configDirectory / path).resolve())
+
+
 def _normalizePaths(config: dict[str, object], *, configDirectory: Path) -> dict[str, object]:
     normalized = dict(config)
     for key in ("promptsFile", "transcriptFile", "chatFile", "outputDirectory"):
-        value = normalized.get(key)
-        if type(value) is str:
-            path = Path(value)
-            if not path.is_absolute():
-                normalized[key] = str((configDirectory / path).resolve())
+        if key in normalized:
+            normalized[key] = _normalizePath(normalized[key], configDirectory=configDirectory)
+
     llama = normalized.get("llamaCpp")
     if isinstance(llama, dict):
         llama = dict(llama)
         for key in ("executable", "modelPath", "mmprojPath"):
-            value = llama.get(key)
-            if type(value) is str:
-                path = Path(value)
-                if not path.is_absolute():
-                    llama[key] = str((configDirectory / path).resolve())
+            if key in llama:
+                llama[key] = _normalizePath(llama[key], configDirectory=configDirectory)
+
+        models = llama.get("models")
+        if isinstance(models, dict):
+            normalizedModels: dict[object, object] = {}
+            for name, definition in models.items():
+                if not isinstance(definition, dict):
+                    normalizedModels[name] = definition
+                    continue
+                normalizedDefinition = dict(definition)
+                for key in ("modelPath", "mmprojPath"):
+                    if key in normalizedDefinition:
+                        normalizedDefinition[key] = _normalizePath(
+                            normalizedDefinition[key],
+                            configDirectory=configDirectory,
+                        )
+                normalizedModels[name] = normalizedDefinition
+            llama["models"] = normalizedModels
         normalized["llamaCpp"] = llama
     return normalized
 
