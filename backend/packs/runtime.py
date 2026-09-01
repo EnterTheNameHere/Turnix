@@ -1,4 +1,4 @@
-# file: backend/packs/runtime.py ; version: 6
+# file: backend/packs/runtime.py ; version: 7
 from __future__ import annotations
 
 import importlib.util
@@ -51,35 +51,74 @@ class ManualActivationPlan:
 
 
 class PackResolver:
-    """Uniqueness-only resolver skeleton: 0 or >1 candidates are errors."""
+    """Uniqueness-only resolver over one immutable discovery snapshot.
+
+    Content roots are expected to be stable for the lifetime of a resolver.
+    The first lookup discovers and validates every Pack manifest once. Later
+    lookups reuse that snapshot, avoiding repeated recursive filesystem scans
+    while preserving the resolver's 0/1/>1 candidate semantics.
+    """
 
     def __init__(self, *, roots: tuple[Path, ...]) -> None:
         self._roots = tuple(root.resolve() for root in roots)
+        self._candidatesByPackId: dict[str, tuple[PackDefinition, ...]] | None = None
+
+    @staticmethod
+    def _definition(manifestPath: Path, manifest: object) -> PackDefinition:
+        if not isinstance(manifest, dict):
+            raise ValueError(f"Pack manifest must contain a JSON object: {manifestPath}.")
+        packId = manifest.get("packId")
+        if type(packId) is not str or not packId:
+            raise ValueError(f"Pack manifest requires a non-empty string packId: {manifestPath}.")
+        entriesSource = manifest.get("codeEntries", [])
+        if not isinstance(entriesSource, list):
+            raise ValueError(f"Pack {packId!r} has invalid codeEntries.")
+
+        entries: list[CodeEntryDefinition] = []
+        seenEntryIds: set[str] = set()
+        for item in entriesSource:
+            if not isinstance(item, dict) or type(item.get("id")) is not str or type(item.get("source")) is not str:
+                raise ValueError(f"Pack {packId!r} has an invalid CodeEntry declaration.")
+            entryId = item["id"]
+            source = item["source"]
+            if not entryId or not source:
+                raise ValueError(f"Pack {packId!r} CodeEntry id/source must not be blank.")
+            if entryId in seenEntryIds:
+                raise ValueError(f"Pack {packId!r} declares duplicate CodeEntry id {entryId!r}.")
+            seenEntryIds.add(entryId)
+            entries.append(CodeEntryDefinition(codeEntryId=entryId, source=source))
+
+        return PackDefinition(
+            packId=packId,
+            root=manifestPath.parent.resolve(),
+            codeEntries=tuple(entries),
+        )
+
+    def _discover(self) -> dict[str, tuple[PackDefinition, ...]]:
+        cached = self._candidatesByPackId
+        if cached is not None:
+            return cached
+
+        discovered: dict[str, list[PackDefinition]] = {}
+        for root in self._roots:
+            if not root.is_dir():
+                continue
+            for manifestPath in sorted(root.rglob("manifest.json")):
+                try:
+                    manifest = json.loads(manifestPath.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, json.JSONDecodeError) as err:
+                    raise ValueError(f"Could not read Pack manifest: {manifestPath}.") from err
+                definition = self._definition(manifestPath, manifest)
+                discovered.setdefault(definition.packId, []).append(definition)
+
+        snapshot = {packId: tuple(candidates) for packId, candidates in discovered.items()}
+        self._candidatesByPackId = snapshot
+        return snapshot
 
     def requireSingle(self, packId: str) -> PackDefinition:
-        matches: list[PackDefinition] = []
-        for root in self._roots:
-            for manifestPath in sorted(root.rglob("manifest.json")):
-                manifest = json.loads(manifestPath.read_text(encoding="utf-8"))
-                if manifest.get("packId") != packId:
-                    continue
-                entriesSource = manifest.get("codeEntries", [])
-                if not isinstance(entriesSource, list):
-                    raise ValueError(f"Pack {packId!r} has invalid codeEntries.")
-                entries: list[CodeEntryDefinition] = []
-                seenEntryIds: set[str] = set()
-                for item in entriesSource:
-                    if not isinstance(item, dict) or type(item.get("id")) is not str or type(item.get("source")) is not str:
-                        raise ValueError(f"Pack {packId!r} has an invalid CodeEntry declaration.")
-                    entryId = item["id"]
-                    source = item["source"]
-                    if not entryId or not source:
-                        raise ValueError(f"Pack {packId!r} CodeEntry id/source must not be blank.")
-                    if entryId in seenEntryIds:
-                        raise ValueError(f"Pack {packId!r} declares duplicate CodeEntry id {entryId!r}.")
-                    seenEntryIds.add(entryId)
-                    entries.append(CodeEntryDefinition(codeEntryId=entryId, source=source))
-                matches.append(PackDefinition(packId=packId, root=manifestPath.parent.resolve(), codeEntries=tuple(entries)))
+        if type(packId) is not str or not packId:
+            raise ValueError("Pack identity must be a non-empty exact string.")
+        matches = self._discover().get(packId, ())
         if not matches:
             raise LookupError(f"Pack was not found: {packId}.")
         if len(matches) != 1:
