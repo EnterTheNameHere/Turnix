@@ -29,6 +29,7 @@ def plainImmutableValue(value: ImmutableValue) -> object:
 
 class ProcessingStage(StrEnum):
     PREPARE_INPUT = "prepare-input"
+    RESOLVE_EXECUTION_PROFILE = "resolve-execution-profile"
     BUILD_QUERY_ITEMS = "build-query-items"
     FILTER_QUERY_ITEMS = "filter-query-items"
     BUILD_QUERY = "build-query"
