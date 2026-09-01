@@ -16,6 +16,20 @@ def test_commit_creates_revision_and_detached_decode():
     assert layer.load("analysis/result") == {"items": [1, 2]}
 
 
+def test_transaction_detaches_input_and_staged_loads():
+    layer = CommittedValueLayer()
+    transaction = layer.openTransaction()
+    source = {"items": [1, 2]}
+    transaction.set("analysis/result", source)
+    source["items"].append(3)
+    staged = transaction.load("analysis/result")
+    assert staged == {"items": [1, 2]}
+    staged["items"].append(4)
+    assert transaction.load("analysis/result") == {"items": [1, 2]}
+    transaction.commit()
+    assert layer.load("analysis/result") == {"items": [1, 2]}
+
+
 def test_conflict_detected_from_first_touch_revision():
     layer = CommittedValueLayer()
     first = layer.openTransaction()
