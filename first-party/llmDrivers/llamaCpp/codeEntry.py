@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 4
+# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 5
 from __future__ import annotations
 
 import json
@@ -264,10 +264,16 @@ class LlamaCppDriver:
         self.port = _positiveInt(self.config.get("port", 8080), "llamaCpp.port")
         if self.port > 65535:
             raise ValueError("llamaCpp.port must not exceed 65535.")
-        baseUrl = self.config.get("baseUrl", f"http://{self.host}:{self.port}")
+        managedBaseUrl = f"http://{self.host}:{self.port}"
+        baseUrl = self.config.get("baseUrl", managedBaseUrl)
         if type(baseUrl) is not str or not baseUrl.strip():
             raise ValueError("llamaCpp.baseUrl must be a non-blank string.")
         self.baseUrl = baseUrl.rstrip("/")
+        if self.manageServer and self.baseUrl != managedBaseUrl:
+            raise ValueError(
+                "Managed llama.cpp baseUrl must identify the server Actant launches at "
+                f"{managedBaseUrl!r}; received {self.baseUrl!r}.",
+            )
         self.externalContextWindowTokens = _optionalPositiveInt(
             self.config.get("contextWindowTokens"),
             "llamaCpp.contextWindowTokens",
