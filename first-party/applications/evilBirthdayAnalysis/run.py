@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 1
+# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 2
 from __future__ import annotations
 
 import argparse
@@ -68,8 +68,10 @@ def main() -> int:
                 sys.stdout.write(f"\n\nSaved result: {saved['path']}\n")
         return 0
     finally:
-        loader.close()
-        host.stop()
+        try:
+            loader.close()
+        finally:
+            host.stop()
 
 
 if __name__ == "__main__":
