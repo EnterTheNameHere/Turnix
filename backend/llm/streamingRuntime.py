@@ -66,19 +66,14 @@ class LlmProcessingResult:
 
 
 class LlmProcessingPipeline:
-    """Reusable staged LLM pipeline backed by ApplicationRun committed memory.
-
-    Pack behaviour participates through named capabilities. Each stage invocation
-    therefore receives a fresh CodeEntry Context through RuntimeHost rather than
-    retaining the Context that requested the pipeline run.
-    """
+    """Reusable staged LLM pipeline with optional ApplicationRun committed memory."""
 
     def __init__(
         self,
         *,
         providers: LlmProviderRegistry,
-        state: CommittedValueLayer,
-        capabilityInvoker: Callable[[str, object | None], object],
+        state: CommittedValueLayer | None = None,
+        capabilityInvoker: Callable[[str, object | None], object] | None = None,
         trace: Callable[[str, dict[str, object]], None] | None = None,
     ) -> None:
         self._providers = providers
@@ -95,7 +90,7 @@ class LlmProcessingPipeline:
         providerOptions: Mapping[str, ImmutableValue] | None = None,
         streamObserver: Callable[[LlmStreamEvent], None] | None = None,
     ) -> StreamingLlmResult:
-        """Executes the provider streaming portion directly for non-staged callers."""
+        """Executes only the provider-neutral streaming portion."""
         return self._stream(
             providerName=providerName,
             query=query,
@@ -117,6 +112,8 @@ class LlmProcessingPipeline:
         filterQueryItemsCapabilityId: str | None = None,
         streamObserver: Callable[[LlmStreamEvent], None] | None = None,
     ) -> LlmProcessingResult:
+        if self._state is None or self._capabilityInvoker is None:
+            raise RuntimeError("runProcessing() requires committed state and a capability invoker.")
         if type(memoryKey) is not str or not memoryKey or not memoryKey.replace("-", "").replace("_", "").isalnum() or not memoryKey.islower():
             raise ValueError("memoryKey must be a lowercase Value-address-safe identifier.")
 
@@ -295,7 +292,6 @@ class LlmProcessingPipeline:
                 },
             )
         except Exception:
-            # Trace evidence must not decide processing-state correctness.
             return
 
 
