@@ -1,4 +1,3 @@
-# file: backend/runtime/runtimeHost.py ; version: 6
 from __future__ import annotations
 
 from copy import deepcopy
@@ -9,7 +8,7 @@ from backend.application.runtime import Application, ApplicationRun
 from backend.capabilities.runtime import CapabilityRegistry
 from backend.context.codeEntryContext import CodeEntryContext, CodeEntryIdentity
 from backend.io.managedIo import ManagedIo
-from backend.llm.streamingRuntime import LlmProviderRegistry, StreamingLlmPipeline
+from backend.llm.streamingRuntime import LlmProviderRegistry, LlmProcessingPipeline
 from backend.orchestration.runtime import Job, OrchestrationUnit, OrchestrationUnitOutcome
 from backend.registration import RegistrationScope
 from backend.tracing import TraceSinkDestination, Tracer
@@ -18,39 +17,43 @@ __all__ = ["RuntimeHost"]
 
 
 class RuntimeHost:
-    """Running host boundary coordinating controlled surfaces for one proving-ground ApplicationRun.
+    """Running host boundary coordinating controlled surfaces for one ApplicationRun."""
 
-    All capability execution enters one re-entrant ApplicationRun lane. Nested
-    capability calls remain legal, while unrelated callers cannot execute the
-    same ApplicationRun concurrently merely because Python threads are available.
-
-    Bootstrap configuration is detached at construction and exposed only as
-    snapshots. Runtime operations emit through the existing tracing substrate;
-    callers may inject a retaining Tracer, while the default intentionally uses
-    a sink destination without changing runtime semantics.
-    """
-
-    def __init__(self, *, application: Application | None = None, config: dict[str, object] | None = None,
-                 tracer: Tracer | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        application: Application | None = None,
+        config: dict[str, object] | None = None,
+        tracer: Tracer | None = None,
+    ) -> None:
         self.applicationRun = ApplicationRun(application=application or Application.new())
         self.io = ManagedIo()
         self.capabilities = CapabilityRegistry()
         self.llmProviders = LlmProviderRegistry()
-        self.llmPipeline = StreamingLlmPipeline(providers=self.llmProviders)
         self._config = {} if config is None else deepcopy(config)
         self._codeEntries: dict[str, tuple[CodeEntryIdentity, Path]] = {}
         self._lane = RLock()
         self._ownsTracer = tracer is None
         self.tracer = tracer or Tracer(origin="actant.runtime", destinations=(TraceSinkDestination(),))
+        self.llmPipeline = LlmProcessingPipeline(
+            providers=self.llmProviders,
+            state=self.applicationRun.committedState,
+            capabilityInvoker=lambda capabilityId, payload=None: self.invokeCapability(capabilityId, payload),
+            trace=lambda reason, attributes: self.trace(reason, attributes=attributes),
+        )
 
     @property
     def config(self) -> dict[str, object]:
-        """Returns a detached snapshot of the runtime bootstrap configuration."""
         return deepcopy(self._config)
 
-    def trace(self, reason: str, *, message: str = "", attributes: dict[str, object] | None = None,
-              level: str = "info") -> None:
-        """Emits one RuntimeHost-domain event using reason as its machine label."""
+    def trace(
+        self,
+        reason: str,
+        *,
+        message: str = "",
+        attributes: dict[str, object] | None = None,
+        level: str = "info",
+    ) -> None:
         self.tracer.emitEvent(
             domain="runtime",
             level=level,
@@ -89,8 +92,14 @@ class RuntimeHost:
         if not self.applicationRun.active:
             raise RuntimeError("ApplicationRun is not active.")
 
-    def createContext(self, *, identity: CodeEntryIdentity, packRoot: Path, registrationScope: RegistrationScope,
-                      allowRegistration: bool = False) -> CodeEntryContext:
+    def createContext(
+        self,
+        *,
+        identity: CodeEntryIdentity,
+        packRoot: Path,
+        registrationScope: RegistrationScope,
+        allowRegistration: bool = False,
+    ) -> CodeEntryContext:
         self.requireActive()
         return CodeEntryContext(
             identity=identity,
@@ -153,7 +162,6 @@ class RuntimeHost:
                 scope.withdraw()
 
     def runJob(self, capabilityId: str, payload: object | None = None) -> Job:
-        """Runs one synchronous Job/OrchestrationUnit on the ApplicationRun lane."""
         with self._lane:
             self.requireActive()
             job = Job.new()
