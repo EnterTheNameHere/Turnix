@@ -319,7 +319,49 @@ def _streamStart(item: QueryItem) -> float:
     return float(value)
 
 
-def _buildQuery(_ctx, payload):
+def _chatLineNumber(item: QueryItem) -> int:
+    value = item.metadata.get("lineNumber")
+    if type(value) is not int:
+        raise RuntimeError(f"Chat QueryItem {item.itemId!r} has no exact integer lineNumber metadata.")
+    return value
+
+
+def _chatAuthor(item: QueryItem) -> str:
+    value = item.metadata.get("username")
+    if type(value) is not str or not value:
+        raise RuntimeError(f"Chat QueryItem {item.itemId!r} has no non-empty username metadata.")
+    return value
+
+
+def _sanitizePromptSections(ctx, sections: list[str], chatItems: list[QueryItem]) -> tuple[list[str], dict[str, int]]:
+    orderedChat = sorted(chatItems, key=lambda item: (_streamStart(item), _chatLineNumber(item)))
+    authors = [_chatAuthor(item) for item in orderedChat]
+    resolution = ctx.capabilities.call(
+        "evilAnalysis.identity@1",
+        {"authors": authors, "texts": sections},
+    )
+    if not isinstance(resolution, dict):
+        raise RuntimeError("Identity capability returned an invalid result.")
+    sanitized = resolution.get("texts")
+    anonymousCount = resolution.get("anonymousIdentityCount")
+    preservedCount = resolution.get("preservedIdentityCount")
+    if (
+        not isinstance(sanitized, list)
+        or len(sanitized) != len(sections)
+        or any(type(text) is not str for text in sanitized)
+        or type(anonymousCount) is not int
+        or type(preservedCount) is not int
+        or anonymousCount < 0
+        or preservedCount < 0
+    ):
+        raise RuntimeError("Identity capability returned invalid sanitized prompt evidence.")
+    return sanitized, {
+        "anonymousIdentityCount": anonymousCount,
+        "preservedIdentityCount": preservedCount,
+    }
+
+
+def _buildQuery(ctx, payload):
     if not isinstance(payload, dict) or not isinstance(payload.get("input"), dict):
         raise ValueError("BUILD_QUERY requires an input object.")
     snapshots = payload.get("queryItems")
@@ -343,6 +385,8 @@ def _buildQuery(_ctx, payload):
     if transcriptItems:
         sections.append("TRANSCRIPT WINDOW\n" + "\n".join(item.content for item in transcriptItems))
 
+    sections, identityStatistics = _sanitizePromptSections(ctx, sections, byKind.get("chat", []))
+
     inputValue = payload["input"]
     return {
         "formatId": "text/plain",
@@ -353,6 +397,8 @@ def _buildQuery(_ctx, payload):
             "windowIndex": inputValue["windowIndex"],
             "streamPositionSeconds": inputValue["window"]["positionSeconds"],
             "chatIncluded": False,
+            "identitySanitized": True,
+            **identityStatistics,
         },
     }
 
