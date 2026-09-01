@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import math
 import urllib.request as urlRequest
 from urllib.error import HTTPError, URLError
+
+_MAX_ERROR_BODY_BYTES = 4096
 
 
 def _baseUrl(ctx) -> str:
@@ -13,10 +16,13 @@ def _baseUrl(ctx) -> str:
     if type(baseUrl) is not str or not baseUrl.strip():
         host = llamaCpp.get("host", "127.0.0.1")
         port = llamaCpp.get("port", 8080)
-        if type(host) is not str or not host or type(port) is not int or not 1 <= port <= 65535:
+        if type(host) is not str or not host.strip() or type(port) is not int or not 1 <= port <= 65535:
             raise ValueError("llamaCpp must provide baseUrl or valid host/port values.")
-        baseUrl = f"http://{host}:{port}"
-    return baseUrl.rstrip("/")
+        baseUrl = f"http://{host.strip()}:{port}"
+    result = baseUrl.strip().rstrip("/")
+    if not result.startswith(("http://", "https://")):
+        raise ValueError("llamaCpp.baseUrl must use http:// or https://.")
+    return result
 
 
 def _timeoutSeconds(ctx) -> float:
@@ -27,12 +33,28 @@ def _timeoutSeconds(ctx) -> float:
     if not isinstance(providerOptions, dict):
         raise ValueError("llm.providerOptions must be an object.")
     value = providerOptions.get("timeoutSeconds", 120.0)
-    if type(value) not in {int, float} or float(value) <= 0:
-        raise ValueError("llm.providerOptions.timeoutSeconds must be positive when configured.")
-    return float(value)
+    if type(value) not in {int, float}:
+        raise ValueError("llm.providerOptions.timeoutSeconds must be numeric when configured.")
+    result = float(value)
+    if not math.isfinite(result) or result <= 0:
+        raise ValueError("llm.providerOptions.timeoutSeconds must be a positive finite number when configured.")
+    return result
+
+
+def _httpErrorDetail(err: HTTPError) -> str:
+    try:
+        raw = err.read(_MAX_ERROR_BODY_BYTES)
+    except Exception:
+        return ""
+    if not raw:
+        return ""
+    text = raw.decode("utf-8", errors="replace").strip()
+    return "" if not text else f" Response: {text}"
 
 
 def _postJson(ctx, endpoint: str, payload: dict[str, object]) -> dict[str, object]:
+    if type(endpoint) is not str or not endpoint.startswith("/"):
+        raise ValueError("Token-budget endpoint must be an absolute HTTP path.")
     url = f"{_baseUrl(ctx)}{endpoint}"
     request = urlRequest.Request(
         url,
@@ -44,7 +66,10 @@ def _postJson(ctx, endpoint: str, payload: dict[str, object]) -> dict[str, objec
         with urlRequest.urlopen(request, timeout=_timeoutSeconds(ctx)) as response:
             raw = response.read()
     except HTTPError as err:
-        raise RuntimeError(f"llama.cpp returned HTTP {err.code} while measuring tokens at {endpoint}.") from err
+        detail = _httpErrorDetail(err)
+        raise RuntimeError(
+            f"llama.cpp returned HTTP {err.code} while measuring tokens at {endpoint}.{detail}",
+        ) from err
     except (URLError, TimeoutError) as err:
         raise RuntimeError(f"Failed communicating with llama.cpp while measuring tokens at {endpoint}.") from err
     try:
