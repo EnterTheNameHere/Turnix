@@ -1,7 +1,8 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/transcript/codeEntry.py ; version: 4
 from __future__ import annotations
 
 import math
+
+_sourceCache: dict[str, object] = {}
 
 
 def _timeSeconds(value: str, *, fieldName: str) -> float:
@@ -17,43 +18,25 @@ def _timeSeconds(value: str, *, fieldName: str) -> float:
     return float(hours * 3600 + minutes * 60 + seconds)
 
 
-def _nonNegativeSeconds(settings: dict[str, object], key: str, default: float) -> float:
-    value = settings.get(key, default)
+def _finiteSeconds(payload: dict[str, object], key: str) -> float:
+    value = payload.get(key)
     if type(value) not in {int, float}:
-        raise TypeError(f"Profile setting {key!r} must be numeric.")
+        raise TypeError(f"Transcript selector {key!r} must be numeric.")
     result = float(value)
-    if not math.isfinite(result) or result < 0:
-        raise ValueError(f"Profile setting {key!r} must be a finite non-negative number.")
+    if not math.isfinite(result):
+        raise ValueError(f"Transcript selector {key!r} must be finite.")
     return result
 
 
-def _window(profile: dict[str, object], *, streamStartSeconds: float) -> tuple[float, float, float, float]:
-    name = profile["name"]
-    settings = profile["settings"]
-    if not isinstance(settings, dict):
-        raise ValueError("Profile settings must be an object.")
-    match name:
-        case "0-10-30-profile":
-            anchorValue = settings.get("anchor")
-            if type(anchorValue) is not str:
-                raise ValueError("0-10-30-profile requires a string anchor setting.")
-            anchorVideo = _timeSeconds(anchorValue, fieldName="profile anchor")
-            before = _nonNegativeSeconds(settings, "transcriptBeforeSeconds", 0.0)
-            after = _nonNegativeSeconds(settings, "transcriptAfterSeconds", 600.0)
-            startVideo = anchorVideo - before
-            endVideo = anchorVideo + after
-            if startVideo > endVideo:
-                raise ValueError("Transcript profile produced an inverted video-time window.")
-            startTranscript = startVideo - streamStartSeconds
-            endTranscript = endVideo - streamStartSeconds
-            return startVideo, endVideo, startTranscript, endTranscript
-        case _:
-            raise ValueError(f"Transcript Pack does not support profile {name!r}.")
+def _source(ctx, transcriptPath: str) -> object:
+    if transcriptPath not in _sourceCache:
+        _sourceCache[transcriptPath] = ctx.io.readJson(transcriptPath)
+    return _sourceCache[transcriptPath]
 
 
 def _select(ctx, payload):
-    if not isinstance(payload, dict) or not isinstance(payload.get("profile"), dict):
-        raise ValueError("Transcript selection requires a profile snapshot.")
+    if not isinstance(payload, dict):
+        raise ValueError("Transcript selection requires an object payload.")
     transcriptPath = ctx.config.get("transcriptFile")
     streamStartTime = ctx.config.get("streamStartTime")
     if type(transcriptPath) is not str:
@@ -61,16 +44,22 @@ def _select(ctx, payload):
     if type(streamStartTime) is not str:
         raise ValueError("Application config streamStartTime must be an HH:MM:SS video offset.")
 
+    startVideo = _finiteSeconds(payload, "videoStartSeconds")
+    endVideo = _finiteSeconds(payload, "videoEndSeconds")
+    if endVideo < startVideo:
+        raise ValueError("Transcript selector produced an inverted video-time window.")
+
     streamStartSeconds = _timeSeconds(streamStartTime, fieldName="streamStartTime")
-    source = ctx.io.readJson(transcriptPath)
+    startTranscript = startVideo - streamStartSeconds
+    endTranscript = endVideo - streamStartSeconds
+
+    source = _source(ctx, transcriptPath)
+    if not isinstance(source, dict):
+        raise ValueError("Transcript JSON root must be an object.")
     segments = source.get("segments")
     if not isinstance(segments, list):
         raise ValueError("Transcript JSON must contain segments[].")
 
-    startVideo, endVideo, startTranscript, endTranscript = _window(
-        payload["profile"],
-        streamStartSeconds=streamStartSeconds,
-    )
     selectedSegments: list[dict[str, object]] = []
     for segmentIndex, segment in enumerate(segments):
         if not isinstance(segment, dict) or not isinstance(segment.get("words"), list):
