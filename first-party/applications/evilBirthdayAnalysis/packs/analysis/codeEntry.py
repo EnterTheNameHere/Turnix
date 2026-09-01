@@ -1,10 +1,10 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 2
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 3
 from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
-from backend.core.ids import uuidv4hex
+from backend.core.runtimeIds import newRuntimeId
 from backend.llm.llmTypes import LlmQuery
 
 
@@ -74,7 +74,7 @@ def _run(ctx, payload):
         providerOptions=providerOptions,
         streamObserver=observer,
     )
-    resultId = uuidv4hex()
+    resultId = newRuntimeId()
     record = {
         "resultId": resultId,
         "createdAt": datetime.now(UTC).isoformat(),

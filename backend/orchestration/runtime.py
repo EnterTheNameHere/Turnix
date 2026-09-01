@@ -1,10 +1,10 @@
-# file: backend/orchestration/runtime.py ; version: 1
+# file: backend/orchestration/runtime.py ; version: 2
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
 
-from backend.core.ids import uuidv4hex
+from backend.core.runtimeIds import newRuntimeId
 
 __all__ = ["Job", "JobState", "OrchestrationUnit", "OrchestrationUnitOutcome"]
 
@@ -37,7 +37,7 @@ class Job:
 
     @classmethod
     def new(cls) -> "Job":
-        return cls(jobId=uuidv4hex())
+        return cls(jobId=newRuntimeId())
 
     def start(self) -> None:
         if self.state is not JobState.PENDING:
@@ -70,7 +70,7 @@ class OrchestrationUnit:
 
     @classmethod
     def new(cls) -> "OrchestrationUnit":
-        return cls(orchestrationUnitId=uuidv4hex())
+        return cls(orchestrationUnitId=newRuntimeId())
 
     def finish(self, outcome: OrchestrationUnitOutcome) -> None:
         if self.outcome is not None:

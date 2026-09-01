@@ -1,4 +1,4 @@
-# file: backend/io/managedIo.py ; version: 1
+# file: backend/io/managedIo.py ; version: 2
 from __future__ import annotations
 
 import contextlib
@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from backend.core.ids import uuidv4hex
+from backend.core.runtimeIds import newRuntimeId
 
 __all__ = ["IoError", "IoNotFoundError", "IoDecodeError", "IoWriteError", "ManagedIo"]
 
@@ -28,12 +28,7 @@ class IoWriteError(IoError):
 
 
 class ManagedIo:
-    """Central Actant file-I/O service used by Pack-facing Context facades.
-
-    Paths are resolved before use and every language-facing operation funnels
-    through this service so error classification, atomic writes and later
-    permission/tracing policy have one implementation boundary.
-    """
+    """Central Actant file-I/O service used by Pack-facing Context facades."""
 
     def readText(self, path: str | Path) -> str:
         resolved = self._path(path)
@@ -64,7 +59,7 @@ class ManagedIo:
             raise TypeError("text must be an exact built-in string.")
         resolved = self._path(path)
         resolved.parent.mkdir(parents=True, exist_ok=True)
-        temporary = resolved.with_name(f".{resolved.name}.{uuidv4hex()}.tmp")
+        temporary = resolved.with_name(f".{resolved.name}.{newRuntimeId()}.tmp")
         try:
             temporary.write_text(text, encoding="utf-8", newline="\n")
             temporary.replace(resolved)

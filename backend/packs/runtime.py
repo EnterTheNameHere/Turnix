@@ -1,4 +1,4 @@
-# file: backend/packs/runtime.py ; version: 2
+# file: backend/packs/runtime.py ; version: 3
 from __future__ import annotations
 
 import importlib.util
@@ -10,7 +10,7 @@ from types import ModuleType
 from typing import TYPE_CHECKING
 
 from backend.context.codeEntryContext import CodeEntryIdentity
-from backend.core.ids import uuidv4hex
+from backend.core.runtimeIds import newRuntimeId
 from backend.registration import RegistrationScope
 
 if TYPE_CHECKING:
@@ -103,7 +103,7 @@ class PackLoader:
         activated: list[_LoadedCodeEntry] = []
         try:
             for definition in pack.codeEntries:
-                instanceId = uuidv4hex()
+                instanceId = newRuntimeId()
                 identity = CodeEntryIdentity(
                     applicationId=self._host.applicationRun.application.applicationId,
                     applicationRunId=self._host.applicationRun.applicationRunId,
@@ -154,6 +154,7 @@ class PackLoader:
                     scope.withdraw()
             self._host.capabilities.unregisterOwnedBy(item.identity.codeEntryInstanceId)
             self._host.llmProviders.unregisterOwnedBy(item.identity.codeEntryInstanceId)
+            sys.modules.pop(item.module.__name__, None)
         self._loaded.clear()
 
     @staticmethod
@@ -161,7 +162,7 @@ class PackLoader:
         sourcePath = (pack.root / definition.source).resolve()
         if not sourcePath.is_file():
             raise FileNotFoundError(f"CodeEntry source does not exist: {sourcePath}.")
-        moduleName = f"_actant_{pack.packId.replace('.', '_')}_{definition.codeEntryId.replace('.', '_')}_{instanceId}"
+        moduleName = f"_actant_{pack.packId.replace('.', '_')}_{definition.codeEntryId.replace('.', '_')}_{instanceId.replace('-', '_')}"
         spec = importlib.util.spec_from_file_location(moduleName, sourcePath)
         if spec is None or spec.loader is None:
             raise RuntimeError(f"Could not create Python module spec for {sourcePath}.")

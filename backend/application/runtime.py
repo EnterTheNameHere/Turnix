@@ -1,9 +1,9 @@
-# file: backend/application/runtime.py ; version: 1
+# file: backend/application/runtime.py ; version: 2
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from backend.core.ids import uuidv4hex
+from backend.core.runtimeIds import newRuntimeId
 
 __all__ = ["Application", "ApplicationRun"]
 
@@ -16,7 +16,7 @@ class Application:
 
     @classmethod
     def new(cls) -> "Application":
-        return cls(applicationId=uuidv4hex())
+        return cls(applicationId=newRuntimeId())
 
 
 @dataclass(slots=True)
@@ -24,7 +24,7 @@ class ApplicationRun:
     """One live execution period of an Application."""
 
     application: Application
-    applicationRunId: str = field(default_factory=uuidv4hex)
+    applicationRunId: str = field(default_factory=newRuntimeId)
     active: bool = False
 
     def start(self) -> None:
