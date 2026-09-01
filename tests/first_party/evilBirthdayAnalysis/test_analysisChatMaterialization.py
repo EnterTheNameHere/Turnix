@@ -60,27 +60,35 @@ class _Ctx:
 
 
 class _BuildQueryCapabilities:
-    def __init__(self):
-        self.payload = None
+    def __init__(self, tokenCounter=None):
+        self.identityPayload = None
+        self.tokenTexts: list[str] = []
+        self._tokenCounter = tokenCounter or (lambda text: len(text.split()))
 
     def call(self, capabilityId, payload):
-        assert capabilityId == "evilAnalysis.identity@1"
-        self.payload = payload
-        texts = [
-            text.replace("viewer_name", "anonymized_1").replace("vedal987", "Vedal")
-            for text in payload["texts"]
-        ]
-        return {
-            "displayAuthors": ["anonymized_1" if author == "viewer_name" else "Vedal" for author in payload["authors"]],
-            "texts": texts,
-            "anonymousIdentityCount": 1,
-            "preservedIdentityCount": 1,
-        }
+        if capabilityId == "evilAnalysis.identity@1":
+            self.identityPayload = payload
+            texts = [
+                text.replace("viewer_name", "anonymized_1").replace("vedal987", "Vedal")
+                for text in payload["texts"]
+            ]
+            return {
+                "displayAuthors": ["anonymized_1" if author == "viewer_name" else "Vedal" for author in payload["authors"]],
+                "texts": texts,
+                "anonymousIdentityCount": 1,
+                "preservedIdentityCount": 1,
+            }
+        if capabilityId == "evilAnalysis.tokenBudget@1":
+            text = payload["text"]
+            self.tokenTexts.append(text)
+            return {"inputTokens": self._tokenCounter(text)}
+        raise AssertionError(capabilityId)
 
 
 class _BuildQueryCtx:
-    def __init__(self):
-        self.capabilities = _BuildQueryCapabilities()
+    def __init__(self, tokenCounter=None, *, optionalFraction=0.60):
+        self.capabilities = _BuildQueryCapabilities(tokenCounter)
+        self.config = {"chatBudget": {"optionalContextMaxFraction": optionalFraction}}
 
 
 def _queryItems() -> list[QueryItem]:
@@ -125,7 +133,21 @@ def _queryItems() -> list[QueryItem]:
     ]
 
 
-def _queryPayload(*, includeChat: bool, chatLayout: str) -> dict[str, object]:
+def _window() -> dict[str, object]:
+    return {
+        "positionSeconds": 0,
+        "chunkSeconds": 600,
+        "chunks": analysis._windowChunks(
+            positionSeconds=0,
+            chunkSeconds=600,
+            offsetsSeconds=(0, -600, -1800),
+            streamStartVideoSeconds=533,
+        ),
+    }
+
+
+def _queryPayload(*, includeChat: bool, chatLayout: str, queryItems=None, contextWindow=1000, maxTokens=100) -> dict[str, object]:
+    items = _queryItems() if queryItems is None else queryItems
     return {
         "input": {
             "profile": {
@@ -134,9 +156,13 @@ def _queryPayload(*, includeChat: bool, chatLayout: str) -> dict[str, object]:
             },
             "promptName": "main",
             "windowIndex": 0,
-            "window": {"positionSeconds": 0},
+            "window": _window(),
         },
-        "queryItems": [item.snapshot() for item in _queryItems()],
+        "queryItems": [item.snapshot() for item in items],
+        "execution": {
+            "contextWindowTokens": contextWindow,
+            "providerOptions": {"maxTokens": maxTokens},
+        },
     }
 
 
@@ -181,6 +207,13 @@ def test_chatPresentation_defaults_to_chat_excluded_and_separate_layout():
         analysis._chatPresentation({"includeChat": 1})
     with pytest.raises(ValueError, match="chatLayout"):
         analysis._chatPresentation({"chatLayout": "mixed"})
+
+
+def test_chatBudgetFraction_defaults_to_sixty_percent_and_validates_range():
+    assert analysis._chatBudgetFraction({}) == 0.60
+    assert analysis._chatBudgetFraction({"chatBudget": {"optionalContextMaxFraction": 0.25}}) == 0.25
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        analysis._chatBudgetFraction({"chatBudget": {"optionalContextMaxFraction": 1.1}})
 
 
 def test_preparedChatSnapshot_keeps_three_candidate_chunks_without_raw_record_duplication():
@@ -312,7 +345,7 @@ def test_buildQuery_can_keep_chat_excluded_while_still_sanitizing_transcript_men
     ctx = _BuildQueryCtx()
     query = analysis._buildQuery(ctx, _queryPayload(includeChat=False, chatLayout="separate"))
 
-    assert ctx.capabilities.payload["authors"] == ["viewer_name", "vedal987"]
+    assert ctx.capabilities.identityPayload["authors"] == ["viewer_name", "vedal987"]
     assert query["payload"] == (
         "CONTEXT\ncontext\n\n"
         "ANALYSIS PROFILE\nprofile\n\n"
@@ -324,9 +357,10 @@ def test_buildQuery_can_keep_chat_excluded_while_still_sanitizing_transcript_men
     assert "GIGAEVIL" not in query["payload"]
     assert query["metadata"]["chatIncluded"] is False
     assert query["metadata"]["chatLayout"] == "separate"
+    assert "chatBudget" not in query["metadata"]
 
 
-def test_buildQuery_separate_layout_renders_sanitized_chat_as_its_own_section():
+def test_buildQuery_separate_layout_renders_sanitized_required_chat_as_its_own_section():
     ctx = _BuildQueryCtx()
     query = analysis._buildQuery(ctx, _queryPayload(includeChat=True, chatLayout="separate"))
 
@@ -344,9 +378,11 @@ def test_buildQuery_separate_layout_renders_sanitized_chat_as_its_own_section():
     assert query["metadata"]["identitySanitized"] is True
     assert query["metadata"]["anonymousIdentityCount"] == 1
     assert query["metadata"]["preservedIdentityCount"] == 1
+    assert query["metadata"]["chatBudget"]["optionalRequestedItemCount"] == 0
+    assert query["metadata"]["chatBudget"]["optionalTruncated"] is False
 
 
-def test_buildQuery_interleaved_layout_orders_transcript_and_chat_by_stream_time():
+def test_buildQuery_interleaved_layout_orders_required_transcript_and_chat_by_stream_time():
     ctx = _BuildQueryCtx()
     query = analysis._buildQuery(ctx, _queryPayload(includeChat=True, chatLayout="interleaved"))
 
@@ -364,3 +400,102 @@ def test_buildQuery_interleaved_layout_orders_transcript_and_chat_by_stream_time
     assert "vedal987" not in query["payload"]
     assert query["metadata"]["chatIncluded"] is True
     assert query["metadata"]["chatLayout"] == "interleaved"
+
+
+def _budgetItems() -> list[QueryItem]:
+    return [
+        QueryItem(itemId="context", kind="context", content="context"),
+        QueryItem(itemId="profile", kind="analysis-profile", content="profile"),
+        QueryItem(itemId="prompt", kind="prompt", content="prompt"),
+        QueryItem(
+            itemId="transcript",
+            kind="transcript",
+            content="00:00:01 transcript",
+            metadata={"streamStartSeconds": 1.0, "segmentIndex": 1},
+        ),
+        QueryItem(
+            itemId="chat:current",
+            kind="chat",
+            content="CURRENT",
+            metadata={
+                "streamStartSeconds": 10.0,
+                "lineNumber": 300,
+                "username": "viewer_name",
+                "analysis": {"streamTime": "00:00:10"},
+            },
+        ),
+        QueryItem(
+            itemId="chat:minus10",
+            kind="chat",
+            content="OLD10",
+            metadata={
+                "streamStartSeconds": -5.0,
+                "lineNumber": 200,
+                "username": "viewer_name",
+                "analysis": {"streamTime": "-00:00:05"},
+            },
+        ),
+        QueryItem(
+            itemId="chat:minus30",
+            kind="chat",
+            content="OLD30",
+            metadata={
+                "streamStartSeconds": -1300.0,
+                "lineNumber": 100,
+                "username": "viewer_name",
+                "analysis": {"streamTime": "-00:21:40"},
+            },
+        ),
+    ]
+
+
+def test_optional_chat_is_capped_and_prioritizes_minus10_before_minus30():
+    def countTokens(text):
+        return 20 + text.count("CURRENT") * 5 + text.count("OLD10") * 8 + text.count("OLD30") * 8
+
+    ctx = _BuildQueryCtx(countTokens, optionalFraction=0.60)
+    query = analysis._buildQuery(
+        ctx,
+        _queryPayload(
+            includeChat=True,
+            chatLayout="separate",
+            queryItems=_budgetItems(),
+            contextWindow=50,
+            maxTokens=10,
+        ),
+    )
+
+    assert "CURRENT" in query["payload"]
+    assert "OLD10" in query["payload"]
+    assert "OLD30" not in query["payload"]
+    budget = query["metadata"]["chatBudget"]
+    assert budget["maxInputTokens"] == 40
+    assert budget["baseQueryTokens"] == 20
+    assert budget["requiredCurrentChatTokens"] == 5
+    assert budget["optionalTokenLimit"] == 12
+    assert budget["optionalRequestedTokens"] == 16
+    assert budget["optionalIncludedTokens"] == 8
+    assert budget["optionalRequestedItemCount"] == 2
+    assert budget["optionalIncludedItemCount"] == 1
+    assert budget["optionalRequestedByOffset"] == {"-600": 1, "-1800": 1}
+    assert budget["optionalIncludedByOffset"] == {"-600": 1, "-1800": 0}
+    assert budget["optionalTruncated"] is True
+    assert len(budget["warnings"]) == 1
+
+
+def test_required_current_chat_overflow_is_a_hard_error():
+    def countTokens(text):
+        return 20 + text.count("CURRENT") * 25
+
+    ctx = _BuildQueryCtx(countTokens)
+    with pytest.raises(RuntimeError, match="Required current chat window cannot fit"):
+        analysis._buildQuery(
+            ctx,
+            _queryPayload(
+                includeChat=True,
+                chatLayout="separate",
+                queryItems=_budgetItems(),
+                contextWindow=40,
+                maxTokens=10,
+            ),
+        )
