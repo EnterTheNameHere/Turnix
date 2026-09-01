@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 4
+# file: backend/runtime/runtimeHost.py ; version: 5
 from __future__ import annotations
 
 from copy import deepcopy
@@ -12,6 +12,7 @@ from backend.io.managedIo import ManagedIo
 from backend.llm.streamingRuntime import LlmProviderRegistry, StreamingLlmPipeline
 from backend.orchestration.runtime import Job, OrchestrationUnit, OrchestrationUnitOutcome
 from backend.registration import RegistrationScope
+from backend.tracing import TraceSinkDestination, Tracer
 
 __all__ = ["RuntimeHost"]
 
@@ -24,11 +25,13 @@ class RuntimeHost:
     same ApplicationRun concurrently merely because Python threads are available.
 
     Bootstrap configuration is detached at construction and exposed only as
-    snapshots. Caller-owned mutable dictionaries therefore cannot silently
-    change later Pack invocations after the ApplicationRun has started.
+    snapshots. Runtime operations emit through the existing tracing substrate;
+    callers may inject a retaining Tracer, while the default intentionally uses
+    a sink destination without changing runtime semantics.
     """
 
-    def __init__(self, *, application: Application | None = None, config: dict[str, object] | None = None) -> None:
+    def __init__(self, *, application: Application | None = None, config: dict[str, object] | None = None,
+                 tracer: Tracer | None = None) -> None:
         self.applicationRun = ApplicationRun(application=application or Application.new())
         self.io = ManagedIo()
         self.capabilities = CapabilityRegistry()
@@ -37,21 +40,50 @@ class RuntimeHost:
         self._config = {} if config is None else deepcopy(config)
         self._codeEntries: dict[str, tuple[CodeEntryIdentity, Path]] = {}
         self._lane = RLock()
+        self._ownsTracer = tracer is None
+        self.tracer = tracer or Tracer(origin="actant.runtime", destinations=(TraceSinkDestination(),))
 
     @property
     def config(self) -> dict[str, object]:
         """Returns a detached snapshot of the runtime bootstrap configuration."""
         return deepcopy(self._config)
 
+    def trace(self, reason: str, *, message: str = "", attributes: dict[str, object] | None = None,
+              level: str = "info") -> None:
+        """Emits one RuntimeHost-domain event using reason as its machine label."""
+        self.tracer.emitEvent(
+            domain="runtime",
+            level=level,
+            message=message,
+            label=reason,
+            attributes={} if attributes is None else attributes,
+        )
+
     def start(self) -> None:
         with self._lane:
             self.applicationRun.start()
+            self.trace(
+                "application-run-started",
+                attributes={
+                    "applicationId": self.applicationRun.application.applicationId,
+                    "applicationRunId": self.applicationRun.applicationRunId,
+                },
+            )
 
     def stop(self) -> None:
         with self._lane:
             if not self.applicationRun.active:
                 return
+            self.trace(
+                "application-run-stopped",
+                attributes={
+                    "applicationId": self.applicationRun.application.applicationId,
+                    "applicationRunId": self.applicationRun.applicationRunId,
+                },
+            )
             self.applicationRun.stop()
+            if self._ownsTracer:
+                self.tracer.close()
 
     def requireActive(self) -> None:
         if not self.applicationRun.active:
@@ -88,10 +120,32 @@ class RuntimeHost:
                 identity, packRoot = self._codeEntries[registration.ownerId]
             except KeyError as err:
                 raise RuntimeError(f"Capability owner is not an active CodeEntry: {registration.ownerId}.") from err
+            self.trace(
+                "capability-invocation-started",
+                attributes={
+                    "capabilityId": capabilityId,
+                    "ownerId": registration.ownerId,
+                    "codeEntryInstanceId": identity.codeEntryInstanceId,
+                },
+            )
             scope = RegistrationScope()
             context = self.createContext(identity=identity, packRoot=packRoot, registrationScope=scope)
             try:
-                return self.capabilities.invokeResolved(registration, context=context, payload=payload)
+                result = self.capabilities.invokeResolved(registration, context=context, payload=payload)
+            except Exception as err:
+                self.trace(
+                    "capability-invocation-failed",
+                    message=str(err),
+                    attributes={"capabilityId": capabilityId, "ownerId": registration.ownerId},
+                    level="error",
+                )
+                raise
+            else:
+                self.trace(
+                    "capability-invocation-completed",
+                    attributes={"capabilityId": capabilityId, "ownerId": registration.ownerId},
+                )
+                return result
             finally:
                 context.invalidate()
                 scope.withdraw()
@@ -103,12 +157,38 @@ class RuntimeHost:
             job = Job.new()
             unit = OrchestrationUnit.new()
             job.start()
+            self.trace(
+                "job-started",
+                attributes={
+                    "jobId": job.jobId,
+                    "orchestrationUnitId": unit.orchestrationUnitId,
+                    "capabilityId": capabilityId,
+                },
+            )
             try:
                 result = self.invokeCapability(capabilityId, payload)
             except Exception as err:
                 unit.finish(OrchestrationUnitOutcome.FAILED)
                 job.fail(err)
+                self.trace(
+                    "job-failed",
+                    message=str(err),
+                    attributes={
+                        "jobId": job.jobId,
+                        "orchestrationUnitId": unit.orchestrationUnitId,
+                        "capabilityId": capabilityId,
+                    },
+                    level="error",
+                )
             else:
                 unit.finish(OrchestrationUnitOutcome.COMPLETED)
                 job.succeed(result)
+                self.trace(
+                    "job-completed",
+                    attributes={
+                        "jobId": job.jobId,
+                        "orchestrationUnitId": unit.orchestrationUnitId,
+                        "capabilityId": capabilityId,
+                    },
+                )
             return job
