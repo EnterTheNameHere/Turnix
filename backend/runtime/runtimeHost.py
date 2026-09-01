@@ -1,7 +1,8 @@
-# file: backend/runtime/runtimeHost.py ; version: 2
+# file: backend/runtime/runtimeHost.py ; version: 3
 from __future__ import annotations
 
 from pathlib import Path
+from threading import RLock
 
 from backend.application.runtime import Application, ApplicationRun
 from backend.capabilities.runtime import CapabilityRegistry
@@ -15,7 +16,12 @@ __all__ = ["RuntimeHost"]
 
 
 class RuntimeHost:
-    """Running host boundary coordinating controlled surfaces for one proving-ground ApplicationRun."""
+    """Running host boundary coordinating controlled surfaces for one proving-ground ApplicationRun.
+
+    All capability execution enters one re-entrant ApplicationRun lane. Nested
+    capability calls remain legal, while unrelated callers cannot execute the
+    same ApplicationRun concurrently merely because Python threads are available.
+    """
 
     def __init__(self, *, application: Application | None = None, config: dict[str, object] | None = None) -> None:
         self.applicationRun = ApplicationRun(application=application or Application.new())
@@ -25,14 +31,24 @@ class RuntimeHost:
         self.llmPipeline = StreamingLlmPipeline(providers=self.llmProviders)
         self.config = {} if config is None else dict(config)
         self._codeEntries: dict[str, tuple[CodeEntryIdentity, Path]] = {}
+        self._lane = RLock()
 
     def start(self) -> None:
-        self.applicationRun.start()
+        with self._lane:
+            self.applicationRun.start()
 
     def stop(self) -> None:
-        self.applicationRun.stop()
+        with self._lane:
+            if not self.applicationRun.active:
+                return
+            self.applicationRun.stop()
+
+    def requireActive(self) -> None:
+        if not self.applicationRun.active:
+            raise RuntimeError("ApplicationRun is not active.")
 
     def createContext(self, *, identity: CodeEntryIdentity, packRoot: Path, registrationScope: RegistrationScope) -> CodeEntryContext:
+        self.requireActive()
         return CodeEntryContext(
             identity=identity,
             packRoot=packRoot,
@@ -46,33 +62,43 @@ class RuntimeHost:
         )
 
     def registerCodeEntry(self, identity: CodeEntryIdentity, packRoot: Path) -> None:
-        self._codeEntries[identity.codeEntryInstanceId] = (identity, packRoot)
+        self.requireActive()
+        if identity.codeEntryInstanceId in self._codeEntries:
+            raise RuntimeError(f"CodeEntry instance is already active: {identity.codeEntryInstanceId}.")
+        self._codeEntries[identity.codeEntryInstanceId] = (identity, packRoot.resolve())
+
+    def unregisterCodeEntry(self, codeEntryInstanceId: str) -> None:
+        self._codeEntries.pop(codeEntryInstanceId, None)
 
     def invokeCapability(self, capabilityId: str, payload: object | None = None) -> object:
-        registration = self.capabilities.resolve(capabilityId)
-        try:
-            identity, packRoot = self._codeEntries[registration.ownerId]
-        except KeyError as err:
-            raise RuntimeError(f"Capability owner is not an active CodeEntry: {registration.ownerId}.") from err
-        scope = RegistrationScope()
-        context = self.createContext(identity=identity, packRoot=packRoot, registrationScope=scope)
-        try:
-            return self.capabilities.invokeResolved(registration, context=context, payload=payload)
-        finally:
-            context.invalidate()
-            scope.withdraw()
+        with self._lane:
+            self.requireActive()
+            registration = self.capabilities.resolve(capabilityId)
+            try:
+                identity, packRoot = self._codeEntries[registration.ownerId]
+            except KeyError as err:
+                raise RuntimeError(f"Capability owner is not an active CodeEntry: {registration.ownerId}.") from err
+            scope = RegistrationScope()
+            context = self.createContext(identity=identity, packRoot=packRoot, registrationScope=scope)
+            try:
+                return self.capabilities.invokeResolved(registration, context=context, payload=payload)
+            finally:
+                context.invalidate()
+                scope.withdraw()
 
     def runJob(self, capabilityId: str, payload: object | None = None) -> Job:
-        """Runs one synchronous Job/OrchestrationUnit on the current single mutation lane."""
-        job = Job.new()
-        unit = OrchestrationUnit.new()
-        job.start()
-        try:
-            result = self.invokeCapability(capabilityId, payload)
-        except BaseException as err:
-            unit.finish(OrchestrationUnitOutcome.FAILED)
-            job.fail(err)
-        else:
-            unit.finish(OrchestrationUnitOutcome.COMPLETED)
-            job.succeed(result)
-        return job
+        """Runs one synchronous Job/OrchestrationUnit on the ApplicationRun lane."""
+        with self._lane:
+            self.requireActive()
+            job = Job.new()
+            unit = OrchestrationUnit.new()
+            job.start()
+            try:
+                result = self.invokeCapability(capabilityId, payload)
+            except Exception as err:
+                unit.finish(OrchestrationUnitOutcome.FAILED)
+                job.fail(err)
+            else:
+                unit.finish(OrchestrationUnitOutcome.COMPLETED)
+                job.succeed(result)
+            return job
