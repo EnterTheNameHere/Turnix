@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from backend.core.immutableValue import ImmutableValue
+from backend.core.immutableValue import ImmutableValue, ImmutableValueFreezer
 from backend.llm.errors import LlmProviderProtocolError
 from backend.llm.llmTypes import LlmCallRequest, LlmExecutionProfile, LlmQuery, LlmStreamEvent, LlmStreamProvider
 from backend.processing.runtime import ProcessingRun, ProcessingStage, QueryItem, plainImmutableValue
@@ -90,12 +90,18 @@ class LlmProcessingPipeline:
         providerOptions: Mapping[str, ImmutableValue] | None = None,
         streamObserver: Callable[[LlmStreamEvent], None] | None = None,
     ) -> StreamingLlmResult:
-        """Executes only the provider-neutral streaming portion."""
-        return self._stream(
+        registration, provider, options, profile = self._resolveExecution(
             providerName=providerName,
-            query=query,
             model=model,
             providerOptions=providerOptions,
+        )
+        return self._streamResolved(
+            registration=registration,
+            provider=provider,
+            profile=profile,
+            options=options,
+            query=query,
+            model=model,
             streamObserver=streamObserver,
         )
 
@@ -121,23 +127,44 @@ class LlmProcessingPipeline:
         run = ProcessingRun(pipelineId=f"llm:{memoryKey}", transaction=transaction)
         queryItemsAddress = f"processing/{memoryKey}/queryitems"
         try:
+            run.enterStage(ProcessingStage.RESOLVE_EXECUTION_PROFILE)
+            registration, provider, options, profile = self._resolveExecution(
+                providerName=providerName,
+                model=model,
+                providerOptions=providerOptions,
+            )
+            executionSnapshot = {
+                "providerName": providerName,
+                "providerOwnerId": registration.ownerId,
+                "model": model,
+                "providerOptions": plainImmutableValue(options),
+                "contextWindowTokens": profile.contextWindowTokens,
+                "metadata": plainImmutableValue(profile.metadata),
+            }
+
             previous = transaction.load(queryItemsAddress)
             previousSnapshots = [] if previous is MISSING else previous
             if not isinstance(previousSnapshots, list):
                 raise RuntimeError(f"Committed QueryItem memory at {queryItemsAddress!r} is invalid.")
 
+            stageInput = {
+                "input": inputValue,
+                "previousQueryItems": previousSnapshots,
+                "execution": executionSnapshot,
+            }
             run.enterStage(ProcessingStage.BUILD_QUERY_ITEMS)
-            built = self._capabilityInvoker(
-                buildQueryItemsCapabilityId,
-                {"input": inputValue, "previousQueryItems": previousSnapshots},
-            )
+            built = self._capabilityInvoker(buildQueryItemsCapabilityId, stageInput)
             items = self._requireQueryItems(built, stage="BUILD_QUERY_ITEMS")
 
             if filterQueryItemsCapabilityId is not None:
                 run.enterStage(ProcessingStage.FILTER_QUERY_ITEMS)
                 filtered = self._capabilityInvoker(
                     filterQueryItemsCapabilityId,
-                    {"input": inputValue, "queryItems": [item.snapshot() for item in items]},
+                    {
+                        "input": inputValue,
+                        "queryItems": [item.snapshot() for item in items],
+                        "execution": executionSnapshot,
+                    },
                 )
                 items = self._requireQueryItems(filtered, stage="FILTER_QUERY_ITEMS")
             run.queryItems = items
@@ -145,16 +172,22 @@ class LlmProcessingPipeline:
             run.enterStage(ProcessingStage.BUILD_QUERY)
             builtQuery = self._capabilityInvoker(
                 buildQueryCapabilityId,
-                {"input": inputValue, "queryItems": [item.snapshot() for item in items]},
+                {
+                    "input": inputValue,
+                    "queryItems": [item.snapshot() for item in items],
+                    "execution": executionSnapshot,
+                },
             )
             query = self._requireQuery(builtQuery)
 
             run.enterStage(ProcessingStage.PREPARE_PROVIDER_CALL)
-            llmResult = self._stream(
-                providerName=providerName,
+            llmResult = self._streamResolved(
+                registration=registration,
+                provider=provider,
+                profile=profile,
+                options=options,
                 query=query,
                 model=model,
-                providerOptions=providerOptions,
                 streamObserver=streamObserver,
                 processingRun=run,
             )
@@ -173,13 +206,8 @@ class LlmProcessingPipeline:
                         "metadata": plainImmutableValue(llmResult.query.metadata),
                     },
                     "response": {"rawText": llmResult.rawText},
-                    "provider": {
-                        "name": llmResult.providerName,
-                        "ownerId": llmResult.providerOwnerId,
-                        "model": llmResult.model,
-                        "options": plainImmutableValue(llmResult.providerOptions),
-                        "metadata": plainImmutableValue(llmResult.providerMetadata),
-                    },
+                    "execution": executionSnapshot,
+                    "providerMetadata": plainImmutableValue(llmResult.providerMetadata),
                 },
             )
             transaction.set(
@@ -201,24 +229,39 @@ class LlmProcessingPipeline:
             self._emitTrace("processing-run-failed", run, {})
             raise
 
-    def _stream(
+    def _resolveExecution(
         self,
         *,
         providerName: str,
-        query: LlmQuery,
         model: str | None,
         providerOptions: Mapping[str, ImmutableValue] | None,
+    ) -> tuple[
+        Registration[LlmStreamProvider],
+        LlmStreamProvider,
+        Mapping[str, ImmutableValue],
+        LlmExecutionProfile,
+    ]:
+        registration = self._providers.requireRegistration(providerName)
+        provider = registration.value
+        options = ImmutableValueFreezer().freezeMapping(providerOptions, "providerOptions")
+        profile = provider.getExecutionProfile(model=model, providerOptions=options)
+        if not isinstance(profile, LlmExecutionProfile):
+            raise LlmProviderProtocolError("Provider getExecutionProfile() returned an invalid value.")
+        return registration, provider, options, profile
+
+    def _streamResolved(
+        self,
+        *,
+        registration: Registration[LlmStreamProvider],
+        provider: LlmStreamProvider,
+        profile: LlmExecutionProfile,
+        options: Mapping[str, ImmutableValue],
+        query: LlmQuery,
+        model: str | None,
         streamObserver: Callable[[LlmStreamEvent], None] | None,
         processingRun: ProcessingRun | None = None,
     ) -> StreamingLlmResult:
-        registration = self._providers.requireRegistration(providerName)
-        provider = registration.value
-        options = {} if providerOptions is None else providerOptions
         request = LlmCallRequest(query=query, model=model, providerOptions=options)
-        profile = provider.getExecutionProfile(model=request.model, providerOptions=request.providerOptions)
-        if not isinstance(profile, LlmExecutionProfile):
-            raise LlmProviderProtocolError("Provider getExecutionProfile() returned an invalid value.")
-
         parts: list[str] = []
         completed = False
         finalMetadata: Mapping[str, ImmutableValue] = {}
@@ -245,7 +288,7 @@ class LlmProcessingPipeline:
         return StreamingLlmResult(
             query=request.query,
             model=request.model,
-            providerName=providerName,
+            providerName=registration.name,
             providerOwnerId=registration.ownerId,
             providerOptions=request.providerOptions,
             executionProfile=profile,
