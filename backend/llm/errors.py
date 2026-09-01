@@ -1,5 +1,7 @@
-# file: backend/llm/errors.py ; version: 8
+# file: backend/llm/errors.py ; version: 9
 from __future__ import annotations
+
+from backend.core.errors import ActantError
 
 __all__: list[str] = [
     "LlmError",
@@ -13,7 +15,7 @@ __all__: list[str] = [
 ]
 
 
-class LlmError(RuntimeError):
+class LlmError(ActantError):
     """Base class for current Actant LLM-domain runtime failures."""
 
 
