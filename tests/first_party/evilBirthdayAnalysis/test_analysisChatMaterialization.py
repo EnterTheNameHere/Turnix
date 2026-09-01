@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 from backend.processing.runtime import QueryItem
 
 
@@ -81,6 +83,63 @@ class _BuildQueryCtx:
         self.capabilities = _BuildQueryCapabilities()
 
 
+def _queryItems() -> list[QueryItem]:
+    return [
+        QueryItem(itemId="context", kind="context", content="context"),
+        QueryItem(itemId="profile", kind="analysis-profile", content="profile"),
+        QueryItem(itemId="prompt", kind="prompt", content="prompt"),
+        QueryItem(
+            itemId="t2",
+            kind="transcript",
+            content="00:00:48 viewer_name mentioned vedal987",
+            metadata={"streamStartSeconds": 48.0, "segmentIndex": 2},
+        ),
+        QueryItem(
+            itemId="chat:21",
+            kind="chat",
+            content="replying to viewer_name",
+            metadata={
+                "streamStartSeconds": 46.0,
+                "streamTime": "00:00:46",
+                "lineNumber": 21,
+                "username": "vedal987",
+            },
+        ),
+        QueryItem(
+            itemId="chat:20",
+            kind="chat",
+            content="GIGAEVIL",
+            metadata={
+                "streamStartSeconds": 45.0,
+                "streamTime": "00:00:45",
+                "lineNumber": 20,
+                "username": "viewer_name",
+            },
+        ),
+        QueryItem(
+            itemId="t1",
+            kind="transcript",
+            content="00:00:45 first",
+            metadata={"streamStartSeconds": 45.0, "segmentIndex": 1},
+        ),
+    ]
+
+
+def _queryPayload(*, includeChat: bool, chatLayout: str) -> dict[str, object]:
+    return {
+        "input": {
+            "profile": {
+                "name": "default",
+                "settings": {"includeChat": includeChat, "chatLayout": chatLayout},
+            },
+            "promptName": "main",
+            "windowIndex": 0,
+            "window": {"positionSeconds": 0},
+        },
+        "queryItems": [item.snapshot() for item in _queryItems()],
+    }
+
+
 def test_windowChunks_translate_stream_relative_ranges_to_video_time():
     chunks = analysis._windowChunks(
         positionSeconds=0,
@@ -114,6 +173,16 @@ def test_windowChunks_translate_stream_relative_ranges_to_video_time():
     ]
 
 
+def test_chatPresentation_defaults_to_chat_excluded_and_separate_layout():
+    assert analysis._chatPresentation({}) == (False, "separate")
+    assert analysis._chatPresentation({"includeChat": True, "chatLayout": "interleaved"}) == (True, "interleaved")
+
+    with pytest.raises(TypeError, match="includeChat"):
+        analysis._chatPresentation({"includeChat": 1})
+    with pytest.raises(ValueError, match="chatLayout"):
+        analysis._chatPresentation({"chatLayout": "mixed"})
+
+
 def test_preparedChatSnapshot_keeps_three_candidate_chunks_without_raw_record_duplication():
     ctx = _Ctx()
     chunks = analysis._windowChunks(
@@ -122,7 +191,7 @@ def test_preparedChatSnapshot_keeps_three_candidate_chunks_without_raw_record_du
         offsetsSeconds=(0, -600, -1800),
         streamStartVideoSeconds=533,
     )
-    snapshot = analysis._preparedChatSnapshot(ctx, {"chunks": chunks})
+    snapshot = analysis._preparedChatSnapshot(ctx, {"chunks": chunks}, includedInPrompt=True)
 
     assert ctx.capabilities.calls == [
         {"videoStartSeconds": 533, "videoEndSeconds": 1133},
@@ -130,7 +199,7 @@ def test_preparedChatSnapshot_keeps_three_candidate_chunks_without_raw_record_du
         {"videoStartSeconds": -1267, "videoEndSeconds": -667},
     ]
     assert snapshot["prepared"] is True
-    assert snapshot["includedInPrompt"] is False
+    assert snapshot["includedInPrompt"] is True
     assert [chunk["offsetSeconds"] for chunk in snapshot["chunks"]] == [0, -600, -1800]
     assert [chunk["streamStartSeconds"] for chunk in snapshot["chunks"]] == [0, -600, -1800]
     assert all("records" not in chunk for chunk in snapshot["chunks"])
@@ -199,7 +268,7 @@ def test_transcriptQueryItems_reuse_same_absolute_evidence_item():
     assert items[0] is existing
 
 
-def test_chatQueryItems_keep_timestamped_internal_identity_but_only_in_chat_kind():
+def test_chatQueryItems_keep_timestamped_internal_identity_and_render_time():
     chat = {
         "sourcePath": "data/chat.txt",
         "records": [
@@ -233,46 +302,13 @@ def test_chatQueryItems_keep_timestamped_internal_identity_but_only_in_chat_kind
     assert items[0].kind == "chat"
     assert items[0].content == "GIGAEVIL"
     assert items[0].metadata["streamStartSeconds"] == 45.0
+    assert items[0].metadata["streamTime"] == "00:00:45"
     assert items[0].metadata["username"] == "viewer_name"
 
 
-def test_buildQuery_sanitizes_final_prompt_from_chat_identity_namespace_while_chat_stays_out():
-    items = [
-        QueryItem(itemId="context", kind="context", content="context"),
-        QueryItem(itemId="profile", kind="analysis-profile", content="profile"),
-        QueryItem(itemId="prompt", kind="prompt", content="prompt"),
-        QueryItem(
-            itemId="t2",
-            kind="transcript",
-            content="00:00:48 viewer_name mentioned vedal987",
-            metadata={"streamStartSeconds": 48.0},
-        ),
-        QueryItem(
-            itemId="chat:21",
-            kind="chat",
-            content="this must remain excluded",
-            metadata={"streamStartSeconds": 46.0, "lineNumber": 21, "username": "vedal987"},
-        ),
-        QueryItem(
-            itemId="chat:20",
-            kind="chat",
-            content="GIGAEVIL",
-            metadata={"streamStartSeconds": 45.0, "lineNumber": 20, "username": "viewer_name"},
-        ),
-        QueryItem(itemId="t1", kind="transcript", content="00:00:45 first", metadata={"streamStartSeconds": 45.0}),
-    ]
-    payload = {
-        "input": {
-            "profile": {"name": "default"},
-            "promptName": "main",
-            "windowIndex": 0,
-            "window": {"positionSeconds": 0},
-        },
-        "queryItems": [item.snapshot() for item in items],
-    }
+def test_buildQuery_can_keep_chat_excluded_while_still_sanitizing_transcript_mentions():
     ctx = _BuildQueryCtx()
-
-    query = analysis._buildQuery(ctx, payload)
+    query = analysis._buildQuery(ctx, _queryPayload(includeChat=False, chatLayout="separate"))
 
     assert ctx.capabilities.payload["authors"] == ["viewer_name", "vedal987"]
     assert query["payload"] == (
@@ -284,8 +320,45 @@ def test_buildQuery_sanitizes_final_prompt_from_chat_identity_namespace_while_ch
     assert "viewer_name" not in query["payload"]
     assert "vedal987" not in query["payload"]
     assert "GIGAEVIL" not in query["payload"]
-    assert "this must remain excluded" not in query["payload"]
     assert query["metadata"]["chatIncluded"] is False
+    assert query["metadata"]["chatLayout"] == "separate"
+
+
+def test_buildQuery_separate_layout_renders_sanitized_chat_as_its_own_section():
+    ctx = _BuildQueryCtx()
+    query = analysis._buildQuery(ctx, _queryPayload(includeChat=True, chatLayout="separate"))
+
+    assert query["payload"] == (
+        "CONTEXT\ncontext\n\n"
+        "ANALYSIS PROFILE\nprofile\n\n"
+        "ANALYSIS INSTRUCTION\nprompt\n\n"
+        "TRANSCRIPT WINDOW\n00:00:45 first\n00:00:48 anonymized_1 mentioned Vedal\n\n"
+        "CHAT WINDOW\n00:00:45 anonymized_1: GIGAEVIL\n00:00:46 Vedal: replying to anonymized_1"
+    )
+    assert "viewer_name" not in query["payload"]
+    assert "vedal987" not in query["payload"]
+    assert query["metadata"]["chatIncluded"] is True
+    assert query["metadata"]["chatLayout"] == "separate"
     assert query["metadata"]["identitySanitized"] is True
     assert query["metadata"]["anonymousIdentityCount"] == 1
     assert query["metadata"]["preservedIdentityCount"] == 1
+
+
+def test_buildQuery_interleaved_layout_orders_transcript_and_chat_by_stream_time():
+    ctx = _BuildQueryCtx()
+    query = analysis._buildQuery(ctx, _queryPayload(includeChat=True, chatLayout="interleaved"))
+
+    assert query["payload"] == (
+        "CONTEXT\ncontext\n\n"
+        "ANALYSIS PROFILE\nprofile\n\n"
+        "ANALYSIS INSTRUCTION\nprompt\n\n"
+        "CHRONOLOGICAL EVIDENCE\n"
+        "TRANSCRIPT 00:00:45 first\n"
+        "CHAT 00:00:45 anonymized_1: GIGAEVIL\n"
+        "CHAT 00:00:46 Vedal: replying to anonymized_1\n"
+        "TRANSCRIPT 00:00:48 anonymized_1 mentioned Vedal"
+    )
+    assert "viewer_name" not in query["payload"]
+    assert "vedal987" not in query["payload"]
+    assert query["metadata"]["chatIncluded"] is True
+    assert query["metadata"]["chatLayout"] == "interleaved"
