@@ -1,4 +1,4 @@
-# file: backend/packs/runtime.py ; version: 4
+# file: backend/packs/runtime.py ; version: 5
 from __future__ import annotations
 
 import importlib.util
@@ -119,24 +119,33 @@ class PackLoader:
     def activate(self, plan: ManualActivationPlan) -> None:
         self._host.requireActive()
         checkpoint = len(self._loadedPacks)
+        self._host.trace("activation-plan-started", attributes={"packIds": list(plan.packIds)})
         try:
             for packId in plan.packIds:
                 self.activatePack(self._resolver.requireSingle(packId))
         except Exception as activationError:
             cleanupErrors = self._closeLoadedPacks(self._loadedPacks[checkpoint:])
             del self._loadedPacks[checkpoint:]
+            self._host.trace(
+                "activation-plan-failed",
+                message=str(activationError),
+                attributes={"packIds": list(plan.packIds)},
+                level="error",
+            )
             if cleanupErrors:
                 raise ExceptionGroup(
                     "Activation plan failed and cleanup also reported errors.",
                     [activationError, *cleanupErrors],
                 ) from None
             raise
+        self._host.trace("activation-plan-completed", attributes={"packIds": list(plan.packIds)})
 
     def activatePack(self, pack: PackDefinition) -> None:
         self._host.requireActive()
         if any(item.pack.packId == pack.packId for item in self._loadedPacks):
             raise RuntimeError(f"Pack is already active in this ApplicationRun: {pack.packId}.")
 
+        self._host.trace("pack-activation-started", attributes={"packId": pack.packId})
         scope = RegistrationScope()
         entries: list[_LoadedCodeEntry] = []
         loadedModules: list[ModuleType] = []
@@ -154,7 +163,12 @@ class PackLoader:
                 )
                 module = self._loadModule(pack=pack, definition=definition, instanceId=instanceId)
                 loadedModules.append(module)
-                context = self._host.createContext(identity=identity, packRoot=pack.root, registrationScope=scope)
+                context = self._host.createContext(
+                    identity=identity,
+                    packRoot=pack.root,
+                    registrationScope=scope,
+                    allowRegistration=True,
+                )
                 try:
                     callback = getattr(module, "onLoad", None)
                     state = None if callback is None else callback(context)
@@ -178,6 +192,12 @@ class PackLoader:
             for module in reversed(loadedModules):
                 sys.modules.pop(module.__name__, None)
 
+            self._host.trace(
+                "pack-activation-failed",
+                message=str(activationError),
+                attributes={"packId": pack.packId},
+                level="error",
+            )
             if cleanupErrors:
                 raise ExceptionGroup(
                     f"Pack {pack.packId!r} activation failed and cleanup also reported errors.",
@@ -186,6 +206,13 @@ class PackLoader:
             raise
 
         self._loadedPacks.append(_LoadedPack(pack=pack, entries=tuple(entries), registrationScope=scope))
+        self._host.trace(
+            "pack-activation-completed",
+            attributes={
+                "packId": pack.packId,
+                "codeEntryInstanceIds": [item.identity.codeEntryInstanceId for item in entries],
+            },
+        )
 
     def close(self) -> None:
         cleanupErrors = self._closeLoadedPacks(tuple(self._loadedPacks))
@@ -196,13 +223,20 @@ class PackLoader:
     def _closeLoadedPacks(self, packs: tuple[_LoadedPack, ...] | list[_LoadedPack]) -> list[Exception]:
         errors: list[Exception] = []
         for loadedPack in reversed(tuple(packs)):
+            self._host.trace("pack-unload-started", attributes={"packId": loadedPack.pack.packId})
             # Remove public participation first so no new invocation starts
             # while CodeEntry resources are being torn down.
             loadedPack.registrationScope.withdraw()
-            errors.extend(self._unloadEntries(list(loadedPack.entries)))
+            packErrors = self._unloadEntries(list(loadedPack.entries))
+            errors.extend(packErrors)
             for item in reversed(loadedPack.entries):
                 self._host.unregisterCodeEntry(item.identity.codeEntryInstanceId)
                 sys.modules.pop(item.module.__name__, None)
+            self._host.trace(
+                "pack-unload-completed" if not packErrors else "pack-unload-failed",
+                attributes={"packId": loadedPack.pack.packId, "errorCount": len(packErrors)},
+                level="info" if not packErrors else "error",
+            )
         return errors
 
     def _unloadEntries(self, entries: list[_LoadedCodeEntry]) -> list[Exception]:
@@ -216,6 +250,7 @@ class PackLoader:
                 identity=item.identity,
                 packRoot=item.pack.root,
                 registrationScope=cleanupScope,
+                allowRegistration=False,
             )
             try:
                 callback(context, item.state)
