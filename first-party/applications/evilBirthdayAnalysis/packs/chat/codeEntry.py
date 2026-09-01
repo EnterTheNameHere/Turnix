@@ -159,14 +159,22 @@ def _vocabulary(ctx) -> tuple[dict[str, dict[str, object]], list[dict[str, objec
         normalizedEmotes[name] = dict(metadata)
 
     normalizedComposites: list[dict[str, object]] = []
-    for definition in composites:
-        if not isinstance(definition, dict):
+    seenPatterns: set[tuple[str, ...]] = set()
+    for compositeDefinition in composites:
+        if not isinstance(compositeDefinition, dict):
             raise ValueError("Chat composite definitions must be objects.")
-        tokens = definition.get("tokens")
+        tokens = compositeDefinition.get("tokens")
         if not isinstance(tokens, list) or len(tokens) < 2 or any(type(token) is not str or not token for token in tokens):
             raise ValueError("Chat composite definitions require at least two non-empty string tokens.")
-        metadata = {key: value for key, value in definition.items() if key != "tokens"}
-        normalizedComposites.append({"tokens": tuple(tokens), "metadata": metadata})
+        pattern = tuple(tokens)
+        unknown = [token for token in pattern if token not in normalizedEmotes]
+        if unknown:
+            raise ValueError(f"Chat composite references unknown emote token(s): {', '.join(unknown)}.")
+        if pattern in seenPatterns:
+            raise ValueError(f"Duplicate chat composite pattern: {' '.join(pattern)}.")
+        seenPatterns.add(pattern)
+        metadata = {key: value for key, value in compositeDefinition.items() if key != "tokens"}
+        normalizedComposites.append({"tokens": pattern, "metadata": metadata})
     normalizedComposites.sort(key=lambda item: len(item["tokens"]), reverse=True)
     return normalizedEmotes, normalizedComposites
 
@@ -174,11 +182,11 @@ def _vocabulary(ctx) -> tuple[dict[str, dict[str, object]], list[dict[str, objec
 def _spanIdentity(span: dict[str, object]) -> tuple[object, ...]:
     kind = span.get("kind")
     if kind == "emote":
-        return (kind, span.get("name"), span.get("metadata"))
+        return (kind, span.get("name"), repr(span.get("metadata")))
     if kind == "composite":
-        return (kind, tuple(span.get("tokens", [])), span.get("metadata"))
+        return (kind, tuple(span.get("tokens", [])), repr(span.get("metadata")))
     if kind == "command":
-        return (kind, span.get("command"), span.get("arguments"))
+        return (kind, span.get("command"), tuple(span.get("arguments", [])))
     if kind == "text":
         return (kind, span.get("text"))
     return (kind, repr(span))
@@ -216,6 +224,18 @@ def _collapseWholeSequence(spans: list[dict[str, object]]) -> list[dict[str, obj
     return spans
 
 
+def _occurrenceCount(tokens: list[str], nextIndex: int) -> tuple[int, int]:
+    if nextIndex >= len(tokens):
+        return 1, nextIndex
+    multiplier = _MULTIPLIER_RE.fullmatch(tokens[nextIndex])
+    if multiplier is None:
+        return 1, nextIndex
+    count = int(multiplier.group("count"))
+    if count <= 0:
+        return 1, nextIndex
+    return count, nextIndex + 1
+
+
 def _lexMessage(message: str, emotes: dict[str, dict[str, object]], composites: list[dict[str, object]]) -> list[dict[str, object]]:
     tokens = message.split()
     spans: list[dict[str, object]] = []
@@ -224,31 +244,25 @@ def _lexMessage(message: str, emotes: dict[str, dict[str, object]], composites: 
         composite = _matchComposite(tokens, index, composites)
         if composite is not None:
             pattern = composite["tokens"]
+            count, nextIndex = _occurrenceCount(tokens, index + len(pattern))
             _appendSpan(
                 spans,
                 {
                     "kind": "composite",
                     "tokens": list(pattern),
-                    "count": 1,
+                    "count": count,
                     "metadata": dict(composite["metadata"]),
                 },
             )
-            index += len(pattern)
+            index = nextIndex
             continue
 
         token = tokens[index]
-        multiplier = _MULTIPLIER_RE.fullmatch(token)
-        if multiplier is not None and spans and spans[-1].get("kind") in {"emote", "composite"}:
-            value = int(multiplier.group("count"))
-            if value > 0:
-                spans[-1]["count"] = int(spans[-1].get("count", 1)) * value
-                index += 1
-                continue
-
         metadata = emotes.get(token)
         if metadata is not None:
-            _appendSpan(spans, {"kind": "emote", "name": token, "count": 1, "metadata": dict(metadata)})
-            index += 1
+            count, nextIndex = _occurrenceCount(tokens, index + 1)
+            _appendSpan(spans, {"kind": "emote", "name": token, "count": count, "metadata": dict(metadata)})
+            index = nextIndex
             continue
 
         if token.startswith("!") and len(token) > 1 and not spans:
@@ -355,7 +369,13 @@ def _eventText(event: dict[str, object]) -> str:
     return ""
 
 
-def _analyzeRecords(records: list[dict[str, object]], emotes: dict[str, dict[str, object]], composites: list[dict[str, object]]) -> list[str]:
+def _analyzeRecords(
+    records: list[dict[str, object]],
+    emotes: dict[str, dict[str, object]],
+    composites: list[dict[str, object]],
+    *,
+    includeFromTimestamp: datetime | None = None,
+) -> list[str]:
     rendered: list[str] = []
     openBatches: dict[tuple[str, int], tuple[datetime, dict[str, object], int]] = {}
 
@@ -366,15 +386,17 @@ def _analyzeRecords(records: list[dict[str, object]], emotes: dict[str, dict[str
         timeText = record.get("timeText")
         if type(username) is not str or type(message) is not str or not isinstance(timestamp, datetime) or type(timeText) is not str:
             raise RuntimeError("Parsed chat record has invalid internal analysis fields.")
+        includeRecord = includeFromTimestamp is None or timestamp >= includeFromTimestamp
 
         generated = _generatedEvent(username, message)
         if generated is not None:
             eventType = generated["type"]
-            record["analysis"] = {"kind": "generatedEvent", "event": generated, "includedInText": True}
+            record["analysis"] = {"kind": "generatedEvent", "event": generated, "includedInText": includeRecord}
             if eventType == "subscriptionGiftBatch":
                 key = (username.casefold(), int(generated["tier"]))
                 openBatches[key] = (timestamp, generated, int(record["lineNumber"]))
-                rendered.append(f"{timeText} {username}: {_eventText(generated)}")
+                if includeRecord:
+                    rendered.append(f"{timeText} {username}: {_eventText(generated)}")
                 continue
             if eventType == "subscriptionGift":
                 key = (username.casefold(), int(generated["tier"]))
@@ -396,9 +418,11 @@ def _analyzeRecords(records: list[dict[str, object]], emotes: dict[str, dict[str
                             openBatches.pop(key, None)
                         continue
                     openBatches.pop(key, None)
-                rendered.append(f"{timeText} {username}: {_eventText(generated)}")
+                if includeRecord:
+                    rendered.append(f"{timeText} {username}: {_eventText(generated)}")
                 continue
-            rendered.append(f"{timeText} {username}: {_eventText(generated)}")
+            if includeRecord:
+                rendered.append(f"{timeText} {username}: {_eventText(generated)}")
             continue
 
         botEvent = _knownBotEvent(username, message)
@@ -408,8 +432,9 @@ def _analyzeRecords(records: list[dict[str, object]], emotes: dict[str, dict[str
 
         spans = _lexMessage(message, emotes, composites)
         compactMessage = _renderSpans(spans)
-        record["analysis"] = {"kind": "userMessage", "spans": spans, "includedInText": True}
-        rendered.append(f"{timeText} {username}: {compactMessage}")
+        record["analysis"] = {"kind": "userMessage", "spans": spans, "includedInText": includeRecord}
+        if includeRecord:
+            rendered.append(f"{timeText} {username}: {compactMessage}")
 
     return rendered
 
@@ -434,13 +459,16 @@ def _select(ctx, payload):
 
     startIndex = bisect_left(timestamps, startWall)
     endIndex = bisect_left(timestamps, endWall)
-    analysisRecords: list[dict[str, object]] = []
-    for record in parsedRecords[startIndex:endIndex]:
-        analysisRecords.append(dict(record))
+    lookbackWall = startWall - timedelta(seconds=_GIFT_BATCH_MAX_SECONDS)
+    analysisStartIndex = bisect_left(timestamps, lookbackWall)
 
-    rendered = _analyzeRecords(analysisRecords, emotes, composites)
+    analysisRecords = [dict(record) for record in parsedRecords[analysisStartIndex:endIndex]]
+    rendered = _analyzeRecords(analysisRecords, emotes, composites, includeFromTimestamp=startWall)
+
+    selectedOffset = startIndex - analysisStartIndex
+    selectedRecords = analysisRecords[selectedOffset:]
     records: list[dict[str, object]] = []
-    for record in analysisRecords:
+    for record in selectedRecords:
         retained = dict(record)
         retained.pop("timestamp")
         records.append(retained)
