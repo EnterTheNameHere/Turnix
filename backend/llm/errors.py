@@ -1,19 +1,8 @@
-# file: backend/llm/errors.py ; version: 7
+# file: backend/llm/errors.py ; version: 8
 from __future__ import annotations
-
-from backend.core.errors import ActantError
-from backend.core.validation import (
-    requireExactNonBlankString,
-    requireInstance,
-    requireNonBlankString,
-)
-from backend.pack.packCodeEntry import PackCodeEntryInstanceId
 
 __all__: list[str] = [
     "LlmError",
-    "LlmInputRejectedError",
-    "LlmPipelineStateError",
-    "LlmProviderAlreadyRegisteredError",
     "LlmProviderConnectionError",
     "LlmProviderContractError",
     "LlmProviderError",
@@ -21,55 +10,19 @@ __all__: list[str] = [
     "LlmProviderProtocolError",
     "LlmProviderRequestError",
     "LlmProviderUnavailableError",
-    "LlmQueryBudgetError",
 ]
 
 
-class LlmError(ActantError):
-    """Base class for LLM-domain exceptions."""
-
-
-class LlmInputRejectedError(LlmError):
-    """Raised when a hook rejects the current pipeline input."""
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        purposeId: str,
-        ownerId: PackCodeEntryInstanceId,
-        reason: str,
-    ) -> None:
-        """Initializes an LLM input-rejection error."""
-        requireNonBlankString(message, "message")
-        requireExactNonBlankString(purposeId, "purposeId")
-        requireInstance(ownerId, PackCodeEntryInstanceId, "ownerId")
-        requireNonBlankString(reason, "reason")
-
-        super().__init__(message)
-        self.purposeId = purposeId
-        self.ownerId = ownerId
-        self.reason = reason
-
-
-class LlmPipelineStateError(LlmError):
-    """Raised when a pipeline stage leaves the run in an invalid state."""
-
-
-class LlmQueryBudgetError(LlmError):
-    """Raised when LLM inference input cannot satisfy the effective query budget."""
+class LlmError(RuntimeError):
+    """Base class for current Actant LLM-domain runtime failures."""
 
 
 class LlmProviderError(LlmError):
-    """Base class for LLM provider exceptions."""
+    """Base class for LLM provider failures."""
 
 
 class LlmProviderNotRegisteredError(LlmProviderError):
     """Raised when a requested LLM provider is not registered."""
-
-
-class LlmProviderAlreadyRegisteredError(LlmProviderError):
-    """Raised when provider registration conflicts with an existing identity."""
 
 
 class LlmProviderContractError(LlmProviderError):
