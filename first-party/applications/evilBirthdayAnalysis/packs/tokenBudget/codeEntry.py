@@ -1,113 +1,34 @@
 from __future__ import annotations
 
-import json
-import math
-import urllib.request as urlRequest
-from urllib.error import HTTPError, URLError
-
-_MAX_ERROR_BODY_BYTES = 4096
+from backend.llm.llmTypes import LlmQuery
 
 
-def _baseUrl(ctx) -> str:
-    llamaCpp = ctx.config.get("llamaCpp")
-    if not isinstance(llamaCpp, dict):
-        raise ValueError("Application config llamaCpp must be an object.")
-    baseUrl = llamaCpp.get("baseUrl")
-    if type(baseUrl) is not str or not baseUrl.strip():
-        host = llamaCpp.get("host", "127.0.0.1")
-        port = llamaCpp.get("port", 8080)
-        if type(host) is not str or not host.strip() or type(port) is not int or not 1 <= port <= 65535:
-            raise ValueError("llamaCpp must provide baseUrl or valid host/port values.")
-        baseUrl = f"http://{host.strip()}:{port}"
-    result = baseUrl.strip().rstrip("/")
-    if not result.startswith(("http://", "https://")):
-        raise ValueError("llamaCpp.baseUrl must use http:// or https://.")
-    return result
-
-
-def _timeoutSeconds(ctx) -> float:
+def _llmSelection(ctx) -> tuple[str, str | None, dict[str, object]]:
     llm = ctx.config.get("llm")
     if not isinstance(llm, dict):
         raise ValueError("Application config llm must be an object.")
+    provider = llm.get("provider")
+    if type(provider) is not str or not provider:
+        raise ValueError("Application config llm.provider must be a non-empty string.")
+    model = llm.get("model")
+    if model is not None and type(model) is not str:
+        raise ValueError("Application config llm.model must be null or a string.")
     providerOptions = llm.get("providerOptions", {})
     if not isinstance(providerOptions, dict):
-        raise ValueError("llm.providerOptions must be an object.")
-    value = providerOptions.get("timeoutSeconds", 120.0)
-    if type(value) not in {int, float}:
-        raise ValueError("llm.providerOptions.timeoutSeconds must be numeric when configured.")
-    result = float(value)
-    if not math.isfinite(result) or result <= 0:
-        raise ValueError("llm.providerOptions.timeoutSeconds must be a positive finite number when configured.")
-    return result
-
-
-def _httpErrorDetail(err: HTTPError) -> str:
-    try:
-        raw = err.read(_MAX_ERROR_BODY_BYTES)
-    except Exception:
-        return ""
-    if not raw:
-        return ""
-    text = raw.decode("utf-8", errors="replace").strip()
-    return "" if not text else f" Response: {text}"
-
-
-def _postJson(ctx, endpoint: str, payload: dict[str, object]) -> dict[str, object]:
-    if type(endpoint) is not str or not endpoint.startswith("/"):
-        raise ValueError("Token-budget endpoint must be an absolute HTTP path.")
-    url = f"{_baseUrl(ctx)}{endpoint}"
-    request = urlRequest.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Accept": "application/json", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urlRequest.urlopen(request, timeout=_timeoutSeconds(ctx)) as response:
-            raw = response.read()
-    except HTTPError as err:
-        detail = _httpErrorDetail(err)
-        raise RuntimeError(
-            f"llama.cpp returned HTTP {err.code} while measuring tokens at {endpoint}.{detail}",
-        ) from err
-    except (URLError, TimeoutError) as err:
-        raise RuntimeError(f"Failed communicating with llama.cpp while measuring tokens at {endpoint}.") from err
-    try:
-        decoded = json.loads(raw.decode("utf-8", errors="strict"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as err:
-        raise RuntimeError(f"llama.cpp returned an invalid JSON token-measurement response from {endpoint}.") from err
-    if not isinstance(decoded, dict):
-        raise RuntimeError(f"llama.cpp returned a non-object token-measurement response from {endpoint}.")
-    return decoded
+        raise ValueError("Application config llm.providerOptions must be an object.")
+    return provider, model, providerOptions
 
 
 def _estimateText(ctx, text: str) -> int:
     if type(text) is not str:
         raise TypeError("Token estimation text must be an exact built-in string.")
-
-    templated = _postJson(
-        ctx,
-        "/apply-template",
-        {"messages": [{"role": "user", "content": text}]},
+    provider, model, providerOptions = _llmSelection(ctx)
+    return ctx.llm.estimateInputTokens(
+        providerName=provider,
+        model=model,
+        providerOptions=providerOptions,
+        query=LlmQuery(formatId="text/plain", payload=text),
     )
-    prompt = templated.get("prompt")
-    if type(prompt) is not str:
-        raise RuntimeError("llama.cpp /apply-template response does not contain a string prompt.")
-
-    tokenized = _postJson(
-        ctx,
-        "/tokenize",
-        {
-            "content": prompt,
-            "add_special": False,
-            "parse_special": True,
-            "with_pieces": False,
-        },
-    )
-    tokens = tokenized.get("tokens")
-    if not isinstance(tokens, list):
-        raise RuntimeError("llama.cpp /tokenize response does not contain a tokens list.")
-    return len(tokens)
 
 
 def _measure(ctx, payload):
