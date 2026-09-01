@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 3
+# file: backend/context/codeEntryContext.py ; version: 4
 from __future__ import annotations
 
 from copy import deepcopy
@@ -46,15 +46,19 @@ class _IoFacade:
 
 class _CapabilityFacade:
     def __init__(self, *, ownerId: str, registry: CapabilityRegistry, scope: RegistrationScope,
-                 invoker: Callable[[str, object | None], object], requireValid: Callable[[], None]) -> None:
+                 invoker: Callable[[str, object | None], object], requireValid: Callable[[], None],
+                 allowRegistration: bool) -> None:
         self._ownerId = ownerId
         self._registry = registry
         self._scope = scope
         self._invoker = invoker
         self._requireValid = requireValid
+        self._allowRegistration = allowRegistration
 
     def register(self, capabilityId: str, handler: CapabilityHandler) -> None:
         self._requireValid()
+        if not self._allowRegistration:
+            raise RuntimeError("Capability registration is not available in this invocation Context.")
         self._registry.register(self._scope, ownerId=self._ownerId, capabilityId=capabilityId, handler=handler)
 
     def call(self, capabilityId: str, payload: object | None = None) -> object:
@@ -64,15 +68,18 @@ class _CapabilityFacade:
 
 class _LlmFacade:
     def __init__(self, *, ownerId: str, registry: LlmProviderRegistry, scope: RegistrationScope,
-                 pipeline: StreamingLlmPipeline, requireValid: Callable[[], None]) -> None:
+                 pipeline: StreamingLlmPipeline, requireValid: Callable[[], None], allowRegistration: bool) -> None:
         self._ownerId = ownerId
         self._registry = registry
         self._scope = scope
         self._pipeline = pipeline
         self._requireValid = requireValid
+        self._allowRegistration = allowRegistration
 
     def registerProvider(self, name: str, provider: LlmStreamProvider) -> None:
         self._requireValid()
+        if not self._allowRegistration:
+            raise RuntimeError("LLM provider registration is not available in this invocation Context.")
         self._registry.register(self._scope, ownerId=self._ownerId, name=name, provider=provider)
 
     def run(self, *, providerName: str, query: LlmQuery, model: str | None = None,
@@ -100,13 +107,16 @@ class CodeEntryIdentity:
 class CodeEntryContext:
     """Fresh invocation-scoped gateway supplied to Pack CodeEntry code.
 
-    Every authority-bearing facade checks this Context's lifetime. Retaining a
-    facade beyond callback completion therefore does not retain authority.
+    Every authority-bearing facade checks this Context's lifetime. Registration
+    authority is also invocation-specific: activation callbacks receive it,
+    while ordinary capability and unload callbacks do not silently create
+    registrations that would disappear when their temporary scope closes.
     """
 
     def __init__(self, *, identity: CodeEntryIdentity, packRoot: Path, io: ManagedIo, capabilities: CapabilityRegistry,
                  llmProviders: LlmProviderRegistry, llmPipeline: StreamingLlmPipeline, registrationScope: RegistrationScope,
-                 config: dict[str, object], capabilityInvoker: Callable[[str, object | None], object]) -> None:
+                 config: dict[str, object], capabilityInvoker: Callable[[str, object | None], object],
+                 allowRegistration: bool = False) -> None:
         self.identity = identity
         self.packRoot = packRoot
         self.config = deepcopy(config)
@@ -118,6 +128,7 @@ class CodeEntryContext:
             scope=registrationScope,
             invoker=capabilityInvoker,
             requireValid=self.requireValid,
+            allowRegistration=allowRegistration,
         )
         self.llm = _LlmFacade(
             ownerId=identity.codeEntryInstanceId,
@@ -125,6 +136,7 @@ class CodeEntryContext:
             scope=registrationScope,
             pipeline=llmPipeline,
             requireValid=self.requireValid,
+            allowRegistration=allowRegistration,
         )
 
     def requireValid(self) -> None:
