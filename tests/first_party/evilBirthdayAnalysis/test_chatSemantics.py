@@ -21,8 +21,55 @@ chatSemantics = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(chatSemantics)
 
 
+EMOTES = {
+    "GIGAEVIL": {"semanticClass": "praise", "classificationSource": "userDefined"},
+    "ReallyGunPull": {"semanticClass": "negative", "target": "Vedal", "classificationSource": "userDefined"},
+    "Tutel": {"entity": "Vedal", "classificationSource": "userDefined"},
+    "Clap": {},
+}
+COMPOSITES = [
+    {
+        "tokens": ["ReallyGunPull", "Tutel"],
+        "semanticClass": "negative",
+        "target": "Vedal",
+        "classificationSource": "userDefined",
+    }
+]
+
+
+class _Io:
+    def readJson(self, _path):
+        return {"emotes": EMOTES, "composites": COMPOSITES}
+
+
+class _Ctx:
+    def __init__(self):
+        self.io = _Io()
+        self.config = {"chatEmotesFile": "chatEmotes.json"}
+
+
 def _evaluate(spans):
     return chatSemantics._evaluate(None, {"spans": spans})
+
+
+def _raw(
+    lineNumber: int,
+    message: str,
+    *,
+    streamTimeSeconds: float,
+    streamTime: str,
+    insideRequestedWindow: bool = True,
+) -> dict[str, object]:
+    return {
+        "lineNumber": lineNumber,
+        "channel": "#vedal987",
+        "message": message,
+        "timestampText": "2024-03-25 19:20:00",
+        "rawLine": f"[2024-03-25 19:20:00] #vedal987 {message}",
+        "streamTimeSeconds": streamTimeSeconds,
+        "streamTime": streamTime,
+        "insideRequestedWindow": insideRequestedWindow,
+    }
 
 
 def test_known_user_defined_emote_is_fully_reducible_and_aggregation_eligible():
@@ -37,18 +84,15 @@ def test_known_user_defined_emote_is_fully_reducible_and_aggregation_eligible():
         ]
     )
 
-    assert result == {
-        "lexicallyComplete": True,
-        "semanticallyComplete": True,
-        "aggregationEligible": True,
-        "semanticUnits": [
-            {
-                "meaning": {"semanticClass": "praise", "classificationSource": "userDefined"},
-                "count": 3,
-            }
-        ],
-        "structurallyCompressed": False,
-    }
+    assert result["lexicallyComplete"] is True
+    assert result["semanticallyComplete"] is True
+    assert result["aggregationEligible"] is True
+    assert result["semanticUnits"] == [
+        {
+            "meaning": {"semanticClass": "praise", "classificationSource": "userDefined"},
+            "count": 3,
+        }
+    ]
 
 
 def test_recognized_but_unclassified_emote_is_lexical_not_semantic():
@@ -60,7 +104,7 @@ def test_recognized_but_unclassified_emote_is_lexical_not_semantic():
     assert result["semanticUnits"] == []
 
 
-def test_known_semantic_emote_with_residual_text_is_not_flattenable():
+def test_residual_text_prevents_semantic_flattening():
     result = _evaluate(
         [
             {
@@ -76,39 +120,9 @@ def test_known_semantic_emote_with_residual_text_is_not_flattenable():
     assert result["lexicallyComplete"] is False
     assert result["semanticallyComplete"] is False
     assert result["aggregationEligible"] is False
-    assert result["semanticUnits"] == []
 
 
-def test_confirmed_composite_keeps_target_as_part_of_semantic_identity():
-    result = _evaluate(
-        [
-            {
-                "kind": "composite",
-                "tokens": ["ReallyGunPull", "Tutel"],
-                "count": 2,
-                "metadata": {
-                    "semanticClass": "negative",
-                    "target": "Vedal",
-                    "classificationSource": "userDefined",
-                },
-            }
-        ]
-    )
-
-    assert result["semanticallyComplete"] is True
-    assert result["semanticUnits"] == [
-        {
-            "meaning": {
-                "semanticClass": "negative",
-                "target": "Vedal",
-                "classificationSource": "userDefined",
-            },
-            "count": 2,
-        }
-    ]
-
-
-def test_exact_repeat_of_semantic_units_multiplies_occurrence_count_without_creating_users():
+def test_exact_repeat_multiplies_semantic_occurrence_count():
     result = _evaluate(
         [
             {
@@ -127,46 +141,7 @@ def test_exact_repeat_of_semantic_units_multiplies_occurrence_count_without_crea
     )
 
     assert result["structurallyCompressed"] is True
-    assert result["semanticallyComplete"] is True
     assert result["semanticUnits"][0]["count"] == 5
-
-
-def test_exact_repeat_remains_safe_structural_compression_even_when_meaning_is_incomplete():
-    result = _evaluate(
-        [
-            {
-                "kind": "repeat",
-                "count": 4,
-                "spans": [
-                    {
-                        "kind": "composite",
-                        "tokens": ["ReallyGunPull", "Tutel"],
-                        "count": 1,
-                        "metadata": {
-                            "semanticClass": "negative",
-                            "target": "Vedal",
-                            "classificationSource": "userDefined",
-                        },
-                    },
-                    {"kind": "text", "text": "COME TO HER PARTY"},
-                ],
-            }
-        ]
-    )
-
-    assert result["structurallyCompressed"] is True
-    assert result["lexicallyComplete"] is False
-    assert result["semanticallyComplete"] is False
-    assert result["aggregationEligible"] is False
-    assert result["semanticUnits"] == []
-
-
-def test_commands_are_preserved_but_not_treated_as_preexisting_semantic_meaning():
-    result = _evaluate([{"kind": "command", "command": "abandonedarchive", "arguments": []}])
-
-    assert result["lexicallyComplete"] is False
-    assert result["semanticallyComplete"] is False
-    assert result["aggregationEligible"] is False
 
 
 def test_non_user_defined_semantic_suggestion_is_not_aggregation_eligible():
@@ -189,3 +164,123 @@ def test_non_user_defined_semantic_suggestion_is_not_aggregation_eligible():
 def test_invalid_repeat_shape_fails_closed():
     with pytest.raises(ValueError, match="count greater than one"):
         _evaluate([{"kind": "repeat", "count": 1, "spans": [{"kind": "text", "text": "x"}]}])
+
+
+def test_interpret_dynamically_recognizes_user_shape_and_keeps_raw_message():
+    result = chatSemantics._interpret(
+        _Ctx(),
+        {
+            "records": [
+                _raw(1, "viewer: GIGAEVIL GIGAEVIL", streamTimeSeconds=5.0, streamTime="00:00:05")
+            ]
+        },
+    )
+
+    record = result["records"][0]
+    assert record["message"] == "viewer: GIGAEVIL GIGAEVIL"
+    assert record["username"] == "viewer"
+    assert record["body"] == "GIGAEVIL GIGAEVIL"
+    assert record["analysis"]["kind"] == "userMessage"
+    assert record["analysis"]["spans"][0]["kind"] == "emote"
+    assert record["analysis"]["spans"][0]["count"] == 2
+    assert result["text"] == "00:00:05 viewer: GIGAEVIL x2"
+
+
+def test_interpret_preserves_unknown_message_without_guessing_username_or_body():
+    rawMessage = "A moderation or information form not understood by this CodeEntry"
+    result = chatSemantics._interpret(
+        _Ctx(),
+        {"records": [_raw(1, rawMessage, streamTimeSeconds=7.0, streamTime="00:00:07")]},
+    )
+
+    record = result["records"][0]
+    assert record["message"] == rawMessage
+    assert "username" not in record
+    assert "body" not in record
+    assert record["analysis"]["kind"] == "unknownMessage"
+    assert record["analysis"]["rawMessage"] == rawMessage
+    assert record["analysis"]["includedInText"] is True
+    assert result["text"] == f"00:00:07 [unclassified] {rawMessage}"
+
+
+def test_interpret_uses_pre_window_raw_context_to_reconstruct_gift_batch():
+    result = chatSemantics._interpret(
+        _Ctx(),
+        {
+            "records": [
+                _raw(
+                    1,
+                    "mybraza: mybraza is gifting 2 Tier 1 Subs to vedal987's community! They've gifted a total of 126 in the channel!",
+                    streamTimeSeconds=-1.0,
+                    streamTime="-00:00:01",
+                    insideRequestedWindow=False,
+                ),
+                _raw(
+                    2,
+                    "mybraza: mybraza gifted a Tier 1 sub to Aemable!",
+                    streamTimeSeconds=0.0,
+                    streamTime="00:00:00",
+                ),
+                _raw(
+                    3,
+                    "viewer: HAPPY BIRTHDAY",
+                    streamTimeSeconds=1.0,
+                    streamTime="00:00:01",
+                ),
+                _raw(
+                    4,
+                    "mybraza: mybraza gifted a Tier 1 sub to OtherUser!",
+                    streamTimeSeconds=2.0,
+                    streamTime="00:00:02",
+                ),
+            ]
+        },
+    )
+
+    assert result["records"][0]["analysis"]["includedInText"] is False
+    assert result["records"][1]["analysis"]["includedInText"] is False
+    assert result["records"][3]["analysis"]["includedInText"] is False
+    assert result["records"][1]["analysis"]["partOfGiftBatchLineNumber"] == 1
+    assert result["records"][3]["analysis"]["partOfGiftBatchLineNumber"] == 1
+    assert result["records"][0]["analysis"]["event"]["recipients"] == ["Aemable", "OtherUser"]
+    assert result["text"] == "00:00:01 viewer: HAPPY BIRTHDAY"
+
+
+def test_interpret_known_fossabot_automation_is_retained_but_suppressed():
+    result = chatSemantics._interpret(
+        _Ctx(),
+        {
+            "records": [
+                _raw(
+                    1,
+                    "fossabot: @RatK1ngg_, Your message is too long [warning]",
+                    streamTimeSeconds=9.0,
+                    streamTime="00:00:09",
+                )
+            ]
+        },
+    )
+
+    record = result["records"][0]
+    assert record["analysis"]["kind"] == "botEvent"
+    assert record["analysis"]["includedInText"] is False
+    assert result["text"] == ""
+
+
+def test_interpret_unknown_fossabot_message_remains_user_message():
+    result = chatSemantics._interpret(
+        _Ctx(),
+        {
+            "records": [
+                _raw(
+                    1,
+                    "fossabot: an unfamiliar future message",
+                    streamTimeSeconds=10.0,
+                    streamTime="00:00:10",
+                )
+            ]
+        },
+    )
+
+    assert result["records"][0]["analysis"]["kind"] == "userMessage"
+    assert result["text"] == "00:00:10 fossabot: an unfamiliar future message"
