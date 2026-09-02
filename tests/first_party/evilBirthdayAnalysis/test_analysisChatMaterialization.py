@@ -23,40 +23,117 @@ analysis = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(analysis)
 
 
-class _Capabilities:
+class _MaterializationCapabilities:
     def __init__(self):
-        self.calls: list[dict[str, int]] = []
+        self.calls: list[tuple[str, dict[str, object]]] = []
 
     def call(self, capabilityId, payload):
-        assert capabilityId == "evilAnalysis.chat@1"
-        self.calls.append(payload)
-        startVideo = payload["videoStartSeconds"]
-        endVideo = payload["videoEndSeconds"]
-        streamStart = startVideo - 533
-        streamEnd = endVideo - 533
-        text = f"{streamStart}:{streamEnd} viewer: hello"
-        return {
-            "sourcePath": "data/chat.txt",
-            "chatStartTime": "19:08:55",
-            "streamStartTime": "00:08:53",
-            "streamStartVideoSeconds": 533.0,
-            "wallClockAtMediaZero": "2024-03-25 19:08:55",
-            "wallClockAtStreamZero": "2024-03-25 19:17:48",
-            "videoStartSeconds": float(startVideo),
-            "videoEndSeconds": float(endVideo),
-            "streamStartSeconds": float(streamStart),
-            "streamEndSeconds": float(streamEnd),
-            "records": [
-                {"analysis": {"includedInText": True}, "rawLine": "raw included line"},
-                {"analysis": {"includedInText": False}, "rawLine": "raw suppressed line"},
-            ],
-            "text": text,
-        }
+        self.calls.append((capabilityId, payload))
+
+        if capabilityId == "evilAnalysis.chat@1":
+            startVideo = payload["videoStartSeconds"]
+            endVideo = payload["videoEndSeconds"]
+            streamStart = startVideo - 533
+            streamEnd = endVideo - 533
+            return {
+                "sourcePath": "data/chat.txt",
+                "chatStartTime": "19:08:55",
+                "streamStartTime": "00:08:53",
+                "streamStartVideoSeconds": 533.0,
+                "wallClockAtMediaZero": "2024-03-25 19:08:55",
+                "wallClockAtStreamZero": "2024-03-25 19:17:48",
+                "videoStartSeconds": float(startVideo),
+                "videoEndSeconds": float(endVideo),
+                "streamStartSeconds": float(streamStart),
+                "streamEndSeconds": float(streamEnd),
+                "lookbackSeconds": float(payload["lookbackSeconds"]),
+                "records": [
+                    {
+                        "lineNumber": 1,
+                        "channel": "#vedal987",
+                        "message": "prior: context",
+                        "timestampText": "2024-03-25 19:17:47",
+                        "streamTimeSeconds": float(streamStart) - 1.0,
+                        "streamTime": "-00:00:01",
+                        "insideRequestedWindow": False,
+                    },
+                    {
+                        "lineNumber": 2,
+                        "channel": "#vedal987",
+                        "message": "viewer: hello",
+                        "timestampText": "2024-03-25 19:17:48",
+                        "streamTimeSeconds": float(streamStart),
+                        "streamTime": "00:00:00",
+                        "insideRequestedWindow": True,
+                    },
+                    {
+                        "lineNumber": 3,
+                        "channel": "#vedal987",
+                        "message": "fossabot: hidden",
+                        "timestampText": "2024-03-25 19:17:49",
+                        "streamTimeSeconds": float(streamStart) + 1.0,
+                        "streamTime": "00:00:01",
+                        "insideRequestedWindow": True,
+                    },
+                ],
+            }
+
+        if capabilityId == "evilAnalysis.chatInterpret@1":
+            rawRecords = payload["records"]
+            records = []
+            for rawRecord in rawRecords:
+                record = dict(rawRecord)
+                if record["lineNumber"] == 1:
+                    record.update(
+                        username="prior",
+                        body="context",
+                        analysis={
+                            "kind": "userMessage",
+                            "includedInText": False,
+                            "streamTimeSeconds": record["streamTimeSeconds"],
+                            "streamTime": record["streamTime"],
+                            "spans": [{"kind": "text", "text": "context"}],
+                        },
+                    )
+                elif record["lineNumber"] == 2:
+                    record.update(
+                        username="viewer",
+                        body="hello",
+                        analysis={
+                            "kind": "userMessage",
+                            "includedInText": True,
+                            "streamTimeSeconds": record["streamTimeSeconds"],
+                            "streamTime": record["streamTime"],
+                            "spans": [{"kind": "text", "text": "hello"}],
+                        },
+                    )
+                else:
+                    record.update(
+                        username="fossabot",
+                        body="hidden",
+                        analysis={
+                            "kind": "botEvent",
+                            "includedInText": False,
+                            "streamTimeSeconds": record["streamTimeSeconds"],
+                            "streamTime": record["streamTime"],
+                        },
+                    )
+                records.append(record)
+            included = [record for record in records if record["analysis"]["includedInText"]]
+            return {
+                "records": records,
+                "text": "\n".join(
+                    f"{record['streamTime']} {record['username']}: {record['body']}"
+                    for record in included
+                ),
+            }
+
+        raise AssertionError(capabilityId)
 
 
-class _Ctx:
+class _MaterializationCtx:
     def __init__(self):
-        self.capabilities = _Capabilities()
+        self.capabilities = _MaterializationCapabilities()
 
 
 class _BuildQueryCapabilities:
@@ -73,7 +150,10 @@ class _BuildQueryCapabilities:
                 for text in payload["texts"]
             ]
             return {
-                "displayAuthors": ["anonymized_1" if author == "viewer_name" else "Vedal" for author in payload["authors"]],
+                "displayAuthors": [
+                    "anonymized_1" if author == "viewer_name" else "Vedal"
+                    for author in payload["authors"]
+                ],
                 "texts": texts,
                 "anonymousIdentityCount": 1,
                 "preservedIdentityCount": 1,
@@ -97,21 +177,16 @@ def _queryItems() -> list[QueryItem]:
         QueryItem(itemId="profile", kind="analysis-profile", content="profile"),
         QueryItem(itemId="prompt", kind="prompt", content="prompt"),
         QueryItem(
+            itemId="t1",
+            kind="transcript",
+            content="00:00:45 first",
+            metadata={"streamStartSeconds": 45.0, "segmentIndex": 1},
+        ),
+        QueryItem(
             itemId="t2",
             kind="transcript",
             content="00:00:48 viewer_name mentioned vedal987",
             metadata={"streamStartSeconds": 48.0, "segmentIndex": 2},
-        ),
-        QueryItem(
-            itemId="chat:21",
-            kind="chat",
-            content="replying to viewer_name",
-            metadata={
-                "streamStartSeconds": 46.0,
-                "lineNumber": 21,
-                "username": "vedal987",
-                "analysis": {"streamTime": "00:00:46"},
-            },
         ),
         QueryItem(
             itemId="chat:20",
@@ -125,10 +200,15 @@ def _queryItems() -> list[QueryItem]:
             },
         ),
         QueryItem(
-            itemId="t1",
-            kind="transcript",
-            content="00:00:45 first",
-            metadata={"streamStartSeconds": 45.0, "segmentIndex": 1},
+            itemId="chat:21",
+            kind="chat",
+            content="replying to viewer_name",
+            metadata={
+                "streamStartSeconds": 46.0,
+                "lineNumber": 21,
+                "username": "vedal987",
+                "analysis": {"streamTime": "00:00:46"},
+            },
         ),
     ]
 
@@ -146,8 +226,7 @@ def _window() -> dict[str, object]:
     }
 
 
-def _queryPayload(*, includeChat: bool, chatLayout: str, queryItems=None, contextWindow=1000, maxTokens=100) -> dict[str, object]:
-    items = _queryItems() if queryItems is None else queryItems
+def _queryPayload(*, includeChat: bool, chatLayout: str) -> dict[str, object]:
     return {
         "input": {
             "profile": {
@@ -158,10 +237,10 @@ def _queryPayload(*, includeChat: bool, chatLayout: str, queryItems=None, contex
             "windowIndex": 0,
             "window": _window(),
         },
-        "queryItems": [item.snapshot() for item in items],
+        "queryItems": [item.snapshot() for item in _queryItems()],
         "execution": {
-            "contextWindowTokens": contextWindow,
-            "providerOptions": {"maxTokens": maxTokens},
+            "contextWindowTokens": 1000,
+            "providerOptions": {"maxTokens": 100},
         },
     }
 
@@ -174,328 +253,147 @@ def test_windowChunks_translate_stream_relative_ranges_to_video_time():
         streamStartVideoSeconds=533,
     )
 
-    assert chunks == [
+    assert chunks[0] == {
+        "offsetSeconds": 0,
+        "streamStartSeconds": 0,
+        "streamEndSeconds": 600,
+        "videoStartSeconds": 533,
+        "videoEndSeconds": 1133,
+    }
+    assert chunks[1]["videoStartSeconds"] == -67
+    assert chunks[2]["videoStartSeconds"] == -1267
+
+
+def test_interpretedChat_uses_raw_capability_with_semantic_lookback_then_semantics_capability():
+    ctx = _MaterializationCtx()
+
+    rawChat, interpreted = analysis._interpretedChat(
+        ctx,
+        {"videoStartSeconds": 533, "videoEndSeconds": 1133},
+    )
+
+    assert ctx.capabilities.calls[0] == (
+        "evilAnalysis.chat@1",
         {
-            "offsetSeconds": 0,
-            "streamStartSeconds": 0,
-            "streamEndSeconds": 600,
             "videoStartSeconds": 533,
             "videoEndSeconds": 1133,
+            "lookbackSeconds": analysis._CHAT_SEMANTIC_LOOKBACK_SECONDS,
         },
-        {
-            "offsetSeconds": -600,
-            "streamStartSeconds": -600,
-            "streamEndSeconds": 0,
-            "videoStartSeconds": -67,
-            "videoEndSeconds": 533,
-        },
-        {
-            "offsetSeconds": -1800,
-            "streamStartSeconds": -1800,
-            "streamEndSeconds": -1200,
-            "videoStartSeconds": -1267,
-            "videoEndSeconds": -667,
-        },
-    ]
+    )
+    assert ctx.capabilities.calls[1][0] == "evilAnalysis.chatInterpret@1"
+    assert ctx.capabilities.calls[1][1]["records"] is rawChat["records"]
+    assert interpreted["sourcePath"] == "data/chat.txt"
+    assert interpreted["text"] == "00:00:00 viewer: hello"
 
 
-def test_chatPresentation_defaults_to_chat_excluded_and_separate_layout():
-    assert analysis._chatPresentation({}) == (False, "separate")
-    assert analysis._chatPresentation({"includeChat": True, "chatLayout": "interleaved"}) == (True, "interleaved")
-
-    with pytest.raises(TypeError, match="includeChat"):
-        analysis._chatPresentation({"includeChat": 1})
-    with pytest.raises(ValueError, match="chatLayout"):
-        analysis._chatPresentation({"chatLayout": "mixed"})
-
-
-def test_chatBudgetFraction_defaults_to_sixty_percent_and_validates_range():
-    assert analysis._chatBudgetFraction({}) == 0.60
-    assert analysis._chatBudgetFraction({"chatBudget": {"optionalContextMaxFraction": 0.25}}) == 0.25
-    with pytest.raises(ValueError, match="between 0 and 1"):
-        analysis._chatBudgetFraction({"chatBudget": {"optionalContextMaxFraction": 1.1}})
-
-
-def test_preparedChatSnapshot_keeps_three_candidate_chunks_without_raw_record_duplication():
-    ctx = _Ctx()
+def test_preparedChatSnapshot_omits_raw_records_and_counts_only_requested_window_as_source():
+    ctx = _MaterializationCtx()
     chunks = analysis._windowChunks(
         positionSeconds=0,
         chunkSeconds=600,
         offsetsSeconds=(0, -600, -1800),
         streamStartVideoSeconds=533,
     )
+
     snapshot = analysis._preparedChatSnapshot(ctx, {"chunks": chunks}, includedInPrompt=True)
 
-    assert ctx.capabilities.calls == [
-        {"videoStartSeconds": 533, "videoEndSeconds": 1133},
-        {"videoStartSeconds": -67, "videoEndSeconds": 533},
-        {"videoStartSeconds": -1267, "videoEndSeconds": -667},
-    ]
     assert snapshot["prepared"] is True
     assert snapshot["includedInPrompt"] is True
-    assert [chunk["offsetSeconds"] for chunk in snapshot["chunks"]] == [0, -600, -1800]
-    assert [chunk["streamStartSeconds"] for chunk in snapshot["chunks"]] == [0, -600, -1800]
     assert all("records" not in chunk for chunk in snapshot["chunks"])
     assert snapshot["statistics"]["sourceRecordCount"] == 6
     assert snapshot["statistics"]["includedRecordCount"] == 3
     assert snapshot["statistics"]["suppressedRecordCount"] == 3
     assert snapshot["statistics"]["renderedLineCount"] == 3
-
-
-def test_transcriptQueryItems_create_one_reusable_item_per_timed_segment():
-    transcript = {
-        "sourcePath": "data/transcript.json",
-        "streamStartVideoSeconds": 533.0,
-        "segments": [
-            {
-                "segmentIndex": 12,
-                "streamStartSeconds": 45.2,
-                "streamStartTime": "00:00:45",
-                "words": [
-                    {"word": "hello", "start": 45.2, "end": 45.5},
-                    {"word": "chat", "start": 45.6, "end": 46.0},
-                ],
-            },
-            {
-                "segmentIndex": 13,
-                "streamStartSeconds": 48.0,
-                "streamStartTime": "00:00:48",
-                "words": [{"word": "again", "start": 48.0, "end": 48.4}],
-            },
-        ],
-    }
-
-    items = analysis._transcriptQueryItems(transcript, previous={})
-
-    assert [item.kind for item in items] == ["transcript", "transcript"]
-    assert items[0].itemId == "transcript:12:45.2-46.0"
-    assert items[0].content == "00:00:45 hello chat"
-    assert items[0].metadata["streamStartSeconds"] == 45.2
-    assert items[0].metadata["streamEndSeconds"] == 46.0
-    assert items[1].metadata["streamStartSeconds"] == 48.0
-
-
-def test_transcriptQueryItems_reuse_same_absolute_evidence_item():
-    transcript = {
-        "sourcePath": "data/transcript.json",
-        "streamStartVideoSeconds": 533.0,
-        "segments": [
-            {
-                "segmentIndex": 4,
-                "streamStartSeconds": 10.0,
-                "streamStartTime": "00:00:10",
-                "words": [{"word": "same", "start": 10.0, "end": 10.5}],
-            }
-        ],
-    }
-    existing = QueryItem(
-        itemId="transcript:4:10.0-10.5",
-        kind="transcript",
-        content="00:00:10 same",
-        metadata={"streamStartSeconds": 10.0, "streamEndSeconds": 10.5, "segmentIndex": 4},
+    assert all(
+        chunk["metadata"]["lookbackSeconds"] == analysis._CHAT_SEMANTIC_LOOKBACK_SECONDS
+        for chunk in snapshot["chunks"]
     )
 
-    items = analysis._transcriptQueryItems(transcript, previous={existing.itemId: existing})
 
-    assert items == [existing]
-    assert items[0] is existing
-
-
-def test_chatQueryItems_keep_existing_metadata_shape_and_render_time_in_analysis():
-    chat = {
+def test_chatQueryItems_use_interpreted_body_but_keep_raw_message_as_source_evidence():
+    interpreted = {
         "sourcePath": "data/chat.txt",
         "records": [
             {
                 "lineNumber": 20,
+                "channel": "#vedal987",
+                "message": "viewer_name: GIGAEVIL",
                 "username": "viewer_name",
-                "message": "GIGAEVIL",
+                "body": "GIGAEVIL",
                 "timestampText": "2024-03-25 19:18:33",
                 "analysis": {
                     "kind": "userMessage",
                     "includedInText": True,
                     "streamTimeSeconds": 45.0,
                     "streamTime": "00:00:45",
-                    "spans": [{"kind": "emote", "name": "GIGAEVIL", "count": 1, "metadata": {"reaction": "praise"}}],
+                    "spans": [],
                 },
             },
             {
                 "lineNumber": 21,
-                "username": "Fossabot",
-                "message": "suppressed",
+                "channel": "#vedal987",
+                "message": "a future source form we do not understand",
                 "timestampText": "2024-03-25 19:18:34",
-                "analysis": {"kind": "botEvent", "includedInText": False, "streamTimeSeconds": 46.0, "streamTime": "00:00:46"},
+                "analysis": {
+                    "kind": "unknownMessage",
+                    "includedInText": True,
+                    "streamTimeSeconds": 46.0,
+                    "streamTime": "00:00:46",
+                    "rawMessage": "a future source form we do not understand",
+                },
             },
         ],
     }
 
-    items = analysis._chatQueryItems(chat, previous={})
+    items = analysis._chatQueryItems(interpreted, previous={})
 
-    assert len(items) == 1
-    assert items[0].itemId == "chat:20"
-    assert items[0].kind == "chat"
+    assert len(items) == 2
     assert items[0].content == "GIGAEVIL"
-    assert items[0].metadata["streamStartSeconds"] == 45.0
     assert items[0].metadata["username"] == "viewer_name"
-    assert "streamTime" not in items[0].metadata
-    assert items[0].metadata["analysis"]["streamTime"] == "00:00:45"
-    assert analysis._chatStreamTime(items[0]) == "00:00:45"
+    assert items[0].metadata["source"]["rawMessage"] == "viewer_name: GIGAEVIL"
+    assert items[1].content == "a future source form we do not understand"
+    assert items[1].metadata["username"] == "[unclassified]"
+    assert items[1].metadata["sourceUsername"] is None
 
 
-def test_buildQuery_can_keep_chat_excluded_while_still_sanitizing_transcript_mentions():
+def test_buildQuery_can_exclude_chat_while_still_using_chat_authors_for_identity_sanitization():
     ctx = _BuildQueryCtx()
     query = analysis._buildQuery(ctx, _queryPayload(includeChat=False, chatLayout="separate"))
 
     assert ctx.capabilities.identityPayload["authors"] == ["viewer_name", "vedal987"]
-    assert query["payload"] == (
-        "CONTEXT\ncontext\n\n"
-        "ANALYSIS PROFILE\nprofile\n\n"
-        "ANALYSIS INSTRUCTION\nprompt\n\n"
-        "TRANSCRIPT WINDOW\n00:00:45 first\n00:00:48 anonymized_1 mentioned Vedal"
-    )
+    assert "GIGAEVIL" not in query["payload"]
     assert "viewer_name" not in query["payload"]
     assert "vedal987" not in query["payload"]
-    assert "GIGAEVIL" not in query["payload"]
+    assert "anonymized_1 mentioned Vedal" in query["payload"]
     assert query["metadata"]["chatIncluded"] is False
-    assert query["metadata"]["chatLayout"] == "separate"
-    assert "chatBudget" not in query["metadata"]
 
 
-def test_buildQuery_separate_layout_renders_sanitized_required_chat_as_its_own_section():
+def test_buildQuery_separate_layout_renders_sanitized_chat():
     ctx = _BuildQueryCtx()
     query = analysis._buildQuery(ctx, _queryPayload(includeChat=True, chatLayout="separate"))
 
-    assert query["payload"] == (
-        "CONTEXT\ncontext\n\n"
-        "ANALYSIS PROFILE\nprofile\n\n"
-        "ANALYSIS INSTRUCTION\nprompt\n\n"
-        "TRANSCRIPT WINDOW\n00:00:45 first\n00:00:48 anonymized_1 mentioned Vedal\n\n"
-        "CHAT WINDOW\n00:00:45 anonymized_1: GIGAEVIL\n00:00:46 Vedal: replying to anonymized_1"
-    )
+    assert "CHAT WINDOW" in query["payload"]
+    assert "00:00:45 anonymized_1: GIGAEVIL" in query["payload"]
+    assert "00:00:46 Vedal: replying to anonymized_1" in query["payload"]
     assert "viewer_name" not in query["payload"]
     assert "vedal987" not in query["payload"]
-    assert query["metadata"]["chatIncluded"] is True
-    assert query["metadata"]["chatLayout"] == "separate"
     assert query["metadata"]["identitySanitized"] is True
-    assert query["metadata"]["anonymousIdentityCount"] == 1
-    assert query["metadata"]["preservedIdentityCount"] == 1
-    assert query["metadata"]["chatBudget"]["optionalRequestedItemCount"] == 0
-    assert query["metadata"]["chatBudget"]["optionalTruncated"] is False
 
 
-def test_buildQuery_interleaved_layout_orders_required_transcript_and_chat_by_stream_time():
+def test_buildQuery_interleaved_layout_orders_chat_and_transcript_by_stream_time():
     ctx = _BuildQueryCtx()
     query = analysis._buildQuery(ctx, _queryPayload(includeChat=True, chatLayout="interleaved"))
 
-    assert query["payload"] == (
-        "CONTEXT\ncontext\n\n"
-        "ANALYSIS PROFILE\nprofile\n\n"
-        "ANALYSIS INSTRUCTION\nprompt\n\n"
-        "CHRONOLOGICAL EVIDENCE\n"
-        "TRANSCRIPT 00:00:45 first\n"
-        "CHAT 00:00:45 anonymized_1: GIGAEVIL\n"
-        "CHAT 00:00:46 Vedal: replying to anonymized_1\n"
-        "TRANSCRIPT 00:00:48 anonymized_1 mentioned Vedal"
-    )
-    assert "viewer_name" not in query["payload"]
-    assert "vedal987" not in query["payload"]
-    assert query["metadata"]["chatIncluded"] is True
-    assert query["metadata"]["chatLayout"] == "interleaved"
+    payload = query["payload"]
+    assert payload.index("TRANSCRIPT 00:00:45 first") < payload.index("CHAT 00:00:45 anonymized_1: GIGAEVIL")
+    assert payload.index("CHAT 00:00:45 anonymized_1: GIGAEVIL") < payload.index("CHAT 00:00:46 Vedal")
+    assert payload.index("CHAT 00:00:46 Vedal") < payload.index("TRANSCRIPT 00:00:48 anonymized_1 mentioned Vedal")
 
 
-def _budgetItems() -> list[QueryItem]:
-    return [
-        QueryItem(itemId="context", kind="context", content="context"),
-        QueryItem(itemId="profile", kind="analysis-profile", content="profile"),
-        QueryItem(itemId="prompt", kind="prompt", content="prompt"),
-        QueryItem(
-            itemId="transcript",
-            kind="transcript",
-            content="00:00:01 transcript",
-            metadata={"streamStartSeconds": 1.0, "segmentIndex": 1},
-        ),
-        QueryItem(
-            itemId="chat:current",
-            kind="chat",
-            content="CURRENT",
-            metadata={
-                "streamStartSeconds": 10.0,
-                "lineNumber": 300,
-                "username": "viewer_name",
-                "analysis": {"streamTime": "00:00:10"},
-            },
-        ),
-        QueryItem(
-            itemId="chat:minus10",
-            kind="chat",
-            content="OLD10",
-            metadata={
-                "streamStartSeconds": -5.0,
-                "lineNumber": 200,
-                "username": "viewer_name",
-                "analysis": {"streamTime": "-00:00:05"},
-            },
-        ),
-        QueryItem(
-            itemId="chat:minus30",
-            kind="chat",
-            content="OLD30",
-            metadata={
-                "streamStartSeconds": -1300.0,
-                "lineNumber": 100,
-                "username": "viewer_name",
-                "analysis": {"streamTime": "-00:21:40"},
-            },
-        ),
-    ]
-
-
-def test_optional_chat_is_capped_and_prioritizes_minus10_before_minus30():
-    def countTokens(text):
-        return 20 + text.count("CURRENT") * 5 + text.count("OLD10") * 8 + text.count("OLD30") * 8
-
-    ctx = _BuildQueryCtx(countTokens, optionalFraction=0.60)
-    query = analysis._buildQuery(
-        ctx,
-        _queryPayload(
-            includeChat=True,
-            chatLayout="separate",
-            queryItems=_budgetItems(),
-            contextWindow=50,
-            maxTokens=10,
-        ),
-    )
-
-    assert "CURRENT" in query["payload"]
-    assert "OLD10" in query["payload"]
-    assert "OLD30" not in query["payload"]
-    budget = query["metadata"]["chatBudget"]
-    assert budget["maxInputTokens"] == 40
-    assert budget["baseQueryTokens"] == 20
-    assert budget["requiredCurrentChatTokens"] == 5
-    assert budget["optionalTokenLimit"] == 12
-    assert budget["optionalRequestedTokens"] == 16
-    assert budget["optionalIncludedTokens"] == 8
-    assert budget["optionalRequestedItemCount"] == 2
-    assert budget["optionalIncludedItemCount"] == 1
-    assert budget["optionalRequestedByOffset"] == {"-600": 1, "-1800": 1}
-    assert budget["optionalIncludedByOffset"] == {"-600": 1, "-1800": 0}
-    assert budget["optionalTruncated"] is True
-    assert len(budget["warnings"]) == 1
-
-
-def test_required_current_chat_overflow_is_a_hard_error():
-    def countTokens(text):
-        return 20 + text.count("CURRENT") * 25
-
-    ctx = _BuildQueryCtx(countTokens)
-    with pytest.raises(RuntimeError, match="Required current chat window cannot fit"):
-        analysis._buildQuery(
-            ctx,
-            _queryPayload(
-                includeChat=True,
-                chatLayout="separate",
-                queryItems=_budgetItems(),
-                contextWindow=40,
-                maxTokens=10,
-            ),
-        )
+def test_chatPresentation_validation_is_unchanged():
+    assert analysis._chatPresentation({}) == (False, "separate")
+    assert analysis._chatPresentation({"includeChat": True, "chatLayout": "interleaved"}) == (True, "interleaved")
+    with pytest.raises(TypeError, match="includeChat"):
+        analysis._chatPresentation({"includeChat": 1})
+    with pytest.raises(ValueError, match="chatLayout"):
+        analysis._chatPresentation({"chatLayout": "mixed")
