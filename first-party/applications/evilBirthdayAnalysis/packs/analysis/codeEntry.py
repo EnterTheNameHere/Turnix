@@ -12,10 +12,153 @@ _SPEC.loader.exec_module(_implementation)
 
 # Re-export the implementation surface. Tests and pack users intentionally treat
 # these helpers as the analysis pack's implementation API while the wrapper lets
-# us optimize one hot path without rewriting the large source module in place.
+# us replace focused hot paths and boundary adapters without rewriting the large
+# source module in place.
 for _name, _value in vars(_implementation).items():
     if not _name.startswith("__"):
         globals()[_name] = _value
+
+
+_CHAT_SEMANTIC_LOOKBACK_SECONDS = 120
+_UNCLASSIFIED_CHAT_AUTHOR = "[unclassified]"
+
+
+def _chatQueryItems(
+    chat: dict[str, object],
+    *,
+    previous: dict[str, QueryItem],
+) -> list[QueryItem]:
+    """Materializes interpreted chat records without requiring source ingestion to parse semantics."""
+    records = chat.get("records")
+    if not isinstance(records, list):
+        raise RuntimeError("Chat interpretation capability returned invalid records.")
+
+    items: list[QueryItem] = []
+    for record in records:
+        if not isinstance(record, dict):
+            raise RuntimeError("Chat interpretation capability returned an invalid record.")
+        analysis = record.get("analysis")
+        if not isinstance(analysis, dict) or analysis.get("includedInText") is not True:
+            continue
+
+        lineNumber = record.get("lineNumber")
+        rawMessage = record.get("message")
+        username = record.get("username")
+        body = record.get("body")
+        streamTimeSeconds = analysis.get("streamTimeSeconds")
+        streamTime = analysis.get("streamTime")
+        if (
+            type(lineNumber) is not int
+            or type(rawMessage) is not str
+            or type(streamTimeSeconds) not in {int, float}
+            or type(streamTime) is not str
+        ):
+            raise RuntimeError("Chat interpretation returned invalid query-item evidence.")
+
+        interpretationKind = analysis.get("kind")
+        if interpretationKind == "unknownMessage":
+            presentedAuthor = _UNCLASSIFIED_CHAT_AUTHOR
+            content = rawMessage
+        else:
+            if type(username) is not str or not username or type(body) is not str:
+                raise RuntimeError("Interpreted chat user/event record has invalid username/body evidence.")
+            presentedAuthor = username
+            content = body
+
+        itemId = f"chat:{lineNumber}"
+        previousItem = previous.get(itemId)
+        if previousItem is not None:
+            items.append(previousItem)
+            continue
+
+        items.append(
+            QueryItem(
+                itemId=itemId,
+                kind="chat",
+                content=content,
+                metadata={
+                    "streamStartSeconds": float(streamTimeSeconds),
+                    "lineNumber": lineNumber,
+                    "username": presentedAuthor,
+                    "sourceUsername": username if type(username) is str else None,
+                    "analysis": _plain(analysis),
+                    "source": {
+                        "sourcePath": chat.get("sourcePath"),
+                        "timestampText": record.get("timestampText"),
+                        "channel": record.get("channel"),
+                        "rawMessage": rawMessage,
+                    },
+                },
+            )
+        )
+    return items
+
+
+def _buildQueryItems(ctx, payload):
+    """Builds analysis QueryItems, explicitly separating raw chat selection from semantic interpretation."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("input"), dict):
+        raise ValueError("BUILD_QUERY_ITEMS requires an input object.")
+    inputValue = payload["input"]
+    profile = inputValue.get("profile")
+    window = inputValue.get("window")
+    promptName = inputValue.get("promptName")
+    if not isinstance(profile, dict) or not isinstance(window, dict) or type(promptName) is not str:
+        raise ValueError("Processing input requires profile, window and promptName.")
+
+    previous = _itemMap(payload)
+    items: list[QueryItem] = []
+
+    contextId = "context:evil-birthday"
+    items.append(previous.get(contextId) or QueryItem(itemId=contextId, kind="context", content=_CONTEXT_TEXT))
+
+    profileId = f"profile:{profile['name']}"
+    profileText = f"Analysis profile: {profile['name']}\n{profile['description']}"
+    items.append(
+        previous.get(profileId)
+        or QueryItem(itemId=profileId, kind="analysis-profile", content=profileText, metadata={"profile": _plain(profile)})
+    )
+
+    promptId = f"prompt:{promptName}"
+    promptItem = previous.get(promptId)
+    if promptItem is None:
+        prompt = ctx.capabilities.call("evilAnalysis.prompts@1", {"name": promptName})
+        if not isinstance(prompt, dict):
+            raise RuntimeError("Prompt capability returned an invalid snapshot.")
+        promptItem = QueryItem(
+            itemId=promptId,
+            kind="prompt",
+            content=prompt["prompt"],
+            metadata={"prompt": _plain(prompt)},
+        )
+    items.append(promptItem)
+
+    for chunk in _windowChunkList(window):
+        selector = {
+            "videoStartSeconds": int(chunk["videoStartSeconds"]),
+            "videoEndSeconds": int(chunk["videoEndSeconds"]),
+        }
+        transcript = ctx.capabilities.call("evilAnalysis.transcript@1", selector)
+        if not isinstance(transcript, dict) or type(transcript.get("text")) is not str:
+            raise RuntimeError("Transcript capability returned an invalid snapshot.")
+        items.extend(_transcriptQueryItems(transcript, previous=previous))
+
+        rawChat = ctx.capabilities.call(
+            "evilAnalysis.chat@1",
+            {**selector, "lookbackSeconds": _CHAT_SEMANTIC_LOOKBACK_SECONDS},
+        )
+        if not isinstance(rawChat, dict) or not isinstance(rawChat.get("records"), list):
+            raise RuntimeError("Raw chat capability returned an invalid snapshot.")
+
+        interpretedChat = ctx.capabilities.call(
+            "evilAnalysis.chatInterpret@1",
+            {"records": rawChat["records"]},
+        )
+        if not isinstance(interpretedChat, dict) or not isinstance(interpretedChat.get("records"), list):
+            raise RuntimeError("Chat interpretation capability returned an invalid snapshot.")
+        interpretedChat = dict(interpretedChat)
+        interpretedChat["sourcePath"] = rawChat.get("sourcePath")
+        items.extend(_chatQueryItems(interpretedChat, previous=previous))
+    return items
 
 
 def _budgetedChat(
@@ -180,9 +323,11 @@ def _budgetedChat(
     return [*currentItems, *selectedOptional], evidence, identityStatistics
 
 
-# _buildQuery was defined in the implementation module and resolves globals in
-# that module. Replacing the implementation's hot-path function therefore makes
-# every registered analysis capability use the optimized selector as well.
+# Functions defined in the implementation module resolve globals in that module.
+# Patch the boundary adapters there so every registered analysis capability uses
+# the raw-chat -> semantic-interpretation path and optimized chat selector.
+_implementation._chatQueryItems = _chatQueryItems
+_implementation._buildQueryItems = _buildQueryItems
 _implementation._budgetedChat = _budgetedChat
 
 
