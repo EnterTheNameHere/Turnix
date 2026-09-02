@@ -23,6 +23,31 @@ _CHAT_SEMANTIC_LOOKBACK_SECONDS = 120
 _UNCLASSIFIED_CHAT_AUTHOR = "[unclassified]"
 
 
+def _interpretedChat(ctx, selector: dict[str, int]) -> tuple[dict[str, object], dict[str, object]]:
+    """Selects raw chat with semantic lookback, then interprets it through the semantics Pack."""
+    rawChat = ctx.capabilities.call(
+        "evilAnalysis.chat@1",
+        {**selector, "lookbackSeconds": _CHAT_SEMANTIC_LOOKBACK_SECONDS},
+    )
+    if not isinstance(rawChat, dict) or not isinstance(rawChat.get("records"), list):
+        raise RuntimeError("Raw chat capability returned an invalid snapshot.")
+
+    interpretedChat = ctx.capabilities.call(
+        "evilAnalysis.chatInterpret@1",
+        {"records": rawChat["records"]},
+    )
+    if (
+        not isinstance(interpretedChat, dict)
+        or type(interpretedChat.get("text")) is not str
+        or not isinstance(interpretedChat.get("records"), list)
+    ):
+        raise RuntimeError("Chat interpretation capability returned an invalid snapshot.")
+
+    interpretedChat = dict(interpretedChat)
+    interpretedChat["sourcePath"] = rawChat.get("sourcePath")
+    return rawChat, interpretedChat
+
+
 def _chatQueryItems(
     chat: dict[str, object],
     *,
@@ -142,23 +167,73 @@ def _buildQueryItems(ctx, payload):
             raise RuntimeError("Transcript capability returned an invalid snapshot.")
         items.extend(_transcriptQueryItems(transcript, previous=previous))
 
-        rawChat = ctx.capabilities.call(
-            "evilAnalysis.chat@1",
-            {**selector, "lookbackSeconds": _CHAT_SEMANTIC_LOOKBACK_SECONDS},
-        )
-        if not isinstance(rawChat, dict) or not isinstance(rawChat.get("records"), list):
-            raise RuntimeError("Raw chat capability returned an invalid snapshot.")
-
-        interpretedChat = ctx.capabilities.call(
-            "evilAnalysis.chatInterpret@1",
-            {"records": rawChat["records"]},
-        )
-        if not isinstance(interpretedChat, dict) or not isinstance(interpretedChat.get("records"), list):
-            raise RuntimeError("Chat interpretation capability returned an invalid snapshot.")
-        interpretedChat = dict(interpretedChat)
-        interpretedChat["sourcePath"] = rawChat.get("sourcePath")
+        _rawChat, interpretedChat = _interpretedChat(ctx, selector)
         items.extend(_chatQueryItems(interpretedChat, previous=previous))
     return items
+
+
+def _preparedChatChunk(ctx, chunk: dict[str, object]) -> dict[str, object]:
+    """Creates saved chat evidence from the same raw->semantic boundary used for QueryItems."""
+    selector = {
+        "videoStartSeconds": int(chunk["videoStartSeconds"]),
+        "videoEndSeconds": int(chunk["videoEndSeconds"]),
+    }
+    rawChat, interpretedChat = _interpretedChat(ctx, selector)
+
+    text = interpretedChat["text"]
+    interpretedRecords = interpretedChat["records"]
+    rawRecords = rawChat["records"]
+
+    sourceRecordCount = 0
+    includedCount = 0
+    suppressedCount = 0
+    for rawRecord in rawRecords:
+        if not isinstance(rawRecord, dict):
+            raise RuntimeError("Raw chat capability returned an invalid record.")
+        if rawRecord.get("insideRequestedWindow") is True:
+            sourceRecordCount += 1
+
+    for record in interpretedRecords:
+        if not isinstance(record, dict):
+            raise RuntimeError("Chat interpretation capability returned an invalid record.")
+        if record.get("insideRequestedWindow") is not True:
+            continue
+        analysis = record.get("analysis")
+        included = isinstance(analysis, dict) and analysis.get("includedInText") is True
+        if included:
+            includedCount += 1
+        else:
+            suppressedCount += 1
+
+    metadataKeys = (
+        "sourcePath",
+        "chatStartTime",
+        "streamStartTime",
+        "streamStartVideoSeconds",
+        "wallClockAtMediaZero",
+        "wallClockAtStreamZero",
+        "videoStartSeconds",
+        "videoEndSeconds",
+        "streamStartSeconds",
+        "streamEndSeconds",
+        "lookbackSeconds",
+    )
+    metadata = {key: _plain(rawChat[key]) for key in metadataKeys if key in rawChat}
+    return {
+        "offsetSeconds": int(chunk["offsetSeconds"]),
+        "streamStartSeconds": int(chunk["streamStartSeconds"]),
+        "streamEndSeconds": int(chunk["streamEndSeconds"]),
+        "text": text,
+        "metadata": metadata,
+        "statistics": {
+            "sourceRecordCount": sourceRecordCount,
+            "includedRecordCount": includedCount,
+            "suppressedRecordCount": suppressedCount,
+            "renderedLineCount": 0 if not text else text.count("\n") + 1,
+            "characterCount": len(text),
+            "utf8ByteCount": len(text.encode("utf-8")),
+        },
+    }
 
 
 def _budgetedChat(
@@ -328,6 +403,7 @@ def _budgetedChat(
 # the raw-chat -> semantic-interpretation path and optimized chat selector.
 _implementation._chatQueryItems = _chatQueryItems
 _implementation._buildQueryItems = _buildQueryItems
+_implementation._preparedChatChunk = _preparedChatChunk
 _implementation._budgetedChat = _budgetedChat
 
 
