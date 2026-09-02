@@ -52,6 +52,10 @@ def _parseLine(line: str, lineNumber: int) -> dict[str, object]:
         raise ValueError(
             f"Chat channel must begin with '#' at physical line {lineNumber}; got {channel!r}.",
         )
+    if any(character.isspace() for character in channel):
+        raise ValueError(
+            f"Chat channel must not contain whitespace at physical line {lineNumber}; got {channel!r}.",
+        )
 
     return {
         "timestamp": timestamp,
