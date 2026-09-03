@@ -17,157 +17,177 @@ Purpose:
 This document defines what tracing is inside Actant and which guarantees the
 tracing substrate provides while runtime work is occurring.
 
-It defines:
-- tracing as structured runtime evidence rather than logging
-- trace producers and producer-local ordering
-- trace context and correlation propagation
-- trace span lifecycle semantics
-- trace type registration and publication
-- trace destinations and delivery isolation
-- trace emission and persistence boundaries
-- tracing authority and non-authority
-- ownership boundaries between tracing, trace records, and trace tooling
-
 Detailed portable trace-record semantics are defined in tracing-records.txt.
-Trace reconstruction, full DAG materialization, storage inspection, and
-interactive tooling are defined in tracing-tooling.txt.
+Historical persistence and retention are defined in tracing-retention.txt.
+Trace reconstruction, graph materialization, analysis, and interactive tooling
+are defined in tracing-tooling.txt.
 
 This document is implementation-language neutral. Language-specific runtime
 mechanics belong to implementation specifications.
 
 
 ===============================================================================
-01. INTERPRETATION BASIS
+01. CORE CONCEPT
 ===============================================================================
 
-01.01. This document expresses normative meaning through explicit,
-      deterministic prose.
+01.01. Tracing records structured evidence about runtime activity.
 
-01.02. Normative meaning derives from sentence structure and document context
-      rather than from RFC-style keywords.
+01.02. Tracing is not logging.
 
-01.03. This document migrates and supersedes the tracing-substrate meaning of
-      the legacy DA-03 specification for the new design corpus.
-
-01.04. Legacy DA-03 remains reference material during migration. It does not
-      force the new design to preserve obsolete representation or tooling
-      assumptions.
-
-
-===============================================================================
-02. CORE CONCEPT
-===============================================================================
-
-02.01. Tracing records structured evidence about runtime activity.
-
-02.02. Tracing answers, within the evidence that was emitted:
-
-          "What happened, what was it related to, and why?"
-
-02.03. Tracing is not logging.
-
-02.04. Human-readable logs may be derived from, accompany, or exist beside
+01.03. Human-readable logs may be derived from, accompany, or exist beside
       trace evidence. Logs do not replace trace evidence.
 
-02.05. The tracing substrate produces records and explicit relationships.
+01.04. The tracing substrate creates records containing structural,
+      correlation, ordering, outcome, and explicit relationship evidence.
 
-02.06. The tracing substrate does not require a complete trace graph to exist
+01.05. The tracing substrate does not require a complete trace graph to exist
       while records are being emitted.
 
-02.07. Full causal and structural graphs are materialized by trace tooling
-      from available trace evidence.
+01.06. Trace tooling reconstructs and interprets relationships from available
+      trace evidence.
 
-02.08. The architectural separation is:
+01.07. The architectural separation is:
 
-          Tracing records relationships.
-          Tooling materializes relationships.
+          Tracing records evidence and relationships.
+          Tooling materializes and interprets them.
 
 
 ===============================================================================
-03. AUTHORITY AND EVIDENCE
+02. AUTHORITY AND EVIDENCE
 ===============================================================================
 
-03.01. Trace evidence is evidence of what an Actant subsystem recorded.
+02.01. Trace evidence is evidence of what an Actant subsystem recorded.
 
-03.02. Trace evidence is not authoritative committed state.
+02.02. Trace evidence is not authoritative committed state.
 
-03.03. Trace evidence does not by itself define restoration, rollback,
-      Replay, Resume, Retry, or object-lifecycle truth outside the evidence
-      represented by the records being examined.
+02.03. Trace evidence does not by itself define restoration, rollback, Replay,
+      Resume, Retry, or object-lifecycle truth outside the evidence represented
+      by the records being examined.
 
-03.04. Explicit relationships recorded by a producer are authoritative as
-      statements made by that producer within the available trace evidence.
+02.04. Explicit relationships recorded at emission are producer-emitted
+      evidence and remain distinguishable from later tooling interpretation.
 
-03.05. A trace consumer does not invent an unrecorded event, relationship,
-      reason, or outcome.
+02.05. A trace consumer does not invent an unrecorded event, relationship,
+      reason, or outcome and present it as producer-emitted evidence.
 
-03.06. Absence of evidence does not prove absence of the underlying runtime
+02.06. Absence of evidence does not prove absence of the underlying runtime
       action when evidence may be unavailable, undelivered, unretained, or
       incomplete.
 
-03.07. Loss of trace evidence weakens evidential completeness. It does not by
+02.07. Loss of trace evidence weakens evidential completeness. It does not by
       itself change committed-state correctness.
 
-03.08. Trace presentation, reconstruction, storage, export, or debugger
-      tooling does not acquire runtime authority merely by consuming trace
-      evidence.
-
 
 ===============================================================================
-04. DOMAIN TRACE OBLIGATIONS
+03. DOMAIN EMITTERS AND TRACE OBLIGATIONS
 ===============================================================================
 
-04.01. The tracing substrate defines how trace evidence is produced and
-      transported.
+03.01. A domain emitter is runtime code or a subsystem that knows a meaningful
+      domain fact and requests that fact to be traced.
 
-04.02. The design area that owns a lifecycle, operation, object, workflow, or
+03.02. A domain emitter is not thereby a trace producer.
+
+03.03. Domain code may know only its own operation and the tracing emission
+      surface it uses. It does not need to know producer sequencing, storage,
+      graph materialization, or tracing implementation mechanics.
+
+03.04. The design area that owns a lifecycle, operation, object, workflow, or
       subsystem defines which meaningful actions require trace evidence.
 
-04.03. A domain-required trace emission is not optional merely because trace
+03.05. A domain-required trace emission is not optional merely because trace
       retention is non-authoritative or best-effort.
 
-04.04. An emission obligation requires the owning runtime path to attempt
-      trace emission at the defined point.
+03.06. An emission obligation requires the owning runtime path to attempt trace
+      emission at the defined point.
 
-04.05. An emission obligation is distinct from a persistence guarantee.
+03.07. An emission obligation is distinct from a persistence guarantee.
 
-04.06. Domain-specific trace types, attributes, correlations, and causal
-      references remain owned by the domain that gives them meaning unless a
-      tracing document explicitly defines a substrate-level type.
+03.08. Domain-specific trace types, attributes, correlations, and explicit
+      causal references remain owned by the domain that gives them meaning
+      unless tracing explicitly defines a substrate-level type.
 
-04.07. The tracing substrate does not maintain a global catalog of every
-      domain action that must be traced.
+03.09. Guideline - trace or it did not happen:
+
+      When information is required to explain a traced operation, and the
+      responsible subsystem knows that information at the point where its
+      tracing obligation applies, that information is represented in trace
+      evidence if later tracing is expected to know it.
+
+03.10. Information omitted from trace evidence is not later presented as
+       producer-known trace evidence merely because tooling can speculate or
+       infer that it probably occurred.
 
 
 ===============================================================================
-05. TRACE PRODUCERS
+04. TRACE PRODUCERS
 ===============================================================================
 
-05.01. Trace records are emitted by trace producers.
+04.01. A trace producer is tracing infrastructure that creates TraceRecords.
 
-05.02. Each trace producer has a stable identity for its producer lifetime.
+04.02. Each trace producer has a stable identity for its producer lifetime.
 
-05.03. Each record emitted by a producer carries that producer identity.
+04.03. Each record created by a producer carries that producer identity.
 
-05.04. Each producer assigns a producer-local sequence to emitted records.
+04.04. Each producer assigns a producer-local sequence in record creation
+      order.
 
-05.05. Producer-local sequence values are unique and strictly ordered for
+04.05. Producer-local sequence values are unique and strictly ordered for
       records successfully created by that producer.
 
-05.06. Producer-local sequence does not define ordering between different
+04.06. Producer-local sequence does not define ordering between different
       producers.
 
-05.07. A replacement or restarted producer receives a distinct producer
-      identity.
+04.07. A replacement or restarted producer receives a distinct producer
+      identity and does not continue another producer's sequence as though the
+      two were one uninterrupted producer.
 
-05.08. A new producer does not continue another producer's local sequence as
-      though both producers were one uninterrupted producer.
+04.08. A producer may record descriptive predecessor information when the
+      surrounding runtime knows that relationship. Such information does not
+      merge producer identities or their sequence domains.
 
-05.09. A producer may record descriptive predecessor information when the
-      surrounding runtime knows that relationship.
+04.09. Domain emitter, trace producer, and span are distinct concepts:
+      - the domain emitter knows and reports a runtime fact
+      - the trace producer creates and orders TraceRecords
+      - the span provides structural context for bounded work
 
-05.10. Predecessor information does not merge producer identities or convert
-      separate producer-local sequences into one sequence.
+
+===============================================================================
+05. ORDERING AND MULTIPLE PRODUCERS
+===============================================================================
+
+05.01. Producer-local sequence is the normative total creation order for
+      records created by one trace producer.
+
+05.02. Records that belong to the same span and were created by the same trace
+      producer can be placed in producer-relative order by combining their
+      structural membership with producer-local sequence.
+
+05.03. Unrelated records from the same producer may occur between two records
+      belonging to one span. They do not become members of that span merely
+      because their sequence values lie between those records.
+
+05.04. Independent producers have independent sequence domains.
+
+05.05. Tracing does not pretend that independent producer sequences establish
+      one cross-producer total order.
+
+05.06. Guideline - when relative record ordering is important to later
+      interpretation, use the same trace producer where practical.
+
+05.07. Use of multiple independent trace producers is valid when cross-producer
+      ordering is unnecessary or when the creator accepts that such ordering
+      is not established by ordinary tracing.
+
+05.08. When a relationship across independently ordered records matters, the
+      creator may preserve the identity of emitted evidence and explicitly
+      reference that evidence from later trace evidence.
+
+05.09. Explicit relationship evidence can establish a known relationship
+      without establishing or requiring a total cross-producer order.
+
+05.10. A future synchronized-producer facility may provide stronger ordering
+       guarantees for cases that require them. Such a facility is not part of
+       the ordinary tracing guarantee and remains OPEN.
 
 
 ===============================================================================
@@ -178,37 +198,23 @@ mechanics belong to implementation specifications.
       inherit structural and correlation information without restating it at
       every emission point.
 
-06.02. Trace context may contain:
-      - current span identity
-      - current span-start record identity
-      - current span family
-      - producer identity associated with structural span context
-      - runtime correlation identifiers
+06.02. Trace context may contain current span identity, current span-start
+      identity, span-family information, runtime correlations, and information
+      required by the tracing implementation to preserve valid context.
 
 06.03. Correlation identifiers associate trace evidence with known Actant
-      runtime identities.
+      runtime identities without granting authority over those objects.
 
-06.04. Correlation identifiers do not create ownership or authority over the
-      correlated objects.
-
-06.05. Correlation context may be inherited, explicitly overridden, or
+06.04. Correlation context may be inherited, explicitly overridden, or
       explicitly cleared by a nested runtime scope.
 
-06.06. A nested correlation scope restores the preceding context when the
-      scope ends.
+06.05. Structural span context identifies where emitted evidence belongs.
 
-06.07. Structural span context is producer-specific.
+06.06. The portable design does not currently define general cross-producer
+      participation and ordering inside one span. That design remains OPEN.
 
-06.08. A producer does not structurally contain a new record or child span
-      inside span context owned by a different producer.
-
-06.09. An implementation may transfer structural span context across an
-      execution boundary when the boundary preserves the context's identity
-      and the tracing contract.
-
-06.10. Transfer of structural context does not transfer ownership of the
-       active span lifecycle unless an owning design explicitly defines such
-       transfer.
+06.07. An implementation may therefore impose stronger restrictions on
+      cross-producer structural context until a shared design contract exists.
 
 
 ===============================================================================
@@ -217,256 +223,248 @@ mechanics belong to implementation specifications.
 
 07.01. A trace span represents bounded work.
 
-07.02. A normally completed span has one start record and one terminal record.
+07.02. A normally terminally-recorded span has one start record and one
+      terminal record.
 
 07.03. The start record establishes the span identity and span family.
 
-07.04. A child span explicitly identifies its parent span.
+07.04. A child span explicitly identifies its structural parent span.
 
 07.05. A terminal span record identifies the corresponding span and its start
-      record.
+      record and records an outcome.
 
-07.06. A terminal span record records an outcome.
+07.06. A span becomes terminal at most once in valid trace evidence.
 
-07.07. A terminal span record may record duration when duration is available.
+07.07. Standard terminal outcome categories are:
+      - completed
+      - failed
+      - errored
+      - cancelled
 
-07.08. Span outcomes distinguish semantically different terminal conditions.
+07.08. completed means the bounded operation reached its intended successful
+      terminal state.
 
-07.09. The standard tracing substrate recognizes normal completion, failure,
-      error, and cancellation as distinct terminal outcome categories.
+07.09. failed means the operation reached a recognized unsuccessful terminal
+      state within the operation's defined failure semantics.
 
-07.10. A span family may define additional generated terminal outcome types
-       while preserving the span's common lifecycle semantics.
+07.10. errored means the operation could not resolve execution into an ordinary
+       domain success or failure because an exceptional or otherwise unhandled
+       condition escaped its understood handling semantics.
 
-07.11. Span lifecycle ownership remains explicit.
+07.11. cancelled means the operation was intentionally prevented from reaching
+       its ordinary terminal result by cancellation.
 
-07.12. Structural span context may be used by nested work without granting
-       that work permission to terminate the active span.
+07.12. Intermediate errors do not determine the terminal span outcome. An
+       operation may encounter and handle any number of errors and still
+       complete successfully.
 
-07.13. Shutdown or recovery may encounter a span for which normal terminal
-       evidence can no longer be emitted safely.
+07.13. A domain may define more specific generated outcomes while preserving
+       the common lifecycle semantics.
 
-07.14. Such a span may be abandoned by the tracing producer.
+07.14. Structural containment records where evidence belongs. Structural
+       containment does not by itself assert causality.
 
-07.15. Abandonment is represented explicitly when tracing can still emit the
-       corresponding evidence.
+07.15. Span lifecycle ownership remains explicit. Work using a span's
+       structural context does not thereby acquire permission to terminate it.
 
-07.16. Tracing does not fabricate a successful terminal span record merely to
-       make an incomplete lifecycle appear complete.
+07.16. Shutdown or recovery may encounter a span for which normal terminal
+       evidence can no longer be emitted safely. Such abandonment is represented
+       explicitly when tracing can still emit corresponding evidence.
+
+07.17. Tracing does not fabricate successful terminal evidence merely to make
+       an incomplete lifecycle appear complete.
+
+07.18. The distinction between structurally parentless spans, designated trace
+       roots, bounded trace regions, and kernel-run trace roots requires further
+       design and remains OPEN. This document does not collapse those concepts.
 
 
 ===============================================================================
-08. TRACE TYPES
+08. CAUSAL EXPLANATION
 ===============================================================================
 
-08.01. Every ordinary trace record refers to a registered trace type
+08.01. Structural membership, producer ordering, outcomes, and traced domain
+      events may already provide enough evidence for tooling to derive a simple
+      local explanation.
+
+08.02. Tracing does not require a creator to duplicate an obvious local
+      explanation by mechanically adding an explicit causal reference to every
+      terminal record.
+
+08.03. Explicit causal references are used when the creator knows a causal
+      relationship that ordinary structure and ordering do not adequately
+      express, or when preserving that relationship explicitly is otherwise
+      important.
+
+08.04. A creator may emit a dedicated explanatory event when the known reason
+      is richer than a useful set of direct causal references.
+
+08.05. Such an explanatory event is ordinary trace evidence. Its domain owns
+      the semantics of the explanation it records.
+
+08.06. Tooling may derive additional causal interpretations from structure,
+      ordering, patterns, or later knowledge, but derived causality remains
+      distinguishable from explicit producer-emitted causal evidence.
+
+08.07. Tracing does not currently define a generic relatedTo relationship.
+      Structural, causal, correlation, and domain-specific evidence retain
+      their distinct meanings. A new relationship category is introduced only
+      when a concrete semantic need requires it.
+
+
+===============================================================================
+09. TRACE TYPES
+===============================================================================
+
+09.01. Every ordinary trace record refers to a registered trace type
       definition.
 
-08.02. A trace type definition gives portable semantic identity to the kind
-      of evidence represented by a record.
+09.02. Trace type definitions provide portable machine-readable semantic
+      identity to emitted evidence.
 
-08.03. Trace type definitions distinguish event definitions from span-family
-      definitions.
+09.03. Definitions distinguish event definitions from span-family definitions.
 
-08.04. A span-family definition describes its start type and terminal outcome
-      types.
+09.04. Definition identity is derived from canonical semantic content.
 
-08.05. Trace type definitions may describe generated types used for span
-      start and outcome records.
+09.05. Equivalent canonical definitions have equivalent identity; changed
+      semantic content produces a different identity.
 
-08.06. Trace type definition identity is derived from the definition's
-      canonical semantic content.
+09.06. Concrete canonicalization and digest algorithms are implementation or
+      interoperability concerns unless promoted into a shared cross-language
+      contract.
 
-08.07. Equivalent canonical definitions have equivalent definition identity.
-
-08.08. Changing semantic definition content produces a different definition
-      identity.
-
-08.09. Concrete canonicalization and digest algorithms are implementation or
-      interoperability specification concerns unless promoted into a shared
-      cross-language wire contract.
-
-08.10. A producer does not emit an ordinary record that refers to an
-       unregistered trace type definition.
+09.07. A producer does not emit an ordinary record referring to an unregistered
+      trace type definition.
 
 
 ===============================================================================
-09. PUBLICATION AND DESTINATIONS
+10. PUBLICATION AND DESTINATIONS
 ===============================================================================
 
-09.01. A trace producer publishes trace definitions and records to one or
-      more trace destinations.
+10.01. A trace producer publishes trace definitions and records to one or more
+       trace destinations.
 
-09.02. A trace destination is a consumer boundary for live trace evidence.
+10.02. A trace destination is a consumer boundary for live trace evidence and
+       may display, persist, forward, inspect, analyze, or intentionally discard
+       evidence according to its contract.
 
-09.03. A destination may display, persist, forward, inspect, analyze, or
-      intentionally discard trace evidence.
+10.03. A destination receives the definition required to interpret a record
+       before it receives that dependent record successfully.
 
-09.04. Intentional discard is explicit through a destination whose defined
-      behavior is to discard evidence.
+10.04. Repeated delivery of an equivalent definition is semantically
+       idempotent.
 
-09.05. A producer does not silently behave as though trace publication exists
-      when no destination is configured.
+10.05. Failure of one destination does not prevent publication attempts to
+       independent destinations.
 
-09.06. Before a destination receives a record referring to a trace type
-      definition, that destination receives the corresponding definition.
+10.06. Destination failure does not acquire authority to change the runtime
+       operation that produced the evidence.
 
-09.07. Repeated delivery of an equivalent definition to a destination is
-      semantically idempotent.
+10.07. Known publication failure is not represented as successful delivery.
 
-09.08. A newly attached destination receives definitions required to
-      interpret records subsequently delivered to it.
-
-09.09. Failure of one destination does not prevent publication attempts to
-      independent destinations.
-
-09.10. Destination failure does not acquire authority to change the runtime
-       operation that produced the trace evidence.
-
-09.11. Failed definition delivery may be retried before a later dependent
-       record is delivered to that destination.
-
-09.12. Tracing records destination failure and recovery when ordinary tracing
-       remains capable of doing so.
-
-09.13. Failure reporting that cannot safely use ordinary tracing uses an
-       implementation-defined emergency reporting path.
-
-09.14. Emergency reporting is not a replacement trace destination and does
-       not pretend that failed ordinary publication succeeded.
+10.08. Tracing may report destination failure and recovery while ordinary
+       tracing remains capable of doing so. A failure path that cannot safely
+       use ordinary tracing may use an implementation-defined emergency path.
 
 
 ===============================================================================
-10. RECURSION AND RE-ENTRANCY
+11. RECURSION AND PRODUCER LIFECYCLE
 ===============================================================================
 
-10.01. Destination publication does not recursively create ordinary tracing
-       through the same producer publication path.
+11.01. Destination publication does not recursively create ordinary tracing
+       through the same active producer publication path.
 
-10.02. A destination does not consume producer sequence values by recursively
-       invoking ordinary tracing during publication.
+11.02. Recursive destination behavior does not consume ordinary producer
+       sequence as though valid new domain evidence had been emitted.
 
-10.03. A destination does not mutate producer lifecycle state through a
-       re-entrant publication callback when that mutation would violate the
-       active publication boundary.
+11.03. A trace producer has an explicit lifecycle.
 
-10.04. Recursion protection is a tracing contract. The concrete mechanism is
-       implementation-specific.
+11.04. Producer shutdown prevents new ordinary tracing work once shutdown has
+       taken ownership of producer termination.
 
+11.05. Shutdown handles active tracing lifecycle responsibilities rather than
+       silently forgetting them.
 
-===============================================================================
-11. PRODUCER LIFECYCLE
-===============================================================================
-
-11.01. A trace producer has an explicit lifecycle.
-
-11.02. Producer startup may emit evidence that the producer is ready.
-
-11.03. Producer shutdown prevents new ordinary work from entering tracing
-       lifecycle paths once shutdown has taken ownership of termination.
-
-11.04. Shutdown handles active spans according to the tracing lifecycle
-       contract rather than silently forgetting them.
-
-11.05. Producer stopping and stopped states may themselves be trace-visible.
-
-11.06. Producer shutdown remains safe when destinations fail.
-
-11.07. Trace destination failure does not prevent the producer from completing
-       its own lifecycle.
+11.06. Destination failure does not prevent the producer from completing its
+       own lifecycle.
 
 
 ===============================================================================
-12. EMISSION, DELIVERY, AND RETENTION
+12. EMISSION, DELIVERY, RETENTION, AND TOOLING
 ===============================================================================
 
-12.01. Trace emission, destination delivery, and historical retention are
-      distinct operations.
+12.01. Trace emission, record creation, destination delivery, historical
+       retention, and tooling interpretation are distinct operations.
 
-12.02. The tracing substrate owns trace creation and delivery attempts.
+12.02. Runtime tracing owns record creation and live publication attempts.
 
 12.03. A destination owns what it does with successfully delivered evidence
-      within the destination's contract.
+       within its destination contract.
 
-12.04. Persistent trace storage is a destination/tooling concern unless a
-      later design assigns a stronger storage contract to a specific runtime
-      component.
+12.04. Persistent history, retention policy, pruning, durability, storage loss,
+       and persisted-history completeness are defined in
+       tracing-retention.txt.
 
-12.05. Failure to deliver trace evidence to one destination does not by itself
-      change committed-state correctness.
+12.05. Graph reconstruction, derived causal interpretation, navigation,
+       visualization, and debugger consumption are defined in
+       tracing-tooling.txt.
 
-12.06. Tracing does not silently claim successful delivery when delivery
-      failed.
-
-12.07. Historical pruning, rotation, retention windows, continuity anchors,
-      and persisted-history completeness are not runtime trace-producer
-      responsibilities.
-
-12.08. Those historical concerns are defined by tracing-tooling.txt and by
-      the persistent destination that stores the evidence.
+12.06. Failure in tracing, delivery, retention, or tooling does not silently
+       become success and does not by itself change committed-state truth.
 
 
 ===============================================================================
-13. DIAGNOSTIC AND ERROR CORRELATION
+13. NO HEURISTIC FABRICATION
 ===============================================================================
 
-13.01. Trace evidence supports diagnosis and creator feedback.
+13.01. Tracing does not fabricate reasons or outcomes that were not recorded.
 
-13.02. Surfaced Actant failures remain linkable to trace correlation evidence
-      when the failing operation has such evidence available.
+13.02. Timestamps alone do not establish causality.
 
-13.03. A surfaced failure does not fabricate trace evidence when correlation
-      is unavailable.
+13.03. Tooling interpretation is not rewritten into the original TraceRecord.
 
-13.04. User-facing diagnostics may simplify trace presentation while
-      preserving the distinction between recorded evidence and interpretation.
+13.04. Development enrichment remains explicit and non-authoritative.
 
-13.05. Diagnostic presentation does not become runtime authority.
-
-13.06. Concrete error-envelope schemas belong to the interface or protocol
-      that owns those envelopes.
+13.05. A later-discovered pattern may explain old evidence without becoming a
+       claim that the original emitter knew that explanation when it emitted
+       the evidence.
 
 
 ===============================================================================
-14. NO HEURISTIC TRACE FABRICATION
+14. OWNERSHIP STOP-LINES
 ===============================================================================
 
-14.01. Tracing does not infer causal relationships from timestamps.
+14.01. tracing.txt owns runtime tracing-substrate semantics.
 
-14.02. Tracing does not fabricate reasons or outcomes that were not recorded.
+14.02. tracing-records.txt owns portable TraceRecord structure, identities,
+       structural references, explicit causal references, timestamps, type
+       definitions, and exception evidence.
 
-14.03. Tracing does not silently suppress evidence required by a domain trace
-      obligation.
+14.03. tracing-retention.txt owns persistent history, retention, durability,
+       pruning, storage loss, and historical completeness semantics.
 
-14.04. Trace enrichment does not convert inferred information into producer-
-      asserted trace evidence.
+14.04. tracing-tooling.txt owns evidence-set interpretation, graph
+       materialization, derived causality, navigation, presentation, and
+       debugger-consumption boundaries.
 
-14.05. Development-only enrichment remains explicit and non-authoritative.
+14.05. Domain design documents own domain-specific emission obligations and
+       semantic trace types.
+
+14.06. Implementation specifications own language/runtime mechanisms used to
+       realize this design.
 
 
 ===============================================================================
-15. OWNERSHIP STOP-LINES
+15. OPEN DESIGN
 ===============================================================================
 
-15.01. tracing.txt owns runtime tracing-substrate semantics.
-
-15.02. tracing-records.txt owns the portable structure and invariants of trace
-      records, references, identities, type definitions, and exception
-      evidence.
-
-15.03. tracing-tooling.txt owns reconstruction of complete available evidence
-      sets into graphs, storage inspection, retained-evidence completeness,
-      navigation, visualization, and trace/debugger consumption boundaries.
-
-15.04. Domain design documents own their domain-specific emission obligations
-      and semantic trace types.
-
-15.05. Implementation specifications own language/runtime mechanisms used to
-      realize this design.
-
-15.06. No implementation language, concurrency primitive, exception class,
-      context-propagation primitive, collection type, or source-code API name
-      is part of this design merely because the current implementation uses it.
+15.01. OPEN:
+       - cross-producer participation within one structural span
+       - synchronized trace producers and their ordering contract
+       - cross-producer ordering facilities and their synchronization costs
+       - structurally parentless span versus designated trace-root semantics
+       - bounded trace-region semantics
+       - kernel-run trace-root requirement and ownership
 
 
 ===============================================================================
@@ -474,32 +472,33 @@ mechanics belong to implementation specifications.
 ===============================================================================
 
 16.01. LOCKED:
-      - tracing is structured evidence rather than logging
-      - tracing is part of platform accountability
-      - trace evidence is not authoritative committed state
-      - domain trace emission obligations remain domain-owned
-      - emission obligation and persistence guarantee are distinct
-      - temporal order does not define causality
-      - explicit recorded relationships define trace relationship evidence
-      - trace spans represent bounded work with explicit lifecycle evidence
-      - trace producer identity and producer-local sequence are explicit
-      - trace context and runtime correlation are explicit
-      - trace type definitions are delivered before dependent records
-      - destination failures are isolated from independent destinations
-      - recursive destination publication does not recursively trace
-      - known publication failure is not represented as success
-      - tooling and diagnostic presentation do not create runtime authority
-      - tracing records relationships; tooling materializes relationships
+       - tracing is structured evidence rather than logging
+       - trace evidence is not authoritative committed state
+       - domain emitter, trace producer, and span are distinct concepts
+       - domain trace emission obligations remain domain-owned
+       - emission obligation and persistence guarantee are distinct
+       - producer identity and producer-local creation order are explicit
+       - independent producer sequences do not establish cross-producer order
+       - same producer is the normal guideline when relative ordering matters
+       - explicit references may preserve important cross-record relationships
+       - ordinary structure and ordering need not be duplicated as explicit
+         causality when they already provide adequate local explanation
+       - explicit causal evidence remains distinct from tooling-derived cause
+       - generic relatedTo is not part of the current tracing model
+       - spans represent bounded work with explicit lifecycle evidence
+       - handled errors do not by themselves determine terminal span outcome
+       - destination failures are isolated from independent destinations
+       - known publication failure is not represented as success
+       - retention is owned separately from runtime tracing and tooling
+       - tooling and diagnostic presentation do not create runtime authority
 
-16.02. The legacy rule that the runtime tracing substrate itself is a
-      materialized trace DAG is superseded.
+16.02. The legacy rule that runtime tracing itself maintains a materialized
+       trace DAG is superseded.
 
-16.03. The legacy generic reason field is superseded by typed trace evidence,
-      generated outcomes, structured attributes, and explicit references.
-
-16.04. The legacy generic parentEventIds representation is superseded by the
-      structural span fields and explicit typed references defined in
-      tracing-records.txt.
+16.03. The legacy generic reason and parentEventIds representations are not
+       retained as universal tracing fields. Domain explanation, structural
+       evidence, explicit causal references, outcomes, and tooling-derived
+       interpretation remain semantically distinct.
 
 
 ===============================================================================
