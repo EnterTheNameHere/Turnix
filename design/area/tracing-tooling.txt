@@ -33,7 +33,7 @@ control semantics.
       applicable retention/storage metadata.
 
 01.02. Tooling may consume evidence live, from persistent history, from an
-      artifact, or from another controlled evidence surface.
+      artifact, or from another structured evidence surface.
 
 01.03. A tooling interpretation is derived from an available evidence set.
 
@@ -41,7 +41,8 @@ control semantics.
       TraceRecords.
 
 01.05. Tooling preserves the distinction between producer-emitted evidence,
-      explicit producer-emitted causality, and tooling-derived interpretation.
+      explicit producer-emitted causality, storage/retention metadata, and
+      tooling-derived interpretation.
 
 
 ===============================================================================
@@ -58,11 +59,20 @@ control semantics.
       record ever emitted by Actant.
 
 02.04. Tooling preserves distinctions supplied by evidence and retention
-      metadata between out-of-scope evidence, known loss, unresolved
-      references, malformed evidence, and absence of unknown cause.
+      metadata between:
+      - available evidence
+      - evidence known to have been removed by retention
+      - evidence known to be unavailable or failed
+      - evidence outside the selected or retained scope
+      - unexplained unresolved references
+      - malformed or inconsistent evidence
 
 02.05. Tooling does not collapse those conditions into a false claim that the
       underlying runtime action did not occur.
+
+02.06. An unexplained unresolved reference is not silently normalized into
+      ordinary retention. It represents a knowledge gap or possible evidence-
+      integrity problem until stronger evidence accounts for it.
 
 
 ===============================================================================
@@ -89,9 +99,14 @@ control semantics.
 03.05. Tooling does not flatten distinct relationships into one generic parent
       relation when doing so would lose meaning.
 
-03.06. A graph may contain explicit unresolved or external identity nodes when
-      necessary to preserve truthful relationships. Such nodes are not
-      fabricated TraceRecords.
+03.06. A graph may contain non-record nodes or markers representing external
+      identities, known removed targets, known unavailable targets, or
+      unexplained unresolved targets when necessary to preserve truthful
+      relationships. Such nodes are not fabricated TraceRecords.
+
+03.07. A relationship whose target was knowingly collected remains navigable to
+      an explicit known-removed state rather than terminating at an unexplained
+      empty location.
 
 
 ===============================================================================
@@ -228,11 +243,19 @@ control semantics.
       parent span.
 
 08.04. If referenced structural evidence is unavailable, tooling preserves the
-      unresolved relationship rather than inventing missing records.
+      relationship and its known availability state rather than inventing
+      missing records.
 
-08.05. Incremental live presentation state is not authoritative trace state.
+08.05. A dependency known to have been removed by retention is presented as
+      known removed, not as an unexplained unresolved dependency.
 
-08.06. Later evidence may refine an earlier incomplete graph without changing
+08.06. A dependency whose absence cannot be accounted for remains explicitly
+      unresolved and may be surfaced as a possible integrity or knowledge-gap
+      condition.
+
+08.07. Incremental live presentation state is not authoritative trace state.
+
+08.08. Later evidence may refine an earlier incomplete graph without changing
       original TraceRecords.
 
 
@@ -243,9 +266,10 @@ control semantics.
 09.01. Persistent trace history and its retention semantics are owned by
       tracing-retention.txt.
 
-09.02. Tooling consumes retention boundaries, continuity metadata, known-loss
-      declarations, durability information when relevant, and completeness
-      claims exposed by persistent history.
+09.02. Tooling consumes retention boundaries, continuity metadata, known
+      collection/removal declarations, known-loss declarations, durability
+      information when relevant, and completeness claims exposed by persistent
+      history.
 
 09.03. Tooling preserves those semantics when selecting, reconstructing, or
       presenting retained evidence.
@@ -266,13 +290,17 @@ control semantics.
        on scraping human-formatted terminal output.
 
 10.02. Tooling access may be provided through live destinations or
-       subscriptions, persistent readers, controlled runtime APIs, debugger
-       integration, or trace artifacts.
+       subscriptions, persistent readers, runtime APIs, debugger integration,
+       defined trace files, or trace artifacts.
 
 10.03. A concrete access protocol is not defined here.
 
-10.04. Access surfaces preserve known incompleteness and unresolved
-       relationships.
+10.04. Access surfaces preserve known incompleteness, known removal, and
+       unresolved relationships.
+
+10.05. Access-control and permission semantics belong to their owning designs;
+       tracing does not derive such semantics merely from how evidence is
+       physically stored.
 
 
 ===============================================================================
@@ -291,10 +319,11 @@ control semantics.
        - explicit emitted causal assertions
        - locally inferred explanations
        - later analytical or pattern-derived explanations
+       - known removed or unavailable evidence
        - unresolved or uncertain interpretation
 
 11.04. Presentation does not fabricate missing records or hide known evidence
-       loss.
+       loss or collection.
 
 11.05. Human-readable summaries do not replace the source evidence they
        summarize.
@@ -313,7 +342,7 @@ control semantics.
 12.03. Arrival order does not redefine trace ordering semantics.
 
 12.04. Live graphs may temporarily contain unresolved references that later
-       become resolved.
+       become resolved or otherwise accounted for.
 
 12.05. Offline tooling consumes retained evidence without requiring original
        producers to remain active.
@@ -350,15 +379,19 @@ control semantics.
 14.01. Tooling may calculate and persist derived annotations.
 
 14.02. Derived annotations may include resolved graph edges, inferred causal
-       edges, unresolved-reference markers, continuity findings, search
-       matches, graph validation findings, comparison results, and debugger
-       navigation state.
+       edges, known-removal markers, unresolved-reference markers, continuity
+       findings, search matches, graph validation findings, comparison results,
+       and debugger navigation state.
 
 14.03. Derived annotations remain distinguishable from producer-emitted
        TraceRecords even when stored beside them.
 
 14.04. A derived annotation does not become producer evidence merely because
        later analysis considers it highly reliable.
+
+14.05. A tooling annotation derived from authoritative retention metadata does
+       not turn that metadata into producer-emitted evidence; provenance remains
+       visible.
 
 
 ===============================================================================
@@ -394,11 +427,15 @@ control semantics.
        are available to the exporter.
 
 16.04. An artifact that intentionally represents a partial evidence set may
-       contain unresolved span dependencies when that incompleteness is
-       explicit.
+       contain absent span dependencies when their known removal,
+       unavailability, or unresolved state is explicit.
 
 16.05. Export does not fabricate missing evidence to satisfy a completeness
        claim.
+
+16.06. An export does not erase retention metadata needed to distinguish an
+       intentionally collected target from an unexplained dangling reference
+       when the exported relationship depends on that distinction.
 
 
 ===============================================================================
@@ -416,6 +453,7 @@ control semantics.
        - diff-oriented trace views
        - concrete debugger trace bridge
        - export codecs
+       - presentation and navigation of compact retention-removal metadata
 
 
 ===============================================================================
@@ -438,8 +476,12 @@ control semantics.
        - graph-root status is relative to the available evidence set
        - structurally parentless span and designated trace root are not assumed
          to be the same concept
-       - unresolved references remain representable
+       - known removed/unavailable targets and unexplained unresolved targets
+         remain distinguishable
+       - a knowingly collected target remains navigable as known removed rather
+         than becoming an unexplained empty link
        - retention semantics are consumed by tooling but owned separately
+       - structured trace files may be valid tooling evidence surfaces
        - debugger runtime-control authority is outside trace tooling
        - derived annotations remain distinct from producer-emitted evidence
        - trace tooling does not create committed-state authority
