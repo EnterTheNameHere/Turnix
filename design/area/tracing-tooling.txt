@@ -8,274 +8,254 @@ EVOLVING
 
 Description:
 ------------
-Defines trace evidence consumption, persistence-facing inspection, full graph
-materialization, diagnostic navigation, and debugger integration boundaries.
+Defines collection-level interpretation of trace evidence, graph
+materialization, causal analysis, diagnostic navigation, and debugger
+consumption boundaries.
 
 Purpose:
 --------
-This document owns semantics that require a collection of trace evidence
-rather than one producer emitting one record at runtime.
+This document owns semantics that require a collection of trace evidence rather
+than one runtime emission.
 
-It defines:
-- trace evidence sets
-- full trace graph materialization
-- structural and causal edge reconstruction
-- graph roots and bounded trace regions
-- unresolved and missing evidence
-- persistent trace history and retention visibility
-- live and offline trace consumption
-- trace query and presentation rules
-- debugger consumption of trace evidence
-- derived annotations and non-authority
+Persistent history, retention, pruning, durability, storage loss, and storage
+completeness are defined in tracing-retention.txt. This document consumes those
+semantics but does not own them.
 
 This document does not define debugger pause, breakpoint, mutation, or runtime
-control semantics. Those remain owned by the debugger design area.
+control semantics.
 
 
 ===============================================================================
 01. CORE CONCEPT
 ===============================================================================
 
-01.01. Trace tooling consumes TraceRecords and TraceTypeDefinitions emitted by
-      the tracing substrate.
+01.01. Trace tooling consumes TraceRecords, TraceTypeDefinitions, and when
+      applicable retention/storage metadata.
 
-01.02. Trace tooling may consume evidence live, from persistent storage, from
-      an artifact, or from another controlled Actant evidence surface.
+01.02. Tooling may consume evidence live, from persistent history, from an
+      artifact, or from another controlled evidence surface.
 
-01.03. Trace tooling materializes relationships that runtime tracing records.
+01.03. A tooling interpretation is derived from an available evidence set.
 
-01.04. A materialized trace graph is a derived interpretation of available
-      evidence.
+01.04. Materialized graphs and causal explanations do not replace source
+      TraceRecords.
 
-01.05. The graph does not replace the source TraceRecords.
-
-01.06. Tooling preserves the distinction between producer-emitted evidence and
-      tooling-derived interpretation.
+01.05. Tooling preserves the distinction between producer-emitted evidence,
+      explicit producer-emitted causality, and tooling-derived interpretation.
 
 
 ===============================================================================
 02. AVAILABLE EVIDENCE SET
 ===============================================================================
 
-02.01. Every tooling interpretation operates over an available evidence set.
+02.01. Every tooling interpretation operates over an identified available
+      evidence set.
 
-02.02. The available evidence set is the set of TraceRecords and
-      TraceTypeDefinitions currently available to that tooling operation.
-
-02.03. An available evidence set may be complete for a selected scope or may
+02.02. An available evidence set may be complete for a selected scope or may
       be incomplete.
 
-02.04. Tooling does not assume that its available evidence set contains every
+02.03. Tooling does not assume that its available evidence contains every
       record ever emitted by Actant.
 
-02.05. Tooling distinguishes:
-      - evidence absent because it lies outside the selected scope
-      - evidence known to have been lost or pruned
-      - an unresolved reference to evidence not currently available
-      - malformed or internally inconsistent evidence
-      - absence whose cause is unknown
+02.04. Tooling preserves distinctions supplied by evidence and retention
+      metadata between out-of-scope evidence, known loss, unresolved
+      references, malformed evidence, and absence of unknown cause.
 
-02.06. Tooling does not collapse these conditions into one false claim of
-      non-occurrence.
+02.05. Tooling does not collapse those conditions into a false claim that the
+      underlying runtime action did not occur.
 
 
 ===============================================================================
 03. FULL TRACE GRAPH
 ===============================================================================
 
-03.01. Trace tooling materializes the full trace graph from all supported
-      explicit relationships present in the available evidence set.
+03.01. Trace tooling may materialize a full trace graph containing the
+      relationship categories supported by the available evidence.
 
-03.02. The full trace graph may contain multiple edge categories.
+03.02. The full trace graph is not necessarily a DAG.
 
-03.03. At minimum, tooling preserves distinct graph semantics for:
+03.03. Relationship categories remain semantically distinct. They may include:
       - span membership
       - span start-to-end lifecycle relationship
-      - parent-span nesting
-      - explicit causedBy references
-      - producer-local ordering when displayed as ordering evidence
-      - runtime correlation relationships when represented graphically
+      - parent-span structural nesting
+      - explicit causal references
+      - producer-local ordering
+      - runtime correlations
+      - domain-specific relationships whose semantics are defined elsewhere
 
-03.04. Producer-local sequence and timestamps may support ordering views but
-      do not become causal edges merely because they are ordered.
+03.04. Ordering and correlation relationships do not become causal edges merely
+      because they are represented in the same graph.
 
-03.05. Tooling does not flatten distinct relationship categories into one
-      generic parent relation when doing so would lose meaning.
+03.05. Tooling does not flatten distinct relationships into one generic parent
+      relation when doing so would lose meaning.
 
-03.06. A simplified view may hide edge categories visually only when the
-      underlying interpretation remains available and the simplification does
-      not fabricate causal meaning.
-
-03.07. The materialized graph may contain nodes representing unresolved
-      references or external correlated identities when needed to preserve
-      truthful structure.
-
-03.08. A graph node created to represent an unresolved target is explicitly
-      marked as unresolved or external. It is not presented as a fabricated
-      TraceRecord.
+03.06. A graph may contain explicit unresolved or external identity nodes when
+      necessary to preserve truthful relationships. Such nodes are not
+      fabricated TraceRecords.
 
 
 ===============================================================================
-04. ACYCLIC CAUSAL PROJECTION
+04. ORDER RECONSTRUCTION
 ===============================================================================
 
-04.01. Tooling may derive a causal DAG projection from the full trace graph.
+04.01. Producer-local sequence establishes total creation order only within one
+      trace producer.
 
-04.02. A causal DAG projection includes only relationships whose semantics are
-      defined as causal for that projection.
+04.02. Tooling may select records belonging to one span and one producer and
+      order those records by that producer's sequence.
 
-04.03. Tooling validates acyclicity of a causal DAG projection over the
-      available evidence set.
+04.03. Unrelated records created by the same producer may lie between selected
+      span records in producer sequence without becoming span members.
 
-04.04. A causal cycle is reported as inconsistent evidence or an invalid
-      projection. Tooling does not silently remove an edge merely to obtain a
-      DAG.
+04.04. Independent producer sequences do not establish a cross-producer total
+      order.
 
-04.05. No node in a valid causal DAG projection is causally reachable from
-      itself.
+04.05. Tooling does not manufacture cross-producer order by numerically
+      comparing independent producer sequence values.
 
-04.06. The causal DAG is therefore a tooling materialization, not an object
-      maintained by every runtime trace producer.
+04.06. Tooling does not use wall-clock or monotonic timestamp proximity as a
+      substitute for an ordering guarantee that the evidence does not provide.
 
-04.07. The legacy DA-03 statement that trace events themselves "form a trace
-      DAG" is interpreted in the new design as the causal structure that can
-      be reconstructed from explicit trace evidence.
+04.07. A stronger synchronized-producer contract may eventually provide
+      cross-producer ordering evidence. Tooling uses such ordering only when
+      that stronger contract is explicitly represented and applicable.
 
-
-===============================================================================
-05. GRAPH ROOTS
-===============================================================================
-
-05.01. A graph root is defined relative to one materialized graph or graph
-      projection and its available evidence set.
-
-05.02. A causal DAG root has no resolved causal parent inside that DAG
-      projection.
-
-05.03. Multiple unconnected roots are valid.
-
-05.04. A node may appear as a root because its causal parent lies outside the
-      available evidence set.
-
-05.05. Tooling distinguishes a proven independent origin from a root produced
-      by unresolved or unavailable parent evidence when the evidence permits
-      that distinction.
-
-05.06. Root status therefore does not by itself prove global independence
-      outside the available evidence set.
+04.08. Arrival order at live tooling or storage does not redefine producer
+      creation order.
 
 
 ===============================================================================
-06. ROOT SPANS AND BOUNDED TRACE REGIONS
+05. CAUSAL INTERPRETATION
 ===============================================================================
 
-06.01. A root span is a span whose start record declares an independent
-      structural origin rather than a parent span.
+05.01. Tooling distinguishes explicit causal assertions from derived causal
+      interpretation.
 
-06.02. Root span is a structural tracing concept and is distinct from a causal
-      DAG root.
+05.02. Explicit causal references are producer-emitted causal evidence.
 
-06.03. Tooling may use root spans as navigation anchors for bounded tracing
-      regions.
+05.03. Tooling may derive a local causal explanation from a combination of:
+      - structural span membership
+      - same-producer creation order
+      - semantic trace types
+      - outcomes
+      - error evidence
+      - domain evidence
 
-06.04. Tooling may select evidence associated with one or more root spans for
-      inspection, export, audit, or debugging.
+05.04. For example, an error that is the final same-producer record in a span
+      immediately before that span records a failed outcome may be presented as
+      an inferred local explanation when the available evidence supports that
+      interpretation.
 
-06.05. A selected root span does not make omitted evidence present.
+05.05. Such an inference does not retroactively create an explicit causal
+      reference in the source TraceRecord.
 
-06.06. A selected root span does not create committed-state authority.
+05.06. Tooling may also derive causal explanations from patterns or knowledge
+      discovered after the original evidence was emitted.
 
-06.07. Nested bounded regions may be represented by domain-defined spans or
-      correlations without redefining graph-root semantics.
+05.07. Later-derived causality remains explicitly distinguishable from what the
+      emitter knew and asserted at emission time.
 
-06.08. Whether a particular Actant runtime region requires a root span is
-      owned by the design area for that runtime region.
+05.08. Tooling does not infer a causal relationship solely because two records
+      are close in wall-clock or monotonic time.
+
+05.09. When evidence is insufficient to distinguish causality from mere
+      adjacency, tooling represents the explanation as uncertain or leaves it
+      unresolved rather than fabricating certainty.
 
 
 ===============================================================================
-07. SPAN RECONSTRUCTION
+06. CAUSAL DAG PROJECTION
 ===============================================================================
 
-07.01. Tooling reconstructs span structure from spanId, spanStartEventId,
-      parentSpanId, spanFamily, and record kind.
+06.01. Tooling may derive a causal DAG projection from relationships whose
+      semantics are causal for that projection.
 
-07.02. A spanEnd whose corresponding start is available is linked to that
+06.02. Explicit causal references may participate directly in the causal DAG.
+
+06.03. Tooling-derived causal edges may also participate in an analytical DAG
+      when the view explicitly identifies them as derived rather than emitted.
+
+06.04. A view may choose to show only explicit causal evidence, only a defined
+      class of derived causality, or both, but does not erase their provenance.
+
+06.05. Tooling validates acyclicity for a causal DAG projection.
+
+06.06. A causal cycle is reported as inconsistent evidence, incompatible
+      derived interpretation, or an invalid projection as applicable. Tooling
+      does not silently remove edges merely to obtain a DAG.
+
+06.07. Full Trace Graph and Trace Causal DAG are distinct concepts.
+
+
+===============================================================================
+07. GRAPH ROOTS AND TRACE ROOTS
+===============================================================================
+
+07.01. A graph root is defined relative to a materialized graph or projection
+      and its available evidence set.
+
+07.02. A causal DAG root has no resolved causal parent inside that projection.
+
+07.03. Multiple unconnected causal roots are valid.
+
+07.04. A node may appear as a causal root because causal predecessor evidence
+      lies outside the available evidence set.
+
+07.05. Graph-root status does not by itself prove global independence.
+
+07.06. Structurally parentless span, designated trace root, bounded trace
+      region, and kernel-run trace root are not treated as synonyms.
+
+07.07. The exact designated trace-root and bounded-region model remains OPEN
+      pending dedicated design analysis.
+
+07.08. Tooling does not infer designated trace-root status merely because a
+      span has no structural parent unless the future trace-root contract
+      explicitly defines that rule.
+
+
+===============================================================================
+08. SPAN RECONSTRUCTION
+===============================================================================
+
+08.01. Tooling reconstructs span structure from span identity, span-start
+      identity, parent-span identity, span family, and structural record kind.
+
+08.02. A spanEnd whose corresponding start is available is linked to that
       start.
 
-07.03. A child span whose parent start is available is linked to that parent
-      span.
+08.03. A child span whose parent is available is linked structurally to that
+      parent span.
 
-07.04. If a referenced start or parent is unavailable, tooling preserves the
-      unresolved relationship.
+08.04. If referenced structural evidence is unavailable, tooling preserves the
+      unresolved relationship rather than inventing missing records.
 
-07.05. Tooling does not invent a start record or parent span to make nesting
-      visually complete.
+08.05. Incremental live presentation state is not authoritative trace state.
 
-07.06. A view may reconstruct local nesting incrementally from live records.
-
-07.07. Incremental presentation state is not authoritative trace state.
-
-07.08. Later evidence may refine an earlier incomplete graph without changing
-      the original TraceRecords.
+08.06. Later evidence may refine an earlier incomplete graph without changing
+      original TraceRecords.
 
 
 ===============================================================================
-08. PERSISTENT TRACE HISTORY
+09. RETENTION CONSUMPTION BOUNDARY
 ===============================================================================
 
-08.01. Persistent trace history is produced by a destination or storage
-      component that retains trace definitions and records beyond live
-      publication.
+09.01. Persistent trace history and its retention semantics are owned by
+      tracing-retention.txt.
 
-08.02. The runtime tracing substrate does not require one concrete storage
-      format.
+09.02. Tooling consumes retention boundaries, continuity metadata, known-loss
+      declarations, durability information when relevant, and completeness
+      claims exposed by persistent history.
 
-08.03. A persistent trace history implementation defines its retention,
-      rotation, pruning, indexing, and durability behavior explicitly.
+09.03. Tooling preserves those semantics when selecting, reconstructing, or
+      presenting retained evidence.
 
-08.04. Retention policy does not create committed-state authority for trace
-      evidence.
+09.04. Tooling may calculate continuity findings from retained producer-local
+      sequence evidence, but a sequence gap alone does not explain why evidence
+      is absent.
 
-08.05. Historical trace loss is distinct from live destination-delivery
-      failure.
-
-08.06. A storage implementation does not claim historical completeness when
-      it knows records were pruned, dropped, corrupted, partially imported,
-      partially exported, or otherwise made unavailable.
-
-08.07. Known incompleteness is represented in storage metadata, evidence, or
-      tooling state in a form that consumers can inspect.
-
-08.08. The exact persistence format, database, files, indexes, and rotation
-      mechanics are implementation concerns unless standardized separately.
-
-
-===============================================================================
-09. RETENTION AND LOSS INTERPRETATION
-===============================================================================
-
-09.01. Trace retention is policy-driven.
-
-09.02. Trace history may be bounded, rotating, pruned, or intentionally
-      discarded according to explicit policy.
-
-09.03. Trace loss is acceptable for non-authoritative trace history when the
-      applicable platform and domain guarantees permit that loss.
-
-09.04. Known loss is not hidden.
-
-09.05. Tooling does not present an incomplete evidence set as complete when
-      incompleteness is known.
-
-09.06. Loss weakens evidential completeness rather than committed-state
-      correctness by itself.
-
-09.07. Tooling may calculate continuity gaps from producer-local sequence
-      evidence, but a sequence gap alone does not prove why the record is
-      absent.
-
-09.08. Loss declarations and continuity metadata may provide stronger
-      explanation when available.
+09.05. Providing a user interface for retention policy does not transfer
+      ownership of retention semantics to tooling.
 
 
 ===============================================================================
@@ -285,19 +265,13 @@ control semantics. Those remain owned by the debugger design area.
 10.01. Trace tooling consumes structured trace evidence rather than depending
        on scraping human-formatted terminal output.
 
-10.02. Persistent trace storage exposes definitions and records in a form that
-       preserves their semantic fields and identities.
+10.02. Tooling access may be provided through live destinations or
+       subscriptions, persistent readers, controlled runtime APIs, debugger
+       integration, or trace artifacts.
 
-10.03. Tooling access may be provided through:
-       - live destinations or subscriptions
-       - persistent trace readers
-       - controlled runtime APIs
-       - debugger integration
-       - trace artifacts and exports
+10.03. A concrete access protocol is not defined here.
 
-10.04. A concrete access protocol is not defined by this document.
-
-10.05. Access surfaces preserve known evidence incompleteness and unresolved
+10.04. Access surfaces preserve known incompleteness and unresolved
        relationships.
 
 
@@ -305,201 +279,167 @@ control semantics. Those remain owned by the debugger design area.
 11. PRESENTATION AND DIAGNOSTICS
 ===============================================================================
 
-11.01. Tooling may present trace evidence as timelines, trees, graphs, tables,
-       filtered record streams, span views, diagnostic explanations, or other
-       derived views.
+11.01. Tooling may present evidence as timelines, trees, graphs, tables,
+       filtered streams, span views, diagnostic explanations, or other derived
+       views.
 
-11.02. Presentation may simplify information without changing the underlying
+11.02. Presentation may simplify information without changing underlying
        evidence meaning.
 
-11.03. Presentation does not fabricate causal links.
+11.03. Presentation distinguishes:
+       - source trace evidence
+       - explicit emitted causal assertions
+       - locally inferred explanations
+       - later analytical or pattern-derived explanations
+       - unresolved or uncertain interpretation
 
-11.04. Presentation does not fabricate missing records.
+11.04. Presentation does not fabricate missing records or hide known evidence
+       loss.
 
-11.05. Presentation does not hide known evidence loss.
-
-11.06. Presentation distinguishes producer-emitted evidence from derived
-       annotations when both are shown.
-
-11.07. Human-readable diagnostic summaries do not replace the source trace
-       evidence they summarize.
+11.05. Human-readable summaries do not replace the source evidence they
+       summarize.
 
 
 ===============================================================================
-12. LIVE TOOLING
+12. LIVE AND OFFLINE TOOLING
 ===============================================================================
 
-12.01. A live trace tool may participate as a trace destination or consume a
-       destination-backed live stream.
+12.01. Live tooling may participate as a destination or consume a
+       destination-backed stream.
 
-12.02. Live tooling may incrementally update its materialized graph as records
+12.02. Live tooling may incrementally update materialized structures as records
        arrive.
 
-12.03. Arrival order at the tool does not redefine causal order.
+12.03. Arrival order does not redefine trace ordering semantics.
 
-12.04. A live graph may temporarily contain unresolved references that later
+12.04. Live graphs may temporarily contain unresolved references that later
        become resolved.
 
-12.05. Temporary incompleteness in a live graph is represented as temporary
-       or unresolved rather than as proof that referenced evidence does not
-       exist.
+12.05. Offline tooling consumes retained evidence without requiring original
+       producers to remain active.
 
-12.06. Live tooling failure does not grant the tool authority over the runtime
-       operation being traced.
-
-
-===============================================================================
-13. OFFLINE TOOLING
-===============================================================================
-
-13.01. Offline tooling consumes retained trace evidence without requiring the
-       original runtime producer to remain active.
-
-13.02. Offline tooling uses TraceTypeDefinitions to interpret TraceRecords.
-
-13.03. Offline tooling may reconstruct graphs, inspect producer continuity,
-       compare evidence sets, search attributes, and navigate correlations.
-
-13.04. Offline tooling does not infer that retained evidence is complete merely
-       because no live producer exists to provide more evidence.
-
-13.05. Cross-run or cross-session stitching is derived from explicit
-       identities, correlations, references, and storage metadata rather than
-       timestamp proximity alone.
+12.06. Cross-run or cross-session stitching derives from explicit identities,
+       correlations, references, applicable ordering contracts, and retention
+       metadata rather than timestamp proximity alone.
 
 
 ===============================================================================
-14. DEBUGGER INTEGRATION
+13. DEBUGGER INTEGRATION
 ===============================================================================
 
-14.01. Debugger tooling may consume trace evidence live and may inspect
-       retained trace evidence.
+13.01. Debugger tooling may consume live and retained trace evidence and use
+       the same graph and interpretation model as other trace tooling.
 
-14.02. A debugger may maintain the same materialized trace graph model used by
-       non-debugger trace tooling.
+13.02. Debugger-specific annotations are derived tooling state unless an owning
+       runtime domain emits them as TraceRecords.
 
-14.03. Trace evidence may correlate debugger-visible runtime state with the
-       work that produced or observed that state.
+13.03. Consuming trace evidence does not grant runtime mutation authority.
 
-14.04. Debugger-specific annotations are derived tooling state unless an
-       owning runtime domain explicitly emits them as TraceRecords.
+13.04. Breakpoints, pausing, safe points, inspection authority, mutation,
+       disconnect behavior, and debugger-originated runtime control belong to
+       the debugger design area.
 
-14.05. Consuming trace evidence does not grant the debugger runtime mutation
-       authority.
-
-14.06. Breakpoints, pausing, safe points, inspection authority, mutation
-       authority, disconnect behavior, and debugger-originated runtime control
-       are owned by the debugger design area.
-
-14.07. The tracing/tooling boundary defines evidence exchange and
-       interpretation only.
-
-14.08. Debugger control actions that the debugger design requires to be traced
-       are emitted through the ordinary tracing substrate and become ordinary
-       trace evidence.
+13.05. Debugger control actions required to be traced are emitted through the
+       ordinary tracing substrate.
 
 
 ===============================================================================
-15. DERIVED ANNOTATIONS
+14. DERIVED ANNOTATIONS
 ===============================================================================
 
-15.01. Tooling may calculate derived annotations from available evidence.
+14.01. Tooling may calculate and persist derived annotations.
 
-15.02. Derived annotations may include:
-       - resolved graph edges
-       - unresolved-reference markers
-       - continuity-gap markers
-       - selected root regions
-       - search matches
-       - graph validation findings
-       - debugger navigation state
-       - comparison results
+14.02. Derived annotations may include resolved graph edges, inferred causal
+       edges, unresolved-reference markers, continuity findings, search
+       matches, graph validation findings, comparison results, and debugger
+       navigation state.
 
-15.03. Derived annotations remain distinguishable from producer-emitted
-       TraceRecords.
+14.03. Derived annotations remain distinguishable from producer-emitted
+       TraceRecords even when stored beside them.
 
-15.04. A derived annotation does not become producer evidence merely because
-       it is saved beside trace data.
-
-15.05. Tooling may persist derived state when useful, but persisted derived
-       state retains its derived status.
+14.04. A derived annotation does not become producer evidence merely because
+       later analysis considers it highly reliable.
 
 
 ===============================================================================
-16. DEVELOPMENT-MODE ENRICHMENT
+15. DEVELOPMENT ENRICHMENT
 ===============================================================================
 
-16.01. Development tooling may request or display richer trace evidence.
+15.01. Development tooling may request or display richer trace evidence when
+       owning domains support it.
 
-16.02. Enrichment may include verbose domain evidence, why-not-chosen
+15.02. Enrichment may include verbose domain evidence, why-not-chosen
        explanations, speculative-path evidence, resolution breakdowns, or
-       debugger-oriented annotations when the owning domains support them.
+       debugger-oriented evidence.
 
-16.03. Development enrichment is explicit.
+15.03. Runtime-emitted enrichment remains producer evidence; tooling-created
+       enrichment remains derived interpretation.
 
-16.04. Development enrichment does not silently change runtime semantics.
-
-16.05. Development enrichment does not create committed-state authority.
-
-16.06. Tooling does not invent enrichment that the runtime did not emit and
-       then present it as producer evidence.
+15.04. Development enrichment does not silently change runtime semantics or
+       create committed-state authority.
 
 
 ===============================================================================
-17. EXPORT AND SNAPSHOT BOUNDARY
+16. EXPORT AND SNAPSHOT BOUNDARY
 ===============================================================================
 
-17.01. Trace exports and snapshots are derived evidence artifacts.
+16.01. Trace exports and snapshots are evidence artifacts selected from source
+       evidence and, when requested, derived annotations.
 
-17.02. An export identifies its evidence selection boundary and known
+16.02. An export identifies its evidence selection boundary and known
        incompleteness.
 
-17.03. An export that aims to provide structurally complete span evidence for
-       a selected spanEnd includes the corresponding spanStart when that start
-       is available to the exporter.
+16.03. An artifact claiming structurally complete span evidence includes the
+       structural dependencies required by that completeness claim when they
+       are available to the exporter.
 
-17.04. If the corresponding spanStart is unavailable, the export preserves an
-       explicit unresolved or incomplete relationship rather than fabricating
-       the start.
+16.04. An artifact that intentionally represents a partial evidence set may
+       contain unresolved span dependencies when that incompleteness is
+       explicit.
 
-17.05. Concrete artifact formats and artifact authority belong to the artifact
-       and export design areas.
+16.05. Export does not fabricate missing evidence to satisfy a completeness
+       claim.
 
 
 ===============================================================================
-18. OPEN TOOLING DESIGN
+17. OPEN TOOLING DESIGN
 ===============================================================================
 
-18.01. OPEN:
-       - concrete persistent trace storage format
-       - trace database and index strategy
+17.01. OPEN:
        - graph query API
        - live subscription protocol
        - visualization schemas
+       - causal inference rule catalog and confidence representation
+       - synchronized-producer ordering consumption
+       - designated trace-root and bounded-region tooling semantics
        - cross-run stitching UX
        - diff-oriented trace views
        - concrete debugger trace bridge
        - export codecs
-       - retention-policy configuration surface
 
 
 ===============================================================================
-19. LOCKED MIGRATION DECISIONS
+18. LOCKED MIGRATION DECISIONS
 ===============================================================================
 
-19.01. LOCKED:
+18.01. LOCKED:
        - full graph materialization belongs to tooling
-       - a materialized graph is derived from available trace evidence
-       - graph relationship categories preserve their semantic differences
-       - temporal proximity does not create causal edges
-       - causal DAG acyclicity is validated by tooling over an evidence set
+       - Full Trace Graph is not necessarily a DAG
+       - Trace Causal DAG is a causal projection, not the full graph
+       - relationship categories preserve their semantic differences
+       - producer-local sequence orders only one producer's records
+       - independent producers do not acquire fabricated total order
+       - same-span same-producer evidence can be ordered by producer sequence
+       - explicit causality and tooling-derived causality remain distinguishable
+       - local structure and order may support inferred explanation
+       - later pattern knowledge may derive explanation without rewriting what
+         the original emitter knew
+       - timestamp proximity alone does not create causal edges
        - graph-root status is relative to the available evidence set
-       - root spans and causal DAG roots are distinct concepts
+       - structurally parentless span and designated trace root are not assumed
+         to be the same concept
        - unresolved references remain representable
-       - known incompleteness is not presented as completeness
-       - persistent retention is distinct from runtime emission and delivery
-       - live and offline tooling can consume the same portable evidence model
-       - debugger tooling may use the same graph materialization model
+       - retention semantics are consumed by tooling but owned separately
        - debugger runtime-control authority is outside trace tooling
        - derived annotations remain distinct from producer-emitted evidence
        - trace tooling does not create committed-state authority
