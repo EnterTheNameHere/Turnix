@@ -1,0 +1,492 @@
+===============================================================================
+IMPLEMENTATION SPECIFICATION IS-03 - PYTHON TRACING
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines the Python realization of the Actant tracing design.
+
+Purpose:
+--------
+This document records Python-specific implementation choices required to
+realize design/area/tracing.txt and design/area/tracing-records.txt without
+promoting Python mechanics into platform truth.
+
+It defines:
+- Python tracing module responsibilities
+- immutable Python record representation
+- ContextVar-based ambient tracing context
+- thread and asyncio task lifecycle ownership
+- synchronization and producer sequencing
+- Python exception snapshot capture
+- destination protocol realization
+- Python recursion and lifecycle guards
+- current implementation-specific canonicalization and identity mechanics
+
+This document does not redefine implementation-independent tracing semantics.
+
+
+===============================================================================
+01. IMPLEMENTATION BOUNDARY
+===============================================================================
+
+01.01. The Python tracing implementation lives under backend/tracing.
+
+01.02. Python class, module, method, protocol, collection, synchronization,
+      exception, and context-management choices in this document are
+      implementation details.
+
+01.03. A future non-Python implementation may use different mechanisms while
+      preserving the contracts in the tracing design documents.
+
+01.04. When this document conflicts with implementation-independent tracing
+      design, the implementation-independent design defines platform meaning.
+
+
+===============================================================================
+02. MODULE RESPONSIBILITIES
+===============================================================================
+
+02.01. The current Python tracing package separates responsibilities across
+      modules including:
+      - records.py for immutable trace record representation
+      - references.py for TraceReference representation and normalization
+      - typeDefinitions.py for trace type definitions
+      - typeRegistry.py for registered type ownership
+      - recordFactory.py for record creation and producer sequencing
+      - context.py for ambient span and correlation context
+      - spans.py for active span lifecycle ownership
+      - builders.py for event and span construction surfaces
+      - publisher.py for destination publication
+      - destinations.py for destination protocol and sink behavior
+      - terminalDestination.py for terminal presentation
+      - exceptionSnapshot.py for captured Python exception evidence
+      - emergency.py for out-of-band emergency reporting
+      - tracer.py for producer-level orchestration and lifecycle
+      - canonical.py for canonical data normalization
+      - ids.py for tracing identifier realization
+      - validation.py for implementation contract validation
+      - errors.py for tracing implementation errors
+
+02.02. Module boundaries may be refactored without changing platform tracing
+      semantics when their contracts remain preserved.
+
+
+===============================================================================
+03. PYTHON TRACE RECORD REPRESENTATION
+===============================================================================
+
+03.01. Python realizes TraceRecord as an immutable dataclass.
+
+03.02. Record construction validates kind-specific invariants before a record
+      becomes publishable evidence.
+
+03.03. Mutable mappings and collections entering record evidence are
+      normalized into immutable representations before publication.
+
+03.04. Python enum or literal representation choices do not redefine the
+      portable semantic values described by tracing-records.txt.
+
+03.05. TraceRecord field names follow the platform semantic names directly
+      where Python syntax permits them.
+
+
+===============================================================================
+04. PRODUCER IDENTITY AND SEQUENCE
+===============================================================================
+
+04.01. One Python Tracer owns one TraceRecordFactory.
+
+04.02. One TraceRecordFactory owns one traceProducerId for its producer
+      lifetime.
+
+04.03. TraceRecordFactory allocates producer-local sequence values.
+
+04.04. Sequence allocation and record creation are synchronized so concurrent
+      Python callers do not create duplicate producer-local sequence values.
+
+04.05. Successfully created records expose one contiguous producer-local
+      sequence in creation order.
+
+04.06. Recursive destination callbacks rejected before record creation do not
+      consume producer sequence values.
+
+04.07. The synchronization primitive used to preserve these rules is a Python
+      implementation choice and is not platform truth.
+
+
+===============================================================================
+05. PYTHON CLOCKS
+===============================================================================
+
+05.01. Python record creation captures both Unix wall-clock nanoseconds and a
+      monotonic nanosecond clock value.
+
+05.02. Span duration is calculated from compatible monotonic clock values.
+
+05.03. Concrete Python clock functions may change if the replacement preserves
+      the required wall-clock and monotonic semantics.
+
+05.04. Python clock choice does not convert timestamps into causal evidence.
+
+
+===============================================================================
+06. CONTEXTVARS REALIZATION
+===============================================================================
+
+06.01. Python realizes ambient tracing context using contextvars.ContextVar.
+
+06.02. TraceRuntimeContext owns separate ambient positions for structural span
+      context and runtime correlation context.
+
+06.03. TraceCorrelationContext is immutable.
+
+06.04. TraceSpanContext is immutable structural context containing producer,
+      span, span-start, span-family, and correlation information.
+
+06.05. ContextVar propagation permits inherited context to follow compatible
+      Python asynchronous execution-context propagation.
+
+06.06. Copying Python async context may therefore make structural span context
+      visible inside another task.
+
+06.07. Visibility of structural span context in another task does not transfer
+      ActiveTraceSpan lifecycle ownership.
+
+06.08. TraceRuntimeContext may be shared by multiple Tracer instances for
+      correlation propagation.
+
+06.09. Structural span context remains producer-specific even when the runtime
+      context object is shared.
+
+
+===============================================================================
+07. CONTEXT LEASES AND RESTORATION
+===============================================================================
+
+07.01. Python context scopes use lease objects to restore preceding ContextVar
+      state.
+
+07.02. A context lease is restored exactly once.
+
+07.03. A lease is restored from the same Python thread and asyncio task that
+      acquired it unless the owning implementation explicitly defines a safe
+      alternative.
+
+07.04. Nested correlation scopes support three semantic operations for each
+      correlation position:
+      - inherit the existing value
+      - clear the value
+      - replace the value with an explicit identifier
+
+07.05. The Python sentinel used to distinguish inherit from explicit None is
+      an implementation mechanism.
+
+
+===============================================================================
+08. ACTIVE SPAN OWNERSHIP
+===============================================================================
+
+08.01. ActiveTraceSpan owns the Python lifecycle handle for one active span.
+
+08.02. ActiveTraceSpan records the Python thread and asyncio task that own its
+      normal terminal lifecycle.
+
+08.03. Normal span termination validates lifecycle ownership.
+
+08.04. Normal span termination also validates that the span is the applicable
+      ambient current span for the owner context.
+
+08.05. Passing TraceSpanContext to another Python task permits structural
+      containment and child-span creation when producer identity is valid.
+
+08.06. Passing TraceSpanContext does not permit the receiving task to complete,
+      fail, error, cancel, or otherwise terminally own the original
+      ActiveTraceSpan.
+
+08.07. Shutdown and recovery paths may abandon active spans without using the
+      normal owner-context terminal operation.
+
+08.08. Python context-manager conveniences around ActiveTraceSpan are API
+      realization and do not redefine span lifecycle semantics.
+
+
+===============================================================================
+09. SPAN TERMINAL OPERATIONS
+===============================================================================
+
+09.01. The Python ActiveTraceSpan surface supports terminal operations for:
+      - completion
+      - failure
+      - error
+      - cancellation
+
+09.02. Terminal operations create the corresponding spanEnd evidence through
+      the owning Tracer and record factory.
+
+09.03. Error termination may capture a Python exception snapshot.
+
+09.04. A span becomes terminal at most once through normal lifecycle handling.
+
+09.05. Attempts to violate span lifecycle invariants raise tracing
+      implementation errors rather than silently rewriting prior evidence.
+
+
+===============================================================================
+10. PYTHON EXCEPTION SNAPSHOTS
+===============================================================================
+
+10.01. exceptionSnapshot.py converts Python exception state into immutable
+       diagnostic evidence.
+
+10.02. The snapshot does not retain the live exception as the portable trace
+       contract.
+
+10.03. Snapshot capture may include Python-specific information such as
+       exception type, message, traceback frames, chaining, and related
+       diagnostic structure when available.
+
+10.04. Capture normalizes data so later trace consumers do not depend on the
+       continued lifetime of Python traceback or exception objects.
+
+10.05. Python BaseException hierarchy handling is implementation-specific.
+
+10.06. A non-Python implementation provides semantically equivalent captured
+       failure evidence using its own failure model.
+
+
+===============================================================================
+11. TYPE DEFINITIONS AND CANONICAL IDENTITY
+===============================================================================
+
+11.01. Python represents TraceTypeDefinition and generated trace types as
+       immutable dataclasses.
+
+11.02. Python computes TraceTypeDefinitionId from canonicalized definition
+       content.
+
+11.03. The current implementation uses canonical JSON-compatible content and a
+       SHA-256 content digest for definition identity.
+
+11.04. SHA-256 and the exact Python canonicalization implementation remain
+       implementation-specific until a cross-language interoperability
+       specification standardizes them.
+
+11.05. TypeRegistry prevents ordinary record emission against unknown trace
+       type definitions.
+
+11.06. Equivalent registered definitions retain equivalent semantic identity.
+
+
+===============================================================================
+12. REFERENCE NORMALIZATION
+===============================================================================
+
+12.01. Python represents TraceReference as an immutable value containing kind
+       and id.
+
+12.02. Reference id accepts a stable exact nonblank string and is not limited
+       to UUID syntax.
+
+12.03. normalizeTraceReferences produces an immutable ordered tuple.
+
+12.04. Normalization removes exact duplicate references while preserving the
+       first occurrence order.
+
+12.05. Python tuple representation is implementation-specific. Portable
+       semantics are ordered immutable normalized references.
+
+
+===============================================================================
+13. DESTINATION PROTOCOL
+===============================================================================
+
+13.01. Python realizes a trace destination through the TraceDestination
+       Protocol.
+
+13.02. The protocol exposes operations equivalent to:
+       - writeTraceTypeDefinition(definition)
+       - write(record)
+
+13.03. A destination implementation may be shared by multiple Tracers.
+
+13.04. A shared destination implementation handles concurrent calls safely.
+
+13.05. Repeated equivalent definition delivery is idempotent.
+
+13.06. TraceSinkDestination intentionally discards definitions and records.
+
+13.07. Python Protocol typing is an implementation convenience and is not a
+       requirement on other language implementations.
+
+
+===============================================================================
+14. PUBLISHER REALIZATION
+===============================================================================
+
+14.01. Each Python Tracer owns a TracePublisher.
+
+14.02. TracePublisher owns destination registration identity and per-
+       destination definition-delivery state.
+
+14.03. TracePublisher delivers a required TraceTypeDefinition before the first
+       dependent record delivered to that destination.
+
+14.04. Failed definition delivery remains pending and is retried before a
+       later dependent record is delivered.
+
+14.05. Destination failures are caught and isolated from independent
+       destinations.
+
+14.06. Publisher tracks destination health episodes so failure and recovery
+       reporting is edge-triggered rather than emitted repeatedly for every
+       failing operation.
+
+14.07. Removing and later re-adding a destination establishes a new
+       registration delivery state and causes required definitions to be
+       delivered again as needed.
+
+
+===============================================================================
+15. PUBLICATION RECURSION GUARD
+===============================================================================
+
+15.01. Python TracePublisher marks active destination publication in runtime
+       context local to the active execution context.
+
+15.02. Ordinary tracing invoked recursively from destination publication is
+       rejected.
+
+15.03. Recursive attempts do not allocate ordinary TraceRecords or consume
+       producer sequence values.
+
+15.04. Copied async context does not remain permanently poisoned by a
+       publication guard after the originating publication has completed.
+
+15.05. The exact guard representation is Python-specific.
+
+
+===============================================================================
+16. TRACER LIFECYCLE
+===============================================================================
+
+16.01. Python Tracer coordinates type registration, record creation, ambient
+       runtime context, active spans, publication, and producer lifecycle.
+
+16.02. Tracer requires at least one destination.
+
+16.03. Callers that intentionally require no retained or displayed evidence
+       use TraceSinkDestination rather than configuring an absent destination
+       set.
+
+16.04. Tracer rejects structural span context belonging to another producer.
+
+16.05. Tracer serializes lifecycle-sensitive operations so shutdown and
+       ordinary tracing cannot create contradictory producer lifecycle state.
+
+16.06. Closing a Tracer prevents new ordinary tracing operations from entering
+       after shutdown ownership is established.
+
+16.07. Shutdown unwinds active spans in reverse nesting order when recovery
+       requires abandonment.
+
+16.08. Abandoned spans are represented through tracing's built-in
+       span-abandoned evidence when ordinary publication remains possible.
+
+16.09. Producer ready, stopping, stopped, destination added, destination
+       removed, destination failed, and destination recovered are current
+       Python built-in tracing events.
+
+16.10. The exact built-in API symbols may change without changing the semantic
+       events when design meaning remains preserved.
+
+
+===============================================================================
+17. EMERGENCY REPORTING
+===============================================================================
+
+17.01. emergency.py provides reporting for tracing failures that cannot safely
+       be reported through ordinary tracing publication.
+
+17.02. Emergency reporting avoids recursively depending on the failing trace
+       path.
+
+17.03. Emergency output is diagnostic fallback evidence about tracing
+       infrastructure failure.
+
+17.04. Emergency reporting does not create a false ordinary TraceRecord and
+       does not claim destination delivery succeeded.
+
+17.05. Concrete stderr, stream, formatting, and synchronization behavior is
+       Python implementation detail.
+
+
+===============================================================================
+18. TERMINAL DESTINATION
+===============================================================================
+
+18.01. terminalDestination.py provides best-effort live human-readable trace
+       presentation.
+
+18.02. The terminal destination caches delivered type definitions needed for
+       presentation.
+
+18.03. It reconstructs local span nesting from records it successfully
+       receives and renders.
+
+18.04. Its nesting state is presentation state rather than authoritative trace
+       state.
+
+18.05. Unknown or unavailable parents are presented as unknown rather than
+       fabricated.
+
+18.06. Terminal formatting, indentation, text style, and stream behavior are
+       Python implementation details.
+
+
+===============================================================================
+19. CONCURRENCY EXPECTATIONS
+===============================================================================
+
+19.01. The Python tracing implementation supports concurrent emission from
+       multiple threads through one Tracer.
+
+19.02. Concurrent emission preserves unique contiguous producer-local sequence
+       allocation.
+
+19.03. Concurrent record creation preserves monotonic producer timing evidence
+       according to the selected Python monotonic clock.
+
+19.04. Destination implementations shared across concurrent producers are
+       responsible for satisfying the destination concurrency contract.
+
+19.05. Python thread locks and asyncio task identity are realization mechanics,
+       not portable trace-record fields unless explicitly captured as domain
+       attributes.
+
+
+===============================================================================
+20. IMPLEMENTATION CHANGE RULE
+===============================================================================
+
+20.01. Python tracing internals may be refactored when the implementation
+       continues to satisfy the implementation-independent tracing contracts.
+
+20.02. A change to ContextVar usage, lock type, class decomposition, builder
+       API, module layout, dataclass usage, Protocol typing, clock function, or
+       exception-inspection technique is an implementation change when tracing
+       semantics remain preserved.
+
+20.03. A change to producer identity semantics, record immutability, sequence
+       guarantees, span structure, type-definition meaning, reference meaning,
+       destination ordering guarantees, or failure isolation is a design
+       change and is reflected in the design documents first.
+
+
+===============================================================================
+END OF IS-03 - PYTHON TRACING
+===============================================================================
