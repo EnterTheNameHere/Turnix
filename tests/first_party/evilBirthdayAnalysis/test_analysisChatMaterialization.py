@@ -571,7 +571,7 @@ def test_interleaved_chat_presentation_uses_semantic_repeat_spans_without_mutati
 
 
 def test_chatPresentation_validation_is_unchanged():
-    assert analysis._chatPresentation({}) == (False, "separate")
+    assert analysis._chatPresentation({}) == (False, "interleaved")
     assert analysis._chatPresentation({"includeChat": True, "chatLayout": "interleaved"}) == (True, "interleaved")
     with pytest.raises(TypeError, match="includeChat"):
         analysis._chatPresentation({"includeChat": 1})
