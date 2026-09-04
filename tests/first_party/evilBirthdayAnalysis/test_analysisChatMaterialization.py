@@ -422,8 +422,40 @@ def test_buildQuery_preserves_unknown_chat_as_unclassified_evidence():
 
     query = analysis._buildQuery(ctx, payload)
 
-    assert "[00:00:47 CHAT [unclassified]] a future source form we do not understand" in query["payload"]
+    assert (
+        "[00:00:47]\n"
+        "CHAT [unclassified]: a future source form we do not understand"
+    ) in query["payload"]
     assert ctx.capabilities.identityPayload["authors"] == ["viewer_name", "vedal987"]
+
+
+def test_buildQuery_keeps_analysis_profile_out_of_model_facing_prompt():
+    ctx = _BuildQueryCtx()
+    payload = _queryPayload(includeChat=True, chatLayout="interleaved")
+    payload["input"]["profile"]["name"] = "0-10-30-profile"
+    payload["input"]["profile"]["description"] = (
+        "Use aligned 10-minute context chunks at the current stream position, "
+        "10 minutes earlier, and 30 minutes earlier."
+    )
+    items = _queryItems()
+    items[1] = QueryItem(
+        itemId="profile",
+        kind="analysis-profile",
+        content=(
+            "Analysis profile: 0-10-30-profile\n"
+            "Use aligned 10-minute context chunks at the current stream position, "
+            "10 minutes earlier, and 30 minutes earlier."
+        ),
+        metadata={"profile": payload["input"]["profile"]},
+    )
+    payload["queryItems"] = [item.snapshot() for item in items]
+
+    query = analysis._buildQuery(ctx, payload)
+
+    assert "ANALYSIS PROFILE" not in query["payload"]
+    assert "0-10-30-profile" not in query["payload"]
+    assert "10 minutes earlier" not in query["payload"]
+    assert query["metadata"]["profileName"] == "0-10-30-profile"
 
 
 def test_buildQuery_can_exclude_chat_while_still_using_chat_authors_for_identity_sanitization():
