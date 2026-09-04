@@ -404,19 +404,75 @@ def _sanitizePromptSections(ctx, sections: list[str], chatItems: list[QueryItem]
     }
 
 
+def _renderChatSpan(span: Mapping[str, object]) -> str:
+    """Renders one interpreted chat span without mutating source/query evidence."""
+    kind = span.get("kind")
+    if kind == "text":
+        return str(span.get("text", ""))
+    if kind == "emote":
+        text = str(span.get("name", ""))
+        count = span.get("count", 1)
+        return text if count == 1 else f"{text} ×{count}"
+    if kind == "composite":
+        tokens = span.get("tokens", [])
+        text = " ".join(str(token) for token in tokens) if isinstance(tokens, list) else ""
+        count = span.get("count", 1)
+        return text if count == 1 else f"{text} ×{count}"
+    if kind == "command":
+        command = f"!{span.get('command', '')}"
+        arguments = span.get("arguments", [])
+        if isinstance(arguments, list) and arguments:
+            return command + " " + " ".join(str(argument) for argument in arguments)
+        return command
+    if kind == "repeat":
+        nested = span.get("spans", [])
+        if not isinstance(nested, list):
+            return ""
+        text = " ".join(
+            part
+            for nestedSpan in nested
+            if isinstance(nestedSpan, Mapping)
+            for part in [_renderChatSpan(nestedSpan)]
+            if part
+        )
+        return f"({text}) ×{span.get('count', 1)}"
+    return ""
+
+
+def _chatPresentationContent(item: QueryItem) -> str:
+    """Returns presentation-only compressed chat text when semantic spans are available."""
+    analysis = item.metadata.get("analysis")
+    if isinstance(analysis, Mapping) and analysis.get("kind") == "userMessage":
+        spans = analysis.get("spans")
+        if isinstance(spans, list) and spans and all(isinstance(span, Mapping) for span in spans):
+            rendered = " ".join(
+                part
+                for span in spans
+                for part in [_renderChatSpan(span)]
+                if part
+            )
+            if rendered:
+                return rendered
+    return item.content
+
+
 def _chatLine(item: QueryItem) -> str:
-    """Renders one chat item in the model-facing evidence format."""
-    return f"[{_chatStreamTime(item)} CHAT {_chatAuthor(item)}] {item.content}"
+    """Renders one unbucketed chat item in the model-facing evidence format."""
+    return f"[{_chatStreamTime(item)} CHAT {_chatAuthor(item)}] {_chatPresentationContent(item)}"
+
+
+def _transcriptStreamTime(item: QueryItem) -> str:
+    value = item.metadata.get("streamTime")
+    if type(value) is not str or not value:
+        raise RuntimeError(
+            f"Transcript QueryItem {item.itemId!r} has no non-empty streamTime metadata."
+        )
+    return value
 
 
 def _transcriptLine(item: QueryItem) -> str:
     """Renders one Evil transcript item in the model-facing evidence format."""
-    streamTime = item.metadata.get("streamTime")
-    if type(streamTime) is not str or not streamTime:
-        raise RuntimeError(
-            f"Transcript QueryItem {item.itemId!r} has no non-empty streamTime metadata."
-        )
-    return f"[{streamTime} EVIL] {item.content}"
+    return f"[{_transcriptStreamTime(item)} EVIL] {item.content}"
 
 
 def _timedEvidenceKey(item: QueryItem) -> tuple[float, int, int]:
@@ -455,13 +511,61 @@ def _evidenceSections(
 
     if chatLayout == "interleaved":
         timedItems = sorted([*transcriptItems, *chatItems], key=_timedEvidenceKey)
-        lines: list[str] = []
+        if not timedItems:
+            return []
+
+        buckets: list[tuple[str, list[QueryItem]]] = []
         for item in timedItems:
-            if item.kind == "transcript":
-                lines.append(_transcriptLine(item))
+            streamTime = _transcriptStreamTime(item) if item.kind == "transcript" else _chatStreamTime(item)
+            if buckets and buckets[-1][0] == streamTime:
+                buckets[-1][1].append(item)
             else:
-                lines.append(_chatLine(item))
-        return [] if not lines else ["CHRONOLOGICAL EVIDENCE\n" + "\n".join(lines)]
+                buckets.append((streamTime, [item]))
+
+        renderedBuckets: list[str] = []
+        for streamTime, bucketItems in buckets:
+            chatGroups: dict[str, list[QueryItem]] = {}
+            for item in bucketItems:
+                if item.kind != "chat":
+                    continue
+                analysis = item.metadata.get("analysis")
+                if isinstance(analysis, Mapping) and analysis.get("kind") == "userMessage":
+                    chatGroups.setdefault(_chatPresentationContent(item), []).append(item)
+
+            consumedChatIds: set[str] = set()
+            lines = [f"[{streamTime}]"]
+            for item in bucketItems:
+                if item.kind == "transcript":
+                    lines.append(f"EVIL: {item.content}")
+                    continue
+
+                if item.itemId in consumedChatIds:
+                    continue
+                content = _chatPresentationContent(item)
+                group = chatGroups.get(content, [])
+                if len(group) <= 1:
+                    lines.append(f"CHAT {_chatAuthor(item)}: {content}")
+                    continue
+
+                consumedChatIds.update(groupItem.itemId for groupItem in group)
+                sourceAuthors = [
+                    sourceAuthor
+                    for groupItem in group
+                    if type(sourceAuthor := groupItem.metadata.get("sourceUsername")) is str
+                ]
+                uniqueAuthors = len({author.casefold() for author in sourceAuthors})
+                count = len(group)
+                if len(sourceAuthors) != count:
+                    suffix = f"[{count} messages]"
+                elif uniqueAuthors == count:
+                    suffix = f"[{uniqueAuthors} users]"
+                else:
+                    suffix = f"[{count} messages; {uniqueAuthors} users]"
+                lines.append(f"CHAT: {content} ×{count} {suffix}")
+
+            renderedBuckets.append("\n".join(lines))
+
+        return ["CHRONOLOGICAL EVIDENCE\n" + "\n\n".join(renderedBuckets)]
 
     raise RuntimeError(f"Unsupported chat layout after validation: {chatLayout!r}.")
 
