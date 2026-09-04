@@ -507,8 +507,41 @@ def test_buildQuery_interleaved_layout_groups_evidence_into_second_buckets():
         "EVIL: anonymized_1 mentioned Vedal"
     )
     assert expectedEvidence in query["payload"]
+    assert "EVIDENCE NOTICE" not in query["payload"]
     assert "[00:00:45 EVIL]" not in query["payload"]
     assert "[00:00:45 CHAT" not in query["payload"]
+
+
+def test_buildQuery_warns_model_when_optional_chat_is_budget_truncated():
+    ctx = _BuildQueryCtx(optionalFraction=0.0)
+    payload = _queryPayload(includeChat=True, chatLayout="interleaved")
+    payload["input"]["window"] = {
+        "positionSeconds": 600,
+        "chunkSeconds": 600,
+        "chunks": analysis._windowChunks(
+            positionSeconds=600,
+            chunkSeconds=600,
+            offsetsSeconds=(0, -600, -1800),
+            streamStartVideoSeconds=533,
+        ),
+    }
+
+    query = analysis._buildQuery(ctx, payload)
+
+    assert (
+        "EVIDENCE NOTICE\n"
+        + analysis._CHAT_BUDGET_PROMPT_NOTICE
+    ) in query["payload"]
+    budget = query["metadata"]["chatBudget"]
+    assert budget["optionalTruncated"] is True
+    assert budget["optionalRequestedItemCount"] == 2
+    assert budget["optionalIncludedItemCount"] == 0
+    assert budget["warnings"] == [
+        (
+            "Chat budget truncation: included 0 of 2 optional older chat messages; "
+            "omitted 2 lower-priority messages. Current-window chat remains complete."
+        )
+    ]
 
 
 def test_buildQuery_interleaved_layout_collapses_same_second_duplicate_user_messages():
