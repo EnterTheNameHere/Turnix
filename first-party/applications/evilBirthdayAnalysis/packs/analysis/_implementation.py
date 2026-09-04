@@ -93,7 +93,7 @@ def _contextGeometry(settings: dict[str, object]) -> tuple[int, tuple[int, ...]]
 
 def _chatPresentation(settings: Mapping[str, object]) -> tuple[bool, str]:
     includeChat = settings.get("includeChat", False)
-    layout = settings.get("chatLayout", "separate")
+    layout = settings.get("chatLayout", "interleaved")
     if type(includeChat) is not bool:
         raise TypeError("Profile setting 'includeChat' must be a boolean.")
     if type(layout) is not str or layout not in _CHAT_LAYOUTS:
