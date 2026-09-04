@@ -66,6 +66,7 @@ def _chat(itemId: str, *, streamTime: float, lineNumber: int, content: str) -> Q
             "streamStartSeconds": streamTime,
             "lineNumber": lineNumber,
             "username": "viewer",
+            "sourceUsername": "viewer",
             "analysis": {"streamTime": f"{sign}00:00:{seconds % 60:02d}"},
         },
     )
