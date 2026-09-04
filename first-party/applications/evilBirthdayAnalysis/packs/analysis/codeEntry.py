@@ -21,6 +21,10 @@ for _name, _value in vars(_implementation).items():
 
 _CHAT_SEMANTIC_LOOKBACK_SECONDS = 120
 _UNCLASSIFIED_CHAT_AUTHOR = "[unclassified]"
+_CHAT_BUDGET_PROMPT_NOTICE = (
+    "Older optional chat context was limited by the configured input-token budget. "
+    "Some lower-priority older chat messages are omitted; current-window chat is complete."
+)
 
 
 def _interpretedChat(ctx, selector: dict[str, int]) -> tuple[dict[str, object], dict[str, object]]:
@@ -253,10 +257,9 @@ def _budgetedChat(
     higher-priority boundary cannot fit, lower-priority evidence is not allowed
     to leapfrog it merely because an individual message happens to be shorter.
 
-    Exact model token measurements are used for the base query, mandatory
-    current chat, the full optional request, and O(log N) priority-prefix probes
-    when truncation is necessary. This avoids the previous O(N) sequence of
-    complete prompt renders, identity sanitizations, and tokenizer requests.
+    If optional chat is truncated, the model-facing evidence notice is itself
+    included in exact token measurement. The selected prefix may therefore
+    shrink slightly to ensure the final prompt still satisfies the same budget.
     """
 
     window = inputValue.get("window")
@@ -268,112 +271,147 @@ def _budgetedChat(
     byOffset = _chatByOffset(window, allChatItems)
     currentItems = _orderedChat(byOffset.get(0, []))
 
-    tokenMeasurementCount = 0
-
-    baseText, identityStatistics = _renderPrompt(
-        ctx,
-        byKind=byKind,
-        allChatItems=allChatItems,
-        presentedChatItems=[],
-        includeChat=True,
-        chatLayout=chatLayout,
-    )
-    baseTokens = _measurePromptTokens(ctx, baseText)
-    tokenMeasurementCount += 1
-
-    mandatoryText, identityStatistics = _renderPrompt(
-        ctx,
-        byKind=byKind,
-        allChatItems=allChatItems,
-        presentedChatItems=currentItems,
-        includeChat=True,
-        chatLayout=chatLayout,
-    )
-    mandatoryTokens = _measurePromptTokens(ctx, mandatoryText)
-    tokenMeasurementCount += 1
-    if mandatoryTokens > maxInputTokens:
-        position = window.get("positionSeconds")
-        chunkSeconds = window.get("chunkSeconds")
-        raise RuntimeError(
-            "Required current chat window cannot fit the model input budget: "
-            f"stream position {position!r}, chunkSeconds {chunkSeconds!r}, required query {mandatoryTokens} tokens, "
-            f"available input {maxInputTokens} tokens after reserving {reservedResponseTokens} response tokens."
-        )
-
     optionalOffsets = sorted((offset for offset in byOffset if offset != 0), reverse=True)
-    optionalItems: list[QueryItem] = []
     optionalPriority: list[QueryItem] = []
     for offset in optionalOffsets:
-        chunkItems = byOffset[offset]
-        optionalItems.extend(chunkItems)
         optionalPriority.extend(
-            sorted(chunkItems, key=lambda item: (_streamStart(item), _chatLineNumber(item)), reverse=True)
+            sorted(
+                byOffset[offset],
+                key=lambda item: (_streamStart(item), _chatLineNumber(item)),
+                reverse=True,
+            )
         )
+    optionalCount = len(optionalPriority)
 
-    availableChatTokens = max(0, maxInputTokens - baseTokens)
-    fractionLimit = int(availableChatTokens * optionalFraction)
-    absoluteRemaining = max(0, maxInputTokens - mandatoryTokens)
-    optionalTokenLimit = min(fractionLimit, absoluteRemaining)
+    tokenMeasurementCount = 0
+    tokenCache: dict[tuple[int, str | None], int] = {}
 
-    def fits(tokens: int) -> bool:
-        optionalCost = max(0, tokens - mandatoryTokens)
-        return tokens <= maxInputTokens and optionalCost <= optionalTokenLimit
-
-    prefixTokens: dict[int, int] = {0: mandatoryTokens}
-
-    def measurePrefix(count: int) -> int:
+    def measureBase(evidenceNotice: str | None) -> tuple[int, dict[str, int]]:
         nonlocal tokenMeasurementCount
-        cached = prefixTokens.get(count)
+        text, identityStatistics = _renderPrompt(
+            ctx,
+            byKind=byKind,
+            allChatItems=allChatItems,
+            presentedChatItems=[],
+            includeChat=True,
+            chatLayout=chatLayout,
+            evidenceNotice=evidenceNotice,
+        )
+        measured = _measurePromptTokens(ctx, text)
+        tokenMeasurementCount += 1
+        return measured, identityStatistics
+
+    def measurePrefix(count: int, evidenceNotice: str | None) -> int:
+        nonlocal tokenMeasurementCount
+        key = (count, evidenceNotice)
+        cached = tokenCache.get(key)
         if cached is not None:
             return cached
-        candidateText, _ = _renderPrompt(
+        text, _ = _renderPrompt(
             ctx,
             byKind=byKind,
             allChatItems=allChatItems,
             presentedChatItems=[*currentItems, *optionalPriority[:count]],
             includeChat=True,
             chatLayout=chatLayout,
+            evidenceNotice=evidenceNotice,
         )
-        measured = _measurePromptTokens(ctx, candidateText)
+        measured = _measurePromptTokens(ctx, text)
         tokenMeasurementCount += 1
-        prefixTokens[count] = measured
+        tokenCache[key] = measured
         return measured
 
-    optionalCount = len(optionalPriority)
-    if optionalCount:
-        fullTokens = measurePrefix(optionalCount)
-    else:
-        fullTokens = mandatoryTokens
+    def budgetState(evidenceNotice: str | None) -> tuple[int, int, int, int, int, dict[str, int]]:
+        baseTokens, identityStatistics = measureBase(evidenceNotice)
+        mandatoryTokens = measurePrefix(0, evidenceNotice)
+        if mandatoryTokens > maxInputTokens:
+            position = window.get("positionSeconds")
+            chunkSeconds = window.get("chunkSeconds")
+            raise RuntimeError(
+                "Required current chat window cannot fit the model input budget: "
+                f"stream position {position!r}, chunkSeconds {chunkSeconds!r}, "
+                f"required query {mandatoryTokens} tokens, available input {maxInputTokens} tokens "
+                f"after reserving {reservedResponseTokens} response tokens."
+            )
 
-    if optionalCount == 0 or fits(fullTokens):
-        selectedCount = optionalCount
-    elif optionalTokenLimit <= 0:
-        selectedCount = 0
-    else:
-        low = 0
-        high = optionalCount - 1
-        while low < high:
-            middle = (low + high + 1) // 2
-            if fits(measurePrefix(middle)):
-                low = middle
-            else:
-                high = middle - 1
-        selectedCount = low
+        availableChatTokens = max(0, maxInputTokens - baseTokens)
+        fractionLimit = int(availableChatTokens * optionalFraction)
+        absoluteRemaining = max(0, maxInputTokens - mandatoryTokens)
+        optionalTokenLimit = min(fractionLimit, absoluteRemaining)
+
+        def fits(count: int) -> bool:
+            tokens = measurePrefix(count, evidenceNotice)
+            optionalCost = max(0, tokens - mandatoryTokens)
+            return tokens <= maxInputTokens and optionalCost <= optionalTokenLimit
+
+        if optionalCount == 0 or fits(optionalCount):
+            selectedCount = optionalCount
+        elif optionalTokenLimit <= 0:
+            selectedCount = 0
+        else:
+            low = 0
+            high = optionalCount - 1
+            while low < high:
+                middle = (low + high + 1) // 2
+                if fits(middle):
+                    low = middle
+                else:
+                    high = middle - 1
+            selectedCount = low
+
+        finalTokens = measurePrefix(selectedCount, evidenceNotice)
+        fullTokens = measurePrefix(optionalCount, evidenceNotice)
+        return (
+            selectedCount,
+            baseTokens,
+            mandatoryTokens,
+            finalTokens,
+            fullTokens,
+            identityStatistics,
+        )
+
+    (
+        selectedCount,
+        baseTokens,
+        mandatoryTokens,
+        finalTokens,
+        fullTokens,
+        identityStatistics,
+    ) = budgetState(None)
+
+    promptNotice: str | None = None
+    if selectedCount != optionalCount:
+        promptNotice = _CHAT_BUDGET_PROMPT_NOTICE
+        (
+            selectedCount,
+            baseTokens,
+            mandatoryTokens,
+            finalTokens,
+            fullTokens,
+            identityStatistics,
+        ) = budgetState(promptNotice)
 
     selectedOptional = optionalPriority[:selectedCount]
-    finalTokens = measurePrefix(selectedCount)
-
     selectedOptionalIds = {item.itemId for item in selectedOptional}
     selectedByOffset = {
         str(offset): sum(1 for item in byOffset[offset] if item.itemId in selectedOptionalIds)
         for offset in optionalOffsets
     }
     requestedByOffset = {str(offset): len(byOffset[offset]) for offset in optionalOffsets}
+
+    availableChatTokens = max(0, maxInputTokens - baseTokens)
+    fractionLimit = int(availableChatTokens * optionalFraction)
+    absoluteRemaining = max(0, maxInputTokens - mandatoryTokens)
+    optionalTokenLimit = min(fractionLimit, absoluteRemaining)
     optionalTruncated = selectedCount != optionalCount
+
     warnings: list[str] = []
     if optionalTruncated:
+        omittedCount = optionalCount - selectedCount
         warnings.append(
-            "Older chat context exceeded its optional token allowance; lower-priority messages were omitted from the prompt."
+            "Chat budget truncation: "
+            f"included {selectedCount} of {optionalCount} optional older chat messages; "
+            f"omitted {omittedCount} lower-priority messages. Current-window chat remains complete."
         )
 
     evidence = {
@@ -393,6 +431,7 @@ def _budgetedChat(
         "optionalIncludedByOffset": selectedByOffset,
         "optionalTruncated": optionalTruncated,
         "tokenMeasurementCount": tokenMeasurementCount,
+        "promptNotice": promptNotice,
         "warnings": warnings,
     }
     return [*currentItems, *selectedOptional], evidence, identityStatistics
