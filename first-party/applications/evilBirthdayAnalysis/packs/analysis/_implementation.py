@@ -574,7 +574,6 @@ def _fixedSections(byKind: dict[str, list[QueryItem]]) -> list[str]:
     sections: list[str] = []
     for kind, heading in (
         ("context", "CONTEXT"),
-        ("analysis-profile", "ANALYSIS PROFILE"),
         ("prompt", "ANALYSIS INSTRUCTION"),
     ):
         for item in byKind.get(kind, []):
