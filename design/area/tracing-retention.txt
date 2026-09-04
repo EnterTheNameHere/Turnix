@@ -1,0 +1,438 @@
+===============================================================================
+DESIGN AREA DA-03 - TRACE RETENTION AND STORAGE
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines implementation-independent persistence, retention, continuity, loss,
+and storage-boundary semantics for Actant trace evidence.
+
+Purpose:
+--------
+This document separates persistent trace history from runtime trace emission
+and from tooling that interprets retained evidence.
+
+It defines:
+-----------
+- persistent trace-history semantics
+- retention policy, pruning, collection, and durability boundaries
+- known removal, known unavailability, unexplained absence, and completeness
+- producer-local continuity semantics after persistence
+- preservation of knowledge about removed referenced evidence
+- persistent-destination and storage self-diagnostic boundaries
+- structured access requirements for retained evidence
+
+It does NOT define:
+-------------------
+- runtime TraceRecord creation or ordinary producer lifecycle
+- live publication mechanics except where they meet persistence boundaries
+- graph materialization, causal interpretation, or presentation behavior
+- debugger runtime-control semantics
+- one concrete storage technology, schema, codec, or reader API
+- domain-specific trace emission obligations
+
+
+===============================================================================
+01. CORE BOUNDARY
+===============================================================================
+
+01.01. Trace emission, record creation, destination delivery, durable
+       persistence, historical retention, and tooling interpretation are
+       distinct operations.
+
+01.02. Runtime tracing creates and publishes trace evidence.
+
+01.03. A persistent trace destination or equivalent storage component creates
+       persistent trace history from evidence delivered to it according to its
+       persistence contract.
+
+01.04. Trace tooling consumes persistent history and retention metadata but
+       does not own persistence merely because it queries or visualizes it.
+
+01.05. Persistent trace history is evidence storage, not authoritative
+       committed state merely because it is durable.
+
+01.06. Retention may intentionally remove detailed evidence. It does not
+       silently convert a relationship that storage could previously account
+       for into an unexplained hole merely because the target was collected.
+
+
+===============================================================================
+02. PERSISTENT TRACE HISTORY
+===============================================================================
+
+02.01. Persistent trace history consists of retained TraceRecords,
+       TraceTypeDefinitions, and storage metadata required to interpret
+       retained evidence honestly.
+
+02.02. Persistent storage preserves semantic identities and fields of retained
+       trace evidence.
+
+02.03. Storage encoding, physical layout, database technology, indexing, and
+       compression do not change trace evidence semantics.
+
+02.04. Storage does not mutate producer-emitted evidence and present the
+       mutation as original evidence.
+
+02.05. Storage-specific metadata remains distinguishable from TraceRecords.
+
+02.06. Storage metadata may compactly preserve knowledge about evidence that is
+       no longer retained without preserving the removed TraceRecord itself.
+
+
+===============================================================================
+03. RETENTION POLICY
+===============================================================================
+
+03.01. Trace retention is policy-driven unless another design establishes a
+       stronger persistence requirement for a defined evidence class.
+
+03.02. A retention policy may define bounded history, rotation, pruning,
+       quotas, age limits, scope limits, or intentional discard.
+
+03.03. Retention policy defines preservation and removal behavior explicitly
+       enough that consumers do not need to infer the policy from missing
+       records.
+
+03.04. Retention policy does not create committed-state authority.
+
+03.05. An emission obligation is not a persistence guarantee.
+
+03.06. A persistence guarantee exists only when an owning design explicitly
+       requires evidence to remain available under defined conditions.
+
+03.07. A policy may consider evidence collectible even when that evidence once
+       participated in structural or causal relationships, provided enough
+       knowledge survives to represent the intentional absence honestly.
+
+
+===============================================================================
+04. DELIVERY, PERSISTENCE, AND LOSS
+===============================================================================
+
+04.01. Failure to deliver evidence to a persistent destination, failure to make
+       delivered evidence durable, later intentional collection of durable
+       evidence, and unexplained disappearance are distinct forms of evidence
+       unavailability.
+
+04.02. Runtime tracing owns truthful reporting of known live publication or
+       destination-delivery failure within its reporting capability.
+
+04.03. Persistent storage owns truthful representation of known persistence,
+       pruning, rotation, collection, corruption, import, export, and storage-
+       loss limitations within its contract.
+
+04.04. Storage does not claim persistence when persistence is known to have
+       failed.
+
+04.05. Storage does not claim historical completeness for a scope when it knows
+       evidence in that scope was removed, lost, corrupted, or never
+       successfully retained.
+
+04.06. Loss of non-authoritative trace history weakens evidential completeness;
+       it does not by itself change committed-state correctness.
+
+04.07. Multiple destinations may possess different evidence sets. A failure or
+       collection decision in one destination does not imply that equivalent
+       evidence is unavailable from every other destination.
+
+04.08. Retention does not require a globally perfect evidence set across all
+       destinations. Each persistent history represents its own availability,
+       collection, and loss semantics honestly.
+
+
+===============================================================================
+05. KNOWN ABSENCE AND UNEXPLAINED ABSENCE
+===============================================================================
+
+05.01. When persistent history knows why previously available or expected
+       evidence is unavailable, it preserves enough metadata to represent that
+       known condition according to its storage contract.
+
+05.02. Known conditions may include intentional retention collection, pruning,
+       rotation, quota dropping, failed persistence, known delivery failure,
+       detected corruption, partial import/export, or unavailable storage
+       segments.
+
+05.03. Storage and tooling do not convert unknown absence into a fabricated
+       explanation.
+
+05.04. A missing producer-local sequence value may demonstrate a continuity gap
+       in the available history. The gap alone does not prove whether evidence
+       was undelivered, unretained, collected, filtered, outside selected
+       scope, or lost for another reason.
+
+05.05. Stronger availability or loss metadata may explain a continuity gap when
+       available and applicable.
+
+05.06. An absence that persistent history cannot account for remains an
+       unexplained absence. It is not silently classified as ordinary
+       retention.
+
+05.07. Unexplained absence is diagnostically meaningful because it may indicate
+       missing knowledge, broken history, unexpected delivery/storage behavior,
+       or evidence outside the history's knowledge boundary.
+
+
+===============================================================================
+06. COMPLETENESS
+===============================================================================
+
+06.01. Completeness is evaluated for an identified evidence scope.
+
+06.02. Persistent history does not imply global completeness merely because no
+       known loss marker is present.
+
+06.03. Storage distinguishes, where evidence permits:
+       - available evidence
+       - intentionally collected or removed evidence
+       - known unavailable or failed evidence
+       - unresolved or unexplained absence
+       - outside-retained-scope evidence
+       - storage-unavailable conditions
+
+06.04. A completeness claim does not extend beyond the scope and guarantees
+       from which it was established.
+
+06.05. Trace tooling preserves storage completeness and uncertainty semantics
+       when interpreting retained evidence.
+
+06.06. Knowing that evidence was intentionally removed is weaker than retaining
+       the evidence itself, but stronger than an unexplained hole. These states
+       remain distinguishable.
+
+
+===============================================================================
+07. CONTINUITY AND ORDERING
+===============================================================================
+
+07.01. Persistent history may use trace producer identity and producer-local
+       sequence to evaluate producer-local continuity.
+
+07.02. Persistent storage preserves producer sequence semantics; it does not
+       replace producer creation order with persistence or storage order.
+
+07.03. Producer-local continuity does not establish cross-producer ordering or
+       causality.
+
+07.04. Replacement producer identities remain separate sequence and continuity
+       domains.
+
+07.05. Explicit relationships or future synchronized-producer evidence may
+       relate histories without pretending that independent producer sequences
+       form one sequence.
+
+07.06. Continuity metadata may identify known storage, collection, or pruning
+       boundaries.
+
+07.07. Continuity metadata does not fabricate unavailable TraceRecords.
+
+
+===============================================================================
+08. RETENTION AND REFERENCED EVIDENCE
+===============================================================================
+
+08.01. Retention policy may remove evidence referenced by surviving records.
+
+08.02. Removal does not authorize storage to rewrite surviving producer-emitted
+       records to hide or alter the reference.
+
+08.03. If a referenced target is intentionally removed by retention, surviving
+       history preserves enough information for resolution to distinguish:
+       - target available
+       - target known removed by retention
+       - target known unavailable or failed
+       - target unresolved for an unexplained reason
+
+08.04. A surviving reference to a target intentionally removed by the same
+       persistent history does not degrade into an unexplained dangling link.
+
+08.05. The retained representation of known removal need not be a TraceRecord.
+       It may be storage metadata, a compact tombstone, an identity/range
+       index, or another representation satisfying the semantic requirement.
+
+08.06. The design does not require recursive preservation of every historical
+       removal marker. Storage may compact or replace removal metadata provided
+       surviving relationships remain classifiable according to 08.03.
+
+08.07. A retention or export policy promising structurally complete span
+       evidence defines how required structural dependencies are preserved.
+
+08.08. When promised completeness cannot be preserved, resulting history is
+       represented as incomplete rather than repaired with fabricated evidence.
+
+08.09. Explicit causal references receive the same preservation treatment as
+       structural references. Removing their targets does not rewrite the
+       original causal assertion.
+
+08.10. A reference that cannot be resolved and cannot be classified as known
+       removed, known unavailable, outside a declared boundary, or otherwise
+       accounted for remains explicitly unresolved. Tooling may treat this as a
+       possible evidence-integrity or knowledge-gap condition.
+
+
+===============================================================================
+09. PERSISTENT DESTINATION CONTRACT
+===============================================================================
+
+09.01. A persistent destination consumes portable trace definitions and records
+       according to the tracing destination contract.
+
+09.02. Successful live delivery and successful durable retention are distinct
+       states unless the destination contract explicitly makes them the same
+       operation.
+
+09.03. A persistent destination defines the point at which evidence is
+       considered persisted under its durability contract.
+
+09.04. Persistence acknowledgement, batching, buffering, flushing,
+       transactions, recovery, and durability levels belong to persistent
+       destination design or implementation specification.
+
+09.05. A persistent destination does not silently weaken a persistence
+       guarantee established by an owning design.
+
+09.06. Ordinary tracing does not require every persistent destination to
+       succeed before runtime work may continue. Stronger behavior exists only
+       where a destination or owning design explicitly establishes it.
+
+
+===============================================================================
+10. STORAGE SELF-DIAGNOSTICS
+===============================================================================
+
+10.01. Persistent tracing infrastructure is itself diagnosable.
+
+10.02. Meaningful storage, collection, pruning, persistence, continuity, and
+       failure conditions should be represented through trace evidence or
+       equivalent tracing-system diagnostic evidence when the tracing system is
+       capable of recording them.
+
+10.03. This principle does not require recursively tracing every internal
+       storage operation or producing an infinite chain of diagnostics about
+       diagnostics.
+
+10.04. When ordinary tracing cannot record a tracing-system failure, an
+       implementation may use an emergency or fallback diagnostic path.
+
+10.05. The design does not require a specific fallback medium. A fallback may
+       itself be unavailable; such a limit is a real boundary of obtainable
+       evidence rather than something tracing fabricates around.
+
+10.06. Concrete substrate-level trace types for retention/storage diagnostics
+       remain OPEN. Legacy reason identifiers are not carried forward merely to
+       preserve their names.
+
+
+===============================================================================
+11. STORAGE ACCESS BOUNDARY
+===============================================================================
+
+11.01. Persistent trace history is exposed through structured evidence access
+       preserving TraceRecord and TraceTypeDefinition semantics.
+
+11.02. Human-formatted terminal or log output is not the canonical persistent
+       trace evidence interface.
+
+11.03. A storage reader exposes known retention boundaries, incompleteness,
+       collection/removal knowledge, and storage metadata needed for truthful
+       interpretation.
+
+11.04. A defined trace file or storage format may itself be a valid structured
+       evidence interface. Tracing does not prohibit direct access merely
+       because the representation is file-backed.
+
+11.05. Access-control and permission requirements belong to the designs that
+       own those concerns; they are not implied by the word "controlled" in
+       legacy tracing documentation.
+
+11.06. Concrete reader APIs, query languages, transport protocols, and storage
+       schemas remain implementation or interoperability concerns unless
+       standardized separately.
+
+
+===============================================================================
+12. TOOLING BOUNDARY
+===============================================================================
+
+12.01. Tooling may query, select, reconstruct, compare, and visualize
+       persistent trace history.
+
+12.02. Tooling interprets retention and completeness metadata defined by the
+       storage contract.
+
+12.03. Tooling does not redefine storage loss as producer-emitted evidence.
+
+12.04. Tooling-derived continuity or causal findings remain derived unless they
+       correspond to explicit retained evidence or storage metadata.
+
+12.05. A tooling UI may configure retention policy without acquiring ownership
+       of retention semantics.
+
+12.06. Tooling preserves the distinction between known removal/unavailability
+       and an unexplained unresolved relationship.
+
+
+===============================================================================
+13. OPEN RETENTION DESIGN
+===============================================================================
+
+13.01. OPEN:
+       - concrete persistent trace destination architecture
+       - retention-policy configuration model
+       - durability levels
+       - batching and acknowledgement semantics
+       - storage continuity and removal-metadata model
+       - persistent trace database and index strategy
+       - pruning granularity
+       - corruption detection and recovery behavior
+       - cross-storage history migration
+       - storage/export completeness metadata interchange
+       - concrete tracing-system storage diagnostic trace types
+       - preservation rules for future designated trace-root regions
+
+
+===============================================================================
+14. LOCKED MIGRATION DECISIONS
+===============================================================================
+
+14.01. LOCKED:
+       - emission, creation, delivery, persistence, retention, and tooling
+         interpretation are distinct
+       - persistent trace history is non-authoritative evidence storage
+       - retention is policy-driven unless a stronger guarantee is established
+       - emission obligation is distinct from persistence guarantee
+       - ordinary tracing does not require one globally perfect history across
+         all destinations
+       - known removal or unavailability is not represented as unexplained
+         absence when the persistent history can account for it
+       - unexplained absence is not assigned a fabricated cause
+       - intentional collection may remove evidence while preserving compact
+         knowledge sufficient to classify surviving references
+       - removal metadata may itself be compacted; recursive tombstone history
+         is not required
+       - evidence loss weakens evidential completeness rather than committed-
+         state correctness by itself
+       - producer sequence semantics survive persistence unchanged
+       - producer-local sequence may expose continuity gaps but does not
+         explain their cause
+       - independent producer sequences do not become globally ordered through
+         storage
+       - storage metadata remains distinguishable from producer-emitted
+         evidence
+       - pruning does not rewrite surviving evidence to hide structural or
+         causal references
+       - tracing storage is diagnosable without requiring infinite recursive
+         tracing of its own diagnostics
+       - structured evidence access, not a blanket prohibition on file-backed
+         access, is the tracing requirement
+       - tooling consumes retention semantics but does not own persistence
+
+
+===============================================================================
+END OF DA-03 - TRACE RETENTION AND STORAGE
+===============================================================================

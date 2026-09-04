@@ -1,0 +1,549 @@
+===============================================================================
+DESIGN AREA DA-03 - TRACE RECORDS
+===============================================================================
+
+Status:
+-------
+EVOLVING
+
+Description:
+------------
+Defines the implementation-independent portable evidence model emitted by the
+Actant tracing substrate.
+
+Purpose:
+--------
+This document defines trace-record structure and invariants independently of
+implementation language, storage codec, transport, viewer, or debugger.
+
+It defines:
+-----------
+- portable TraceRecord concepts and structural record kinds
+- record identity and trace-producer-local ordering evidence
+- timestamp, span, origin, outcome, correlation, and exception evidence
+- portable TraceTypeDefinition semantics
+- explicit causal-reference semantics
+- record immutability and portability invariants
+- the requirement that emitted evidence identity can be retained when needed
+
+It does NOT define:
+-------------------
+- runtime emission, producer lifecycle, or destination publication mechanics
+- persistence, retention, pruning, durability, or storage representation
+- graph materialization, causal analysis, presentation, or debugger behavior
+- concrete serialization codecs, field bindings, or language-specific APIs
+- designated trace-root or bounded trace-region semantics that remain OPEN
+
+
+===============================================================================
+01. RECORD MODEL
+===============================================================================
+
+01.01. A TraceRecord is one immutable unit of trace evidence after creation.
+
+01.02. TraceRecord is the fundamental evidence unit of the tracing substrate.
+
+01.03. A TraceRecord does not contain or require a materialized trace graph.
+
+01.04. TraceRecords carry explicit identity, structure, ordering evidence,
+       correlations, outcomes, domain evidence, and optional explicit causal
+       references from which consumers can reconstruct supported relationships.
+
+01.05. TraceRecord semantics are independent of concrete in-memory object
+       representation and serialization format.
+
+
+===============================================================================
+02. COMMON RECORD CONCEPTS
+===============================================================================
+
+02.01. Every TraceRecord contains concepts representing:
+       - record identity
+       - trace producer identity
+       - producer-local sequence
+       - wall-clock timestamp
+       - monotonic timestamp
+       - structural record kind
+       - semantic domain and type
+       - trace type definition identity
+       - presentation level
+       - human-readable message
+       - structured attributes
+       - explicit causal references, when present
+
+02.02. According to record kind and available context, a TraceRecord may also
+       contain:
+       - captured exception evidence
+       - span identity
+       - span-start record identity
+       - parent span identity
+       - span family
+       - structural origin
+       - terminal outcome
+       - duration
+       - Actant runtime correlation identifiers
+
+02.03. Concrete field names and surface syntax belong to interoperability or
+       implementation specifications. The concepts and invariants defined here
+       are platform design.
+
+
+===============================================================================
+03. RECORD IDENTITY AND PRODUCER ORDER
+===============================================================================
+
+03.01. Each TraceRecord has a stable identity unique within the trace evidence
+       identity domain.
+
+03.02. Each TraceRecord identifies the trace producer that created it.
+
+03.03. Each TraceRecord has a producer-local sequence value.
+
+03.04. For one trace producer, successfully created records have unique
+       sequence values in record creation order.
+
+03.05. Producer-local sequence is not publication order, destination arrival
+       order, persistence order, or wall-clock order.
+
+03.06. Sequence values from different trace producers are independent and are
+       not directly comparable as one global sequence.
+
+03.07. Consumers do not manufacture cross-producer ordering by comparing
+       independent producer sequence values.
+
+03.08. Producer identity plus sequence supports auditing producer-local record
+       continuity when the relevant evidence is available.
+
+03.09. Missing sequence values may indicate missing evidence, filtering,
+       partial selection, retention boundaries, or another cause. The gap alone
+       does not identify its cause.
+
+03.10. When records share one structural span and one trace producer, tooling
+       may select those span records and use producer-local sequence to recover
+       their producer-relative creation order even when unrelated producer
+       records occur between them.
+
+
+===============================================================================
+04. TIMESTAMPS
+===============================================================================
+
+04.01. A TraceRecord carries observed wall-clock timing evidence.
+
+04.02. A TraceRecord carries monotonic timing evidence from its applicable
+       monotonic clock domain.
+
+04.03. Timestamps are observational evidence and do not themselves define
+       causality.
+
+04.04. Monotonic timestamps from different clock domains are not assumed to be
+       directly comparable.
+
+04.05. Cross-producer timestamp comparison establishes ordering only when a
+       stronger contract explicitly establishes that the timestamps belong to a
+       shared comparable ordering domain.
+
+04.06. Span duration may be represented when it can be measured within a
+       compatible monotonic clock domain.
+
+
+===============================================================================
+05. RECORD KINDS
+===============================================================================
+
+05.01. The tracing substrate defines three structural record kinds:
+       - event
+       - spanStart
+       - spanEnd
+
+05.02. An event represents an occurrence that does not itself establish or
+       terminate a span lifecycle.
+
+05.03. A spanStart establishes a span.
+
+05.04. A spanEnd terminates a normally terminally-recorded span.
+
+05.05. Domain semantics are represented by trace types rather than by
+       proliferating structural record kinds.
+
+
+===============================================================================
+06. EVENT RECORDS
+===============================================================================
+
+06.01. An event may be structurally contained by a span or may exist without
+       structural span containment.
+
+06.02. A span-contained event identifies the span and its span-start record.
+
+06.03. A span-contained event does not claim an independent structural origin.
+
+06.04. An event without structural span containment records sufficient origin
+       evidence to identify why it begins outside a parent span according to
+       the applicable origin design.
+
+06.05. Structural containment does not assert that the containing span caused
+       the event.
+
+06.06. An event may carry explicit causal references when the emitter knows
+       causal information worth preserving explicitly.
+
+
+===============================================================================
+07. SPAN-START RECORDS
+===============================================================================
+
+07.01. A spanStart identifies its span and span family.
+
+07.02. A spanStart identifies itself as the start record for that span.
+
+07.03. A structurally nested spanStart identifies its parent span.
+
+07.04. Parent span identity expresses structural nesting, not causality.
+
+07.05. A structurally parentless spanStart carries structural-origin evidence
+       according to the applicable origin design.
+
+07.06. Structurally parentless span and designated trace root are not declared
+       synonymous by this document. Trace-root semantics remain OPEN pending
+       dedicated root-span design.
+
+
+===============================================================================
+08. SPAN-END RECORDS
+===============================================================================
+
+08.01. A spanEnd identifies its span, corresponding span-start record, span
+       family, and terminal outcome.
+
+08.02. A spanEnd may record duration.
+
+08.03. A spanEnd does not establish a new structural parent or independent
+       origin.
+
+08.04. One span has at most one valid terminal record.
+
+08.05. A spanEnd does not exist as valid complete span evidence without a
+       corresponding span start in the evidence universe from which it
+       originated.
+
+08.06. A partial retained or exported evidence set may contain a spanEnd whose
+       start is unavailable only when that incompleteness is represented
+       honestly.
+
+08.07. Tooling distinguishes malformed evidence from valid evidence whose
+       dependencies are absent from the currently available evidence set.
+
+08.08. When a missing structural dependency was knowingly removed by retention,
+       the available evidence distinguishes that known removal from an
+       unexplained unresolved dependency according to tracing-retention.txt.
+
+
+===============================================================================
+09. TRACE TYPE DEFINITIONS
+===============================================================================
+
+09.01. Each ordinary TraceRecord identifies the TraceTypeDefinition required
+       to interpret its semantic type.
+
+09.02. A TraceTypeDefinition is immutable semantic metadata.
+
+09.03. A TraceTypeDefinition is either an event definition or a span-family
+       definition.
+
+09.04. An event definition identifies the domain and event semantic name.
+
+09.05. A span-family definition identifies the domain, span-family semantic
+       name, generated start type, and generated terminal outcome types.
+
+09.06. TraceTypeDefinition identity is content-addressed from canonical
+       semantic definition content.
+
+09.07. Concrete canonical encoding and digest algorithm belong to an
+       interoperability or implementation specification unless standardized
+       across all Actant implementations.
+
+09.08. A consumer interprets a record using its exact identified definition
+       rather than guessing semantics from display text.
+
+
+===============================================================================
+10. DOMAIN EVIDENCE
+===============================================================================
+
+10.01. domain identifies the semantic subsystem or subject area of the trace
+       type.
+
+10.02. type identifies the semantic event or generated span type represented
+       by the record.
+
+10.03. level classifies presentation severity and does not by itself define
+       runtime correctness or authority.
+
+10.04. message provides human-readable evidence presentation.
+
+10.05. Machine interpretation does not rely on message text when structured
+       semantic fields provide the meaning.
+
+10.06. attributes carry structured event-specific evidence.
+
+10.07. The owning domain defines the meaning and required presence of its
+       domain-specific attributes.
+
+10.08. Domain evidence may include stable identifiers known by the emitter.
+
+10.09. Attribute representation remains portable and immutable after record
+       creation.
+
+
+===============================================================================
+11. EXPLICIT CAUSAL REFERENCES
+===============================================================================
+
+11.01. A TraceRecord may contain zero or more explicit causal references.
+
+11.02. An explicit causal reference is a producer-emitted assertion that the
+       referenced evidence or identified fact contributed causally to why the
+       current record represents the event, decision, or outcome that it does.
+
+11.03. Explicit causal references are not a generic relationship container.
+
+11.04. Logical association, structural containment, correlation, and causality
+       remain distinct concepts.
+
+11.05. A causal reference identifies the semantic identity category and stable
+       exact identity of its target.
+
+11.06. Reference identifiers are not restricted to one universal identifier
+       encoding.
+
+11.07. Duplicate normalized causal references are not retained as separate
+       assertions merely because they were supplied more than once.
+
+11.08. Reference order is preserved when available but does not imply causal
+       precedence unless an owning semantic definition explicitly gives that
+       order meaning.
+
+11.09. A causal reference may target evidence or a stable identity not present
+       in the consumer's currently available evidence set.
+
+11.10. Absence of a referenced target does not authorize a consumer to discard
+       the reference or fabricate replacement evidence.
+
+11.11. When the target was knowingly removed or became unavailable through a
+       known retention/storage condition, that condition remains
+       distinguishable from an unexplained unresolved reference according to
+       tracing-retention.txt.
+
+11.12. An unexplained unresolved reference means the available evidence cannot
+       account for the referenced target. It is not silently interpreted as
+       ordinary retention.
+
+11.13. Ordinary local explanation need not be duplicated with an explicit
+       causal reference when span structure, same-producer ordering, outcome,
+       and domain evidence already express the relevant history adequately.
+
+11.14. Explicit causal references are appropriate when the emitter knows a
+       causal relationship that ordinary local structure and ordering do not
+       adequately preserve, including causal links across independently ordered
+       evidence.
+
+11.15. The tracing record model does not currently define generic relatedTo
+       references.
+
+
+===============================================================================
+12. STRUCTURE, ORDER, AND CAUSALITY
+===============================================================================
+
+12.01. Structural relationships answer where evidence belongs.
+
+12.02. Producer sequence answers creation order within one trace producer.
+
+12.03. Explicit causal references answer causal knowledge deliberately asserted
+       by the emitter.
+
+12.04. These relationship forms are not interchangeable.
+
+12.05. A child span is not asserted to have been caused by its parent merely
+       because it is structurally nested beneath that parent.
+
+12.06. An error immediately preceding a failed span termination in the same
+       span and same producer may provide strong local explanatory evidence,
+       but the TraceRecord does not retroactively gain an explicit causal
+       reference unless one was emitted.
+
+12.07. Tooling may distinguish:
+       - producer-emitted explicit causality
+       - causality inferred from local structure and order
+       - causality derived from later analysis or pattern knowledge
+
+12.08. Derived causal interpretation does not mutate the original TraceRecord.
+
+
+===============================================================================
+13. ORIGIN
+===============================================================================
+
+13.01. origin is producer-emitted structural evidence explaining why a record
+       or structurally parentless span begins without parent-span containment
+       in its applicable tracing context.
+
+13.02. origin does not prove that no external, domain, or causal predecessor
+       exists.
+
+13.03. Origin is not a substitute for a domain trace type or explicit causal
+       evidence.
+
+13.04. A record structurally contained by a span does not simultaneously claim
+       an independent structural origin.
+
+13.05. Concrete origin vocabulary and its extensibility remain subject to
+       further design.
+
+
+===============================================================================
+14. OUTCOMES
+===============================================================================
+
+14.01. outcome identifies the terminal semantic category of a spanEnd.
+
+14.02. Standard categories include completed, failed, errored, and cancelled.
+
+14.03. completed means the operation reached its intended successful terminal
+       state.
+
+14.04. failed means the operation reached a recognized unsuccessful terminal
+       state within its defined failure semantics.
+
+14.05. errored means an exceptional or otherwise unhandled condition prevented
+       the operation from resolving into an ordinary domain success or failure.
+
+14.06. cancelled means the operation was intentionally prevented from reaching
+       its ordinary terminal result by cancellation.
+
+14.07. Intermediate error records do not force an errored or failed terminal
+       outcome. A span may record handled errors and later complete.
+
+14.08. A span family may define additional generated outcomes.
+
+14.09. Outcome identity is machine-readable and does not depend on message
+       wording.
+
+14.10. Absence of a spanEnd from an available evidence set does not by itself
+       prove which terminal outcome occurred.
+
+
+===============================================================================
+15. RUNTIME CORRELATION
+===============================================================================
+
+15.01. TraceRecords may carry identifiers correlating evidence with Actant
+       runtime identity domains.
+
+15.02. Correlation fields are optional when the corresponding identity is not
+       known or not applicable at emission time.
+
+15.03. Correlation is evidence linkage, not structural containment, causality,
+       or authority.
+
+15.04. Additional correlation identities may be added through explicit design
+       evolution.
+
+
+===============================================================================
+16. EXCEPTION EVIDENCE
+===============================================================================
+
+16.01. A TraceRecord may carry immutable captured exception evidence when an
+       exception or equivalent failure object contributes diagnostic evidence
+       to the record.
+
+16.02. Captured exception evidence is not a live implementation exception
+       object and does not require that object to remain alive.
+
+16.03. Language-specific exception capture mechanics belong to implementation
+       specifications.
+
+16.04. Cross-language representation preserves semantic diagnostic content
+       without requiring identical host-language exception models.
+
+
+===============================================================================
+17. EMITTED EVIDENCE IDENTITY
+===============================================================================
+
+17.01. A tracing emission surface provides a means for the emitter to retain
+       the stable identity of successfully created evidence when the emitter
+       needs to reference that evidence later.
+
+17.02. The design does not require every emitter to retain every emitted record
+       or identity.
+
+17.03. Access to emitted evidence identity enables explicit relationships
+       without requiring the emitter to predict identities, search trace
+       storage, or infer relationships from timestamps.
+
+17.04. The concrete API representation returned to an emitter is an
+       implementation concern.
+
+
+===============================================================================
+18. PORTABILITY AND IMMUTABILITY
+===============================================================================
+
+18.01. TraceRecords and TraceTypeDefinitions are designed to cross process,
+       language, storage, and tooling boundaries without changing semantic
+       meaning.
+
+18.02. Once a TraceRecord is created, its evidence fields do not change.
+
+18.03. Once a TraceTypeDefinition identity is established, semantic content
+       associated with that identity does not change.
+
+18.04. Derived annotations belong to tooling state or derived artifacts and
+       remain distinguishable from producer-emitted evidence.
+
+
+===============================================================================
+19. OPEN DESIGN
+===============================================================================
+
+19.01. OPEN:
+       - cross-producer structural participation in one span
+       - synchronized-producer ordering representation
+       - exact portable field surface and interoperability encoding
+       - complete origin vocabulary
+       - designated trace-root representation
+
+
+===============================================================================
+20. LOCKED MIGRATION DECISIONS
+===============================================================================
+
+20.01. LOCKED:
+       - TraceRecord is the fundamental emitted evidence unit
+       - records are immutable after creation
+       - producer identity and producer-local creation order are explicit
+       - independent producer sequences are not a global order
+       - timestamps are observational and do not themselves define causality
+       - event, spanStart, and spanEnd are structural record kinds
+       - span structure and causality are semantically distinct
+       - explicit causal references contain causal assertions, not generic
+         logical relationships
+       - generic relatedTo is not part of the current record model
+       - ordinary local explanation need not redundantly assert causedBy
+       - emitted evidence identity can be retained for later explicit reference
+       - known removal of referenced evidence remains distinguishable from an
+         unexplained unresolved reference
+       - tooling-derived causality remains distinct from emitted causality
+       - handled errors do not determine terminal span outcome
+       - graph materialization is a tooling concern
+
+20.02. The legacy generic parentEventIds and generic reason representations are
+       not part of this record model.
+
+
+===============================================================================
+END OF DA-03 - TRACE RECORDS
+===============================================================================
