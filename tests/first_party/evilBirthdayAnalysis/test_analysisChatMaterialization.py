@@ -482,4 +482,4 @@ def test_chatPresentation_validation_is_unchanged():
     with pytest.raises(TypeError, match="includeChat"):
         analysis._chatPresentation({"includeChat": 1})
     with pytest.raises(ValueError, match="chatLayout"):
-        analysis._chatPresentation({"chatLayout": "mixed")
+        analysis._chatPresentation({"chatLayout": "mixed"})
