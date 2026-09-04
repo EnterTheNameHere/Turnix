@@ -399,6 +399,7 @@ def test_chatQueryItems_use_interpreted_body_but_keep_raw_message_as_source_evid
     assert items[1].metadata["sourceUsername"] is None
     assert items[1].metadata["source"]["rawMessage"] == "a future source form we do not understand"
 
+
 def test_buildQuery_preserves_unknown_chat_as_unclassified_evidence():
     ctx = _BuildQueryCtx()
     items = _queryItems()
@@ -423,7 +424,6 @@ def test_buildQuery_preserves_unknown_chat_as_unclassified_evidence():
 
     assert "[00:00:47 CHAT [unclassified]] a future source form we do not understand" in query["payload"]
     assert ctx.capabilities.identityPayload["authors"] == ["viewer_name", "vedal987"]
-
 
 
 def test_buildQuery_can_exclude_chat_while_still_using_chat_authors_for_identity_sanitization():
