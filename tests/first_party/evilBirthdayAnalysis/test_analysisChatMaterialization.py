@@ -460,20 +460,114 @@ def test_buildQuery_separate_layout_renders_sanitized_chat():
     assert query["metadata"]["identitySanitized"] is True
 
 
-def test_buildQuery_interleaved_layout_orders_chat_and_transcript_by_stream_time():
+def test_buildQuery_interleaved_layout_groups_evidence_into_second_buckets():
     ctx = _BuildQueryCtx()
     query = analysis._buildQuery(ctx, _queryPayload(includeChat=True, chatLayout="interleaved"))
 
     expectedEvidence = (
         "CHRONOLOGICAL EVIDENCE\n"
-        "[00:00:45 EVIL] first\n"
-        "[00:00:45 CHAT anonymized_1] GIGAEVIL\n"
-        "[00:00:46 CHAT Vedal] replying to anonymized_1\n"
-        "[00:00:48 EVIL] anonymized_1 mentioned Vedal"
+        "[00:00:45]\n"
+        "EVIL: first\n"
+        "CHAT anonymized_1: GIGAEVIL\n\n"
+        "[00:00:46]\n"
+        "CHAT Vedal: replying to anonymized_1\n\n"
+        "[00:00:48]\n"
+        "EVIL: anonymized_1 mentioned Vedal"
     )
     assert expectedEvidence in query["payload"]
-    assert "TRANSCRIPT 00:00:45" not in query["payload"]
-    assert "CHAT 00:00:45" not in query["payload"]
+    assert "[00:00:45 EVIL]" not in query["payload"]
+    assert "[00:00:45 CHAT" not in query["payload"]
+
+
+def test_buildQuery_interleaved_layout_collapses_same_second_duplicate_user_messages():
+    ctx = _BuildQueryCtx()
+    items = _queryItems()
+    items.extend(
+        [
+            QueryItem(
+                itemId="chat:22",
+                kind="chat",
+                content="GIGAEVIL",
+                metadata={
+                    "streamStartSeconds": 45.0,
+                    "lineNumber": 22,
+                    "username": "other_viewer",
+                    "sourceUsername": "other_viewer",
+                    "analysis": {"kind": "userMessage", "streamTime": "00:00:45"},
+                },
+            ),
+            QueryItem(
+                itemId="chat:23",
+                kind="chat",
+                content="GIGAEVIL",
+                metadata={
+                    "streamStartSeconds": 45.0,
+                    "lineNumber": 23,
+                    "username": "third_viewer",
+                    "sourceUsername": "third_viewer",
+                    "analysis": {"kind": "userMessage", "streamTime": "00:00:45"},
+                },
+            ),
+        ]
+    )
+    items[5] = QueryItem(
+        itemId="chat:20",
+        kind="chat",
+        content="GIGAEVIL",
+        metadata={
+            "streamStartSeconds": 45.0,
+            "lineNumber": 20,
+            "username": "viewer_name",
+            "sourceUsername": "viewer_name",
+            "analysis": {"kind": "userMessage", "streamTime": "00:00:45"},
+        },
+    )
+    payload = _queryPayload(includeChat=True, chatLayout="interleaved")
+    payload["queryItems"] = [item.snapshot() for item in items]
+
+    query = analysis._buildQuery(ctx, payload)
+
+    assert "CHAT: GIGAEVIL ×3 [3 users]" in query["payload"]
+    assert "CHAT anonymized_1: GIGAEVIL" not in query["payload"]
+
+
+def test_interleaved_chat_presentation_uses_semantic_repeat_spans_without_mutating_query_content():
+    item = QueryItem(
+        itemId="chat:30",
+        kind="chat",
+        content="bring gun bring gun bring gun",
+        metadata={
+            "streamStartSeconds": 49.0,
+            "lineNumber": 30,
+            "username": "viewer_name",
+            "sourceUsername": "viewer_name",
+            "analysis": {
+                "kind": "userMessage",
+                "streamTime": "00:00:49",
+                "spans": [
+                    {
+                        "kind": "repeat",
+                        "count": 3,
+                        "spans": [{"kind": "text", "text": "bring gun"}],
+                    }
+                ],
+            },
+        },
+    )
+
+    sections = analysis._evidenceSections(
+        transcriptItems=[],
+        chatItems=[item],
+        includeChat=True,
+        chatLayout="interleaved",
+    )
+
+    assert sections == [
+        "CHRONOLOGICAL EVIDENCE\n"
+        "[00:00:49]\n"
+        "CHAT viewer_name: (bring gun) ×3"
+    ]
+    assert item.content == "bring gun bring gun bring gun"
 
 
 def test_chatPresentation_validation_is_unchanged():
