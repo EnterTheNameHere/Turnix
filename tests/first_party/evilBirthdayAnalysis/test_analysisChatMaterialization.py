@@ -372,7 +372,8 @@ def test_buildQuery_can_exclude_chat_while_still_using_chat_authors_for_identity
     assert "GIGAEVIL" not in query["payload"]
     assert "viewer_name" not in query["payload"]
     assert "vedal987" not in query["payload"]
-    assert "anonymized_1 mentioned Vedal" in query["payload"]
+    assert "[00:00:45 EVIL] first" in query["payload"]
+    assert "[00:00:48 EVIL] anonymized_1 mentioned Vedal" in query["payload"]
     assert query["metadata"]["chatIncluded"] is False
 
 
@@ -381,8 +382,9 @@ def test_buildQuery_separate_layout_renders_sanitized_chat():
     query = analysis._buildQuery(ctx, _queryPayload(includeChat=True, chatLayout="separate"))
 
     assert "CHAT WINDOW" in query["payload"]
-    assert "00:00:45 anonymized_1: GIGAEVIL" in query["payload"]
-    assert "00:00:46 Vedal: replying to anonymized_1" in query["payload"]
+    assert "[00:00:45 EVIL] first" in query["payload"]
+    assert "[00:00:45 CHAT anonymized_1] GIGAEVIL" in query["payload"]
+    assert "[00:00:46 CHAT Vedal] replying to anonymized_1" in query["payload"]
     assert "viewer_name" not in query["payload"]
     assert "vedal987" not in query["payload"]
     assert query["metadata"]["identitySanitized"] is True
@@ -393,9 +395,9 @@ def test_buildQuery_interleaved_layout_orders_chat_and_transcript_by_stream_time
     query = analysis._buildQuery(ctx, _queryPayload(includeChat=True, chatLayout="interleaved"))
 
     payload = query["payload"]
-    assert payload.index("TRANSCRIPT 00:00:45 first") < payload.index("CHAT 00:00:45 anonymized_1: GIGAEVIL")
-    assert payload.index("CHAT 00:00:45 anonymized_1: GIGAEVIL") < payload.index("CHAT 00:00:46 Vedal")
-    assert payload.index("CHAT 00:00:46 Vedal") < payload.index("TRANSCRIPT 00:00:48 anonymized_1 mentioned Vedal")
+    assert payload.index("[00:00:45 EVIL] first") < payload.index("[00:00:45 CHAT anonymized_1] GIGAEVIL")
+    assert payload.index("[00:00:45 CHAT anonymized_1] GIGAEVIL") < payload.index("[00:00:46 CHAT Vedal] replying to anonymized_1")
+    assert payload.index("[00:00:46 CHAT Vedal] replying to anonymized_1") < payload.index("[00:00:48 EVIL] anonymized_1 mentioned Vedal")
 
 
 def test_chatPresentation_validation_is_unchanged():
