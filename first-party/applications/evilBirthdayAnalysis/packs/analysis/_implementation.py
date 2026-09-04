@@ -211,10 +211,11 @@ def _transcriptQueryItems(
             QueryItem(
                 itemId=itemId,
                 kind="transcript",
-                content=f"{streamTime} {text}",
+                content=text,
                 metadata={
                     "streamStartSeconds": streamStartSeconds,
                     "streamEndSeconds": streamEndSeconds,
+                    "streamTime": streamTime,
                     "segmentIndex": segmentIndex,
                     "source": {
                         "sourcePath": transcript.get("sourcePath"),
@@ -373,7 +374,11 @@ def _orderedChat(items: list[QueryItem]) -> list[QueryItem]:
 
 def _sanitizePromptSections(ctx, sections: list[str], chatItems: list[QueryItem]) -> tuple[list[str], dict[str, int]]:
     orderedChat = _orderedChat(chatItems)
-    authors = [_chatAuthor(item) for item in orderedChat]
+    authors = [
+        sourceAuthor
+        for item in orderedChat
+        if type(sourceAuthor := item.metadata.get("sourceUsername")) is str
+    ]
     resolution = ctx.capabilities.call(
         "evilAnalysis.identity@1",
         {"authors": authors, "texts": sections},
@@ -406,13 +411,12 @@ def _chatLine(item: QueryItem) -> str:
 
 def _transcriptLine(item: QueryItem) -> str:
     """Renders one Evil transcript item in the model-facing evidence format."""
-    streamTime, separator, text = item.content.partition(" ")
-    if not separator or not streamTime or not text:
+    streamTime = item.metadata.get("streamTime")
+    if type(streamTime) is not str or not streamTime:
         raise RuntimeError(
-            f"Transcript QueryItem {item.itemId!r} does not contain its expected "
-            "'HH:MM:SS text' evidence representation."
+            f"Transcript QueryItem {item.itemId!r} has no non-empty streamTime metadata."
         )
-    return f"[{streamTime} EVIL] {text}"
+    return f"[{streamTime} EVIL] {item.content}"
 
 
 def _timedEvidenceKey(item: QueryItem) -> tuple[float, int, int]:
