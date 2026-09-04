@@ -589,8 +589,13 @@ def _renderPrompt(
     presentedChatItems: list[QueryItem],
     includeChat: bool,
     chatLayout: str,
+    evidenceNotice: str | None = None,
 ) -> tuple[str, dict[str, int]]:
     sections = _fixedSections(byKind)
+    if evidenceNotice is not None:
+        if type(evidenceNotice) is not str or not evidenceNotice:
+            raise ValueError("Model-facing evidence notice must be a non-empty string when supplied.")
+        sections.append(f"EVIDENCE NOTICE\n{evidenceNotice}")
     sections.extend(
         _evidenceSections(
             transcriptItems=byKind.get("transcript", []),
@@ -808,6 +813,12 @@ def _buildQuery(ctx, payload):
             chatLayout=chatLayout,
         )
 
+    evidenceNotice = None
+    if chatBudget is not None:
+        notice = chatBudget.get("promptNotice")
+        if type(notice) is str and notice:
+            evidenceNotice = notice
+
     text, identityStatistics = _renderPrompt(
         ctx,
         byKind=byKind,
@@ -815,6 +826,7 @@ def _buildQuery(ctx, payload):
         presentedChatItems=presentedChat,
         includeChat=includeChat,
         chatLayout=chatLayout,
+        evidenceNotice=evidenceNotice,
     )
 
     metadata: dict[str, object] = {
