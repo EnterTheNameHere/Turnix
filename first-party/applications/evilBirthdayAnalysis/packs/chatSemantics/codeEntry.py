@@ -207,6 +207,34 @@ def _collapseWholeSequence(spans: list[dict[str, object]]) -> list[dict[str, obj
     return spans
 
 
+def _collapseRepeatedTextSequence(message: str, spans: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Collapses an exact whole-message repeated text token sequence."""
+    if len(spans) != 1 or spans[0].get("kind") != "text":
+        return spans
+
+    tokens = message.split()
+    count = len(tokens)
+    if count < 2:
+        return spans
+    for unitLength in range(1, count // 2 + 1):
+        if count % unitLength:
+            continue
+        repetitions = count // unitLength
+        unit = tokens[:unitLength]
+        if repetitions > 1 and all(
+            tokens[offset : offset + unitLength] == unit
+            for offset in range(0, count, unitLength)
+        ):
+            return [
+                {
+                    "kind": "repeat",
+                    "count": repetitions,
+                    "spans": [{"kind": "text", "text": " ".join(unit)}],
+                }
+            ]
+    return spans
+
+
 def _occurrenceCount(tokens: list[str], nextIndex: int) -> tuple[int, int]:
     if nextIndex >= len(tokens):
         return 1, nextIndex
@@ -266,7 +294,8 @@ def _lexMessage(message: str, emotes: dict[str, dict[str, object]], composites: 
         _appendSpan(spans, {"kind": "text", "text": token})
         index += 1
 
-    return _collapseWholeSequence(spans)
+    spans = _collapseWholeSequence(spans)
+    return _collapseRepeatedTextSequence(message, spans)
 
 
 def _renderSpan(span: dict[str, object]) -> str:
