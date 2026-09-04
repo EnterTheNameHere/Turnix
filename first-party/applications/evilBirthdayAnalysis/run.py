@@ -88,6 +88,21 @@ def main() -> int:
                 for entry in results:
                     if not isinstance(entry, dict):
                         continue
+                    finalized = entry.get("result")
+                    if isinstance(finalized, dict):
+                        inputEvidence = finalized.get("input")
+                        if isinstance(inputEvidence, dict):
+                            metadata = inputEvidence.get("metadata")
+                            if isinstance(metadata, dict):
+                                chatBudget = metadata.get("chatBudget")
+                                if isinstance(chatBudget, dict):
+                                    warnings = chatBudget.get("warnings", [])
+                                    if isinstance(warnings, list):
+                                        for warning in warnings:
+                                            if type(warning) is str and warning:
+                                                sys.stdout.write(
+                                                    f"[WARNING window {entry.get('windowIndex')}] {warning}\n"
+                                                )
                     saved = entry.get("saved")
                     if isinstance(saved, dict) and saved.get("path"):
                         sys.stdout.write(f"[{entry.get('windowIndex')}] {saved['path']}\n")
