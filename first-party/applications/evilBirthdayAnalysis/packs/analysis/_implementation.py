@@ -400,7 +400,19 @@ def _sanitizePromptSections(ctx, sections: list[str], chatItems: list[QueryItem]
 
 
 def _chatLine(item: QueryItem) -> str:
-    return f"{_chatStreamTime(item)} {_chatAuthor(item)}: {item.content}"
+    """Renders one chat item in the model-facing evidence format."""
+    return f"[{_chatStreamTime(item)} CHAT {_chatAuthor(item)}] {item.content}"
+
+
+def _transcriptLine(item: QueryItem) -> str:
+    """Renders one Evil transcript item in the model-facing evidence format."""
+    streamTime, separator, text = item.content.partition(" ")
+    if not separator or not streamTime or not text:
+        raise RuntimeError(
+            f"Transcript QueryItem {item.itemId!r} does not contain its expected "
+            "'HH:MM:SS text' evidence representation."
+        )
+    return f"[{streamTime} EVIL] {text}"
 
 
 def _timedEvidenceKey(item: QueryItem) -> tuple[float, int, int]:
@@ -427,12 +439,12 @@ def _evidenceSections(
     if not includeChat:
         if not transcriptItems:
             return []
-        return ["TRANSCRIPT WINDOW\n" + "\n".join(item.content for item in transcriptItems)]
+        return ["TRANSCRIPT WINDOW\n" + "\n".join(_transcriptLine(item) for item in transcriptItems)]
 
     if chatLayout == "separate":
         sections: list[str] = []
         if transcriptItems:
-            sections.append("TRANSCRIPT WINDOW\n" + "\n".join(item.content for item in transcriptItems))
+            sections.append("TRANSCRIPT WINDOW\n" + "\n".join(_transcriptLine(item) for item in transcriptItems))
         if chatItems:
             sections.append("CHAT WINDOW\n" + "\n".join(_chatLine(item) for item in chatItems))
         return sections
@@ -442,9 +454,9 @@ def _evidenceSections(
         lines: list[str] = []
         for item in timedItems:
             if item.kind == "transcript":
-                lines.append(f"TRANSCRIPT {item.content}")
+                lines.append(_transcriptLine(item))
             else:
-                lines.append(f"CHAT {_chatLine(item)}")
+                lines.append(_chatLine(item))
         return [] if not lines else ["CHRONOLOGICAL EVIDENCE\n" + "\n".join(lines)]
 
     raise RuntimeError(f"Unsupported chat layout after validation: {chatLayout!r}.")
