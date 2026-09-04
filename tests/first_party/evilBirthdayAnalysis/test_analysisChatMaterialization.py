@@ -326,6 +326,32 @@ def test_preparedChatSnapshot_omits_raw_records_and_counts_only_requested_window
     )
 
 
+def test_transcriptQueryItems_keep_spoken_text_separate_from_stream_time():
+    transcript = {
+        "sourcePath": "data/transcript.json",
+        "streamStartVideoSeconds": 533.0,
+        "segments": [
+            {
+                "segmentIndex": 7,
+                "streamStartTime": "00:00:45",
+                "words": [
+                    {"word": "first", "start": 45.25, "end": 45.50},
+                    {"word": "line", "start": 45.55, "end": 46.00},
+                ],
+            }
+        ],
+    }
+
+    items = analysis._transcriptQueryItems(transcript, previous={})
+
+    assert len(items) == 1
+    assert items[0].content == "first line"
+    assert items[0].metadata["streamStartSeconds"] == 45.25
+    assert items[0].metadata["streamEndSeconds"] == 46.0
+    assert items[0].metadata["streamTime"] == "00:00:45"
+    assert items[0].metadata["segmentIndex"] == 7
+
+
 def test_chatQueryItems_use_interpreted_body_but_keep_raw_message_as_source_evidence():
     interpreted = {
         "sourcePath": "data/chat.txt",
