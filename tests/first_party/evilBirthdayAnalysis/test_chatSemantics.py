@@ -186,6 +186,33 @@ def test_interpret_dynamically_recognizes_user_shape_and_keeps_raw_message():
     assert result["text"] == "00:00:05 viewer: GIGAEVIL x2"
 
 
+def test_interpret_collapses_exact_repeated_plain_text_sequence():
+    result = chatSemantics._interpret(
+        _Ctx(),
+        {
+            "records": [
+                _raw(
+                    1,
+                    "viewer: bring gun bring gun bring gun",
+                    streamTimeSeconds=6.0,
+                    streamTime="00:00:06",
+                )
+            ]
+        },
+    )
+
+    record = result["records"][0]
+    assert record["body"] == "bring gun bring gun bring gun"
+    assert record["analysis"]["spans"] == [
+        {
+            "kind": "repeat",
+            "count": 3,
+            "spans": [{"kind": "text", "text": "bring gun"}],
+        }
+    ]
+    assert result["text"] == "00:00:06 viewer: (bring gun) x3"
+
+
 def test_interpret_preserves_unknown_message_without_guessing_username_or_body():
     rawMessage = "A moderation or information form not understood by this CodeEntry"
     result = chatSemantics._interpret(
