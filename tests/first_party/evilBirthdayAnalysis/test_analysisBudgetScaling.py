@@ -144,7 +144,16 @@ def test_optional_budget_uses_logarithmic_exact_measurements():
     assert presented[0] is current
     assert evidence["optionalTruncated"] is True
     assert evidence["optionalIncludedItemCount"] < 256
+    assert evidence["promptNotice"] == analysis._CHAT_BUDGET_PROMPT_NOTICE
+    assert evidence["warnings"] == [
+        (
+            "Chat budget truncation: "
+            f"included {evidence['optionalIncludedItemCount']} of 256 optional older chat messages; "
+            f"omitted {256 - evidence['optionalIncludedItemCount']} lower-priority messages. "
+            "Current-window chat remains complete."
+        )
+    ]
     assert evidence["tokenMeasurementCount"] == ctx.capabilities.tokenMeasurements
-    # base + mandatory + full + binary search + one cached/final lookup should
-    # stay comfortably below a linear scan of the 256 candidates.
-    assert ctx.capabilities.tokenMeasurements <= 16
+    # Truncation causes a second logarithmic pass because the model-facing
+    # notice itself is measured inside the final token budget.
+    assert ctx.capabilities.tokenMeasurements <= 28
