@@ -267,6 +267,49 @@ def test_interpret_known_fossabot_automation_is_retained_but_suppressed():
     assert result["text"] == ""
 
 
+def test_interpret_command_and_confirmed_composite_behavior_remains_explicit():
+    result = chatSemantics._interpret(
+        _Ctx(),
+        {
+            "records": [
+                _raw(
+                    1,
+                    "viewer: !clip now",
+                    streamTimeSeconds=11.0,
+                    streamTime="00:00:11",
+                ),
+                _raw(
+                    2,
+                    "viewer: ReallyGunPull Tutel ReallyGunPull Tutel",
+                    streamTimeSeconds=12.0,
+                    streamTime="00:00:12",
+                ),
+            ]
+        },
+    )
+
+    command = result["records"][0]["analysis"]["spans"]
+    composite = result["records"][1]["analysis"]["spans"]
+
+    assert command == [{"kind": "command", "command": "clip", "arguments": ["now"]}]
+    assert composite == [
+        {
+            "kind": "composite",
+            "tokens": ["ReallyGunPull", "Tutel"],
+            "count": 2,
+            "metadata": {
+                "semanticClass": "negative",
+                "target": "Vedal",
+                "classificationSource": "userDefined",
+            },
+        }
+    ]
+    assert result["text"].splitlines() == [
+        "00:00:11 viewer: !clip now",
+        "00:00:12 viewer: ReallyGunPull Tutel x2",
+    ]
+
+
 def test_interpret_unknown_fossabot_message_remains_user_message():
     result = chatSemantics._interpret(
         _Ctx(),
