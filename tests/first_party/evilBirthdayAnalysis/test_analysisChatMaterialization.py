@@ -25,12 +25,12 @@ _SPEC.loader.exec_module(analysis)
 
 class _MaterializationCapabilities:
     def __init__(self):
-        self.calls: list[tuple[str, dict[str, object]]] = []
+        self.rawChatCalls: list[dict[str, object]] = []
+        self.interpretCalls: list[dict[str, object]] = []
 
     def call(self, capabilityId, payload):
-        self.calls.append((capabilityId, payload))
-
         if capabilityId == "evilAnalysis.chat@1":
+            self.rawChatCalls.append(payload)
             startVideo = payload["videoStartSeconds"]
             endVideo = payload["videoEndSeconds"]
             streamStart = startVideo - 533
@@ -79,6 +79,7 @@ class _MaterializationCapabilities:
             }
 
         if capabilityId == "evilAnalysis.chatInterpret@1":
+            self.interpretCalls.append(payload)
             rawRecords = payload["records"]
             records = []
             for rawRecord in rawRecords:
@@ -272,16 +273,15 @@ def test_interpretedChat_uses_raw_capability_with_semantic_lookback_then_semanti
         {"videoStartSeconds": 533, "videoEndSeconds": 1133},
     )
 
-    assert ctx.capabilities.calls[0] == (
-        "evilAnalysis.chat@1",
+    assert ctx.capabilities.rawChatCalls == [
         {
             "videoStartSeconds": 533,
             "videoEndSeconds": 1133,
             "lookbackSeconds": analysis._CHAT_SEMANTIC_LOOKBACK_SECONDS,
-        },
-    )
-    assert ctx.capabilities.calls[1][0] == "evilAnalysis.chatInterpret@1"
-    assert ctx.capabilities.calls[1][1]["records"] is rawChat["records"]
+        }
+    ]
+    assert len(ctx.capabilities.interpretCalls) == 1
+    assert ctx.capabilities.interpretCalls[0]["records"] is rawChat["records"]
     assert interpreted["sourcePath"] == "data/chat.txt"
     assert interpreted["text"] == "00:00:00 viewer: hello"
 
@@ -304,6 +304,12 @@ def test_preparedChatSnapshot_omits_raw_records_and_counts_only_requested_window
     assert snapshot["statistics"]["includedRecordCount"] == 3
     assert snapshot["statistics"]["suppressedRecordCount"] == 3
     assert snapshot["statistics"]["renderedLineCount"] == 3
+    assert len(ctx.capabilities.rawChatCalls) == 3
+    assert len(ctx.capabilities.interpretCalls) == 3
+    assert all(
+        call["lookbackSeconds"] == analysis._CHAT_SEMANTIC_LOOKBACK_SECONDS
+        for call in ctx.capabilities.rawChatCalls
+    )
     assert all(
         chunk["metadata"]["lookbackSeconds"] == analysis._CHAT_SEMANTIC_LOOKBACK_SECONDS
         for chunk in snapshot["chunks"]
@@ -350,10 +356,12 @@ def test_chatQueryItems_use_interpreted_body_but_keep_raw_message_as_source_evid
     assert len(items) == 2
     assert items[0].content == "GIGAEVIL"
     assert items[0].metadata["username"] == "viewer_name"
+    assert items[0].metadata["sourceUsername"] == "viewer_name"
     assert items[0].metadata["source"]["rawMessage"] == "viewer_name: GIGAEVIL"
     assert items[1].content == "a future source form we do not understand"
     assert items[1].metadata["username"] == "[unclassified]"
     assert items[1].metadata["sourceUsername"] is None
+    assert items[1].metadata["source"]["rawMessage"] == "a future source form we do not understand"
 
 
 def test_buildQuery_can_exclude_chat_while_still_using_chat_authors_for_identity_sanitization():
