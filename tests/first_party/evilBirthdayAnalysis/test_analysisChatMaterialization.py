@@ -180,14 +180,22 @@ def _queryItems() -> list[QueryItem]:
         QueryItem(
             itemId="t1",
             kind="transcript",
-            content="00:00:45 first",
-            metadata={"streamStartSeconds": 45.0, "segmentIndex": 1},
+            content="first",
+            metadata={
+                "streamStartSeconds": 45.0,
+                "streamTime": "00:00:45",
+                "segmentIndex": 1,
+            },
         ),
         QueryItem(
             itemId="t2",
             kind="transcript",
-            content="00:00:48 viewer_name mentioned vedal987",
-            metadata={"streamStartSeconds": 48.0, "segmentIndex": 2},
+            content="viewer_name mentioned vedal987",
+            metadata={
+                "streamStartSeconds": 48.0,
+                "streamTime": "00:00:48",
+                "segmentIndex": 2,
+            },
         ),
         QueryItem(
             itemId="chat:20",
@@ -197,6 +205,7 @@ def _queryItems() -> list[QueryItem]:
                 "streamStartSeconds": 45.0,
                 "lineNumber": 20,
                 "username": "viewer_name",
+                "sourceUsername": "viewer_name",
                 "analysis": {"streamTime": "00:00:45"},
             },
         ),
@@ -208,6 +217,7 @@ def _queryItems() -> list[QueryItem]:
                 "streamStartSeconds": 46.0,
                 "lineNumber": 21,
                 "username": "vedal987",
+                "sourceUsername": "vedal987",
                 "analysis": {"streamTime": "00:00:46"},
             },
         ),
@@ -363,6 +373,32 @@ def test_chatQueryItems_use_interpreted_body_but_keep_raw_message_as_source_evid
     assert items[1].metadata["sourceUsername"] is None
     assert items[1].metadata["source"]["rawMessage"] == "a future source form we do not understand"
 
+def test_buildQuery_preserves_unknown_chat_as_unclassified_evidence():
+    ctx = _BuildQueryCtx()
+    items = _queryItems()
+    items.append(
+        QueryItem(
+            itemId="chat:22",
+            kind="chat",
+            content="a future source form we do not understand",
+            metadata={
+                "streamStartSeconds": 47.0,
+                "lineNumber": 22,
+                "username": "[unclassified]",
+                "sourceUsername": None,
+                "analysis": {"streamTime": "00:00:47"},
+            },
+        )
+    )
+    payload = _queryPayload(includeChat=True, chatLayout="interleaved")
+    payload["queryItems"] = [item.snapshot() for item in items]
+
+    query = analysis._buildQuery(ctx, payload)
+
+    assert "[00:00:47 CHAT [unclassified]] a future source form we do not understand" in query["payload"]
+    assert ctx.capabilities.identityPayload["authors"] == ["viewer_name", "vedal987"]
+
+
 
 def test_buildQuery_can_exclude_chat_while_still_using_chat_authors_for_identity_sanitization():
     ctx = _BuildQueryCtx()
@@ -381,10 +417,18 @@ def test_buildQuery_separate_layout_renders_sanitized_chat():
     ctx = _BuildQueryCtx()
     query = analysis._buildQuery(ctx, _queryPayload(includeChat=True, chatLayout="separate"))
 
-    assert "CHAT WINDOW" in query["payload"]
-    assert "[00:00:45 EVIL] first" in query["payload"]
-    assert "[00:00:45 CHAT anonymized_1] GIGAEVIL" in query["payload"]
-    assert "[00:00:46 CHAT Vedal] replying to anonymized_1" in query["payload"]
+    expectedTranscript = (
+        "TRANSCRIPT WINDOW\n"
+        "[00:00:45 EVIL] first\n"
+        "[00:00:48 EVIL] anonymized_1 mentioned Vedal"
+    )
+    expectedChat = (
+        "CHAT WINDOW\n"
+        "[00:00:45 CHAT anonymized_1] GIGAEVIL\n"
+        "[00:00:46 CHAT Vedal] replying to anonymized_1"
+    )
+    assert expectedTranscript in query["payload"]
+    assert expectedChat in query["payload"]
     assert "viewer_name" not in query["payload"]
     assert "vedal987" not in query["payload"]
     assert query["metadata"]["identitySanitized"] is True
@@ -394,10 +438,16 @@ def test_buildQuery_interleaved_layout_orders_chat_and_transcript_by_stream_time
     ctx = _BuildQueryCtx()
     query = analysis._buildQuery(ctx, _queryPayload(includeChat=True, chatLayout="interleaved"))
 
-    payload = query["payload"]
-    assert payload.index("[00:00:45 EVIL] first") < payload.index("[00:00:45 CHAT anonymized_1] GIGAEVIL")
-    assert payload.index("[00:00:45 CHAT anonymized_1] GIGAEVIL") < payload.index("[00:00:46 CHAT Vedal] replying to anonymized_1")
-    assert payload.index("[00:00:46 CHAT Vedal] replying to anonymized_1") < payload.index("[00:00:48 EVIL] anonymized_1 mentioned Vedal")
+    expectedEvidence = (
+        "CHRONOLOGICAL EVIDENCE\n"
+        "[00:00:45 EVIL] first\n"
+        "[00:00:45 CHAT anonymized_1] GIGAEVIL\n"
+        "[00:00:46 CHAT Vedal] replying to anonymized_1\n"
+        "[00:00:48 EVIL] anonymized_1 mentioned Vedal"
+    )
+    assert expectedEvidence in query["payload"]
+    assert "TRANSCRIPT 00:00:45" not in query["payload"]
+    assert "CHAT 00:00:45" not in query["payload"]
 
 
 def test_chatPresentation_validation_is_unchanged():
