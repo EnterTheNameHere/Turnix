@@ -91,8 +91,12 @@ def test_optional_budget_uses_logarithmic_exact_measurements():
             QueryItem(
                 itemId="transcript",
                 kind="transcript",
-                content="00:00:01 transcript",
-                metadata={"streamStartSeconds": 1.0, "segmentIndex": 1},
+                content="transcript",
+                metadata={
+                    "streamStartSeconds": 1.0,
+                    "streamTime": "00:00:01",
+                    "segmentIndex": 1,
+                },
             )
         ],
         "chat": [current, *optional],
