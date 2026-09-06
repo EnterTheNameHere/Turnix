@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 10
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 11
 from __future__ import annotations
 
 import importlib.util
@@ -368,6 +368,7 @@ def _preparedChatChunk(ctx, chunk: dict[str, object]) -> dict[str, object]:
         "contextStreamStartSeconds",
         "contextStreamEndSeconds",
         "lookbackSeconds",
+        "lookaheadSeconds",
     )
     metadata = {key: _plain(rawChat[key]) for key in metadataKeys if key in rawChat}
     return {
