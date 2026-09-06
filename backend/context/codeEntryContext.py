@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 6
+# file: backend/context/codeEntryContext.py ; version: 7
 from __future__ import annotations
 
 from copy import deepcopy
@@ -86,7 +86,7 @@ class _MemoryTransactionFacade:
     be promoted into the Value System/CodeEntry design documents later.
     """
 
-    __slots__ = ("_register", "_transaction", "_requireValid")
+    __slots__ = ("_producer", "_register", "_transaction", "_requireValid")
 
     def __init__(
         self,
@@ -94,10 +94,12 @@ class _MemoryTransactionFacade:
         transaction: CommittedValueTransaction,
         requireValid: Callable[[], None],
         register: Callable[["_MemoryTransactionFacade"], None],
+        producer: dict[str, object],
     ) -> None:
         self._transaction = transaction
         self._requireValid = requireValid
         self._register = register
+        self._producer = deepcopy(producer)
 
     def load(self, address: str) -> object:
         self._requireValid()
@@ -107,9 +109,22 @@ class _MemoryTransactionFacade:
         self._requireValid()
         return self._transaction.state(address)
 
-    def set(self, address: str, value: object) -> None:
+    def set(
+        self,
+        address: str,
+        value: object,
+        *,
+        validity: dict[str, object] | None = None,
+        provenance: dict[str, object] | None = None,
+    ) -> None:
+        """Stages a value with Actant-owned producer and Pack-owned derivation metadata."""
         self._requireValid()
-        self._transaction.set(address, value)
+        metadata = {
+            "producer": deepcopy(self._producer),
+            "validity": {} if validity is None else deepcopy(validity),
+            "provenance": {} if provenance is None else deepcopy(provenance),
+        }
+        self._transaction.set(address, value, metadata=metadata)
 
     def setAbsent(self, address: str) -> None:
         self._requireValid()
@@ -125,6 +140,7 @@ class _MemoryTransactionFacade:
             transaction=self._transaction.openTransaction(),
             requireValid=self._requireValid,
             register=self._register,
+            producer=self._producer,
         )
         self._register(facade)
         return facade
@@ -147,16 +163,18 @@ class _MemoryFacade:
     requiring Packs to encode authority flags inside their own payloads.
     """
 
-    __slots__ = ("_openedTransactions", "_state", "_requireValid")
+    __slots__ = ("_openedTransactions", "_producer", "_state", "_requireValid")
 
     def __init__(
         self,
         *,
         state: CommittedValueLayer | CommittedValueTransaction,
         requireValid: Callable[[], None],
+        producer: dict[str, object],
     ) -> None:
         self._state = state
         self._requireValid = requireValid
+        self._producer = deepcopy(producer)
         self._openedTransactions: list[_MemoryTransactionFacade] = []
 
     def load(self, address: str) -> object:
@@ -171,12 +189,18 @@ class _MemoryFacade:
         self._requireValid()
         return self._state.revisionId(address)
 
+    def metadata(self, address: str) -> dict[str, object] | None:
+        """Returns generic Actant metadata for the visible revision."""
+        self._requireValid()
+        return self._state.metadata(address)
+
     def openTransaction(self) -> _MemoryTransactionFacade:
         self._requireValid()
         facade = _MemoryTransactionFacade(
             transaction=self._state.openTransaction(),
             requireValid=self._requireValid,
             register=self._openedTransactions.append,
+            producer=self._producer,
         )
         self._openedTransactions.append(facade)
         return facade
@@ -335,8 +359,21 @@ class CodeEntryIdentity:
     applicationId: str
     applicationRunId: str
     packId: str
+    packVersion: str
     codeEntryId: str
     codeEntryInstanceId: str
+    sourceSha256: str
+    implementationId: str
+
+    def producerSnapshot(self) -> dict[str, object]:
+        """Returns stable producer identity suitable for persisted Value metadata."""
+        return {
+            "packId": self.packId,
+            "packVersion": self.packVersion,
+            "codeEntryId": self.codeEntryId,
+            "sourceSha256": self.sourceSha256,
+            "implementationId": self.implementationId,
+        }
 
 
 class CodeEntryContext:
@@ -362,7 +399,11 @@ class CodeEntryContext:
         self.config = deepcopy(config)
         self._valid = True
         self.io = _IoFacade(io=io, requireValid=self.requireValid)
-        self.memory = _MemoryFacade(state=memory, requireValid=self.requireValid)
+        self.memory = _MemoryFacade(
+            state=memory,
+            requireValid=self.requireValid,
+            producer=identity.producerSnapshot(),
+        )
         self.capabilities = _CapabilityFacade(
             ownerId=identity.codeEntryInstanceId,
             registry=capabilities,
