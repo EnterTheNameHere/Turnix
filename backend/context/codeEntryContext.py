@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 9
+# file: backend/context/codeEntryContext.py ; version: 10
 from __future__ import annotations
 
 from copy import deepcopy
@@ -234,6 +234,11 @@ class _MemoryFacade:
         """Returns generic Actant metadata for the visible revision."""
         self._requireValid()
         return self._state.metadata(address)
+
+    def describe(self, address: str) -> dict[str, object]:
+        """Returns generic revision/state/metadata evidence for debugger-style inspection."""
+        self._requireValid()
+        return self._state.describe(address)
 
     def isReusable(self, address: str, *, validity: dict[str, object]) -> bool:
         """Returns whether visible state is current for this producer/validity contract."""
