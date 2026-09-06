@@ -1,4 +1,4 @@
-# file: tests/backend/runtime/test_runtimeHost.py ; version: 4
+# file: tests/backend/runtime/test_runtimeHost.py ; version: 5
 from pathlib import Path
 
 import pytest
@@ -53,8 +53,11 @@ def test_non_activation_context_rejects_registration():
         applicationId=host.applicationRun.application.applicationId,
         applicationRunId=host.applicationRun.applicationRunId,
         packId="test.pack",
+        packVersion="1.0.0",
         codeEntryId="entry",
         codeEntryInstanceId="entry-instance",
+        sourceSha256="source-sha",
+        implementationId="implementation-sha",
     )
     scope = RegistrationScope()
     context = host.createContext(identity=identity, packRoot=Path.cwd(), registrationScope=scope)
@@ -86,8 +89,11 @@ def test_contexts_share_application_run_authoritative_memory():
         applicationId=host.applicationRun.application.applicationId,
         applicationRunId=host.applicationRun.applicationRunId,
         packId="test.pack",
+        packVersion="1.0.0",
         codeEntryId="entry",
         codeEntryInstanceId="entry-instance",
+        sourceSha256="source-sha",
+        implementationId="implementation-sha",
     )
 
     firstScope = RegistrationScope()
@@ -190,8 +196,11 @@ def test_capability_memory_write_nests_under_supplied_transaction():
         applicationId=host.applicationRun.application.applicationId,
         applicationRunId=host.applicationRun.applicationRunId,
         packId="test.pack",
+        packVersion="1.0.0",
         codeEntryId="entry",
         codeEntryInstanceId="entry-instance",
+        sourceSha256="source-sha",
+        implementationId="implementation-sha",
     )
     host.registerCodeEntry(identity, Path.cwd())
     scope = RegistrationScope()
