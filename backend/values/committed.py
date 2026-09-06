@@ -1,7 +1,8 @@
-# file: backend/values/committed.py ; version: 15
+# file: backend/values/committed.py ; version: 16
 from __future__ import annotations
 
 import base64
+import hashlib
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import StrEnum
@@ -129,6 +130,34 @@ class CommittedValueLayer(ValueLayer):
             metadata = None if revision is None else revision.metadata
         return None if metadata is None else deepcopy(metadata)
 
+    def dependency(self, address: str | ValueAddress) -> dict[str, object]:
+        """Returns commit-stable identity for the current authoritative input.
+
+        Dependency identity excludes revisionId deliberately. A producer may
+        derive from a staged value before the outer transaction assigns its
+        next authoritative revision number. Canonical content and metadata
+        identities remain unchanged when that staged state commits.
+
+        Producers may persist this object inside validity metadata. Actant does
+        not infer or traverse dependencies automatically.
+        """
+        key = address if isinstance(address, ValueAddress) else ValueAddress(address)
+        with self._lock:
+            revision = self._values.get(key)
+        if revision is None:
+            return {
+                "address": str(key),
+                "state": ValueState.ABSENT.value,
+                "contentSha256": None,
+                "metadataSha256": None,
+            }
+        return {
+            "address": str(key),
+            "state": revision.state.value,
+            "contentSha256": self._valueRefContentSha256(revision.valueRef),
+            "metadataSha256": self._metadataSha256(revision.metadata),
+        }
+
     def describe(self, address: str | ValueAddress) -> dict[str, object]:
         """Returns generic debugger/audit description without materializing payload."""
         key = address if isinstance(address, ValueAddress) else ValueAddress(address)
@@ -151,6 +180,31 @@ class CommittedValueLayer(ValueLayer):
     def openTransaction(self) -> CommittedValueTransaction:
         """Creates a speculative transaction against this authoritative layer."""
         return CommittedValueTransaction(root=self, parent=None)
+
+    @staticmethod
+    def _valueRefContentSha256(valueRef: ValueRef | None) -> str | None:
+        if valueRef is None:
+            return None
+        if isinstance(valueRef, InlineValueRef):
+            return hashlib.sha256(valueRef.payload).hexdigest()
+        if isinstance(valueRef, ChunkValueRef):
+            return valueRef.contentHash
+        raise TypeError("Unsupported ValueRef while deriving content identity.")
+
+    @staticmethod
+    def _jsonContentSha256(value: object) -> str:
+        store = InMemoryChunkStore()
+        valueRef = encodeJsonValue(value, store=store)
+        contentHash = CommittedValueLayer._valueRefContentSha256(valueRef)
+        if contentHash is None:
+            raise RuntimeError("Present value unexpectedly produced no content identity.")
+        return contentHash
+
+    @staticmethod
+    def _metadataSha256(metadata: dict[str, object] | None) -> str | None:
+        if metadata is None:
+            return None
+        return CommittedValueLayer._jsonContentSha256(metadata)
 
     @staticmethod
     def _snapshotMetadata(metadata: dict[str, object] | None) -> dict[str, object] | None:
@@ -483,6 +537,25 @@ class CommittedValueTransaction(ValueLayer):
         key = address if isinstance(address, ValueAddress) else ValueAddress(address)
         self._captureBase(key)
         return self._bases[key]
+
+    def dependency(self, address: str | ValueAddress) -> dict[str, object]:
+        """Returns commit-stable identity for the value visible in this transaction."""
+        self._requireActive()
+        self._requireNoChildren()
+        key = address if isinstance(address, ValueAddress) else ValueAddress(address)
+        self._captureBase(key)
+        visible = self._loadVisibleRevision(key)
+        contentSha256 = (
+            CommittedValueLayer._jsonContentSha256(visible.value)
+            if visible.state is ValueState.PRESENT
+            else None
+        )
+        return {
+            "address": str(key),
+            "state": visible.state.value,
+            "contentSha256": contentSha256,
+            "metadataSha256": CommittedValueLayer._metadataSha256(visible.metadata),
+        }
 
     def describe(self, address: str | ValueAddress) -> dict[str, object]:
         """Describes the value visible in this speculative transaction view.
