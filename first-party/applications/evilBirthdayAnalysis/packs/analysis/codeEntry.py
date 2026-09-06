@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 3
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 4
 from __future__ import annotations
 
 import importlib.util
@@ -96,20 +96,19 @@ def _previousChatItemReusable(
     previousItem: QueryItem,
     *,
     content: str,
-    semanticValue: dict[str, object],
-    secondBucket: dict[str, object],
+    metadata: dict[str, object],
 ) -> bool:
-    """Requires persistent derivation identity to match before QueryItem reuse."""
-    if previousItem.kind != "chat" or previousItem.content != content:
-        return False
-    memory = previousItem.metadata.get("memory")
-    if not isinstance(memory, Mapping):
-        return False
-    return (
-        _plain(memory.get("semantic")) == _plain(semanticValue)
-        and _plain(memory.get("secondBucket")) == _plain(secondBucket)
-    )
+    """Reuses only an exactly equivalent current chat QueryItem snapshot.
 
+    itemId alone is not a validity key. Cross-line reconstruction, source
+    provenance, semantic dependencies, or temporal bucket dependencies may
+    change while the logical line ID remains stable.
+    """
+    return (
+        previousItem.kind == "chat"
+        and previousItem.content == content
+        and _plain(previousItem.metadata) == _plain(metadata)
+    )
 
 def _chatQueryItems(
     chat: dict[str, object],
@@ -161,14 +160,30 @@ def _chatQueryItems(
             content = body
 
         itemId = f"chat:{lineNumber}"
+        metadata = {
+            "streamStartSeconds": float(streamTimeSeconds),
+            "lineNumber": lineNumber,
+            "username": presentedAuthor,
+            "sourceUsername": username if type(username) is str else None,
+            "analysis": _plain(analysis),
+            "memory": {
+                "semantic": _plain(semanticValue),
+                "secondBucket": _plain(secondBucket),
+            },
+            "source": {
+                "sourcePath": chat.get("sourcePath"),
+                "timestampText": record.get("timestampText"),
+                "channel": record.get("channel"),
+                "rawMessage": rawMessage,
+            },
+        }
         previousItem = previous.get(itemId)
         if (
             previousItem is not None
             and _previousChatItemReusable(
                 previousItem,
                 content=content,
-                semanticValue=semanticValue,
-                secondBucket=secondBucket,
+                metadata=metadata,
             )
         ):
             items.append(previousItem)
@@ -179,23 +194,7 @@ def _chatQueryItems(
                 itemId=itemId,
                 kind="chat",
                 content=content,
-                metadata={
-                    "streamStartSeconds": float(streamTimeSeconds),
-                    "lineNumber": lineNumber,
-                    "username": presentedAuthor,
-                    "sourceUsername": username if type(username) is str else None,
-                    "analysis": _plain(analysis),
-                    "memory": {
-                        "semantic": _plain(semanticValue),
-                        "secondBucket": _plain(secondBucket),
-                    },
-                    "source": {
-                        "sourcePath": chat.get("sourcePath"),
-                        "timestampText": record.get("timestampText"),
-                        "channel": record.get("channel"),
-                        "rawMessage": rawMessage,
-                    },
-                },
+                metadata=metadata,
             )
         )
     return items
