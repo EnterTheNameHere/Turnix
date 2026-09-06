@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatProcessing.py ; version: 2
+# file: tests/first_party/evilBirthdayAnalysis/test_chatProcessing.py ; version: 3
 from __future__ import annotations
 
 import hashlib
@@ -203,9 +203,11 @@ def test_selector_reuses_parse_cache_while_source_observation_is_unchanged():
     )
 
     first = chat._select(ctx, {"videoStartSeconds": 0, "videoEndSeconds": 10})
+    cachedParsed = chat._parsedCache[("chat.txt", "19:20:00")][2]
     second = chat._select(ctx, {"videoStartSeconds": 0, "videoEndSeconds": 10})
 
-    assert ctx.io.readCount == 1
+    assert ctx.io.readCount == 2
+    assert chat._parsedCache[("chat.txt", "19:20:00")][2] is cachedParsed
     assert first["sourceObservation"] == second["sourceObservation"]
     assert first["sourceObservation"]["contentSha256"] is not None
 
