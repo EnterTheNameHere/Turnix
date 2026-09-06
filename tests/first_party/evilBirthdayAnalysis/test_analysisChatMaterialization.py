@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 2
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 3
 from __future__ import annotations
 
 import importlib.util
@@ -780,3 +780,82 @@ def test_chatPresentation_validation_is_unchanged():
         analysis._chatPresentation({"includeChat": 1})
     with pytest.raises(ValueError, match="chatLayout"):
         analysis._chatPresentation({"chatLayout": "mixed"})
+
+
+
+def test_chat_query_item_rebuilds_when_persistent_dependency_changes():
+    semantic = {
+        "address": "evilanalysis/chat/line/40/semantic",
+        "dependency": {
+            "address": "evilanalysis/chat/line/40/semantic",
+            "state": "present",
+            "contentSha256": "semantic-a",
+            "metadataSha256": "semantic-meta-a",
+        },
+    }
+    bucket = {
+        "address": "evilanalysis/chat/second/s50/semantic",
+        "dependency": {
+            "address": "evilanalysis/chat/second/s50/semantic",
+            "state": "present",
+            "contentSha256": "bucket-a",
+            "metadataSha256": "bucket-meta-a",
+        },
+        "value": {
+            "secondIndex": 50,
+            "startSeconds": 50.0,
+            "endSeconds": 51.0,
+            "members": [
+                {
+                    "lineNumber": 40,
+                    "streamTimeSeconds": 50.0,
+                    "semantic": semantic,
+                }
+            ],
+        },
+    }
+    chat = {
+        "sourcePath": "data/chat.txt",
+        "records": [
+            {
+                "lineNumber": 40,
+                "channel": "#vedal987",
+                "message": "viewer: GIGAEVIL",
+                "username": "viewer",
+                "body": "GIGAEVIL",
+                "timestampText": "2024-03-25 19:18:38",
+                "semanticValue": semantic,
+                "analysis": {
+                    "kind": "userMessage",
+                    "includedInText": True,
+                    "streamTimeSeconds": 50.0,
+                    "streamTime": "00:00:50",
+                    "spans": [{"kind": "emote", "name": "GIGAEVIL", "count": 1, "metadata": {}}],
+                },
+            }
+        ],
+        "secondBuckets": [bucket],
+    }
+
+    first = analysis._chatQueryItems(chat, previous={})[0]
+
+    same = analysis._chatQueryItems(chat, previous={first.itemId: first})[0]
+    assert same is first
+
+    changedBucket = {
+        **bucket,
+        "dependency": {
+            **bucket["dependency"],
+            "contentSha256": "bucket-b",
+        },
+    }
+    changedChat = {**chat, "secondBuckets": [changedBucket]}
+    rebuilt = analysis._chatQueryItems(
+        changedChat,
+        previous={first.itemId: first},
+    )[0]
+
+    assert rebuilt is not first
+    assert rebuilt.itemId == first.itemId
+    assert rebuilt.content == first.content
+    assert rebuilt.metadata["memory"]["secondBucket"]["dependency"]["contentSha256"] == "bucket-b"
