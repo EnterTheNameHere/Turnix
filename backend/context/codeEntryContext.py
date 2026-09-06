@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 2
+# file: backend/context/codeEntryContext.py ; version: 3
 from __future__ import annotations
 
 from copy import deepcopy
@@ -129,7 +129,7 @@ class _MemoryFacade:
     def __init__(
         self,
         *,
-        state: CommittedValueLayer,
+        state: CommittedValueLayer | CommittedValueTransaction,
         requireValid: Callable[[], None],
     ) -> None:
         self._state = state
@@ -192,6 +192,7 @@ class _LlmFacade:
         registry: LlmProviderRegistry,
         scope: RegistrationScope,
         pipeline: LlmProcessingPipeline,
+        memory: CommittedValueLayer | CommittedValueTransaction,
         requireValid: Callable[[], None],
         allowRegistration: bool,
     ) -> None:
@@ -199,6 +200,7 @@ class _LlmFacade:
         self._registry = registry
         self._scope = scope
         self._pipeline = pipeline
+        self._memory = memory
         self._requireValid = requireValid
         self._allowRegistration = allowRegistration
 
@@ -281,6 +283,7 @@ class _LlmFacade:
             model=model,
             providerOptions=providerOptions,
             streamObserver=streamObserver,
+            memoryView=self._memory,
         )
 
 
@@ -305,7 +308,7 @@ class CodeEntryContext:
         capabilities: CapabilityRegistry,
         llmProviders: LlmProviderRegistry,
         llmPipeline: LlmProcessingPipeline,
-        memory: CommittedValueLayer,
+        memory: CommittedValueLayer | CommittedValueTransaction,
         registrationScope: RegistrationScope,
         config: dict[str, object],
         capabilityInvoker: Callable[[str, object | None], object],
@@ -330,6 +333,7 @@ class CodeEntryContext:
             registry=llmProviders,
             scope=registrationScope,
             pipeline=llmPipeline,
+            memory=memory,
             requireValid=self.requireValid,
             allowRegistration=allowRegistration,
         )
