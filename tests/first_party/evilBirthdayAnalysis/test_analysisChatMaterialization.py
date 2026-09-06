@@ -1,3 +1,4 @@
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 1
 from __future__ import annotations
 
 import importlib.util
@@ -37,6 +38,13 @@ class _MaterializationCapabilities:
             streamEnd = endVideo - 533
             return {
                 "sourcePath": "data/chat.txt",
+                "sourceObservation": {
+                    "path": "data/chat.txt",
+                    "state": "file",
+                    "sizeBytes": 100,
+                    "modifiedTimeNs": 1,
+                    "contentSha256": "chat-source-hash",
+                },
                 "chatStartTime": "19:08:55",
                 "streamStartTime": "00:08:53",
                 "streamStartVideoSeconds": 533.0,
@@ -292,6 +300,8 @@ def test_interpretedChat_uses_raw_capability_with_semantic_lookback_then_semanti
     ]
     assert len(ctx.capabilities.interpretCalls) == 1
     assert ctx.capabilities.interpretCalls[0]["records"] is rawChat["records"]
+    assert ctx.capabilities.interpretCalls[0]["sourcePath"] == "data/chat.txt"
+    assert ctx.capabilities.interpretCalls[0]["sourceObservation"] == rawChat["sourceObservation"]
     assert interpreted["sourcePath"] == "data/chat.txt"
     assert interpreted["text"] == "00:00:00 viewer: hello"
 
