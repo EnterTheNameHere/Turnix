@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 3
+# file: backend/context/codeEntryContext.py ; version: 4
 from __future__ import annotations
 
 from copy import deepcopy
@@ -68,16 +68,18 @@ class _MemoryTransactionFacade:
     be promoted into the Value System/CodeEntry design documents later.
     """
 
-    __slots__ = ("_transaction", "_requireValid")
+    __slots__ = ("_register", "_transaction", "_requireValid")
 
     def __init__(
         self,
         *,
         transaction: CommittedValueTransaction,
         requireValid: Callable[[], None],
+        register: Callable[["_MemoryTransactionFacade"], None],
     ) -> None:
         self._transaction = transaction
         self._requireValid = requireValid
+        self._register = register
 
     def load(self, address: str) -> object:
         self._requireValid()
@@ -101,10 +103,13 @@ class _MemoryTransactionFacade:
 
     def openTransaction(self) -> "_MemoryTransactionFacade":
         self._requireValid()
-        return _MemoryTransactionFacade(
+        facade = _MemoryTransactionFacade(
             transaction=self._transaction.openTransaction(),
             requireValid=self._requireValid,
+            register=self._register,
         )
+        self._register(facade)
+        return facade
 
     def commit(self) -> None:
         self._requireValid()
@@ -124,7 +129,7 @@ class _MemoryFacade:
     requiring Packs to encode authority flags inside their own payloads.
     """
 
-    __slots__ = ("_state", "_requireValid")
+    __slots__ = ("_openedTransactions", "_state", "_requireValid")
 
     def __init__(
         self,
@@ -134,6 +139,7 @@ class _MemoryFacade:
     ) -> None:
         self._state = state
         self._requireValid = requireValid
+        self._openedTransactions: list[_MemoryTransactionFacade] = []
 
     def load(self, address: str) -> object:
         self._requireValid()
@@ -149,10 +155,29 @@ class _MemoryFacade:
 
     def openTransaction(self) -> _MemoryTransactionFacade:
         self._requireValid()
-        return _MemoryTransactionFacade(
+        facade = _MemoryTransactionFacade(
             transaction=self._state.openTransaction(),
             requireValid=self._requireValid,
+            register=self._openedTransactions.append,
         )
+        self._openedTransactions.append(facade)
+        return facade
+
+
+    def close(self) -> None:
+        """Best-effort aborts unresolved transactions owned by this invocation.
+
+        Context lifetime owns every transaction opened through ctx.memory.
+        Resolved transactions reject abort(), which is harmless here; unresolved
+        children are processed in reverse creation order so their parents can
+        subsequently be resolved by enclosing runtime logic.
+        """
+        for transaction in reversed(self._openedTransactions):
+            try:
+                transaction._transaction.abort()
+            except RuntimeError:
+                pass
+        self._openedTransactions.clear()
 
 
 class _CapabilityFacade:
@@ -343,4 +368,7 @@ class CodeEntryContext:
             raise RuntimeError("CodeEntryContext is no longer valid.")
 
     def invalidate(self) -> None:
+        if not self._valid:
+            return
+        self.memory.close()
         self._valid = False
