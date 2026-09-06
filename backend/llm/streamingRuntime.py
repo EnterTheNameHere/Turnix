@@ -1,4 +1,4 @@
-# file: backend/llm/streamingRuntime.py ; version: 2
+# file: backend/llm/streamingRuntime.py ; version: 3
 from __future__ import annotations
 
 import hashlib
@@ -61,13 +61,13 @@ class StreamingLlmResult:
 
 @dataclass(frozen=True, slots=True)
 class LlmProcessingResult:
-    """Completed ProcessingRun plus streamed provider and finalization evidence."""
+    """Completed ProcessingRun plus streamed provider and transactional completion evidence."""
 
     processingRunId: str
     queryItems: tuple[QueryItem, ...]
     reusableQueryItems: tuple[QueryItem, ...]
     llm: StreamingLlmResult
-    finalizeResult: object | None = None
+    completionResult: object | None = None
 
 
 class LlmProcessingPipeline:
@@ -78,11 +78,14 @@ class LlmProcessingPipeline:
     material. Filtering affects only the accepted query for the current run; it
     does not erase reusable items prepared by BUILD_QUERY_ITEMS.
 
-    Optional application finalization executes after all authoritative state has
-    been staged and validated, but before the outer transaction commits. A
-    finalization failure therefore aborts the ProcessingRun rather than leaving
-    an authoritative success whose required application-side result was not
-    produced.
+    Optional application completion executes inside the ProcessingRun
+    transaction after model evidence has been staged. Completion may derive and
+    stage additional persistent application state, but must not publish export
+    files or other irreversible external effects. Only the outermost commit
+    makes ProcessingRun and completion state authoritative together.
+
+    Export is intentionally outside this pipeline. Applications may publish
+    projections only after runProcessing() returns successfully.
     """
 
     def __init__(
@@ -133,8 +136,8 @@ class LlmProcessingPipeline:
         model: str | None = None,
         providerOptions: Mapping[str, ImmutableValue] | None = None,
         filterQueryItemsCapabilityId: str | None = None,
-        finalizeCapabilityId: str | None = None,
-        finalizeInput: object | None = None,
+        completionCapabilityId: str | None = None,
+        completionInput: object | None = None,
         streamObserver: Callable[[LlmStreamEvent], None] | None = None,
         memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
     ) -> LlmProcessingResult:
@@ -247,15 +250,15 @@ class LlmProcessingPipeline:
                 {"processingRunId": run.processingRunId},
             )
 
-            run.enterStage(ProcessingStage.FINALIZE)
-            finalizeResult = None
-            if finalizeCapabilityId is not None:
-                finalizeResult = self._capabilityInvoker(
-                    finalizeCapabilityId,
-                    self._finalizePayload(
+            run.enterStage(ProcessingStage.COMPLETE)
+            completionResult = None
+            if completionCapabilityId is not None:
+                completionResult = self._capabilityInvoker(
+                    completionCapabilityId,
+                    self._completionPayload(
                         run=run,
                         inputValue=inputValue,
-                        finalizeInput=finalizeInput,
+                        completionInput=completionInput,
                         reusableItems=reusableItems,
                         acceptedItems=acceptedItems,
                         llmResult=llmResult,
@@ -272,7 +275,7 @@ class LlmProcessingPipeline:
                 queryItems=acceptedItems,
                 reusableQueryItems=reusableItems,
                 llm=llmResult,
-                finalizeResult=finalizeResult,
+                completionResult=completionResult,
             )
         except Exception:
             run.fail()
@@ -364,11 +367,11 @@ class LlmProcessingPipeline:
         return evidence
 
     @staticmethod
-    def _finalizePayload(
+    def _completionPayload(
         *,
         run: ProcessingRun,
         inputValue: object,
-        finalizeInput: object | None,
+        completionInput: object | None,
         reusableItems: tuple[QueryItem, ...],
         acceptedItems: tuple[QueryItem, ...],
         llmResult: StreamingLlmResult,
@@ -376,7 +379,7 @@ class LlmProcessingPipeline:
         return {
             "processingRunId": run.processingRunId,
             "input": inputValue,
-            "finalizeInput": finalizeInput,
+            "completionInput": completionInput,
             "reusableQueryItems": [item.snapshot() for item in reusableItems],
             "queryItems": [item.snapshot() for item in acceptedItems],
             "llm": {
