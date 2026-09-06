@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 8
+# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 9
 from __future__ import annotations
 
 import importlib.util
@@ -914,3 +914,123 @@ def test_identical_message_burst_survives_save_bundle_rehydration():
 
     assert restoredMemory.revisionId(burstAddress) == 1
     assert restored["identicalMessageBursts"][0]["address"] == burstAddress
+
+
+
+def test_burst_start_slot_replaces_old_event_when_source_extends_burst_backward():
+    memory = CommittedValueLayer()
+    ctx = _Ctx(memory)
+
+    first = _interpret(
+        ctx,
+        [
+            _raw(81, "alice: GIGAEVIL", streamTimeSeconds=80.0, streamTime="00:01:20"),
+            _raw(82, "bob: GIGAEVIL", streamTimeSeconds=81.0, streamTime="00:01:21"),
+        ],
+        contextStartSeconds=79.0,
+        contextEndSeconds=83.0,
+    )
+    oldSlot = chatSemantics._burstStartCellAddress(80)
+    assert memory.revisionId(oldSlot) == 1
+    assert first["identicalMessageBursts"][0]["address"] == oldSlot
+    assert memory.load(oldSlot)["events"]
+
+    second = _interpret(
+        ctx,
+        [
+            _raw(80, "prior: GIGAEVIL", streamTimeSeconds=79.0, streamTime="00:01:19"),
+            _raw(81, "alice: GIGAEVIL", streamTimeSeconds=80.0, streamTime="00:01:20"),
+            _raw(82, "bob: GIGAEVIL", streamTimeSeconds=81.0, streamTime="00:01:21"),
+        ],
+        contextStartSeconds=78.0,
+        contextEndSeconds=83.0,
+        sourceObservation={**_SOURCE_OBSERVATION, "contentSha256": "extended-backward"},
+    )
+
+    newSlot = chatSemantics._burstStartCellAddress(79)
+    assert memory.revisionId(newSlot) == 1
+    assert second["identicalMessageBursts"][0]["address"] == newSlot
+    assert memory.revisionId(oldSlot) == 2
+    assert memory.load(oldSlot) == {
+        "startSecond": 80,
+        "events": [],
+    }
+
+
+def test_burst_start_slot_becomes_empty_when_burst_is_removed():
+    memory = CommittedValueLayer()
+    ctx = _Ctx(memory)
+    _interpret(
+        ctx,
+        [
+            _raw(90, "alice: GIGAEVIL", streamTimeSeconds=90.0, streamTime="00:01:30"),
+            _raw(91, "bob: GIGAEVIL", streamTimeSeconds=91.0, streamTime="00:01:31"),
+        ],
+        contextStartSeconds=89.0,
+        contextEndSeconds=93.0,
+    )
+    slot = chatSemantics._burstStartCellAddress(90)
+    assert memory.revisionId(slot) == 1
+
+    result = _interpret(
+        ctx,
+        [
+            _raw(90, "alice: GIGAEVIL", streamTimeSeconds=90.0, streamTime="00:01:30"),
+            _raw(91, "bob: Clap", streamTimeSeconds=91.0, streamTime="00:01:31"),
+        ],
+        contextStartSeconds=89.0,
+        contextEndSeconds=93.0,
+        sourceObservation={**_SOURCE_OBSERVATION, "contentSha256": "burst-removed"},
+    )
+
+    assert result["identicalMessageBursts"] == []
+    assert memory.revisionId(slot) == 2
+    assert memory.load(slot) == {
+        "startSecond": 90,
+        "events": [],
+    }
+
+
+def test_open_burst_invalidates_prior_closed_start_slot_without_revision_churn():
+    memory = CommittedValueLayer()
+    ctx = _Ctx(memory)
+    _interpret(
+        ctx,
+        [
+            _raw(100, "alice: GIGAEVIL", streamTimeSeconds=100.0, streamTime="00:01:40"),
+            _raw(101, "bob: GIGAEVIL", streamTimeSeconds=101.0, streamTime="00:01:41"),
+        ],
+        contextStartSeconds=99.0,
+        contextEndSeconds=103.0,
+    )
+    slot = chatSemantics._burstStartCellAddress(100)
+    assert memory.revisionId(slot) == 1
+
+    partial = [
+        _raw(100, "alice: GIGAEVIL", streamTimeSeconds=100.0, streamTime="00:01:40"),
+        _raw(101, "bob: GIGAEVIL", streamTimeSeconds=101.0, streamTime="00:01:41"),
+        _raw(102, "charlie: GIGAEVIL", streamTimeSeconds=102.0, streamTime="00:01:42"),
+    ]
+    firstOpen = _interpret(
+        ctx,
+        partial,
+        contextStartSeconds=99.0,
+        contextEndSeconds=103.0,
+        sourceObservation={**_SOURCE_OBSERVATION, "contentSha256": "open-extension"},
+    )
+
+    assert firstOpen["identicalMessageBursts"] == []
+    assert memory.state(slot).value == "invalidated"
+    assert memory.revisionId(slot) == 2
+
+    secondOpen = _interpret(
+        ctx,
+        partial,
+        contextStartSeconds=99.0,
+        contextEndSeconds=103.0,
+        sourceObservation={**_SOURCE_OBSERVATION, "contentSha256": "open-extension"},
+    )
+
+    assert secondOpen["identicalMessageBursts"] == []
+    assert memory.state(slot).value == "invalidated"
+    assert memory.revisionId(slot) == 2
