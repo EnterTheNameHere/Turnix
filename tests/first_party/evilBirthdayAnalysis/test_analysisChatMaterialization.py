@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 10
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 11
 from __future__ import annotations
 
 import importlib.util
@@ -1242,8 +1242,7 @@ def test_closed_cross_second_burst_has_first_presentation_ownership():
     assert sections == [
         "CHRONOLOGICAL EVIDENCE\n"
         "[00:00:40]\n"
-        "CHAT BURST: GIGAEVIL ×2 [2 users; 2s]\n\n"
-        "[00:00:41]"
+        "CHAT BURST: GIGAEVIL ×2 [2 users; 2s]"
     ]
 
 
@@ -1384,3 +1383,61 @@ def test_chat_query_item_carries_closed_burst_reference_for_processing_evidence(
 
     assert item.metadata["memory"]["identicalMessageBurst"]["address"] == "evilanalysis/chat/burst/s50"
     assert item.metadata["memory"]["identicalMessageBurst"]["eventKey"] == "burst-event"
+
+
+
+def test_burst_ownership_suppresses_only_claimed_occurrences():
+    burst = _burst_reference(
+        line_numbers=[74, 75],
+        content="GIGAEVIL",
+        start_second=44,
+    )
+    burst_first = _persistent_chat_item(
+        line_number=74,
+        username="user_74",
+        content="GIGAEVIL",
+        second=44,
+        aggregate_entry={
+            "kind": "message",
+            "lineNumber": 74,
+            "semantic": {"address": "evilanalysis/chat/line/74/semantic"},
+        },
+        burst=burst,
+    )
+    unrelated = _persistent_chat_item(
+        line_number=76,
+        username="other",
+        content="Clap",
+        second=44,
+        aggregate_entry={
+            "kind": "message",
+            "lineNumber": 76,
+            "semantic": {"address": "evilanalysis/chat/line/76/semantic"},
+        },
+    )
+    burst_second = _persistent_chat_item(
+        line_number=75,
+        username="user_75",
+        content="GIGAEVIL",
+        second=45,
+        aggregate_entry={
+            "kind": "message",
+            "lineNumber": 75,
+            "semantic": {"address": "evilanalysis/chat/line/75/semantic"},
+        },
+        burst=burst,
+    )
+
+    sections = analysis._evidenceSections(
+        transcriptItems=[],
+        chatItems=[burst_first, unrelated, burst_second],
+        includeChat=True,
+        chatLayout="interleaved",
+    )
+
+    assert sections == [
+        "CHRONOLOGICAL EVIDENCE\n"
+        "[00:00:44]\n"
+        "CHAT BURST: GIGAEVIL ×2 [2 users; 2s]\n"
+        "CHAT other: Clap"
+    ]
