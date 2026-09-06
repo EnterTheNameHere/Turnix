@@ -1,4 +1,4 @@
-# file: tests/backend/context/test_codeEntryContext.py ; version: 1
+# file: tests/backend/context/test_codeEntryContext.py ; version: 2
 import pytest
 
 from pathlib import Path
@@ -46,6 +46,7 @@ def _facade(provider):
         registry=registry,
         scope=RegistrationScope(),
         pipeline=LlmProcessingPipeline(providers=registry),
+        memory=CommittedValueLayer(),
         requireValid=lambda: None,
         allowRegistration=False,
     )
