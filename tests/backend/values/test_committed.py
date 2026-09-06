@@ -1,4 +1,4 @@
-# file: tests/backend/values/test_committed.py ; version: 2
+# file: tests/backend/values/test_committed.py ; version: 3
 import pytest
 
 from backend.values.committed import CommittedValueLayer, StateConflictError, ValueState
@@ -163,3 +163,63 @@ def test_committed_metadata_is_detached_and_describable():
     loadedMetadata["validity"]["inputRevision"] = 100
     assert layer.metadata("derived/value")["validity"]["inputRevision"] == 4
     assert layer.describe("derived/value")["revisionId"] == 1
+
+
+
+def test_dependency_identity_is_stable_across_outer_commit():
+    layer = CommittedValueLayer()
+    outer = layer.openTransaction()
+    child = outer.openTransaction()
+    child.set(
+        "derived/input",
+        {"value": [1, 2, 3]},
+        metadata={
+            "producer": {"implementationId": "impl"},
+            "validity": {"source": "same"},
+            "provenance": {"path": "input.txt"},
+        },
+    )
+    child.commit()
+
+    stagedDependency = outer.dependency("derived/input")
+    assert stagedDependency["state"] == "present"
+    assert stagedDependency["contentSha256"]
+    assert stagedDependency["metadataSha256"]
+
+    outer.commit()
+
+    assert layer.dependency("derived/input") == stagedDependency
+    assert layer.revisionId("derived/input") == 1
+
+
+def test_dependency_identity_changes_when_payload_or_metadata_changes():
+    layer = CommittedValueLayer()
+    first = layer.openTransaction()
+    first.set(
+        "derived/input",
+        {"value": 1},
+        metadata={"producer": {"implementationId": "a"}},
+    )
+    first.commit()
+    original = layer.dependency("derived/input")
+
+    second = layer.openTransaction()
+    second.set(
+        "derived/input",
+        {"value": 2},
+        metadata={"producer": {"implementationId": "a"}},
+    )
+    second.commit()
+    changedPayload = layer.dependency("derived/input")
+    assert changedPayload["contentSha256"] != original["contentSha256"]
+
+    third = layer.openTransaction()
+    third.set(
+        "derived/input",
+        {"value": 2},
+        metadata={"producer": {"implementationId": "b"}},
+    )
+    third.commit()
+    changedMetadata = layer.dependency("derived/input")
+    assert changedMetadata["contentSha256"] == changedPayload["contentSha256"]
+    assert changedMetadata["metadataSha256"] != changedPayload["metadataSha256"]
