@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 7
+# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 8
 from __future__ import annotations
 
 import argparse
@@ -95,6 +95,13 @@ def main() -> int:
                                 sys.stdout.write(
                                     f"[WARNING window {entry.get('windowIndex')}] {warning}\n"
                                 )
+                    exportError = entry.get("exportError")
+                    if isinstance(exportError, dict):
+                        message = exportError.get("message")
+                        if type(message) is str and message:
+                            sys.stdout.write(
+                                f"[EXPORT ERROR window {entry.get('windowIndex')}] {message}\n"
+                            )
                     saved = entry.get("saved")
                     if isinstance(saved, dict) and saved.get("path"):
                         sys.stdout.write(f"[{entry.get('windowIndex')}] {saved['path']}\n")
