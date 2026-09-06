@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 13
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 14
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -745,8 +745,11 @@ def _evidenceSections(
                     suffix = f"[{count} messages; {uniqueAuthors} users]"
                 lines.append(f"CHAT: {content} ×{count} {suffix}")
 
-            renderedBuckets.append("\n".join(lines))
+            if len(lines) > 1:
+                renderedBuckets.append("\n".join(lines))
 
+        if not renderedBuckets:
+            return []
         return ["CHRONOLOGICAL EVIDENCE\n" + "\n\n".join(renderedBuckets)]
 
     raise RuntimeError(f"Unsupported chat layout after validation: {chatLayout!r}.")
