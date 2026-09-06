@@ -1,4 +1,4 @@
-# file: backend/values/layer.py ; version: 2
+# file: backend/values/layer.py ; version: 3
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -15,7 +15,6 @@ from backend.values.sentinels import MISSING
 
 if TYPE_CHECKING:
     from backend.values.handle import ValueHandle
-    from backend.values.transaction import ValueTransaction
 
 __all__: list[str] = [
     "InMemoryValueLayer",
@@ -48,10 +47,10 @@ class ValueLayer(ABC):
     databases, remote services, Pack assets, transaction overlays, or other
     providers.
 
-    Direct mutation is not implied by being a ValueLayer. Mutation seeking
-    Value System transaction guarantees is staged through a ValueTransaction.
-    A concrete layer may internally accept a committed promotion without
-    exposing ordinary direct mutation to callers.
+    Direct mutation and transaction creation are not implied by being a
+    ValueLayer. Authoritative providers define their own transaction boundary.
+    In the current Value System, CommittedValueLayer is that authoritative
+    provider; generic resolution layers remain read-only views.
 
     Args:
         parent:
@@ -104,27 +103,6 @@ class ValueLayer(ABC):
             address=self._coerceAddress(address),
         )
 
-    def openTransaction(self) -> ValueTransaction:
-        """
-        Creates a transaction whose parent resolution view is this layer.
-
-        The returned transaction initially contains no local values. Reads
-        therefore fall through to this layer until values are staged in the
-        transaction.
-
-        Creating a transaction does not mutate this layer. Successful outer
-        transaction commit promotes the transaction's staged values through
-        this layer's internal commit boundary.
-
-        Returns:
-            A new active ValueTransaction parented by this layer.
-
-        """
-        # Local import avoids a circular module dependency.
-        from backend.values.transaction import ValueTransaction  # noqa: PLC0415
-
-        return ValueTransaction(parent=self)
-
     def _loadValue(self, address: ValueAddress) -> object:
         """
         Resolves an addressed value through this layer and its parent chain.
@@ -158,28 +136,6 @@ class ValueLayer(ABC):
         raise RuntimeError(
             f"{type(self).__qualname__} does not support direct value "
             "mutation; use a ValueTransaction.",
-        )
-
-    def _acceptPromotion(self, values: Mapping[ValueAddress, object]) -> None:
-        """
-        Accepts a batch submitted for promotion by a committing child.
-
-        This is an internal mutation boundary, not a public direct-write API.
-        Concrete authoritative layers that can receive outer transaction
-        commits override it. Transaction layers override it to receive child
-        transaction promotion into their own staged state.
-
-        Implementations must either accept the complete supplied batch or
-        leave their prior visible state unchanged.
-
-        Raises:
-            RuntimeError:
-                If this layer cannot accept promoted mutation.
-
-        """
-        raise RuntimeError(
-            f"{type(self).__qualname__} does not accept committed value "
-            "promotion.",
         )
 
     @abstractmethod
@@ -222,11 +178,6 @@ class InMemoryValueLayer(ValueLayer):
     Values loaded from the layer are snapshotted again before being returned.
     Consequently, mutating either the original constructor input or a loaded
     mutable Python object does not mutate the layer's retained value.
-
-    Successful outer transaction commit may promote a batch of values into
-    this layer. The complete incoming batch is snapshotted before any retained
-    value is replaced. If snapshotting any incoming value fails, the retained
-    layer remains unchanged.
 
     This implementation uses copy.deepcopy() to provide detached snapshots.
     Deep copying is a Python-specific implementation strategy and is not a
@@ -290,21 +241,6 @@ class InMemoryValueLayer(ValueLayer):
             return MISSING
 
         return self._snapshotValue(storedValue)
-
-    def _acceptPromotion(self, values: Mapping[ValueAddress, object]) -> None:
-        """
-        Commits one complete promoted batch into this in-memory layer.
-
-        Every incoming value is snapshotted before any retained value is
-        changed. Failure to snapshot one value therefore prevents partial
-        application of the promoted batch.
-        """
-        promotedValues = {
-            address: self._snapshotValue(value)
-            for address, value in values.items()
-        }
-
-        self._values.update(promotedValues)
 
     @staticmethod
     def _snapshotValue(value: object) -> object:
