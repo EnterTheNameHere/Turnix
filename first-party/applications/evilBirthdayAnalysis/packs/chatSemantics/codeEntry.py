@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 1
+# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 2
 from __future__ import annotations
 
 import re
@@ -122,17 +122,11 @@ def _vocabulary(
     if type(path) is not str:
         raise ValueError("Application config chatEmotesFile must be a string path.")
 
-    for _attempt in range(3):
-        before = ctx.io.observeFile(path, contentHash=True)
-        definition = ctx.io.readJson(path)
-        after = ctx.io.observeFile(path, contentHash=True)
-        if before == after:
-            break
-    else:
-        raise RuntimeError(f"Chat emote vocabulary changed repeatedly while being read: {path!r}.")
-
-    if after.get("state") != "file":
-        raise RuntimeError(f"Chat emote vocabulary source is not a regular file: {path!r}.")
+    observed = ctx.io.readObservedJson(path)
+    definition = observed.get("value")
+    after = observed.get("observation")
+    if not isinstance(definition, dict) or not isinstance(after, dict):
+        raise RuntimeError("Observed chat vocabulary read returned invalid data.")
     if not isinstance(definition, dict):
         raise ValueError("Chat emote vocabulary must be an object.")
     emotes = definition.get("emotes")
@@ -466,7 +460,7 @@ def _lineSemanticBasis(
     return {
         "rawLine": rawRecord.get("rawLine"),
         "processorRevision": _LINE_SEMANTIC_PROCESSOR_REVISION,
-        "vocabularyObservation": vocabularyObservation,
+        "vocabularyContentSha256": vocabularyObservation.get("contentSha256"),
     }
 
 
