@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 5
+# file: backend/context/codeEntryContext.py ; version: 6
 from __future__ import annotations
 
 from copy import deepcopy
@@ -309,8 +309,8 @@ class _LlmFacade:
         model: str | None = None,
         providerOptions: Mapping[str, ImmutableValue] | None = None,
         filterQueryItemsCapabilityId: str | None = None,
-        finalizeCapabilityId: str | None = None,
-        finalizeInput: object | None = None,
+        completionCapabilityId: str | None = None,
+        completionInput: object | None = None,
         streamObserver: Callable[[LlmStreamEvent], None] | None = None,
     ) -> LlmProcessingResult:
         self._requireValid()
@@ -320,8 +320,8 @@ class _LlmFacade:
             buildQueryItemsCapabilityId=buildQueryItemsCapabilityId,
             buildQueryCapabilityId=buildQueryCapabilityId,
             filterQueryItemsCapabilityId=filterQueryItemsCapabilityId,
-            finalizeCapabilityId=finalizeCapabilityId,
-            finalizeInput=finalizeInput,
+            completionCapabilityId=completionCapabilityId,
+            completionInput=completionInput,
             providerName=providerName,
             model=model,
             providerOptions=providerOptions,
