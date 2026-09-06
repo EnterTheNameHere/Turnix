@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatProcessing.py ; version: 1
+# file: tests/first_party/evilBirthdayAnalysis/test_chatProcessing.py ; version: 2
 from __future__ import annotations
 
 import hashlib
@@ -47,6 +47,20 @@ class _Io:
             "sizeBytes": len(payload),
             "modifiedTimeNs": len(payload) * 1000 + len(self._lines),
             "contentSha256": hashlib.sha256(payload).hexdigest() if contentHash else None,
+        }
+
+    def readObservedLines(self, path):
+        self.readCount += 1
+        payload = self._payload()
+        return {
+            "value": self._lines,
+            "observation": {
+                "path": str(path),
+                "state": "file",
+                "sizeBytes": len(payload),
+                "modifiedTimeNs": len(payload) * 1000 + len(self._lines),
+                "contentSha256": hashlib.sha256(payload).hexdigest(),
+            },
         }
 
     def readLines(self, _path):
