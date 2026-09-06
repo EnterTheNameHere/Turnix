@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 4
+# file: backend/context/codeEntryContext.py ; version: 5
 from __future__ import annotations
 
 from copy import deepcopy
@@ -32,6 +32,24 @@ class _IoFacade:
         """Returns JSON-compatible Actant source-observation evidence."""
         self._requireValid()
         return self._io.observeFile(path, contentHash=contentHash).snapshot()
+
+    def readObservedText(self, path) -> dict[str, object]:
+        """Returns exact UTF-8 text together with its Actant source observation."""
+        self._requireValid()
+        value, observation = self._io.readObservedText(path)
+        return {"value": value, "observation": observation.snapshot()}
+
+    def readObservedLines(self, path) -> dict[str, object]:
+        """Returns exact UTF-8 lines together with their Actant source observation."""
+        self._requireValid()
+        value, observation = self._io.readObservedLines(path)
+        return {"value": value, "observation": observation.snapshot()}
+
+    def readObservedJson(self, path) -> dict[str, object]:
+        """Returns a JSON object together with its Actant source observation."""
+        self._requireValid()
+        value, observation = self._io.readObservedJson(path)
+        return {"value": value, "observation": observation.snapshot()}
 
     def readText(self, path):
         self._requireValid()
