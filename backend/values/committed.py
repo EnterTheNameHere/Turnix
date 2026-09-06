@@ -1,4 +1,4 @@
-# file: backend/values/committed.py ; version: 5
+# file: backend/values/committed.py ; version: 6
 from __future__ import annotations
 
 from copy import deepcopy
@@ -7,6 +7,7 @@ from threading import RLock
 
 from backend.core.errors import ActantError
 from backend.values.address import ValueAddress
+from backend.values.layer import ValueLayer
 from backend.values.payload import ChunkValueRef, InMemoryChunkStore, ValueRef, decodeJsonValue, encodeJsonValue
 from backend.values.sentinels import MISSING
 
@@ -23,18 +24,34 @@ class _CommittedRevision:
     valueRef: ValueRef
 
 
-class CommittedValueLayer:
-    """Authoritative revisioned value layer backed by immutable ValueRefs."""
+class CommittedValueLayer(ValueLayer):
+    """Authoritative revisioned Value System layer backed by immutable ValueRefs.
+
+    This is the single authoritative mutable Value System provider. Generic
+    ValueLayer implementations may contribute read-only resolution views, but
+    transaction creation, revision advancement, and conflict detection belong
+    here so authoritative mutation has one project-wide semantic contract.
+
+    CommittedValueLayer also participates in the normal ValueHandle API. Code
+    may therefore use layer.value(address) for address-bound reads while
+    existing runtime code may continue to use load(address) directly.
+    """
 
     def __init__(self, *, chunkStore: InMemoryChunkStore | None = None) -> None:
+        super().__init__(parent=None)
         self.chunkStore = chunkStore or InMemoryChunkStore()
         self._values: dict[ValueAddress, _CommittedRevision] = {}
         self._lock = RLock()
 
     def load(self, address: str | ValueAddress) -> object:
+        """Materializes the current authoritative value at address."""
         key = address if isinstance(address, ValueAddress) else ValueAddress(address)
+        return self._loadLocalValue(key)
+
+    def _loadLocalValue(self, address: ValueAddress) -> object:
+        """Loads one authoritative local value for ValueLayer resolution."""
         with self._lock:
-            revision = self._values.get(key)
+            revision = self._values.get(address)
         if revision is None:
             return MISSING
         return decodeJsonValue(revision.valueRef, store=self.chunkStore)
@@ -73,8 +90,13 @@ class CommittedValueLayer:
             self._values.update(replacements)
 
 
-class CommittedValueTransaction:
+class CommittedValueTransaction(ValueLayer):
     """Nested speculative transaction with root-authoritative conflict detection.
+
+    This is the Value System's transaction implementation. It is also a
+    ValueLayer so ValueHandle works identically against committed and staged
+    views. The logical address API therefore does not split into a separate
+    transaction model for authoritative state.
 
     Nested transactions form a strict stack. While a child transaction remains
     active, its parent is suspended for public reads, writes, and creation of
@@ -83,8 +105,9 @@ class CommittedValueTransaction:
     """
 
     def __init__(self, *, root: CommittedValueLayer, parent: "CommittedValueTransaction | None") -> None:
+        super().__init__(parent=root if parent is None else parent)
         self._root = root
-        self._parent = parent
+        self._transactionParent = parent
         self._staged: dict[ValueAddress, object] = {}
         self._bases: dict[ValueAddress, int] = {}
         self._children: set[CommittedValueTransaction] = set()
@@ -98,28 +121,46 @@ class CommittedValueTransaction:
         return CommittedValueTransaction(root=self._root, parent=self)
 
     def load(self, address: str | ValueAddress) -> object:
-        self._requireActive()
-        self._requireNoChildren()
+        """Materializes a value through this transaction's staged view."""
         key = address if isinstance(address, ValueAddress) else ValueAddress(address)
-        self._captureBase(key)
-        return self._snapshot(self._loadVisible(key))
+        return self._loadValue(key)
 
     def set(self, address: str | ValueAddress, value: object) -> None:
+        """Stages replacement at address through the authoritative transaction."""
+        key = address if isinstance(address, ValueAddress) else ValueAddress(address)
+        self._setValue(key, value)
+
+    def _loadValue(self, address: ValueAddress) -> object:
         self._requireActive()
         self._requireNoChildren()
-        key = address if isinstance(address, ValueAddress) else ValueAddress(address)
-        self._captureBase(key)
+        self._captureBase(address)
+        return self._snapshot(self._loadVisible(address))
+
+    def _loadLocalValue(self, address: ValueAddress) -> object:
+        self._requireActive()
+        self._requireNoChildren()
+        self._captureBase(address)
+        if address not in self._staged:
+            return MISSING
+        return self._snapshot(self._staged[address])
+
+    def _setValue(self, address: ValueAddress, value: object) -> None:
+        self._requireActive()
+        self._requireNoChildren()
+        self._captureBase(address)
+        if value is MISSING:
+            raise TypeError("MISSING represents Value System absence and cannot be staged as a value.")
         detached = self._snapshot(value)
         encodeJsonValue(detached, store=InMemoryChunkStore())
-        self._staged[key] = detached
+        self._staged[address] = detached
 
     def commit(self) -> None:
         self._requireActive()
         self._requireNoChildren()
-        if self._parent is None:
+        if self._transactionParent is None:
             self._root._commit(self._staged, self._bases)
         else:
-            self._parent._acceptChild(self._staged, self._bases)
+            self._transactionParent._acceptChild(self._staged, self._bases)
         self._finish("committed")
 
     def abort(self) -> None:
@@ -130,8 +171,8 @@ class CommittedValueTransaction:
     def _loadVisible(self, address: ValueAddress) -> object:
         if address in self._staged:
             return self._staged[address]
-        if self._parent is not None:
-            return self._parent._loadVisible(address)
+        if self._transactionParent is not None:
+            return self._transactionParent._loadVisible(address)
         return self._root.load(address)
 
     def _captureBase(self, address: ValueAddress) -> None:
@@ -151,8 +192,8 @@ class CommittedValueTransaction:
         self._staged.clear()
         self._bases.clear()
         self._state = state
-        if self._parent is not None:
-            self._parent._children.discard(self)
+        if self._transactionParent is not None:
+            self._transactionParent._children.discard(self)
 
     def _requireActive(self) -> None:
         if self._state != "active":
