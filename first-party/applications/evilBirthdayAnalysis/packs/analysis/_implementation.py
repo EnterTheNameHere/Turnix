@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 11
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 12
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -923,103 +923,9 @@ def _buildQuery(ctx, payload):
     }
 
 
-def _preparedChatChunk(ctx, chunk: dict[str, object]) -> dict[str, object]:
-    """Builds diagnostic prepared-chat evidence through canonical interpretation.
-
-    This path is observation/export support, but it must still reflect the same
-    source-selection and semantic-processing contract used to materialize
-    QueryItems. Raw chat is never treated as interpreted application state.
-    """
-    startVideo = int(chunk["videoStartSeconds"])
-    endVideo = int(chunk["videoEndSeconds"])
-    adapter = globals().get("_interpretedChat")
-    if not callable(adapter):
-        raise RuntimeError("Analysis implementation requires canonical _interpretedChat adapter.")
-    rawChat, interpretedChat = adapter(
-        ctx,
-        {"videoStartSeconds": startVideo, "videoEndSeconds": endVideo},
-    )
-    if (
-        not isinstance(rawChat, dict)
-        or not isinstance(interpretedChat, dict)
-        or type(interpretedChat.get("text")) is not str
-        or not isinstance(interpretedChat.get("records"), list)
-    ):
-        raise RuntimeError("Canonical chat interpretation returned an invalid snapshot.")
-
-    text = interpretedChat["text"]
-    records = interpretedChat["records"]
-    includedCount = 0
-    suppressedCount = 0
-    requestedRecordCount = 0
-    for record in records:
-        if not isinstance(record, dict):
-            raise RuntimeError("Chat capability returned an invalid record.")
-        if record.get("insideRequestedWindow") is not True:
-            continue
-        requestedRecordCount += 1
-        analysis = record.get("analysis")
-        included = isinstance(analysis, dict) and analysis.get("includedInText") is True
-        if included:
-            includedCount += 1
-        else:
-            suppressedCount += 1
-
-    requiredContextKeys = (
-        "contextStreamStartSeconds",
-        "contextStreamEndSeconds",
-        "lookbackSeconds",
-        "lookaheadSeconds",
-    )
-    missingContextKeys = [
-        key for key in requiredContextKeys if key not in rawChat
-    ]
-    if missingContextKeys:
-        raise RuntimeError(
-            "Canonical raw chat snapshot omitted semantic context metadata: "
-            + ", ".join(missingContextKeys)
-        )
-
-    optionalMetadataKeys = (
-        "sourcePath",
-        "chatStartTime",
-        "streamStartTime",
-        "streamStartVideoSeconds",
-        "wallClockAtMediaZero",
-        "wallClockAtStreamZero",
-        "videoStartSeconds",
-        "videoEndSeconds",
-        "streamStartSeconds",
-        "streamEndSeconds",
-        "startWallClock",
-        "endWallClock",
-    )
-    metadata = {
-        key: _plain(rawChat[key])
-        for key in optionalMetadataKeys
-        if key in rawChat
-    }
-    metadata.update(
-        {
-            key: _plain(rawChat[key])
-            for key in requiredContextKeys
-        }
-    )
-    return {
-        "offsetSeconds": int(chunk["offsetSeconds"]),
-        "streamStartSeconds": int(chunk["streamStartSeconds"]),
-        "streamEndSeconds": int(chunk["streamEndSeconds"]),
-        "text": text,
-        "metadata": metadata,
-        "statistics": {
-            "sourceRecordCount": requestedRecordCount,
-            "includedRecordCount": includedCount,
-            "suppressedRecordCount": suppressedCount,
-            "renderedLineCount": 0 if not text else text.count("\n") + 1,
-            "characterCount": len(text),
-            "utf8ByteCount": len(text.encode("utf-8")),
-        },
-    }
+# _preparedChatChunk is a boundary adapter supplied by codeEntry.py.
+# Keeping source selection/semantic interpretation in the wrapper prevents a
+# second implementation copy from drifting away from the active Pack contract.
 
 
 def _preparedChatSnapshot(ctx, window: dict[str, object], *, includedInPrompt: bool) -> dict[str, object]:
