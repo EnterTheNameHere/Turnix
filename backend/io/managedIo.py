@@ -1,4 +1,4 @@
-# file: backend/io/managedIo.py ; version: 5
+# file: backend/io/managedIo.py ; version: 6
 from __future__ import annotations
 
 import contextlib
@@ -116,6 +116,10 @@ class ManagedIo:
         source identity request contentHash=True and persist contentSha256 as
         part of their derivation provenance.
 
+        Strong observation verifies size and modification time again after
+        hashing. If the source changes while being read, Actant retries rather
+        than publishing an internally inconsistent observation.
+
         This method performs one observation only. Scheduling, polling,
         subscriptions, and source-change event publication belong to future
         Actant services layered over this primitive.
@@ -124,43 +128,52 @@ class ManagedIo:
             raise TypeError("contentHash must be an exact bool.")
 
         resolved = self._path(path)
-        try:
-            stat = resolved.stat()
-        except FileNotFoundError:
-            return SourceObservation(
-                path=str(resolved),
-                state="missing",
-                sizeBytes=None,
-                modifiedTimeNs=None,
-                contentSha256=None,
-            )
-        except PermissionError as err:
-            raise IoPermissionError(f"Permission denied while observing {resolved}.") from err
-        except OSError as err:
-            raise IoError(f"Failed to observe file {resolved}: {err}.") from err
+        attempts = 3 if contentHash else 1
+        for attempt in range(attempts):
+            try:
+                before = resolved.stat()
+            except FileNotFoundError:
+                return SourceObservation(
+                    path=str(resolved),
+                    state="missing",
+                    sizeBytes=None,
+                    modifiedTimeNs=None,
+                    contentSha256=None,
+                )
+            except PermissionError as err:
+                raise IoPermissionError(f"Permission denied while observing {resolved}.") from err
+            except OSError as err:
+                raise IoError(f"Failed to observe file {resolved}: {err}.") from err
 
-        if not resolved.is_file():
-            if contentHash:
-                raise IoPathError(f"Content hashing requires a regular file: {resolved}.")
-            return SourceObservation(
-                path=str(resolved),
-                state="other",
-                sizeBytes=None,
-                modifiedTimeNs=stat.st_mtime_ns,
-                contentSha256=None,
-            )
+            if not resolved.is_file():
+                if contentHash:
+                    raise IoPathError(f"Content hashing requires a regular file: {resolved}.")
+                return SourceObservation(
+                    path=str(resolved),
+                    state="other",
+                    sizeBytes=None,
+                    modifiedTimeNs=before.st_mtime_ns,
+                    contentSha256=None,
+                )
 
-        digest: str | None = None
-        if contentHash:
+            if not contentHash:
+                return SourceObservation(
+                    path=str(resolved),
+                    state="file",
+                    sizeBytes=before.st_size,
+                    modifiedTimeNs=before.st_mtime_ns,
+                    contentSha256=None,
+                )
+
             hasher = hashlib.sha256()
             try:
                 with resolved.open("rb") as source:
                     for chunk in iter(lambda: source.read(1024 * 1024), b""):
                         hasher.update(chunk)
+                after = resolved.stat()
             except FileNotFoundError:
-                # The path changed between stat() and open(). Represent the
-                # observation point conservatively as missing rather than
-                # returning metadata for bytes we could not prove.
+                if attempt + 1 < attempts:
+                    continue
                 return SourceObservation(
                     path=str(resolved),
                     state="missing",
@@ -172,15 +185,20 @@ class ManagedIo:
                 raise IoPermissionError(f"Permission denied while hashing {resolved}.") from err
             except OSError as err:
                 raise IoError(f"Failed to hash file {resolved}: {err}.") from err
-            digest = hasher.hexdigest()
 
-        return SourceObservation(
-            path=str(resolved),
-            state="file",
-            sizeBytes=stat.st_size,
-            modifiedTimeNs=stat.st_mtime_ns,
-            contentSha256=digest,
-        )
+            if (
+                before.st_size == after.st_size
+                and before.st_mtime_ns == after.st_mtime_ns
+            ):
+                return SourceObservation(
+                    path=str(resolved),
+                    state="file",
+                    sizeBytes=after.st_size,
+                    modifiedTimeNs=after.st_mtime_ns,
+                    contentSha256=hasher.hexdigest(),
+                )
+
+        raise IoError(f"File changed repeatedly while being observed: {resolved}.")
 
     def readText(self, path: str | Path) -> str:
         resolved = self._path(path)
