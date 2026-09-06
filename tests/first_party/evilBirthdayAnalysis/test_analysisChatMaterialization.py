@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 5
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 6
 from __future__ import annotations
 
 import importlib.util
@@ -921,6 +921,29 @@ def test_chat_query_item_rebuilds_when_persistent_dependency_changes():
             ],
         },
     }
+    aggregate = {
+        "address": "evilanalysis/chat/second/s50/aggregate",
+        "dependency": {
+            "address": "evilanalysis/chat/second/s50/aggregate",
+            "state": "present",
+            "contentSha256": "aggregate-a",
+            "metadataSha256": "aggregate-meta-a",
+        },
+        "value": {
+            "secondIndex": 50,
+            "secondBucket": {
+                "address": bucket["address"],
+                "dependency": bucket["dependency"],
+            },
+            "entries": [
+                {
+                    "kind": "message",
+                    "lineNumber": 40,
+                    "semantic": semantic,
+                }
+            ],
+        },
+    }
     chat = {
         "sourcePath": "data/chat.txt",
         "records": [
@@ -942,6 +965,7 @@ def test_chat_query_item_rebuilds_when_persistent_dependency_changes():
             }
         ],
         "secondBuckets": [bucket],
+        "secondAggregates": [aggregate],
     }
 
     first = analysis._chatQueryItems(chat, previous={})[0]
