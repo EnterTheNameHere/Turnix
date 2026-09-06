@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 4
+# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 5
 from __future__ import annotations
 
 import importlib.util
@@ -105,6 +105,7 @@ class _Ctx:
                 "packVersion": "0.1.0",
                 "codeEntryId": "chatSemantics",
                 "sourceSha256": f"source-{implementationId}",
+                "implementationFormat": "python-source@1",
                 "implementationId": implementationId,
             },
         )
