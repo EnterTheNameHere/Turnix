@@ -1,7 +1,8 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 2
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 3
 from __future__ import annotations
 
 import importlib.util
+from collections.abc import Mapping
 from pathlib import Path
 
 _IMPLEMENTATION_PATH = Path(__file__).with_name("_implementation.py")
