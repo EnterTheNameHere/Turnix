@@ -1,3 +1,4 @@
+# file: tests/backend/packs/test_packResolver.py ; version: 1
 import json
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from backend.packs.runtime import PackResolver
 def _manifest(root: Path, directory: str, packId: str) -> None:
     path = root / directory
     path.mkdir()
-    (path / "manifest.json").write_text(json.dumps({"packId": packId, "codeEntries": []}), encoding="utf-8")
+    (path / "manifest.json").write_text(json.dumps({"packId": packId, "version": "0.0.0", "codeEntries": []}), encoding="utf-8")
 
 
 def test_resolver_accepts_exactly_one_candidate(tmp_path):
