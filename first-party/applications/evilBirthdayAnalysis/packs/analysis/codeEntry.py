@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 7
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 8
 from __future__ import annotations
 
 import importlib.util
@@ -53,6 +53,8 @@ def _interpretedChat(ctx, selector: dict[str, int]) -> tuple[dict[str, object], 
         {
             "sourcePath": sourcePath,
             "sourceObservation": sourceObservation,
+            "contextStreamStartSeconds": rawChat.get("contextStreamStartSeconds"),
+            "contextStreamEndSeconds": rawChat.get("contextStreamEndSeconds"),
             "records": rawChat["records"],
         },
     )
@@ -355,6 +357,8 @@ def _preparedChatChunk(ctx, chunk: dict[str, object]) -> dict[str, object]:
         "videoEndSeconds",
         "streamStartSeconds",
         "streamEndSeconds",
+        "contextStreamStartSeconds",
+        "contextStreamEndSeconds",
         "lookbackSeconds",
     )
     metadata = {key: _plain(rawChat[key]) for key in metadataKeys if key in rawChat}
