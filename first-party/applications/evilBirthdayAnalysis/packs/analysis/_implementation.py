@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 8
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 9
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -924,17 +924,31 @@ def _buildQuery(ctx, payload):
 
 
 def _preparedChatChunk(ctx, chunk: dict[str, object]) -> dict[str, object]:
+    """Builds diagnostic prepared-chat evidence through canonical interpretation.
+
+    This path is observation/export support, but it must still reflect the same
+    source-selection and semantic-processing contract used to materialize
+    QueryItems. Raw chat is never treated as interpreted application state.
+    """
     startVideo = int(chunk["videoStartSeconds"])
     endVideo = int(chunk["videoEndSeconds"])
-    chat = ctx.capabilities.call(
-        "evilAnalysis.chat@1",
+    adapter = globals().get("_interpretedChat")
+    if not callable(adapter):
+        raise RuntimeError("Analysis implementation requires canonical _interpretedChat adapter.")
+    rawChat, interpretedChat = adapter(
+        ctx,
         {"videoStartSeconds": startVideo, "videoEndSeconds": endVideo},
     )
-    if not isinstance(chat, dict) or type(chat.get("text")) is not str or not isinstance(chat.get("records"), list):
-        raise RuntimeError("Chat capability returned an invalid snapshot.")
+    if (
+        not isinstance(rawChat, dict)
+        or not isinstance(interpretedChat, dict)
+        or type(interpretedChat.get("text")) is not str
+        or not isinstance(interpretedChat.get("records"), list)
+    ):
+        raise RuntimeError("Canonical chat interpretation returned an invalid snapshot.")
 
-    text = chat["text"]
-    records = chat["records"]
+    text = interpretedChat["text"]
+    records = interpretedChat["records"]
     includedCount = 0
     suppressedCount = 0
     for record in records:
@@ -965,7 +979,7 @@ def _preparedChatChunk(ctx, chunk: dict[str, object]) -> dict[str, object]:
         "startWallClock",
         "endWallClock",
     )
-    metadata = {key: _plain(chat[key]) for key in metadataKeys if key in chat}
+    metadata = {key: _plain(rawChat[key]) for key in metadataKeys if key in rawChat}
     return {
         "offsetSeconds": int(chunk["offsetSeconds"]),
         "streamStartSeconds": int(chunk["streamStartSeconds"]),
