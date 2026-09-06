@@ -1,4 +1,4 @@
-# file: backend/values/committed.py ; version: 13
+# file: backend/values/committed.py ; version: 14
 from __future__ import annotations
 
 import base64
@@ -78,6 +78,18 @@ class CommittedValueLayer(ValueLayer):
     ever been established" from "the previous derivation is known not to be
     reusable". Retention and historical-version storage are separate concerns;
     this layer currently retains only the latest committed revision.
+
+    Each revision may also carry generic metadata beside, not inside, its
+    payload. CodeEntry-facing memory uses this for producer identity,
+    derivation-validity requirements, and provenance. Keeping those facts out
+    of the value lets debugger/evidence tooling inspect derivation state without
+    knowing each Pack's payload schema.
+
+    Metadata does not create a global dependency graph. A producer may record
+    input addresses/revisions, source content identities, configuration
+    identities, or other domain requirements in its validity data, and that
+    producer remains responsible for deciding whether those requirements still
+    hold when the logical value is requested again.
 
     This contract is design-significant and should be promoted into the Value
     System design specification when implementation-level design is reconciled
