@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 3
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 4
 from __future__ import annotations
 
 import importlib.util
@@ -175,10 +175,42 @@ class _MaterializationCapabilities:
                     }
                 )
 
+            secondAggregates = []
+            for bucket in secondBuckets:
+                entries = [
+                    {
+                        "kind": "message",
+                        "lineNumber": member["lineNumber"],
+                        "semantic": member["semantic"],
+                    }
+                    for member in bucket["value"]["members"]
+                ]
+                aggregateAddress = bucket["address"].replace("/semantic", "/aggregate")
+                secondAggregates.append(
+                    {
+                        "address": aggregateAddress,
+                        "dependency": {
+                            "address": aggregateAddress,
+                            "state": "present",
+                            "contentSha256": f"aggregate-{bucket['value']['secondIndex']}",
+                            "metadataSha256": f"aggregate-metadata-{bucket['value']['secondIndex']}",
+                        },
+                        "value": {
+                            "secondIndex": bucket["value"]["secondIndex"],
+                            "secondBucket": {
+                                "address": bucket["address"],
+                                "dependency": bucket["dependency"],
+                            },
+                            "entries": entries,
+                        },
+                    }
+                )
+
             included = [record for record in records if record["analysis"]["includedInText"]]
             return {
                 "records": records,
                 "secondBuckets": secondBuckets,
+                "secondAggregates": secondAggregates,
                 "text": "\n".join(
                     f"{record['streamTime']} {record['username']}: {record['body']}"
                     for record in included
@@ -521,6 +553,80 @@ def test_chatQueryItems_use_interpreted_body_but_keep_raw_message_as_source_evid
                 },
             },
         ],
+        "secondAggregates": [
+            {
+                "address": "evilanalysis/chat/second/s45/aggregate",
+                "dependency": {
+                    "address": "evilanalysis/chat/second/s45/aggregate",
+                    "state": "present",
+                    "contentSha256": "aggregate-45",
+                    "metadataSha256": "aggregate-metadata-45",
+                },
+                "value": {
+                    "secondIndex": 45,
+                    "secondBucket": {
+                        "address": "evilanalysis/chat/second/s45/semantic",
+                        "dependency": {
+                            "address": "evilanalysis/chat/second/s45/semantic",
+                            "state": "present",
+                            "contentSha256": "bucket-45",
+                            "metadataSha256": "bucket-metadata-45",
+                        },
+                    },
+                    "entries": [
+                        {
+                            "kind": "message",
+                            "lineNumber": 20,
+                            "semantic": {
+                                "address": "evilanalysis/chat/line/20/semantic",
+                                "dependency": {
+                                    "address": "evilanalysis/chat/line/20/semantic",
+                                    "state": "present",
+                                    "contentSha256": "semantic-20",
+                                    "metadataSha256": "metadata-20",
+                                },
+                            },
+                        }
+                    ],
+                },
+            },
+            {
+                "address": "evilanalysis/chat/second/s46/aggregate",
+                "dependency": {
+                    "address": "evilanalysis/chat/second/s46/aggregate",
+                    "state": "present",
+                    "contentSha256": "aggregate-46",
+                    "metadataSha256": "aggregate-metadata-46",
+                },
+                "value": {
+                    "secondIndex": 46,
+                    "secondBucket": {
+                        "address": "evilanalysis/chat/second/s46/semantic",
+                        "dependency": {
+                            "address": "evilanalysis/chat/second/s46/semantic",
+                            "state": "present",
+                            "contentSha256": "bucket-46",
+                            "metadataSha256": "bucket-metadata-46",
+                        },
+                    },
+                    "entries": [
+                        {
+                            "kind": "message",
+                            "lineNumber": 21,
+                            "semantic": {
+                                "address": "evilanalysis/chat/line/21/semantic",
+                                "dependency": {
+                                    "address": "evilanalysis/chat/line/21/semantic",
+                                    "state": "present",
+                                    "contentSha256": "semantic-21",
+                                    "metadataSha256": "metadata-21",
+                                },
+                            },
+                        }
+                    ],
+                },
+            },
+        ],
     }
 
     items = analysis._chatQueryItems(interpreted, previous={})
@@ -532,6 +638,7 @@ def test_chatQueryItems_use_interpreted_body_but_keep_raw_message_as_source_evid
     assert items[0].metadata["source"]["rawMessage"] == "viewer_name: GIGAEVIL"
     assert items[0].metadata["memory"]["semantic"]["address"] == "evilanalysis/chat/line/20/semantic"
     assert items[0].metadata["memory"]["secondBucket"]["address"] == "evilanalysis/chat/second/s45/semantic"
+    assert items[0].metadata["memory"]["secondAggregate"]["address"] == "evilanalysis/chat/second/s45/aggregate"
     assert items[1].content == "a future source form we do not understand"
     assert items[1].metadata["username"] == "[unclassified]"
     assert items[1].metadata["sourceUsername"] is None
