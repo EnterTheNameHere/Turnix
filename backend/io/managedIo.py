@@ -1,9 +1,11 @@
-# file: backend/io/managedIo.py ; version: 6
+# file: backend/io/managedIo.py ; version: 7
 from __future__ import annotations
 
 import contextlib
 import hashlib
 import json
+import os
+import stat as stat_module
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,7 @@ __all__ = [
     "IoPermissionError",
     "IoWriteError",
     "ManagedIo",
+    "ObservedFileRead",
     "SourceObservation",
 ]
 
@@ -50,6 +53,20 @@ class IoEncodeError(IoError):
 
 class IoWriteError(IoError):
     """Raised when a mediated write cannot be completed atomically."""
+
+
+@dataclass(frozen=True, slots=True)
+class ObservedFileRead:
+    """Exact bytes consumed from one file plus identity of those bytes.
+
+    The content hash is calculated from the returned payload itself while the
+    file descriptor remains open. Consumers therefore do not have to compose a
+    separate observation with a later read and hope both referred to the same
+    source contents.
+    """
+
+    payload: bytes
+    observation: "SourceObservation"
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +113,86 @@ class ManagedIo:
     All filesystem exceptions are translated here so Pack implementations do
     not need language-specific error handling for ordinary supported I/O.
     """
+
+    def readObservedBytes(self, path: str | Path) -> ObservedFileRead:
+        """Reads one regular file and returns exact bytes with source evidence.
+
+        Observation metadata is taken from the opened file descriptor, not by
+        restating the path around a separate read. The SHA-256 identity is
+        calculated from exactly the bytes returned to the caller.
+
+        If the opened file changes materially while being read, Actant retries.
+        Path replacement after opening does not rewrite the identity of the
+        bytes actually consumed; future observations of the path will naturally
+        report the replacement as a different source.
+
+        This primitive is intended to underpin future polling/watch/event
+        services as well as deterministic derived-value provenance.
+        """
+        resolved = self._path(path)
+        for attempt in range(3):
+            try:
+                with resolved.open("rb") as source:
+                    before = os.fstat(source.fileno())
+                    if not stat_module.S_ISREG(before.st_mode):
+                        raise IoPathError(f"Observed reads require a regular file: {resolved}.")
+                    payload = source.read()
+                    after = os.fstat(source.fileno())
+            except FileNotFoundError as err:
+                raise IoNotFoundError(f"File does not exist: {resolved}.") from err
+            except PermissionError as err:
+                raise IoPermissionError(f"Permission denied while reading {resolved}.") from err
+            except IoPathError:
+                raise
+            except OSError as err:
+                raise IoError(f"Failed to read observed file {resolved}: {err}.") from err
+
+            stable = (
+                before.st_dev == after.st_dev
+                and before.st_ino == after.st_ino
+                and before.st_size == after.st_size
+                and before.st_mtime_ns == after.st_mtime_ns
+            )
+            if stable:
+                return ObservedFileRead(
+                    payload=payload,
+                    observation=SourceObservation(
+                        path=str(resolved),
+                        state="file",
+                        sizeBytes=len(payload),
+                        modifiedTimeNs=after.st_mtime_ns,
+                        contentSha256=hashlib.sha256(payload).hexdigest(),
+                    ),
+                )
+            if attempt + 1 == 3:
+                raise IoError(f"File changed repeatedly while being read: {resolved}.")
+
+        raise AssertionError("unreachable")
+
+    def readObservedText(self, path: str | Path) -> tuple[str, SourceObservation]:
+        """Reads UTF-8 text with identity for exactly the consumed bytes."""
+        observed = self.readObservedBytes(path)
+        try:
+            text = observed.payload.decode("utf-8")
+        except UnicodeDecodeError as err:
+            raise IoDecodeError(f"File is not valid UTF-8: {observed.observation.path}.") from err
+        return text, observed.observation
+
+    def readObservedLines(self, path: str | Path) -> tuple[tuple[str, ...], SourceObservation]:
+        """Reads UTF-8 lines with identity for exactly the consumed bytes."""
+        text, observation = self.readObservedText(path)
+        return tuple(text.splitlines()), observation
+
+    def readObservedJson(self, path: str | Path) -> tuple[dict[str, Any], SourceObservation]:
+        """Reads a JSON object with identity for exactly the consumed bytes."""
+        text, observation = self.readObservedText(path)
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError as err:
+            raise IoDecodeError(f"Invalid JSON in {observation.path}: {err}.") from err
+        if not isinstance(value, dict):
+            raise IoDecodeError(f"JSON root must be an object: {observation.path}.")
+        return value, observation
 
     def observeFile(
         self,
