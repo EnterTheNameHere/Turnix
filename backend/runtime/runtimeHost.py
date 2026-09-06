@@ -1,3 +1,4 @@
+# file: backend/runtime/runtimeHost.py ; version: 1
 from __future__ import annotations
 
 from copy import deepcopy
@@ -121,6 +122,7 @@ class RuntimeHost:
             capabilities=self.capabilities,
             llmProviders=self.llmProviders,
             llmPipeline=self.llmPipeline,
+            memory=self.applicationRun.committedState,
             registrationScope=registrationScope,
             config=self._config,
             capabilityInvoker=lambda capabilityId, payload=None: self.invokeCapability(capabilityId, payload),
