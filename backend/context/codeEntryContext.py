@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 8
+# file: backend/context/codeEntryContext.py ; version: 9
 from __future__ import annotations
 
 from copy import deepcopy
@@ -108,6 +108,18 @@ class _MemoryTransactionFacade:
     def state(self, address: str) -> ValueState:
         self._requireValid()
         return self._transaction.state(address)
+
+    def isReusable(self, address: str, *, validity: dict[str, object]) -> bool:
+        """Returns whether staged/visible state matches this producer and validity basis."""
+        self._requireValid()
+        if self._transaction.state(address) is not ValueState.PRESENT:
+            return False
+        metadata = self._transaction.metadata(address)
+        return (
+            isinstance(metadata, dict)
+            and metadata.get("producer") == self._producer
+            and metadata.get("validity") == validity
+        )
 
     def set(
         self,
@@ -222,6 +234,18 @@ class _MemoryFacade:
         """Returns generic Actant metadata for the visible revision."""
         self._requireValid()
         return self._state.metadata(address)
+
+    def isReusable(self, address: str, *, validity: dict[str, object]) -> bool:
+        """Returns whether visible state is current for this producer/validity contract."""
+        self._requireValid()
+        if self._state.state(address) is not ValueState.PRESENT:
+            return False
+        metadata = self._state.metadata(address)
+        return (
+            isinstance(metadata, dict)
+            and metadata.get("producer") == self._producer
+            and metadata.get("validity") == validity
+        )
 
     def openTransaction(self) -> _MemoryTransactionFacade:
         self._requireValid()
