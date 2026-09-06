@@ -1,4 +1,4 @@
-# file: tests/backend/context/test_codeEntryContext.py ; version: 8
+# file: tests/backend/context/test_codeEntryContext.py ; version: 9
 import pytest
 
 from pathlib import Path
@@ -322,4 +322,34 @@ def test_memory_dependency_identity_is_stable_through_context_transaction_commit
     outer.commit()
 
     assert memory.dependency("derived/input") == stagedDependency
+    context.invalidate()
+
+
+
+def test_memory_isCurrent_matches_non_present_producer_state_without_rewriting() -> None:
+    memory = CommittedValueLayer()
+    context = _contextWithMemory(memory)
+    transaction = context.memory.openTransaction()
+    transaction.invalidate(
+        "derived/value",
+        validity={"coverage": "partial"},
+        provenance={"reason": "incomplete"},
+    )
+    transaction.commit()
+
+    assert context.memory.isCurrent(
+        "derived/value",
+        state="invalidated",
+        validity={"coverage": "partial"},
+    ) is True
+    assert context.memory.isCurrent(
+        "derived/value",
+        state="present",
+        validity={"coverage": "partial"},
+    ) is False
+    assert context.memory.isCurrent(
+        "derived/value",
+        state="invalidated",
+        validity={"coverage": "different"},
+    ) is False
     context.invalidate()
