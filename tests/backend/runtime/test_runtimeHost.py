@@ -1,4 +1,4 @@
-# file: tests/backend/runtime/test_runtimeHost.py ; version: 3
+# file: tests/backend/runtime/test_runtimeHost.py ; version: 4
 from pathlib import Path
 
 import pytest
@@ -8,7 +8,7 @@ from backend.context import CodeEntryIdentity
 from backend.registration import RegistrationScope
 from backend.runtime.runtimeHost import RuntimeHost
 from backend.save import SaveBundle
-from backend.values import ValueState
+from backend.values import MISSING, ValueState
 
 
 class RaisingTracer:
@@ -211,6 +211,7 @@ def test_capability_memory_write_nests_under_supplied_transaction():
     scope.publish()
 
     outer = host.applicationRun.committedState.openTransaction()
+    outerCommitted = False
     try:
         result = host.invokeCapability(
             "test.memorywrite@1",
@@ -219,15 +220,16 @@ def test_capability_memory_write_nests_under_supplied_transaction():
 
         assert result == {"count": 1}
         assert outer.load("test/nested/value") == {"count": 1}
-        assert host.applicationRun.committedState.load("test/nested/value") is not result
+        assert host.applicationRun.committedState.load("test/nested/value") is MISSING
         assert host.applicationRun.committedState.revisionId("test/nested/value") == 0
 
         outer.commit()
+        outerCommitted = True
 
         assert host.applicationRun.committedState.load("test/nested/value") == {"count": 1}
         assert host.applicationRun.committedState.revisionId("test/nested/value") == 1
     finally:
-        if outer._state == "active":
+        if not outerCommitted:
             outer.abort()
         scope.withdraw()
         host.unregisterCodeEntry(identity.codeEntryInstanceId)
