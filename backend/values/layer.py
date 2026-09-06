@@ -1,4 +1,4 @@
-# file: backend/values/layer.py ; version: 3
+# file: backend/values/layer.py ; version: 4
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -126,7 +126,8 @@ class ValueLayer(ABC):
         Attempts to mutate a value through this resolution view.
 
         Ordinary ValueLayer instances do not expose direct mutation.
-        Transaction layers override this method to stage mutation.
+        CommittedValueTransaction overrides this method to stage authoritative
+        Value System mutation.
 
         Raises:
             RuntimeError:
@@ -135,7 +136,7 @@ class ValueLayer(ABC):
         """
         raise RuntimeError(
             f"{type(self).__qualname__} does not support direct value "
-            "mutation; use a ValueTransaction.",
+            "mutation; use CommittedValueLayer.openTransaction().",
         )
 
     @abstractmethod
