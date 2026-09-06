@@ -1,7 +1,8 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 1
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 2
 from __future__ import annotations
 
 import importlib.util
+import math
 from pathlib import Path
 
 import pytest
@@ -127,10 +128,57 @@ class _MaterializationCapabilities:
                             "streamTime": record["streamTime"],
                         },
                     )
+                semanticAddress = f"evilanalysis/chat/line/{record['lineNumber']}/semantic"
+                record["semanticValue"] = {
+                    "address": semanticAddress,
+                    "dependency": {
+                        "address": semanticAddress,
+                        "state": "present",
+                        "contentSha256": f"semantic-{record['lineNumber']}",
+                        "metadataSha256": f"semantic-metadata-{record['lineNumber']}",
+                    },
+                }
                 records.append(record)
+
+            grouped = {}
+            for record in records:
+                secondIndex = math.floor(float(record["streamTimeSeconds"]))
+                grouped.setdefault(secondIndex, []).append(record)
+
+            secondBuckets = []
+            for secondIndex in sorted(grouped):
+                segment = f"n{-secondIndex}" if secondIndex < 0 else f"s{secondIndex}"
+                address = f"evilanalysis/chat/second/{segment}/semantic"
+                members = [
+                    {
+                        "lineNumber": record["lineNumber"],
+                        "streamTimeSeconds": float(record["streamTimeSeconds"]),
+                        "semantic": record["semanticValue"],
+                    }
+                    for record in grouped[secondIndex]
+                ]
+                secondBuckets.append(
+                    {
+                        "address": address,
+                        "dependency": {
+                            "address": address,
+                            "state": "present",
+                            "contentSha256": f"bucket-{secondIndex}",
+                            "metadataSha256": f"bucket-metadata-{secondIndex}",
+                        },
+                        "value": {
+                            "secondIndex": secondIndex,
+                            "startSeconds": float(secondIndex),
+                            "endSeconds": float(secondIndex + 1),
+                            "members": members,
+                        },
+                    }
+                )
+
             included = [record for record in records if record["analysis"]["includedInText"]]
             return {
                 "records": records,
+                "secondBuckets": secondBuckets,
                 "text": "\n".join(
                     f"{record['streamTime']} {record['username']}: {record['body']}"
                     for record in included
@@ -373,6 +421,15 @@ def test_chatQueryItems_use_interpreted_body_but_keep_raw_message_as_source_evid
                 "username": "viewer_name",
                 "body": "GIGAEVIL",
                 "timestampText": "2024-03-25 19:18:33",
+                "semanticValue": {
+                    "address": "evilanalysis/chat/line/20/semantic",
+                    "dependency": {
+                        "address": "evilanalysis/chat/line/20/semantic",
+                        "state": "present",
+                        "contentSha256": "semantic-20",
+                        "metadataSha256": "metadata-20",
+                    },
+                },
                 "analysis": {
                     "kind": "userMessage",
                     "includedInText": True,
@@ -386,12 +443,81 @@ def test_chatQueryItems_use_interpreted_body_but_keep_raw_message_as_source_evid
                 "channel": "#vedal987",
                 "message": "a future source form we do not understand",
                 "timestampText": "2024-03-25 19:18:34",
+                "semanticValue": {
+                    "address": "evilanalysis/chat/line/21/semantic",
+                    "dependency": {
+                        "address": "evilanalysis/chat/line/21/semantic",
+                        "state": "present",
+                        "contentSha256": "semantic-21",
+                        "metadataSha256": "metadata-21",
+                    },
+                },
                 "analysis": {
                     "kind": "unknownMessage",
                     "includedInText": True,
                     "streamTimeSeconds": 46.0,
                     "streamTime": "00:00:46",
                     "rawMessage": "a future source form we do not understand",
+                },
+            },
+        ],
+        "secondBuckets": [
+            {
+                "address": "evilanalysis/chat/second/s45/semantic",
+                "dependency": {
+                    "address": "evilanalysis/chat/second/s45/semantic",
+                    "state": "present",
+                    "contentSha256": "bucket-45",
+                    "metadataSha256": "bucket-metadata-45",
+                },
+                "value": {
+                    "secondIndex": 45,
+                    "startSeconds": 45.0,
+                    "endSeconds": 46.0,
+                    "members": [
+                        {
+                            "lineNumber": 20,
+                            "streamTimeSeconds": 45.0,
+                            "semantic": {
+                                "address": "evilanalysis/chat/line/20/semantic",
+                                "dependency": {
+                                    "address": "evilanalysis/chat/line/20/semantic",
+                                    "state": "present",
+                                    "contentSha256": "semantic-20",
+                                    "metadataSha256": "metadata-20",
+                                },
+                            },
+                        }
+                    ],
+                },
+            },
+            {
+                "address": "evilanalysis/chat/second/s46/semantic",
+                "dependency": {
+                    "address": "evilanalysis/chat/second/s46/semantic",
+                    "state": "present",
+                    "contentSha256": "bucket-46",
+                    "metadataSha256": "bucket-metadata-46",
+                },
+                "value": {
+                    "secondIndex": 46,
+                    "startSeconds": 46.0,
+                    "endSeconds": 47.0,
+                    "members": [
+                        {
+                            "lineNumber": 21,
+                            "streamTimeSeconds": 46.0,
+                            "semantic": {
+                                "address": "evilanalysis/chat/line/21/semantic",
+                                "dependency": {
+                                    "address": "evilanalysis/chat/line/21/semantic",
+                                    "state": "present",
+                                    "contentSha256": "semantic-21",
+                                    "metadataSha256": "metadata-21",
+                                },
+                            },
+                        }
+                    ],
                 },
             },
         ],
@@ -404,6 +530,8 @@ def test_chatQueryItems_use_interpreted_body_but_keep_raw_message_as_source_evid
     assert items[0].metadata["username"] == "viewer_name"
     assert items[0].metadata["sourceUsername"] == "viewer_name"
     assert items[0].metadata["source"]["rawMessage"] == "viewer_name: GIGAEVIL"
+    assert items[0].metadata["memory"]["semantic"]["address"] == "evilanalysis/chat/line/20/semantic"
+    assert items[0].metadata["memory"]["secondBucket"]["address"] == "evilanalysis/chat/second/s45/semantic"
     assert items[1].content == "a future source form we do not understand"
     assert items[1].metadata["username"] == "[unclassified]"
     assert items[1].metadata["sourceUsername"] is None
