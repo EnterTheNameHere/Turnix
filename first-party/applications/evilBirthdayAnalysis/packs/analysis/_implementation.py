@@ -1,3 +1,4 @@
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 1
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -927,32 +928,29 @@ def _preparedChatSnapshot(ctx, window: dict[str, object], *, includedInPrompt: b
     }
 
 
-def _finalizeWindow(ctx, payload):
+def _completeWindow(ctx, payload):
+    """Stages the durable analysis-result identity inside ProcessingRun memory.
+
+    Completion is transactional application work, not export. The persistent
+    result points to the ProcessingRun that already retains the exact model
+    query, exact response, execution settings, and QueryItem identities.
+    Diagnostic/export-only material is intentionally not required to restore
+    this result later.
+    """
     if not isinstance(payload, dict) or not isinstance(payload.get("input"), dict) or not isinstance(payload.get("llm"), dict):
-        raise ValueError("FINALIZE requires processing input and LLM evidence.")
+        raise ValueError("COMPLETE requires processing input and LLM evidence.")
     inputValue = payload["input"]
     llm = payload["llm"]
-    query = llm.get("query")
-    response = llm.get("response")
-    if not isinstance(query, dict) or not isinstance(response, dict):
-        raise ValueError("FINALIZE requires query and response evidence.")
-    exactPayload = query.get("payload")
-    if type(exactPayload) is not str:
-        raise TypeError("Evil Birthday analysis finalization expects a text/plain string query payload.")
-
-    finalizeInput = payload.get("finalizeInput")
-    if not isinstance(finalizeInput, dict) or not isinstance(finalizeInput.get("chat"), dict):
-        raise ValueError("FINALIZE requires prepared chat evidence.")
-    preparedChat = finalizeInput["chat"]
 
     batchId = inputValue.get("batchId")
-    if type(batchId) is not str:
-        raise ValueError("Processing input batchId must be a string.")
+    processingRunId = payload.get("processingRunId")
+    if type(batchId) is not str or type(processingRunId) is not str:
+        raise ValueError("Processing completion requires batchId and processingRunId strings.")
 
-    record = {
+    result = {
         "resultId": newRuntimeId(),
         "batchId": batchId,
-        "processingRunId": payload["processingRunId"],
+        "processingRunId": processingRunId,
         "createdAt": datetime.now(UTC).isoformat(),
         "application": {
             "applicationId": ctx.identity.applicationId,
@@ -960,27 +958,59 @@ def _finalizeWindow(ctx, payload):
         },
         "profile": _plain(inputValue["profile"]),
         "window": _plain(inputValue["window"]),
-        "queryItems": _plain(payload["queryItems"]),
-        "chat": _plain(preparedChat),
-        "llm": {
+        "execution": {
             "provider": llm.get("providerName"),
             "providerOwnerId": llm.get("providerOwnerId"),
             "model": llm.get("model"),
             "requestedProviderOptions": _plain(llm.get("providerOptions", {})),
             "executionProfile": _plain(llm.get("executionProfile", {})),
-            "providerMetadata": _plain(llm.get("providerMetadata", {})),
-            "observerErrors": _plain(llm.get("observerErrors", [])),
+        },
+    }
+
+    transaction = ctx.memory.openTransaction()
+    transaction.set(f"evilanalysis/results/{processingRunId}", result)
+    transaction.commit()
+    return {"result": result}
+
+
+def _exportWindowRecord(
+    *,
+    ctx,
+    inputValue: dict[str, object],
+    persistentResult: dict[str, object],
+    preparedChat: dict[str, object],
+    processingResult,
+) -> dict[str, object]:
+    """Builds the current human/diagnostic export projection after commit."""
+    query = processingResult.llm.query
+    exactPayload = query.payload
+    if type(exactPayload) is not str:
+        raise TypeError("Evil Birthday analysis export expects a text/plain string query payload.")
+
+    return {
+        **_plain(persistentResult),
+        "queryItems": _plain([item.snapshot() for item in processingResult.queryItems]),
+        "chat": _plain(preparedChat),
+        "llm": {
+            "provider": processingResult.llm.providerName,
+            "providerOwnerId": processingResult.llm.providerOwnerId,
+            "model": processingResult.llm.model,
+            "requestedProviderOptions": _plain(processingResult.llm.providerOptions),
+            "executionProfile": {
+                "contextWindowTokens": processingResult.llm.executionProfile.contextWindowTokens,
+                "metadata": _plain(processingResult.llm.executionProfile.metadata),
+            },
+            "providerMetadata": _plain(processingResult.llm.providerMetadata),
+            "observerErrors": list(processingResult.llm.observerErrors),
         },
         "llamaCpp": _plain(ctx.config.get("llamaCpp", {})),
         "input": {
-            "formatId": query.get("formatId"),
+            "formatId": query.formatId,
             "exactPayload": exactPayload,
-            "metadata": _plain(query.get("metadata", {})),
+            "metadata": _plain(query.metadata),
         },
-        "response": {"rawText": response.get("rawText", "")},
+        "response": {"rawText": processingResult.llm.rawText},
     }
-    saved = ctx.capabilities.call("evilAnalysis.results@1", record)
-    return {"result": record, "saved": saved}
 
 
 def _run(ctx, payload):
@@ -1048,23 +1078,37 @@ def _run(ctx, payload):
             inputValue=inputValue,
             buildQueryItemsCapabilityId="evilAnalysis.buildQueryItems@1",
             buildQueryCapabilityId="evilAnalysis.buildQuery@1",
-            finalizeCapabilityId="evilAnalysis.finalizeWindow@1",
-            finalizeInput={"chat": preparedChat},
+            completionCapabilityId="evilAnalysis.completeWindow@1",
+            completionInput={"chat": preparedChat},
             providerName=llmConfig["provider"],
             model=model,
             providerOptions=providerOptions,
             streamObserver=observer,
         )
-        finalized = processingResult.finalizeResult
-        if not isinstance(finalized, dict) or not isinstance(finalized.get("result"), dict) or not isinstance(finalized.get("saved"), dict):
-            raise RuntimeError("Window finalization returned an invalid result.")
+        completed = processingResult.completionResult
+        if not isinstance(completed, dict) or not isinstance(completed.get("result"), dict):
+            raise RuntimeError("Window completion returned an invalid persistent result.")
+        persistentResult = completed["result"]
+
+        # Export is a post-commit projection. Failure here does not roll back
+        # the authoritative ProcessingRun or durable result state.
+        exportRecord = _exportWindowRecord(
+            ctx=ctx,
+            inputValue=inputValue,
+            persistentResult=persistentResult,
+            preparedChat=preparedChat,
+            processingResult=processingResult,
+        )
+        saved = ctx.capabilities.call("evilAnalysis.results@1", exportRecord)
+        if not isinstance(saved, dict):
+            raise RuntimeError("Window export returned an invalid result.")
         results.append(
             {
                 "windowIndex": windowIndex,
                 "positionSeconds": position,
                 "processingRunId": processingResult.processingRunId,
-                "result": finalized["result"],
-                "saved": finalized["saved"],
+                "result": persistentResult,
+                "saved": saved,
             }
         )
 
@@ -1074,5 +1118,5 @@ def _run(ctx, payload):
 def onLoad(ctx):
     ctx.capabilities.register("evilAnalysis.buildQueryItems@1", _buildQueryItems)
     ctx.capabilities.register("evilAnalysis.buildQuery@1", _buildQuery)
-    ctx.capabilities.register("evilAnalysis.finalizeWindow@1", _finalizeWindow)
+    ctx.capabilities.register("evilAnalysis.completeWindow@1", _completeWindow)
     ctx.capabilities.register("evilAnalysis.run@1", _run)
