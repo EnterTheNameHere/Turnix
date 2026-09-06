@@ -1,3 +1,4 @@
+# file: tests/backend/packs/test_packLoader.py ; version: 1
 import json
 from pathlib import Path
 
@@ -95,6 +96,51 @@ def test_failing_onload_is_best_effort_unloaded_with_none_state(tmp_path: Path):
         with pytest.raises(RuntimeError, match="load exploded"):
             loader.activate(ManualActivationPlan(packIds=("test.cleanup",)))
         assert marker.read_text(encoding="utf-8") == "None"
+    finally:
+        loader.close()
+        host.stop()
+
+
+
+def test_code_entry_implementation_identity_tracks_exact_executed_source(tmp_path: Path):
+    source = (
+        "def onLoad(ctx):\n"
+        "    ctx.capabilities.register(" 
+        "'test.identity@1', "
+        "lambda ctx, payload: ctx.identity.producerSnapshot())\n"
+    )
+    _writePack(tmp_path, "test.identity", source)
+
+    host = RuntimeHost()
+    host.start()
+    resolver = PackResolver(roots=(tmp_path,))
+    loader = PackLoader(host=host, resolver=resolver)
+    try:
+        loader.activate(ManualActivationPlan(packIds=("test.identity",)))
+        first = host.invokeCapability("test.identity@1")
+        loader.close()
+
+        loader.activate(ManualActivationPlan(packIds=("test.identity",)))
+        second = host.invokeCapability("test.identity@1")
+        loader.close()
+
+        assert first == second
+        assert first["packId"] == "test.identity"
+        assert first["packVersion"] == "0.0.0"
+        assert first["sourceSha256"]
+        assert first["implementationId"]
+
+        directory = tmp_path / "test_identity"
+        (directory / "codeEntry.py").write_text(
+            "# implementation changed\n" + source,
+            encoding="utf-8",
+        )
+
+        loader.activate(ManualActivationPlan(packIds=("test.identity",)))
+        third = host.invokeCapability("test.identity@1")
+
+        assert third["sourceSha256"] != first["sourceSha256"]
+        assert third["implementationId"] != first["implementationId"]
     finally:
         loader.close()
         host.stop()
