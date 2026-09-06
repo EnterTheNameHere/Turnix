@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 1
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 2
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -1079,7 +1079,6 @@ def _run(ctx, payload):
             buildQueryItemsCapabilityId="evilAnalysis.buildQueryItems@1",
             buildQueryCapabilityId="evilAnalysis.buildQuery@1",
             completionCapabilityId="evilAnalysis.completeWindow@1",
-            completionInput={"chat": preparedChat},
             providerName=llmConfig["provider"],
             model=model,
             providerOptions=providerOptions,
@@ -1108,6 +1107,9 @@ def _run(ctx, payload):
                 "positionSeconds": position,
                 "processingRunId": processingResult.processingRunId,
                 "result": persistentResult,
+                "warnings": _plain(processingResult.llm.query.metadata.get("chatBudget", {}).get("warnings", []))
+                if isinstance(processingResult.llm.query.metadata, dict)
+                else [],
                 "saved": saved,
             }
         )
