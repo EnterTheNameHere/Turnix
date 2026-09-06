@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 9
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 10
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -951,9 +951,13 @@ def _preparedChatChunk(ctx, chunk: dict[str, object]) -> dict[str, object]:
     records = interpretedChat["records"]
     includedCount = 0
     suppressedCount = 0
+    requestedRecordCount = 0
     for record in records:
         if not isinstance(record, dict):
             raise RuntimeError("Chat capability returned an invalid record.")
+        if record.get("insideRequestedWindow") is not True:
+            continue
+        requestedRecordCount += 1
         analysis = record.get("analysis")
         included = isinstance(analysis, dict) and analysis.get("includedInText") is True
         if included:
@@ -987,7 +991,7 @@ def _preparedChatChunk(ctx, chunk: dict[str, object]) -> dict[str, object]:
         "text": text,
         "metadata": metadata,
         "statistics": {
-            "sourceRecordCount": len(records),
+            "sourceRecordCount": requestedRecordCount,
             "includedRecordCount": includedCount,
             "suppressedRecordCount": suppressedCount,
             "renderedLineCount": 0 if not text else text.count("\n") + 1,
