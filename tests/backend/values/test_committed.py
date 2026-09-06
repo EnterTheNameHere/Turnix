@@ -1,6 +1,7 @@
+# file: tests/backend/values/test_committed.py ; version: 1
 import pytest
 
-from backend.values.committed import CommittedValueLayer, StateConflictError
+from backend.values.committed import CommittedValueLayer, StateConflictError, ValueState
 from backend.values.sentinels import MISSING
 
 
@@ -70,3 +71,69 @@ def test_parent_is_suspended_while_child_transaction_is_active():
     child.set("value", "child")
     child.commit()
     assert outer.load("value") == "child"
+
+
+def test_explicit_absence_is_authoritative_revisioned_state():
+    layer = CommittedValueLayer()
+
+    assert layer.state("analysis/result") is ValueState.ABSENT
+    assert layer.revisionId("analysis/result") == 0
+    assert layer.load("analysis/result") is MISSING
+
+    transaction = layer.openTransaction()
+    transaction.setAbsent("analysis/result")
+
+    assert transaction.state("analysis/result") is ValueState.ABSENT
+    assert layer.revisionId("analysis/result") == 0
+
+    transaction.commit()
+
+    assert layer.state("analysis/result") is ValueState.ABSENT
+    assert layer.revisionId("analysis/result") == 1
+    assert layer.load("analysis/result") is MISSING
+
+
+def test_invalidation_replaces_same_logical_cell_and_advances_revision():
+    layer = CommittedValueLayer()
+
+    first = layer.openTransaction()
+    first.set("chat/line/17/semantic", {"body": "old"})
+    first.commit()
+
+    assert layer.state("chat/line/17/semantic") is ValueState.PRESENT
+    assert layer.revisionId("chat/line/17/semantic") == 1
+
+    invalidate = layer.openTransaction()
+    invalidate.invalidate("chat/line/17/semantic")
+
+    assert invalidate.state("chat/line/17/semantic") is ValueState.INVALIDATED
+    assert layer.state("chat/line/17/semantic") is ValueState.PRESENT
+
+    invalidate.commit()
+
+    assert layer.state("chat/line/17/semantic") is ValueState.INVALIDATED
+    assert layer.load("chat/line/17/semantic") is MISSING
+    assert layer.revisionId("chat/line/17/semantic") == 2
+
+    replacement = layer.openTransaction()
+    replacement.set("chat/line/17/semantic", {"body": "new"})
+    replacement.commit()
+
+    assert layer.state("chat/line/17/semantic") is ValueState.PRESENT
+    assert layer.load("chat/line/17/semantic") == {"body": "new"}
+    assert layer.revisionId("chat/line/17/semantic") == 3
+
+
+def test_aborted_authority_transition_does_not_change_committed_state():
+    layer = CommittedValueLayer()
+    seed = layer.openTransaction()
+    seed.set("analysis/result", "current")
+    seed.commit()
+
+    transaction = layer.openTransaction()
+    transaction.invalidate("analysis/result")
+    transaction.abort()
+
+    assert layer.state("analysis/result") is ValueState.PRESENT
+    assert layer.load("analysis/result") == "current"
+    assert layer.revisionId("analysis/result") == 1
