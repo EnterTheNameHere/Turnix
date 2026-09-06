@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chat/codeEntry.py ; version: 2
+# file: first-party/applications/evilBirthdayAnalysis/packs/chat/codeEntry.py ; version: 3
 from __future__ import annotations
 
 import math
@@ -235,9 +235,10 @@ def _select(ctx, payload):
 
     No message interpretation occurs here. Returned records contain the raw
     source message plus timing/provenance needed by later CodeEntries. Optional
-    lookbackSeconds lets a later semantic processor request prior raw evidence
-    for stateful interpretation without moving that interpretation into this
-    source Pack.
+    lookbackSeconds and lookaheadSeconds let later semantic processors request
+    boundary context without moving interpretation into this source Pack.
+    insideRequestedWindow always represents the original half-open interval
+    [videoStartSeconds, videoEndSeconds), never the wider context selection.
     """
     if not isinstance(payload, dict):
         raise ValueError("Chat selection requires an object payload.")
@@ -253,11 +254,17 @@ def _select(ctx, payload):
     startVideo = _finiteSeconds(payload, "videoStartSeconds")
     endVideo = _finiteSeconds(payload, "videoEndSeconds")
     lookbackSeconds = payload.get("lookbackSeconds", 0)
+    lookaheadSeconds = payload.get("lookaheadSeconds", 0)
     if type(lookbackSeconds) not in {int, float}:
         raise TypeError("Chat selector 'lookbackSeconds' must be numeric when provided.")
+    if type(lookaheadSeconds) not in {int, float}:
+        raise TypeError("Chat selector 'lookaheadSeconds' must be numeric when provided.")
     lookbackSeconds = float(lookbackSeconds)
+    lookaheadSeconds = float(lookaheadSeconds)
     if not math.isfinite(lookbackSeconds) or lookbackSeconds < 0:
         raise ValueError("Chat selector 'lookbackSeconds' must be finite and non-negative.")
+    if not math.isfinite(lookaheadSeconds) or lookaheadSeconds < 0:
+        raise ValueError("Chat selector 'lookaheadSeconds' must be finite and non-negative.")
     if endVideo < startVideo:
         raise ValueError("Chat selector produced an inverted video-time window.")
 
@@ -266,10 +273,11 @@ def _select(ctx, payload):
     streamZeroWall = mediaZeroWall + timedelta(seconds=streamStartVideoSeconds)
     requestedStartWall = mediaZeroWall + timedelta(seconds=startVideo)
     selectionStartWall = requestedStartWall - timedelta(seconds=lookbackSeconds)
-    endWall = mediaZeroWall + timedelta(seconds=endVideo)
+    requestedEndWall = mediaZeroWall + timedelta(seconds=endVideo)
+    selectionEndWall = requestedEndWall + timedelta(seconds=lookaheadSeconds)
 
     startIndex = bisect_left(timestamps, selectionStartWall)
-    endIndex = bisect_left(timestamps, endWall)
+    endIndex = bisect_left(timestamps, selectionEndWall)
 
     records: list[dict[str, object]] = []
     for sourceRecord in parsedRecords[startIndex:endIndex]:
@@ -284,7 +292,9 @@ def _select(ctx, payload):
         }
         retained["streamTimeSeconds"] = streamTimeSeconds
         retained["streamTime"] = _formatStreamTime(streamTimeSeconds)
-        retained["insideRequestedWindow"] = timestamp >= requestedStartWall
+        retained["insideRequestedWindow"] = (
+            requestedStartWall <= timestamp < requestedEndWall
+        )
         records.append(retained)
 
     return {
@@ -300,6 +310,7 @@ def _select(ctx, payload):
         "streamStartSeconds": startVideo - streamStartVideoSeconds,
         "streamEndSeconds": endVideo - streamStartVideoSeconds,
         "lookbackSeconds": lookbackSeconds,
+        "lookaheadSeconds": lookaheadSeconds,
         "records": records,
     }
 
