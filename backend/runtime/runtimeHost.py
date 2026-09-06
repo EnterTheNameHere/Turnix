@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 2
+# file: backend/runtime/runtimeHost.py ; version: 3
 from __future__ import annotations
 
 from copy import deepcopy
@@ -14,6 +14,7 @@ from backend.orchestration.runtime import Job, OrchestrationUnit, OrchestrationU
 from backend.registration import RegistrationScope
 from backend.save import SaveBundle
 from backend.tracing import TraceSinkDestination, Tracer
+from backend.values.committed import CommittedValueLayer, CommittedValueTransaction
 
 __all__ = ["RuntimeHost"]
 
@@ -63,7 +64,7 @@ class RuntimeHost:
         self.llmPipeline = LlmProcessingPipeline(
             providers=self.llmProviders,
             state=self.applicationRun.committedState,
-            capabilityInvoker=lambda capabilityId, payload=None: self.invokeCapability(capabilityId, payload),
+            capabilityInvoker=lambda capabilityId, payload=None, memoryView=None: self.invokeCapability(capabilityId, payload, memoryView=memoryView),
             trace=lambda reason, attributes: self.trace(reason, attributes=attributes),
         )
 
@@ -159,6 +160,7 @@ class RuntimeHost:
         packRoot: Path,
         registrationScope: RegistrationScope,
         allowRegistration: bool = False,
+        memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
     ) -> CodeEntryContext:
         self.requireActive()
         return CodeEntryContext(
@@ -168,10 +170,10 @@ class RuntimeHost:
             capabilities=self.capabilities,
             llmProviders=self.llmProviders,
             llmPipeline=self.llmPipeline,
-            memory=self.applicationRun.committedState,
+            memory=self.applicationRun.committedState if memoryView is None else memoryView,
             registrationScope=registrationScope,
             config=self._config,
-            capabilityInvoker=lambda capabilityId, payload=None: self.invokeCapability(capabilityId, payload),
+            capabilityInvoker=lambda capabilityId, payload=None: self.invokeCapability(capabilityId, payload, memoryView=self.applicationRun.committedState if memoryView is None else memoryView),
             allowRegistration=allowRegistration,
         )
 
@@ -184,7 +186,13 @@ class RuntimeHost:
     def unregisterCodeEntry(self, codeEntryInstanceId: str) -> None:
         self._codeEntries.pop(codeEntryInstanceId, None)
 
-    def invokeCapability(self, capabilityId: str, payload: object | None = None) -> object:
+    def invokeCapability(
+        self,
+        capabilityId: str,
+        payload: object | None = None,
+        *,
+        memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
+    ) -> object:
         with self._lane:
             self.requireActive()
             registration = self.capabilities.resolve(capabilityId)
@@ -201,7 +209,12 @@ class RuntimeHost:
                 },
             )
             scope = RegistrationScope()
-            context = self.createContext(identity=identity, packRoot=packRoot, registrationScope=scope)
+            context = self.createContext(
+                identity=identity,
+                packRoot=packRoot,
+                registrationScope=scope,
+                memoryView=memoryView,
+            )
             try:
                 result = self.capabilities.invokeResolved(registration, context=context, payload=payload)
             except Exception as err:
