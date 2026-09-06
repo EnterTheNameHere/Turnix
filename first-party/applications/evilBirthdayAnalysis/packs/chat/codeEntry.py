@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chat/codeEntry.py ; version: 3
+# file: first-party/applications/evilBirthdayAnalysis/packs/chat/codeEntry.py ; version: 4
 from __future__ import annotations
 
 import math
@@ -309,6 +309,12 @@ def _select(ctx, payload):
         "videoEndSeconds": endVideo,
         "streamStartSeconds": startVideo - streamStartVideoSeconds,
         "streamEndSeconds": endVideo - streamStartVideoSeconds,
+        "contextStreamStartSeconds": (
+            startVideo - lookbackSeconds - streamStartVideoSeconds
+        ),
+        "contextStreamEndSeconds": (
+            endVideo + lookaheadSeconds - streamStartVideoSeconds
+        ),
         "lookbackSeconds": lookbackSeconds,
         "lookaheadSeconds": lookaheadSeconds,
         "records": records,
