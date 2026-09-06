@@ -1,4 +1,4 @@
-# file: tests/backend/context/test_codeEntryContext.py ; version: 3
+# file: tests/backend/context/test_codeEntryContext.py ; version: 4
 import pytest
 
 from pathlib import Path
@@ -193,3 +193,101 @@ def test_memory_authority_cannot_escape_invalidated_context() -> None:
 
     # The transaction never crossed the authoritative boundary.
     assert memory.load("chat/line/17/semantic") is MISSING
+
+
+
+def test_memory_write_stamps_current_code_entry_producer_metadata() -> None:
+    memory = CommittedValueLayer()
+    context = _contextWithMemory(memory)
+
+    transaction = context.memory.openTransaction()
+    transaction.set(
+        "derived/value",
+        {"answer": 42},
+        validity={"inputRevision": 7},
+        provenance={"source": "fixture"},
+    )
+    transaction.commit()
+
+    assert memory.metadata("derived/value") == {
+        "producer": {
+            "packId": "pack",
+            "packVersion": "1.0.0",
+            "codeEntryId": "entry",
+            "sourceSha256": "source-sha",
+            "implementationId": "implementation-sha",
+        },
+        "validity": {"inputRevision": 7},
+        "provenance": {"source": "fixture"},
+    }
+    assert context.memory.isReusable(
+        "derived/value",
+        validity={"inputRevision": 7},
+    ) is True
+    assert context.memory.isReusable(
+        "derived/value",
+        validity={"inputRevision": 8},
+    ) is False
+    context.invalidate()
+
+
+def test_memory_reuse_requires_same_producer_implementation() -> None:
+    memory = CommittedValueLayer()
+    first = _contextWithMemory(memory)
+    transaction = first.memory.openTransaction()
+    transaction.set("derived/value", "first", validity={"source": "same"})
+    transaction.commit()
+    first.invalidate()
+
+    providers = LlmProviderRegistry()
+    second = CodeEntryContext(
+        identity=CodeEntryIdentity(
+            applicationId="application",
+            applicationRunId="run-2",
+            packId="pack",
+            packVersion="1.0.0",
+            codeEntryId="entry",
+            codeEntryInstanceId="entry-instance-2",
+            sourceSha256="different-source-sha",
+            implementationId="different-implementation-sha",
+        ),
+        packRoot=Path.cwd(),
+        io=_Io(),
+        capabilities=CapabilityRegistry(),
+        llmProviders=providers,
+        llmPipeline=LlmProcessingPipeline(providers=providers),
+        memory=memory,
+        registrationScope=RegistrationScope(),
+        config={},
+        capabilityInvoker=lambda capabilityId, payload=None: (_ for _ in ()).throw(
+            AssertionError((capabilityId, payload))
+        ),
+    )
+    try:
+        assert second.memory.isReusable(
+            "derived/value",
+            validity={"source": "same"},
+        ) is False
+    finally:
+        second.invalidate()
+
+
+def test_memory_describe_reports_staged_and_committed_views() -> None:
+    memory = CommittedValueLayer()
+    context = _contextWithMemory(memory)
+    transaction = context.memory.openTransaction()
+    transaction.set("derived/value", {"large": "payload"}, validity={"v": 1})
+
+    staged = transaction._transaction.describe("derived/value")
+    assert staged["revisionId"] == 0
+    assert staged["state"] == "present"
+    assert staged["staged"] is True
+    assert staged["metadata"]["validity"] == {"v": 1}
+
+    transaction.commit()
+
+    committed = context.memory.describe("derived/value")
+    assert committed["revisionId"] == 1
+    assert committed["state"] == "present"
+    assert committed["metadata"]["validity"] == {"v": 1}
+    context.invalidate()
