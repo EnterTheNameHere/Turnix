@@ -1,8 +1,10 @@
-# file: backend/io/managedIo.py ; version: 4
+# file: backend/io/managedIo.py ; version: 5
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,7 @@ __all__ = [
     "IoPermissionError",
     "IoWriteError",
     "ManagedIo",
+    "SourceObservation",
 ]
 
 
@@ -49,6 +52,43 @@ class IoWriteError(IoError):
     """Raised when a mediated write cannot be completed atomically."""
 
 
+@dataclass(frozen=True, slots=True)
+class SourceObservation:
+    """One immutable observation of a filesystem source.
+
+    SourceObservation is evidence about the source at one observation point,
+    not an automatically maintained subscription. The representation is
+    deliberately suitable for persistence inside Actant-managed values so a
+    producer can later compare the basis of a derived result with a fresh
+    observation.
+
+    Metadata-only observations are cheap and suitable for ordinary polling.
+    contentSha256 is present only when strong content identity was requested.
+    A future watcher/event service can reuse this same representation when it
+    reports source transitions; Pack-facing source identity therefore does not
+    need to change when Actant gains continual observation.
+
+    This contract is design-significant and should be promoted into the I/O /
+    source-observation design specification when design documents are updated.
+    """
+
+    path: str
+    state: str
+    sizeBytes: int | None
+    modifiedTimeNs: int | None
+    contentSha256: str | None
+
+    def snapshot(self) -> dict[str, object]:
+        """Returns the JSON-compatible observation representation."""
+        return {
+            "path": self.path,
+            "state": self.state,
+            "sizeBytes": self.sizeBytes,
+            "modifiedTimeNs": self.modifiedTimeNs,
+            "contentSha256": self.contentSha256,
+        }
+
+
 class ManagedIo:
     """Central Actant file-I/O service used by Pack-facing Context facades.
 
@@ -56,6 +96,91 @@ class ManagedIo:
     All filesystem exceptions are translated here so Pack implementations do
     not need language-specific error handling for ordinary supported I/O.
     """
+
+    def observeFile(
+        self,
+        path: str | Path,
+        *,
+        contentHash: bool = False,
+    ) -> SourceObservation:
+        """Observes current filesystem state for one source path.
+
+        Missing paths are represented rather than raised so creation and
+        deletion are ordinary observable transitions. Existing non-file paths
+        are represented as state="other"; requesting a content hash for such a
+        path fails because byte-content identity is defined here only for files.
+
+        Metadata-only observation records size and nanosecond modification
+        time. These fields are efficient change indicators but are not a proof
+        of byte equality. Callers whose authority decision requires strong
+        source identity request contentHash=True and persist contentSha256 as
+        part of their derivation provenance.
+
+        This method performs one observation only. Scheduling, polling,
+        subscriptions, and source-change event publication belong to future
+        Actant services layered over this primitive.
+        """
+        if type(contentHash) is not bool:
+            raise TypeError("contentHash must be an exact bool.")
+
+        resolved = self._path(path)
+        try:
+            stat = resolved.stat()
+        except FileNotFoundError:
+            return SourceObservation(
+                path=str(resolved),
+                state="missing",
+                sizeBytes=None,
+                modifiedTimeNs=None,
+                contentSha256=None,
+            )
+        except PermissionError as err:
+            raise IoPermissionError(f"Permission denied while observing {resolved}.") from err
+        except OSError as err:
+            raise IoError(f"Failed to observe file {resolved}: {err}.") from err
+
+        if not resolved.is_file():
+            if contentHash:
+                raise IoPathError(f"Content hashing requires a regular file: {resolved}.")
+            return SourceObservation(
+                path=str(resolved),
+                state="other",
+                sizeBytes=None,
+                modifiedTimeNs=stat.st_mtime_ns,
+                contentSha256=None,
+            )
+
+        digest: str | None = None
+        if contentHash:
+            hasher = hashlib.sha256()
+            try:
+                with resolved.open("rb") as source:
+                    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                        hasher.update(chunk)
+            except FileNotFoundError:
+                # The path changed between stat() and open(). Represent the
+                # observation point conservatively as missing rather than
+                # returning metadata for bytes we could not prove.
+                return SourceObservation(
+                    path=str(resolved),
+                    state="missing",
+                    sizeBytes=None,
+                    modifiedTimeNs=None,
+                    contentSha256=None,
+                )
+            except PermissionError as err:
+                raise IoPermissionError(f"Permission denied while hashing {resolved}.") from err
+            except OSError as err:
+                raise IoError(f"Failed to hash file {resolved}: {err}.") from err
+            digest = hasher.hexdigest()
+
+        return SourceObservation(
+            path=str(resolved),
+            state="file",
+            sizeBytes=stat.st_size,
+            modifiedTimeNs=stat.st_mtime_ns,
+            contentSha256=digest,
+        )
 
     def readText(self, path: str | Path) -> str:
         resolved = self._path(path)
