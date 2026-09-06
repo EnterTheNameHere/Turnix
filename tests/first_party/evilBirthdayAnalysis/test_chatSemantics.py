@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 6
+# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 7
 from __future__ import annotations
 
 import importlib.util
@@ -696,3 +696,79 @@ def test_second_bucket_dependency_survives_save_bundle_rehydration():
 def test_second_bucket_address_supports_negative_lookback_seconds():
     assert chatSemantics._secondCellAddress(-1) == "evilanalysis/chat/second/n1/semantic"
     assert chatSemantics._secondCellAddress(0) == "evilanalysis/chat/second/s0/semantic"
+
+
+
+def test_second_aggregate_persists_identical_canonical_user_message_group():
+    memory = CommittedValueLayer()
+    ctx = _Ctx(memory)
+    records = [
+        _raw(50, "alice: GIGAEVIL GIGAEVIL", streamTimeSeconds=20.0, streamTime="00:00:20"),
+        _raw(51, "bob: GIGAEVIL GIGAEVIL", streamTimeSeconds=20.0, streamTime="00:00:20"),
+        _raw(52, "charlie: Clap", streamTimeSeconds=20.0, streamTime="00:00:20"),
+    ]
+
+    result = _interpret(ctx, records)
+    aggregate = result["secondAggregates"][0]
+    aggregateAddress = chatSemantics._secondAggregateAddress(20)
+
+    assert aggregate["address"] == aggregateAddress
+    assert memory.revisionId(aggregateAddress) == 1
+    entries = aggregate["value"]["entries"]
+    assert entries[0]["kind"] == "identicalCanonicalMessage"
+    assert entries[0]["lineNumbers"] == [50, 51]
+    assert entries[0]["sourceUsernames"] == ["alice", "bob"]
+    assert entries[0]["messageCount"] == 2
+    assert entries[0]["uniqueSourceUserCount"] == 2
+    assert entries[1]["kind"] == "message"
+    assert entries[1]["lineNumber"] == 52
+
+
+def test_second_aggregate_reuses_when_second_bucket_dependency_is_unchanged():
+    memory = CommittedValueLayer()
+    ctx = _Ctx(memory)
+    records = [
+        _raw(53, "alice: GIGAEVIL", streamTimeSeconds=21.0, streamTime="00:00:21"),
+        _raw(54, "bob: GIGAEVIL", streamTimeSeconds=21.0, streamTime="00:00:21"),
+    ]
+
+    first = _interpret(ctx, records)
+    aggregateAddress = chatSemantics._secondAggregateAddress(21)
+    assert memory.revisionId(aggregateAddress) == 1
+
+    second = _interpret(ctx, records)
+
+    assert memory.revisionId(aggregateAddress) == 1
+    assert second["secondAggregates"][0]["dependency"] == first["secondAggregates"][0]["dependency"]
+
+
+def test_second_aggregate_recomputes_when_second_bucket_changes():
+    memory = CommittedValueLayer()
+    ctx = _Ctx(memory)
+    firstRecords = [
+        _raw(55, "alice: GIGAEVIL", streamTimeSeconds=22.0, streamTime="00:00:22"),
+        _raw(56, "bob: GIGAEVIL", streamTimeSeconds=22.0, streamTime="00:00:22"),
+    ]
+    _interpret(ctx, firstRecords)
+
+    bucketAddress = chatSemantics._secondCellAddress(22)
+    aggregateAddress = chatSemantics._secondAggregateAddress(22)
+    assert memory.revisionId(bucketAddress) == 1
+    assert memory.revisionId(aggregateAddress) == 1
+
+    changed = [
+        _raw(55, "alice: GIGAEVIL", streamTimeSeconds=22.0, streamTime="00:00:22"),
+        _raw(56, "bob: Clap", streamTimeSeconds=22.0, streamTime="00:00:22"),
+    ]
+    result = _interpret(
+        ctx,
+        changed,
+        sourceObservation={**_SOURCE_OBSERVATION, "contentSha256": "changed-source"},
+    )
+
+    assert memory.revisionId(bucketAddress) == 2
+    assert memory.revisionId(aggregateAddress) == 2
+    assert [entry["kind"] for entry in result["secondAggregates"][0]["value"]["entries"]] == [
+        "message",
+        "message",
+    ]
