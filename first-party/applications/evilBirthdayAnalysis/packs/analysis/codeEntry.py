@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 1
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 2
 from __future__ import annotations
 
 import importlib.util
@@ -62,15 +62,64 @@ def _interpretedChat(ctx, selector: dict[str, int]) -> tuple[dict[str, object], 
     return rawChat, interpretedChat
 
 
+def _chatBucketReferences(chat: dict[str, object]) -> dict[int, dict[str, object]]:
+    """Maps each interpreted line to its persistent canonical second bucket."""
+    buckets = chat.get("secondBuckets")
+    if not isinstance(buckets, list):
+        raise RuntimeError("Chat interpretation capability returned invalid secondBuckets.")
+
+    byLine: dict[int, dict[str, object]] = {}
+    for bucket in buckets:
+        if not isinstance(bucket, dict):
+            raise RuntimeError("Chat second bucket reference must be an object.")
+        address = bucket.get("address")
+        dependency = bucket.get("dependency")
+        value = bucket.get("value")
+        if type(address) is not str or not isinstance(dependency, dict) or not isinstance(value, dict):
+            raise RuntimeError("Chat second bucket reference is incomplete.")
+        members = value.get("members")
+        if not isinstance(members, list):
+            raise RuntimeError("Chat second bucket value requires members.")
+        reference = {"address": address, "dependency": dependency}
+        for member in members:
+            if not isinstance(member, dict) or type(member.get("lineNumber")) is not int:
+                raise RuntimeError("Chat second bucket contains invalid member evidence.")
+            lineNumber = member["lineNumber"]
+            if lineNumber in byLine:
+                raise RuntimeError(f"Chat line {lineNumber} belongs to multiple second buckets.")
+            byLine[lineNumber] = reference
+    return byLine
+
+
+def _previousChatItemReusable(
+    previousItem: QueryItem,
+    *,
+    content: str,
+    semanticValue: dict[str, object],
+    secondBucket: dict[str, object],
+) -> bool:
+    """Requires persistent derivation identity to match before QueryItem reuse."""
+    if previousItem.kind != "chat" or previousItem.content != content:
+        return False
+    memory = previousItem.metadata.get("memory")
+    if not isinstance(memory, Mapping):
+        return False
+    return (
+        _plain(memory.get("semantic")) == _plain(semanticValue)
+        and _plain(memory.get("secondBucket")) == _plain(secondBucket)
+    )
+
+
 def _chatQueryItems(
     chat: dict[str, object],
     *,
     previous: dict[str, QueryItem],
 ) -> list[QueryItem]:
-    """Materializes interpreted chat records without requiring source ingestion to parse semantics."""
+    """Materializes atomic chat QueryItems with persistent-memory provenance."""
     records = chat.get("records")
     if not isinstance(records, list):
         raise RuntimeError("Chat interpretation capability returned invalid records.")
+    bucketByLine = _chatBucketReferences(chat)
 
     items: list[QueryItem] = []
     for record in records:
@@ -84,15 +133,21 @@ def _chatQueryItems(
         rawMessage = record.get("message")
         username = record.get("username")
         body = record.get("body")
+        semanticValue = record.get("semanticValue")
         streamTimeSeconds = analysis.get("streamTimeSeconds")
         streamTime = analysis.get("streamTime")
         if (
             type(lineNumber) is not int
             or type(rawMessage) is not str
+            or not isinstance(semanticValue, dict)
             or type(streamTimeSeconds) not in {int, float}
             or type(streamTime) is not str
         ):
             raise RuntimeError("Chat interpretation returned invalid query-item evidence.")
+
+        secondBucket = bucketByLine.get(lineNumber)
+        if secondBucket is None:
+            raise RuntimeError(f"Chat line {lineNumber} has no canonical second bucket.")
 
         interpretationKind = analysis.get("kind")
         if interpretationKind == "unknownMessage":
@@ -106,7 +161,15 @@ def _chatQueryItems(
 
         itemId = f"chat:{lineNumber}"
         previousItem = previous.get(itemId)
-        if previousItem is not None:
+        if (
+            previousItem is not None
+            and _previousChatItemReusable(
+                previousItem,
+                content=content,
+                semanticValue=semanticValue,
+                secondBucket=secondBucket,
+            )
+        ):
             items.append(previousItem)
             continue
 
@@ -121,6 +184,10 @@ def _chatQueryItems(
                     "username": presentedAuthor,
                     "sourceUsername": username if type(username) is str else None,
                     "analysis": _plain(analysis),
+                    "memory": {
+                        "semantic": _plain(semanticValue),
+                        "secondBucket": _plain(secondBucket),
+                    },
                     "source": {
                         "sourcePath": chat.get("sourcePath"),
                         "timestampText": record.get("timestampText"),
@@ -131,7 +198,6 @@ def _chatQueryItems(
             )
         )
     return items
-
 
 def _buildQueryItems(ctx, payload):
     """Builds analysis QueryItems, explicitly separating raw chat selection from semantic interpretation."""
