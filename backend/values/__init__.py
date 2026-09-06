@@ -1,6 +1,6 @@
-# file: backend/values/__init__.py ; version: 1
+# file: backend/values/__init__.py ; version: 2
 from backend.values.address import RelativeValueAddress, ValueAddress
-from backend.values.committed import CommittedValueLayer, CommittedValueTransaction, StateConflictError
+from backend.values.committed import CommittedValueLayer, CommittedValueTransaction, StateConflictError, ValueState
 from backend.values.handle import ValueHandle
 from backend.values.layer import InMemoryValueLayer, ValueLayer
 from backend.values.payload import Chunk, ChunkValueRef, InlineValueRef, InMemoryChunkStore, ValueRef
@@ -26,6 +26,7 @@ __all__ = [
     "ValueHandle",
     "ValueLayer",
     "ValueRef",
+    "ValueState",
     "requireRelativeValueAddress",
     "requireValueAddress",
     "requireValueAddressSegment",
