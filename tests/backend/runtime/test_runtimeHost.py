@@ -1,4 +1,4 @@
-# file: tests/backend/runtime/test_runtimeHost.py ; version: 1
+# file: tests/backend/runtime/test_runtimeHost.py ; version: 2
 from pathlib import Path
 
 import pytest
@@ -7,6 +7,7 @@ from backend.application import ApplicationRunState
 from backend.context import CodeEntryIdentity
 from backend.registration import RegistrationScope
 from backend.runtime.runtimeHost import RuntimeHost
+from backend.save import SaveBundle
 from backend.values import ValueState
 
 
@@ -115,3 +116,67 @@ def test_contexts_share_application_run_authoritative_memory():
         second.invalidate()
         secondScope.withdraw()
         host.stop()
+
+
+
+def test_save_bundle_rehydrates_same_application_into_new_run():
+    firstHost = RuntimeHost()
+    firstHost.start()
+    try:
+        firstApplicationId = firstHost.applicationRun.application.applicationId
+        firstRunId = firstHost.applicationRun.applicationRunId
+
+        transaction = firstHost.applicationRun.committedState.openTransaction()
+        transaction.set("chat/line/17/semantic", {"body": "hello"})
+        transaction.setAbsent("chat/line/18/semantic")
+        transaction.commit()
+
+        bundle = firstHost.captureSaveBundle()
+        assert bundle.applicationId == firstApplicationId
+        assert bundle.generation == 1
+        assert firstHost.applicationRun.saveBundleId == bundle.saveBundleId
+    finally:
+        firstHost.stop()
+
+    persisted = SaveBundle.fromBytes(bundle.toBytes())
+    secondHost = RuntimeHost(saveBundle=persisted)
+
+    assert secondHost.applicationRun.application.applicationId == firstApplicationId
+    assert secondHost.applicationRun.applicationRunId != firstRunId
+    assert secondHost.applicationRun.saveBundleId == bundle.saveBundleId
+
+    secondHost.start()
+    try:
+        state = secondHost.applicationRun.committedState
+        assert state.load("chat/line/17/semantic") == {"body": "hello"}
+        assert state.revisionId("chat/line/17/semantic") == 1
+        assert state.state("chat/line/18/semantic") is ValueState.ABSENT
+        assert state.revisionId("chat/line/18/semantic") == 1
+
+        update = state.openTransaction()
+        update.set("chat/line/17/semantic", {"body": "changed"})
+        update.commit()
+
+        secondBundle = secondHost.captureSaveBundle()
+        assert secondBundle.saveBundleId == bundle.saveBundleId
+        assert secondBundle.applicationId == firstApplicationId
+        assert secondBundle.generation == 2
+    finally:
+        secondHost.stop()
+
+    thirdHost = RuntimeHost(saveBundle=SaveBundle.fromBytes(secondBundle.toBytes()))
+    assert thirdHost.applicationRun.application.applicationId == firstApplicationId
+    assert thirdHost.applicationRun.applicationRunId not in {firstRunId, secondHost.applicationRun.applicationRunId}
+    assert thirdHost.applicationRun.committedState.load("chat/line/17/semantic") == {"body": "changed"}
+    assert thirdHost.applicationRun.committedState.revisionId("chat/line/17/semantic") == 2
+
+
+def test_runtime_host_rejects_application_and_save_bundle_together():
+    source = RuntimeHost()
+    bundle = source.captureSaveBundle()
+
+    with pytest.raises(ValueError, match="either application or saveBundle"):
+        RuntimeHost(
+            application=source.applicationRun.application,
+            saveBundle=bundle,
+        )
