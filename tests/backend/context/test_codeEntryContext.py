@@ -1,4 +1,4 @@
-# file: tests/backend/context/test_codeEntryContext.py ; version: 5
+# file: tests/backend/context/test_codeEntryContext.py ; version: 6
 import pytest
 
 from pathlib import Path
@@ -210,11 +210,13 @@ def test_memory_write_stamps_current_code_entry_producer_metadata() -> None:
     transaction.commit()
 
     assert memory.metadata("derived/value") == {
+        "formatId": "actant.derived-value-metadata@1",
         "producer": {
             "packId": "pack",
             "packVersion": "1.0.0",
             "codeEntryId": "entry",
             "sourceSha256": "source-sha",
+            "implementationFormat": "python-source@1",
             "implementationId": "implementation-sha",
         },
         "validity": {"inputRevision": 7},
@@ -249,6 +251,7 @@ def test_memory_reuse_requires_same_producer_implementation() -> None:
             codeEntryId="entry",
             codeEntryInstanceId="entry-instance-2",
             sourceSha256="different-source-sha",
+            implementationFormat="python-source@1",
             implementationId="different-implementation-sha",
         ),
         packRoot=Path.cwd(),
