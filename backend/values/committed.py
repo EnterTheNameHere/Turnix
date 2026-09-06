@@ -1,4 +1,4 @@
-# file: backend/values/committed.py ; version: 12
+# file: backend/values/committed.py ; version: 13
 from __future__ import annotations
 
 import base64
@@ -460,6 +460,26 @@ class CommittedValueTransaction(ValueLayer):
         key = address if isinstance(address, ValueAddress) else ValueAddress(address)
         self._captureBase(key)
         return self._bases[key]
+
+    def describe(self, address: str | ValueAddress) -> dict[str, object]:
+        """Describes the value visible in this speculative transaction view.
+
+        revisionId is the committed base revision because speculative writes do
+        not receive authoritative revisions before outer commit. staged tells a
+        debugger whether this transaction currently overrides the parent view.
+        """
+        self._requireActive()
+        self._requireNoChildren()
+        key = address if isinstance(address, ValueAddress) else ValueAddress(address)
+        self._captureBase(key)
+        visible = self._loadVisibleRevision(key)
+        return {
+            "address": str(key),
+            "revisionId": self._bases[key],
+            "state": visible.state.value,
+            "staged": key in self._staged,
+            "metadata": None if visible.metadata is None else deepcopy(visible.metadata),
+        }
 
     def set(
         self,
