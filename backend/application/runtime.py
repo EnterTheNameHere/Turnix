@@ -1,3 +1,4 @@
+# file: backend/application/runtime.py ; version: 1
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -30,14 +31,24 @@ class ApplicationRunState(StrEnum):
 class ApplicationRun:
     """One non-restartable live execution period of an Application.
 
-    committedState is authoritative ApplicationRun-scoped state. ProcessingRuns
-    open speculative transactions against it and only successful pipeline
-    completion may cross the outer commit boundary.
+    committedState is the live authoritative Value layer for this run. It may
+    begin empty for a new Application or be rehydrated from the Application's
+    bound SaveBundle when loading an existing durable Application.
+
+    The layer is runtime residency, not persistence identity. saveBundleId
+    records the active persistence closure when one is bound; the SaveBundle
+    owns durable cross-run continuity. ProcessingRuns and Pack CodeEntries open
+    speculative transactions against the same committedState object.
+
+    This boundary follows DA-04/DA-20: ApplicationRun is live execution,
+    Application is durable identity, and SaveBundle is durable persistence
+    closure.
     """
 
     application: Application
     applicationRunId: str = field(default_factory=newRuntimeId)
     committedState: CommittedValueLayer = field(default_factory=CommittedValueLayer)
+    saveBundleId: str | None = None
     state: ApplicationRunState = ApplicationRunState.CREATED
 
     @property
