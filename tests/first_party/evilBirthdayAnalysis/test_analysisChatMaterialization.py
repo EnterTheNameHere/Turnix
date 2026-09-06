@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 4
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 5
 from __future__ import annotations
 
 import importlib.util
@@ -966,3 +966,145 @@ def test_chat_query_item_rebuilds_when_persistent_dependency_changes():
     assert rebuilt.itemId == first.itemId
     assert rebuilt.content == first.content
     assert rebuilt.metadata["memory"]["secondBucket"]["dependency"]["contentSha256"] == "bucket-b"
+
+
+
+def _persistent_chat_item(
+    *,
+    line_number: int,
+    username: str,
+    content: str,
+    second: int,
+    aggregate_entry: dict[str, object],
+) -> QueryItem:
+    semantic_address = f"evilanalysis/chat/line/{line_number}/semantic"
+    bucket_address = f"evilanalysis/chat/second/s{second}/semantic"
+    aggregate_address = f"evilanalysis/chat/second/s{second}/aggregate"
+    return QueryItem(
+        itemId=f"chat:{line_number}",
+        kind="chat",
+        content=content,
+        metadata={
+            "streamStartSeconds": float(second),
+            "lineNumber": line_number,
+            "username": username,
+            "sourceUsername": username,
+            "analysis": {
+                "kind": "userMessage",
+                "streamTime": f"00:00:{second:02d}",
+                "spans": [{"kind": "text", "text": content}],
+            },
+            "memory": {
+                "semantic": {
+                    "address": semantic_address,
+                    "dependency": {
+                        "address": semantic_address,
+                        "state": "present",
+                        "contentSha256": f"semantic-{line_number}",
+                        "metadataSha256": f"semantic-meta-{line_number}",
+                    },
+                },
+                "secondBucket": {
+                    "address": bucket_address,
+                    "dependency": {
+                        "address": bucket_address,
+                        "state": "present",
+                        "contentSha256": f"bucket-{second}",
+                        "metadataSha256": f"bucket-meta-{second}",
+                    },
+                },
+                "secondAggregate": {
+                    "address": aggregate_address,
+                    "dependency": {
+                        "address": aggregate_address,
+                        "state": "present",
+                        "contentSha256": f"aggregate-{second}",
+                        "metadataSha256": f"aggregate-meta-{second}",
+                    },
+                    "entry": aggregate_entry,
+                },
+            },
+        },
+    )
+
+
+def test_persisted_individual_aggregate_entries_override_content_fallback_grouping():
+    first = _persistent_chat_item(
+        line_number=60,
+        username="alice",
+        content="same text",
+        second=30,
+        aggregate_entry={
+            "kind": "message",
+            "lineNumber": 60,
+            "semantic": {"address": "evilanalysis/chat/line/60/semantic"},
+        },
+    )
+    second = _persistent_chat_item(
+        line_number=61,
+        username="bob",
+        content="same text",
+        second=30,
+        aggregate_entry={
+            "kind": "message",
+            "lineNumber": 61,
+            "semantic": {"address": "evilanalysis/chat/line/61/semantic"},
+        },
+    )
+
+    sections = analysis._evidenceSections(
+        transcriptItems=[],
+        chatItems=[first, second],
+        includeChat=True,
+        chatLayout="interleaved",
+    )
+
+    assert sections == [
+        "CHRONOLOGICAL EVIDENCE\n"
+        "[00:00:30]\n"
+        "CHAT alice: same text\n"
+        "CHAT bob: same text"
+    ]
+
+
+def test_persisted_identical_message_group_drives_interleaved_compaction():
+    entry = {
+        "kind": "identicalCanonicalMessage",
+        "canonicalMessage": "same text",
+        "canonicalSpans": [{"kind": "text", "text": "same text"}],
+        "lineNumbers": [62, 63],
+        "semantic": [
+            {"address": "evilanalysis/chat/line/62/semantic"},
+            {"address": "evilanalysis/chat/line/63/semantic"},
+        ],
+        "sourceUsernames": ["alice", "bob"],
+        "messageCount": 2,
+        "uniqueSourceUserCount": 2,
+    }
+    first = _persistent_chat_item(
+        line_number=62,
+        username="alice",
+        content="same text",
+        second=31,
+        aggregate_entry=entry,
+    )
+    second = _persistent_chat_item(
+        line_number=63,
+        username="bob",
+        content="same text",
+        second=31,
+        aggregate_entry=entry,
+    )
+
+    sections = analysis._evidenceSections(
+        transcriptItems=[],
+        chatItems=[first, second],
+        includeChat=True,
+        chatLayout="interleaved",
+    )
+
+    assert sections == [
+        "CHRONOLOGICAL EVIDENCE\n"
+        "[00:00:31]\n"
+        "CHAT: same text ×2 [2 users]"
+    ]
