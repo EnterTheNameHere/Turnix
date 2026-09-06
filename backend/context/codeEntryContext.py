@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 1
+# file: backend/context/codeEntryContext.py ; version: 2
 from __future__ import annotations
 
 from copy import deepcopy
@@ -27,6 +27,11 @@ class _IoFacade:
     def __init__(self, *, io: ManagedIo, requireValid: Callable[[], None]) -> None:
         self._io = io
         self._requireValid = requireValid
+
+    def observeFile(self, path, *, contentHash: bool = False) -> dict[str, object]:
+        """Returns JSON-compatible Actant source-observation evidence."""
+        self._requireValid()
+        return self._io.observeFile(path, contentHash=contentHash).snapshot()
 
     def readText(self, path):
         self._requireValid()
