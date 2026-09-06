@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 1
+# file: backend/runtime/runtimeHost.py ; version: 2
 from __future__ import annotations
 
 from copy import deepcopy
@@ -12,6 +12,7 @@ from backend.io.managedIo import ManagedIo
 from backend.llm.streamingRuntime import LlmProviderRegistry, LlmProcessingPipeline
 from backend.orchestration.runtime import Job, OrchestrationUnit, OrchestrationUnitOutcome
 from backend.registration import RegistrationScope
+from backend.save import SaveBundle
 from backend.tracing import TraceSinkDestination, Tracer
 
 __all__ = ["RuntimeHost"]
@@ -29,10 +30,28 @@ class RuntimeHost:
         self,
         *,
         application: Application | None = None,
+        saveBundle: SaveBundle | None = None,
         config: dict[str, object] | None = None,
         tracer: Tracer | None = None,
     ) -> None:
-        self.applicationRun = ApplicationRun(application=application or Application.new())
+        if application is not None and saveBundle is not None:
+            raise ValueError("RuntimeHost accepts either application or saveBundle, not both.")
+
+        self._saveBundle = saveBundle
+        if saveBundle is None:
+            resolvedApplication = application or Application.new()
+            committedState = None
+            saveBundleId = None
+        else:
+            resolvedApplication = Application(applicationId=saveBundle.applicationId)
+            committedState = saveBundle.restoreCommittedState()
+            saveBundleId = saveBundle.saveBundleId
+
+        self.applicationRun = ApplicationRun(
+            application=resolvedApplication,
+            **({} if committedState is None else {"committedState": committedState}),
+            saveBundleId=saveBundleId,
+        )
         self.io = ManagedIo()
         self.capabilities = CapabilityRegistry()
         self.llmProviders = LlmProviderRegistry()
@@ -51,6 +70,33 @@ class RuntimeHost:
     @property
     def config(self) -> dict[str, object]:
         return deepcopy(self._config)
+
+    def captureSaveBundle(self) -> SaveBundle:
+        """Captures the next in-memory SaveBundle generation for this Application.
+
+        The returned bundle protects committed state at the instant of capture.
+        This method does not claim filesystem or persistent-I/O publication;
+        storage authority remains a separate boundary.
+
+        When this host was loaded from a SaveBundle, capture preserves that
+        saveBundleId and advances its generation. For a new Application, the
+        first capture establishes generation 1 of a new SaveBundle identity.
+        """
+        with self._lane:
+            if self._saveBundle is None:
+                bundle = SaveBundle.create(
+                    applicationId=self.applicationRun.application.applicationId,
+                    committedState=self.applicationRun.committedState,
+                )
+            else:
+                if self._saveBundle.applicationId != self.applicationRun.application.applicationId:
+                    raise RuntimeError("Bound SaveBundle Application identity no longer matches ApplicationRun.")
+                bundle = self._saveBundle.nextGeneration(
+                    committedState=self.applicationRun.committedState,
+                )
+            self._saveBundle = bundle
+            self.applicationRun.saveBundleId = bundle.saveBundleId
+            return bundle
 
     def trace(
         self,
