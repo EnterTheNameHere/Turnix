@@ -1,4 +1,4 @@
-# file: backend/values/committed.py ; version: 14
+# file: backend/values/committed.py ; version: 15
 from __future__ import annotations
 
 import base64
@@ -151,6 +151,17 @@ class CommittedValueLayer(ValueLayer):
     def openTransaction(self) -> CommittedValueTransaction:
         """Creates a speculative transaction against this authoritative layer."""
         return CommittedValueTransaction(root=self, parent=None)
+
+    @staticmethod
+    def _snapshotMetadata(metadata: dict[str, object] | None) -> dict[str, object] | None:
+        """Validates and detaches generic revision metadata as JSON-compatible state."""
+        if metadata is None:
+            return None
+        if not isinstance(metadata, dict):
+            raise TypeError("Value metadata must be an object or null.")
+        detached = deepcopy(metadata)
+        encodeJsonValue(detached, store=InMemoryChunkStore())
+        return detached
 
     def snapshot(self) -> dict[str, object]:
         """Returns a deterministic persistence snapshot of latest committed state.
@@ -517,7 +528,7 @@ class CommittedValueTransaction(ValueLayer):
         self._captureBase(key)
         self._staged[key] = _StagedRevision(
             state=ValueState.ABSENT,
-            metadata=self._snapshotMetadata(metadata),
+            metadata=self._root._snapshotMetadata(metadata),
         )
 
     def invalidate(
@@ -533,7 +544,7 @@ class CommittedValueTransaction(ValueLayer):
         self._captureBase(key)
         self._staged[key] = _StagedRevision(
             state=ValueState.INVALIDATED,
-            metadata=self._snapshotMetadata(metadata),
+            metadata=self._root._snapshotMetadata(metadata),
         )
 
     def commit(self) -> None:
@@ -585,7 +596,7 @@ class CommittedValueTransaction(ValueLayer):
         self._staged[address] = _StagedRevision(
             state=ValueState.PRESENT,
             value=detached,
-            metadata=self._snapshotMetadata(metadata),
+            metadata=self._root._snapshotMetadata(metadata),
         )
 
     def _loadVisibleRevision(self, address: ValueAddress) -> _StagedRevision:
@@ -647,23 +658,12 @@ class CommittedValueTransaction(ValueLayer):
             return _StagedRevision(
                 state=ValueState.PRESENT,
                 value=cls._snapshot(stagedRevision.value),
-                metadata=cls._snapshotMetadata(stagedRevision.metadata),
+                metadata=CommittedValueLayer._snapshotMetadata(stagedRevision.metadata),
             )
         return _StagedRevision(
             state=stagedRevision.state,
-            metadata=cls._snapshotMetadata(stagedRevision.metadata),
+            metadata=CommittedValueLayer._snapshotMetadata(stagedRevision.metadata),
         )
-
-    @staticmethod
-    def _snapshotMetadata(metadata: dict[str, object] | None) -> dict[str, object] | None:
-        """Validates and detaches generic record metadata as JSON-compatible state."""
-        if metadata is None:
-            return None
-        if not isinstance(metadata, dict):
-            raise TypeError("Value metadata must be an object or null.")
-        detached = deepcopy(metadata)
-        encodeJsonValue(detached, store=InMemoryChunkStore())
-        return detached
 
     @staticmethod
     def _snapshot(value: object) -> object:
