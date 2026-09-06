@@ -1,5 +1,7 @@
-# file: backend/save/__init__.py
-"""SaveBundle creation, loading, and saving."""
+# file: backend/save/__init__.py ; version: 1
+"""SaveBundle representation and rehydration boundary."""
 from __future__ import annotations
 
-__all__: list[str] = []
+from backend.save.runtime import SaveBundle
+
+__all__: list[str] = ["SaveBundle"]
