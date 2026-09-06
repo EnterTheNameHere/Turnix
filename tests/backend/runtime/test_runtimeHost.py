@@ -1,3 +1,4 @@
+# file: tests/backend/runtime/test_runtimeHost.py ; version: 1
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,7 @@ from backend.application import ApplicationRunState
 from backend.context import CodeEntryIdentity
 from backend.registration import RegistrationScope
 from backend.runtime.runtimeHost import RuntimeHost
+from backend.values import ValueState
 
 
 class RaisingTracer:
@@ -73,3 +75,43 @@ def test_trace_publication_failure_does_not_change_runtime_lifecycle():
 
     host.stop()
     assert host.applicationRun.state is ApplicationRunState.STOPPED
+
+
+
+def test_contexts_share_application_run_authoritative_memory():
+    host = RuntimeHost()
+    host.start()
+    identity = CodeEntryIdentity(
+        applicationId=host.applicationRun.application.applicationId,
+        applicationRunId=host.applicationRun.applicationRunId,
+        packId="test.pack",
+        codeEntryId="entry",
+        codeEntryInstanceId="entry-instance",
+    )
+
+    firstScope = RegistrationScope()
+    first = host.createContext(
+        identity=identity,
+        packRoot=Path.cwd(),
+        registrationScope=firstScope,
+    )
+    transaction = first.memory.openTransaction()
+    transaction.set("test/value", {"count": 1})
+    transaction.commit()
+    first.invalidate()
+    firstScope.withdraw()
+
+    secondScope = RegistrationScope()
+    second = host.createContext(
+        identity=identity,
+        packRoot=Path.cwd(),
+        registrationScope=secondScope,
+    )
+    try:
+        assert second.memory.load("test/value") == {"count": 1}
+        assert second.memory.state("test/value") is ValueState.PRESENT
+        assert second.memory.revisionId("test/value") == 1
+    finally:
+        second.invalidate()
+        secondScope.withdraw()
+        host.stop()
