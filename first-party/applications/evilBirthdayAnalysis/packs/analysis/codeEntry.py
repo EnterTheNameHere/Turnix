@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 6
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 7
 from __future__ import annotations
 
 import importlib.util
@@ -22,6 +22,7 @@ for _name, _value in vars(_implementation).items():
 
 
 _CHAT_SEMANTIC_LOOKBACK_SECONDS = 120
+_CHAT_SEMANTIC_LOOKAHEAD_SECONDS = 1
 _UNCLASSIFIED_CHAT_AUTHOR = "[unclassified]"
 _CHAT_BUDGET_PROMPT_NOTICE = (
     "Older optional chat context was limited by the configured input-token budget. "
@@ -33,7 +34,11 @@ def _interpretedChat(ctx, selector: dict[str, int]) -> tuple[dict[str, object], 
     """Selects raw chat with semantic lookback, then interprets it through the semantics Pack."""
     rawChat = ctx.capabilities.call(
         "evilAnalysis.chat@1",
-        {**selector, "lookbackSeconds": _CHAT_SEMANTIC_LOOKBACK_SECONDS},
+        {
+            **selector,
+            "lookbackSeconds": _CHAT_SEMANTIC_LOOKBACK_SECONDS,
+            "lookaheadSeconds": _CHAT_SEMANTIC_LOOKAHEAD_SECONDS,
+        },
     )
     if not isinstance(rawChat, dict) or not isinstance(rawChat.get("records"), list):
         raise RuntimeError("Raw chat capability returned an invalid snapshot.")
