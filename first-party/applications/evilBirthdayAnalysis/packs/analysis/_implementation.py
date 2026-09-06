@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 10
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 11
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -965,7 +965,22 @@ def _preparedChatChunk(ctx, chunk: dict[str, object]) -> dict[str, object]:
         else:
             suppressedCount += 1
 
-    metadataKeys = (
+    requiredContextKeys = (
+        "contextStreamStartSeconds",
+        "contextStreamEndSeconds",
+        "lookbackSeconds",
+        "lookaheadSeconds",
+    )
+    missingContextKeys = [
+        key for key in requiredContextKeys if key not in rawChat
+    ]
+    if missingContextKeys:
+        raise RuntimeError(
+            "Canonical raw chat snapshot omitted semantic context metadata: "
+            + ", ".join(missingContextKeys)
+        )
+
+    optionalMetadataKeys = (
         "sourcePath",
         "chatStartTime",
         "streamStartTime",
@@ -976,14 +991,20 @@ def _preparedChatChunk(ctx, chunk: dict[str, object]) -> dict[str, object]:
         "videoEndSeconds",
         "streamStartSeconds",
         "streamEndSeconds",
-        "contextStreamStartSeconds",
-        "contextStreamEndSeconds",
-        "lookbackSeconds",
-        "lookaheadSeconds",
         "startWallClock",
         "endWallClock",
     )
-    metadata = {key: _plain(rawChat[key]) for key in metadataKeys if key in rawChat}
+    metadata = {
+        key: _plain(rawChat[key])
+        for key in optionalMetadataKeys
+        if key in rawChat
+    }
+    metadata.update(
+        {
+            key: _plain(rawChat[key])
+            for key in requiredContextKeys
+        }
+    )
     return {
         "offsetSeconds": int(chunk["offsetSeconds"]),
         "streamStartSeconds": int(chunk["streamStartSeconds"]),
