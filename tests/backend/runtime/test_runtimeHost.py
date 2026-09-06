@@ -1,4 +1,4 @@
-# file: tests/backend/runtime/test_runtimeHost.py ; version: 2
+# file: tests/backend/runtime/test_runtimeHost.py ; version: 3
 from pathlib import Path
 
 import pytest
@@ -180,3 +180,55 @@ def test_runtime_host_rejects_application_and_save_bundle_together():
             application=source.applicationRun.application,
             saveBundle=bundle,
         )
+
+
+
+def test_capability_memory_write_nests_under_supplied_transaction():
+    host = RuntimeHost()
+    host.start()
+    identity = CodeEntryIdentity(
+        applicationId=host.applicationRun.application.applicationId,
+        applicationRunId=host.applicationRun.applicationRunId,
+        packId="test.pack",
+        codeEntryId="entry",
+        codeEntryInstanceId="entry-instance",
+    )
+    host.registerCodeEntry(identity, Path.cwd())
+    scope = RegistrationScope()
+
+    def handler(ctx, _payload):
+        child = ctx.memory.openTransaction()
+        child.set("test/nested/value", {"count": 1})
+        child.commit()
+        return ctx.memory.load("test/nested/value")
+
+    host.capabilities.register(
+        scope,
+        ownerId=identity.codeEntryInstanceId,
+        capabilityId="test.memorywrite@1",
+        handler=handler,
+    )
+    scope.publish()
+
+    outer = host.applicationRun.committedState.openTransaction()
+    try:
+        result = host.invokeCapability(
+            "test.memorywrite@1",
+            memoryView=outer,
+        )
+
+        assert result == {"count": 1}
+        assert outer.load("test/nested/value") == {"count": 1}
+        assert host.applicationRun.committedState.load("test/nested/value") is not result
+        assert host.applicationRun.committedState.revisionId("test/nested/value") == 0
+
+        outer.commit()
+
+        assert host.applicationRun.committedState.load("test/nested/value") == {"count": 1}
+        assert host.applicationRun.committedState.revisionId("test/nested/value") == 1
+    finally:
+        if outer._state == "active":
+            outer.abort()
+        scope.withdraw()
+        host.unregisterCodeEntry(identity.codeEntryInstanceId)
+        host.stop()
