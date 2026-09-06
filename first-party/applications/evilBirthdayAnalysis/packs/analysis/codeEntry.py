@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 5
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 6
 from __future__ import annotations
 
 import importlib.util
@@ -56,6 +56,7 @@ def _interpretedChat(ctx, selector: dict[str, int]) -> tuple[dict[str, object], 
         or type(interpretedChat.get("text")) is not str
         or not isinstance(interpretedChat.get("records"), list)
         or not isinstance(interpretedChat.get("secondBuckets"), list)
+        or not isinstance(interpretedChat.get("secondAggregates"), list)
     ):
         raise RuntimeError("Chat interpretation capability returned an invalid snapshot.")
 
@@ -93,6 +94,53 @@ def _chatBucketReferences(chat: dict[str, object]) -> dict[int, dict[str, object
     return byLine
 
 
+def _chatAggregateReferences(chat: dict[str, object]) -> dict[int, dict[str, object]]:
+    """Maps each interpreted line to its persistent structured second aggregate entry."""
+    aggregates = chat.get("secondAggregates")
+    if not isinstance(aggregates, list):
+        raise RuntimeError("Chat interpretation capability returned invalid secondAggregates.")
+
+    byLine: dict[int, dict[str, object]] = {}
+    for aggregate in aggregates:
+        if not isinstance(aggregate, dict):
+            raise RuntimeError("Chat second aggregate reference must be an object.")
+        address = aggregate.get("address")
+        dependency = aggregate.get("dependency")
+        value = aggregate.get("value")
+        if type(address) is not str or not isinstance(dependency, dict) or not isinstance(value, dict):
+            raise RuntimeError("Chat second aggregate reference is incomplete.")
+        entries = value.get("entries")
+        if not isinstance(entries, list):
+            raise RuntimeError("Chat second aggregate value requires entries.")
+
+        aggregateReference = {"address": address, "dependency": dependency}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise RuntimeError("Chat second aggregate entry must be an object.")
+            kind = entry.get("kind")
+            if kind == "message":
+                lineNumbers = [entry.get("lineNumber")]
+            elif kind == "identicalCanonicalMessage":
+                lineNumbers = entry.get("lineNumbers")
+            else:
+                raise RuntimeError(f"Unsupported chat second aggregate entry kind: {kind!r}.")
+            if (
+                not isinstance(lineNumbers, list)
+                or not lineNumbers
+                or any(type(lineNumber) is not int for lineNumber in lineNumbers)
+            ):
+                raise RuntimeError("Chat second aggregate entry has invalid line membership.")
+            reference = {
+                **aggregateReference,
+                "entry": _plain(entry),
+            }
+            for lineNumber in lineNumbers:
+                if lineNumber in byLine:
+                    raise RuntimeError(f"Chat line {lineNumber} belongs to multiple second aggregate entries.")
+                byLine[lineNumber] = reference
+    return byLine
+
+
 def _previousChatItemReusable(
     previousItem: QueryItem,
     *,
@@ -121,6 +169,7 @@ def _chatQueryItems(
     if not isinstance(records, list):
         raise RuntimeError("Chat interpretation capability returned invalid records.")
     bucketByLine = _chatBucketReferences(chat)
+    aggregateByLine = _chatAggregateReferences(chat)
 
     items: list[QueryItem] = []
     for record in records:
@@ -147,8 +196,11 @@ def _chatQueryItems(
             raise RuntimeError("Chat interpretation returned invalid query-item evidence.")
 
         secondBucket = bucketByLine.get(lineNumber)
+        secondAggregate = aggregateByLine.get(lineNumber)
         if secondBucket is None:
             raise RuntimeError(f"Chat line {lineNumber} has no canonical second bucket.")
+        if secondAggregate is None:
+            raise RuntimeError(f"Chat line {lineNumber} has no structured second aggregate.")
 
         interpretationKind = analysis.get("kind")
         if interpretationKind == "unknownMessage":
@@ -170,6 +222,7 @@ def _chatQueryItems(
             "memory": {
                 "semantic": _plain(semanticValue),
                 "secondBucket": _plain(secondBucket),
+                "secondAggregate": _plain(secondAggregate),
             },
             "source": {
                 "sourcePath": chat.get("sourcePath"),
