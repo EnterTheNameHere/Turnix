@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 3
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 4
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -1114,7 +1114,7 @@ def _run(ctx, payload):
         chatBudget = processingResult.llm.query.metadata.get("chatBudget", {})
         warnings = (
             _plain(chatBudget.get("warnings", []))
-            if isinstance(chatBudget, dict)
+            if isinstance(chatBudget, Mapping)
             else []
         )
         results.append(
