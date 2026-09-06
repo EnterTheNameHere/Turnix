@@ -1,3 +1,4 @@
+# file: backend/llm/streamingRuntime.py ; version: 1
 from __future__ import annotations
 
 import hashlib
@@ -89,7 +90,7 @@ class LlmProcessingPipeline:
         *,
         providers: LlmProviderRegistry,
         state: CommittedValueLayer | None = None,
-        capabilityInvoker: Callable[[str, object | None], object] | None = None,
+        capabilityInvoker: Callable[[str, object | None, CommittedValueTransaction | None], object] | None = None,
         trace: Callable[[str, dict[str, object]], None] | None = None,
     ) -> None:
         self._providers = providers
@@ -135,13 +136,15 @@ class LlmProcessingPipeline:
         finalizeCapabilityId: str | None = None,
         finalizeInput: object | None = None,
         streamObserver: Callable[[LlmStreamEvent], None] | None = None,
+        memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
     ) -> LlmProcessingResult:
         if self._state is None or self._capabilityInvoker is None:
             raise RuntimeError("runProcessing() requires committed state and a capability invoker.")
         if type(memoryKey) is not str or not memoryKey or not memoryKey.replace("-", "").replace("_", "").isalnum() or not memoryKey.islower():
             raise ValueError("memoryKey must be a lowercase Value-address-safe identifier.")
 
-        transaction = self._state.openTransaction()
+        transactionBase = self._state if memoryView is None else memoryView
+        transaction = transactionBase.openTransaction()
         run = ProcessingRun(pipelineId=f"llm:{memoryKey}", transaction=transaction)
         currentItemsAddress = f"processing/{memoryKey}/currentqueryitems"
         committed = False
@@ -175,6 +178,7 @@ class LlmProcessingPipeline:
                     "previousQueryItems": previousSnapshots,
                     "execution": executionSnapshot,
                 },
+                transaction,
             )
             reusableItems = self._requireQueryItems(built, stage="BUILD_QUERY_ITEMS")
             self._stageReusableQueryItems(transaction, memoryKey=memoryKey, items=reusableItems)
@@ -189,6 +193,7 @@ class LlmProcessingPipeline:
                         "queryItems": [item.snapshot() for item in reusableItems],
                         "execution": executionSnapshot,
                     },
+                    transaction,
                 )
                 acceptedItems = self._requireQueryItems(filtered, stage="FILTER_QUERY_ITEMS")
                 self._requireFilteredSubset(reusableItems, acceptedItems)
@@ -202,6 +207,7 @@ class LlmProcessingPipeline:
                     "queryItems": [item.snapshot() for item in acceptedItems],
                     "execution": executionSnapshot,
                 },
+                transaction,
             )
             query = self._requireQuery(builtQuery)
 
@@ -250,6 +256,7 @@ class LlmProcessingPipeline:
                         acceptedItems=acceptedItems,
                         llmResult=llmResult,
                     ),
+                    transaction,
                 )
 
             transaction.commit()
