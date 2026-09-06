@@ -1,4 +1,4 @@
-# file: backend/llm/streamingRuntime.py ; version: 3
+# file: backend/llm/streamingRuntime.py ; version: 4
 from __future__ import annotations
 
 import hashlib
@@ -234,6 +234,10 @@ class LlmProcessingPipeline:
                     "processingRunId": run.processingRunId,
                     "reusableQueryItemIds": [item.itemId for item in reusableItems],
                     "acceptedQueryItemIds": [item.itemId for item in acceptedItems],
+                    "acceptedQueryItems": [
+                        item.snapshot()
+                        for item in acceptedItems
+                    ],
                     "query": self._queryEvidence(llmResult.query),
                     "response": {
                         "rawText": llmResult.rawText,
