@@ -1,3 +1,4 @@
+# file: backend/context/codeEntryContext.py ; version: 1
 from __future__ import annotations
 
 from copy import deepcopy
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
     from backend.llm.llmTypes import LlmStreamEvent, LlmStreamProvider
     from backend.llm.streamingRuntime import LlmProcessingPipeline, LlmProcessingResult, LlmProviderRegistry, StreamingLlmResult
     from backend.registration import RegistrationScope
+    from backend.values.committed import CommittedValueLayer, CommittedValueTransaction, ValueState
 
 __all__ = ["CodeEntryContext", "CodeEntryIdentity"]
 
@@ -45,6 +47,107 @@ class _IoFacade:
     def writeJsonAtomic(self, path, value: object) -> None:
         self._requireValid()
         self._io.writeJsonAtomic(path, value)
+
+
+class _MemoryTransactionFacade:
+    """Invocation-bound access to one authoritative Value System transaction.
+
+    The underlying transaction belongs to Actant. This facade prevents Pack
+    code from retaining usable transaction authority after its CodeEntryContext
+    has been invalidated. Nested transactions inherit the same invocation
+    lifetime.
+
+    Packs define what makes their logical values authoritative. Actant owns
+    stable addresses, authority state, revisions, conflict detection, and
+    transactional publication. This division is design-significant and should
+    be promoted into the Value System/CodeEntry design documents later.
+    """
+
+    __slots__ = ("_transaction", "_requireValid")
+
+    def __init__(
+        self,
+        *,
+        transaction: CommittedValueTransaction,
+        requireValid: Callable[[], None],
+    ) -> None:
+        self._transaction = transaction
+        self._requireValid = requireValid
+
+    def load(self, address: str) -> object:
+        self._requireValid()
+        return self._transaction.load(address)
+
+    def state(self, address: str) -> ValueState:
+        self._requireValid()
+        return self._transaction.state(address)
+
+    def set(self, address: str, value: object) -> None:
+        self._requireValid()
+        self._transaction.set(address, value)
+
+    def setAbsent(self, address: str) -> None:
+        self._requireValid()
+        self._transaction.setAbsent(address)
+
+    def invalidate(self, address: str) -> None:
+        self._requireValid()
+        self._transaction.invalidate(address)
+
+    def openTransaction(self) -> "_MemoryTransactionFacade":
+        self._requireValid()
+        return _MemoryTransactionFacade(
+            transaction=self._transaction.openTransaction(),
+            requireValid=self._requireValid,
+        )
+
+    def commit(self) -> None:
+        self._requireValid()
+        self._transaction.commit()
+
+    def abort(self) -> None:
+        self._requireValid()
+        self._transaction.abort()
+
+
+class _MemoryFacade:
+    """Invocation-scoped gateway to Application authoritative memory.
+
+    Reads observe committed state. Mutation is available only through
+    openTransaction(), preserving Actant's transaction boundary and automatic
+    revision advancement. state() distinguishes absent from invalidated without
+    requiring Packs to encode authority flags inside their own payloads.
+    """
+
+    __slots__ = ("_state", "_requireValid")
+
+    def __init__(
+        self,
+        *,
+        state: CommittedValueLayer,
+        requireValid: Callable[[], None],
+    ) -> None:
+        self._state = state
+        self._requireValid = requireValid
+
+    def load(self, address: str) -> object:
+        self._requireValid()
+        return self._state.load(address)
+
+    def state(self, address: str) -> ValueState:
+        self._requireValid()
+        return self._state.state(address)
+
+    def revisionId(self, address: str) -> int:
+        self._requireValid()
+        return self._state.revisionId(address)
+
+    def openTransaction(self) -> _MemoryTransactionFacade:
+        self._requireValid()
+        return _MemoryTransactionFacade(
+            transaction=self._state.openTransaction(),
+            requireValid=self._requireValid,
+        )
 
 
 class _CapabilityFacade:
@@ -197,6 +300,7 @@ class CodeEntryContext:
         capabilities: CapabilityRegistry,
         llmProviders: LlmProviderRegistry,
         llmPipeline: LlmProcessingPipeline,
+        memory: CommittedValueLayer,
         registrationScope: RegistrationScope,
         config: dict[str, object],
         capabilityInvoker: Callable[[str, object | None], object],
@@ -207,6 +311,7 @@ class CodeEntryContext:
         self.config = deepcopy(config)
         self._valid = True
         self.io = _IoFacade(io=io, requireValid=self.requireValid)
+        self.memory = _MemoryFacade(state=memory, requireValid=self.requireValid)
         self.capabilities = _CapabilityFacade(
             ownerId=identity.codeEntryInstanceId,
             registry=capabilities,
