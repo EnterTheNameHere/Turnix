@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 3
+# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 4
 from __future__ import annotations
 
 import importlib.util
@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.context.codeEntryContext import _MemoryFacade
 from backend.save import SaveBundle
 from backend.values import CommittedValueLayer
 
@@ -83,12 +84,30 @@ class _Io:
 
 
 class _Ctx:
-    def __init__(self, memory=None, *, emotes=None, vocabularyObservation=None):
+    def __init__(
+        self,
+        memory=None,
+        *,
+        emotes=None,
+        vocabularyObservation=None,
+        implementationId="chat-semantics-impl-1",
+    ):
         self.io = _Io(
             emotes=emotes,
             vocabularyObservation=vocabularyObservation,
         )
-        self.memory = memory or CommittedValueLayer()
+        self._committedMemory = memory or CommittedValueLayer()
+        self.memory = _MemoryFacade(
+            state=self._committedMemory,
+            requireValid=lambda: None,
+            producer={
+                "packId": "evilBirthdayAnalysis.chatSemantics",
+                "packVersion": "0.1.0",
+                "codeEntryId": "chatSemantics",
+                "sourceSha256": f"source-{implementationId}",
+                "implementationId": implementationId,
+            },
+        )
         self.config = {"chatEmotesFile": "chatEmotes.json"}
 
 
@@ -567,3 +586,30 @@ def test_line_semantics_ignore_vocabulary_metadata_change_when_content_identity_
     _interpret(secondCtx, records)
 
     assert memory.revisionId(address) == 1
+
+
+
+def test_line_semantics_recompute_when_producer_implementation_changes():
+    memory = CommittedValueLayer()
+    records = [
+        _raw(
+            22,
+            "viewer: GIGAEVIL",
+            streamTimeSeconds=10.0,
+            streamTime="00:00:10",
+        )
+    ]
+
+    firstCtx = _Ctx(memory, implementationId="implementation-a")
+    _interpret(firstCtx, records)
+    address = chatSemantics._semanticCellAddress(22)
+    assert memory.revisionId(address) == 1
+    firstMetadata = memory.metadata(address)
+    assert firstMetadata["producer"]["implementationId"] == "implementation-a"
+
+    secondCtx = _Ctx(memory, implementationId="implementation-b")
+    _interpret(secondCtx, records)
+
+    assert memory.revisionId(address) == 2
+    secondMetadata = memory.metadata(address)
+    assert secondMetadata["producer"]["implementationId"] == "implementation-b"
