@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 14
+# file: backend/context/codeEntryContext.py ; version: 15
 from __future__ import annotations
 
 from copy import deepcopy
@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from backend.core.immutableValue import ImmutableValueFreezer
 from backend.llm.errors import LlmProviderProtocolError
 from backend.llm.llmTypes import LlmExecutionProfile, LlmQuery
+from backend.values.committed import ValueState
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
     from backend.llm.llmTypes import LlmStreamEvent, LlmStreamProvider
     from backend.llm.streamingRuntime import LlmProcessingPipeline, LlmProcessingResult, LlmProviderRegistry, StreamingLlmResult
     from backend.registration import RegistrationScope
-    from backend.values.committed import CommittedValueLayer, CommittedValueTransaction, ValueState
+    from backend.values.committed import CommittedValueLayer, CommittedValueTransaction
 
 __all__ = ["CodeEntryContext", "CodeEntryIdentity"]
 
