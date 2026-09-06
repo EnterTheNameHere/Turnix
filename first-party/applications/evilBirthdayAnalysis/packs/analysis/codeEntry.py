@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 9
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 10
 from __future__ import annotations
 
 import importlib.util
@@ -71,6 +71,13 @@ def _interpretedChat(ctx, selector: dict[str, int]) -> tuple[dict[str, object], 
     interpretedChat = dict(interpretedChat)
     interpretedChat["sourcePath"] = rawChat.get("sourcePath")
     return rawChat, interpretedChat
+
+
+# _implementation owns prepared/export helpers loaded before this wrapper's
+# canonical source→semantics adapter exists. Install the adapter explicitly so
+# those helpers use the same interpretation path rather than an obsolete direct
+# raw-chat capability assumption.
+_implementation._interpretedChat = _interpretedChat
 
 
 def _chatBucketReferences(chat: dict[str, object]) -> dict[int, dict[str, object]]:
