@@ -1,4 +1,4 @@
-# file: tests/backend/context/test_codeEntryContext.py ; version: 7
+# file: tests/backend/context/test_codeEntryContext.py ; version: 8
 import pytest
 
 from pathlib import Path
@@ -294,4 +294,32 @@ def test_memory_describe_reports_staged_and_committed_views() -> None:
     assert committed["revisionId"] == 1
     assert committed["state"] == "present"
     assert committed["metadata"]["validity"] == {"v": 1}
+    context.invalidate()
+
+
+
+def test_memory_dependency_identity_is_stable_through_context_transaction_commit() -> None:
+    memory = CommittedValueLayer()
+    context = _contextWithMemory(memory)
+
+    outer = memory.openTransaction()
+    childContext = _contextWithMemory(outer)
+    transaction = childContext.memory.openTransaction()
+    transaction.set(
+        "derived/input",
+        {"value": "same"},
+        validity={"source": "stable"},
+        provenance={"note": "fixture"},
+    )
+    transaction.commit()
+
+    stagedDependency = childContext.memory.dependency("derived/input")
+    assert stagedDependency["state"] == "present"
+    assert stagedDependency["contentSha256"]
+    assert stagedDependency["metadataSha256"]
+
+    childContext.invalidate()
+    outer.commit()
+
+    assert memory.dependency("derived/input") == stagedDependency
     context.invalidate()
