@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 7
+# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 8
 from __future__ import annotations
 
 import importlib.util
@@ -116,12 +116,28 @@ def _evaluate(spans):
     return chatSemantics._evaluate(None, {"spans": spans})
 
 
-def _interpret(ctx, records, *, sourceObservation=None):
+def _interpret(
+    ctx,
+    records,
+    *,
+    sourceObservation=None,
+    contextStartSeconds=None,
+    contextEndSeconds=None,
+):
+    times = [float(record["streamTimeSeconds"]) for record in records]
+    inferredStart = (min(times) - 2.0) if times else -2.0
+    inferredEnd = (max(times) + 3.0) if times else 2.0
     return chatSemantics._interpret(
         ctx,
         {
             "sourcePath": "chat.txt",
             "sourceObservation": dict(sourceObservation or _SOURCE_OBSERVATION),
+            "contextStreamStartSeconds": (
+                inferredStart if contextStartSeconds is None else contextStartSeconds
+            ),
+            "contextStreamEndSeconds": (
+                inferredEnd if contextEndSeconds is None else contextEndSeconds
+            ),
             "records": records,
         },
     )
@@ -772,3 +788,129 @@ def test_second_aggregate_recomputes_when_second_bucket_changes():
         "message",
         "message",
     ]
+
+
+
+def test_identical_message_burst_persists_across_consecutive_seconds():
+    memory = CommittedValueLayer()
+    ctx = _Ctx(memory)
+    records = [
+        _raw(70, "alice: GIGAEVIL", streamTimeSeconds=30.0, streamTime="00:00:30"),
+        _raw(71, "bob: GIGAEVIL", streamTimeSeconds=30.0, streamTime="00:00:30"),
+        _raw(72, "charlie: GIGAEVIL", streamTimeSeconds=31.0, streamTime="00:00:31"),
+    ]
+
+    result = _interpret(
+        ctx,
+        records,
+        contextStartSeconds=29.0,
+        contextEndSeconds=33.0,
+    )
+
+    assert len(result["identicalMessageBursts"]) == 1
+    burst = result["identicalMessageBursts"][0]
+    value = burst["value"]
+    assert value["kind"] == "identicalMessageBurst"
+    assert value["startSecond"] == 30
+    assert value["endSecond"] == 31
+    assert value["durationSeconds"] == 2
+    assert value["messageCount"] == 3
+    assert value["uniqueSourceUserCount"] == 3
+    assert value["peakMessagesPerSecond"] == 2
+    assert [occurrence["lineNumber"] for occurrence in value["occurrences"]] == [70, 71, 72]
+    assert memory.revisionId(burst["address"]) == 1
+
+
+def test_identical_message_burst_does_not_bridge_empty_second_gap():
+    result = _interpret(
+        _Ctx(),
+        [
+            _raw(73, "alice: GIGAEVIL", streamTimeSeconds=40.0, streamTime="00:00:40"),
+            _raw(74, "bob: GIGAEVIL", streamTimeSeconds=42.0, streamTime="00:00:42"),
+        ],
+        contextStartSeconds=39.0,
+        contextEndSeconds=44.0,
+    )
+
+    assert result["identicalMessageBursts"] == []
+
+
+@pytest.mark.parametrize(
+    ("contextStartSeconds", "contextEndSeconds"),
+    [
+        (50.0, 53.0),
+        (49.0, 52.0),
+    ],
+)
+def test_identical_message_burst_is_not_persisted_when_boundary_is_unproven(
+    contextStartSeconds,
+    contextEndSeconds,
+):
+    memory = CommittedValueLayer()
+    result = _interpret(
+        _Ctx(memory),
+        [
+            _raw(75, "alice: GIGAEVIL", streamTimeSeconds=50.0, streamTime="00:00:50"),
+            _raw(76, "bob: GIGAEVIL", streamTimeSeconds=51.0, streamTime="00:00:51"),
+        ],
+        contextStartSeconds=contextStartSeconds,
+        contextEndSeconds=contextEndSeconds,
+    )
+
+    assert result["identicalMessageBursts"] == []
+
+
+def test_identical_message_burst_reuses_when_aggregate_inputs_are_unchanged():
+    memory = CommittedValueLayer()
+    ctx = _Ctx(memory)
+    records = [
+        _raw(77, "alice: GIGAEVIL", streamTimeSeconds=60.0, streamTime="00:01:00"),
+        _raw(78, "bob: GIGAEVIL", streamTimeSeconds=61.0, streamTime="00:01:01"),
+    ]
+
+    first = _interpret(
+        ctx,
+        records,
+        contextStartSeconds=59.0,
+        contextEndSeconds=63.0,
+    )
+    burstAddress = first["identicalMessageBursts"][0]["address"]
+    assert memory.revisionId(burstAddress) == 1
+
+    second = _interpret(
+        ctx,
+        records,
+        contextStartSeconds=59.0,
+        contextEndSeconds=63.0,
+    )
+
+    assert memory.revisionId(burstAddress) == 1
+    assert second["identicalMessageBursts"][0]["dependency"] == first["identicalMessageBursts"][0]["dependency"]
+
+
+def test_identical_message_burst_survives_save_bundle_rehydration():
+    memory = CommittedValueLayer()
+    ctx = _Ctx(memory)
+    records = [
+        _raw(79, "alice: GIGAEVIL", streamTimeSeconds=70.0, streamTime="00:01:10"),
+        _raw(80, "bob: GIGAEVIL", streamTimeSeconds=71.0, streamTime="00:01:11"),
+    ]
+    first = _interpret(
+        ctx,
+        records,
+        contextStartSeconds=69.0,
+        contextEndSeconds=73.0,
+    )
+    burstAddress = first["identicalMessageBursts"][0]["address"]
+
+    bundle = SaveBundle.create(applicationId="evil-analysis", committedState=memory)
+    restoredMemory = SaveBundle.fromBytes(bundle.toBytes()).restoreCommittedState()
+    restored = _interpret(
+        _Ctx(restoredMemory),
+        records,
+        contextStartSeconds=69.0,
+        contextEndSeconds=73.0,
+    )
+
+    assert restoredMemory.revisionId(burstAddress) == 1
+    assert restored["identicalMessageBursts"][0]["address"] == burstAddress
