@@ -1,9 +1,13 @@
+# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 1
 from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
 
 import pytest
+
+from backend.save import SaveBundle
+from backend.values import CommittedValueLayer
 
 
 _CODE_ENTRY = (
@@ -37,19 +41,53 @@ COMPOSITES = [
 ]
 
 
+_VOCABULARY_OBSERVATION = {
+    "path": "chatEmotes.json",
+    "state": "file",
+    "sizeBytes": 1,
+    "modifiedTimeNs": 1,
+    "contentSha256": "vocabulary-hash",
+}
+_SOURCE_OBSERVATION = {
+    "path": "chat.txt",
+    "state": "file",
+    "sizeBytes": 1,
+    "modifiedTimeNs": 1,
+    "contentSha256": "source-hash",
+}
+
+
 class _Io:
     def readJson(self, _path):
         return {"emotes": EMOTES, "composites": COMPOSITES}
 
+    def observeFile(self, path, *, contentHash=False):
+        del contentHash
+        if str(path) == "chatEmotes.json":
+            return dict(_VOCABULARY_OBSERVATION)
+        return dict(_SOURCE_OBSERVATION)
+
 
 class _Ctx:
-    def __init__(self):
+    def __init__(self, memory=None):
         self.io = _Io()
+        self.memory = memory or CommittedValueLayer()
         self.config = {"chatEmotesFile": "chatEmotes.json"}
 
 
 def _evaluate(spans):
     return chatSemantics._evaluate(None, {"spans": spans})
+
+
+def _interpret(ctx, records, *, sourceObservation=None):
+    return chatSemantics._interpret(
+        ctx,
+        {
+            "sourcePath": "chat.txt",
+            "sourceObservation": dict(sourceObservation or _SOURCE_OBSERVATION),
+            "records": records,
+        },
+    )
 
 
 def _raw(
@@ -167,13 +205,11 @@ def test_invalid_repeat_shape_fails_closed():
 
 
 def test_interpret_dynamically_recognizes_user_shape_and_keeps_raw_message():
-    result = chatSemantics._interpret(
+    result = _interpret(
         _Ctx(),
-        {
-            "records": [
+        [
                 _raw(1, "viewer: GIGAEVIL GIGAEVIL", streamTimeSeconds=5.0, streamTime="00:00:05")
-            ]
-        },
+            ],
     )
 
     record = result["records"][0]
@@ -187,18 +223,16 @@ def test_interpret_dynamically_recognizes_user_shape_and_keeps_raw_message():
 
 
 def test_interpret_collapses_exact_repeated_plain_text_sequence():
-    result = chatSemantics._interpret(
+    result = _interpret(
         _Ctx(),
-        {
-            "records": [
+        [
                 _raw(
                     1,
                     "viewer: bring gun bring gun bring gun",
                     streamTimeSeconds=6.0,
                     streamTime="00:00:06",
                 )
-            ]
-        },
+            ],
     )
 
     record = result["records"][0]
@@ -215,9 +249,9 @@ def test_interpret_collapses_exact_repeated_plain_text_sequence():
 
 def test_interpret_preserves_unknown_message_without_guessing_username_or_body():
     rawMessage = "A moderation or information form not understood by this CodeEntry"
-    result = chatSemantics._interpret(
+    result = _interpret(
         _Ctx(),
-        {"records": [_raw(1, rawMessage, streamTimeSeconds=7.0, streamTime="00:00:07")]},
+        [_raw(1, rawMessage, streamTimeSeconds=7.0, streamTime="00:00:07")],
     )
 
     record = result["records"][0]
@@ -231,10 +265,9 @@ def test_interpret_preserves_unknown_message_without_guessing_username_or_body()
 
 
 def test_interpret_uses_pre_window_raw_context_to_reconstruct_gift_batch():
-    result = chatSemantics._interpret(
+    result = _interpret(
         _Ctx(),
-        {
-            "records": [
+        [
                 _raw(
                     1,
                     "mybraza: mybraza is gifting 2 Tier 1 Subs to vedal987's community! They've gifted a total of 126 in the channel!",
@@ -260,8 +293,7 @@ def test_interpret_uses_pre_window_raw_context_to_reconstruct_gift_batch():
                     streamTimeSeconds=2.0,
                     streamTime="00:00:02",
                 ),
-            ]
-        },
+            ],
     )
 
     assert result["records"][0]["analysis"]["includedInText"] is False
@@ -274,18 +306,16 @@ def test_interpret_uses_pre_window_raw_context_to_reconstruct_gift_batch():
 
 
 def test_interpret_known_fossabot_automation_is_retained_but_suppressed():
-    result = chatSemantics._interpret(
+    result = _interpret(
         _Ctx(),
-        {
-            "records": [
+        [
                 _raw(
                     1,
                     "fossabot: @RatK1ngg_, Your message is too long [warning]",
                     streamTimeSeconds=9.0,
                     streamTime="00:00:09",
                 )
-            ]
-        },
+            ],
     )
 
     record = result["records"][0]
@@ -295,10 +325,9 @@ def test_interpret_known_fossabot_automation_is_retained_but_suppressed():
 
 
 def test_interpret_command_and_confirmed_composite_behavior_remains_explicit():
-    result = chatSemantics._interpret(
+    result = _interpret(
         _Ctx(),
-        {
-            "records": [
+        [
                 _raw(
                     1,
                     "viewer: !clip now",
@@ -311,8 +340,7 @@ def test_interpret_command_and_confirmed_composite_behavior_remains_explicit():
                     streamTimeSeconds=12.0,
                     streamTime="00:00:12",
                 ),
-            ]
-        },
+            ],
     )
 
     command = result["records"][0]["analysis"]["spans"]
@@ -338,19 +366,104 @@ def test_interpret_command_and_confirmed_composite_behavior_remains_explicit():
 
 
 def test_interpret_unknown_fossabot_message_remains_user_message():
-    result = chatSemantics._interpret(
+    result = _interpret(
         _Ctx(),
-        {
-            "records": [
+        [
                 _raw(
                     1,
                     "fossabot: an unfamiliar future message",
                     streamTimeSeconds=10.0,
                     streamTime="00:00:10",
                 )
-            ]
-        },
+            ],
     )
 
     assert result["records"][0]["analysis"]["kind"] == "userMessage"
     assert result["text"] == "00:00:10 fossabot: an unfamiliar future message"
+
+
+
+def test_line_semantics_reuse_authoritative_cell_when_inputs_are_unchanged():
+    memory = CommittedValueLayer()
+    ctx = _Ctx(memory)
+    records = [
+        _raw(
+            17,
+            "viewer: GIGAEVIL GIGAEVIL",
+            streamTimeSeconds=5.0,
+            streamTime="00:00:05",
+        )
+    ]
+
+    first = _interpret(ctx, records)
+    assert first["records"][0]["analysis"]["spans"][0]["count"] == 2
+    address = chatSemantics._semanticCellAddress(17)
+    assert memory.revisionId(address) == 1
+
+    second = _interpret(ctx, records)
+    assert second["records"][0]["analysis"]["spans"][0]["count"] == 2
+    assert memory.revisionId(address) == 1
+
+
+def test_line_semantics_replace_only_changed_line_at_same_address():
+    memory = CommittedValueLayer()
+    ctx = _Ctx(memory)
+    firstRecords = [
+        _raw(17, "viewer: GIGAEVIL", streamTimeSeconds=5.0, streamTime="00:00:05"),
+        _raw(18, "viewer: Clap", streamTimeSeconds=6.0, streamTime="00:00:06"),
+    ]
+    _interpret(ctx, firstRecords)
+
+    firstAddress = chatSemantics._semanticCellAddress(17)
+    secondAddress = chatSemantics._semanticCellAddress(18)
+    assert memory.revisionId(firstAddress) == 1
+    assert memory.revisionId(secondAddress) == 1
+
+    changedRecords = [
+        _raw(17, "viewer: GIGAEVIL", streamTimeSeconds=5.0, streamTime="00:00:05"),
+        _raw(18, "viewer: Clap Clap", streamTimeSeconds=6.0, streamTime="00:00:06"),
+    ]
+    result = _interpret(
+        ctx,
+        changedRecords,
+        sourceObservation={**_SOURCE_OBSERVATION, "contentSha256": "changed-source"},
+    )
+
+    assert memory.revisionId(firstAddress) == 1
+    assert memory.revisionId(secondAddress) == 2
+    assert result["records"][1]["analysis"]["spans"][0]["count"] == 2
+
+
+def test_line_semantics_survive_save_bundle_rehydration():
+    firstMemory = CommittedValueLayer()
+    firstCtx = _Ctx(firstMemory)
+    records = [
+        _raw(
+            17,
+            "viewer: bring gun bring gun bring gun",
+            streamTimeSeconds=6.0,
+            streamTime="00:00:06",
+        )
+    ]
+    _interpret(firstCtx, records)
+
+    address = chatSemantics._semanticCellAddress(17)
+    assert firstMemory.revisionId(address) == 1
+
+    bundle = SaveBundle.create(
+        applicationId="evil-analysis",
+        committedState=firstMemory,
+    )
+    restoredMemory = SaveBundle.fromBytes(bundle.toBytes()).restoreCommittedState()
+    restoredCtx = _Ctx(restoredMemory)
+
+    result = _interpret(restoredCtx, records)
+
+    assert restoredMemory.revisionId(address) == 1
+    assert result["records"][0]["analysis"]["spans"] == [
+        {
+            "kind": "repeat",
+            "count": 3,
+            "spans": [{"kind": "text", "text": "bring gun"}],
+        }
+    ]
