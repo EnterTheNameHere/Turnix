@@ -1,4 +1,4 @@
-# file: tests/backend/context/test_codeEntryContext.py ; version: 2
+# file: tests/backend/context/test_codeEntryContext.py ; version: 3
 import pytest
 
 from pathlib import Path
@@ -117,8 +117,11 @@ def _contextWithMemory(memory: CommittedValueLayer) -> CodeEntryContext:
             applicationId="application",
             applicationRunId="run",
             packId="pack",
+            packVersion="1.0.0",
             codeEntryId="entry",
             codeEntryInstanceId="entry-instance",
+            sourceSha256="source-sha",
+            implementationId="implementation-sha",
         ),
         packRoot=Path.cwd(),
         io=_Io(),
