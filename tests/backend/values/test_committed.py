@@ -1,4 +1,4 @@
-# file: tests/backend/values/test_committed.py ; version: 1
+# file: tests/backend/values/test_committed.py ; version: 2
 import pytest
 
 from backend.values.committed import CommittedValueLayer, StateConflictError, ValueState
@@ -137,3 +137,29 @@ def test_aborted_authority_transition_does_not_change_committed_state():
     assert layer.state("analysis/result") is ValueState.PRESENT
     assert layer.load("analysis/result") == "current"
     assert layer.revisionId("analysis/result") == 1
+
+
+
+def test_committed_metadata_is_detached_and_describable():
+    layer = CommittedValueLayer()
+    metadata = {
+        "producer": {"implementationId": "impl-1"},
+        "validity": {"inputRevision": 4},
+        "provenance": {"source": {"path": "input.txt"}},
+    }
+
+    transaction = layer.openTransaction()
+    transaction.set("derived/value", {"answer": 42}, metadata=metadata)
+    metadata["validity"]["inputRevision"] = 99
+    transaction.commit()
+
+    loadedMetadata = layer.metadata("derived/value")
+    assert loadedMetadata == {
+        "producer": {"implementationId": "impl-1"},
+        "validity": {"inputRevision": 4},
+        "provenance": {"source": {"path": "input.txt"}},
+    }
+
+    loadedMetadata["validity"]["inputRevision"] = 100
+    assert layer.metadata("derived/value")["validity"]["inputRevision"] == 4
+    assert layer.describe("derived/value")["revisionId"] == 1
