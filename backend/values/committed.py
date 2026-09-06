@@ -1,4 +1,4 @@
-# file: backend/values/committed.py ; version: 8
+# file: backend/values/committed.py ; version: 9
 from __future__ import annotations
 
 import base64
@@ -387,6 +387,19 @@ class CommittedValueTransaction(ValueLayer):
         key = address if isinstance(address, ValueAddress) else ValueAddress(address)
         self._captureBase(key)
         return self._loadVisibleRevision(key).state
+
+    def revisionId(self, address: str | ValueAddress) -> int:
+        """Returns the committed base revision observed by this transaction.
+
+        Staged state has no authoritative revision until the outermost commit.
+        This method therefore reports the root revision captured for conflict
+        detection, not a synthetic revision for speculative writes.
+        """
+        self._requireActive()
+        self._requireNoChildren()
+        key = address if isinstance(address, ValueAddress) else ValueAddress(address)
+        self._captureBase(key)
+        return self._bases[key]
 
     def set(self, address: str | ValueAddress, value: object) -> None:
         """Stages a PRESENT replacement at address."""
