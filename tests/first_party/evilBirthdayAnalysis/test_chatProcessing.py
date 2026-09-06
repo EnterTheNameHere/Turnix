@@ -1,5 +1,7 @@
+# file: tests/first_party/evilBirthdayAnalysis/test_chatProcessing.py ; version: 1
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 from pathlib import Path
 
@@ -24,8 +26,31 @@ _SPEC.loader.exec_module(chat)
 class _Io:
     def __init__(self, *, lines: tuple[str, ...] = ()):
         self._lines = lines
+        self.readCount = 0
+
+    @property
+    def lines(self) -> tuple[str, ...]:
+        return self._lines
+
+    @lines.setter
+    def lines(self, value: tuple[str, ...]) -> None:
+        self._lines = value
+
+    def _payload(self) -> bytes:
+        return "\n".join(self._lines).encode("utf-8")
+
+    def observeFile(self, path, *, contentHash=False):
+        payload = self._payload()
+        return {
+            "path": str(path),
+            "state": "file",
+            "sizeBytes": len(payload),
+            "modifiedTimeNs": len(payload) * 1000 + len(self._lines),
+            "contentSha256": hashlib.sha256(payload).hexdigest() if contentHash else None,
+        }
 
     def readLines(self, _path):
+        self.readCount += 1
         return self._lines
 
 
@@ -151,3 +176,46 @@ def test_selector_can_return_raw_lookback_without_marking_it_inside_requested_wi
         "current: included",
     ]
     assert [record["insideRequestedWindow"] for record in selected["records"]] == [False, True]
+
+
+
+def test_selector_reuses_parse_cache_while_source_observation_is_unchanged():
+    chat._parsedCache.clear()
+    ctx = _Ctx(
+        lines=(
+            "[2024-03-25 19:20:00] #vedal987 first: included",
+            "[2024-03-25 19:20:05] #vedal987 second: included",
+        )
+    )
+
+    first = chat._select(ctx, {"videoStartSeconds": 0, "videoEndSeconds": 10})
+    second = chat._select(ctx, {"videoStartSeconds": 0, "videoEndSeconds": 10})
+
+    assert ctx.io.readCount == 1
+    assert first["sourceObservation"] == second["sourceObservation"]
+    assert first["sourceObservation"]["contentSha256"] is not None
+
+
+def test_selector_rebuilds_parse_cache_when_source_observation_changes():
+    chat._parsedCache.clear()
+    ctx = _Ctx(
+        lines=(
+            "[2024-03-25 19:20:00] #vedal987 first: included",
+            "[2024-03-25 19:20:05] #vedal987 second: old",
+        )
+    )
+
+    first = chat._select(ctx, {"videoStartSeconds": 0, "videoEndSeconds": 10})
+
+    ctx.io.lines = (
+        "[2024-03-25 19:20:00] #vedal987 first: included",
+        "[2024-03-25 19:20:05] #vedal987 second: changed-value",
+    )
+    second = chat._select(ctx, {"videoStartSeconds": 0, "videoEndSeconds": 10})
+
+    assert ctx.io.readCount == 2
+    assert first["sourceObservation"] != second["sourceObservation"]
+    assert [record["message"] for record in second["records"]] == [
+        "first: included",
+        "second: changed-value",
+    ]
