@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 6
+# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 7
 from __future__ import annotations
 
 import hashlib
@@ -702,20 +702,11 @@ def _burstSecondSegment(secondIndex: int) -> str:
     return f"n{-secondIndex}" if secondIndex < 0 else f"s{secondIndex}"
 
 
-def _identicalMessageBurstAddress(
-    *,
-    startSecond: int,
-    canonicalSha256: str,
-) -> str:
-    """Returns stable identity for one closed identical-message burst."""
+def _burstStartCellAddress(startSecond: int) -> str:
+    """Returns the stable logical slot for bursts proven to start in one second."""
     if type(startSecond) is not int:
         raise TypeError("startSecond must be an exact integer.")
-    if type(canonicalSha256) is not str or len(canonicalSha256) != 64:
-        raise ValueError("canonicalSha256 must be a 64-character SHA-256 hex digest.")
-    return (
-        f"evilanalysis/chat/burst/{_burstSecondSegment(startSecond)}/"
-        f"{canonicalSha256}"
-    )
+    return f"evilanalysis/chat/burst/{_burstSecondSegment(startSecond)}"
 
 
 def _aggregateCanonicalOccurrences(
@@ -846,51 +837,57 @@ def _aggregateCanonicalOccurrences(
             spansByCanonical[canonicalKey] = spans
             continue
 
-        raise RuntimeError(f"Unsupported second aggregate entry kind for burst derivation: {kind!r}.")
+        raise RuntimeError(
+            f"Unsupported second aggregate entry kind for burst derivation: {kind!r}.",
+        )
 
     return secondIndex, occurrencesByCanonical, spansByCanonical
 
 
-def _closedCanonicalRuns(
-    *,
+def _canonicalRuns(
     secondsByCanonical: dict[str, dict[int, list[dict[str, object]]]],
-    contextStartSeconds: float,
-    contextEndSeconds: float,
 ) -> list[tuple[str, list[int]]]:
-    """Returns consecutive-second runs whose adjacent seconds are fully observed."""
+    """Returns maximal consecutive-second runs present in the supplied coverage."""
     runs: list[tuple[str, list[int]]] = []
     for canonicalKey, bySecond in secondsByCanonical.items():
         orderedSeconds = sorted(bySecond)
-        if len(orderedSeconds) < 2:
+        if not orderedSeconds:
             continue
-
         current = [orderedSeconds[0]]
-        candidates: list[list[int]] = []
         for secondIndex in orderedSeconds[1:]:
             if secondIndex == current[-1] + 1:
                 current.append(secondIndex)
             else:
-                candidates.append(current)
+                runs.append((canonicalKey, current))
                 current = [secondIndex]
-        candidates.append(current)
-
-        for run in candidates:
-            if len(run) < 2:
-                continue
-            startSecond = run[0]
-            endSecond = run[-1]
-            # To prove maximality at one-second resolution we must observe the
-            # complete immediately preceding and following seconds.
-            if contextStartSeconds > float(startSecond - 1):
-                continue
-            if contextEndSeconds < float(endSecond + 2):
-                continue
-            runs.append((canonicalKey, run))
+        runs.append((canonicalKey, current))
     return runs
 
 
-def _persistentIdenticalMessageBurst(
-    ctx,
+def _aggregateInputSignature(
+    aggregateBySecond: dict[int, dict[str, object]],
+    secondIndex: int,
+) -> dict[str, object]:
+    aggregate = aggregateBySecond.get(secondIndex)
+    if aggregate is None:
+        return {
+            "secondIndex": secondIndex,
+            "aggregate": None,
+        }
+    dependency = aggregate.get("dependency")
+    address = aggregate.get("address")
+    if type(address) is not str or not isinstance(dependency, dict):
+        raise RuntimeError("Burst input aggregate reference is incomplete.")
+    return {
+        "secondIndex": secondIndex,
+        "aggregate": {
+            "address": address,
+            "dependency": dependency,
+        },
+    }
+
+
+def _burstEventValue(
     *,
     canonicalKey: str,
     canonicalSpans: list[dict[str, object]],
@@ -899,70 +896,21 @@ def _persistentIdenticalMessageBurst(
     aggregateBySecond: dict[int, dict[str, object]],
 ) -> dict[str, object]:
     canonicalSha256 = hashlib.sha256(canonicalKey.encode("utf-8")).hexdigest()
-    startSecond = runSeconds[0]
-    endSecond = runSeconds[-1]
-    address = _identicalMessageBurstAddress(
-        startSecond=startSecond,
-        canonicalSha256=canonicalSha256,
-    )
-
-    secondInputs = [
-        {
-            "secondIndex": secondIndex,
-            "aggregate": {
-                "address": aggregateBySecond[secondIndex]["address"],
-                "dependency": aggregateBySecond[secondIndex]["dependency"],
-            },
-        }
-        for secondIndex in runSeconds
-    ]
-    basis = {
-        "canonicalSha256": canonicalSha256,
-        "seconds": secondInputs,
-        "previousSecondContainsCanonical": False,
-        "nextSecondContainsCanonical": False,
-    }
-    if ctx.memory.isReusable(address, validity=basis):
-        value = ctx.memory.load(address)
-        if isinstance(value, dict):
-            return {
-                "address": address,
-                "dependency": ctx.memory.dependency(address),
-                "value": value,
-            }
-        raise RuntimeError(f"Reusable identical-message burst at {address!r} is not an object.")
-
     occurrences = [
         occurrence
         for secondIndex in runSeconds
         for occurrence in occurrencesBySecond[secondIndex]
     ]
-    perSecond = [
-        {
-            "secondIndex": secondIndex,
-            "messageCount": len(occurrencesBySecond[secondIndex]),
-            "uniqueSourceUserCount": len(
-                {
-                    occurrence["sourceUsername"].casefold()
-                    for occurrence in occurrencesBySecond[secondIndex]
-                }
-            ),
-            "aggregate": secondInputs[index]["aggregate"],
-        }
-        for index, secondIndex in enumerate(runSeconds)
-    ]
-    sourceUsernames = [
-        occurrence["sourceUsername"]
-        for occurrence in occurrences
-    ]
-    value = {
+    sourceUsernames = [occurrence["sourceUsername"] for occurrence in occurrences]
+    return {
+        "eventKey": canonicalSha256,
         "kind": "identicalMessageBurst",
         "canonicalSha256": canonicalSha256,
         "canonicalMessage": _renderSpans(canonicalSpans),
         "canonicalSpans": canonicalSpans,
-        "startSecond": startSecond,
-        "endSecond": endSecond,
-        "durationSeconds": endSecond - startSecond + 1,
+        "startSecond": runSeconds[0],
+        "endSecond": runSeconds[-1],
+        "durationSeconds": runSeconds[-1] - runSeconds[0] + 1,
         "messageCount": len(occurrences),
         "uniqueSourceUserCount": len(
             {username.casefold() for username in sourceUsernames}
@@ -973,15 +921,84 @@ def _persistentIdenticalMessageBurst(
         ),
         "sourceUsernames": sourceUsernames,
         "occurrences": occurrences,
-        "seconds": perSecond,
+        "seconds": [
+            {
+                "secondIndex": secondIndex,
+                "messageCount": len(occurrencesBySecond[secondIndex]),
+                "uniqueSourceUserCount": len(
+                    {
+                        occurrence["sourceUsername"].casefold()
+                        for occurrence in occurrencesBySecond[secondIndex]
+                    }
+                ),
+                "aggregate": {
+                    "address": aggregateBySecond[secondIndex]["address"],
+                    "dependency": aggregateBySecond[secondIndex]["dependency"],
+                },
+            }
+            for secondIndex in runSeconds
+        ],
     }
+
+
+def _persistentBurstStartCell(
+    ctx,
+    *,
+    startSecond: int,
+    events: list[dict[str, object]] | None,
+    inputEndSecond: int,
+    aggregateBySecond: dict[int, dict[str, object]],
+) -> dict[str, object] | None:
+    """Publishes one stable burst-start slot or marks it currently indeterminate.
+
+    events=None means the start is proven but at least one burst beginning here
+    reaches beyond supplied right-hand coverage, so any prior PRESENT value is
+    no longer trustworthy. An empty events list is authoritative evidence that
+    no identical-message burst starts in this second.
+    """
+    address = _burstStartCellAddress(startSecond)
+    signatures = [
+        _aggregateInputSignature(aggregateBySecond, secondIndex)
+        for secondIndex in range(startSecond - 1, inputEndSecond + 2)
+    ]
+    basis = {"secondInputs": signatures}
+
+    if events is None:
+        if not ctx.memory.isCurrent(address, state="invalidated", validity=basis):
+            transaction = ctx.memory.openTransaction()
+            transaction.invalidate(
+                address,
+                validity=basis,
+                provenance={
+                    "reason": "burstEndOutsideObservedCoverage",
+                    "secondInputs": signatures,
+                },
+            )
+            transaction.commit()
+        return None
+
+    orderedEvents = sorted(events, key=lambda event: str(event["eventKey"]))
+    value = {
+        "startSecond": startSecond,
+        "events": orderedEvents,
+    }
+    if ctx.memory.isReusable(address, validity=basis):
+        current = ctx.memory.load(address)
+        if isinstance(current, dict):
+            return {
+                "address": address,
+                "dependency": ctx.memory.dependency(address),
+                "value": current,
+            }
+        raise RuntimeError(f"Reusable burst-start cell at {address!r} is not an object.")
+
     transaction = ctx.memory.openTransaction()
     transaction.set(
         address,
         value,
         validity=basis,
         provenance={
-            "secondAggregates": secondInputs,
+            "secondInputs": signatures,
         },
     )
     transaction.commit()
@@ -998,7 +1015,8 @@ def _persistentIdenticalMessageBursts(
     *,
     contextStartSeconds: float,
     contextEndSeconds: float,
-) -> list[dict[str, object]]:
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Materializes stable per-second burst-start slots and closed event refs."""
     aggregateBySecond: dict[int, dict[str, object]] = {}
     secondsByCanonical: dict[str, dict[int, list[dict[str, object]]]] = {}
     spansByCanonical: dict[str, list[dict[str, object]]] = {}
@@ -1015,23 +1033,85 @@ def _persistentIdenticalMessageBursts(
             secondsByCanonical.setdefault(canonicalKey, {})[secondIndex] = items
         spansByCanonical.update(canonicalSpans)
 
-    bursts: list[dict[str, object]] = []
-    for canonicalKey, runSeconds in _closedCanonicalRuns(
-        secondsByCanonical=secondsByCanonical,
-        contextStartSeconds=contextStartSeconds,
-        contextEndSeconds=contextEndSeconds,
-    ):
-        bursts.append(
-            _persistentIdenticalMessageBurst(
+    eventRunsByStart: dict[int, list[tuple[str, list[int]]]] = {}
+    openStarts: set[int] = set()
+    for canonicalKey, runSeconds in _canonicalRuns(secondsByCanonical):
+        if len(runSeconds) < 2:
+            continue
+        startSecond = runSeconds[0]
+        endSecond = runSeconds[-1]
+
+        # If the preceding second is not fully observed, we cannot prove this
+        # second is the logical start slot and must not publish it.
+        if contextStartSeconds > float(startSecond - 1):
+            continue
+
+        if contextEndSeconds < float(endSecond + 2):
+            openStarts.add(startSecond)
+            continue
+
+        eventRunsByStart.setdefault(startSecond, []).append(
+            (canonicalKey, runSeconds),
+        )
+
+    firstEligibleStart = math.ceil(contextStartSeconds + 1)
+    lastEligibleStart = math.floor(contextEndSeconds - 2)
+    burstStartCells: list[dict[str, object]] = []
+    closedEvents: list[dict[str, object]] = []
+
+    for startSecond in range(firstEligibleStart, lastEligibleStart + 1):
+        runs = eventRunsByStart.get(startSecond, [])
+        if startSecond in openStarts:
+            # Include every observed second through the coverage edge so a
+            # changed partial run changes invalidation validity.
+            inputEndSecond = max(
+                runSeconds[-1]
+                for canonicalKey, runSeconds in _canonicalRuns(secondsByCanonical)
+                if runSeconds[0] == startSecond and len(runSeconds) >= 2
+            )
+            _persistentBurstStartCell(
                 ctx,
+                startSecond=startSecond,
+                events=None,
+                inputEndSecond=inputEndSecond,
+                aggregateBySecond=aggregateBySecond,
+            )
+            continue
+
+        events = [
+            _burstEventValue(
                 canonicalKey=canonicalKey,
                 canonicalSpans=spansByCanonical[canonicalKey],
                 runSeconds=runSeconds,
                 occurrencesBySecond=secondsByCanonical[canonicalKey],
                 aggregateBySecond=aggregateBySecond,
             )
+            for canonicalKey, runSeconds in runs
+        ]
+        inputEndSecond = max(
+            [startSecond + 1, *(event["endSecond"] for event in events)],
         )
-    return bursts
+        cell = _persistentBurstStartCell(
+            ctx,
+            startSecond=startSecond,
+            events=events,
+            inputEndSecond=inputEndSecond,
+            aggregateBySecond=aggregateBySecond,
+        )
+        if cell is None:
+            continue
+        burstStartCells.append(cell)
+        for event in cell["value"]["events"]:
+            closedEvents.append(
+                {
+                    "address": cell["address"],
+                    "dependency": cell["dependency"],
+                    "eventKey": event["eventKey"],
+                    "value": event,
+                }
+            )
+
+    return burstStartCells, closedEvents
 
 
 def _lineSemantic(
@@ -1336,7 +1416,7 @@ def _interpret(ctx, payload):
 
     secondBuckets = _persistentSecondBuckets(ctx, records)
     secondAggregates = _persistentSecondAggregates(ctx, secondBuckets)
-    identicalMessageBursts = _persistentIdenticalMessageBursts(
+    burstStartCells, identicalMessageBursts = _persistentIdenticalMessageBursts(
         ctx,
         secondAggregates,
         contextStartSeconds=contextStartSeconds,
@@ -1346,6 +1426,7 @@ def _interpret(ctx, payload):
         "records": records,
         "secondBuckets": secondBuckets,
         "secondAggregates": secondAggregates,
+        "burstStartCells": burstStartCells,
         "identicalMessageBursts": identicalMessageBursts,
         "text": "\n".join(rendered),
     }
