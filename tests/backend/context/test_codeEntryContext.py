@@ -1,4 +1,4 @@
-# file: tests/backend/context/test_codeEntryContext.py ; version: 4
+# file: tests/backend/context/test_codeEntryContext.py ; version: 5
 import pytest
 
 from pathlib import Path
@@ -278,7 +278,7 @@ def test_memory_describe_reports_staged_and_committed_views() -> None:
     transaction = context.memory.openTransaction()
     transaction.set("derived/value", {"large": "payload"}, validity={"v": 1})
 
-    staged = transaction._transaction.describe("derived/value")
+    staged = transaction.describe("derived/value")
     assert staged["revisionId"] == 0
     assert staged["state"] == "present"
     assert staged["staged"] is True
