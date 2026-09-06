@@ -1,4 +1,4 @@
-# file: backend/values/committed.py ; version: 11
+# file: backend/values/committed.py ; version: 12
 from __future__ import annotations
 
 import base64
@@ -213,7 +213,7 @@ class CommittedValueLayer(ValueLayer):
     @classmethod
     def fromSnapshot(cls, snapshot: object) -> CommittedValueLayer:
         """Restores latest committed state from a validated persistence snapshot."""
-        if not isinstance(snapshot, dict) or snapshot.get("formatId") != "actant.committed-values@1":
+        if not isinstance(snapshot, dict) or snapshot.get("formatId") != "actant.committed-values@2":
             raise ValueError("Committed Value snapshot requires formatId 'actant.committed-values@2'.")
 
         values = snapshot.get("values")
