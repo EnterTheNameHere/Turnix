@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 6
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 7
 from __future__ import annotations
 
 import importlib.util
@@ -56,6 +56,7 @@ class _MaterializationCapabilities:
                 "streamStartSeconds": float(streamStart),
                 "streamEndSeconds": float(streamEnd),
                 "lookbackSeconds": float(payload["lookbackSeconds"]),
+                "lookaheadSeconds": float(payload["lookaheadSeconds"]),
                 "records": [
                     {
                         "lineNumber": 1,
@@ -411,7 +412,15 @@ def test_preparedChatSnapshot_omits_raw_records_and_counts_only_requested_window
         for call in ctx.capabilities.rawChatCalls
     )
     assert all(
+        call["lookaheadSeconds"] == analysis._CHAT_SEMANTIC_LOOKAHEAD_SECONDS
+        for call in ctx.capabilities.rawChatCalls
+    )
+    assert all(
         chunk["metadata"]["lookbackSeconds"] == analysis._CHAT_SEMANTIC_LOOKBACK_SECONDS
+        for chunk in snapshot["chunks"]
+    )
+    assert all(
+        chunk["metadata"]["lookaheadSeconds"] == analysis._CHAT_SEMANTIC_LOOKAHEAD_SECONDS
         for chunk in snapshot["chunks"]
     )
 
