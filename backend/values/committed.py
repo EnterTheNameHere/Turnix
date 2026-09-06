@@ -1,4 +1,4 @@
-# file: backend/values/committed.py ; version: 10
+# file: backend/values/committed.py ; version: 11
 from __future__ import annotations
 
 import base64
@@ -48,12 +48,14 @@ class _CommittedRevision:
     revisionId: int
     state: ValueState
     valueRef: ValueRef | None
+    metadata: dict[str, object] | None
 
 
 @dataclass(frozen=True, slots=True)
 class _StagedRevision:
     state: ValueState
     value: object = MISSING
+    metadata: dict[str, object] | None = None
 
 
 class CommittedValueLayer(ValueLayer):
@@ -107,6 +109,33 @@ class CommittedValueLayer(ValueLayer):
             revision = self._values.get(key)
             return 0 if revision is None else revision.revisionId
 
+    def metadata(self, address: str | ValueAddress) -> dict[str, object] | None:
+        """Returns detached metadata for the current committed revision."""
+        key = address if isinstance(address, ValueAddress) else ValueAddress(address)
+        with self._lock:
+            revision = self._values.get(key)
+            metadata = None if revision is None else revision.metadata
+        return None if metadata is None else deepcopy(metadata)
+
+    def describe(self, address: str | ValueAddress) -> dict[str, object]:
+        """Returns generic debugger/audit description without materializing payload."""
+        key = address if isinstance(address, ValueAddress) else ValueAddress(address)
+        with self._lock:
+            revision = self._values.get(key)
+        if revision is None:
+            return {
+                "address": str(key),
+                "revisionId": 0,
+                "state": ValueState.ABSENT.value,
+                "metadata": None,
+            }
+        return {
+            "address": str(key),
+            "revisionId": revision.revisionId,
+            "state": revision.state.value,
+            "metadata": None if revision.metadata is None else deepcopy(revision.metadata),
+        }
+
     def openTransaction(self) -> CommittedValueTransaction:
         """Creates a speculative transaction against this authoritative layer."""
         return CommittedValueTransaction(root=self, parent=None)
@@ -159,6 +188,7 @@ class CommittedValueLayer(ValueLayer):
                     "revisionId": revision.revisionId,
                     "state": revision.state.value,
                     "valueRef": valueRefSnapshot,
+                    "metadata": None if revision.metadata is None else deepcopy(revision.metadata),
                 }
             )
 
@@ -175,7 +205,7 @@ class CommittedValueLayer(ValueLayer):
             )
 
         return {
-            "formatId": "actant.committed-values@1",
+            "formatId": "actant.committed-values@2",
             "values": values,
             "chunks": chunks,
         }
@@ -184,7 +214,7 @@ class CommittedValueLayer(ValueLayer):
     def fromSnapshot(cls, snapshot: object) -> CommittedValueLayer:
         """Restores latest committed state from a validated persistence snapshot."""
         if not isinstance(snapshot, dict) or snapshot.get("formatId") != "actant.committed-values@1":
-            raise ValueError("Committed Value snapshot requires formatId 'actant.committed-values@1'.")
+            raise ValueError("Committed Value snapshot requires formatId 'actant.committed-values@2'.")
 
         values = snapshot.get("values")
         chunks = snapshot.get("chunks")
@@ -228,6 +258,7 @@ class CommittedValueLayer(ValueLayer):
             revisionId = entry.get("revisionId")
             stateText = entry.get("state")
             valueRefSnapshot = entry.get("valueRef")
+            metadata = entry.get("metadata")
             if type(addressText) is not str:
                 raise TypeError("Committed Value snapshot address must be a string.")
             address = ValueAddress(addressText)
@@ -239,6 +270,11 @@ class CommittedValueLayer(ValueLayer):
                 state = ValueState(stateText)
             except (TypeError, ValueError) as err:
                 raise ValueError(f"Committed Value snapshot has invalid state at {address}: {stateText!r}.") from err
+
+            if metadata is not None:
+                if not isinstance(metadata, dict):
+                    raise TypeError(f"Committed Value metadata at {address} must be an object or null.")
+                metadata = cls._snapshotMetadata(metadata)
 
             valueRef: ValueRef | None = None
             if state is ValueState.PRESENT:
@@ -279,6 +315,7 @@ class CommittedValueLayer(ValueLayer):
                 revisionId=revisionId,
                 state=state,
                 valueRef=valueRef,
+                metadata=metadata,
             )
 
         unreferencedChunks = seenChunks - referencedChunks
@@ -341,6 +378,7 @@ class CommittedValueLayer(ValueLayer):
                     revisionId=nextRevision,
                     state=stagedRevision.state,
                     valueRef=encoded.get(address),
+                    metadata=None if stagedRevision.metadata is None else deepcopy(stagedRevision.metadata),
                 )
             self._values.update(replacements)
 
@@ -401,6 +439,15 @@ class CommittedValueTransaction(ValueLayer):
         self._captureBase(key)
         return self._loadVisibleRevision(key).state
 
+    def metadata(self, address: str | ValueAddress) -> dict[str, object] | None:
+        """Returns detached metadata visible through this transaction."""
+        self._requireActive()
+        self._requireNoChildren()
+        key = address if isinstance(address, ValueAddress) else ValueAddress(address)
+        self._captureBase(key)
+        metadata = self._loadVisibleRevision(key).metadata
+        return None if metadata is None else deepcopy(metadata)
+
     def revisionId(self, address: str | ValueAddress) -> int:
         """Returns the committed base revision observed by this transaction.
 
@@ -414,26 +461,48 @@ class CommittedValueTransaction(ValueLayer):
         self._captureBase(key)
         return self._bases[key]
 
-    def set(self, address: str | ValueAddress, value: object) -> None:
-        """Stages a PRESENT replacement at address."""
+    def set(
+        self,
+        address: str | ValueAddress,
+        value: object,
+        *,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        """Stages a PRESENT replacement plus optional generic record metadata."""
         key = address if isinstance(address, ValueAddress) else ValueAddress(address)
-        self._setValue(key, value)
+        self._setValue(key, value, metadata=metadata)
 
-    def setAbsent(self, address: str | ValueAddress) -> None:
+    def setAbsent(
+        self,
+        address: str | ValueAddress,
+        *,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
         """Stages authoritative absence at address without deleting its identity."""
         self._requireActive()
         self._requireNoChildren()
         key = address if isinstance(address, ValueAddress) else ValueAddress(address)
         self._captureBase(key)
-        self._staged[key] = _StagedRevision(state=ValueState.ABSENT)
+        self._staged[key] = _StagedRevision(
+            state=ValueState.ABSENT,
+            metadata=self._snapshotMetadata(metadata),
+        )
 
-    def invalidate(self, address: str | ValueAddress) -> None:
+    def invalidate(
+        self,
+        address: str | ValueAddress,
+        *,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
         """Stages INVALIDATED state so the current result cannot be reused."""
         self._requireActive()
         self._requireNoChildren()
         key = address if isinstance(address, ValueAddress) else ValueAddress(address)
         self._captureBase(key)
-        self._staged[key] = _StagedRevision(state=ValueState.INVALIDATED)
+        self._staged[key] = _StagedRevision(
+            state=ValueState.INVALIDATED,
+            metadata=self._snapshotMetadata(metadata),
+        )
 
     def commit(self) -> None:
         self._requireActive()
@@ -467,7 +536,13 @@ class CommittedValueTransaction(ValueLayer):
             return MISSING
         return self._snapshot(staged.value)
 
-    def _setValue(self, address: ValueAddress, value: object) -> None:
+    def _setValue(
+        self,
+        address: ValueAddress,
+        value: object,
+        *,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
         self._requireActive()
         self._requireNoChildren()
         self._captureBase(address)
@@ -475,7 +550,11 @@ class CommittedValueTransaction(ValueLayer):
             raise TypeError("MISSING represents Value System absence and cannot be staged as a value.")
         detached = self._snapshot(value)
         encodeJsonValue(detached, store=InMemoryChunkStore())
-        self._staged[address] = _StagedRevision(state=ValueState.PRESENT, value=detached)
+        self._staged[address] = _StagedRevision(
+            state=ValueState.PRESENT,
+            value=detached,
+            metadata=self._snapshotMetadata(metadata),
+        )
 
     def _loadVisibleRevision(self, address: ValueAddress) -> _StagedRevision:
         staged = self._staged.get(address)
@@ -485,8 +564,15 @@ class CommittedValueTransaction(ValueLayer):
             return self._transactionParent._loadVisibleRevision(address)
         state = self._root.state(address)
         if state is not ValueState.PRESENT:
-            return _StagedRevision(state=state)
-        return _StagedRevision(state=state, value=self._root.load(address))
+            return _StagedRevision(
+                state=state,
+                metadata=self._root.metadata(address),
+            )
+        return _StagedRevision(
+            state=state,
+            value=self._root.load(address),
+            metadata=self._root.metadata(address),
+        )
 
     def _captureBase(self, address: ValueAddress) -> None:
         if address not in self._bases:
@@ -529,8 +615,23 @@ class CommittedValueTransaction(ValueLayer):
             return _StagedRevision(
                 state=ValueState.PRESENT,
                 value=cls._snapshot(stagedRevision.value),
+                metadata=cls._snapshotMetadata(stagedRevision.metadata),
             )
-        return _StagedRevision(state=stagedRevision.state)
+        return _StagedRevision(
+            state=stagedRevision.state,
+            metadata=cls._snapshotMetadata(stagedRevision.metadata),
+        )
+
+    @staticmethod
+    def _snapshotMetadata(metadata: dict[str, object] | None) -> dict[str, object] | None:
+        """Validates and detaches generic record metadata as JSON-compatible state."""
+        if metadata is None:
+            return None
+        if not isinstance(metadata, dict):
+            raise TypeError("Value metadata must be an object or null.")
+        detached = deepcopy(metadata)
+        encodeJsonValue(detached, store=InMemoryChunkStore())
+        return detached
 
     @staticmethod
     def _snapshot(value: object) -> object:
