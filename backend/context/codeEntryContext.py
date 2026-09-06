@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 15
+# file: backend/context/codeEntryContext.py ; version: 16
 from __future__ import annotations
 
 from copy import deepcopy
@@ -128,6 +128,11 @@ class _MemoryTransactionFacade:
         """Returns generic speculative revision/state/metadata evidence."""
         self._requireValid()
         return self._transaction.describe(address)
+
+    def dependency(self, address: str) -> dict[str, object]:
+        """Returns commit-stable identity for a value used as a derivation input."""
+        self._requireValid()
+        return self._transaction.dependency(address)
 
     def isReusable(self, address: str, *, validity: dict[str, object]) -> bool:
         """Returns whether staged/visible state matches this producer and validity basis."""
@@ -265,6 +270,11 @@ class _MemoryFacade:
         """Returns generic revision/state/metadata evidence for debugger-style inspection."""
         self._requireValid()
         return self._state.describe(address)
+
+    def dependency(self, address: str) -> dict[str, object]:
+        """Returns commit-stable identity for a value used as a derivation input."""
+        self._requireValid()
+        return self._state.dependency(address)
 
     def isReusable(self, address: str, *, validity: dict[str, object]) -> bool:
         """Returns whether visible state is current for this producer/validity contract."""
