@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 5
+# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 6
 from __future__ import annotations
 
 import importlib.util
@@ -614,3 +614,85 @@ def test_line_semantics_recompute_when_producer_implementation_changes():
     assert memory.revisionId(address) == 2
     secondMetadata = memory.metadata(address)
     assert secondMetadata["producer"]["implementationId"] == "implementation-b"
+
+
+
+def test_second_bucket_reuses_when_member_semantics_and_timing_are_unchanged():
+    memory = CommittedValueLayer()
+    ctx = _Ctx(memory)
+    records = [
+        _raw(30, "viewer: GIGAEVIL", streamTimeSeconds=12.0, streamTime="00:00:12"),
+        _raw(31, "other: Clap", streamTimeSeconds=12.0, streamTime="00:00:12"),
+    ]
+
+    first = _interpret(ctx, records)
+    bucketAddress = chatSemantics._secondCellAddress(12)
+
+    assert len(first["secondBuckets"]) == 1
+    assert first["secondBuckets"][0]["address"] == bucketAddress
+    assert [member["lineNumber"] for member in first["secondBuckets"][0]["value"]["members"]] == [30, 31]
+    assert memory.revisionId(bucketAddress) == 1
+
+    second = _interpret(ctx, records)
+
+    assert len(second["secondBuckets"]) == 1
+    assert memory.revisionId(bucketAddress) == 1
+    assert second["secondBuckets"][0]["dependency"] == first["secondBuckets"][0]["dependency"]
+
+
+def test_second_bucket_recomputes_when_one_member_semantic_changes():
+    memory = CommittedValueLayer()
+    ctx = _Ctx(memory)
+    firstRecords = [
+        _raw(32, "viewer: GIGAEVIL", streamTimeSeconds=13.0, streamTime="00:00:13"),
+        _raw(33, "other: Clap", streamTimeSeconds=13.0, streamTime="00:00:13"),
+    ]
+    _interpret(ctx, firstRecords)
+
+    firstLineAddress = chatSemantics._semanticCellAddress(32)
+    secondLineAddress = chatSemantics._semanticCellAddress(33)
+    bucketAddress = chatSemantics._secondCellAddress(13)
+    assert memory.revisionId(firstLineAddress) == 1
+    assert memory.revisionId(secondLineAddress) == 1
+    assert memory.revisionId(bucketAddress) == 1
+
+    changedRecords = [
+        _raw(32, "viewer: GIGAEVIL", streamTimeSeconds=13.0, streamTime="00:00:13"),
+        _raw(33, "other: Clap Clap", streamTimeSeconds=13.0, streamTime="00:00:13"),
+    ]
+    result = _interpret(
+        ctx,
+        changedRecords,
+        sourceObservation={**_SOURCE_OBSERVATION, "contentSha256": "changed-source"},
+    )
+
+    assert memory.revisionId(firstLineAddress) == 1
+    assert memory.revisionId(secondLineAddress) == 2
+    assert memory.revisionId(bucketAddress) == 2
+    assert result["secondBuckets"][0]["value"]["members"][1]["semantic"]["address"] == secondLineAddress
+
+
+def test_second_bucket_dependency_survives_save_bundle_rehydration():
+    memory = CommittedValueLayer()
+    ctx = _Ctx(memory)
+    records = [
+        _raw(34, "viewer: bring gun bring gun", streamTimeSeconds=14.0, streamTime="00:00:14"),
+        _raw(35, "other: GIGAEVIL", streamTimeSeconds=14.0, streamTime="00:00:14"),
+    ]
+    first = _interpret(ctx, records)
+    bucketAddress = chatSemantics._secondCellAddress(14)
+    firstDependency = first["secondBuckets"][0]["dependency"]
+
+    bundle = SaveBundle.create(applicationId="evil-analysis", committedState=memory)
+    restoredMemory = SaveBundle.fromBytes(bundle.toBytes()).restoreCommittedState()
+    restoredCtx = _Ctx(restoredMemory)
+
+    second = _interpret(restoredCtx, records)
+
+    assert restoredMemory.revisionId(bucketAddress) == 1
+    assert second["secondBuckets"][0]["dependency"] == firstDependency
+
+
+def test_second_bucket_address_supports_negative_lookback_seconds():
+    assert chatSemantics._secondCellAddress(-1) == "evilanalysis/chat/second/n1/semantic"
+    assert chatSemantics._secondCellAddress(0) == "evilanalysis/chat/second/s0/semantic"
