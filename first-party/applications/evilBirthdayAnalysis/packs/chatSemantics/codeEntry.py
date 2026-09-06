@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 2
+# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 3
 from __future__ import annotations
 
 import re
@@ -7,7 +7,6 @@ from collections.abc import Mapping
 _SEMANTIC_KEYS = ("semanticClass", "entity", "target")
 _TRUSTED_CLASSIFICATION_SOURCE = "userDefined"
 _GIFT_BATCH_MAX_SECONDS = 120
-_LINE_SEMANTIC_PROCESSOR_REVISION = 1
 
 _SINGLE_GIFT_RE = re.compile(r"^(?P<sender>.+?) gifted a Tier (?P<tier>[123]) sub to (?P<recipient>.+)!$")
 _BULK_GIFT_RE = re.compile(
@@ -459,7 +458,6 @@ def _lineSemanticBasis(
     """Returns requirements that determine line-local semantic authority."""
     return {
         "rawLine": rawRecord.get("rawLine"),
-        "processorRevision": _LINE_SEMANTIC_PROCESSOR_REVISION,
         "vocabularyContentSha256": vocabularyObservation.get("contentSha256"),
     }
 
@@ -478,8 +476,9 @@ def _persistentLineSemantic(
 
     The logical address remains stable when source or processing changes.
     Memory-managed revisioning records successive authoritative states. The
-    Pack owns the domain validity rule: exact raw input, semantic processor
-    revision, and vocabulary source must still match.
+    Pack owns the domain validity rule: exact raw input and vocabulary content
+    identity must still match. Actant automatically compares the persisted
+    producer identity with the currently executing CodeEntry implementation.
 
     File-level source observation is retained as provenance but deliberately
     does not invalidate an unchanged raw line merely because another part of
@@ -499,11 +498,11 @@ def _persistentLineSemantic(
         rawRecord,
         vocabularyObservation=vocabularyObservation,
     )
-    stored = ctx.memory.load(address)
-    if isinstance(stored, dict) and stored.get("basis") == basis:
-        semantic = stored.get("semantic")
+    if ctx.memory.isReusable(address, validity=basis):
+        semantic = ctx.memory.load(address)
         if isinstance(semantic, dict):
             return semantic
+        raise RuntimeError(f"Reusable semantic Value at {address!r} is not an object.")
 
     semantic = _lineSemantic(
         rawMessage,
@@ -513,14 +512,15 @@ def _persistentLineSemantic(
     transaction = ctx.memory.openTransaction()
     transaction.set(
         address,
-        {
-            "basis": basis,
+        semantic,
+        validity=basis,
+        provenance={
             "source": {
                 "path": sourcePath,
                 "observation": sourceObservation,
                 "lineNumber": lineNumber,
             },
-            "semantic": semantic,
+            "vocabularyObservation": vocabularyObservation,
         },
     )
     transaction.commit()
