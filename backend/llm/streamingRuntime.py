@@ -1,4 +1,4 @@
-# file: backend/llm/streamingRuntime.py ; version: 1
+# file: backend/llm/streamingRuntime.py ; version: 2
 from __future__ import annotations
 
 import hashlib
@@ -232,7 +232,11 @@ class LlmProcessingPipeline:
                     "reusableQueryItemIds": [item.itemId for item in reusableItems],
                     "acceptedQueryItemIds": [item.itemId for item in acceptedItems],
                     "query": self._queryEvidence(llmResult.query),
-                    "response": {"rawText": llmResult.rawText},
+                    "response": {
+                        "rawText": llmResult.rawText,
+                        "utf8Bytes": len(llmResult.rawText.encode("utf-8")),
+                        "sha256": hashlib.sha256(llmResult.rawText.encode("utf-8")).hexdigest(),
+                    },
                     "execution": executionSnapshot,
                     "providerMetadata": plainImmutableValue(llmResult.providerMetadata),
                     "observerErrors": list(llmResult.observerErrors),
@@ -330,6 +334,17 @@ class LlmProcessingPipeline:
 
     @staticmethod
     def _queryEvidence(query: LlmQuery) -> dict[str, object]:
+        """Returns persistent evidence sufficient to reconstruct the exact query.
+
+        Human-facing exports are not the persistence source for model inputs.
+        Text and byte payloads therefore retain their exact content here in
+        authoritative ProcessingRun memory, alongside hashes useful for quick
+        comparison and audit. Opaque provider payloads retain type/metadata
+        evidence only until a provider-neutral persistence codec exists.
+
+        This is design-significant: exact model-facing input and exact model
+        response belong to persistent memory; export files are projections.
+        """
         evidence: dict[str, object] = {
             "formatId": query.formatId,
             "metadata": plainImmutableValue(query.metadata),
@@ -337,9 +352,13 @@ class LlmProcessingPipeline:
         }
         if type(query.payload) is str:
             encoded = query.payload.encode("utf-8")
+            evidence["payload"] = query.payload
             evidence["payloadBytes"] = len(encoded)
             evidence["payloadSha256"] = hashlib.sha256(encoded).hexdigest()
         elif type(query.payload) is bytes:
+            import base64
+
+            evidence["payloadBase64"] = base64.b64encode(query.payload).decode("ascii")
             evidence["payloadBytes"] = len(query.payload)
             evidence["payloadSha256"] = hashlib.sha256(query.payload).hexdigest()
         return evidence
