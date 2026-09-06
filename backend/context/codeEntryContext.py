@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 11
+# file: backend/context/codeEntryContext.py ; version: 12
 from __future__ import annotations
 
 from copy import deepcopy
@@ -180,6 +180,7 @@ class _MemoryTransactionFacade:
         provenance: dict[str, object] | None,
     ) -> dict[str, object]:
         return {
+            "formatId": "actant.derived-value-metadata@1",
             "producer": deepcopy(self._producer),
             "validity": {} if validity is None else deepcopy(validity),
             "provenance": {} if provenance is None else deepcopy(provenance),
@@ -431,6 +432,7 @@ class CodeEntryIdentity:
     codeEntryId: str
     codeEntryInstanceId: str
     sourceSha256: str
+    implementationFormat: str
     implementationId: str
 
     def producerSnapshot(self) -> dict[str, object]:
@@ -440,6 +442,7 @@ class CodeEntryIdentity:
             "packVersion": self.packVersion,
             "codeEntryId": self.codeEntryId,
             "sourceSha256": self.sourceSha256,
+            "implementationFormat": self.implementationFormat,
             "implementationId": self.implementationId,
         }
 
