@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 6
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 7
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -466,8 +466,8 @@ def _chatPresentationContent(item: QueryItem) -> str:
     return item.content
 
 
-def _persistentIdenticalChatGroup(item: QueryItem) -> tuple[str, tuple[int, ...]] | None:
-    """Returns persisted same-second identical-message membership when available."""
+def _persistentChatAggregateEntry(item: QueryItem) -> tuple[str, Mapping[str, object]] | None:
+    """Returns persisted same-second aggregate entry when this QueryItem has one."""
     memory = item.metadata.get("memory")
     if not isinstance(memory, Mapping):
         return None
@@ -478,6 +478,15 @@ def _persistentIdenticalChatGroup(item: QueryItem) -> tuple[str, tuple[int, ...]
     entry = aggregate.get("entry")
     if type(address) is not str or not isinstance(entry, Mapping):
         return None
+    return address, entry
+
+
+def _persistentIdenticalChatGroup(item: QueryItem) -> tuple[str, tuple[int, ...]] | None:
+    """Returns persisted identical-message membership when that is the entry kind."""
+    aggregateEntry = _persistentChatAggregateEntry(item)
+    if aggregateEntry is None:
+        return None
+    address, entry = aggregateEntry
     if entry.get("kind") != "identicalCanonicalMessage":
         return None
     lineNumbers = entry.get("lineNumbers")
@@ -585,9 +594,10 @@ def _evidenceSections(
                         persistentGroups[persistentGroup] = group
                         continue
 
-                analysis = item.metadata.get("analysis")
-                if isinstance(analysis, Mapping) and analysis.get("kind") == "userMessage":
-                    fallbackGroups.setdefault(_chatPresentationContent(item), []).append(item)
+                if _persistentChatAggregateEntry(item) is None:
+                    analysis = item.metadata.get("analysis")
+                    if isinstance(analysis, Mapping) and analysis.get("kind") == "userMessage":
+                        fallbackGroups.setdefault(_chatPresentationContent(item), []).append(item)
 
             consumedChatIds: set[str] = set()
             lines = [f"[{streamTime}]"]
@@ -600,11 +610,13 @@ def _evidenceSections(
                     continue
                 content = _chatPresentationContent(item)
                 persistentGroup = _persistentIdenticalChatGroup(item)
-                group = (
-                    persistentGroups.get(persistentGroup, [])
-                    if persistentGroup is not None
-                    else fallbackGroups.get(content, [])
-                )
+                aggregateEntry = _persistentChatAggregateEntry(item)
+                if persistentGroup is not None:
+                    group = persistentGroups.get(persistentGroup, [])
+                elif aggregateEntry is not None:
+                    group = []
+                else:
+                    group = fallbackGroups.get(content, [])
                 if len(group) <= 1:
                     lines.append(f"CHAT {_chatAuthor(item)}: {content}")
                     continue
