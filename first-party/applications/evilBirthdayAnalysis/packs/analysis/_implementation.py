@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 12
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 13
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -500,6 +500,77 @@ def _persistentIdenticalChatGroup(item: QueryItem) -> tuple[str, tuple[int, ...]
     return address, tuple(lineNumbers)
 
 
+def _persistentBurstReference(
+    item: QueryItem,
+) -> tuple[tuple[str, str], Mapping[str, object]] | None:
+    """Returns one closed persistent burst reference carried by this QueryItem."""
+    memory = item.metadata.get("memory")
+    if not isinstance(memory, Mapping):
+        return None
+    burst = memory.get("identicalMessageBurst")
+    if burst is None:
+        return None
+    if not isinstance(burst, Mapping):
+        raise RuntimeError(f"Chat QueryItem {item.itemId!r} has invalid burst metadata.")
+    address = burst.get("address")
+    eventKey = burst.get("eventKey")
+    value = burst.get("value")
+    if (
+        type(address) is not str
+        or type(eventKey) is not str
+        or not eventKey
+        or not isinstance(value, Mapping)
+        or value.get("kind") != "identicalMessageBurst"
+    ):
+        raise RuntimeError(f"Chat QueryItem {item.itemId!r} has incomplete burst metadata.")
+    return (address, eventKey), value
+
+
+def _persistentBurstLineNumbers(value: Mapping[str, object]) -> tuple[int, ...]:
+    occurrences = value.get("occurrences")
+    if (
+        not isinstance(occurrences, Sequence)
+        or isinstance(occurrences, (str, bytes))
+        or len(occurrences) < 2
+    ):
+        raise RuntimeError("Closed identical-message burst requires at least two occurrences.")
+    lineNumbers: list[int] = []
+    for occurrence in occurrences:
+        if not isinstance(occurrence, Mapping) or type(occurrence.get("lineNumber")) is not int:
+            raise RuntimeError("Closed identical-message burst occurrence lacks lineNumber.")
+        lineNumbers.append(occurrence["lineNumber"])
+    return tuple(lineNumbers)
+
+
+def _renderPersistentBurst(
+    value: Mapping[str, object],
+    group: Sequence[QueryItem],
+) -> str:
+    """Renders one fully-present closed burst without inventing omitted evidence."""
+    canonicalMessage = value.get("canonicalMessage")
+    durationSeconds = value.get("durationSeconds")
+    if type(canonicalMessage) is not str or not canonicalMessage:
+        raise RuntimeError("Closed identical-message burst lacks canonicalMessage.")
+    if type(durationSeconds) is not int or durationSeconds < 2:
+        raise RuntimeError("Closed identical-message burst has invalid durationSeconds.")
+
+    count = len(group)
+    sourceAuthors = [
+        sourceAuthor
+        for item in group
+        if type(sourceAuthor := item.metadata.get("sourceUsername")) is str
+    ]
+    if len(sourceAuthors) != count:
+        suffix = f"[{count} messages; {durationSeconds}s]"
+    else:
+        uniqueAuthors = len({author.casefold() for author in sourceAuthors})
+        if uniqueAuthors == count:
+            suffix = f"[{uniqueAuthors} users; {durationSeconds}s]"
+        else:
+            suffix = f"[{count} messages; {uniqueAuthors} users; {durationSeconds}s]"
+    return f"CHAT BURST: {canonicalMessage} ×{count} {suffix}"
+
+
 def _chatLine(item: QueryItem) -> str:
     """Renders one unbucketed chat item in the model-facing evidence format."""
     return f"[{_chatStreamTime(item)} CHAT {_chatAuthor(item)}] {_chatPresentationContent(item)}"
@@ -566,7 +637,32 @@ def _evidenceSections(
             else:
                 buckets.append((streamTime, [item]))
 
+        allChatByLine = {
+            _chatLineNumber(item): item
+            for item in chatItems
+        }
+        completeBurstGroups: dict[tuple[str, str], tuple[Mapping[str, object], list[QueryItem]]] = {}
+        for item in chatItems:
+            burstReference = _persistentBurstReference(item)
+            if burstReference is None:
+                continue
+            burstKey, burstValue = burstReference
+            if burstKey in completeBurstGroups:
+                continue
+            lineNumbers = _persistentBurstLineNumbers(burstValue)
+            if not all(lineNumber in allChatByLine for lineNumber in lineNumbers):
+                continue
+            group = [allChatByLine[lineNumber] for lineNumber in lineNumbers]
+            completeBurstGroups[burstKey] = (burstValue, group)
+
+        burstOwnedItemIds = {
+            item.itemId
+            for _burstValue, group in completeBurstGroups.values()
+            for item in group
+        }
+
         renderedBuckets: list[str] = []
+        consumedChatIds: set[str] = set()
         for streamTime, bucketItems in buckets:
             chatByLine = {
                 _chatLineNumber(item): item
@@ -574,13 +670,14 @@ def _evidenceSections(
                 if item.kind == "chat"
             }
 
-            # Persisted aggregate membership is authoritative for real analysis
-            # QueryItems. Content grouping remains only for standalone/legacy
-            # QueryItems that have no persistent aggregate reference.
+            # Presentation ownership is hierarchical:
+            # closed cross-second burst > same-second aggregate > individual.
+            # Fallback content grouping is only for QueryItems without persistent
+            # temporal structure.
             persistentGroups: dict[tuple[str, tuple[int, ...]], list[QueryItem]] = {}
             fallbackGroups: dict[str, list[QueryItem]] = {}
             for item in bucketItems:
-                if item.kind != "chat":
+                if item.kind != "chat" or item.itemId in burstOwnedItemIds:
                     continue
                 persistentGroup = _persistentIdenticalChatGroup(item)
                 if persistentGroup is not None:
@@ -599,7 +696,6 @@ def _evidenceSections(
                     if isinstance(analysis, Mapping) and analysis.get("kind") == "userMessage":
                         fallbackGroups.setdefault(_chatPresentationContent(item), []).append(item)
 
-            consumedChatIds: set[str] = set()
             lines = [f"[{streamTime}]"]
             for item in bucketItems:
                 if item.kind == "transcript":
@@ -608,6 +704,18 @@ def _evidenceSections(
 
                 if item.itemId in consumedChatIds:
                     continue
+
+                burstReference = _persistentBurstReference(item)
+                if burstReference is not None:
+                    burstKey, _burstValue = burstReference
+                    completeBurst = completeBurstGroups.get(burstKey)
+                    if completeBurst is not None:
+                        burstValue, burstGroup = completeBurst
+                        if item is burstGroup[0]:
+                            lines.append(_renderPersistentBurst(burstValue, burstGroup))
+                        consumedChatIds.update(groupItem.itemId for groupItem in burstGroup)
+                        continue
+
                 content = _chatPresentationContent(item)
                 persistentGroup = _persistentIdenticalChatGroup(item)
                 aggregateEntry = _persistentChatAggregateEntry(item)
