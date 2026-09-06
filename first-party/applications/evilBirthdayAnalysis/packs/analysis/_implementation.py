@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 7
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 8
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -958,6 +958,10 @@ def _preparedChatChunk(ctx, chunk: dict[str, object]) -> dict[str, object]:
         "videoEndSeconds",
         "streamStartSeconds",
         "streamEndSeconds",
+        "contextStreamStartSeconds",
+        "contextStreamEndSeconds",
+        "lookbackSeconds",
+        "lookaheadSeconds",
         "startWallClock",
         "endWallClock",
     )
