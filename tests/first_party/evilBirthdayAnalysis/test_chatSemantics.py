@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 2
+# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 3
 from __future__ import annotations
 
 import importlib.util
@@ -65,6 +65,12 @@ class _Io:
             if vocabularyObservation is None
             else vocabularyObservation
         )
+
+    def readObservedJson(self, path):
+        return {
+            "value": {"emotes": self._emotes, "composites": COMPOSITES},
+            "observation": dict(self._vocabularyObservation),
+        }
 
     def readJson(self, _path):
         return {"emotes": self._emotes, "composites": COMPOSITES}
@@ -531,3 +537,33 @@ def test_line_semantics_recompute_when_vocabulary_requirement_changes():
         }
     ]
     assert memory.revisionId(address) == 2
+
+
+
+def test_line_semantics_ignore_vocabulary_metadata_change_when_content_identity_matches():
+    memory = CommittedValueLayer()
+    records = [
+        _raw(
+            21,
+            "viewer: GIGAEVIL",
+            streamTimeSeconds=9.0,
+            streamTime="00:00:09",
+        )
+    ]
+
+    firstCtx = _Ctx(memory)
+    _interpret(firstCtx, records)
+    address = chatSemantics._semanticCellAddress(21)
+    assert memory.revisionId(address) == 1
+
+    touchedObservation = {
+        **_VOCABULARY_OBSERVATION,
+        "modifiedTimeNs": 999999,
+    }
+    secondCtx = _Ctx(
+        memory,
+        vocabularyObservation=touchedObservation,
+    )
+    _interpret(secondCtx, records)
+
+    assert memory.revisionId(address) == 1
