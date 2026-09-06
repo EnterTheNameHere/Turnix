@@ -1,6 +1,7 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 3
+# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 4
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping
 
@@ -402,6 +403,119 @@ def _semanticCellAddress(lineNumber: int) -> str:
     return f"evilanalysis/chat/line/{lineNumber}/semantic"
 
 
+def _secondCellAddress(secondIndex: int) -> str:
+    """Returns the stable address of one canonical one-second semantic bucket."""
+    if type(secondIndex) is not int:
+        raise TypeError("secondIndex must be an exact integer.")
+    segment = f"n{-secondIndex}" if secondIndex < 0 else f"s{secondIndex}"
+    return f"evilanalysis/chat/second/{segment}/semantic"
+
+
+def _semanticReference(ctx, lineNumber: int) -> dict[str, object]:
+    address = _semanticCellAddress(lineNumber)
+    return {
+        "address": address,
+        "dependency": ctx.memory.dependency(address),
+    }
+
+
+def _secondBucketBasis(members: list[dict[str, object]]) -> dict[str, object]:
+    """Returns ordered exact inputs that determine one second bucket."""
+    return {
+        "members": [
+            {
+                "lineNumber": member["lineNumber"],
+                "streamTimeSeconds": member["streamTimeSeconds"],
+                "semantic": member["semantic"],
+            }
+            for member in members
+        ]
+    }
+
+
+def _persistentSecondBucket(
+    ctx,
+    *,
+    secondIndex: int,
+    members: list[dict[str, object]],
+) -> dict[str, object]:
+    """Returns one persistent canonical temporal bucket.
+
+    A bucket preserves ordered semantic-line references and timing only. It
+    performs no cross-message aggregation, gift reconstruction, identity
+    anonymization, or model-facing presentation. Those remain higher layers.
+
+    validity records the exact member/timing/dependency sequence. Dependency
+    identities are stable before and after outer transaction commit, allowing
+    this bucket to be derived transactionally from newly staged semantic lines
+    without guessing their future authoritative revision numbers.
+    """
+    address = _secondCellAddress(secondIndex)
+    basis = _secondBucketBasis(members)
+    if ctx.memory.isReusable(address, validity=basis):
+        bucket = ctx.memory.load(address)
+        if isinstance(bucket, dict):
+            return {
+                "address": address,
+                "dependency": ctx.memory.dependency(address),
+                "value": bucket,
+            }
+        raise RuntimeError(f"Reusable chat second bucket at {address!r} is not an object.")
+
+    value = {
+        "secondIndex": secondIndex,
+        "startSeconds": float(secondIndex),
+        "endSeconds": float(secondIndex + 1),
+        "members": members,
+    }
+    transaction = ctx.memory.openTransaction()
+    transaction.set(
+        address,
+        value,
+        validity=basis,
+        provenance={
+            "semanticInputs": [member["semantic"] for member in members],
+            "lineNumbers": [member["lineNumber"] for member in members],
+        },
+    )
+    transaction.commit()
+    return {
+        "address": address,
+        "dependency": ctx.memory.dependency(address),
+        "value": value,
+    }
+
+
+def _persistentSecondBuckets(
+    ctx,
+    records: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    grouped: dict[int, list[dict[str, object]]] = {}
+    for record in records:
+        lineNumber = record.get("lineNumber")
+        streamTimeSeconds = record.get("streamTimeSeconds")
+        semanticValue = record.get("semanticValue")
+        if (
+            type(lineNumber) is not int
+            or type(streamTimeSeconds) not in {int, float}
+            or not isinstance(semanticValue, dict)
+        ):
+            raise RuntimeError("Interpreted chat record lacks semantic/timing evidence for second bucketing.")
+        secondIndex = math.floor(float(streamTimeSeconds))
+        grouped.setdefault(secondIndex, []).append(
+            {
+                "lineNumber": lineNumber,
+                "streamTimeSeconds": float(streamTimeSeconds),
+                "semantic": semanticValue,
+            }
+        )
+
+    return [
+        _persistentSecondBucket(ctx, secondIndex=secondIndex, members=grouped[secondIndex])
+        for secondIndex in sorted(grouped)
+    ]
+
+
 def _lineSemantic(
     rawMessage: str,
     *,
@@ -471,8 +585,8 @@ def _persistentLineSemantic(
     vocabularyObservation: dict[str, object],
     sourcePath: str,
     sourceObservation: dict[str, object],
-) -> dict[str, object]:
-    """Returns current line semantics, reusing or replacing Actant memory.
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Returns current line semantics plus its persistent dependency reference.
 
     The logical address remains stable when source or processing changes.
     Memory-managed revisioning records successive authoritative states. The
@@ -501,7 +615,7 @@ def _persistentLineSemantic(
     if ctx.memory.isReusable(address, validity=basis):
         semantic = ctx.memory.load(address)
         if isinstance(semantic, dict):
-            return semantic
+            return semantic, _semanticReference(ctx, lineNumber)
         raise RuntimeError(f"Reusable semantic Value at {address!r} is not an object.")
 
     semantic = _lineSemantic(
@@ -524,7 +638,7 @@ def _persistentLineSemantic(
         },
     )
     transaction.commit()
-    return semantic
+    return semantic, _semanticReference(ctx, lineNumber)
 
 
 def _interpret(ctx, payload):
@@ -570,7 +684,7 @@ def _interpret(ctx, payload):
         ):
             raise TypeError("Raw chat record is missing required source/timing evidence.")
 
-        semantic = _persistentLineSemantic(
+        semantic, semanticValue = _persistentLineSemantic(
             ctx,
             record,
             emotes=emotes,
@@ -579,6 +693,7 @@ def _interpret(ctx, payload):
             sourcePath=sourcePath,
             sourceObservation=sourceObservation,
         )
+        record["semanticValue"] = semanticValue
         kind = semantic.get("kind")
 
         if kind == "unknownMessage":
@@ -686,7 +801,12 @@ def _interpret(ctx, payload):
             rendered.append(f"{streamTime} {username}: {compactMessage}")
         records.append(record)
 
-    return {"records": records, "text": "\n".join(rendered)}
+    secondBuckets = _persistentSecondBuckets(ctx, records)
+    return {
+        "records": records,
+        "secondBuckets": secondBuckets,
+        "text": "\n".join(rendered),
+    }
 
 
 def onLoad(ctx):
