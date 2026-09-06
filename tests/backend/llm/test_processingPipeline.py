@@ -1,3 +1,4 @@
+# file: tests/backend/llm/test_processingPipeline.py ; version: 1
 import pytest
 
 from backend.llm.errors import LlmProviderProtocolError
@@ -49,7 +50,7 @@ def test_processing_run_commits_query_items_for_next_run():
     state = CommittedValueLayer()
     seenPrevious = []
 
-    def invoke(capabilityId, payload):
+    def invoke(capabilityId, payload, memoryView):
         if capabilityId == "build-items@1":
             seenPrevious.append(payload["previousQueryItems"])
             index = len(seenPrevious)
@@ -101,7 +102,7 @@ def test_failed_processing_run_does_not_replace_committed_memory():
     state = CommittedValueLayer()
     mode = {"item": "accepted"}
 
-    def invoke(capabilityId, payload):
+    def invoke(capabilityId, payload, memoryView):
         if capabilityId == "build-items@1":
             return [QueryItem(itemId=mode["item"], kind="test", content=mode["item"])]
         if capabilityId == "build-query@1":
@@ -136,7 +137,7 @@ def test_failed_processing_run_does_not_replace_committed_memory():
 def test_filter_may_only_select_unchanged_built_items():
     state = CommittedValueLayer()
 
-    def invoke(capabilityId, payload):
+    def invoke(capabilityId, payload, memoryView):
         if capabilityId == "build-items@1":
             return [QueryItem(itemId="one", kind="test", content="original")]
         if capabilityId == "filter@1":
@@ -160,7 +161,7 @@ def test_filter_may_only_select_unchanged_built_items():
 def test_filter_selects_current_query_without_erasing_reusable_memory():
     state = CommittedValueLayer()
 
-    def invoke(capabilityId, payload):
+    def invoke(capabilityId, payload, memoryView):
         if capabilityId == "build-items@1":
             return [
                 QueryItem(itemId="keep", kind="test", content="included"),
@@ -214,7 +215,7 @@ def test_execution_profile_is_resolved_before_query_item_selection_and_building(
     providers.register(scope, ownerId="profile-owner", name="profile", provider=ProfileProvider())
     scope.publish()
 
-    def invoke(capabilityId, payload):
+    def invoke(capabilityId, payload, memoryView):
         execution = payload["execution"]
         assert execution["contextWindowTokens"] == 8192
         assert execution["metadata"] == {"profile": "resolved"}
@@ -247,7 +248,7 @@ def test_reused_query_item_identity_rejects_content_drift():
     state = CommittedValueLayer()
     content = {"value": "first"}
 
-    def invoke(capabilityId, payload):
+    def invoke(capabilityId, payload, memoryView):
         if capabilityId == "build-items@1":
             return [QueryItem(itemId="stable-id", kind="test", content=content["value"])]
         if capabilityId == "build-query@1":
@@ -298,7 +299,7 @@ def test_processing_commit_does_not_require_query_payload_to_be_json_encodable()
     state = CommittedValueLayer()
     opaquePayload = object()
 
-    def invoke(capabilityId, payload):
+    def invoke(capabilityId, payload, memoryView):
         if capabilityId == "build-items@1":
             return [QueryItem(itemId="opaque", kind="test", content="opaque")]
         if capabilityId == "build-query@1":
@@ -324,7 +325,7 @@ def test_finalize_input_is_forwarded_without_becoming_processing_memory():
     state = CommittedValueLayer()
     finalizeInput = {"diagnostic": {"text": "prepared side material"}}
 
-    def invoke(capabilityId, payload):
+    def invoke(capabilityId, payload, memoryView):
         if capabilityId == "build-items@1":
             return [QueryItem(itemId="final-input", kind="test", content="final")]
         if capabilityId == "build-query@1":
@@ -356,7 +357,7 @@ def test_finalize_input_is_forwarded_without_becoming_processing_memory():
 def test_finalize_failure_aborts_processing_state():
     state = CommittedValueLayer()
 
-    def invoke(capabilityId, payload):
+    def invoke(capabilityId, payload, memoryView):
         if capabilityId == "build-items@1":
             return [QueryItem(itemId="final", kind="test", content="final")]
         if capabilityId == "build-query@1":
@@ -379,3 +380,38 @@ def test_finalize_failure_aborts_processing_state():
 
     assert state.load("processing/finalize/currentqueryitems") is MISSING
     assert state.revisionId("processing/finalize/currentqueryitems") == 0
+
+
+
+def test_stage_capability_child_memory_does_not_escape_failed_processing_run():
+    state = CommittedValueLayer()
+
+    def invoke(capabilityId, payload, memoryView):
+        if capabilityId == "build-items@1":
+            child = memoryView.openTransaction()
+            child.set("derived/test/value", {"semantic": "prepared"})
+            child.commit()
+            assert memoryView.load("derived/test/value") == {"semantic": "prepared"}
+            assert state.load("derived/test/value") is MISSING
+            return [QueryItem(itemId="derived", kind="test", content="prepared")]
+        if capabilityId == "build-query@1":
+            return {"formatId": "text/plain", "payload": "prepared"}
+        raise AssertionError(capabilityId)
+
+    pipeline = LlmProcessingPipeline(
+        providers=_providers(),
+        state=state,
+        capabilityInvoker=invoke,
+    )
+
+    with pytest.raises(LlmProviderProtocolError):
+        pipeline.runProcessing(
+            memoryKey="nestedfailure",
+            inputValue={},
+            buildQueryItemsCapabilityId="build-items@1",
+            buildQueryCapabilityId="build-query@1",
+            providerName="bad",
+        )
+
+    assert state.load("derived/test/value") is MISSING
+    assert state.revisionId("derived/test/value") == 0
