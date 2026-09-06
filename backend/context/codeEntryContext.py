@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 10
+# file: backend/context/codeEntryContext.py ; version: 11
 from __future__ import annotations
 
 from copy import deepcopy
@@ -108,6 +108,16 @@ class _MemoryTransactionFacade:
     def state(self, address: str) -> ValueState:
         self._requireValid()
         return self._transaction.state(address)
+
+    def metadata(self, address: str) -> dict[str, object] | None:
+        """Returns generic Actant metadata visible through this transaction."""
+        self._requireValid()
+        return self._transaction.metadata(address)
+
+    def describe(self, address: str) -> dict[str, object]:
+        """Returns generic speculative revision/state/metadata evidence."""
+        self._requireValid()
+        return self._transaction.describe(address)
 
     def isReusable(self, address: str, *, validity: dict[str, object]) -> bool:
         """Returns whether staged/visible state matches this producer and validity basis."""
