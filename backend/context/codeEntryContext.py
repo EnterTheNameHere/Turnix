@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 16
+# file: backend/context/codeEntryContext.py ; version: 17
 from __future__ import annotations
 
 from copy import deepcopy
@@ -134,10 +134,20 @@ class _MemoryTransactionFacade:
         self._requireValid()
         return self._transaction.dependency(address)
 
-    def isReusable(self, address: str, *, validity: dict[str, object]) -> bool:
-        """Returns whether staged/visible state matches this producer and validity basis."""
+    def isCurrent(
+        self,
+        address: str,
+        *,
+        state: str,
+        validity: dict[str, object],
+    ) -> bool:
+        """Returns whether visible authority state matches producer and validity."""
         self._requireValid()
-        if self._transaction.state(address) is not ValueState.PRESENT:
+        try:
+            expectedState = ValueState(state)
+        except (TypeError, ValueError) as err:
+            raise ValueError(f"Unsupported Value authority state {state!r}.") from err
+        if self._transaction.state(address) is not expectedState:
             return False
         metadata = self._transaction.metadata(address)
         return (
@@ -146,6 +156,10 @@ class _MemoryTransactionFacade:
             and metadata.get("producer") == self._producer
             and metadata.get("validity") == validity
         )
+
+    def isReusable(self, address: str, *, validity: dict[str, object]) -> bool:
+        """Returns whether PRESENT state matches this producer and validity basis."""
+        return self.isCurrent(address, state="present", validity=validity)
 
     def set(
         self,
@@ -276,10 +290,20 @@ class _MemoryFacade:
         self._requireValid()
         return self._state.dependency(address)
 
-    def isReusable(self, address: str, *, validity: dict[str, object]) -> bool:
-        """Returns whether visible state is current for this producer/validity contract."""
+    def isCurrent(
+        self,
+        address: str,
+        *,
+        state: str,
+        validity: dict[str, object],
+    ) -> bool:
+        """Returns whether visible authority state matches producer and validity."""
         self._requireValid()
-        if self._state.state(address) is not ValueState.PRESENT:
+        try:
+            expectedState = ValueState(state)
+        except (TypeError, ValueError) as err:
+            raise ValueError(f"Unsupported Value authority state {state!r}.") from err
+        if self._state.state(address) is not expectedState:
             return False
         metadata = self._state.metadata(address)
         return (
@@ -288,6 +312,10 @@ class _MemoryFacade:
             and metadata.get("producer") == self._producer
             and metadata.get("validity") == validity
         )
+
+    def isReusable(self, address: str, *, validity: dict[str, object]) -> bool:
+        """Returns whether PRESENT state matches this producer and validity basis."""
+        return self.isCurrent(address, state="present", validity=validity)
 
     def openTransaction(self) -> _MemoryTransactionFacade:
         self._requireValid()
