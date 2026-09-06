@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 5
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 6
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -466,6 +466,31 @@ def _chatPresentationContent(item: QueryItem) -> str:
     return item.content
 
 
+def _persistentIdenticalChatGroup(item: QueryItem) -> tuple[str, tuple[int, ...]] | None:
+    """Returns persisted same-second identical-message membership when available."""
+    memory = item.metadata.get("memory")
+    if not isinstance(memory, Mapping):
+        return None
+    aggregate = memory.get("secondAggregate")
+    if not isinstance(aggregate, Mapping):
+        return None
+    address = aggregate.get("address")
+    entry = aggregate.get("entry")
+    if type(address) is not str or not isinstance(entry, Mapping):
+        return None
+    if entry.get("kind") != "identicalCanonicalMessage":
+        return None
+    lineNumbers = entry.get("lineNumbers")
+    if (
+        not isinstance(lineNumbers, Sequence)
+        or isinstance(lineNumbers, (str, bytes))
+        or len(lineNumbers) < 2
+        or any(type(lineNumber) is not int for lineNumber in lineNumbers)
+    ):
+        return None
+    return address, tuple(lineNumbers)
+
+
 def _chatLine(item: QueryItem) -> str:
     """Renders one unbucketed chat item in the model-facing evidence format."""
     return f"[{_chatStreamTime(item)} CHAT {_chatAuthor(item)}] {_chatPresentationContent(item)}"
@@ -534,13 +559,35 @@ def _evidenceSections(
 
         renderedBuckets: list[str] = []
         for streamTime, bucketItems in buckets:
-            chatGroups: dict[str, list[QueryItem]] = {}
+            chatByLine = {
+                _chatLineNumber(item): item
+                for item in bucketItems
+                if item.kind == "chat"
+            }
+
+            # Persisted aggregate membership is authoritative for real analysis
+            # QueryItems. Content grouping remains only for standalone/legacy
+            # QueryItems that have no persistent aggregate reference.
+            persistentGroups: dict[tuple[str, tuple[int, ...]], list[QueryItem]] = {}
+            fallbackGroups: dict[str, list[QueryItem]] = {}
             for item in bucketItems:
                 if item.kind != "chat":
                     continue
+                persistentGroup = _persistentIdenticalChatGroup(item)
+                if persistentGroup is not None:
+                    _address, lineNumbers = persistentGroup
+                    group = [
+                        chatByLine[lineNumber]
+                        for lineNumber in lineNumbers
+                        if lineNumber in chatByLine
+                    ]
+                    if len(group) > 1:
+                        persistentGroups[persistentGroup] = group
+                        continue
+
                 analysis = item.metadata.get("analysis")
                 if isinstance(analysis, Mapping) and analysis.get("kind") == "userMessage":
-                    chatGroups.setdefault(_chatPresentationContent(item), []).append(item)
+                    fallbackGroups.setdefault(_chatPresentationContent(item), []).append(item)
 
             consumedChatIds: set[str] = set()
             lines = [f"[{streamTime}]"]
@@ -552,7 +599,12 @@ def _evidenceSections(
                 if item.itemId in consumedChatIds:
                     continue
                 content = _chatPresentationContent(item)
-                group = chatGroups.get(content, [])
+                persistentGroup = _persistentIdenticalChatGroup(item)
+                group = (
+                    persistentGroups.get(persistentGroup, [])
+                    if persistentGroup is not None
+                    else fallbackGroups.get(content, [])
+                )
                 if len(group) <= 1:
                     lines.append(f"CHAT {_chatAuthor(item)}: {content}")
                     continue
