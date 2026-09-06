@@ -1,4 +1,4 @@
-# file: tests/backend/save/test_saveBundle.py ; version: 1
+# file: tests/backend/save/test_saveBundle.py ; version: 2
 from __future__ import annotations
 
 import pytest
@@ -49,7 +49,7 @@ def test_committed_state_snapshot_contains_only_reachable_chunks() -> None:
     state = _state()
     snapshot = state.snapshot()
 
-    assert snapshot["formatId"] == "actant.committed-values@1"
+    assert snapshot["formatId"] == "actant.committed-values@2"
     chunks = snapshot["chunks"]
     assert isinstance(chunks, list)
     assert len(chunks) == 1
@@ -103,3 +103,27 @@ def test_save_bundle_rejects_tampered_chunk_payload() -> None:
 
     with pytest.raises(ValueError, match="integrity mismatch"):
         SaveBundle.fromSnapshot(snapshot)
+
+
+
+def test_save_bundle_preserves_value_metadata():
+    state = CommittedValueLayer()
+    transaction = state.openTransaction()
+    metadata = {
+        "producer": {"implementationId": "impl"},
+        "validity": {"sourceSha256": "source"},
+        "provenance": {"path": "chat.txt"},
+    }
+    transaction.set("chat/line/17/semantic", {"body": "hello"}, metadata=metadata)
+    transaction.commit()
+
+    bundle = SaveBundle.create(applicationId="application-1", committedState=state)
+    restored = SaveBundle.fromBytes(bundle.toBytes()).restoreCommittedState()
+
+    assert restored.metadata("chat/line/17/semantic") == metadata
+    assert restored.describe("chat/line/17/semantic") == {
+        "address": "chat/line/17/semantic",
+        "revisionId": 1,
+        "state": "present",
+        "metadata": metadata,
+    }
