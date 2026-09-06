@@ -1,3 +1,4 @@
+# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 1
 from __future__ import annotations
 
 import re
@@ -6,6 +7,7 @@ from collections.abc import Mapping
 _SEMANTIC_KEYS = ("semanticClass", "entity", "target")
 _TRUSTED_CLASSIFICATION_SOURCE = "userDefined"
 _GIFT_BATCH_MAX_SECONDS = 120
+_LINE_SEMANTIC_PROCESSOR_REVISION = 1
 
 _SINGLE_GIFT_RE = re.compile(r"^(?P<sender>.+?) gifted a Tier (?P<tier>[123]) sub to (?P<recipient>.+)!$")
 _BULK_GIFT_RE = re.compile(
@@ -108,11 +110,29 @@ def _evaluate(_ctx, payload):
     }
 
 
-def _vocabulary(ctx) -> tuple[dict[str, dict[str, object]], list[dict[str, object]]]:
+def _vocabulary(
+    ctx,
+) -> tuple[
+    dict[str, dict[str, object]],
+    list[dict[str, object]],
+    dict[str, object],
+]:
+    """Loads one coherent vocabulary plus strong Actant source provenance."""
     path = ctx.config.get("chatEmotesFile", "chatEmotes.json")
     if type(path) is not str:
         raise ValueError("Application config chatEmotesFile must be a string path.")
-    definition = ctx.io.readJson(path)
+
+    for _attempt in range(3):
+        before = ctx.io.observeFile(path, contentHash=True)
+        definition = ctx.io.readJson(path)
+        after = ctx.io.observeFile(path, contentHash=True)
+        if before == after:
+            break
+    else:
+        raise RuntimeError(f"Chat emote vocabulary changed repeatedly while being read: {path!r}.")
+
+    if after.get("state") != "file":
+        raise RuntimeError(f"Chat emote vocabulary source is not a regular file: {path!r}.")
     if not isinstance(definition, dict):
         raise ValueError("Chat emote vocabulary must be an object.")
     emotes = definition.get("emotes")
@@ -145,7 +165,7 @@ def _vocabulary(ctx) -> tuple[dict[str, dict[str, object]], list[dict[str, objec
         normalizedComposites.append({"tokens": pattern, "metadata": metadata})
 
     normalizedComposites.sort(key=lambda item: len(item["tokens"]), reverse=True)
-    return normalizedEmotes, normalizedComposites
+    return normalizedEmotes, normalizedComposites, after
 
 
 def _splitUserMessage(value: str) -> tuple[str, str] | None:
@@ -384,22 +404,156 @@ def _eventText(event: dict[str, object]) -> str:
     return ""
 
 
-def _interpret(ctx, payload):
-    """
-    Interpret raw chat records after ingestion, preserving unrecognized forms.
+def _semanticCellAddress(lineNumber: int) -> str:
+    """Returns the stable logical address of one line-local semantic product."""
+    return f"evilanalysis/chat/line/{lineNumber}/semantic"
 
-    A record is treated as a current user-message form only when its raw message
-    dynamically matches ``username: body``. Records that do not match remain
-    explicit ``unknownMessage`` evidence rather than causing ingestion failure
-    or being guessed into a user/body pair.
+
+def _lineSemantic(
+    rawMessage: str,
+    *,
+    emotes: dict[str, dict[str, object]],
+    composites: list[dict[str, object]],
+) -> dict[str, object]:
+    """Derives only semantics that are a function of this physical line.
+
+    Cross-line reconstruction, currently gift-batch membership/recipients,
+    intentionally remains outside this product. The persisted value can
+    therefore be reused independently by any later consumer without silently
+    embedding one window's neighboring context.
+    """
+    split = _splitUserMessage(rawMessage)
+    if split is None:
+        return {
+            "kind": "unknownMessage",
+            "rawMessage": rawMessage,
+        }
+
+    username, message = split
+    generated = _generatedEvent(username, message)
+    if generated is not None:
+        return {
+            "kind": "generatedEvent",
+            "username": username,
+            "body": message,
+            "event": generated,
+        }
+
+    botEvent = _knownBotEvent(username, message)
+    if botEvent is not None:
+        return {
+            "kind": "botEvent",
+            "username": username,
+            "body": message,
+            "event": botEvent,
+        }
+
+    spans = _lexMessage(message, emotes, composites)
+    return {
+        "kind": "userMessage",
+        "username": username,
+        "body": message,
+        "spans": spans,
+    }
+
+
+def _lineSemanticBasis(
+    rawRecord: dict[str, object],
+    *,
+    vocabularyObservation: dict[str, object],
+) -> dict[str, object]:
+    """Returns requirements that determine line-local semantic authority."""
+    return {
+        "rawLine": rawRecord.get("rawLine"),
+        "processorRevision": _LINE_SEMANTIC_PROCESSOR_REVISION,
+        "vocabularyObservation": vocabularyObservation,
+    }
+
+
+def _persistentLineSemantic(
+    ctx,
+    rawRecord: dict[str, object],
+    *,
+    emotes: dict[str, dict[str, object]],
+    composites: list[dict[str, object]],
+    vocabularyObservation: dict[str, object],
+    sourcePath: str,
+    sourceObservation: dict[str, object],
+) -> dict[str, object]:
+    """Returns current line semantics, reusing or replacing Actant memory.
+
+    The logical address remains stable when source or processing changes.
+    Memory-managed revisioning records successive authoritative states. The
+    Pack owns the domain validity rule: exact raw input, semantic processor
+    revision, and vocabulary source must still match.
+
+    File-level source observation is retained as provenance but deliberately
+    does not invalidate an unchanged raw line merely because another part of
+    the file changed. This is the implementation-level form of the persistent
+    derived-state model and should later be promoted into the design docs.
+    """
+    lineNumber = rawRecord.get("lineNumber")
+    rawMessage = rawRecord.get("message")
+    rawLine = rawRecord.get("rawLine")
+    if type(lineNumber) is not int or lineNumber <= 0:
+        raise TypeError("Raw chat line semantic processing requires positive lineNumber.")
+    if type(rawMessage) is not str or type(rawLine) is not str:
+        raise TypeError("Raw chat line semantic processing requires message and rawLine strings.")
+
+    address = _semanticCellAddress(lineNumber)
+    basis = _lineSemanticBasis(
+        rawRecord,
+        vocabularyObservation=vocabularyObservation,
+    )
+    stored = ctx.memory.load(address)
+    if isinstance(stored, dict) and stored.get("basis") == basis:
+        semantic = stored.get("semantic")
+        if isinstance(semantic, dict):
+            return semantic
+
+    semantic = _lineSemantic(
+        rawMessage,
+        emotes=emotes,
+        composites=composites,
+    )
+    transaction = ctx.memory.openTransaction()
+    transaction.set(
+        address,
+        {
+            "basis": basis,
+            "source": {
+                "path": sourcePath,
+                "observation": sourceObservation,
+                "lineNumber": lineNumber,
+            },
+            "semantic": semantic,
+        },
+    )
+    transaction.commit()
+    return semantic
+
+
+def _interpret(ctx, payload):
+    """Interpret raw chat records using persistent line-local semantic products.
+
+    Line-local classification/lexing is reusable across windows and
+    ApplicationRuns. Multi-line gift reconstruction is performed after those
+    products are loaded so one persisted semantic cell never depends on the
+    accidental boundaries or lookback of a particular analysis request.
     """
     if not isinstance(payload, dict):
         raise ValueError("Chat interpretation requires an object payload.")
     rawRecords = payload.get("records")
+    sourcePath = payload.get("sourcePath")
+    sourceObservation = payload.get("sourceObservation")
     if not isinstance(rawRecords, list):
         raise TypeError("Chat interpretation requires a records list.")
+    if type(sourcePath) is not str or not sourcePath:
+        raise TypeError("Chat interpretation requires sourcePath.")
+    if not isinstance(sourceObservation, dict):
+        raise TypeError("Chat interpretation requires sourceObservation.")
 
-    emotes, composites = _vocabulary(ctx)
+    emotes, composites, vocabularyObservation = _vocabulary(ctx)
     records: list[dict[str, object]] = []
     rendered: list[str] = []
     openBatches: dict[tuple[str, int], tuple[float, dict[str, object], int]] = {}
@@ -422,8 +576,18 @@ def _interpret(ctx, payload):
         ):
             raise TypeError("Raw chat record is missing required source/timing evidence.")
 
-        split = _splitUserMessage(rawMessage)
-        if split is None:
+        semantic = _persistentLineSemantic(
+            ctx,
+            record,
+            emotes=emotes,
+            composites=composites,
+            vocabularyObservation=vocabularyObservation,
+            sourcePath=sourcePath,
+            sourceObservation=sourceObservation,
+        )
+        kind = semantic.get("kind")
+
+        if kind == "unknownMessage":
             analysis = {
                 "kind": "unknownMessage",
                 "includedInText": insideRequestedWindow,
@@ -437,12 +601,24 @@ def _interpret(ctx, payload):
             records.append(record)
             continue
 
-        username, message = split
+        username = semantic.get("username")
+        message = semantic.get("body")
+        if type(username) is not str or type(message) is not str:
+            raise RuntimeError(f"Persisted chat semantic line {lineNumber} has invalid username/body.")
         record["username"] = username
         record["body"] = message
 
-        generated = _generatedEvent(username, message)
-        if generated is not None:
+        if kind == "generatedEvent":
+            generated = semantic.get("event")
+            if not isinstance(generated, dict):
+                raise RuntimeError(f"Persisted generated chat event at line {lineNumber} is invalid.")
+            # Batch reconstruction mutates recipient lists, so each window gets
+            # its own detached event object rather than modifying the persisted
+            # line-local semantic value.
+            generated = {
+                key: (list(value) if isinstance(value, list) else value)
+                for key, value in generated.items()
+            }
             eventType = generated["type"]
             analysis = {
                 "kind": "generatedEvent",
@@ -484,8 +660,10 @@ def _interpret(ctx, payload):
             records.append(record)
             continue
 
-        botEvent = _knownBotEvent(username, message)
-        if botEvent is not None:
+        if kind == "botEvent":
+            botEvent = semantic.get("event")
+            if not isinstance(botEvent, dict):
+                raise RuntimeError(f"Persisted bot event at line {lineNumber} is invalid.")
             record["analysis"] = {
                 "kind": "botEvent",
                 "event": botEvent,
@@ -496,7 +674,12 @@ def _interpret(ctx, payload):
             records.append(record)
             continue
 
-        spans = _lexMessage(message, emotes, composites)
+        if kind != "userMessage":
+            raise RuntimeError(f"Persisted chat semantic line {lineNumber} has unsupported kind {kind!r}.")
+
+        spans = semantic.get("spans")
+        if not isinstance(spans, list):
+            raise RuntimeError(f"Persisted user chat semantic line {lineNumber} has invalid spans.")
         compactMessage = _renderSpans(spans)
         record["analysis"] = {
             "kind": "userMessage",
