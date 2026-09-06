@@ -1,6 +1,7 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 4
+# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 5
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections.abc import Mapping
@@ -516,6 +517,186 @@ def _persistentSecondBuckets(
     ]
 
 
+def _secondAggregateAddress(secondIndex: int) -> str:
+    """Returns the stable address of one structured same-second chat aggregate."""
+    if type(secondIndex) is not int:
+        raise TypeError("secondIndex must be an exact integer.")
+    segment = f"n{-secondIndex}" if secondIndex < 0 else f"s{secondIndex}"
+    return f"evilanalysis/chat/second/{segment}/aggregate"
+
+
+def _canonicalUserMessage(semantic: dict[str, object]) -> tuple[str, list[dict[str, object]]] | None:
+    if semantic.get("kind") != "userMessage":
+        return None
+    spans = semantic.get("spans")
+    if not isinstance(spans, list) or any(not isinstance(span, dict) for span in spans):
+        raise RuntimeError("Persistent user-message semantics require spans for aggregation.")
+    canonicalKey = json.dumps(
+        spans,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return canonicalKey, spans
+
+
+def _secondAggregateValue(
+    ctx,
+    *,
+    secondIndex: int,
+    bucket: dict[str, object],
+) -> dict[str, object]:
+    """Builds neutral same-second structure without model-facing policy."""
+    value = bucket.get("value")
+    if not isinstance(value, dict) or not isinstance(value.get("members"), list):
+        raise RuntimeError("Second aggregate requires a canonical second bucket.")
+    members = value["members"]
+
+    grouped: dict[str, list[dict[str, object]]] = {}
+    canonicalSpans: dict[str, list[dict[str, object]]] = {}
+    semanticByLine: dict[int, dict[str, object]] = {}
+    for member in members:
+        if not isinstance(member, dict):
+            raise RuntimeError("Second bucket member must be an object.")
+        lineNumber = member.get("lineNumber")
+        semanticReference = member.get("semantic")
+        if type(lineNumber) is not int or not isinstance(semanticReference, dict):
+            raise RuntimeError("Second bucket member lacks semantic reference.")
+        semanticAddress = semanticReference.get("address")
+        if type(semanticAddress) is not str:
+            raise RuntimeError("Second bucket semantic reference lacks address.")
+        semantic = ctx.memory.load(semanticAddress)
+        if not isinstance(semantic, dict):
+            raise RuntimeError(f"Second aggregate semantic input {semanticAddress!r} is unavailable.")
+        semanticByLine[lineNumber] = semantic
+
+        canonical = _canonicalUserMessage(semantic)
+        if canonical is None:
+            continue
+        key, spans = canonical
+        grouped.setdefault(key, []).append(member)
+        canonicalSpans[key] = spans
+
+    claimed: set[int] = set()
+    entries: list[dict[str, object]] = []
+    for member in members:
+        lineNumber = member["lineNumber"]
+        if lineNumber in claimed:
+            continue
+        semantic = semanticByLine[lineNumber]
+        canonical = _canonicalUserMessage(semantic)
+        if canonical is None:
+            entries.append(
+                {
+                    "kind": "message",
+                    "lineNumber": lineNumber,
+                    "semantic": member["semantic"],
+                }
+            )
+            claimed.add(lineNumber)
+            continue
+
+        key, _spans = canonical
+        group = grouped[key]
+        if len(group) == 1:
+            entries.append(
+                {
+                    "kind": "message",
+                    "lineNumber": lineNumber,
+                    "semantic": member["semantic"],
+                }
+            )
+            claimed.add(lineNumber)
+            continue
+
+        sourceUsernames: list[str] = []
+        for groupMember in group:
+            groupLineNumber = groupMember["lineNumber"]
+            groupSemantic = semanticByLine[groupLineNumber]
+            username = groupSemantic.get("username")
+            if type(username) is not str or not username:
+                raise RuntimeError("Canonical user-message group lacks source username.")
+            sourceUsernames.append(username)
+
+        groupLineNumbers = [groupMember["lineNumber"] for groupMember in group]
+        claimed.update(groupLineNumbers)
+        entries.append(
+            {
+                "kind": "identicalCanonicalMessage",
+                "canonicalMessage": _renderSpans(canonicalSpans[key]),
+                "canonicalSpans": canonicalSpans[key],
+                "lineNumbers": groupLineNumbers,
+                "semantic": [groupMember["semantic"] for groupMember in group],
+                "sourceUsernames": sourceUsernames,
+                "messageCount": len(group),
+                "uniqueSourceUserCount": len({username.casefold() for username in sourceUsernames}),
+            }
+        )
+
+    return {
+        "secondIndex": secondIndex,
+        "secondBucket": {
+            "address": bucket["address"],
+            "dependency": bucket["dependency"],
+        },
+        "entries": entries,
+    }
+
+
+def _persistentSecondAggregate(
+    ctx,
+    *,
+    bucket: dict[str, object],
+) -> dict[str, object]:
+    value = bucket.get("value")
+    dependency = bucket.get("dependency")
+    if not isinstance(value, dict) or not isinstance(dependency, dict):
+        raise RuntimeError("Second aggregate requires bucket value and dependency.")
+    secondIndex = value.get("secondIndex")
+    if type(secondIndex) is not int:
+        raise RuntimeError("Second bucket lacks exact secondIndex.")
+
+    address = _secondAggregateAddress(secondIndex)
+    basis = {"secondBucket": dependency}
+    if ctx.memory.isReusable(address, validity=basis):
+        aggregate = ctx.memory.load(address)
+        if isinstance(aggregate, dict):
+            return {
+                "address": address,
+                "dependency": ctx.memory.dependency(address),
+                "value": aggregate,
+            }
+        raise RuntimeError(f"Reusable second aggregate at {address!r} is not an object.")
+
+    aggregate = _secondAggregateValue(ctx, secondIndex=secondIndex, bucket=bucket)
+    transaction = ctx.memory.openTransaction()
+    transaction.set(
+        address,
+        aggregate,
+        validity=basis,
+        provenance={
+            "secondBucket": {
+                "address": bucket["address"],
+                "dependency": dependency,
+            }
+        },
+    )
+    transaction.commit()
+    return {
+        "address": address,
+        "dependency": ctx.memory.dependency(address),
+        "value": aggregate,
+    }
+
+
+def _persistentSecondAggregates(
+    ctx,
+    buckets: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    return [_persistentSecondAggregate(ctx, bucket=bucket) for bucket in buckets]
+
+
 def _lineSemantic(
     rawMessage: str,
     *,
@@ -802,9 +983,11 @@ def _interpret(ctx, payload):
         records.append(record)
 
     secondBuckets = _persistentSecondBuckets(ctx, records)
+    secondAggregates = _persistentSecondAggregates(ctx, secondBuckets)
     return {
         "records": records,
         "secondBuckets": secondBuckets,
+        "secondAggregates": secondAggregates,
         "text": "\n".join(rendered),
     }
 
