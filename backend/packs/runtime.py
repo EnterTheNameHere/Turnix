@@ -1,4 +1,4 @@
-# file: backend/packs/runtime.py ; version: 8
+# file: backend/packs/runtime.py ; version: 9
 from __future__ import annotations
 
 import hashlib
@@ -214,6 +214,7 @@ class PackLoader:
                     codeEntryId=definition.codeEntryId,
                     codeEntryInstanceId=instanceId,
                     sourceSha256=sourceSha256,
+                    implementationFormat="python-source@1",
                     implementationId=implementationId,
                 )
 
