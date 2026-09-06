@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chat/codeEntry.py ; version: 1
+# file: first-party/applications/evilBirthdayAnalysis/packs/chat/codeEntry.py ; version: 2
 from __future__ import annotations
 
 import math
@@ -177,61 +177,56 @@ def _records(
     chatPath: str,
     chatStartTime: str,
 ) -> tuple[list[dict[str, object]], list[datetime], datetime, dict[str, object]]:
-    """Returns parsed chat plus strong source provenance.
+    """Returns parsed chat plus provenance for exactly the consumed source bytes.
 
-    The in-process parse cache is validated using Actant's cheap metadata
-    observation. On a cache miss or observed change, the file is strongly
-    observed before and after the actual read. Parsing is accepted only when
-    both strong observations match, so cached records and the source
-    provenance forwarded to downstream processors describe the same stable
-    source snapshot.
-
-    The Pack decides that this source evidence governs reuse; Actant owns how
-    the source is observed. Future source-watch/event services can therefore
-    invalidate or trigger this producer without changing the Pack's provenance
-    contract.
+    Actant's observed read couples content identity to the bytes actually read.
+    The Pack cache therefore compares strong content identity rather than
+    treating filesystem metadata as proof of equality.
     """
+    observed = ctx.io.readObservedLines(chatPath)
+    lines = observed.get("value")
+    sourceObservation = observed.get("observation")
+    if not isinstance(lines, (list, tuple)) or not isinstance(sourceObservation, dict):
+        raise RuntimeError("Observed chat read returned invalid data.")
+
     key = (chatPath, chatStartTime)
-    currentMetadata = ctx.io.observeFile(chatPath)
     cached = _parsedCache.get(key)
     if cached is not None:
-        cachedMetadata, sourceObservation, parsed, timestamps, mediaZero = cached
-        if currentMetadata == cachedMetadata:
+        _cachedMetadata, cachedObservation, parsed, timestamps, mediaZero = cached
+        if (
+            cachedObservation.get("contentSha256")
+            == sourceObservation.get("contentSha256")
+            and cachedObservation.get("path") == sourceObservation.get("path")
+        ):
             return parsed, timestamps, mediaZero, sourceObservation
 
-    for _attempt in range(3):
-        before = ctx.io.observeFile(chatPath, contentHash=True)
-        lines = ctx.io.readLines(chatPath)
-        after = ctx.io.observeFile(chatPath, contentHash=True)
-        if before != after:
-            continue
-        if after.get("state") != "file":
-            raise RuntimeError(f"Chat source is not a regular file: {chatPath!r}.")
+    parsed = [
+        _parseLine(line, lineNumber)
+        for lineNumber, line in enumerate(lines, start=1)
+    ]
+    timestamps: list[datetime] = []
+    previous: datetime | None = None
+    for record in parsed:
+        timestamp = record.get("timestamp")
+        if not isinstance(timestamp, datetime):
+            raise RuntimeError("Parsed chat timestamp has an invalid internal type.")
+        if previous is not None and timestamp < previous:
+            raise ValueError(
+                f"Chat records must be chronological; physical line {record['lineNumber']} moves backward in time.",
+            )
+        timestamps.append(timestamp)
+        previous = timestamp
 
-        parsed = [
-            _parseLine(line, lineNumber)
-            for lineNumber, line in enumerate(lines, start=1)
-        ]
-        timestamps: list[datetime] = []
-        previous: datetime | None = None
-        for record in parsed:
-            timestamp = record.get("timestamp")
-            if not isinstance(timestamp, datetime):
-                raise RuntimeError("Parsed chat timestamp has an invalid internal type.")
-            if previous is not None and timestamp < previous:
-                raise ValueError(
-                    f"Chat records must be chronological; physical line {record['lineNumber']} moves backward in time.",
-                )
-            timestamps.append(timestamp)
-            previous = timestamp
-
-        mediaZero = _inferMediaZero(timestamps, chatStartTime)
-        cachedMetadata = _metadataObservation(after)
-        cached = (cachedMetadata, after, parsed, timestamps, mediaZero)
-        _parsedCache[key] = cached
-        return parsed, timestamps, mediaZero, after
-
-    raise RuntimeError(f"Chat source changed repeatedly while being read: {chatPath!r}.")
+    mediaZero = _inferMediaZero(timestamps, chatStartTime)
+    cachedMetadata = _metadataObservation(sourceObservation)
+    _parsedCache[key] = (
+        cachedMetadata,
+        sourceObservation,
+        parsed,
+        timestamps,
+        mediaZero,
+    )
+    return parsed, timestamps, mediaZero, sourceObservation
 
 
 def _select(ctx, payload):
