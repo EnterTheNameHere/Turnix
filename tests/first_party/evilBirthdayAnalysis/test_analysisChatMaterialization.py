@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 9
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 10
 from __future__ import annotations
 
 import importlib.util
@@ -574,6 +574,7 @@ def test_chatQueryItems_use_interpreted_body_but_keep_raw_message_as_source_evid
                 },
             },
         ],
+        "identicalMessageBursts": [],
         "secondAggregates": [
             {
                 "address": "evilanalysis/chat/second/s45/aggregate",
@@ -987,6 +988,7 @@ def test_chat_query_item_rebuilds_when_persistent_dependency_changes():
         ],
         "secondBuckets": [bucket],
         "secondAggregates": [aggregate],
+        "identicalMessageBursts": [],
     }
 
     first = analysis._chatQueryItems(chat, previous={})[0]
@@ -1021,6 +1023,7 @@ def _persistent_chat_item(
     content: str,
     second: int,
     aggregate_entry: dict[str, object],
+    burst: dict[str, object] | None = None,
 ) -> QueryItem:
     semantic_address = f"evilanalysis/chat/line/{line_number}/semantic"
     bucket_address = f"evilanalysis/chat/second/s{second}/semantic"
@@ -1068,6 +1071,7 @@ def _persistent_chat_item(
                     },
                     "entry": aggregate_entry,
                 },
+                "identicalMessageBurst": burst,
             },
         },
     )
@@ -1153,3 +1157,230 @@ def test_persisted_identical_message_group_drives_interleaved_compaction():
         "[00:00:31]\n"
         "CHAT: same text ×2 [2 users]"
     ]
+
+
+
+def _burst_reference(*, line_numbers: list[int], content: str, start_second: int) -> dict[str, object]:
+    end_second = start_second + 1
+    address = f"evilanalysis/chat/burst/s{start_second}"
+    occurrences = [
+        {
+            "lineNumber": line_number,
+            "secondIndex": start_second + index,
+            "streamTimeSeconds": float(start_second + index),
+            "sourceUsername": f"user_{line_number}",
+            "semantic": {"address": f"evilanalysis/chat/line/{line_number}/semantic"},
+        }
+        for index, line_number in enumerate(line_numbers)
+    ]
+    return {
+        "address": address,
+        "dependency": {
+            "address": address,
+            "state": "present",
+            "contentSha256": f"burst-{start_second}",
+            "metadataSha256": f"burst-meta-{start_second}",
+        },
+        "eventKey": "event-key",
+        "value": {
+            "eventKey": "event-key",
+            "kind": "identicalMessageBurst",
+            "canonicalSha256": "a" * 64,
+            "canonicalMessage": content,
+            "canonicalSpans": [{"kind": "text", "text": content}],
+            "startSecond": start_second,
+            "endSecond": end_second,
+            "durationSeconds": 2,
+            "messageCount": len(line_numbers),
+            "uniqueSourceUserCount": len(line_numbers),
+            "peakMessagesPerSecond": 1,
+            "sourceUsernames": [f"user_{line_number}" for line_number in line_numbers],
+            "occurrences": occurrences,
+            "seconds": [],
+        },
+    }
+
+
+def test_closed_cross_second_burst_has_first_presentation_ownership():
+    burst = _burst_reference(
+        line_numbers=[70, 71],
+        content="GIGAEVIL",
+        start_second=40,
+    )
+    first = _persistent_chat_item(
+        line_number=70,
+        username="user_70",
+        content="GIGAEVIL",
+        second=40,
+        aggregate_entry={
+            "kind": "message",
+            "lineNumber": 70,
+            "semantic": {"address": "evilanalysis/chat/line/70/semantic"},
+        },
+        burst=burst,
+    )
+    second = _persistent_chat_item(
+        line_number=71,
+        username="user_71",
+        content="GIGAEVIL",
+        second=41,
+        aggregate_entry={
+            "kind": "message",
+            "lineNumber": 71,
+            "semantic": {"address": "evilanalysis/chat/line/71/semantic"},
+        },
+        burst=burst,
+    )
+
+    sections = analysis._evidenceSections(
+        transcriptItems=[],
+        chatItems=[first, second],
+        includeChat=True,
+        chatLayout="interleaved",
+    )
+
+    assert sections == [
+        "CHRONOLOGICAL EVIDENCE\n"
+        "[00:00:40]\n"
+        "CHAT BURST: GIGAEVIL ×2 [2 users; 2s]\n\n"
+        "[00:00:41]"
+    ]
+
+
+def test_partial_burst_selection_does_not_reintroduce_omitted_occurrences():
+    burst = _burst_reference(
+        line_numbers=[72, 73],
+        content="same text",
+        start_second=42,
+    )
+    first = _persistent_chat_item(
+        line_number=72,
+        username="user_72",
+        content="same text",
+        second=42,
+        aggregate_entry={
+            "kind": "message",
+            "lineNumber": 72,
+            "semantic": {"address": "evilanalysis/chat/line/72/semantic"},
+        },
+        burst=burst,
+    )
+
+    sections = analysis._evidenceSections(
+        transcriptItems=[],
+        chatItems=[first],
+        includeChat=True,
+        chatLayout="interleaved",
+    )
+
+    assert sections == [
+        "CHRONOLOGICAL EVIDENCE\n"
+        "[00:00:42]\n"
+        "CHAT user_72: same text"
+    ]
+    assert "×2" not in sections[0]
+
+
+def test_chat_query_item_carries_closed_burst_reference_for_processing_evidence():
+    semantic = {
+        "address": "evilanalysis/chat/line/80/semantic",
+        "dependency": {
+            "address": "evilanalysis/chat/line/80/semantic",
+            "state": "present",
+            "contentSha256": "semantic-80",
+            "metadataSha256": "semantic-meta-80",
+        },
+    }
+    bucket = {
+        "address": "evilanalysis/chat/second/s50/semantic",
+        "dependency": {
+            "address": "evilanalysis/chat/second/s50/semantic",
+            "state": "present",
+            "contentSha256": "bucket-50",
+            "metadataSha256": "bucket-meta-50",
+        },
+        "value": {
+            "secondIndex": 50,
+            "startSeconds": 50.0,
+            "endSeconds": 51.0,
+            "members": [
+                {
+                    "lineNumber": 80,
+                    "streamTimeSeconds": 50.0,
+                    "semantic": semantic,
+                }
+            ],
+        },
+    }
+    aggregate = {
+        "address": "evilanalysis/chat/second/s50/aggregate",
+        "dependency": {
+            "address": "evilanalysis/chat/second/s50/aggregate",
+            "state": "present",
+            "contentSha256": "aggregate-50",
+            "metadataSha256": "aggregate-meta-50",
+        },
+        "value": {
+            "secondIndex": 50,
+            "secondBucket": {
+                "address": bucket["address"],
+                "dependency": bucket["dependency"],
+            },
+            "entries": [
+                {
+                    "kind": "message",
+                    "lineNumber": 80,
+                    "semantic": semantic,
+                }
+            ],
+        },
+    }
+    burst = {
+        "address": "evilanalysis/chat/burst/s50",
+        "dependency": {
+            "address": "evilanalysis/chat/burst/s50",
+            "state": "present",
+            "contentSha256": "burst-50",
+            "metadataSha256": "burst-meta-50",
+        },
+        "eventKey": "burst-event",
+        "value": {
+            "eventKey": "burst-event",
+            "kind": "identicalMessageBurst",
+            "canonicalMessage": "GIGAEVIL",
+            "durationSeconds": 2,
+            "occurrences": [
+                {"lineNumber": 80},
+                {"lineNumber": 81},
+            ],
+        },
+    }
+    chat = {
+        "sourcePath": "data/chat.txt",
+        "records": [
+            {
+                "lineNumber": 80,
+                "channel": "#vedal987",
+                "message": "viewer: GIGAEVIL",
+                "username": "viewer",
+                "body": "GIGAEVIL",
+                "timestampText": "2024-03-25 19:18:38",
+                "semanticValue": semantic,
+                "analysis": {
+                    "kind": "userMessage",
+                    "includedInText": True,
+                    "streamTimeSeconds": 50.0,
+                    "streamTime": "00:00:50",
+                    "spans": [{"kind": "emote", "name": "GIGAEVIL", "count": 1, "metadata": {}}],
+                },
+            }
+        ],
+        "secondBuckets": [bucket],
+        "secondAggregates": [aggregate],
+        "identicalMessageBursts": [burst],
+    }
+
+    item = analysis._chatQueryItems(chat, previous={})[0]
+
+    assert item.metadata["memory"]["identicalMessageBurst"]["address"] == "evilanalysis/chat/burst/s50"
+    assert item.metadata["memory"]["identicalMessageBurst"]["eventKey"] == "burst-event"
