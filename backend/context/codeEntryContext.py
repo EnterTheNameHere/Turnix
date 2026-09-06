@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 12
+# file: backend/context/codeEntryContext.py ; version: 13
 from __future__ import annotations
 
 from copy import deepcopy
@@ -127,6 +127,7 @@ class _MemoryTransactionFacade:
         metadata = self._transaction.metadata(address)
         return (
             isinstance(metadata, dict)
+            and metadata.get("formatId") == "actant.derived-value-metadata@1"
             and metadata.get("producer") == self._producer
             and metadata.get("validity") == validity
         )
@@ -179,6 +180,10 @@ class _MemoryTransactionFacade:
         validity: dict[str, object] | None,
         provenance: dict[str, object] | None,
     ) -> dict[str, object]:
+        if validity is not None and not isinstance(validity, dict):
+            raise TypeError("Value validity metadata must be an object or null.")
+        if provenance is not None and not isinstance(provenance, dict):
+            raise TypeError("Value provenance metadata must be an object or null.")
         return {
             "formatId": "actant.derived-value-metadata@1",
             "producer": deepcopy(self._producer),
@@ -259,6 +264,7 @@ class _MemoryFacade:
         metadata = self._state.metadata(address)
         return (
             isinstance(metadata, dict)
+            and metadata.get("formatId") == "actant.derived-value-metadata@1"
             and metadata.get("producer") == self._producer
             and metadata.get("validity") == validity
         )
