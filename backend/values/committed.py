@@ -1,6 +1,7 @@
-# file: backend/values/committed.py ; version: 7
+# file: backend/values/committed.py ; version: 8
 from __future__ import annotations
 
+import base64
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import StrEnum
@@ -9,7 +10,7 @@ from threading import RLock
 from backend.core.errors import ActantError
 from backend.values.address import ValueAddress
 from backend.values.layer import ValueLayer
-from backend.values.payload import ChunkValueRef, InMemoryChunkStore, ValueRef, decodeJsonValue, encodeJsonValue
+from backend.values.payload import Chunk, ChunkValueRef, InlineValueRef, InMemoryChunkStore, ValueRef, decodeJsonValue, encodeJsonValue
 from backend.values.sentinels import MISSING
 
 __all__ = [
@@ -109,6 +110,173 @@ class CommittedValueLayer(ValueLayer):
     def openTransaction(self) -> CommittedValueTransaction:
         """Creates a speculative transaction against this authoritative layer."""
         return CommittedValueTransaction(root=self, parent=None)
+
+    def snapshot(self) -> dict[str, object]:
+        """Returns a deterministic persistence snapshot of latest committed state.
+
+        The snapshot is JSON-compatible and contains only authoritative latest
+        revisions plus the immutable chunks reachable from their ValueRefs.
+        Historical revisions and retention policy are intentionally outside
+        this representation for now.
+
+        Snapshotting does not create authority; it protects state that already
+        crossed the commit boundary. This persistence boundary is
+        design-significant and should be promoted into the Value System /
+        SaveBundle specifications when those documents are reconciled.
+        """
+        with self._lock:
+            revisions = dict(self._values)
+
+        values: list[dict[str, object]] = []
+        referencedChunks: set[str] = set()
+        for address in sorted(revisions, key=str):
+            revision = revisions[address]
+            valueRefSnapshot: dict[str, object] | None = None
+            if revision.state is ValueState.PRESENT:
+                valueRef = revision.valueRef
+                if isinstance(valueRef, InlineValueRef):
+                    valueRefSnapshot = {
+                        "kind": "inline",
+                        "codecId": valueRef.codecId,
+                        "payloadBase64": base64.b64encode(valueRef.payload).decode("ascii"),
+                    }
+                elif isinstance(valueRef, ChunkValueRef):
+                    valueRefSnapshot = {
+                        "kind": "chunk",
+                        "codecId": valueRef.codecId,
+                        "chunkId": valueRef.chunkId,
+                        "contentHash": valueRef.contentHash,
+                    }
+                    referencedChunks.add(valueRef.chunkId)
+                else:
+                    raise RuntimeError(f"Present committed value at {address} has invalid ValueRef.")
+            elif revision.valueRef is not None:
+                raise RuntimeError(f"Non-present committed value at {address} unexpectedly has a ValueRef.")
+
+            values.append(
+                {
+                    "address": str(address),
+                    "revisionId": revision.revisionId,
+                    "state": revision.state.value,
+                    "valueRef": valueRefSnapshot,
+                }
+            )
+
+        chunks: list[dict[str, object]] = []
+        for chunkId in sorted(referencedChunks):
+            chunk = self.chunkStore.require(chunkId)
+            chunks.append(
+                {
+                    "chunkId": chunk.chunkId,
+                    "chunkType": chunk.chunkType,
+                    "contentHash": chunk.contentHash,
+                    "payloadBase64": base64.b64encode(chunk.payload).decode("ascii"),
+                }
+            )
+
+        return {
+            "formatId": "actant.committed-values@1",
+            "values": values,
+            "chunks": chunks,
+        }
+
+    @classmethod
+    def fromSnapshot(cls, snapshot: object) -> CommittedValueLayer:
+        """Restores latest committed state from a validated persistence snapshot."""
+        if not isinstance(snapshot, dict) or snapshot.get("formatId") != "actant.committed-values@1":
+            raise ValueError("Committed Value snapshot requires formatId 'actant.committed-values@1'.")
+
+        values = snapshot.get("values")
+        chunks = snapshot.get("chunks")
+        if not isinstance(values, list) or not isinstance(chunks, list):
+            raise TypeError("Committed Value snapshot requires values and chunks lists.")
+
+        chunkStore = InMemoryChunkStore()
+        seenChunks: set[str] = set()
+        for entry in chunks:
+            if not isinstance(entry, dict):
+                raise TypeError("Committed Value snapshot chunk entries must be objects.")
+            chunkId = entry.get("chunkId")
+            chunkType = entry.get("chunkType")
+            contentHash = entry.get("contentHash")
+            payloadBase64 = entry.get("payloadBase64")
+            if any(type(value) is not str or not value for value in (chunkId, chunkType, contentHash, payloadBase64)):
+                raise ValueError("Committed Value snapshot chunk metadata must be non-empty strings.")
+            if chunkId in seenChunks:
+                raise ValueError(f"Committed Value snapshot contains duplicate chunk {chunkId!r}.")
+            seenChunks.add(chunkId)
+            try:
+                payload = base64.b64decode(payloadBase64.encode("ascii"), validate=True)
+            except (UnicodeEncodeError, ValueError) as err:
+                raise ValueError(f"Committed Value snapshot chunk {chunkId!r} has invalid base64 payload.") from err
+            rebuilt = Chunk.create(chunkType=chunkType, payload=payload)
+            if rebuilt.chunkId != chunkId or rebuilt.contentHash != contentHash:
+                raise ValueError(f"Committed Value snapshot chunk integrity mismatch: {chunkId!r}.")
+            chunkStore.put(rebuilt)
+
+        layer = cls(chunkStore=chunkStore)
+        restored: dict[ValueAddress, _CommittedRevision] = {}
+        for entry in values:
+            if not isinstance(entry, dict):
+                raise TypeError("Committed Value snapshot value entries must be objects.")
+            addressText = entry.get("address")
+            revisionId = entry.get("revisionId")
+            stateText = entry.get("state")
+            valueRefSnapshot = entry.get("valueRef")
+            if type(addressText) is not str:
+                raise TypeError("Committed Value snapshot address must be a string.")
+            address = ValueAddress(addressText)
+            if address in restored:
+                raise ValueError(f"Committed Value snapshot contains duplicate address {address}.")
+            if type(revisionId) is not int or revisionId <= 0:
+                raise ValueError(f"Committed Value snapshot revisionId at {address} must be a positive integer.")
+            try:
+                state = ValueState(stateText)
+            except (TypeError, ValueError) as err:
+                raise ValueError(f"Committed Value snapshot has invalid state at {address}: {stateText!r}.") from err
+
+            valueRef: ValueRef | None = None
+            if state is ValueState.PRESENT:
+                if not isinstance(valueRefSnapshot, dict):
+                    raise TypeError(f"Present committed value at {address} requires a ValueRef snapshot.")
+                kind = valueRefSnapshot.get("kind")
+                codecId = valueRefSnapshot.get("codecId")
+                if type(codecId) is not str or not codecId:
+                    raise ValueError(f"Committed ValueRef at {address} requires non-empty codecId.")
+                if kind == "inline":
+                    payloadBase64 = valueRefSnapshot.get("payloadBase64")
+                    if type(payloadBase64) is not str or not payloadBase64:
+                        raise ValueError(f"Inline ValueRef at {address} requires payloadBase64.")
+                    try:
+                        payload = base64.b64decode(payloadBase64.encode("ascii"), validate=True)
+                    except (UnicodeEncodeError, ValueError) as err:
+                        raise ValueError(f"Inline ValueRef at {address} has invalid base64 payload.") from err
+                    valueRef = InlineValueRef(codecId=codecId, payload=payload)
+                elif kind == "chunk":
+                    chunkId = valueRefSnapshot.get("chunkId")
+                    contentHash = valueRefSnapshot.get("contentHash")
+                    if type(chunkId) is not str or not chunkId or type(contentHash) is not str or not contentHash:
+                        raise ValueError(f"Chunk ValueRef at {address} requires chunkId and contentHash.")
+                    chunk = chunkStore.require(chunkId)
+                    if chunk.contentHash != contentHash:
+                        raise ValueError(f"Chunk ValueRef integrity mismatch at {address}.")
+                    valueRef = ChunkValueRef(codecId=codecId, chunkId=chunkId, contentHash=contentHash)
+                else:
+                    raise ValueError(f"Committed ValueRef at {address} has unsupported kind {kind!r}.")
+                # Decode now so malformed codec/payload cannot enter restored
+                # authoritative state and fail only on a future Pack read.
+                decodeJsonValue(valueRef, store=chunkStore)
+            elif valueRefSnapshot is not None:
+                raise ValueError(f"Non-present committed value at {address} must not contain a ValueRef.")
+
+            restored[address] = _CommittedRevision(
+                revisionId=revisionId,
+                state=state,
+                valueRef=valueRef,
+            )
+
+        layer._values = restored
+        return layer
 
     def _loadLocalValue(self, address: ValueAddress) -> object:
         with self._lock:
