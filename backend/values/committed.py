@@ -1,4 +1,4 @@
-# file: backend/values/committed.py ; version: 9
+# file: backend/values/committed.py ; version: 10
 from __future__ import annotations
 
 import base64
@@ -202,6 +202,10 @@ class CommittedValueLayer(ValueLayer):
             payloadBase64 = entry.get("payloadBase64")
             if any(type(value) is not str or not value for value in (chunkId, chunkType, contentHash, payloadBase64)):
                 raise ValueError("Committed Value snapshot chunk metadata must be non-empty strings.")
+            if chunkType != "stateValue":
+                raise ValueError(
+                    f"Committed Value snapshot chunk {chunkId!r} has unsupported type {chunkType!r}.",
+                )
             if chunkId in seenChunks:
                 raise ValueError(f"Committed Value snapshot contains duplicate chunk {chunkId!r}.")
             seenChunks.add(chunkId)
@@ -216,6 +220,7 @@ class CommittedValueLayer(ValueLayer):
 
         layer = cls(chunkStore=chunkStore)
         restored: dict[ValueAddress, _CommittedRevision] = {}
+        referencedChunks: set[str] = set()
         for entry in values:
             if not isinstance(entry, dict):
                 raise TypeError("Committed Value snapshot value entries must be objects.")
@@ -258,6 +263,7 @@ class CommittedValueLayer(ValueLayer):
                     if type(chunkId) is not str or not chunkId or type(contentHash) is not str or not contentHash:
                         raise ValueError(f"Chunk ValueRef at {address} requires chunkId and contentHash.")
                     chunk = chunkStore.require(chunkId)
+                    referencedChunks.add(chunkId)
                     if chunk.contentHash != contentHash:
                         raise ValueError(f"Chunk ValueRef integrity mismatch at {address}.")
                     valueRef = ChunkValueRef(codecId=codecId, chunkId=chunkId, contentHash=contentHash)
@@ -273,6 +279,13 @@ class CommittedValueLayer(ValueLayer):
                 revisionId=revisionId,
                 state=state,
                 valueRef=valueRef,
+            )
+
+        unreferencedChunks = seenChunks - referencedChunks
+        if unreferencedChunks:
+            rendered = ", ".join(sorted(unreferencedChunks))
+            raise ValueError(
+                f"Committed Value snapshot contains unreferenced chunk(s): {rendered}.",
             )
 
         layer._values = restored
