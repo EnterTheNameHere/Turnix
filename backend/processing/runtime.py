@@ -1,3 +1,4 @@
+# file: backend/processing/runtime.py ; version: 1
 from __future__ import annotations
 
 from collections.abc import Mapping as MappingABC
@@ -37,7 +38,7 @@ class ProcessingStage(StrEnum):
     STREAM_EVENT = "stream-event"
     PARSE_RESPONSE = "parse-response"
     UPDATE_QUERY_ITEMS = "update-query-items"
-    FINALIZE = "finalize"
+    COMPLETE = "complete"
 
 
 class ProcessingRunOutcome(StrEnum):
