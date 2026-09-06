@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 8
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 9
 from __future__ import annotations
 
 import importlib.util
@@ -64,6 +64,7 @@ def _interpretedChat(ctx, selector: dict[str, int]) -> tuple[dict[str, object], 
         or not isinstance(interpretedChat.get("records"), list)
         or not isinstance(interpretedChat.get("secondBuckets"), list)
         or not isinstance(interpretedChat.get("secondAggregates"), list)
+        or not isinstance(interpretedChat.get("identicalMessageBursts"), list)
     ):
         raise RuntimeError("Chat interpretation capability returned an invalid snapshot.")
 
