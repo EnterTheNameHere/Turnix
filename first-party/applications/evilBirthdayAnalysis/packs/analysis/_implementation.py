@@ -1,7 +1,7 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 4
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 5
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
 from backend.core.runtimeIds import newRuntimeId
@@ -415,19 +415,23 @@ def _renderChatSpan(span: Mapping[str, object]) -> str:
         count = span.get("count", 1)
         return text if count == 1 else f"{text} ×{count}"
     if kind == "composite":
-        tokens = span.get("tokens", [])
-        text = " ".join(str(token) for token in tokens) if isinstance(tokens, list) else ""
+        tokens = span.get("tokens", ())
+        text = (
+            " ".join(str(token) for token in tokens)
+            if isinstance(tokens, Sequence) and not isinstance(tokens, (str, bytes))
+            else ""
+        )
         count = span.get("count", 1)
         return text if count == 1 else f"{text} ×{count}"
     if kind == "command":
         command = f"!{span.get('command', '')}"
-        arguments = span.get("arguments", [])
-        if isinstance(arguments, list) and arguments:
+        arguments = span.get("arguments", ())
+        if isinstance(arguments, Sequence) and not isinstance(arguments, (str, bytes)) and arguments:
             return command + " " + " ".join(str(argument) for argument in arguments)
         return command
     if kind == "repeat":
-        nested = span.get("spans", [])
-        if not isinstance(nested, list):
+        nested = span.get("spans", ())
+        if not isinstance(nested, Sequence) or isinstance(nested, (str, bytes)):
             return ""
         text = " ".join(
             part
@@ -445,7 +449,12 @@ def _chatPresentationContent(item: QueryItem) -> str:
     analysis = item.metadata.get("analysis")
     if isinstance(analysis, Mapping) and analysis.get("kind") == "userMessage":
         spans = analysis.get("spans")
-        if isinstance(spans, list) and spans and all(isinstance(span, Mapping) for span in spans):
+        if (
+            isinstance(spans, Sequence)
+            and not isinstance(spans, (str, bytes))
+            and spans
+            and all(isinstance(span, Mapping) for span in spans)
+        ):
             rendered = " ".join(
                 part
                 for span in spans
