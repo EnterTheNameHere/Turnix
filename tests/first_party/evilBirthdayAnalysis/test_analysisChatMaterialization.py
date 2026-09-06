@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 7
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 8
 from __future__ import annotations
 
 import importlib.util
@@ -55,6 +55,8 @@ class _MaterializationCapabilities:
                 "videoEndSeconds": float(endVideo),
                 "streamStartSeconds": float(streamStart),
                 "streamEndSeconds": float(streamEnd),
+                "contextStreamStartSeconds": float(streamStart) - float(payload["lookbackSeconds"]),
+                "contextStreamEndSeconds": float(streamEnd) + float(payload["lookaheadSeconds"]),
                 "lookbackSeconds": float(payload["lookbackSeconds"]),
                 "lookaheadSeconds": float(payload["lookaheadSeconds"]),
                 "records": [
@@ -212,6 +214,7 @@ class _MaterializationCapabilities:
                 "records": records,
                 "secondBuckets": secondBuckets,
                 "secondAggregates": secondAggregates,
+                "identicalMessageBursts": [],
                 "text": "\n".join(
                     f"{record['streamTime']} {record['username']}: {record['body']}"
                     for record in included
