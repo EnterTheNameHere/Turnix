@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatProcessing.py ; version: 3
+# file: tests/first_party/evilBirthdayAnalysis/test_chatProcessing.py ; version: 4
 from __future__ import annotations
 
 import hashlib
@@ -234,4 +234,56 @@ def test_selector_rebuilds_parse_cache_when_source_observation_changes():
     assert [record["message"] for record in second["records"]] == [
         "first: included",
         "second: changed-value",
+    ]
+
+
+
+def test_selector_can_return_raw_lookahead_without_marking_it_inside_requested_window():
+    chat._parsedCache.clear()
+    lines = (
+        "[2024-03-25 19:20:00] #vedal987 current: included",
+        "[2024-03-25 19:20:01] #vedal987 future: semantic-context",
+        "[2024-03-25 19:20:02] #vedal987 later: outside-lookahead",
+    )
+    selected = chat._select(
+        _Ctx(lines=lines),
+        {
+            "videoStartSeconds": 0,
+            "videoEndSeconds": 1,
+            "lookaheadSeconds": 1,
+        },
+    )
+
+    assert [record["message"] for record in selected["records"]] == [
+        "current: included",
+        "future: semantic-context",
+    ]
+    assert [record["insideRequestedWindow"] for record in selected["records"]] == [
+        True,
+        False,
+    ]
+    assert selected["lookaheadSeconds"] == 1.0
+
+
+def test_selector_context_preserves_half_open_requested_membership():
+    chat._parsedCache.clear()
+    lines = (
+        "[2024-03-25 19:19:59] #vedal987 prior: context",
+        "[2024-03-25 19:20:00] #vedal987 start: included",
+        "[2024-03-25 19:20:01] #vedal987 end: context",
+    )
+    selected = chat._select(
+        _Ctx(lines=lines),
+        {
+            "videoStartSeconds": 0,
+            "videoEndSeconds": 1,
+            "lookbackSeconds": 1,
+            "lookaheadSeconds": 1,
+        },
+    )
+
+    assert [record["insideRequestedWindow"] for record in selected["records"]] == [
+        False,
+        True,
+        False,
     ]
