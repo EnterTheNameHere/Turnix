@@ -1,6 +1,7 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 5
+# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 6
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -697,6 +698,342 @@ def _persistentSecondAggregates(
     return [_persistentSecondAggregate(ctx, bucket=bucket) for bucket in buckets]
 
 
+def _burstSecondSegment(secondIndex: int) -> str:
+    return f"n{-secondIndex}" if secondIndex < 0 else f"s{secondIndex}"
+
+
+def _identicalMessageBurstAddress(
+    *,
+    startSecond: int,
+    canonicalSha256: str,
+) -> str:
+    """Returns stable identity for one closed identical-message burst."""
+    if type(startSecond) is not int:
+        raise TypeError("startSecond must be an exact integer.")
+    if type(canonicalSha256) is not str or len(canonicalSha256) != 64:
+        raise ValueError("canonicalSha256 must be a 64-character SHA-256 hex digest.")
+    return (
+        f"evilanalysis/chat/burst/{_burstSecondSegment(startSecond)}/"
+        f"{canonicalSha256}"
+    )
+
+
+def _aggregateCanonicalOccurrences(
+    ctx,
+    aggregate: dict[str, object],
+) -> tuple[int, dict[str, list[dict[str, object]]], dict[str, list[dict[str, object]]]]:
+    """Returns canonical user-message occurrences for one persistent second aggregate."""
+    value = aggregate.get("value")
+    if not isinstance(value, dict):
+        raise RuntimeError("Burst derivation requires second aggregate value.")
+    secondIndex = value.get("secondIndex")
+    secondBucket = value.get("secondBucket")
+    entries = value.get("entries")
+    if (
+        type(secondIndex) is not int
+        or not isinstance(secondBucket, dict)
+        or not isinstance(entries, list)
+    ):
+        raise RuntimeError("Second aggregate has invalid burst input structure.")
+
+    bucketAddress = secondBucket.get("address")
+    if type(bucketAddress) is not str:
+        raise RuntimeError("Second aggregate lacks second-bucket address.")
+    bucketValue = ctx.memory.load(bucketAddress)
+    if not isinstance(bucketValue, dict) or not isinstance(bucketValue.get("members"), list):
+        raise RuntimeError("Second aggregate references unavailable second bucket.")
+    timeByLine = {
+        member["lineNumber"]: member["streamTimeSeconds"]
+        for member in bucketValue["members"]
+        if (
+            isinstance(member, dict)
+            and type(member.get("lineNumber")) is int
+            and type(member.get("streamTimeSeconds")) in {int, float}
+        )
+    }
+
+    occurrencesByCanonical: dict[str, list[dict[str, object]]] = {}
+    spansByCanonical: dict[str, list[dict[str, object]]] = {}
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise RuntimeError("Second aggregate entry must be an object.")
+        kind = entry.get("kind")
+
+        if kind == "message":
+            lineNumber = entry.get("lineNumber")
+            semanticReference = entry.get("semantic")
+            if type(lineNumber) is not int or not isinstance(semanticReference, dict):
+                raise RuntimeError("Second aggregate message entry is invalid.")
+            semanticAddress = semanticReference.get("address")
+            if type(semanticAddress) is not str:
+                raise RuntimeError("Second aggregate message semantic reference lacks address.")
+            semantic = ctx.memory.load(semanticAddress)
+            if not isinstance(semantic, dict):
+                raise RuntimeError("Second aggregate message semantic value is unavailable.")
+            canonical = _canonicalUserMessage(semantic)
+            if canonical is None:
+                continue
+            canonicalKey, spans = canonical
+            username = semantic.get("username")
+            if type(username) is not str or not username:
+                raise RuntimeError("Canonical user message lacks username.")
+            streamTimeSeconds = timeByLine.get(lineNumber)
+            if type(streamTimeSeconds) not in {int, float}:
+                raise RuntimeError("Canonical user message lacks bucket timing evidence.")
+            occurrencesByCanonical.setdefault(canonicalKey, []).append(
+                {
+                    "lineNumber": lineNumber,
+                    "secondIndex": secondIndex,
+                    "streamTimeSeconds": float(streamTimeSeconds),
+                    "sourceUsername": username,
+                    "semantic": semanticReference,
+                }
+            )
+            spansByCanonical[canonicalKey] = spans
+            continue
+
+        if kind == "identicalCanonicalMessage":
+            spans = entry.get("canonicalSpans")
+            lineNumbers = entry.get("lineNumbers")
+            semanticReferences = entry.get("semantic")
+            sourceUsernames = entry.get("sourceUsernames")
+            if (
+                not isinstance(spans, list)
+                or any(not isinstance(span, dict) for span in spans)
+                or not isinstance(lineNumbers, list)
+                or not isinstance(semanticReferences, list)
+                or not isinstance(sourceUsernames, list)
+                or not (
+                    len(lineNumbers)
+                    == len(semanticReferences)
+                    == len(sourceUsernames)
+                )
+            ):
+                raise RuntimeError("Identical canonical-message entry is invalid.")
+            canonicalKey = json.dumps(
+                spans,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+            for lineNumber, semanticReference, sourceUsername in zip(
+                lineNumbers,
+                semanticReferences,
+                sourceUsernames,
+                strict=True,
+            ):
+                if (
+                    type(lineNumber) is not int
+                    or not isinstance(semanticReference, dict)
+                    or type(sourceUsername) is not str
+                    or not sourceUsername
+                ):
+                    raise RuntimeError("Identical canonical-message occurrence is invalid.")
+                streamTimeSeconds = timeByLine.get(lineNumber)
+                if type(streamTimeSeconds) not in {int, float}:
+                    raise RuntimeError("Identical canonical-message occurrence lacks timing.")
+                occurrencesByCanonical.setdefault(canonicalKey, []).append(
+                    {
+                        "lineNumber": lineNumber,
+                        "secondIndex": secondIndex,
+                        "streamTimeSeconds": float(streamTimeSeconds),
+                        "sourceUsername": sourceUsername,
+                        "semantic": semanticReference,
+                    }
+                )
+            spansByCanonical[canonicalKey] = spans
+            continue
+
+        raise RuntimeError(f"Unsupported second aggregate entry kind for burst derivation: {kind!r}.")
+
+    return secondIndex, occurrencesByCanonical, spansByCanonical
+
+
+def _closedCanonicalRuns(
+    *,
+    secondsByCanonical: dict[str, dict[int, list[dict[str, object]]]],
+    contextStartSeconds: float,
+    contextEndSeconds: float,
+) -> list[tuple[str, list[int]]]:
+    """Returns consecutive-second runs whose adjacent seconds are fully observed."""
+    runs: list[tuple[str, list[int]]] = []
+    for canonicalKey, bySecond in secondsByCanonical.items():
+        orderedSeconds = sorted(bySecond)
+        if len(orderedSeconds) < 2:
+            continue
+
+        current = [orderedSeconds[0]]
+        candidates: list[list[int]] = []
+        for secondIndex in orderedSeconds[1:]:
+            if secondIndex == current[-1] + 1:
+                current.append(secondIndex)
+            else:
+                candidates.append(current)
+                current = [secondIndex]
+        candidates.append(current)
+
+        for run in candidates:
+            if len(run) < 2:
+                continue
+            startSecond = run[0]
+            endSecond = run[-1]
+            # To prove maximality at one-second resolution we must observe the
+            # complete immediately preceding and following seconds.
+            if contextStartSeconds > float(startSecond - 1):
+                continue
+            if contextEndSeconds < float(endSecond + 2):
+                continue
+            runs.append((canonicalKey, run))
+    return runs
+
+
+def _persistentIdenticalMessageBurst(
+    ctx,
+    *,
+    canonicalKey: str,
+    canonicalSpans: list[dict[str, object]],
+    runSeconds: list[int],
+    occurrencesBySecond: dict[int, list[dict[str, object]]],
+    aggregateBySecond: dict[int, dict[str, object]],
+) -> dict[str, object]:
+    canonicalSha256 = hashlib.sha256(canonicalKey.encode("utf-8")).hexdigest()
+    startSecond = runSeconds[0]
+    endSecond = runSeconds[-1]
+    address = _identicalMessageBurstAddress(
+        startSecond=startSecond,
+        canonicalSha256=canonicalSha256,
+    )
+
+    secondInputs = [
+        {
+            "secondIndex": secondIndex,
+            "aggregate": {
+                "address": aggregateBySecond[secondIndex]["address"],
+                "dependency": aggregateBySecond[secondIndex]["dependency"],
+            },
+        }
+        for secondIndex in runSeconds
+    ]
+    basis = {
+        "canonicalSha256": canonicalSha256,
+        "seconds": secondInputs,
+        "previousSecondContainsCanonical": False,
+        "nextSecondContainsCanonical": False,
+    }
+    if ctx.memory.isReusable(address, validity=basis):
+        value = ctx.memory.load(address)
+        if isinstance(value, dict):
+            return {
+                "address": address,
+                "dependency": ctx.memory.dependency(address),
+                "value": value,
+            }
+        raise RuntimeError(f"Reusable identical-message burst at {address!r} is not an object.")
+
+    occurrences = [
+        occurrence
+        for secondIndex in runSeconds
+        for occurrence in occurrencesBySecond[secondIndex]
+    ]
+    perSecond = [
+        {
+            "secondIndex": secondIndex,
+            "messageCount": len(occurrencesBySecond[secondIndex]),
+            "uniqueSourceUserCount": len(
+                {
+                    occurrence["sourceUsername"].casefold()
+                    for occurrence in occurrencesBySecond[secondIndex]
+                }
+            ),
+            "aggregate": secondInputs[index]["aggregate"],
+        }
+        for index, secondIndex in enumerate(runSeconds)
+    ]
+    sourceUsernames = [
+        occurrence["sourceUsername"]
+        for occurrence in occurrences
+    ]
+    value = {
+        "kind": "identicalMessageBurst",
+        "canonicalSha256": canonicalSha256,
+        "canonicalMessage": _renderSpans(canonicalSpans),
+        "canonicalSpans": canonicalSpans,
+        "startSecond": startSecond,
+        "endSecond": endSecond,
+        "durationSeconds": endSecond - startSecond + 1,
+        "messageCount": len(occurrences),
+        "uniqueSourceUserCount": len(
+            {username.casefold() for username in sourceUsernames}
+        ),
+        "peakMessagesPerSecond": max(
+            len(occurrencesBySecond[secondIndex])
+            for secondIndex in runSeconds
+        ),
+        "sourceUsernames": sourceUsernames,
+        "occurrences": occurrences,
+        "seconds": perSecond,
+    }
+    transaction = ctx.memory.openTransaction()
+    transaction.set(
+        address,
+        value,
+        validity=basis,
+        provenance={
+            "secondAggregates": secondInputs,
+        },
+    )
+    transaction.commit()
+    return {
+        "address": address,
+        "dependency": ctx.memory.dependency(address),
+        "value": value,
+    }
+
+
+def _persistentIdenticalMessageBursts(
+    ctx,
+    aggregates: list[dict[str, object]],
+    *,
+    contextStartSeconds: float,
+    contextEndSeconds: float,
+) -> list[dict[str, object]]:
+    aggregateBySecond: dict[int, dict[str, object]] = {}
+    secondsByCanonical: dict[str, dict[int, list[dict[str, object]]]] = {}
+    spansByCanonical: dict[str, list[dict[str, object]]] = {}
+
+    for aggregate in aggregates:
+        if not isinstance(aggregate, dict):
+            raise RuntimeError("Burst derivation requires aggregate objects.")
+        secondIndex, occurrences, canonicalSpans = _aggregateCanonicalOccurrences(
+            ctx,
+            aggregate,
+        )
+        aggregateBySecond[secondIndex] = aggregate
+        for canonicalKey, items in occurrences.items():
+            secondsByCanonical.setdefault(canonicalKey, {})[secondIndex] = items
+        spansByCanonical.update(canonicalSpans)
+
+    bursts: list[dict[str, object]] = []
+    for canonicalKey, runSeconds in _closedCanonicalRuns(
+        secondsByCanonical=secondsByCanonical,
+        contextStartSeconds=contextStartSeconds,
+        contextEndSeconds=contextEndSeconds,
+    ):
+        bursts.append(
+            _persistentIdenticalMessageBurst(
+                ctx,
+                canonicalKey=canonicalKey,
+                canonicalSpans=spansByCanonical[canonicalKey],
+                runSeconds=runSeconds,
+                occurrencesBySecond=secondsByCanonical[canonicalKey],
+                aggregateBySecond=aggregateBySecond,
+            )
+        )
+    return bursts
+
+
 def _lineSemantic(
     rawMessage: str,
     *,
@@ -835,12 +1172,27 @@ def _interpret(ctx, payload):
     rawRecords = payload.get("records")
     sourcePath = payload.get("sourcePath")
     sourceObservation = payload.get("sourceObservation")
+    contextStartSeconds = payload.get("contextStreamStartSeconds")
+    contextEndSeconds = payload.get("contextStreamEndSeconds")
     if not isinstance(rawRecords, list):
         raise TypeError("Chat interpretation requires a records list.")
     if type(sourcePath) is not str or not sourcePath:
         raise TypeError("Chat interpretation requires sourcePath.")
     if not isinstance(sourceObservation, dict):
         raise TypeError("Chat interpretation requires sourceObservation.")
+    if (
+        type(contextStartSeconds) not in {int, float}
+        or type(contextEndSeconds) not in {int, float}
+    ):
+        raise TypeError("Chat interpretation requires numeric context coverage bounds.")
+    contextStartSeconds = float(contextStartSeconds)
+    contextEndSeconds = float(contextEndSeconds)
+    if (
+        not math.isfinite(contextStartSeconds)
+        or not math.isfinite(contextEndSeconds)
+        or contextEndSeconds < contextStartSeconds
+    ):
+        raise ValueError("Chat interpretation context coverage bounds are invalid.")
 
     emotes, composites, vocabularyObservation = _vocabulary(ctx)
     records: list[dict[str, object]] = []
@@ -984,10 +1336,17 @@ def _interpret(ctx, payload):
 
     secondBuckets = _persistentSecondBuckets(ctx, records)
     secondAggregates = _persistentSecondAggregates(ctx, secondBuckets)
+    identicalMessageBursts = _persistentIdenticalMessageBursts(
+        ctx,
+        secondAggregates,
+        contextStartSeconds=contextStartSeconds,
+        contextEndSeconds=contextEndSeconds,
+    )
     return {
         "records": records,
         "secondBuckets": secondBuckets,
         "secondAggregates": secondAggregates,
+        "identicalMessageBursts": identicalMessageBursts,
         "text": "\n".join(rendered),
     }
 
