@@ -1,4 +1,4 @@
-# file: tests/backend/llm/test_processingPipeline.py ; version: 1
+# file: tests/backend/llm/test_processingPipeline.py ; version: 2
 import pytest
 
 from backend.llm.errors import LlmProviderProtocolError
@@ -193,6 +193,10 @@ def test_filter_selects_current_query_without_erasing_reusable_memory():
     runRecord = state.load(f"processing/selection/runs/{result.processingRunId}")
     assert runRecord["acceptedQueryItemIds"] == ["keep"]
     assert runRecord["reusableQueryItemIds"] == ["keep", "later"]
+    assert runRecord["query"]["payload"] == "included"
+    assert runRecord["query"]["payloadSha256"]
+    assert runRecord["response"]["rawText"] == "ok"
+    assert runRecord["response"]["sha256"]
 
 
 def test_execution_profile_is_resolved_before_query_item_selection_and_building():
