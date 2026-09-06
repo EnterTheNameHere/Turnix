@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 13
+# file: backend/context/codeEntryContext.py ; version: 14
 from __future__ import annotations
 
 from copy import deepcopy
@@ -81,9 +81,18 @@ class _MemoryTransactionFacade:
     lifetime.
 
     Packs define what makes their logical values authoritative. Actant owns
-    stable addresses, authority state, revisions, conflict detection, and
-    transactional publication. This division is design-significant and should
-    be promoted into the Value System/CodeEntry design documents later.
+    stable addresses, authority state, revisions, conflict detection,
+    transactional publication, and the identity of the CodeEntry
+    implementation performing the write.
+
+    validity and provenance remain intentionally distinct. validity contains
+    the Pack-owned facts that must still hold for reuse; provenance records why
+    and from what evidence a revision was produced. A provenance change alone
+    need not invalidate a value. Neither structure is interpreted as an
+    automatic project-wide dependency graph.
+
+    This division is design-significant and should be promoted into the Value
+    System/CodeEntry design documents later.
     """
 
     __slots__ = ("_producer", "_register", "_transaction", "_requireValid")
