@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 1
+# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 2
 from __future__ import annotations
 
 import importlib.util
@@ -58,19 +58,30 @@ _SOURCE_OBSERVATION = {
 
 
 class _Io:
+    def __init__(self, *, emotes=None, vocabularyObservation=None):
+        self._emotes = EMOTES if emotes is None else emotes
+        self._vocabularyObservation = (
+            _VOCABULARY_OBSERVATION
+            if vocabularyObservation is None
+            else vocabularyObservation
+        )
+
     def readJson(self, _path):
-        return {"emotes": EMOTES, "composites": COMPOSITES}
+        return {"emotes": self._emotes, "composites": COMPOSITES}
 
     def observeFile(self, path, *, contentHash=False):
         del contentHash
         if str(path) == "chatEmotes.json":
-            return dict(_VOCABULARY_OBSERVATION)
+            return dict(self._vocabularyObservation)
         return dict(_SOURCE_OBSERVATION)
 
 
 class _Ctx:
-    def __init__(self, memory=None):
-        self.io = _Io()
+    def __init__(self, memory=None, *, emotes=None, vocabularyObservation=None):
+        self.io = _Io(
+            emotes=emotes,
+            vocabularyObservation=vocabularyObservation,
+        )
         self.memory = memory or CommittedValueLayer()
         self.config = {"chatEmotesFile": "chatEmotes.json"}
 
@@ -467,3 +478,56 @@ def test_line_semantics_survive_save_bundle_rehydration():
             "spans": [{"kind": "text", "text": "bring gun"}],
         }
     ]
+
+
+
+def test_line_semantics_recompute_when_vocabulary_requirement_changes():
+    memory = CommittedValueLayer()
+    records = [
+        _raw(
+            20,
+            "viewer: NEWEMOTE",
+            streamTimeSeconds=8.0,
+            streamTime="00:00:08",
+        )
+    ]
+
+    firstCtx = _Ctx(memory)
+    first = _interpret(firstCtx, records)
+    address = chatSemantics._semanticCellAddress(20)
+
+    assert first["records"][0]["analysis"]["spans"] == [
+        {"kind": "text", "text": "NEWEMOTE"}
+    ]
+    assert memory.revisionId(address) == 1
+
+    changedObservation = {
+        **_VOCABULARY_OBSERVATION,
+        "contentSha256": "changed-vocabulary-hash",
+    }
+    changedEmotes = {
+        **EMOTES,
+        "NEWEMOTE": {
+            "semanticClass": "praise",
+            "classificationSource": "userDefined",
+        },
+    }
+    secondCtx = _Ctx(
+        memory,
+        emotes=changedEmotes,
+        vocabularyObservation=changedObservation,
+    )
+    second = _interpret(secondCtx, records)
+
+    assert second["records"][0]["analysis"]["spans"] == [
+        {
+            "kind": "emote",
+            "name": "NEWEMOTE",
+            "count": 1,
+            "metadata": {
+                "semanticClass": "praise",
+                "classificationSource": "userDefined",
+            },
+        }
+    ]
+    assert memory.revisionId(address) == 2
