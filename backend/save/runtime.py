@@ -1,8 +1,9 @@
-# file: backend/save/runtime.py ; version: 1
+# file: backend/save/runtime.py ; version: 2
 from __future__ import annotations
 
 import json
 from copy import deepcopy
+from dataclasses import dataclass
 
 from backend.core.runtimeIds import newRuntimeId
 from backend.values.committed import CommittedValueLayer
@@ -10,66 +11,49 @@ from backend.values.committed import CommittedValueLayer
 __all__ = ["SaveBundle"]
 
 
+@dataclass(frozen=True, slots=True)
 class SaveBundle:
-    """Durable persistence closure snapshot for one Application.
+    """Immutable persistence-closure snapshot for one Application generation.
 
     SaveBundle contains a persistence representation of authoritative committed
     state. It does not make state authoritative: values are included only after
     they have crossed Actant's commit boundary.
 
-    A SaveBundle identity is distinct from Application identity and survives
-    generation updates. Each published replacement generation keeps the same
-    saveBundleId and applicationId while incrementing generation.
+    SaveBundle identity is distinct from Application identity. A new generation
+    is a new immutable snapshot object with the same saveBundleId/applicationId
+    and an incremented generation number.
 
-    This implementation intentionally owns representation, validation, and
-    rehydration only. It does not write filesystem paths or claim persistent
-    I/O authority; DA-07 owns the storage mechanism that eventually publishes
-    these bytes durably.
-
-    The current bundle contains committed Value state only. Other durable
-    Application material (accepted graph evidence, configuration, Windows,
-    retained evidence, Pack material, and retention metadata) can be added to
-    later format revisions without making Pack code responsible for persistence.
+    This implementation owns representation, validation, and rehydration only.
+    It does not write filesystem paths or claim persistent-I/O publication;
+    storage authority remains a separate boundary.
 
     This implementation-level contract is design-significant and should be
-    promoted into the SaveBundle implementation specification when one is
-    established.
+    promoted into the SaveBundle implementation specification later.
     """
 
-    __slots__ = (
-        "_committedStateSnapshot",
-        "applicationId",
-        "generation",
-        "saveBundleId",
-    )
+    saveBundleId: str
+    applicationId: str
+    generation: int
+    _committedStateSnapshot: dict[str, object]
 
     _FORMAT_ID = "actant.save-bundle@1"
 
-    def __init__(
-        self,
-        *,
-        saveBundleId: str,
-        applicationId: str,
-        generation: int,
-        committedStateSnapshot: dict[str, object],
-    ) -> None:
-        if type(saveBundleId) is not str or not saveBundleId:
+    def __post_init__(self) -> None:
+        if type(self.saveBundleId) is not str or not self.saveBundleId:
             raise ValueError("saveBundleId must be a non-empty string.")
-        if type(applicationId) is not str or not applicationId:
+        if type(self.applicationId) is not str or not self.applicationId:
             raise ValueError("applicationId must be a non-empty string.")
-        if type(generation) is not int or generation <= 0:
+        if type(self.generation) is not int or self.generation <= 0:
             raise ValueError("generation must be a positive exact integer.")
-        if not isinstance(committedStateSnapshot, dict):
+        if not isinstance(self._committedStateSnapshot, dict):
             raise TypeError("committedStateSnapshot must be an object.")
 
-        # Validate before retaining. Rehydration also proves referenced chunks,
-        # codecs, ValueRefs, revisions, addresses, and authority states.
-        CommittedValueLayer.fromSnapshot(committedStateSnapshot)
-
-        self.saveBundleId = saveBundleId
-        self.applicationId = applicationId
-        self.generation = generation
-        self._committedStateSnapshot = deepcopy(committedStateSnapshot)
+        CommittedValueLayer.fromSnapshot(self._committedStateSnapshot)
+        object.__setattr__(
+            self,
+            "_committedStateSnapshot",
+            deepcopy(self._committedStateSnapshot),
+        )
 
     @classmethod
     def create(
@@ -85,7 +69,7 @@ class SaveBundle:
             saveBundleId=newRuntimeId(),
             applicationId=applicationId,
             generation=1,
-            committedStateSnapshot=committedState.snapshot(),
+            _committedStateSnapshot=committedState.snapshot(),
         )
 
     def nextGeneration(self, *, committedState: CommittedValueLayer) -> SaveBundle:
@@ -96,7 +80,7 @@ class SaveBundle:
             saveBundleId=self.saveBundleId,
             applicationId=self.applicationId,
             generation=self.generation + 1,
-            committedStateSnapshot=committedState.snapshot(),
+            _committedStateSnapshot=committedState.snapshot(),
         )
 
     def restoreCommittedState(self) -> CommittedValueLayer:
@@ -137,7 +121,7 @@ class SaveBundle:
             saveBundleId=snapshot.get("saveBundleId"),
             applicationId=snapshot.get("applicationId"),
             generation=snapshot.get("generation"),
-            committedStateSnapshot=committedStateSnapshot,
+            _committedStateSnapshot=committedStateSnapshot,
         )
 
     @classmethod
