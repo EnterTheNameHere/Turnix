@@ -1,6 +1,7 @@
-# file: backend/packs/runtime.py ; version: 7
+# file: backend/packs/runtime.py ; version: 8
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import sys
@@ -28,6 +29,7 @@ class CodeEntryDefinition:
 @dataclass(frozen=True, slots=True)
 class PackDefinition:
     packId: str
+    version: str
     root: Path
     codeEntries: tuple[CodeEntryDefinition, ...]
 
@@ -70,6 +72,10 @@ class PackResolver:
         packId = manifest.get("packId")
         if type(packId) is not str or not packId:
             raise ValueError(f"Pack manifest requires a non-empty string packId: {manifestPath}.")
+        version = manifest.get("version")
+        if type(version) is not str or not version:
+            raise ValueError(f"Pack {packId!r} requires a non-empty string version.")
+
         entriesSource = manifest.get("codeEntries", [])
         if not isinstance(entriesSource, list):
             raise ValueError(f"Pack {packId!r} has invalid codeEntries.")
@@ -90,6 +96,7 @@ class PackResolver:
 
         return PackDefinition(
             packId=packId,
+            version=version,
             root=manifestPath.parent.resolve(),
             codeEntries=tuple(entries),
         )
@@ -193,15 +200,22 @@ class PackLoader:
         try:
             for definition in pack.codeEntries:
                 instanceId = newRuntimeId()
+                module, sourceSha256, implementationId = self._loadModule(
+                    pack=pack,
+                    definition=definition,
+                    instanceId=instanceId,
+                )
+                loadedModules.append(module)
                 identity = CodeEntryIdentity(
                     applicationId=self._host.applicationRun.application.applicationId,
                     applicationRunId=self._host.applicationRun.applicationRunId,
                     packId=pack.packId,
+                    packVersion=pack.version,
                     codeEntryId=definition.codeEntryId,
                     codeEntryInstanceId=instanceId,
+                    sourceSha256=sourceSha256,
+                    implementationId=implementationId,
                 )
-                module = self._loadModule(pack=pack, definition=definition, instanceId=instanceId)
-                loadedModules.append(module)
 
                 # Once module code has executed, the CodeEntry may already own
                 # resources. Make it cleanup-eligible before invoking onLoad so
@@ -303,7 +317,20 @@ class PackLoader:
         return errors
 
     @staticmethod
-    def _loadModule(*, pack: PackDefinition, definition: CodeEntryDefinition, instanceId: str) -> ModuleType:
+    def _loadModule(
+        *,
+        pack: PackDefinition,
+        definition: CodeEntryDefinition,
+        instanceId: str,
+    ) -> tuple[ModuleType, str, str]:
+        """Loads exactly the bytes used to establish CodeEntry implementation identity.
+
+        The Python implementation identity currently covers the declared
+        CodeEntry source bytes plus Pack/version/entry identity. It deliberately
+        does not pretend to capture arbitrary transitive imports; future Pack
+        materialization can widen the implementation closure without changing
+        the producer-metadata contract consumed by persistent values.
+        """
         packRoot = pack.root.resolve()
         sourcePath = (packRoot / definition.source).resolve()
         if not sourcePath.is_relative_to(packRoot):
@@ -315,18 +342,30 @@ class PackLoader:
         if sourcePath.suffix != ".py":
             raise ValueError(f"Python CodeEntry source must use a .py file: {sourcePath}.")
 
+        try:
+            sourceBytes = sourcePath.read_bytes()
+        except OSError as err:
+            raise RuntimeError(f"Could not read CodeEntry source: {sourcePath}.") from err
+        sourceSha256 = hashlib.sha256(sourceBytes).hexdigest()
+        identityMaterial = (
+            f"python-source@1\0{pack.packId}\0{pack.version}\0"
+            f"{definition.codeEntryId}\0{definition.source}\0{sourceSha256}"
+        ).encode("utf-8")
+        implementationId = hashlib.sha256(identityMaterial).hexdigest()
+
         moduleName = (
             f"_actant_{pack.packId.replace('.', '_')}_"
             f"{definition.codeEntryId.replace('.', '_')}_{instanceId.replace('-', '_')}"
         )
         spec = importlib.util.spec_from_file_location(moduleName, sourcePath)
-        if spec is None or spec.loader is None:
+        if spec is None:
             raise RuntimeError(f"Could not create Python module spec for {sourcePath}.")
         module = importlib.util.module_from_spec(spec)
         sys.modules[moduleName] = module
         try:
-            spec.loader.exec_module(module)
-        except Exception:
+            code = compile(sourceBytes, str(sourcePath), "exec")
+            exec(code, module.__dict__)
+        except BaseException:
             sys.modules.pop(moduleName, None)
             raise
-        return module
+        return module, sourceSha256, implementationId
