@@ -1,3 +1,4 @@
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 1
 from __future__ import annotations
 
 import importlib.util
@@ -36,9 +37,18 @@ def _interpretedChat(ctx, selector: dict[str, int]) -> tuple[dict[str, object], 
     if not isinstance(rawChat, dict) or not isinstance(rawChat.get("records"), list):
         raise RuntimeError("Raw chat capability returned an invalid snapshot.")
 
+    sourcePath = rawChat.get("sourcePath")
+    sourceObservation = rawChat.get("sourceObservation")
+    if type(sourcePath) is not str or not isinstance(sourceObservation, dict):
+        raise RuntimeError("Raw chat capability did not provide source provenance.")
+
     interpretedChat = ctx.capabilities.call(
         "evilAnalysis.chatInterpret@1",
-        {"records": rawChat["records"]},
+        {
+            "sourcePath": sourcePath,
+            "sourceObservation": sourceObservation,
+            "records": rawChat["records"],
+        },
     )
     if (
         not isinstance(interpretedChat, dict)
