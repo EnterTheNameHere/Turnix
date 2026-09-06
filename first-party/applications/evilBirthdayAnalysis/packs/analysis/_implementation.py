@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 2
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 3
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -1098,19 +1098,34 @@ def _run(ctx, payload):
             preparedChat=preparedChat,
             processingResult=processingResult,
         )
-        saved = ctx.capabilities.call("evilAnalysis.results@1", exportRecord)
-        if not isinstance(saved, dict):
-            raise RuntimeError("Window export returned an invalid result.")
+        saved = None
+        exportError = None
+        try:
+            exported = ctx.capabilities.call("evilAnalysis.results@1", exportRecord)
+            if not isinstance(exported, dict):
+                raise RuntimeError("Window export returned an invalid result.")
+            saved = exported
+        except Exception as err:
+            exportError = {
+                "errorType": type(err).__qualname__,
+                "message": str(err),
+            }
+
+        chatBudget = processingResult.llm.query.metadata.get("chatBudget", {})
+        warnings = (
+            _plain(chatBudget.get("warnings", []))
+            if isinstance(chatBudget, dict)
+            else []
+        )
         results.append(
             {
                 "windowIndex": windowIndex,
                 "positionSeconds": position,
                 "processingRunId": processingResult.processingRunId,
                 "result": persistentResult,
-                "warnings": _plain(processingResult.llm.query.metadata.get("chatBudget", {}).get("warnings", []))
-                if isinstance(processingResult.llm.query.metadata, dict)
-                else [],
+                "warnings": warnings,
                 "saved": saved,
+                "exportError": exportError,
             }
         )
 
