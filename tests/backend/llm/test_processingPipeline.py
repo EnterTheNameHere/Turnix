@@ -1,4 +1,4 @@
-# file: tests/backend/llm/test_processingPipeline.py ; version: 2
+# file: tests/backend/llm/test_processingPipeline.py ; version: 3
 import pytest
 
 from backend.llm.errors import LlmProviderProtocolError
@@ -325,17 +325,17 @@ def test_processing_commit_does_not_require_query_payload_to_be_json_encodable()
     assert "payload" not in runRecord["query"]
 
 
-def test_finalize_input_is_forwarded_without_becoming_processing_memory():
+def test_completion_input_is_forwarded_without_becoming_processing_memory():
     state = CommittedValueLayer()
-    finalizeInput = {"diagnostic": {"text": "prepared side material"}}
+    completionInput = {"diagnostic": {"text": "prepared side material"}}
 
     def invoke(capabilityId, payload, memoryView):
         if capabilityId == "build-items@1":
             return [QueryItem(itemId="final-input", kind="test", content="final")]
         if capabilityId == "build-query@1":
             return {"formatId": "text/plain", "payload": "final"}
-        if capabilityId == "finalize@1":
-            assert payload["finalizeInput"] is finalizeInput
+        if capabilityId == "complete@1":
+            assert payload["completionInput"] is completionInput
             return {"saved": True}
         raise AssertionError(capabilityId)
 
@@ -348,17 +348,17 @@ def test_finalize_input_is_forwarded_without_becoming_processing_memory():
         inputValue={},
         buildQueryItemsCapabilityId="build-items@1",
         buildQueryCapabilityId="build-query@1",
-        finalizeCapabilityId="finalize@1",
-        finalizeInput=finalizeInput,
+        completionCapabilityId="complete@1",
+        completionInput=completionInput,
         providerName="good",
     )
 
-    assert result.finalizeResult == {"saved": True}
+    assert result.completionResult == {"saved": True}
     runRecord = state.load(f"processing/finalinput/runs/{result.processingRunId}")
-    assert "finalizeInput" not in runRecord
+    assert "completionInput" not in runRecord
 
 
-def test_finalize_failure_aborts_processing_state():
+def test_completion_failure_aborts_processing_state():
     state = CommittedValueLayer()
 
     def invoke(capabilityId, payload, memoryView):
@@ -366,7 +366,7 @@ def test_finalize_failure_aborts_processing_state():
             return [QueryItem(itemId="final", kind="test", content="final")]
         if capabilityId == "build-query@1":
             return {"formatId": "text/plain", "payload": "final"}
-        if capabilityId == "finalize@1":
+        if capabilityId == "complete@1":
             assert payload["llm"]["response"]["rawText"] == "ok"
             raise RuntimeError("persistence failed")
         raise AssertionError(capabilityId)
@@ -374,16 +374,16 @@ def test_finalize_failure_aborts_processing_state():
     pipeline = LlmProcessingPipeline(providers=_providers(), state=state, capabilityInvoker=invoke)
     with pytest.raises(RuntimeError, match="persistence failed"):
         pipeline.runProcessing(
-            memoryKey="finalize",
+            memoryKey="completion",
             inputValue={},
             buildQueryItemsCapabilityId="build-items@1",
             buildQueryCapabilityId="build-query@1",
-            finalizeCapabilityId="finalize@1",
+            completionCapabilityId="complete@1",
             providerName="good",
         )
 
-    assert state.load("processing/finalize/currentqueryitems") is MISSING
-    assert state.revisionId("processing/finalize/currentqueryitems") == 0
+    assert state.load("processing/completion/currentqueryitems") is MISSING
+    assert state.revisionId("processing/completion/currentqueryitems") == 0
 
 
 
