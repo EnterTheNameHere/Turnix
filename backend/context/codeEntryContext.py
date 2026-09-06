@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 7
+# file: backend/context/codeEntryContext.py ; version: 8
 from __future__ import annotations
 
 from copy import deepcopy
@@ -119,20 +119,49 @@ class _MemoryTransactionFacade:
     ) -> None:
         """Stages a value with Actant-owned producer and Pack-owned derivation metadata."""
         self._requireValid()
-        metadata = {
+        self._transaction.set(
+            address,
+            value,
+            metadata=self._metadata(validity=validity, provenance=provenance),
+        )
+
+    def setAbsent(
+        self,
+        address: str,
+        *,
+        validity: dict[str, object] | None = None,
+        provenance: dict[str, object] | None = None,
+    ) -> None:
+        self._requireValid()
+        self._transaction.setAbsent(
+            address,
+            metadata=self._metadata(validity=validity, provenance=provenance),
+        )
+
+    def invalidate(
+        self,
+        address: str,
+        *,
+        validity: dict[str, object] | None = None,
+        provenance: dict[str, object] | None = None,
+    ) -> None:
+        self._requireValid()
+        self._transaction.invalidate(
+            address,
+            metadata=self._metadata(validity=validity, provenance=provenance),
+        )
+
+    def _metadata(
+        self,
+        *,
+        validity: dict[str, object] | None,
+        provenance: dict[str, object] | None,
+    ) -> dict[str, object]:
+        return {
             "producer": deepcopy(self._producer),
             "validity": {} if validity is None else deepcopy(validity),
             "provenance": {} if provenance is None else deepcopy(provenance),
         }
-        self._transaction.set(address, value, metadata=metadata)
-
-    def setAbsent(self, address: str) -> None:
-        self._requireValid()
-        self._transaction.setAbsent(address)
-
-    def invalidate(self, address: str) -> None:
-        self._requireValid()
-        self._transaction.invalidate(address)
 
     def openTransaction(self) -> "_MemoryTransactionFacade":
         self._requireValid()
