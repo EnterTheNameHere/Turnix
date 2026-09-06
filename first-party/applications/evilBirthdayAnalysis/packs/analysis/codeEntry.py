@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 11
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 12
 from __future__ import annotations
 
 import importlib.util
@@ -156,6 +156,54 @@ def _chatAggregateReferences(chat: dict[str, object]) -> dict[int, dict[str, obj
     return byLine
 
 
+def _chatBurstReferences(chat: dict[str, object]) -> dict[int, dict[str, object]]:
+    """Maps each included physical line to at most one closed persistent burst event.
+
+    Burst events are presentation/evidence structure derived by chatSemantics.
+    INVALIDATED/open burst-start slots are intentionally absent from
+    identicalMessageBursts and therefore never claim line ownership here.
+    """
+    bursts = chat.get("identicalMessageBursts")
+    if not isinstance(bursts, list):
+        raise RuntimeError("Chat interpretation capability returned invalid identicalMessageBursts.")
+
+    byLine: dict[int, dict[str, object]] = {}
+    for burst in bursts:
+        if not isinstance(burst, dict):
+            raise RuntimeError("Chat burst reference must be an object.")
+        address = burst.get("address")
+        dependency = burst.get("dependency")
+        eventKey = burst.get("eventKey")
+        value = burst.get("value")
+        if (
+            type(address) is not str
+            or not isinstance(dependency, dict)
+            or type(eventKey) is not str
+            or not eventKey
+            or not isinstance(value, dict)
+            or value.get("kind") != "identicalMessageBurst"
+        ):
+            raise RuntimeError("Chat burst reference is incomplete.")
+
+        occurrences = value.get("occurrences")
+        if not isinstance(occurrences, list) or len(occurrences) < 2:
+            raise RuntimeError("Closed identical-message burst requires at least two occurrences.")
+        reference = {
+            "address": address,
+            "dependency": dependency,
+            "eventKey": eventKey,
+            "value": _plain(value),
+        }
+        for occurrence in occurrences:
+            if not isinstance(occurrence, dict) or type(occurrence.get("lineNumber")) is not int:
+                raise RuntimeError("Chat burst occurrence has invalid lineNumber.")
+            lineNumber = occurrence["lineNumber"]
+            if lineNumber in byLine:
+                raise RuntimeError(f"Chat line {lineNumber} belongs to multiple closed burst events.")
+            byLine[lineNumber] = reference
+    return byLine
+
+
 def _previousChatItemReusable(
     previousItem: QueryItem,
     *,
@@ -185,6 +233,7 @@ def _chatQueryItems(
         raise RuntimeError("Chat interpretation capability returned invalid records.")
     bucketByLine = _chatBucketReferences(chat)
     aggregateByLine = _chatAggregateReferences(chat)
+    burstByLine = _chatBurstReferences(chat)
 
     items: list[QueryItem] = []
     for record in records:
@@ -212,6 +261,7 @@ def _chatQueryItems(
 
         secondBucket = bucketByLine.get(lineNumber)
         secondAggregate = aggregateByLine.get(lineNumber)
+        identicalMessageBurst = burstByLine.get(lineNumber)
         if secondBucket is None:
             raise RuntimeError(f"Chat line {lineNumber} has no canonical second bucket.")
         if secondAggregate is None:
@@ -238,6 +288,11 @@ def _chatQueryItems(
                 "semantic": _plain(semanticValue),
                 "secondBucket": _plain(secondBucket),
                 "secondAggregate": _plain(secondAggregate),
+                "identicalMessageBurst": (
+                    None
+                    if identicalMessageBurst is None
+                    else _plain(identicalMessageBurst)
+                ),
             },
             "source": {
                 "sourcePath": chat.get("sourcePath"),
