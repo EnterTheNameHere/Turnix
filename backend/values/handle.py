@@ -1,4 +1,4 @@
-# file: backend/values/handle.py ; version: 3
+# file: backend/values/handle.py ; version: 4
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -135,9 +135,9 @@ class ValueHandle:
         mutation is performed. Mutation capability and semantics are determined
         by the layer view to which the handle is bound.
 
-        A handle bound to a ValueTransaction stages the supplied value in that
-        transaction. The staged value is not authoritative merely because set()
-        succeeds.
+        A handle bound to a CommittedValueTransaction stages the supplied
+        value in that transaction. The staged value is not authoritative
+        merely because set() succeeds.
 
         A handle bound directly to an ordinary read-only or authoritative
         layer does not bypass transaction boundaries; such a layer rejects
