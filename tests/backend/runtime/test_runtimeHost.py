@@ -1,4 +1,4 @@
-# file: tests/backend/runtime/test_runtimeHost.py ; version: 8
+# file: tests/backend/runtime/test_runtimeHost.py ; version: 9
 from pathlib import Path
 
 import pytest
@@ -83,6 +83,18 @@ def test_trace_publication_failure_does_not_change_runtime_lifecycle():
 
 
 
+def test_application_physically_owns_authoritative_memory():
+    host = RuntimeHost(appPackId="test.app")
+
+    assert host.applicationRun.committedState is host.applicationRun.application.committedState
+
+    transaction = host.applicationRun.application.committedState.openTransaction()
+    transaction.set("test/application-owned", {"value": 1})
+    transaction.commit()
+
+    assert host.applicationRun.committedState.load("test/application-owned") == {"value": 1}
+
+
 def test_contexts_share_application_run_authoritative_memory():
     host = RuntimeHost(appPackId="test.app")
     host.start()
@@ -144,6 +156,7 @@ def test_save_bundle_rehydrates_same_application_into_new_run():
         assert bundle.applicationId == firstApplicationId
         assert bundle.generation == 1
         assert firstHost.applicationRun.saveBundleId == bundle.saveBundleId
+        assert firstHost.applicationRun.application.saveBundleId == bundle.saveBundleId
     finally:
         firstHost.stop()
 
@@ -153,6 +166,11 @@ def test_save_bundle_rehydrates_same_application_into_new_run():
     assert secondHost.applicationRun.application.applicationId == firstApplicationId
     assert secondHost.applicationRun.applicationRunId != firstRunId
     assert secondHost.applicationRun.saveBundleId == bundle.saveBundleId
+    assert secondHost.applicationRun.application.saveBundleId == bundle.saveBundleId
+    assert (
+        secondHost.applicationRun.committedState
+        is secondHost.applicationRun.application.committedState
+    )
 
     secondHost.start()
     try:
