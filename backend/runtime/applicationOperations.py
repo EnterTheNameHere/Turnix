@@ -1,4 +1,4 @@
-# file: backend/runtime/applicationOperations.py ; version: 1
+# file: backend/runtime/applicationOperations.py ; version: 2
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from backend.application.lifecycle import ApplicationLifecycle
 from backend.packs.runtime import ManualActivationPlan, PackLoader, PackResolver
 from backend.runtime.runtimeHost import RuntimeHost
-from backend.save import ApplicationStore, LoadedApplicationSave, SaveBundle
+from backend.save import ApplicationStore, LoadedApplicationSave
 from backend.tracing import Tracer
 
 __all__ = ["ApplicationRuntimeOperations", "ApplicationRuntimeSession"]
