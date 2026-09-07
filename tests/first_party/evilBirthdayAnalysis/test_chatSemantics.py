@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 14
+# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 15
 from __future__ import annotations
 
 import importlib.util
@@ -504,6 +504,7 @@ def test_line_semantics_survive_save_bundle_rehydration():
     assert firstMemory.revisionId(address) == 1
 
     bundle = SaveBundle.create(
+        appPackId="evilBirthdayAnalysis",
         applicationId="evil-analysis",
         committedState=firstMemory,
     )
