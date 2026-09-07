@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 13
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 14
 from __future__ import annotations
 
 import importlib.util
@@ -717,6 +717,104 @@ def _budgetedChat(
     return [*currentItems, *selectedOptional], evidence, identityStatistics
 
 
+def _previewPrompt(ctx, payload):
+    """Prepares one real analysis window through the normal pipeline without inference."""
+    request = {} if payload is None else payload
+    if not isinstance(request, dict):
+        raise ValueError("Prompt preview request must be an object.")
+
+    profile = _profileSnapshot(ctx.config)
+    settings = profile["settings"]
+    if not isinstance(settings, dict):
+        raise RuntimeError("Profile snapshot has invalid settings.")
+    chunkSeconds, offsetsSeconds = _contextGeometry(settings)
+    includeChat, chatLayout = _chatPresentation(settings)
+    streamStartVideoSeconds = _streamStartVideoSeconds(ctx.config)
+
+    position = request.get("position")
+    if position is None:
+        positionSeconds = _batchSnapshot(ctx.config)["startSeconds"]
+    elif type(position) is str:
+        positionSeconds = _timeSeconds(position, fieldName="preview position")
+    elif type(position) in {int, float}:
+        positionSeconds = int(position)
+        if float(positionSeconds) != float(position) or positionSeconds < 0:
+            raise ValueError("Numeric preview position must be a non-negative whole number of seconds.")
+    else:
+        raise TypeError("Prompt preview position must be HH:MM:SS text or whole seconds.")
+
+    promptName = ctx.config.get("activePrompt")
+    if type(promptName) is not str:
+        raise ValueError("activePrompt must be configured.")
+    llmConfig = ctx.config.get("llm")
+    if not isinstance(llmConfig, dict) or type(llmConfig.get("provider")) is not str:
+        raise ValueError("llm.provider must be configured.")
+    providerOptions = llmConfig.get("providerOptions", {})
+    if not isinstance(providerOptions, dict):
+        raise ValueError("llm.providerOptions must be an object.")
+    model = llmConfig.get("model")
+    if model is not None and type(model) is not str:
+        raise ValueError("llm.model must be null or a string.")
+
+    chunks = _windowChunks(
+        positionSeconds=positionSeconds,
+        chunkSeconds=chunkSeconds,
+        offsetsSeconds=offsetsSeconds,
+        streamStartVideoSeconds=streamStartVideoSeconds,
+    )
+    window = {
+        "positionSeconds": positionSeconds,
+        "chunkSeconds": chunkSeconds,
+        "contextOffsetsSeconds": list(offsetsSeconds),
+        "streamStartVideoSeconds": streamStartVideoSeconds,
+        "chunks": chunks,
+        "chatPrepared": True,
+        "chatIncluded": includeChat,
+        "chatLayout": chatLayout,
+    }
+    inputValue = {
+        "batchId": f"preview-{newRuntimeId()}",
+        "windowIndex": 0,
+        "profile": profile,
+        "promptName": promptName,
+        "window": window,
+    }
+
+    preview = ctx.llm.prepareProcessing(
+        memoryKey="evilbirthday",
+        inputValue=inputValue,
+        buildQueryItemsCapabilityId="evilAnalysis.buildQueryItems@1",
+        buildQueryCapabilityId="evilAnalysis.buildQuery@1",
+        providerName=llmConfig["provider"],
+        model=model,
+        providerOptions=providerOptions,
+    )
+    if preview.query.formatId != "text/plain" or type(preview.query.payload) is not str:
+        raise RuntimeError("Evil Birthday prompt preview requires a text/plain string query.")
+
+    return {
+        "positionSeconds": positionSeconds,
+        "profile": _plain(profile),
+        "window": _plain(window),
+        "provider": preview.providerName,
+        "providerOwnerId": preview.providerOwnerId,
+        "model": model,
+        "providerOptions": _plain(preview.providerOptions),
+        "executionProfile": {
+            "contextWindowTokens": preview.executionProfile.contextWindowTokens,
+            "metadata": _plain(preview.executionProfile.metadata),
+        },
+        "inputTokens": preview.inputTokens,
+        "queryItems": [item.snapshot() for item in preview.queryItems],
+        "reusableQueryItems": [item.snapshot() for item in preview.reusableQueryItems],
+        "query": {
+            "formatId": preview.query.formatId,
+            "payload": preview.query.payload,
+            "metadata": _plain(preview.query.metadata),
+        },
+    }
+
+
 # Functions defined in the implementation module resolve globals in that module.
 # Patch the boundary adapters there so every registered analysis capability uses
 # the raw-chat -> semantic-interpretation path and optimized chat selector.
@@ -728,3 +826,4 @@ _implementation._budgetedChat = _budgetedChat
 
 def onLoad(ctx):
     _implementation.onLoad(ctx)
+    ctx.capabilities.register("evilAnalysis.previewPrompt@1", _previewPrompt)
