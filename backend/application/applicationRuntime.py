@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 1
+# file: backend/application/applicationRuntime.py ; version: 2
 from __future__ import annotations
 
 from copy import deepcopy
@@ -11,6 +11,7 @@ from backend.context.codeEntryContext import CodeEntryContext, CodeEntryIdentity
 from backend.io.managedIo import ManagedIo
 from backend.llm.streamingRuntime import LlmProviderRegistry, LlmProcessingPipeline
 from backend.orchestration.runtime import Job, OrchestrationUnit, OrchestrationUnitOutcome
+from backend.packs.runtime import PackLoader, PackResolver
 from backend.registration import RegistrationScope
 from backend.save import ApplicationStore, LoadedApplicationSave, SaveBundle
 from backend.tracing import TraceSinkDestination, Tracer
@@ -34,6 +35,7 @@ class ApplicationRuntime:
         application: Application | None = None,
         saveBundle: SaveBundle | None = None,
         applicationStore: ApplicationStore | None = None,
+        packResolver: PackResolver,
         config: dict[str, object] | None = None,
         tracer: Tracer | None = None,
     ) -> None:
@@ -46,6 +48,8 @@ class ApplicationRuntime:
 
         if applicationStore is not None and not isinstance(applicationStore, ApplicationStore):
             raise TypeError("applicationStore must be an ApplicationStore.")
+        if not isinstance(packResolver, PackResolver):
+            raise TypeError("packResolver must be a PackResolver.")
         self._applicationStore = applicationStore
         self._saveBundle = saveBundle
         if saveBundle is None:
@@ -80,6 +84,7 @@ class ApplicationRuntime:
             capabilityInvoker=lambda capabilityId, payload=None, memoryView=None: self.invokeCapability(capabilityId, payload, memoryView=memoryView),
             trace=lambda reason, attributes: self.trace(reason, attributes=attributes),
         )
+        self.packLoader = PackLoader(runtime=self, resolver=packResolver)
 
     @property
     def config(self) -> dict[str, object]:
@@ -97,6 +102,7 @@ class ApplicationRuntime:
         applicationStore: ApplicationStore,
         appPackId: str,
         applicationId: str,
+        packResolver: PackResolver,
         config: dict[str, object] | None = None,
         tracer: Tracer | None = None,
     ) -> tuple["ApplicationRuntime", LoadedApplicationSave]:
@@ -115,6 +121,7 @@ class ApplicationRuntime:
         runtime = cls(
             saveBundle=loaded.bundle,
             applicationStore=applicationStore,
+            packResolver=packResolver,
             config=config,
             tracer=tracer,
         )
