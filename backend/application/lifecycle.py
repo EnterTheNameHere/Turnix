@@ -1,7 +1,7 @@
-# file: backend/application/lifecycle.py ; version: 3
+# file: backend/application/lifecycle.py ; version: 4
 from __future__ import annotations
 
-from backend.packs.runtime import ManualActivationPlan, PackLoader
+from backend.packs.runtime import ManualActivationPlan
 from backend.application.applicationRuntime import ApplicationRuntime
 from backend.save import SaveBundle
 
@@ -11,8 +11,9 @@ __all__ = ["ApplicationLifecycle"]
 class ApplicationLifecycle:
     """Coordinates Pack activation, Application hooks, and persistence order.
 
-    Storage representation remains ApplicationRuntime/ApplicationStore responsibility,
-    while PackLoader owns mechanical CodeEntry hook invocation. This coordinator
+    Storage representation remains ApplicationRuntime/ApplicationStore responsibility.
+    ApplicationRuntime owns its PackLoader, which performs mechanical CodeEntry
+    hook invocation. This coordinator
     supplies the semantic ordering between those boundaries.
     """
 
@@ -21,7 +22,6 @@ class ApplicationLifecycle:
         cls,
         *,
         runtime: ApplicationRuntime,
-        packLoader: PackLoader,
         plan: ManualActivationPlan,
     ) -> SaveBundle:
         """Creates and publishes a new persistent Application, then starts its run."""
@@ -30,12 +30,12 @@ class ApplicationLifecycle:
 
         runtime.beginInitialization()
         try:
-            packLoader.activate(plan)
+            runtime.packLoader.activate(plan)
 
             root = runtime.applicationRun.application.committedState
             creationTransaction = root.openTransaction()
             try:
-                packLoader.invokeApplicationCreate(memoryView=creationTransaction)
+                runtime.packLoader.invokeApplicationCreate(memoryView=creationTransaction)
                 creationTransaction.commit()
             except Exception:
                 try:
@@ -47,15 +47,15 @@ class ApplicationLifecycle:
             accepted = runtime.saveApplication()
 
             beforeLoad = root.snapshot()
-            packLoader.invokeApplicationLoad()
+            runtime.packLoader.invokeApplicationLoad()
             if root.snapshot() != beforeLoad:
                 accepted = runtime.saveApplication()
 
             runtime.start()
-            packLoader.invokeApplicationRun()
+            runtime.packLoader.invokeApplicationRun()
             return accepted
         except Exception as lifecycleError:
-            cleanupErrors = cls._cleanupFailedStart(runtime=runtime, packLoader=packLoader)
+            cleanupErrors = cls._cleanupFailedStart(runtime=runtime)
             if cleanupErrors:
                 raise ExceptionGroup(
                     "Application creation failed and runtime cleanup also reported errors.",
@@ -78,19 +78,19 @@ class ApplicationLifecycle:
 
         runtime.beginInitialization()
         try:
-            packLoader.activate(plan)
+            runtime.packLoader.activate(plan)
 
             root = runtime.applicationRun.application.committedState
             beforeLoad = root.snapshot()
-            packLoader.invokeApplicationLoad()
+            runtime.packLoader.invokeApplicationLoad()
             if root.snapshot() != beforeLoad:
                 accepted = runtime.saveApplication()
 
             runtime.start()
-            packLoader.invokeApplicationRun()
+            runtime.packLoader.invokeApplicationRun()
             return accepted
         except Exception as lifecycleError:
-            cleanupErrors = cls._cleanupFailedStart(runtime=runtime, packLoader=packLoader)
+            cleanupErrors = cls._cleanupFailedStart(runtime=runtime, )
             if cleanupErrors:
                 raise ExceptionGroup(
                     "Application load failed and runtime cleanup also reported errors.",
@@ -102,11 +102,10 @@ class ApplicationLifecycle:
     def _cleanupFailedStart(
         *,
         runtime: ApplicationRuntime,
-        packLoader: PackLoader,
     ) -> list[Exception]:
         errors: list[Exception] = []
         try:
-            packLoader.close()
+            runtime.packLoader.close()
         except Exception as err:
             errors.append(err)
 
