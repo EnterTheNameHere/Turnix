@@ -1,4 +1,4 @@
-# file: backend/application/lifecycle.py ; version: 4
+# file: backend/application/lifecycle.py ; version: 5
 from __future__ import annotations
 
 from backend.packs.runtime import ManualActivationPlan
@@ -68,7 +68,6 @@ class ApplicationLifecycle:
         cls,
         *,
         runtime: ApplicationRuntime,
-        packLoader: PackLoader,
         plan: ManualActivationPlan,
     ) -> SaveBundle:
         """Runs loaded-Application lifecycle and starts a fresh ApplicationRun."""
@@ -90,7 +89,7 @@ class ApplicationLifecycle:
             runtime.packLoader.invokeApplicationRun()
             return accepted
         except Exception as lifecycleError:
-            cleanupErrors = cls._cleanupFailedStart(runtime=runtime, )
+            cleanupErrors = cls._cleanupFailedStart(runtime=runtime)
             if cleanupErrors:
                 raise ExceptionGroup(
                     "Application load failed and runtime cleanup also reported errors.",
