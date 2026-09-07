@@ -1,4 +1,4 @@
-# file: tests/backend/runtime/test_runtimeHost.py ; version: 2
+# file: tests/backend/runtime/test_runtimeHost.py ; version: 3
 import json
 from pathlib import Path
 
@@ -64,6 +64,9 @@ def test_runtime_host_identity_is_stable_and_distinct_per_host(tmp_path: Path):
     assert second.runtimeHostId
     assert first.runtimeHostId != second.runtimeHostId
     assert first.runtimeHostId == first.runtimeHostId
+
+    first.stop()
+    second.stop()
 
 
 def test_runtime_host_owns_multiple_independent_application_runtimes(tmp_path: Path):
