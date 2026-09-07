@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 18
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 19
 from __future__ import annotations
 
 import json
@@ -436,7 +436,11 @@ def _renderChatSpan(
     if kind == "emote":
         text = str(span.get("name", ""))
         count = span.get("count", 1)
-        return text if count == 1 else f"{text} ×{count}"
+        return (
+            text
+            if count == 1
+            else f"{repeatStartMarker}{text}{repeatEndMarker}×{count}"
+        )
     if kind == "composite":
         tokens = span.get("tokens", ())
         text = (
@@ -445,7 +449,11 @@ def _renderChatSpan(
             else ""
         )
         count = span.get("count", 1)
-        return text if count == 1 else f"{text} ×{count}"
+        return (
+            text
+            if count == 1
+            else f"{repeatStartMarker}{text}{repeatEndMarker}×{count}"
+        )
     if kind == "command":
         command = f"!{span.get('command', '')}"
         arguments = span.get("arguments", ())
@@ -470,7 +478,7 @@ def _renderChatSpan(
             if part
         )
         return (
-            f"{repeatStartMarker}{text}{repeatEndMarker} "
+            f"{repeatStartMarker}{text}{repeatEndMarker}"
             f"×{span.get('count', 1)}"
         )
     return ""
@@ -999,7 +1007,7 @@ def _renderPrompt(
     if includeChat:
         sections.append(
             "EVIDENCE FORMAT\n"
-            f"{repeatStartMarker}text{repeatEndMarker} ×N means the enclosed span occurred N consecutive times "
+            f"{repeatStartMarker}text{repeatEndMarker}×N means the enclosed span occurred N consecutive times "
             "inside one original chat message. The repeat delimiters are reserved renderer syntax and do not "
             "occur literally in the source chat.\n"
             "CHAT BURST: text ×N [..] represents N separate chat messages with the same or canonically "
