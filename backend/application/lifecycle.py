@@ -1,4 +1,4 @@
-# file: backend/application/lifecycle.py ; version: 5
+# file: backend/application/lifecycle.py ; version: 6
 from __future__ import annotations
 
 from backend.packs.runtime import ManualActivationPlan
@@ -102,17 +102,8 @@ class ApplicationLifecycle:
         *,
         runtime: ApplicationRuntime,
     ) -> list[Exception]:
-        errors: list[Exception] = []
         try:
-            runtime.packLoader.close()
+            runtime.close()
         except Exception as err:
-            errors.append(err)
-
-        try:
-            if runtime.applicationRun.active:
-                runtime.stop()
-            else:
-                runtime.abortInitialization()
-        except Exception as err:
-            errors.append(err)
-        return errors
+            return [err]
+        return []
