@@ -1,11 +1,11 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_applicationPersistence.py ; version: 1
+# file: tests/first_party/evilBirthdayAnalysis/test_applicationPersistence.py ; version: 2
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
 from backend.packs.runtime import ManualActivationPlan, PackResolver
-from backend.runtime.applicationOperations import ApplicationRuntimeOperations
+from backend.runtime.runtimeHost import RuntimeHost
 from backend.save import ApplicationStore
 
 
@@ -64,10 +64,11 @@ def _payload(config: dict[str, object]) -> dict[str, object]:
 def test_real_evil_chat_semantics_survive_filesystem_application_restart(tmp_path: Path):
     store = ApplicationStore(tmp_path / "saves")
     resolver = PackResolver(roots=(_REPO_ROOT / "first-party",))
-    operations = ApplicationRuntimeOperations(
+    host = RuntimeHost(
         applicationStore=store,
         packResolver=resolver,
     )
+    host.start()
     plan = ManualActivationPlan(
         packIds=(
             "evilBirthdayAnalysis",
@@ -77,13 +78,13 @@ def test_real_evil_chat_semantics_survive_filesystem_application_restart(tmp_pat
     config = _config(tmp_path)
     payload = _payload(config)
 
-    first = operations.createApplication(
+    first = host.createApplication(
         appPackId="evilBirthdayAnalysis",
         plan=plan,
         config=config,
     )
-    applicationId = first.applicationId
-    firstResult = first.runtime.invokeCapability(
+    applicationId = first.applicationRun.application.applicationId
+    firstResult = first.invokeCapability(
         "evilAnalysis.chatInterpret@1",
         payload,
     )
@@ -95,24 +96,24 @@ def test_real_evil_chat_semantics_survive_filesystem_application_restart(tmp_pat
         },
     ]
 
-    firstRoot = first.runtime.applicationRun.application.committedState
+    firstRoot = first.applicationRun.application.committedState
     firstMetadata = firstRoot.metadata(_SEMANTIC_ADDRESS)
     assert firstRoot.revisionId(_SEMANTIC_ADDRESS) == 1
-    first.runtime.saveApplication()
-    first.close()
+    first.saveApplication()
+    host.closeApplicationRun(first.applicationRun.applicationRunId)
 
-    second = operations.loadApplication(
+    second = host.loadApplication(
         appPackId="evilBirthdayAnalysis",
         applicationId=applicationId,
         plan=plan,
         config=config,
     )
-    secondRoot = second.runtime.applicationRun.application.committedState
+    secondRoot = second.applicationRun.application.committedState
 
     assert secondRoot.revisionId(_SEMANTIC_ADDRESS) == 1
     assert secondRoot.metadata(_SEMANTIC_ADDRESS) == firstMetadata
 
-    secondResult = second.runtime.invokeCapability(
+    secondResult = second.invokeCapability(
         "evilAnalysis.chatInterpret@1",
         payload,
     )
@@ -127,4 +128,5 @@ def test_real_evil_chat_semantics_survive_filesystem_application_restart(tmp_pat
         },
     ]
 
-    second.close()
+    host.closeApplicationRun(second.applicationRun.applicationRunId)
+    host.stop()
