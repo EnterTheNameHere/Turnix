@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 5
+# file: backend/application/applicationRuntime.py ; version: 6
 from __future__ import annotations
 
 from copy import deepcopy
@@ -419,19 +419,35 @@ class ApplicationRuntime:
         with self._lane:
             self.requireActive()
             job = Job.new()
+            job.start()
             unit = OrchestrationUnit.mutation(
                 applicationRunId=self.applicationRun.applicationRunId,
                 transactionBase=self.applicationRun.application.committedState,
             )
-            job.start()
+            orchestrationAttributes = {
+                "jobId": job.jobId,
+                "orchestrationUnitId": unit.orchestrationUnitId,
+                "applicationId": self.applicationRun.application.applicationId,
+                "applicationRunId": unit.applicationRunId,
+                "capabilityId": capabilityId,
+                "workKind": "job-capability",
+            }
+            self.trace(
+                "OrchestrationUnitCreated",
+                attributes=orchestrationAttributes,
+            )
+            self.trace(
+                "OrchestrationUnitTransactionOpened",
+                attributes=orchestrationAttributes,
+            )
+            unit.start()
+            self.trace(
+                "OrchestrationUnitStarted",
+                attributes=orchestrationAttributes,
+            )
             self.trace(
                 "job-started",
-                attributes={
-                    "jobId": job.jobId,
-                    "orchestrationUnitId": unit.orchestrationUnitId,
-                    "applicationRunId": unit.applicationRunId,
-                    "capabilityId": capabilityId,
-                },
+                attributes=orchestrationAttributes,
             )
             try:
                 result = self.invokeCapability(
@@ -441,29 +457,39 @@ class ApplicationRuntime:
                 )
                 unit.commitMutation()
             except Exception as err:
+                mutationWasResolved = unit.mutationResolved
                 unit.finish(OrchestrationUnitOutcome.FAILED)
+                if not mutationWasResolved:
+                    self.trace(
+                        "OrchestrationUnitTransactionAborted",
+                        attributes=orchestrationAttributes,
+                    )
+                self.trace(
+                    "OrchestrationUnitFailed",
+                    message=str(err),
+                    attributes=orchestrationAttributes,
+                    level="error",
+                )
                 job.fail(err)
                 self.trace(
                     "job-failed",
                     message=str(err),
-                    attributes={
-                        "jobId": job.jobId,
-                        "orchestrationUnitId": unit.orchestrationUnitId,
-                        "applicationRunId": unit.applicationRunId,
-                        "capabilityId": capabilityId,
-                    },
+                    attributes=orchestrationAttributes,
                     level="error",
                 )
             else:
+                self.trace(
+                    "OrchestrationUnitTransactionCommitted",
+                    attributes=orchestrationAttributes,
+                )
                 unit.finish(OrchestrationUnitOutcome.COMPLETED)
+                self.trace(
+                    "OrchestrationUnitCompleted",
+                    attributes=orchestrationAttributes,
+                )
                 job.succeed(result)
                 self.trace(
                     "job-completed",
-                    attributes={
-                        "jobId": job.jobId,
-                        "orchestrationUnitId": unit.orchestrationUnitId,
-                        "applicationRunId": unit.applicationRunId,
-                        "capabilityId": capabilityId,
-                    },
+                    attributes=orchestrationAttributes,
                 )
             return job
