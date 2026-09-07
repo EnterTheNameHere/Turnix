@@ -1,8 +1,8 @@
-# file: backend/application/lifecycle.py ; version: 1
+# file: backend/application/lifecycle.py ; version: 2
 from __future__ import annotations
 
 from backend.packs.runtime import ManualActivationPlan, PackLoader
-from backend.runtime.runtimeHost import RuntimeHost
+from backend.application.applicationRuntime import ApplicationRuntime
 from backend.save import SaveBundle
 
 __all__ = ["ApplicationLifecycle"]
@@ -11,7 +11,7 @@ __all__ = ["ApplicationLifecycle"]
 class ApplicationLifecycle:
     """Coordinates Pack activation, Application hooks, and persistence order.
 
-    Storage representation remains RuntimeHost/ApplicationStore responsibility,
+    Storage representation remains ApplicationRuntime/ApplicationStore responsibility,
     while PackLoader owns mechanical CodeEntry hook invocation. This coordinator
     supplies the semantic ordering between those boundaries.
     """
@@ -20,19 +20,19 @@ class ApplicationLifecycle:
     def create(
         cls,
         *,
-        host: RuntimeHost,
+        runtime: ApplicationRuntime,
         packLoader: PackLoader,
         plan: ManualActivationPlan,
     ) -> SaveBundle:
         """Creates and publishes a new persistent Application, then starts its run."""
-        if host.acceptedSaveBundle is not None:
-            raise RuntimeError("Application creation requires a host with no accepted SaveBundle.")
+        if runtime.acceptedSaveBundle is not None:
+            raise RuntimeError("Application creation requires a ApplicationRuntime with no accepted SaveBundle.")
 
-        host.beginInitialization()
+        runtime.beginInitialization()
         try:
             packLoader.activate(plan)
 
-            root = host.applicationRun.application.committedState
+            root = runtime.applicationRun.application.committedState
             creationTransaction = root.openTransaction()
             try:
                 packLoader.invokeApplicationCreate(memoryView=creationTransaction)
@@ -44,18 +44,18 @@ class ApplicationLifecycle:
                     pass
                 raise
 
-            accepted = host.saveApplication()
+            accepted = runtime.saveApplication()
 
             beforeLoad = root.snapshot()
             packLoader.invokeApplicationLoad()
             if root.snapshot() != beforeLoad:
-                accepted = host.saveApplication()
+                accepted = runtime.saveApplication()
 
-            host.start()
+            runtime.start()
             packLoader.invokeApplicationRun()
             return accepted
         except Exception as lifecycleError:
-            cleanupErrors = cls._cleanupFailedStart(host=host, packLoader=packLoader)
+            cleanupErrors = cls._cleanupFailedStart(runtime=runtime, packLoader=packLoader)
             if cleanupErrors:
                 raise ExceptionGroup(
                     "Application creation failed and runtime cleanup also reported errors.",
@@ -67,30 +67,30 @@ class ApplicationLifecycle:
     def load(
         cls,
         *,
-        host: RuntimeHost,
+        runtime: ApplicationRuntime,
         packLoader: PackLoader,
         plan: ManualActivationPlan,
     ) -> SaveBundle:
         """Runs loaded-Application lifecycle and starts a fresh ApplicationRun."""
-        accepted = host.acceptedSaveBundle
+        accepted = runtime.acceptedSaveBundle
         if accepted is None:
-            raise RuntimeError("Application loading requires a host restored from an accepted SaveBundle.")
+            raise RuntimeError("Application loading requires a ApplicationRuntime restored from an accepted SaveBundle.")
 
-        host.beginInitialization()
+        runtime.beginInitialization()
         try:
             packLoader.activate(plan)
 
-            root = host.applicationRun.application.committedState
+            root = runtime.applicationRun.application.committedState
             beforeLoad = root.snapshot()
             packLoader.invokeApplicationLoad()
             if root.snapshot() != beforeLoad:
-                accepted = host.saveApplication()
+                accepted = runtime.saveApplication()
 
-            host.start()
+            runtime.start()
             packLoader.invokeApplicationRun()
             return accepted
         except Exception as lifecycleError:
-            cleanupErrors = cls._cleanupFailedStart(host=host, packLoader=packLoader)
+            cleanupErrors = cls._cleanupFailedStart(runtime=runtime, packLoader=packLoader)
             if cleanupErrors:
                 raise ExceptionGroup(
                     "Application load failed and runtime cleanup also reported errors.",
@@ -101,7 +101,7 @@ class ApplicationLifecycle:
     @staticmethod
     def _cleanupFailedStart(
         *,
-        host: RuntimeHost,
+        runtime: ApplicationRuntime,
         packLoader: PackLoader,
     ) -> list[Exception]:
         errors: list[Exception] = []
@@ -111,10 +111,10 @@ class ApplicationLifecycle:
             errors.append(err)
 
         try:
-            if host.applicationRun.active:
-                host.stop()
+            if runtime.applicationRun.active:
+                runtime.stop()
             else:
-                host.abortInitialization()
+                runtime.abortInitialization()
         except Exception as err:
             errors.append(err)
         return errors
