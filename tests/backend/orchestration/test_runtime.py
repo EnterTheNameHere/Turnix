@@ -1,4 +1,4 @@
-# file: tests/backend/orchestration/test_runtime.py ; version: 1
+# file: tests/backend/orchestration/test_runtime.py ; version: 2
 import pytest
 
 from backend.orchestration.runtime import Job, JobState, OrchestrationUnit, OrchestrationUnitOutcome
@@ -29,6 +29,7 @@ def test_job_constructor_rejects_invalid_runtime_state():
 
 def test_orchestration_unit_requires_declared_outcome():
     unit = OrchestrationUnit.new()
+    unit.start()
 
     with pytest.raises(TypeError, match="OrchestrationUnit outcome"):
         unit.finish("Completed")  # type: ignore[arg-type]
@@ -45,6 +46,7 @@ def test_mutation_orchestration_unit_requires_explicit_successful_acceptance():
         transactionBase=root,
     )
     assert unit.memoryView is not None
+    unit.start()
 
     child = unit.memoryView.openTransaction()
     child.set("test/value", {"accepted": True})
@@ -79,6 +81,7 @@ def test_non_completed_orchestration_unit_discards_unresolved_mutation(outcome):
         transactionBase=root,
     )
     assert unit.memoryView is not None
+    unit.start()
 
     child = unit.memoryView.openTransaction()
     child.set("test/value", "must-not-propagate")
@@ -98,6 +101,7 @@ def test_orchestration_unit_outcome_remains_distinct_from_transaction_resolution
         transactionBase=root,
     )
 
+    unit.start()
     unit.abortMutation()
     assert unit.outcome is None
     assert unit.mutationResolved is True
