@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 18
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 19
 from __future__ import annotations
 
 import importlib.util
@@ -1666,7 +1666,7 @@ def test_semantic_unit_owner_compacts_presented_messages_without_raw_duplication
     assert sections == [
         "CHRONOLOGICAL EVIDENCE\n"
         "[00:00:55]\n"
-        "CHAT SEMANTIC: semanticClass=praise ×3 [2 users]"
+        "CHAT SEMANTICS: praise ×3 [2 users]"
     ]
     assert "GIGAEVIL" not in sections[0]
     assert "EVILLOVE" not in sections[0]
@@ -1697,7 +1697,7 @@ def test_partial_semantic_group_selection_counts_only_presented_contribution():
     assert sections == [
         "CHRONOLOGICAL EVIDENCE\n"
         "[00:00:56]\n"
-        "CHAT SEMANTIC: semanticClass=praise ×1 [1 user]"
+        "CHAT SEMANTICS: praise"
     ]
     assert "×3" not in sections[0]
 
@@ -1728,8 +1728,7 @@ def test_multiple_semantic_meanings_from_one_message_are_each_presented_once():
     assert sections == [
         "CHRONOLOGICAL EVIDENCE\n"
         "[00:00:57]\n"
-        "CHAT SEMANTIC: semanticClass=negative ×2 [1 user]\n"
-        "CHAT SEMANTIC: semanticClass=praise ×1 [1 user]"
+        "CHAT SEMANTICS: negative ×2; praise"
     ]
     assert "semantic source form" not in sections[0]
 
@@ -1882,7 +1881,7 @@ def test_separate_layout_threads_configured_repeat_markers_into_chat_lines():
 
 @pytest.mark.parametrize(
     "event_type",
-    ["subscriptionGiftBatch", "subscriptionGift"],
+    ["subscription", "subscriptionGiftBatch", "subscriptionGift"],
 )
 def test_subscription_gift_generated_events_are_not_prompt_eligible(event_type: str):
     analysis_snapshot = {
@@ -1911,3 +1910,90 @@ def test_non_generated_chat_remains_prompt_eligible():
             "includedInText": True,
         }
     ) is True
+
+
+
+def test_reaction_only_surface_messages_share_one_summary_line():
+    items = [
+        QueryItem(
+            itemId=f"chat:{line_number}",
+            kind="chat",
+            content=content,
+            metadata={
+                "streamStartSeconds": 575.0,
+                "lineNumber": line_number,
+                "username": username,
+                "sourceUsername": username,
+                "analysis": {
+                    "kind": "userMessage",
+                    "streamTime": "00:09:35",
+                    "spans": [{"kind": "emote", "name": content, "count": 1}],
+                },
+            },
+        )
+        for line_number, username, content in [
+            (1, "alice", "Lol"),
+            (2, "bob", "OK"),
+            (3, "carol", "RIPBOZO"),
+        ]
+    ]
+
+    sections = analysis._evidenceSections(
+        transcriptItems=[],
+        chatItems=items,
+        includeChat=True,
+        chatLayout="interleaved",
+    )
+
+    assert sections == [
+        "CHRONOLOGICAL EVIDENCE\n"
+        "[00:09:35]\n"
+        "CHAT REACTIONS: Lol; OK; RIPBOZO"
+    ]
+
+
+def test_semantic_owned_reaction_is_not_duplicated_in_surface_reactions():
+    owner = _semantic_group_owner(line_counts=[(130, 1)], semantic_class="affection")
+    semantic = _persistent_chat_item(
+        line_number=130,
+        username="alice",
+        content="vedalHeart",
+        second=58,
+        aggregate_entry={
+            "kind": "message",
+            "lineNumber": 130,
+            "semantic": {"address": "evilanalysis/chat/line/130/semantic"},
+        },
+        presentation_owners=[owner],
+    )
+    surface = QueryItem(
+        itemId="chat:131",
+        kind="chat",
+        content="modCheck",
+        metadata={
+            "streamStartSeconds": 58.0,
+            "lineNumber": 131,
+            "username": "bob",
+            "sourceUsername": "bob",
+            "analysis": {
+                "kind": "userMessage",
+                "streamTime": "00:00:58",
+                "spans": [{"kind": "emote", "name": "modCheck", "count": 1}],
+            },
+        },
+    )
+
+    sections = analysis._evidenceSections(
+        transcriptItems=[],
+        chatItems=[semantic, surface],
+        includeChat=True,
+        chatLayout="interleaved",
+    )
+
+    assert sections == [
+        "CHRONOLOGICAL EVIDENCE\n"
+        "[00:00:58]\n"
+        "CHAT SEMANTICS: affection\n"
+        "CHAT REACTIONS: modCheck"
+    ]
+    assert "vedalHeart" not in sections[0]
