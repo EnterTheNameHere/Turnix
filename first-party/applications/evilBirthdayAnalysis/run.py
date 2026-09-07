@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 12
+# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 13
 from __future__ import annotations
 
 import argparse
@@ -69,6 +69,14 @@ def main() -> int:
         help="Load and run one existing durable Application by exact applicationId.",
     )
     parser.add_argument(
+        "--preview-prompt",
+        metavar="HH:MM:SS",
+        help=(
+            "Prepare and print one exact model-facing analysis prompt at the requested "
+            "stream position without invoking model generation."
+        ),
+    )
+    parser.add_argument(
         "--saves-root",
         default=str(REPO_ROOT / "saves"),
         help="Application persistence root. Defaults to the repository saves/ directory.",
@@ -113,6 +121,41 @@ def main() -> int:
             sys.stdout.flush()
 
     try:
+        if args.preview_prompt is not None:
+            job = runtime.runJob(
+                "evilAnalysis.previewPrompt@1",
+                {"position": args.preview_prompt},
+            )
+            if job.authoritativeStateAccepted:
+                savedBundle = runtime.saveApplication()
+                sys.stdout.write(
+                    "Saved Application "
+                    f"{runtime.applicationRun.application.applicationId} "
+                    f"generation {savedBundle.generation}.\n"
+                )
+            if job.error is not None:
+                raise job.error
+            preview = job.result
+            if not isinstance(preview, dict):
+                raise RuntimeError("Prompt preview returned an invalid result.")
+            query = preview.get("query")
+            if not isinstance(query, dict) or type(query.get("payload")) is not str:
+                raise RuntimeError("Prompt preview did not return exact text/plain payload.")
+            sys.stdout.write(
+                f"\nPrompt preview at {args.preview_prompt}\n"
+                f"Provider: {preview.get('provider')}\n"
+                f"Model: {preview.get('model')}\n"
+                f"Input tokens: {preview.get('inputTokens')}\n"
+                f"Context window: "
+                f"{preview.get('executionProfile', {}).get('contextWindowTokens') if isinstance(preview.get('executionProfile'), dict) else None}\n"
+                "\n===== MODEL-FACING PROMPT =====\n"
+            )
+            sys.stdout.write(query["payload"])
+            if not query["payload"].endswith("\n"):
+                sys.stdout.write("\n")
+            sys.stdout.write("===== END MODEL-FACING PROMPT =====\n")
+            return 0
+
         job = runtime.runJob("evilAnalysis.run@1", {"streamObserver": observe})
         result = job.result
         if isinstance(result, dict):
