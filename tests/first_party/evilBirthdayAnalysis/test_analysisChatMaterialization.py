@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 20
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 21
 from __future__ import annotations
 
 import importlib.util
@@ -49,8 +49,8 @@ class _MaterializationCapabilities:
                 "chatStartTime": "19:08:55",
                 "streamStartTime": "00:08:53",
                 "streamStartVideoSeconds": 533.0,
-                "wallClockAtMediaZero": "2024-03-25 19:08:55",
-                "wallClockAtStreamZero": "2024-03-25 19:17:48",
+                "wallClockAtMediaZero": "2024-03-25 19:00:02",
+                "wallClockAtStreamZero": "2024-03-25 19:08:55",
                 "videoStartSeconds": float(startVideo),
                 "videoEndSeconds": float(endVideo),
                 "streamStartSeconds": float(streamStart),
