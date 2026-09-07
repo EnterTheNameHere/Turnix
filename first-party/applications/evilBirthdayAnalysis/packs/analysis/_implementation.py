@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 20
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 21
 from __future__ import annotations
 
 import json
@@ -517,6 +517,96 @@ def _chatPresentationContent(
     return item.content
 
 
+def _reactionOnlySpan(span: Mapping[str, object]) -> bool:
+    kind = span.get("kind")
+    if kind in {"emote", "composite"}:
+        return True
+    if kind != "repeat":
+        return False
+    nested = span.get("spans")
+    return (
+        isinstance(nested, Sequence)
+        and not isinstance(nested, (str, bytes))
+        and bool(nested)
+        and all(isinstance(item, Mapping) and _reactionOnlySpan(item) for item in nested)
+    )
+
+
+def _reactionOnlyItem(item: QueryItem) -> bool:
+    analysis = item.metadata.get("analysis")
+    if not isinstance(analysis, Mapping) or analysis.get("kind") != "userMessage":
+        return False
+    spans = analysis.get("spans")
+    return (
+        isinstance(spans, Sequence)
+        and not isinstance(spans, (str, bytes))
+        and bool(spans)
+        and all(isinstance(span, Mapping) and _reactionOnlySpan(span) for span in spans)
+    )
+
+
+def _reactionOnlyBurst(value: Mapping[str, object]) -> bool:
+    spans = value.get("canonicalSpans")
+    return (
+        isinstance(spans, Sequence)
+        and not isinstance(spans, (str, bytes))
+        and bool(spans)
+        and all(isinstance(span, Mapping) and _reactionOnlySpan(span) for span in spans)
+    )
+
+
+def _semanticMeaningLabel(meaning: Mapping[str, object]) -> str:
+    fields = {
+        key: value
+        for key, value in meaning.items()
+        if key != "classificationSource"
+    }
+    if set(fields) == {"semanticClass"}:
+        return str(fields["semanticClass"])
+    return _semanticMeaningText(meaning)
+
+
+def _semanticGroupFragment(
+    meaning: Mapping[str, object],
+    contributions: Sequence[tuple[QueryItem, int]],
+) -> str:
+    totalCount = sum(count for _item, count in contributions)
+    uniqueItems = {item.itemId for item, _count in contributions}
+    sourceAuthors = [
+        sourceAuthor
+        for item, _count in contributions
+        if type(sourceAuthor := item.metadata.get("sourceUsername")) is str
+    ]
+    messageCount = len(uniqueItems)
+    label = _semanticMeaningLabel(meaning)
+    countText = "" if totalCount == 1 else f" ×{totalCount}"
+    if len(sourceAuthors) != len(contributions):
+        return f"{label}{countText} [{messageCount} messages]"
+    uniqueAuthors = len({author.casefold() for author in sourceAuthors})
+    if messageCount == 1 and uniqueAuthors == 1:
+        return f"{label}{countText}"
+    if uniqueAuthors == messageCount:
+        return f"{label}{countText} [{uniqueAuthors} users]"
+    return f"{label}{countText} [{messageCount} messages; {uniqueAuthors} users]"
+
+
+def _reactionGroupFragment(content: str, group: Sequence[QueryItem]) -> str:
+    count = len(group)
+    if count <= 1:
+        return content
+    sourceAuthors = [
+        sourceAuthor
+        for item in group
+        if type(sourceAuthor := item.metadata.get("sourceUsername")) is str
+    ]
+    if len(sourceAuthors) != count:
+        return f"{content} ×{count} [{count} messages]"
+    uniqueAuthors = len({author.casefold() for author in sourceAuthors})
+    if uniqueAuthors == count:
+        return f"{content} ×{count} [{uniqueAuthors} users]"
+    return f"{content} ×{count} [{count} messages; {uniqueAuthors} users]"
+
+
 def _persistentChatAggregateEntry(item: QueryItem) -> tuple[str, Mapping[str, object]] | None:
     """Returns persisted same-second aggregate entry when this QueryItem has one."""
     memory = item.metadata.get("memory")
@@ -925,6 +1015,8 @@ def _evidenceSections(
                 semanticGroupsByAnchor.setdefault(anchorItem.itemId, []).append(group)
 
             lines = [f"[{streamTime}]"]
+            semanticFragments: list[str] = []
+            reactionFragments: list[str] = []
             for item in bucketItems:
                 if item.kind == "transcript":
                     lines.append(f"EVIL: {item.content}")
@@ -940,14 +1032,18 @@ def _evidenceSections(
                     if completeBurst is not None:
                         burstValue, burstGroup = completeBurst
                         if item is burstGroup[0]:
-                            lines.append(_renderPersistentBurst(burstValue, burstGroup))
+                            renderedBurst = _renderPersistentBurst(burstValue, burstGroup)
+                            if _reactionOnlyBurst(burstValue):
+                                reactionFragments.append(renderedBurst.removeprefix("CHAT BURST: "))
+                            else:
+                                lines.append(renderedBurst)
                         consumedChatIds.update(groupItem.itemId for groupItem in burstGroup)
                         continue
 
                 if item.itemId in semanticOwnedItemIds:
                     for group in semanticGroupsByAnchor.get(item.itemId, []):
-                        lines.append(
-                            _renderSemanticGroup(
+                        semanticFragments.append(
+                            _semanticGroupFragment(
                                 group["meaning"],
                                 group["contributions"],
                             )
@@ -968,7 +1064,10 @@ def _evidenceSections(
                 else:
                     group = fallbackGroups.get(content, [])
                 if len(group) <= 1:
-                    lines.append(f"CHAT {_chatAuthor(item)}: {content}")
+                    if _reactionOnlyItem(item):
+                        reactionFragments.append(content)
+                    else:
+                        lines.append(f"CHAT {_chatAuthor(item)}: {content}")
                     continue
 
                 consumedChatIds.update(groupItem.itemId for groupItem in group)
@@ -985,7 +1084,15 @@ def _evidenceSections(
                     suffix = f"[{uniqueAuthors} users]"
                 else:
                     suffix = f"[{count} messages; {uniqueAuthors} users]"
-                lines.append(f"CHAT: {content} ×{count} {suffix}")
+                if all(_reactionOnlyItem(groupItem) for groupItem in group):
+                    reactionFragments.append(_reactionGroupFragment(content, group))
+                else:
+                    lines.append(f"CHAT: {content} ×{count} {suffix}")
+
+            if semanticFragments:
+                lines.append("CHAT SEMANTICS: " + "; ".join(semanticFragments))
+            if reactionFragments:
+                lines.append("CHAT REACTIONS: " + "; ".join(reactionFragments))
 
             if len(lines) > 1:
                 renderedBuckets.append("\n".join(lines))
