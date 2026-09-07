@@ -1,4 +1,4 @@
-# file: tests/backend/runtime/test_runtimeHost.py ; version: 6
+# file: tests/backend/runtime/test_runtimeHost.py ; version: 7
 from pathlib import Path
 
 import pytest
@@ -20,7 +20,7 @@ class RaisingTracer:
 
 
 def test_application_run_is_non_restartable_and_requires_active_work():
-    host = RuntimeHost()
+    host = RuntimeHost(appPackId="test.app")
     assert host.applicationRun.state is ApplicationRunState.CREATED
 
     with pytest.raises(RuntimeError):
@@ -37,7 +37,7 @@ def test_application_run_is_non_restartable_and_requires_active_work():
 
 def test_runtime_config_is_detached_from_caller_and_public_snapshots():
     source = {"nested": {"value": 1}}
-    host = RuntimeHost(config=source)
+    host = RuntimeHost(appPackId="test.app", config=source)
     source["nested"]["value"] = 2
     assert host.config == {"nested": {"value": 1}}
 
@@ -47,7 +47,7 @@ def test_runtime_config_is_detached_from_caller_and_public_snapshots():
 
 
 def test_non_activation_context_rejects_registration():
-    host = RuntimeHost()
+    host = RuntimeHost(appPackId="test.app")
     host.start()
     identity = CodeEntryIdentity(
         applicationId=host.applicationRun.application.applicationId,
@@ -72,7 +72,7 @@ def test_non_activation_context_rejects_registration():
 
 
 def test_trace_publication_failure_does_not_change_runtime_lifecycle():
-    host = RuntimeHost(tracer=RaisingTracer())
+    host = RuntimeHost(appPackId="test.app", tracer=RaisingTracer())
 
     host.start()
     assert host.applicationRun.state is ApplicationRunState.ACTIVE
@@ -84,7 +84,7 @@ def test_trace_publication_failure_does_not_change_runtime_lifecycle():
 
 
 def test_contexts_share_application_run_authoritative_memory():
-    host = RuntimeHost()
+    host = RuntimeHost(appPackId="test.app")
     host.start()
     identity = CodeEntryIdentity(
         applicationId=host.applicationRun.application.applicationId,
@@ -128,7 +128,7 @@ def test_contexts_share_application_run_authoritative_memory():
 
 
 def test_save_bundle_rehydrates_same_application_into_new_run():
-    firstHost = RuntimeHost()
+    firstHost = RuntimeHost(appPackId="test.app")
     firstHost.start()
     try:
         firstApplicationId = firstHost.applicationRun.application.applicationId
@@ -180,7 +180,7 @@ def test_save_bundle_rehydrates_same_application_into_new_run():
 
 
 def test_runtime_host_rejects_application_and_save_bundle_together():
-    source = RuntimeHost()
+    source = RuntimeHost(appPackId="test.app")
     bundle = source.captureSaveBundle()
 
     with pytest.raises(ValueError, match="either application or saveBundle"):
@@ -192,7 +192,7 @@ def test_runtime_host_rejects_application_and_save_bundle_together():
 
 
 def test_capability_memory_write_nests_under_supplied_transaction():
-    host = RuntimeHost()
+    host = RuntimeHost(appPackId="test.app")
     host.start()
     identity = CodeEntryIdentity(
         applicationId=host.applicationRun.application.applicationId,
