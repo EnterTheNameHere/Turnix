@@ -1,4 +1,4 @@
-# file: tests/backend/llm/test_processingPipeline.py ; version: 4
+# file: tests/backend/llm/test_processingPipeline.py ; version: 5
 import pytest
 
 from backend.llm.errors import LlmProviderProtocolError
@@ -250,7 +250,7 @@ def test_execution_profile_is_resolved_before_query_item_selection_and_building(
     assert seenStages == ["profile", "items", "filter", "query", "stream"]
 
 
-def test_reused_query_item_identity_rejects_content_drift():
+def test_reused_query_item_identity_updates_current_snapshot_without_rewriting_history():
     state = CommittedValueLayer()
     content = {"value": "first"}
 
@@ -262,7 +262,19 @@ def test_reused_query_item_identity_rejects_content_drift():
         raise AssertionError(capabilityId)
 
     pipeline = LlmProcessingPipeline(providers=_providers(), state=state, capabilityInvoker=invoke)
-    pipeline.runProcessing(
+    first = pipeline.runProcessing(
+        memoryKey="identity",
+        inputValue={},
+        buildQueryItemsCapabilityId="build-items@1",
+        buildQueryCapabilityId="build-query@1",
+        providerName="good",
+    )
+    firstRunAddress = f"processing/identity/runs/{first.processingRunId}"
+    firstRun = state.load(firstRunAddress)
+    assert firstRun["acceptedQueryItems"][0]["content"] == "first"
+
+    content["value"] = "changed"
+    second = pipeline.runProcessing(
         memoryKey="identity",
         inputValue={},
         buildQueryItemsCapabilityId="build-items@1",
@@ -270,17 +282,12 @@ def test_reused_query_item_identity_rejects_content_drift():
         providerName="good",
     )
 
-    content["value"] = "changed"
-    with pytest.raises(RuntimeError, match="different content"):
-        pipeline.runProcessing(
-            memoryKey="identity",
-            inputValue={},
-            buildQueryItemsCapabilityId="build-items@1",
-            buildQueryCapabilityId="build-query@1",
-            providerName="good",
-        )
-
+    currentAddress = pipeline._queryItemAddress("identity", "stable-id")
+    assert state.load(currentAddress)["content"] == "changed"
     assert state.load("processing/identity/currentqueryitems") == ["stable-id"]
+    assert state.load(firstRunAddress)["acceptedQueryItems"][0]["content"] == "first"
+    secondRun = state.load(f"processing/identity/runs/{second.processingRunId}")
+    assert secondRun["acceptedQueryItems"][0]["content"] == "changed"
 
 
 def test_observer_failure_is_evidence_not_processing_failure():
