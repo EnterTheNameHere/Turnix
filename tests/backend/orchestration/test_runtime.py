@@ -1,4 +1,4 @@
-# file: tests/backend/orchestration/test_runtime.py ; version: 2
+# file: tests/backend/orchestration/test_runtime.py ; version: 3
 import pytest
 
 from backend.orchestration.runtime import Job, JobState, OrchestrationUnit, OrchestrationUnitOutcome
@@ -108,3 +108,28 @@ def test_orchestration_unit_outcome_remains_distinct_from_transaction_resolution
 
     unit.finish(OrchestrationUnitOutcome.COMPLETED)
     assert unit.outcome is OrchestrationUnitOutcome.COMPLETED
+
+
+def test_mutation_orchestration_unit_can_nest_under_existing_parent_transaction():
+    root = CommittedValueLayer()
+    parent = root.openTransaction()
+    unit = OrchestrationUnit.mutation(
+        applicationRunId="application-run",
+        transactionBase=parent,
+    )
+    unit.start()
+    assert unit.memoryView is not None
+
+    child = unit.memoryView.openTransaction()
+    child.set("test/value", "nested")
+    child.commit()
+
+    unit.commitMutation()
+    unit.finish(OrchestrationUnitOutcome.COMPLETED)
+
+    assert root.load("test/value") is MISSING
+    assert parent.load("test/value") == "nested"
+
+    parent.commit()
+
+    assert root.load("test/value") == "nested"
