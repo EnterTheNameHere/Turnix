@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 4
+# file: backend/runtime/runtimeHost.py ; version: 5
 from __future__ import annotations
 
 from copy import deepcopy
@@ -12,7 +12,7 @@ from backend.io.managedIo import ManagedIo
 from backend.llm.streamingRuntime import LlmProviderRegistry, LlmProcessingPipeline
 from backend.orchestration.runtime import Job, OrchestrationUnit, OrchestrationUnitOutcome
 from backend.registration import RegistrationScope
-from backend.save import SaveBundle
+from backend.save import ApplicationStore, LoadedApplicationSave, SaveBundle
 from backend.tracing import TraceSinkDestination, Tracer
 from backend.values.committed import CommittedValueLayer, CommittedValueTransaction
 
@@ -33,6 +33,7 @@ class RuntimeHost:
         appPackId: str | None = None,
         application: Application | None = None,
         saveBundle: SaveBundle | None = None,
+        applicationStore: ApplicationStore | None = None,
         config: dict[str, object] | None = None,
         tracer: Tracer | None = None,
     ) -> None:
@@ -43,6 +44,9 @@ class RuntimeHost:
         if saveBundle is not None and appPackId is not None and saveBundle.appPackId != appPackId:
             raise ValueError("RuntimeHost appPackId does not match supplied SaveBundle.")
 
+        if applicationStore is not None and not isinstance(applicationStore, ApplicationStore):
+            raise TypeError("applicationStore must be an ApplicationStore.")
+        self._applicationStore = applicationStore
         self._saveBundle = saveBundle
         if saveBundle is None:
             if application is None:
@@ -85,6 +89,80 @@ class RuntimeHost:
     def config(self) -> dict[str, object]:
         return deepcopy(self._config)
 
+    @classmethod
+    def loadApplication(
+        cls,
+        *,
+        applicationStore: ApplicationStore,
+        appPackId: str,
+        applicationId: str,
+        config: dict[str, object] | None = None,
+        tracer: Tracer | None = None,
+    ) -> tuple["RuntimeHost", LoadedApplicationSave]:
+        """Creates a fresh host from one durable Application root snapshot.
+
+        Loading restores only the SaveBundle's committed root. No transaction
+        hierarchy exists in the new host. AppPack lifecycle hooks are a later
+        layer above this storage operation.
+        """
+        if not isinstance(applicationStore, ApplicationStore):
+            raise TypeError("applicationStore must be an ApplicationStore.")
+        loaded = applicationStore.load(
+            appPackId=appPackId,
+            applicationId=applicationId,
+        )
+        host = cls(
+            saveBundle=loaded.bundle,
+            applicationStore=applicationStore,
+            config=config,
+            tracer=tracer,
+        )
+        return host, loaded
+
+    def _nextSaveBundleCandidate(self) -> SaveBundle:
+        """Captures root state without advancing accepted persistence identity."""
+        if self._saveBundle is None:
+            return SaveBundle.create(
+                appPackId=self.applicationRun.application.appPackId,
+                applicationId=self.applicationRun.application.applicationId,
+                committedState=self.applicationRun.committedState,
+            )
+        if (
+            self._saveBundle.appPackId != self.applicationRun.application.appPackId
+            or self._saveBundle.applicationId != self.applicationRun.application.applicationId
+        ):
+            raise RuntimeError("Bound SaveBundle Application identity no longer matches ApplicationRun.")
+        return self._saveBundle.nextGeneration(
+            committedState=self.applicationRun.committedState,
+        )
+
+    def _acceptSaveBundle(self, bundle: SaveBundle) -> None:
+        self._saveBundle = bundle
+        self.applicationRun.saveBundleId = bundle.saveBundleId
+
+    def saveApplication(self, applicationStore: ApplicationStore | None = None) -> SaveBundle:
+        """Persists exactly one snapshot of the current authoritative root.
+
+        Filesystem publication is attempted before the host accepts the new
+        SaveBundle generation. A failed publication therefore leaves the
+        host's accepted durable generation unchanged and retryable.
+        """
+        with self._lane:
+            store = applicationStore or self._applicationStore
+            if store is None:
+                raise RuntimeError("RuntimeHost has no ApplicationStore bound for persistence.")
+            if not isinstance(store, ApplicationStore):
+                raise TypeError("applicationStore must be an ApplicationStore.")
+
+            candidate = self._nextSaveBundleCandidate()
+            if self._saveBundle is None:
+                store.createApplication(candidate)
+            else:
+                store.publish(candidate)
+            self._applicationStore = store
+            self._acceptSaveBundle(candidate)
+            return candidate
+
     def captureSaveBundle(self) -> SaveBundle:
         """Captures the next in-memory SaveBundle generation for this Application.
 
@@ -97,23 +175,8 @@ class RuntimeHost:
         first capture establishes generation 1 of a new SaveBundle identity.
         """
         with self._lane:
-            if self._saveBundle is None:
-                bundle = SaveBundle.create(
-                    appPackId=self.applicationRun.application.appPackId,
-                    applicationId=self.applicationRun.application.applicationId,
-                    committedState=self.applicationRun.committedState,
-                )
-            else:
-                if (
-                    self._saveBundle.appPackId != self.applicationRun.application.appPackId
-                    or self._saveBundle.applicationId != self.applicationRun.application.applicationId
-                ):
-                    raise RuntimeError("Bound SaveBundle Application identity no longer matches ApplicationRun.")
-                bundle = self._saveBundle.nextGeneration(
-                    committedState=self.applicationRun.committedState,
-                )
-            self._saveBundle = bundle
-            self.applicationRun.saveBundleId = bundle.saveBundleId
+            bundle = self._nextSaveBundleCandidate()
+            self._acceptSaveBundle(bundle)
             return bundle
 
     def trace(
