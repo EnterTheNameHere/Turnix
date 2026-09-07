@@ -1,4 +1,4 @@
-# file: tests/backend/orchestration/test_runtime.py ; version: 4
+# file: tests/backend/orchestration/test_runtime.py ; version: 5
 import pytest
 
 from backend.orchestration.runtime import Job, JobState, OrchestrationUnit, OrchestrationUnitOutcome
@@ -150,3 +150,19 @@ def test_failed_outcome_does_not_undo_already_committed_authoritative_mutation()
 
     assert unit.outcome is OrchestrationUnitOutcome.FAILED
     assert root.load("test/value") == "already-authoritative"
+
+
+def test_mutation_orchestration_unit_exposes_owned_transaction_identity():
+    root = CommittedValueLayer()
+    unit = OrchestrationUnit.mutation(
+        applicationRunId="application-run",
+        transactionBase=root,
+    )
+
+    assert unit.transactionId is not None
+    assert unit.memoryView is not None
+    assert unit.transactionId == unit.memoryView.transactionId
+
+    unit.start()
+    unit.abortMutation()
+    unit.finish(OrchestrationUnitOutcome.COMPLETED)
