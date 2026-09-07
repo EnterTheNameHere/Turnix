@@ -1,4 +1,4 @@
-# file: backend/save/runtime.py ; version: 3
+# file: backend/save/runtime.py ; version: 4
 from __future__ import annotations
 
 import json
@@ -78,14 +78,32 @@ class SaveBundle:
         )
 
     def nextGeneration(self, *, committedState: CommittedValueLayer) -> SaveBundle:
-        """Captures the next generation of this same SaveBundle identity."""
+        """Captures the immediately following generation of this SaveBundle identity."""
+        return self.advanceToGeneration(
+            generation=self.generation + 1,
+            committedState=committedState,
+        )
+
+    def advanceToGeneration(
+        self,
+        *,
+        generation: int,
+        committedState: CommittedValueLayer,
+    ) -> SaveBundle:
+        """Captures a later generation while preserving immutable recovery gaps.
+
+        Normal publication uses nextGeneration(). Recovery may need to advance
+        beyond an occupied corrupt generation without overwriting that evidence.
+        """
+        if type(generation) is not int or generation <= self.generation:
+            raise ValueError("generation must be an exact integer greater than the current bundle generation.")
         if not isinstance(committedState, CommittedValueLayer):
             raise TypeError("committedState must be a CommittedValueLayer.")
         return SaveBundle(
             saveBundleId=self.saveBundleId,
             appPackId=self.appPackId,
             applicationId=self.applicationId,
-            generation=self.generation + 1,
+            generation=generation,
             _committedStateSnapshot=committedState.snapshot(),
         )
 
