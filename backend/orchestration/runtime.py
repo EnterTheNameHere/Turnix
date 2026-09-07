@@ -1,4 +1,4 @@
-# file: backend/orchestration/runtime.py ; version: 5
+# file: backend/orchestration/runtime.py ; version: 6
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -139,6 +139,10 @@ class OrchestrationUnit:
         if self.outcome is not None:
             raise RuntimeError("Terminal OrchestrationUnit cannot start.")
         self.started = True
+
+    @property
+    def transactionId(self) -> str | None:
+        return None if self._transaction is None else self._transaction.transactionId
 
     @property
     def memoryView(self) -> CommittedValueTransaction | None:
