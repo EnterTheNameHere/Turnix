@@ -1,4 +1,4 @@
-# file: tests/backend/application/test_applicationRuntime.py ; version: 4
+# file: tests/backend/application/test_applicationRuntime.py ; version: 5
 from pathlib import Path
 
 import pytest
@@ -18,6 +18,21 @@ class RaisingTracer:
 
     def close(self):
         raise RuntimeError("trace close failed")
+
+
+def test_application_runtime_owns_one_pack_loader_for_its_lifetime():
+    resolver = PackResolver(roots=())
+    runtime = ApplicationRuntime(
+        appPackId="test.app",
+        packResolver=resolver,
+    )
+
+    loader = runtime.packLoader
+
+    assert runtime.packLoader is loader
+
+    runtime.close()
+    runtime.close()
 
 
 def test_application_run_is_non_restartable_and_requires_active_work():
