@@ -1,4 +1,4 @@
-# file: backend/save/applicationStore.py ; version: 6
+# file: backend/save/applicationStore.py ; version: 7
 from __future__ import annotations
 
 import hashlib
@@ -84,6 +84,21 @@ class ApplicationStore:
             os.fsync(stream.fileno())
 
     @staticmethod
+    def _syncDirectory(path: Path) -> None:
+        """Flushes directory-entry changes where Python exposes that primitive."""
+        if os.name == "nt":
+            # CPython does not expose a portable Windows directory fsync
+            # primitive. File contents are flushed before replace/link and NTFS
+            # supplies the platform's native metadata durability semantics.
+            return
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        descriptor = os.open(path, flags)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    @staticmethod
     def _replaceFileDurably(path: Path, payload: bytes) -> None:
         descriptor, temporaryName = tempfile.mkstemp(
             prefix=f".{path.name}.tmp-",
@@ -96,6 +111,7 @@ class ApplicationStore:
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary, path)
+            ApplicationStore._syncDirectory(path.parent)
         finally:
             if temporary.exists():
                 temporary.unlink()
@@ -240,7 +256,10 @@ class ApplicationStore:
                 staging / "current",
                 self._canonicalJsonBytes(self._currentPointer(bundle)),
             )
+            self._syncDirectory(generations)
+            self._syncDirectory(staging)
             os.replace(staging, target)
+            self._syncDirectory(appPackDirectory)
         except Exception:
             if staging.exists():
                 shutil.rmtree(staging)
@@ -313,6 +332,7 @@ class ApplicationStore:
             # existence check.
             os.link(temporary, generationPath)
             temporary.unlink()
+            self._syncDirectory(generationPath.parent)
 
             self._replaceFileDurably(
                 applicationPath / "current",
