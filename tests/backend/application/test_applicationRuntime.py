@@ -1,4 +1,4 @@
-# file: tests/backend/application/test_applicationRuntime.py ; version: 8
+# file: tests/backend/application/test_applicationRuntime.py ; version: 9
 from pathlib import Path
 
 import pytest
@@ -624,6 +624,105 @@ def test_run_job_failure_discards_capability_mutation_from_authoritative_root():
         assert str(job.error) == "job exploded"
         assert runtime.applicationRun.application.committedState.load("test/job/value") is MISSING
         assert runtime.applicationRun.application.committedState.revisionId("test/job/value") == 0
+    finally:
+        scope.withdraw()
+        runtime.unregisterCodeEntry(identity.codeEntryInstanceId)
+        runtime.close()
+
+
+def test_run_job_stages_managed_io_until_after_state_acceptance(tmp_path):
+    runtime = ApplicationRuntime(
+        appPackId="test.app",
+        packResolver=PackResolver(roots=()),
+    )
+    runtime.start()
+    identity = CodeEntryIdentity(
+        applicationId=runtime.applicationRun.application.applicationId,
+        applicationRunId=runtime.applicationRun.applicationRunId,
+        packId="test.pack",
+        packVersion="1.0.0",
+        codeEntryId="entry",
+        codeEntryInstanceId="io-job-entry",
+        sourceSha256="source-sha",
+        implementationFormat="python-source@1",
+        implementationId="implementation-sha",
+    )
+    runtime.registerCodeEntry(identity, Path.cwd())
+    scope = RegistrationScope()
+    output = tmp_path / "job-result.json"
+
+    def handler(ctx, _payload):
+        transaction = ctx.memory.openTransaction()
+        transaction.set("test/job/io", "accepted")
+        transaction.commit()
+        ctx.io.writeJsonAtomic(output, {"saved": True})
+
+        assert output.exists() is False
+        assert runtime.applicationRun.application.committedState.load("test/job/io") is MISSING
+        return "ok"
+
+    runtime.capabilities.register(
+        scope,
+        ownerId=identity.codeEntryInstanceId,
+        capabilityId="test.job.io@1",
+        handler=handler,
+    )
+    scope.publish()
+
+    try:
+        job = runtime.runJob("test.job.io@1")
+
+        assert job.state is JobState.SUCCEEDED
+        assert runtime.applicationRun.application.committedState.load("test/job/io") == "accepted"
+        assert output.exists() is True
+    finally:
+        scope.withdraw()
+        runtime.unregisterCodeEntry(identity.codeEntryInstanceId)
+        runtime.close()
+
+
+def test_run_job_failure_aborts_staged_managed_io(tmp_path):
+    runtime = ApplicationRuntime(
+        appPackId="test.app",
+        packResolver=PackResolver(roots=()),
+    )
+    runtime.start()
+    identity = CodeEntryIdentity(
+        applicationId=runtime.applicationRun.application.applicationId,
+        applicationRunId=runtime.applicationRun.applicationRunId,
+        packId="test.pack",
+        packVersion="1.0.0",
+        codeEntryId="entry",
+        codeEntryInstanceId="io-failing-job-entry",
+        sourceSha256="source-sha",
+        implementationFormat="python-source@1",
+        implementationId="implementation-sha",
+    )
+    runtime.registerCodeEntry(identity, Path.cwd())
+    scope = RegistrationScope()
+    output = tmp_path / "job-result.json"
+
+    def handler(ctx, _payload):
+        transaction = ctx.memory.openTransaction()
+        transaction.set("test/job/io", "must-disappear")
+        transaction.commit()
+        ctx.io.writeJsonAtomic(output, {"saved": False})
+        raise RuntimeError("fail after staging output")
+
+    runtime.capabilities.register(
+        scope,
+        ownerId=identity.codeEntryInstanceId,
+        capabilityId="test.job.io.fail@1",
+        handler=handler,
+    )
+    scope.publish()
+
+    try:
+        job = runtime.runJob("test.job.io.fail@1")
+
+        assert job.state is JobState.FAILED
+        assert output.exists() is False
+        assert runtime.applicationRun.application.committedState.load("test/job/io") is MISSING
     finally:
         scope.withdraw()
         runtime.unregisterCodeEntry(identity.codeEntryInstanceId)
