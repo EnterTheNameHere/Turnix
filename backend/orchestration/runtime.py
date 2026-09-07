@@ -1,10 +1,11 @@
-# file: backend/orchestration/runtime.py ; version: 3
+# file: backend/orchestration/runtime.py ; version: 4
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
 
 from backend.core.runtimeIds import newRuntimeId
+from backend.values.committed import CommittedValueLayer, CommittedValueTransaction
 
 __all__ = ["Job", "JobState", "OrchestrationUnit", "OrchestrationUnitOutcome"]
 
@@ -77,24 +78,103 @@ class Job:
 
 @dataclass(slots=True)
 class OrchestrationUnit:
-    """One bounded execution-authority unit inside an ApplicationRun."""
+    """One bounded execution-authority unit inside an ApplicationRun.
+
+    OrchestrationUnit outcome and transaction resolution remain distinct.
+    Mutation-bearing units own one outer transaction, but successful workflow
+    code must explicitly accept staged mutation before the unit is marked
+    Completed. Failed, Cancelled, and Superseded units discard any unresolved
+    staging.
+    """
 
     orchestrationUnitId: str
+    applicationRunId: str | None = None
     outcome: OrchestrationUnitOutcome | None = None
+    _transaction: CommittedValueTransaction | None = None
+    _mutationResolved: bool = False
 
     def __post_init__(self) -> None:
         if type(self.orchestrationUnitId) is not str or not self.orchestrationUnitId:
             raise ValueError("OrchestrationUnit.orchestrationUnitId must be a non-empty exact string.")
+        if self.applicationRunId is not None and (
+            type(self.applicationRunId) is not str or not self.applicationRunId
+        ):
+            raise ValueError("OrchestrationUnit.applicationRunId must be a non-empty string or None.")
         if self.outcome is not None and not isinstance(self.outcome, OrchestrationUnitOutcome):
             raise TypeError("OrchestrationUnit.outcome must be an OrchestrationUnitOutcome or None.")
+        if self._transaction is not None and not isinstance(self._transaction, CommittedValueTransaction):
+            raise TypeError("OrchestrationUnit transaction must be a CommittedValueTransaction or None.")
+        if self._transaction is not None and self.applicationRunId is None:
+            raise ValueError("A mutation-bearing OrchestrationUnit requires applicationRunId.")
 
     @classmethod
     def new(cls) -> "OrchestrationUnit":
         return cls(orchestrationUnitId=newRuntimeId())
 
+    @classmethod
+    def mutation(
+        cls,
+        *,
+        applicationRunId: str,
+        transactionBase: CommittedValueLayer | CommittedValueTransaction,
+    ) -> "OrchestrationUnit":
+        if type(applicationRunId) is not str or not applicationRunId:
+            raise ValueError("applicationRunId must be a non-empty string.")
+        if not isinstance(transactionBase, (CommittedValueLayer, CommittedValueTransaction)):
+            raise TypeError(
+                "transactionBase must be a CommittedValueLayer or CommittedValueTransaction.",
+            )
+        return cls(
+            orchestrationUnitId=newRuntimeId(),
+            applicationRunId=applicationRunId,
+            _transaction=transactionBase.openTransaction(),
+        )
+
+    @property
+    def memoryView(self) -> CommittedValueTransaction | None:
+        return self._transaction
+
+    @property
+    def mutationResolved(self) -> bool:
+        return self._transaction is None or self._mutationResolved
+
+    def commitMutation(self) -> None:
+        self._requireNonTerminal()
+        transaction = self._requireMutationTransaction()
+        if self._mutationResolved:
+            raise RuntimeError("OrchestrationUnit mutation is already resolved.")
+        transaction.commit()
+        self._mutationResolved = True
+
+    def abortMutation(self) -> None:
+        self._requireNonTerminal()
+        transaction = self._requireMutationTransaction()
+        if self._mutationResolved:
+            raise RuntimeError("OrchestrationUnit mutation is already resolved.")
+        transaction.abort()
+        self._mutationResolved = True
+
     def finish(self, outcome: OrchestrationUnitOutcome) -> None:
-        if self.outcome is not None:
-            raise RuntimeError("OrchestrationUnit is already terminal.")
+        self._requireNonTerminal()
         if not isinstance(outcome, OrchestrationUnitOutcome):
             raise TypeError("OrchestrationUnit outcome must be an OrchestrationUnitOutcome.")
+
+        if outcome is OrchestrationUnitOutcome.COMPLETED:
+            if self._transaction is not None and not self._mutationResolved:
+                raise RuntimeError(
+                    "Completed mutation-bearing OrchestrationUnit requires explicit mutation resolution.",
+                )
+        elif self._transaction is not None and not self._mutationResolved:
+            self._transaction.abort()
+            self._mutationResolved = True
+
         self.outcome = outcome
+
+    def _requireMutationTransaction(self) -> CommittedValueTransaction:
+        if self._transaction is None:
+            raise RuntimeError("OrchestrationUnit is not mutation-bearing.")
+        return self._transaction
+
+    def _requireNonTerminal(self) -> None:
+        if self.outcome is not None:
+            raise RuntimeError("OrchestrationUnit is already terminal.")
