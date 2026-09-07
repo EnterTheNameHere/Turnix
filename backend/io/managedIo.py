@@ -1,4 +1,4 @@
-# file: backend/io/managedIo.py ; version: 8
+# file: backend/io/managedIo.py ; version: 9
 from __future__ import annotations
 
 import contextlib
@@ -190,16 +190,15 @@ class ManagedIoTransaction:
                 backup = resolved.with_name(
                     f".{resolved.name}.{self.ioTransactionId}.{newRuntimeId()}.bak",
                 )
+                entry = {
+                    "resolved": resolved,
+                    "temporary": temporary,
+                    "backup": backup,
+                    "backedUp": False,
+                    "published": False,
+                }
+                prepared.append(entry)
                 temporary.write_text(text, encoding="utf-8")
-                prepared.append(
-                    {
-                        "resolved": resolved,
-                        "temporary": temporary,
-                        "backup": backup,
-                        "backedUp": False,
-                        "published": False,
-                    }
-                )
 
             for entry in prepared:
                 resolved = entry["resolved"]
