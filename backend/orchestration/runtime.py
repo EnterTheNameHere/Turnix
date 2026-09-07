@@ -1,4 +1,4 @@
-# file: backend/orchestration/runtime.py ; version: 4
+# file: backend/orchestration/runtime.py ; version: 5
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -89,6 +89,7 @@ class OrchestrationUnit:
 
     orchestrationUnitId: str
     applicationRunId: str | None = None
+    started: bool = False
     outcome: OrchestrationUnitOutcome | None = None
     _transaction: CommittedValueTransaction | None = None
     _mutationResolved: bool = False
@@ -100,6 +101,8 @@ class OrchestrationUnit:
             type(self.applicationRunId) is not str or not self.applicationRunId
         ):
             raise ValueError("OrchestrationUnit.applicationRunId must be a non-empty string or None.")
+        if type(self.started) is not bool:
+            raise TypeError("OrchestrationUnit.started must be a bool.")
         if self.outcome is not None and not isinstance(self.outcome, OrchestrationUnitOutcome):
             raise TypeError("OrchestrationUnit.outcome must be an OrchestrationUnitOutcome or None.")
         if self._transaction is not None and not isinstance(self._transaction, CommittedValueTransaction):
@@ -130,6 +133,13 @@ class OrchestrationUnit:
             _transaction=transactionBase.openTransaction(),
         )
 
+    def start(self) -> None:
+        if self.started:
+            raise RuntimeError("OrchestrationUnit is already started.")
+        if self.outcome is not None:
+            raise RuntimeError("Terminal OrchestrationUnit cannot start.")
+        self.started = True
+
     @property
     def memoryView(self) -> CommittedValueTransaction | None:
         return self._transaction
@@ -139,7 +149,7 @@ class OrchestrationUnit:
         return self._transaction is None or self._mutationResolved
 
     def commitMutation(self) -> None:
-        self._requireNonTerminal()
+        self._requireRunning()
         transaction = self._requireMutationTransaction()
         if self._mutationResolved:
             raise RuntimeError("OrchestrationUnit mutation is already resolved.")
@@ -147,7 +157,7 @@ class OrchestrationUnit:
         self._mutationResolved = True
 
     def abortMutation(self) -> None:
-        self._requireNonTerminal()
+        self._requireRunning()
         transaction = self._requireMutationTransaction()
         if self._mutationResolved:
             raise RuntimeError("OrchestrationUnit mutation is already resolved.")
@@ -155,7 +165,7 @@ class OrchestrationUnit:
         self._mutationResolved = True
 
     def finish(self, outcome: OrchestrationUnitOutcome) -> None:
-        self._requireNonTerminal()
+        self._requireRunning()
         if not isinstance(outcome, OrchestrationUnitOutcome):
             raise TypeError("OrchestrationUnit outcome must be an OrchestrationUnitOutcome.")
 
@@ -178,3 +188,8 @@ class OrchestrationUnit:
     def _requireNonTerminal(self) -> None:
         if self.outcome is not None:
             raise RuntimeError("OrchestrationUnit is already terminal.")
+
+    def _requireRunning(self) -> None:
+        self._requireNonTerminal()
+        if not self.started:
+            raise RuntimeError("OrchestrationUnit has not started.")
