@@ -1,4 +1,4 @@
-# file: tests/backend/application/test_lifecycle.py ; version: 1
+# file: tests/backend/application/test_lifecycle.py ; version: 2
 import json
 from pathlib import Path
 
@@ -6,7 +6,7 @@ import pytest
 
 from backend.application import ApplicationLifecycle, ApplicationRunState
 from backend.packs.runtime import ManualActivationPlan, PackLoader, PackResolver
-from backend.runtime.runtimeHost import RuntimeHost
+from backend.application.applicationRuntime import ApplicationRuntime
 from backend.save import ApplicationStore
 from backend.values import MISSING
 
@@ -28,8 +28,8 @@ def _writeAppPack(root: Path, code: str) -> None:
     (directory / "codeEntry.py").write_text(code, encoding="utf-8")
 
 
-def _loader(host: RuntimeHost, root: Path) -> PackLoader:
-    return PackLoader(host=host, resolver=PackResolver(roots=(root,)))
+def _loader(runtime: ApplicationRuntime, root: Path) -> PackLoader:
+    return PackLoader(runtime=runtime, resolver=PackResolver(roots=(root,)))
 
 
 def _plan() -> ManualActivationPlan:
@@ -62,13 +62,13 @@ def test_create_and_load_follow_persistent_application_lifecycle_order(tmp_path:
     )
 
     store = ApplicationStore(tmp_path / "saves")
-    firstHost = RuntimeHost(appPackId="test.app", applicationStore=store)
+    firstHost = ApplicationRuntime(appPackId="test.app", applicationStore=store)
     firstApplicationId = firstHost.applicationRun.application.applicationId
     firstRunId = firstHost.applicationRun.applicationRunId
     firstLoader = _loader(firstHost, packsRoot)
 
     accepted = ApplicationLifecycle.create(
-        host=firstHost,
+        runtime=firstHost,
         packLoader=firstLoader,
         plan=_plan(),
     )
@@ -94,7 +94,7 @@ def test_create_and_load_follow_persistent_application_lifecycle_order(tmp_path:
     firstLoader.close()
     firstHost.stop()
 
-    secondHost, loaded = RuntimeHost.loadApplication(
+    secondHost, loaded = ApplicationRuntime.loadApplication(
         applicationStore=store,
         appPackId="test.app",
         applicationId=firstApplicationId,
@@ -104,7 +104,7 @@ def test_create_and_load_follow_persistent_application_lifecycle_order(tmp_path:
     secondLoader = _loader(secondHost, packsRoot)
 
     acceptedAgain = ApplicationLifecycle.load(
-        host=secondHost,
+        runtime=secondHost,
         packLoader=secondLoader,
         plan=_plan(),
     )
@@ -148,13 +148,13 @@ def test_failed_application_create_aborts_root_and_does_not_publish_application(
     )
 
     store = ApplicationStore(tmp_path / "saves")
-    host = RuntimeHost(appPackId="test.app", applicationStore=store)
+    host = ApplicationRuntime(appPackId="test.app", applicationStore=store)
     applicationId = host.applicationRun.application.applicationId
     loader = _loader(host, packsRoot)
 
     with pytest.raises(RuntimeError, match="creation failed"):
         ApplicationLifecycle.create(
-            host=host,
+            runtime=host,
             packLoader=loader,
             plan=_plan(),
         )
@@ -181,12 +181,12 @@ def test_noop_application_load_does_not_create_redundant_generation(tmp_path: Pa
     )
 
     store = ApplicationStore(tmp_path / "saves")
-    firstHost = RuntimeHost(appPackId="test.app", applicationStore=store)
+    firstHost = ApplicationRuntime(appPackId="test.app", applicationStore=store)
     applicationId = firstHost.applicationRun.application.applicationId
     firstLoader = _loader(firstHost, packsRoot)
 
     accepted = ApplicationLifecycle.create(
-        host=firstHost,
+        runtime=firstHost,
         packLoader=firstLoader,
         plan=_plan(),
     )
@@ -195,7 +195,7 @@ def test_noop_application_load_does_not_create_redundant_generation(tmp_path: Pa
     firstLoader.close()
     firstHost.stop()
 
-    secondHost, _loaded = RuntimeHost.loadApplication(
+    secondHost, _loaded = ApplicationRuntime.loadApplication(
         applicationStore=store,
         appPackId="test.app",
         applicationId=applicationId,
@@ -203,7 +203,7 @@ def test_noop_application_load_does_not_create_redundant_generation(tmp_path: Pa
     secondLoader = _loader(secondHost, packsRoot)
 
     acceptedAgain = ApplicationLifecycle.load(
-        host=secondHost,
+        runtime=secondHost,
         packLoader=secondLoader,
         plan=_plan(),
     )
