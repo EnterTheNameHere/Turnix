@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 7
+# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 8
 from __future__ import annotations
 
 import hashlib
@@ -1114,6 +1114,317 @@ def _persistentIdenticalMessageBursts(
     return burstStartCells, closedEvents
 
 
+def _secondPresentationAddress(secondIndex: int) -> str:
+    """Returns the stable persistent presentation-plan address for one second."""
+    if type(secondIndex) is not int:
+        raise TypeError("secondIndex must be an exact integer.")
+    return f"evilanalysis/chat/second/{_burstSecondSegment(secondIndex)}/presentation"
+
+
+def _repeatPresentation(semantic: dict[str, object]) -> dict[str, object] | None:
+    if semantic.get("kind") != "userMessage":
+        return None
+    spans = semantic.get("spans")
+    if (
+        not isinstance(spans, list)
+        or len(spans) != 1
+        or not isinstance(spans[0], dict)
+        or spans[0].get("kind") != "repeat"
+    ):
+        return None
+    repeat = spans[0]
+    count = repeat.get("count")
+    nested = repeat.get("spans")
+    if (
+        type(count) is not int
+        or count <= 1
+        or not isinstance(nested, list)
+        or not nested
+        or any(not isinstance(span, dict) for span in nested)
+    ):
+        raise RuntimeError("Persisted repeat semantic span has invalid presentation shape.")
+    return {
+        "kind": "repeatMessage",
+        "count": count,
+        "spans": nested,
+        "renderedUnit": _renderSpans(nested),
+        "rendered": _renderSpans(spans),
+    }
+
+
+def _semanticUnitPresentation(
+    semantic: dict[str, object],
+) -> list[dict[str, object]] | None:
+    """Returns trusted semantic units only when the whole message is reducible."""
+    if semantic.get("kind") != "userMessage":
+        return None
+    spans = semantic.get("spans")
+    if not isinstance(spans, list):
+        raise RuntimeError("Persisted user-message semantics require spans.")
+    evaluated = _evaluate(None, {"spans": spans})
+    if evaluated.get("aggregationEligible") is not True:
+        return None
+    units = evaluated.get("semanticUnits")
+    if not isinstance(units, list) or not units:
+        return None
+    normalized: list[dict[str, object]] = []
+    for unit in units:
+        if not isinstance(unit, dict):
+            raise RuntimeError("Semantic evaluation returned invalid unit.")
+        meaning = unit.get("meaning")
+        count = unit.get("count")
+        if not isinstance(meaning, dict) or type(count) is not int or count <= 0:
+            raise RuntimeError("Semantic evaluation returned invalid unit evidence.")
+        normalized.append({"meaning": meaning, "count": count})
+    return normalized
+
+
+def _meaningKey(meaning: dict[str, object]) -> str:
+    return json.dumps(
+        meaning,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+
+def _burstMembershipByLine(
+    bursts: list[dict[str, object]],
+) -> dict[int, dict[str, object]]:
+    byLine: dict[int, dict[str, object]] = {}
+    for burst in bursts:
+        if not isinstance(burst, dict):
+            raise RuntimeError("Presentation planning requires burst references.")
+        address = burst.get("address")
+        dependency = burst.get("dependency")
+        eventKey = burst.get("eventKey")
+        value = burst.get("value")
+        if (
+            type(address) is not str
+            or not isinstance(dependency, dict)
+            or type(eventKey) is not str
+            or not isinstance(value, dict)
+        ):
+            raise RuntimeError("Presentation planning received incomplete burst reference.")
+        occurrences = value.get("occurrences")
+        if not isinstance(occurrences, list):
+            raise RuntimeError("Presentation planning burst lacks occurrences.")
+        reference = {
+            "address": address,
+            "dependency": dependency,
+            "eventKey": eventKey,
+        }
+        for occurrence in occurrences:
+            if not isinstance(occurrence, dict) or type(occurrence.get("lineNumber")) is not int:
+                raise RuntimeError("Presentation planning burst occurrence lacks lineNumber.")
+            lineNumber = occurrence["lineNumber"]
+            if lineNumber in byLine:
+                raise RuntimeError(f"Chat line {lineNumber} has multiple burst presentation owners.")
+            byLine[lineNumber] = reference
+    return byLine
+
+
+def _secondPresentationValue(
+    ctx,
+    *,
+    aggregate: dict[str, object],
+    burstByLine: dict[int, dict[str, object]],
+) -> dict[str, object]:
+    aggregateValue = aggregate.get("value")
+    if not isinstance(aggregateValue, dict):
+        raise RuntimeError("Presentation planning requires second aggregate value.")
+    secondIndex = aggregateValue.get("secondIndex")
+    secondBucket = aggregateValue.get("secondBucket")
+    if type(secondIndex) is not int or not isinstance(secondBucket, dict):
+        raise RuntimeError("Presentation planning second aggregate is incomplete.")
+    bucketAddress = secondBucket.get("address")
+    if type(bucketAddress) is not str:
+        raise RuntimeError("Presentation planning aggregate lacks bucket address.")
+    bucketValue = ctx.memory.load(bucketAddress)
+    if not isinstance(bucketValue, dict) or not isinstance(bucketValue.get("members"), list):
+        raise RuntimeError("Presentation planning aggregate references unavailable bucket.")
+
+    entries: list[dict[str, object]] = []
+    semanticGroups: dict[str, dict[str, object]] = {}
+
+    for member in bucketValue["members"]:
+        if not isinstance(member, dict):
+            raise RuntimeError("Presentation planning bucket member must be an object.")
+        lineNumber = member.get("lineNumber")
+        semanticReference = member.get("semantic")
+        if type(lineNumber) is not int or not isinstance(semanticReference, dict):
+            raise RuntimeError("Presentation planning member lacks semantic reference.")
+
+        burst = burstByLine.get(lineNumber)
+        if burst is not None:
+            entries.append(
+                {
+                    "kind": "burstOccurrence",
+                    "lineNumber": lineNumber,
+                    "burst": burst,
+                }
+            )
+            continue
+
+        semanticAddress = semanticReference.get("address")
+        if type(semanticAddress) is not str:
+            raise RuntimeError("Presentation planning semantic reference lacks address.")
+        semantic = ctx.memory.load(semanticAddress)
+        if not isinstance(semantic, dict):
+            raise RuntimeError("Presentation planning semantic value is unavailable.")
+
+        repeat = _repeatPresentation(semantic)
+        if repeat is not None:
+            entries.append(
+                {
+                    **repeat,
+                    "lineNumber": lineNumber,
+                    "semantic": semanticReference,
+                }
+            )
+            continue
+
+        units = _semanticUnitPresentation(semantic)
+        if units is not None:
+            for unit in units:
+                meaning = unit["meaning"]
+                key = _meaningKey(meaning)
+                group = semanticGroups.setdefault(
+                    key,
+                    {
+                        "kind": "semanticUnitGroup",
+                        "meaning": meaning,
+                        "count": 0,
+                        "members": [],
+                    },
+                )
+                group["count"] = int(group["count"]) + int(unit["count"])
+                group["members"].append(
+                    {
+                        "lineNumber": lineNumber,
+                        "count": int(unit["count"]),
+                        "semantic": semanticReference,
+                    }
+                )
+            continue
+
+        entries.append(
+            {
+                "kind": "individual",
+                "lineNumber": lineNumber,
+                "semantic": semanticReference,
+            }
+        )
+
+    entries.extend(
+        semanticGroups[key]
+        for key in sorted(semanticGroups)
+    )
+    return {
+        "secondIndex": secondIndex,
+        "entries": entries,
+    }
+
+
+def _persistentSecondPresentation(
+    ctx,
+    *,
+    aggregate: dict[str, object],
+    burstByLine: dict[int, dict[str, object]],
+) -> dict[str, object]:
+    value = aggregate.get("value")
+    dependency = aggregate.get("dependency")
+    address = aggregate.get("address")
+    if (
+        not isinstance(value, dict)
+        or type(value.get("secondIndex")) is not int
+        or not isinstance(dependency, dict)
+        or type(address) is not str
+    ):
+        raise RuntimeError("Presentation planning requires complete aggregate reference.")
+    secondIndex = value["secondIndex"]
+
+    relevantBursts = sorted(
+        (
+            {
+                "lineNumber": lineNumber,
+                "burst": burst,
+            }
+            for lineNumber, burst in burstByLine.items()
+            if math.floor(
+                float(
+                    next(
+                        member["streamTimeSeconds"]
+                        for member in ctx.memory.load(value["secondBucket"]["address"])["members"]
+                        if member["lineNumber"] == lineNumber
+                    )
+                )
+            )
+            == secondIndex
+        ),
+        key=lambda item: item["lineNumber"],
+    )
+    basis = {
+        "secondAggregate": {
+            "address": address,
+            "dependency": dependency,
+        },
+        "burstMemberships": relevantBursts,
+    }
+    planAddress = _secondPresentationAddress(secondIndex)
+    if ctx.memory.isReusable(planAddress, validity=basis):
+        current = ctx.memory.load(planAddress)
+        if isinstance(current, dict):
+            return {
+                "address": planAddress,
+                "dependency": ctx.memory.dependency(planAddress),
+                "value": current,
+            }
+        raise RuntimeError(f"Reusable presentation plan at {planAddress!r} is not an object.")
+
+    plan = _secondPresentationValue(
+        ctx,
+        aggregate=aggregate,
+        burstByLine=burstByLine,
+    )
+    transaction = ctx.memory.openTransaction()
+    transaction.set(
+        planAddress,
+        plan,
+        validity=basis,
+        provenance={
+            "secondAggregate": {
+                "address": address,
+                "dependency": dependency,
+            },
+            "burstMemberships": relevantBursts,
+        },
+    )
+    transaction.commit()
+    return {
+        "address": planAddress,
+        "dependency": ctx.memory.dependency(planAddress),
+        "value": plan,
+    }
+
+
+def _persistentSecondPresentations(
+    ctx,
+    aggregates: list[dict[str, object]],
+    bursts: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    burstByLine = _burstMembershipByLine(bursts)
+    return [
+        _persistentSecondPresentation(
+            ctx,
+            aggregate=aggregate,
+            burstByLine=burstByLine,
+        )
+        for aggregate in aggregates
+    ]
+
+
 def _lineSemantic(
     rawMessage: str,
     *,
@@ -1422,12 +1733,18 @@ def _interpret(ctx, payload):
         contextStartSeconds=contextStartSeconds,
         contextEndSeconds=contextEndSeconds,
     )
+    secondPresentations = _persistentSecondPresentations(
+        ctx,
+        secondAggregates,
+        identicalMessageBursts,
+    )
     return {
         "records": records,
         "secondBuckets": secondBuckets,
         "secondAggregates": secondAggregates,
         "burstStartCells": burstStartCells,
         "identicalMessageBursts": identicalMessageBursts,
+        "secondPresentations": secondPresentations,
         "text": "\n".join(rendered),
     }
 
