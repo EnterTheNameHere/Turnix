@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatProcessing.py ; version: 4
+# file: tests/first_party/evilBirthdayAnalysis/test_chatProcessing.py ; version: 5
 from __future__ import annotations
 
 import hashlib
@@ -74,6 +74,7 @@ class _Ctx:
         *,
         lines: tuple[str, ...] = (),
         streamStartTime: str = "00:00:00",
+        chatRendering: dict[str, object] | None = None,
     ):
         self.io = _Io(lines=lines)
         self.config = {
@@ -81,6 +82,8 @@ class _Ctx:
             "chatStartTime": "19:20:00",
             "streamStartTime": streamStartTime,
         }
+        if chatRendering is not None:
+            self.config["chatRendering"] = chatRendering
 
 
 def _record(line: str, lineNumber: int = 1):
@@ -287,3 +290,73 @@ def test_selector_context_preserves_half_open_requested_membership():
         True,
         False,
     ]
+
+
+
+@pytest.mark.parametrize("marker", ["⟦", "⟧"])
+def test_selector_rejects_reserved_repeat_marker_anywhere_in_full_chat_source(marker: str):
+    chat._parsedCache.clear()
+    ctx = _Ctx(
+        lines=(
+            "[2024-03-25 19:20:00] #vedal987 current: selected",
+            f"[2024-03-25 19:21:00] #vedal987 later: literal {marker} collision",
+        )
+    )
+
+    with pytest.raises(ValueError, match="repeat rendering marker collides"):
+        chat._select(
+            ctx,
+            {"videoStartSeconds": 0, "videoEndSeconds": 1},
+        )
+
+
+def test_selector_accepts_manual_non_colliding_repeat_markers():
+    chat._parsedCache.clear()
+    ctx = _Ctx(
+        lines=(
+            "[2024-03-25 19:20:00] #vedal987 current: literal ⟦ and ⟧ are source text",
+        ),
+        chatRendering={
+            "repeatStartMarker": "<<<",
+            "repeatEndMarker": ">>>",
+        },
+    )
+
+    selected = chat._select(
+        ctx,
+        {"videoStartSeconds": 0, "videoEndSeconds": 1},
+    )
+
+    assert selected["records"][0]["message"] == "current: literal ⟦ and ⟧ are source text"
+
+
+@pytest.mark.parametrize(
+    ("rendering", "message"),
+    [
+        (
+            {"repeatStartMarker": "", "repeatEndMarker": ">>>"},
+            "non-empty exact string",
+        ),
+        (
+            {"repeatStartMarker": "<<<", "repeatEndMarker": "<<<"},
+            "must differ",
+        ),
+        (
+            {"repeatStartMarker": "<<", "repeatEndMarker": "<<<"},
+            "must not contain one another",
+        ),
+        (
+            {"repeatStartMarker": "<\n<", "repeatEndMarker": ">>>"},
+            "must not contain line breaks",
+        ),
+    ],
+)
+def test_repeat_marker_configuration_fails_closed(rendering, message):
+    chat._parsedCache.clear()
+    ctx = _Ctx(
+        lines=("[2024-03-25 19:20:00] #vedal987 current: selected",),
+        chatRendering=rendering,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        chat._select(ctx, {"videoStartSeconds": 0, "videoEndSeconds": 1})
