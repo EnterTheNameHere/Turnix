@@ -1,4 +1,4 @@
-# file: backend/orchestration/runtime.py ; version: 6
+# file: backend/orchestration/runtime.py ; version: 7
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -35,6 +35,7 @@ class Job:
     state: JobState = JobState.PENDING
     result: object | None = None
     error: BaseException | None = None
+    authoritativeStateAccepted: bool = False
 
     def __post_init__(self) -> None:
         if type(self.jobId) is not str or not self.jobId:
@@ -43,6 +44,8 @@ class Job:
             raise TypeError("Job.state must be a JobState.")
         if self.error is not None and not isinstance(self.error, BaseException):
             raise TypeError("Job.error must be a BaseException or None.")
+        if type(self.authoritativeStateAccepted) is not bool:
+            raise TypeError("Job.authoritativeStateAccepted must be a bool.")
 
     @classmethod
     def new(cls) -> "Job":
