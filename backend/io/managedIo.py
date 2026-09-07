@@ -1,4 +1,4 @@
-# file: backend/io/managedIo.py ; version: 7
+# file: backend/io/managedIo.py ; version: 8
 from __future__ import annotations
 
 import contextlib
@@ -22,6 +22,7 @@ __all__ = [
     "IoPermissionError",
     "IoWriteError",
     "ManagedIo",
+    "ManagedIoTransaction",
     "ObservedFileRead",
     "SourceObservation",
 ]
@@ -106,6 +107,170 @@ class SourceObservation:
         }
 
 
+class ManagedIoTransaction:
+    """One explicit non-streaming staged persistent-I/O transaction.
+
+    Writes are retained in memory until commit. Commit prepares temporary files
+    beside their final destinations, then publishes the batch with best-effort
+    rollback if a later member fails. Final destinations are never updated
+    before commit.
+
+    This is a runtime rollback guarantee, not a crash-recovery journal. Crash
+    recovery and persistent rollback-point policy remain future IoManager work.
+    """
+
+    def __init__(self, *, io: "ManagedIo") -> None:
+        if not isinstance(io, ManagedIo):
+            raise TypeError("io must be a ManagedIo.")
+        self.ioTransactionId = newRuntimeId()
+        self._io = io
+        self._writes: dict[Path, str] = {}
+        self._state = "active"
+
+    def readObservedText(self, path):
+        self._requireActive()
+        return self._io.readObservedText(path)
+
+    def readObservedLines(self, path):
+        self._requireActive()
+        return self._io.readObservedLines(path)
+
+    def readObservedJson(self, path):
+        self._requireActive()
+        return self._io.readObservedJson(path)
+
+    def observeFile(self, path, *, contentHash: bool = False):
+        self._requireActive()
+        return self._io.observeFile(path, contentHash=contentHash)
+
+    def readText(self, path):
+        self._requireActive()
+        return self._io.readText(path)
+
+    def readJson(self, path):
+        self._requireActive()
+        return self._io.readJson(path)
+
+    def readLines(self, path):
+        self._requireActive()
+        return self._io.readLines(path)
+
+    def writeTextAtomic(self, path: str | Path, text: str) -> None:
+        self._requireActive()
+        if type(text) is not str:
+            raise TypeError("text must be an exact built-in string.")
+        self._writes[self._io._path(path)] = text
+
+    def writeJsonAtomic(self, path: str | Path, value: object) -> None:
+        self._requireActive()
+        resolved = self._io._path(path)
+        try:
+            text = json.dumps(
+                value,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+                allow_nan=False,
+            ) + "\n"
+        except (TypeError, ValueError) as err:
+            raise IoEncodeError(
+                f"Value cannot be encoded as JSON for {resolved}: {err}.",
+            ) from err
+        self._writes[resolved] = text
+
+    def commit(self) -> None:
+        self._requireActive()
+        prepared: list[dict[str, object]] = []
+        try:
+            for resolved, text in self._writes.items():
+                resolved.parent.mkdir(parents=True, exist_ok=True)
+                temporary = resolved.with_name(
+                    f".{resolved.name}.{self.ioTransactionId}.{newRuntimeId()}.tmp",
+                )
+                backup = resolved.with_name(
+                    f".{resolved.name}.{self.ioTransactionId}.{newRuntimeId()}.bak",
+                )
+                temporary.write_text(text, encoding="utf-8")
+                prepared.append(
+                    {
+                        "resolved": resolved,
+                        "temporary": temporary,
+                        "backup": backup,
+                        "backedUp": False,
+                        "published": False,
+                    }
+                )
+
+            for entry in prepared:
+                resolved = entry["resolved"]
+                temporary = entry["temporary"]
+                backup = entry["backup"]
+                assert isinstance(resolved, Path)
+                assert isinstance(temporary, Path)
+                assert isinstance(backup, Path)
+
+                if resolved.exists():
+                    resolved.replace(backup)
+                    entry["backedUp"] = True
+                temporary.replace(resolved)
+                entry["published"] = True
+        except PermissionError as err:
+            self._rollbackPrepared(prepared)
+            raise IoPermissionError(
+                f"Permission denied while committing staged persistent I/O: {err}.",
+            ) from err
+        except OSError as err:
+            self._rollbackPrepared(prepared)
+            raise IoWriteError(
+                f"Failed to commit staged persistent I/O: {err}.",
+            ) from err
+        else:
+            for entry in prepared:
+                backup = entry["backup"]
+                if isinstance(backup, Path):
+                    with contextlib.suppress(OSError):
+                        backup.unlink(missing_ok=True)
+            self._writes.clear()
+            self._state = "committed"
+
+    def abort(self) -> None:
+        self._requireActive()
+        self._writes.clear()
+        self._state = "aborted"
+
+    @staticmethod
+    def _rollbackPrepared(prepared: list[dict[str, object]]) -> None:
+        for entry in reversed(prepared):
+            resolved = entry["resolved"]
+            temporary = entry["temporary"]
+            backup = entry["backup"]
+            assert isinstance(resolved, Path)
+            assert isinstance(temporary, Path)
+            assert isinstance(backup, Path)
+
+            try:
+                if entry["published"]:
+                    if entry["backedUp"] and backup.exists():
+                        backup.replace(resolved)
+                    else:
+                        resolved.unlink(missing_ok=True)
+                elif entry["backedUp"] and backup.exists():
+                    backup.replace(resolved)
+            except OSError:
+                pass
+
+            with contextlib.suppress(OSError):
+                temporary.unlink(missing_ok=True)
+            with contextlib.suppress(OSError):
+                backup.unlink(missing_ok=True)
+
+    def _requireActive(self) -> None:
+        if self._state != "active":
+            raise RuntimeError(
+                f"ManagedIoTransaction is already {self._state}.",
+            )
+
+
 class ManagedIo:
     """Central Actant file-I/O service used by Pack-facing Context facades.
 
@@ -113,6 +278,10 @@ class ManagedIo:
     All filesystem exceptions are translated here so Pack implementations do
     not need language-specific error handling for ordinary supported I/O.
     """
+
+    def openTransaction(self) -> ManagedIoTransaction:
+        """Creates one explicit staged persistent-I/O transaction."""
+        return ManagedIoTransaction(io=self)
 
     def readObservedBytes(self, path: str | Path) -> ObservedFileRead:
         """Reads one regular file and returns exact bytes with source evidence.
