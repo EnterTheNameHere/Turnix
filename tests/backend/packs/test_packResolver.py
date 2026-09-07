@@ -1,4 +1,4 @@
-# file: tests/backend/packs/test_packResolver.py ; version: 1
+# file: tests/backend/packs/test_packResolver.py ; version: 2
 import json
 from pathlib import Path
 
@@ -7,15 +7,28 @@ import pytest
 from backend.packs.runtime import PackResolver
 
 
-def _manifest(root: Path, directory: str, packId: str) -> None:
+def _manifest(root: Path, directory: str, packId: str, *, kind: str = "modPack") -> None:
     path = root / directory
     path.mkdir()
-    (path / "manifest.json").write_text(json.dumps({"packId": packId, "version": "0.0.0", "codeEntries": []}), encoding="utf-8")
+    (path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "packId": packId,
+                "kind": kind,
+                "version": "0.0.0",
+                "codeEntries": [],
+            },
+        ),
+        encoding="utf-8",
+    )
 
 
 def test_resolver_accepts_exactly_one_candidate(tmp_path):
-    _manifest(tmp_path, "one", "sample")
-    assert PackResolver(roots=(tmp_path,)).requireSingle("sample").packId == "sample"
+    _manifest(tmp_path, "one", "sample", kind="appPack")
+    definition = PackResolver(roots=(tmp_path,)).requireSingle("sample")
+
+    assert definition.packId == "sample"
+    assert definition.kind == "appPack"
 
 
 def test_resolver_rejects_ambiguity(tmp_path):
@@ -48,6 +61,24 @@ def test_resolver_reports_malformed_manifest_during_discovery(tmp_path):
 
     with pytest.raises(ValueError, match="Could not read Pack manifest"):
         PackResolver(roots=(tmp_path,)).requireSingle("anything")
+
+
+def test_resolver_rejects_manifest_without_pack_kind(tmp_path):
+    path = tmp_path / "missing_kind"
+    path.mkdir()
+    (path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "packId": "missing.kind",
+                "version": "0.0.0",
+                "codeEntries": [],
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="non-empty string kind"):
+        PackResolver(roots=(tmp_path,)).requireSingle("missing.kind")
 
 
 def test_resolver_rejects_invalid_requested_identity(tmp_path):
