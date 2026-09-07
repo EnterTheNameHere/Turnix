@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 4
+# file: backend/application/applicationRuntime.py ; version: 5
 from __future__ import annotations
 
 from copy import deepcopy
@@ -419,18 +419,27 @@ class ApplicationRuntime:
         with self._lane:
             self.requireActive()
             job = Job.new()
-            unit = OrchestrationUnit.new()
+            unit = OrchestrationUnit.mutation(
+                applicationRunId=self.applicationRun.applicationRunId,
+                transactionBase=self.applicationRun.application.committedState,
+            )
             job.start()
             self.trace(
                 "job-started",
                 attributes={
                     "jobId": job.jobId,
                     "orchestrationUnitId": unit.orchestrationUnitId,
+                    "applicationRunId": unit.applicationRunId,
                     "capabilityId": capabilityId,
                 },
             )
             try:
-                result = self.invokeCapability(capabilityId, payload)
+                result = self.invokeCapability(
+                    capabilityId,
+                    payload,
+                    memoryView=unit.memoryView,
+                )
+                unit.commitMutation()
             except Exception as err:
                 unit.finish(OrchestrationUnitOutcome.FAILED)
                 job.fail(err)
@@ -440,6 +449,7 @@ class ApplicationRuntime:
                     attributes={
                         "jobId": job.jobId,
                         "orchestrationUnitId": unit.orchestrationUnitId,
+                        "applicationRunId": unit.applicationRunId,
                         "capabilityId": capabilityId,
                     },
                     level="error",
@@ -452,6 +462,7 @@ class ApplicationRuntime:
                     attributes={
                         "jobId": job.jobId,
                         "orchestrationUnitId": unit.orchestrationUnitId,
+                        "applicationRunId": unit.applicationRunId,
                         "capabilityId": capabilityId,
                     },
                 )
