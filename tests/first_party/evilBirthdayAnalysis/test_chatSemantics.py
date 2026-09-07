@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 12
+# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 13
 from __future__ import annotations
 
 import importlib.util
@@ -699,7 +699,11 @@ def test_second_bucket_dependency_survives_save_bundle_rehydration():
     bucketAddress = chatSemantics._secondCellAddress(14)
     firstDependency = first["secondBuckets"][0]["dependency"]
 
-    bundle = SaveBundle.create(applicationId="evil-analysis", committedState=memory)
+    bundle = SaveBundle.create(
+        appPackId="evilBirthdayAnalysis",
+        applicationId="evil-analysis",
+        committedState=memory,
+    )
     restoredMemory = SaveBundle.fromBytes(bundle.toBytes()).restoreCommittedState()
     restoredCtx = _Ctx(restoredMemory)
 
