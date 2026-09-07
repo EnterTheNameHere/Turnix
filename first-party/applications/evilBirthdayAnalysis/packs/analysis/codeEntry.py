@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 14
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 15
 from __future__ import annotations
 
 import importlib.util
@@ -294,6 +294,29 @@ def _previousChatItemReusable(
         and _plain(previousItem.metadata) == _plain(metadata)
     )
 
+_PROMPT_OMITTED_GENERATED_EVENT_TYPES = frozenset({
+    "subscriptionGiftBatch",
+    "subscriptionGift",
+})
+
+
+def _chatPromptEligible(analysis: dict[str, object]) -> bool:
+    """Returns whether interpreted chat should become model-facing analysis evidence.
+
+    This is a presentation decision only. Omitted generated events remain in
+    raw chat, interpreted records, persistent semantic memory, temporal
+    aggregates, and provenance.
+    """
+    if analysis.get("includedInText") is not True:
+        return False
+    if analysis.get("kind") != "generatedEvent":
+        return True
+    event = analysis.get("event")
+    if not isinstance(event, dict):
+        raise RuntimeError("Generated chat event has invalid analysis.event evidence.")
+    return event.get("type") not in _PROMPT_OMITTED_GENERATED_EVENT_TYPES
+
+
 def _chatQueryItems(
     chat: dict[str, object],
     *,
@@ -313,7 +336,9 @@ def _chatQueryItems(
         if not isinstance(record, dict):
             raise RuntimeError("Chat interpretation capability returned an invalid record.")
         analysis = record.get("analysis")
-        if not isinstance(analysis, dict) or analysis.get("includedInText") is not True:
+        if not isinstance(analysis, dict):
+            continue
+        if not _chatPromptEligible(analysis):
             continue
 
         lineNumber = record.get("lineNumber")
