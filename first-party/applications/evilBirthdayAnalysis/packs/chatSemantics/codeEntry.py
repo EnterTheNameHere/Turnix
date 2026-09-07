@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 10
+# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 11
 from __future__ import annotations
 
 import hashlib
@@ -1167,7 +1167,7 @@ def _semanticUnitPresentation(
     units = evaluated.get("semanticUnits")
     if not isinstance(units, list) or not units:
         return None
-    normalized: list[dict[str, object]] = []
+    normalizedByMeaning: dict[str, dict[str, object]] = {}
     for unit in units:
         if not isinstance(unit, dict):
             raise RuntimeError("Semantic evaluation returned invalid unit.")
@@ -1175,8 +1175,16 @@ def _semanticUnitPresentation(
         count = unit.get("count")
         if not isinstance(meaning, dict) or type(count) is not int or count <= 0:
             raise RuntimeError("Semantic evaluation returned invalid unit evidence.")
-        normalized.append({"meaning": meaning, "count": count})
-    return normalized
+        key = _meaningKey(meaning)
+        normalized = normalizedByMeaning.setdefault(
+            key,
+            {"meaning": meaning, "count": 0},
+        )
+        normalized["count"] = int(normalized["count"]) + count
+    return [
+        normalizedByMeaning[key]
+        for key in sorted(normalizedByMeaning)
+    ]
 
 
 def _meaningKey(meaning: dict[str, object]) -> str:
