@@ -1,11 +1,11 @@
-# file: tests/backend/application/test_lifecycle.py ; version: 2
+# file: tests/backend/application/test_lifecycle.py ; version: 3
 import json
 from pathlib import Path
 
 import pytest
 
 from backend.application import ApplicationLifecycle, ApplicationRunState
-from backend.packs.runtime import ManualActivationPlan, PackLoader, PackResolver
+from backend.packs.runtime import ManualActivationPlan, PackResolver
 from backend.application.applicationRuntime import ApplicationRuntime
 from backend.save import ApplicationStore
 from backend.values import MISSING
@@ -27,9 +27,6 @@ def _writeAppPack(root: Path, code: str) -> None:
     )
     (directory / "codeEntry.py").write_text(code, encoding="utf-8")
 
-
-def _loader(runtime: ApplicationRuntime, root: Path) -> PackLoader:
-    return PackLoader(runtime=runtime, resolver=PackResolver(roots=(root,)))
 
 
 def _plan() -> ManualActivationPlan:
@@ -62,14 +59,12 @@ def test_create_and_load_follow_persistent_application_lifecycle_order(tmp_path:
     )
 
     store = ApplicationStore(tmp_path / "saves")
-    firstHost = ApplicationRuntime(appPackId="test.app", applicationStore=store)
+    firstHost = ApplicationRuntime(appPackId="test.app", applicationStore=store, packResolver=PackResolver(roots=(packsRoot,)))
     firstApplicationId = firstHost.applicationRun.application.applicationId
     firstRunId = firstHost.applicationRun.applicationRunId
-    firstLoader = _loader(firstHost, packsRoot)
-
+    
     accepted = ApplicationLifecycle.create(
         runtime=firstHost,
-        packLoader=firstLoader,
         plan=_plan(),
     )
 
@@ -91,21 +86,20 @@ def test_create_and_load_follow_persistent_application_lifecycle_order(tmp_path:
         "load",
     ]
 
-    firstLoader.close()
+    firstHost.packLoader.close()
     firstHost.stop()
 
     secondHost, loaded = ApplicationRuntime.loadApplication(
         applicationStore=store,
+        packResolver=PackResolver(roots=(packsRoot,)),
         appPackId="test.app",
         applicationId=firstApplicationId,
     )
     assert loaded.bundle.generation == 2
     assert secondHost.applicationRun.applicationRunId != firstRunId
-    secondLoader = _loader(secondHost, packsRoot)
-
+    
     acceptedAgain = ApplicationLifecycle.load(
         runtime=secondHost,
-        packLoader=secondLoader,
         plan=_plan(),
     )
 
@@ -129,7 +123,7 @@ def test_create_and_load_follow_persistent_application_lifecycle_order(tmp_path:
         "load",
     ]
 
-    secondLoader.close()
+    secondHost.packLoader.close()
     secondHost.stop()
 
 
@@ -148,14 +142,12 @@ def test_failed_application_create_aborts_root_and_does_not_publish_application(
     )
 
     store = ApplicationStore(tmp_path / "saves")
-    host = ApplicationRuntime(appPackId="test.app", applicationStore=store)
+    host = ApplicationRuntime(appPackId="test.app", applicationStore=store, packResolver=PackResolver(roots=(packsRoot,)))
     applicationId = host.applicationRun.application.applicationId
-    loader = _loader(host, packsRoot)
-
+    
     with pytest.raises(RuntimeError, match="creation failed"):
         ApplicationLifecycle.create(
             runtime=host,
-            packLoader=loader,
             plan=_plan(),
         )
 
@@ -181,30 +173,27 @@ def test_noop_application_load_does_not_create_redundant_generation(tmp_path: Pa
     )
 
     store = ApplicationStore(tmp_path / "saves")
-    firstHost = ApplicationRuntime(appPackId="test.app", applicationStore=store)
+    firstHost = ApplicationRuntime(appPackId="test.app", applicationStore=store, packResolver=PackResolver(roots=(packsRoot,)))
     applicationId = firstHost.applicationRun.application.applicationId
-    firstLoader = _loader(firstHost, packsRoot)
-
+    
     accepted = ApplicationLifecycle.create(
         runtime=firstHost,
-        packLoader=firstLoader,
         plan=_plan(),
     )
     assert accepted.generation == 1
 
-    firstLoader.close()
+    firstHost.packLoader.close()
     firstHost.stop()
 
     secondHost, _loaded = ApplicationRuntime.loadApplication(
         applicationStore=store,
+        packResolver=PackResolver(roots=(packsRoot,)),
         appPackId="test.app",
         applicationId=applicationId,
     )
-    secondLoader = _loader(secondHost, packsRoot)
-
+    
     acceptedAgain = ApplicationLifecycle.load(
         runtime=secondHost,
-        packLoader=secondLoader,
         plan=_plan(),
     )
 
@@ -214,5 +203,5 @@ def test_noop_application_load_does_not_create_redundant_generation(tmp_path: Pa
         applicationId=applicationId,
     ).bundle.generation == 1
 
-    secondLoader.close()
+    secondHost.packLoader.close()
     secondHost.stop()
