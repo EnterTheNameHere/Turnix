@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 13
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 14
 from __future__ import annotations
 
 import importlib.util
@@ -750,6 +750,8 @@ def test_chatQueryItems_use_interpreted_body_but_keep_raw_message_as_source_evid
     assert items[0].metadata["memory"]["semantic"]["address"] == "evilanalysis/chat/line/20/semantic"
     assert items[0].metadata["memory"]["secondBucket"]["address"] == "evilanalysis/chat/second/s45/semantic"
     assert items[0].metadata["memory"]["secondAggregate"]["address"] == "evilanalysis/chat/second/s45/aggregate"
+    assert items[0].metadata["memory"]["secondPresentation"]["address"] == "evilanalysis/chat/second/s45/presentation"
+    assert items[0].metadata["memory"]["secondPresentation"]["owners"][0]["kind"] == "individual"
     assert items[1].content == "a future source form we do not understand"
     assert items[1].metadata["username"] == "[unclassified]"
     assert items[1].metadata["sourceUsername"] is None
@@ -1687,7 +1689,7 @@ def test_partial_semantic_group_selection_counts_only_presented_contribution():
     assert sections == [
         "CHRONOLOGICAL EVIDENCE\n"
         "[00:00:56]\n"
-        "CHAT SEMANTIC: semanticClass=praise ×1 [1 users]"
+        "CHAT SEMANTIC: semanticClass=praise ×1 [1 user]"
     ]
     assert "×3" not in sections[0]
 
@@ -1718,7 +1720,7 @@ def test_multiple_semantic_meanings_from_one_message_are_each_presented_once():
     assert sections == [
         "CHRONOLOGICAL EVIDENCE\n"
         "[00:00:57]\n"
-        "CHAT SEMANTIC: semanticClass=negative ×2 [1 users]\n"
-        "CHAT SEMANTIC: semanticClass=praise ×1 [1 users]"
+        "CHAT SEMANTIC: semanticClass=negative ×2 [1 user]\n"
+        "CHAT SEMANTIC: semanticClass=praise ×1 [1 user]"
     ]
     assert "semantic source form" not in sections[0]
