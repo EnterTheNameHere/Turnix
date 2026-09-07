@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 17
+# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 18
 from __future__ import annotations
 
 import importlib.util
@@ -1392,3 +1392,62 @@ def test_subscription_notice_without_attached_message_stays_generated_event():
         "method": "tier",
         "tier": 1,
     }
+
+
+
+def test_emote_matching_is_case_insensitive_and_uses_canonical_vocabulary_name():
+    result = _interpret(
+        _Ctx(),
+        [
+            _raw(
+                1,
+                "viewer: gigaevil GiGaEvIl GIGAEVIL",
+                streamTimeSeconds=15.0,
+                streamTime="00:00:15",
+            )
+        ],
+    )
+
+    record = result["records"][0]
+    assert record["message"] == "viewer: gigaevil GiGaEvIl GIGAEVIL"
+    assert record["body"] == "gigaevil GiGaEvIl GIGAEVIL"
+    assert record["analysis"]["spans"] == [
+        {
+            "kind": "emote",
+            "name": "GIGAEVIL",
+            "count": 3,
+            "metadata": {
+                "semanticClass": "praise",
+                "classificationSource": "userDefined",
+            },
+        }
+    ]
+
+
+def test_case_insensitive_composite_matching_uses_canonical_vocabulary_tokens():
+    emotes = {
+        "feelsbirthdayman": {"name": "FeelsBirthdayMan", "metadata": {}},
+        "clap": {"name": "Clap", "metadata": {}},
+    }
+    composites = [
+        {
+            "tokens": ("FeelsBirthdayMan", "Clap"),
+            "foldedTokens": ("feelsbirthdayman", "clap"),
+            "metadata": {},
+        }
+    ]
+
+    spans = chatSemantics._lexMessage(
+        "FEELSBIRTHDAYMAN clap",
+        emotes,
+        composites,
+    )
+
+    assert spans == [
+        {
+            "kind": "composite",
+            "tokens": ["FeelsBirthdayMan", "Clap"],
+            "count": 1,
+            "metadata": {},
+        }
+    ]
