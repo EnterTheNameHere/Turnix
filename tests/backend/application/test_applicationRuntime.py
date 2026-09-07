@@ -1,4 +1,4 @@
-# file: tests/backend/application/test_applicationRuntime.py ; version: 3
+# file: tests/backend/application/test_applicationRuntime.py ; version: 4
 from pathlib import Path
 
 import pytest
@@ -38,7 +38,7 @@ def test_application_run_is_non_restartable_and_requires_active_work():
 
 def test_runtime_config_is_detached_from_caller_and_public_snapshots():
     source = {"nested": {"value": 1}}
-    host = ApplicationRuntime(appPackId="test.app", config=source)
+    host = ApplicationRuntime(appPackId="test.app", packResolver=PackResolver(roots=()), config=source)
     source["nested"]["value"] = 2
     assert host.config == {"nested": {"value": 1}}
 
@@ -73,7 +73,7 @@ def test_non_activation_context_rejects_registration():
 
 
 def test_trace_publication_failure_does_not_change_runtime_lifecycle():
-    host = ApplicationRuntime(appPackId="test.app", tracer=RaisingTracer())
+    host = ApplicationRuntime(appPackId="test.app", packResolver=PackResolver(roots=()), tracer=RaisingTracer())
 
     host.start()
     assert host.applicationRun.state is ApplicationRunState.ACTIVE
