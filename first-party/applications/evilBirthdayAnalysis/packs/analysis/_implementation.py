@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 22
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 23
 from __future__ import annotations
 
 import json
@@ -532,6 +532,114 @@ def _reactionOnlySpan(span: Mapping[str, object]) -> bool:
     )
 
 
+def _trustedReactionUnitsFromSpans(
+    spans: Sequence[Mapping[str, object]],
+    *,
+    multiplier: int = 1,
+) -> list[tuple[dict[str, object], int]] | None:
+    units: list[tuple[dict[str, object], int]] = []
+    for span in spans:
+        kind = span.get("kind")
+        if kind in {"emote", "composite"}:
+            metadata = span.get("metadata")
+            if not isinstance(metadata, Mapping):
+                return None
+            if metadata.get("classificationSource") != "userDefined":
+                return None
+            meaning = {
+                key: metadata[key]
+                for key in ("semanticClass", "entity", "target")
+                if key in metadata
+            }
+            if not meaning:
+                return None
+            count = span.get("count", 1)
+            if type(count) is not int or count <= 0:
+                return None
+            meaning["classificationSource"] = "userDefined"
+            units.append((meaning, count * multiplier))
+            continue
+        if kind == "repeat":
+            count = span.get("count")
+            nested = span.get("spans")
+            if (
+                type(count) is not int
+                or count <= 1
+                or not isinstance(nested, Sequence)
+                or isinstance(nested, (str, bytes))
+                or not nested
+                or any(not isinstance(item, Mapping) for item in nested)
+            ):
+                return None
+            nestedUnits = _trustedReactionUnitsFromSpans(
+                nested,
+                multiplier=multiplier * count,
+            )
+            if nestedUnits is None:
+                return None
+            units.extend(nestedUnits)
+            continue
+        return None
+    return units or None
+
+
+def _burstSemanticFragments(
+    value: Mapping[str, object],
+    group: Sequence[QueryItem],
+) -> list[str] | None:
+    spans = value.get("canonicalSpans")
+    durationSeconds = value.get("durationSeconds")
+    if (
+        not isinstance(spans, Sequence)
+        or isinstance(spans, (str, bytes))
+        or not spans
+        or any(not isinstance(span, Mapping) for span in spans)
+        or type(durationSeconds) is not int
+        or durationSeconds < 2
+    ):
+        return None
+    units = _trustedReactionUnitsFromSpans(spans)
+    if units is None:
+        return None
+
+    byMeaning: dict[str, dict[str, object]] = {}
+    for meaning, count in units:
+        key = json.dumps(
+            meaning,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        current = byMeaning.setdefault(key, {"meaning": meaning, "count": 0})
+        current["count"] = int(current["count"]) + count
+
+    messageCount = len(group)
+    sourceAuthors = [
+        sourceAuthor
+        for item in group
+        if type(sourceAuthor := item.metadata.get("sourceUsername")) is str
+    ]
+    if len(sourceAuthors) != messageCount:
+        suffix = f"[{messageCount} messages; {durationSeconds}s]"
+    else:
+        uniqueAuthors = len({author.casefold() for author in sourceAuthors})
+        if uniqueAuthors == messageCount:
+            suffix = f"[{uniqueAuthors} users; {durationSeconds}s]"
+        else:
+            suffix = f"[{messageCount} messages; {uniqueAuthors} users; {durationSeconds}s]"
+
+    fragments: list[str] = []
+    for key in sorted(byMeaning):
+        current = byMeaning[key]
+        totalCount = int(current["count"]) * messageCount
+        countText = "" if totalCount == 1 else f" ×{totalCount}"
+        fragments.append(
+            f"{_semanticMeaningLabel(current['meaning'])}{countText} {suffix}"
+        )
+    return fragments
+
+
 def _reactionOnlyItem(item: QueryItem) -> bool:
     analysis = item.metadata.get("analysis")
     if not isinstance(analysis, Mapping) or analysis.get("kind") != "userMessage":
@@ -1008,7 +1116,10 @@ def _evidenceSections(
                         burstValue, burstGroup = completeBurst
                         if item is burstGroup[0]:
                             renderedBurst = _renderPersistentBurst(burstValue, burstGroup)
-                            if _reactionOnlyBurst(burstValue):
+                            burstSemantics = _burstSemanticFragments(burstValue, burstGroup)
+                            if burstSemantics is not None:
+                                semanticFragments.extend(burstSemantics)
+                            elif _reactionOnlyBurst(burstValue):
                                 reactionFragments.append(renderedBurst.removeprefix("CHAT BURST: "))
                             else:
                                 lines.append(renderedBurst)
