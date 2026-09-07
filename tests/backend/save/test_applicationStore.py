@@ -1,4 +1,4 @@
-# file: tests/backend/save/test_applicationStore.py ; version: 1
+# file: tests/backend/save/test_applicationStore.py ; version: 2
 from __future__ import annotations
 
 import json
@@ -150,6 +150,36 @@ def test_application_store_falls_back_to_previous_valid_generation_without_rewri
     assert (applicationPath / "current").read_bytes() == currentBefore
     assert (applicationPath / "generations" / "00000001.bundle").read_bytes() == firstBefore
     assert secondPath.read_bytes() == b"{not-valid-json"
+
+
+def test_application_store_never_overwrites_generation_published_by_racing_writer(
+    tmp_path,
+    monkeypatch,
+):
+    state, first = _bundle()
+    store = ApplicationStore(tmp_path / "saves")
+    applicationPath = store.createApplication(first)
+
+    update = state.openTransaction()
+    update.set("chat/line/17/semantic", {"body": "candidate-two"})
+    update.commit()
+    second = first.nextGeneration(committedState=state)
+
+    generationPath = applicationPath / "generations" / "00000002.bundle"
+    competingPayload = b"already-published-by-other-writer"
+    originalWrite = store._writeFileDurably
+
+    def raceAfterExistenceCheck(path, payload):
+        if path.name == ".00000002.bundle.tmp":
+            generationPath.write_bytes(competingPayload)
+        originalWrite(path, payload)
+
+    monkeypatch.setattr(store, "_writeFileDurably", raceAfterExistenceCheck)
+
+    with pytest.raises(FileExistsError):
+        store.publish(second)
+
+    assert generationPath.read_bytes() == competingPayload
 
 
 def test_application_store_creation_failure_does_not_publish_application_directory(tmp_path, monkeypatch):
