@@ -1,4 +1,4 @@
-# file: backend/application/runtime.py ; version: 3
+# file: backend/application/runtime.py ; version: 4
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -28,6 +28,7 @@ class Application:
     applicationId: str
     committedState: CommittedValueLayer = field(default_factory=CommittedValueLayer)
     saveBundleId: str | None = None
+    durableGeneration: int | None = None
 
     def __post_init__(self) -> None:
         if type(self.appPackId) is not str or not self.appPackId:
@@ -40,6 +41,10 @@ class Application:
             type(self.saveBundleId) is not str or not self.saveBundleId
         ):
             raise ValueError("saveBundleId must be a non-empty string or None.")
+        if self.durableGeneration is not None and (
+            type(self.durableGeneration) is not int or self.durableGeneration <= 0
+        ):
+            raise ValueError("durableGeneration must be a positive exact integer or None.")
 
     @classmethod
     def new(cls, *, appPackId: str) -> "Application":
