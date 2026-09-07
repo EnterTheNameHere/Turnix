@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 2
+# file: backend/application/applicationRuntime.py ; version: 3
 from __future__ import annotations
 
 from copy import deepcopy
@@ -77,6 +77,8 @@ class ApplicationRuntime:
         self._lane = RLock()
         self._initializing = False
         self._ownsTracer = tracer is None
+        self._tracerClosed = False
+        self._closed = False
         self.tracer = tracer or Tracer(origin="actant.runtime", destinations=(TraceSinkDestination(),))
         self.llmPipeline = LlmProcessingPipeline(
             providers=self.llmProviders,
@@ -274,11 +276,39 @@ class ApplicationRuntime:
                 },
             )
             self.applicationRun.stop()
-            if self._ownsTracer:
+
+    def close(self) -> None:
+        with self._lane:
+            if self._closed:
+                return
+
+            errors: list[Exception] = []
+            try:
+                self.packLoader.close()
+            except Exception as err:
+                errors.append(err)
+
+            try:
+                if self.applicationRun.active:
+                    self.stop()
+                else:
+                    self.abortInitialization()
+            except Exception as err:
+                errors.append(err)
+
+            if self._ownsTracer and not self._tracerClosed:
                 try:
                     self.tracer.close()
                 except Exception:
                     pass
+                self._tracerClosed = True
+
+            self._closed = True
+            if errors:
+                raise ExceptionGroup(
+                    "ApplicationRuntime close reported errors.",
+                    errors,
+                )
 
     def requireActive(self) -> None:
         if not self.applicationRun.active:
