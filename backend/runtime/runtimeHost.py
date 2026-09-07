@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 1
+# file: backend/runtime/runtimeHost.py ; version: 2
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,7 +9,7 @@ from backend.application.applicationRuntime import ApplicationRuntime
 from backend.application.lifecycle import ApplicationLifecycle
 from backend.core.runtimeIds import newRuntimeId
 from backend.packs.runtime import ManualActivationPlan, PackLoader, PackResolver
-from backend.save import ApplicationStore, LoadedApplicationSave
+from backend.save import ApplicationStore
 from backend.tracing import TraceSinkDestination, Tracer
 
 __all__ = ["RuntimeHost", "RuntimeHostState"]
@@ -25,7 +25,6 @@ class RuntimeHostState(StrEnum):
 class _HostedApplicationRuntime:
     runtime: ApplicationRuntime
     packLoader: PackLoader
-    loadedSave: LoadedApplicationSave | None = None
 
 
 class RuntimeHost:
@@ -162,7 +161,6 @@ class RuntimeHost:
                     _HostedApplicationRuntime(
                         runtime=runtime,
                         packLoader=loader,
-                        loadedSave=loaded,
                     ),
                 )
             except Exception:
