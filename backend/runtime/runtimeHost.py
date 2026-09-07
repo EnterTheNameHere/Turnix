@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 8
+# file: backend/runtime/runtimeHost.py ; version: 9
 from __future__ import annotations
 
 from copy import deepcopy
@@ -61,6 +61,7 @@ class RuntimeHost:
                 applicationId=saveBundle.applicationId,
                 committedState=saveBundle.restoreCommittedState(),
                 saveBundleId=saveBundle.saveBundleId,
+                durableGeneration=saveBundle.generation,
             )
 
         self.applicationRun = ApplicationRun(application=resolvedApplication)
@@ -117,6 +118,8 @@ class RuntimeHost:
             config=config,
             tracer=tracer,
         )
+        if loaded.recoveredFromGeneration is not None:
+            host.applicationRun.application.durableGeneration = loaded.recoveredFromGeneration
         return host, loaded
 
     def _nextSaveBundleCandidate(self) -> SaveBundle:
@@ -132,13 +135,25 @@ class RuntimeHost:
             or self._saveBundle.applicationId != self.applicationRun.application.applicationId
         ):
             raise RuntimeError("Bound SaveBundle Application identity no longer matches ApplicationRun.")
-        return self._saveBundle.nextGeneration(
-            committedState=self.applicationRun.application.committedState,
+        application = self.applicationRun.application
+        durableGeneration = application.durableGeneration
+        if durableGeneration is None:
+            durableGeneration = self._saveBundle.generation
+        targetGeneration = durableGeneration + 1
+        if targetGeneration == self._saveBundle.generation + 1:
+            return self._saveBundle.nextGeneration(
+                committedState=application.committedState,
+            )
+        return self._saveBundle.advanceToGeneration(
+            generation=targetGeneration,
+            committedState=application.committedState,
         )
 
     def _acceptSaveBundle(self, bundle: SaveBundle) -> None:
         self._saveBundle = bundle
-        self.applicationRun.application.saveBundleId = bundle.saveBundleId
+        application = self.applicationRun.application
+        application.saveBundleId = bundle.saveBundleId
+        application.durableGeneration = bundle.generation
 
     def saveApplication(self, applicationStore: ApplicationStore | None = None) -> SaveBundle:
         """Persists exactly one snapshot of the current authoritative root.
