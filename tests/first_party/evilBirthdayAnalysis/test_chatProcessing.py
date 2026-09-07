@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatProcessing.py ; version: 6
+# file: tests/first_party/evilBirthdayAnalysis/test_chatProcessing.py ; version: 7
 from __future__ import annotations
 
 import hashlib
@@ -382,6 +382,15 @@ def test_real_alignment_contract_maps_video_offset_to_stream_relative_chat_time(
     assert selected["wallClockAtStreamZero"] == "2024-03-25 19:08:55"
     assert selected["wallClockAtMediaZero"] == "2024-03-25 19:00:02"
     assert [record["streamTime"] for record in selected["records"]] == [
+        "00:00:00",
+        "00:08:52",
+    ]
+
+    extended = chat._select(
+        ctx,
+        {"videoStartSeconds": 533, "videoEndSeconds": 1067},
+    )
+    assert [record["streamTime"] for record in extended["records"]] == [
         "00:00:00",
         "00:08:52",
         "00:08:53",
