@@ -1,4 +1,4 @@
-# file: tests/backend/orchestration/test_runtime.py ; version: 5
+# file: tests/backend/orchestration/test_runtime.py ; version: 6
 import pytest
 
 from backend.orchestration.runtime import Job, JobState, OrchestrationUnit, OrchestrationUnitOutcome
@@ -25,6 +25,9 @@ def test_job_constructor_rejects_invalid_runtime_state():
 
     with pytest.raises(ValueError, match="jobId"):
         Job(jobId="")
+
+    with pytest.raises(TypeError, match="authoritativeStateAccepted"):
+        Job(jobId="job", authoritativeStateAccepted=1)  # type: ignore[arg-type]
 
 
 def test_orchestration_unit_requires_declared_outcome():
@@ -166,3 +169,15 @@ def test_mutation_orchestration_unit_exposes_owned_transaction_identity():
     unit.start()
     unit.abortMutation()
     unit.finish(OrchestrationUnitOutcome.COMPLETED)
+
+
+def test_job_state_acceptance_is_separate_from_terminal_job_outcome():
+    job = Job.new()
+    job.start()
+    job.authoritativeStateAccepted = True
+    error = RuntimeError("later persistence failure")
+    job.fail(error)
+
+    assert job.state is JobState.FAILED
+    assert job.authoritativeStateAccepted is True
+    assert job.error is error
