@@ -1,4 +1,4 @@
-# file: backend/application/runtime.py ; version: 5
+# file: backend/application/runtime.py ; version: 6
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -63,32 +63,14 @@ class ApplicationRunState(StrEnum):
 class ApplicationRun:
     """One non-restartable live execution period of an Application.
 
-    Durable authoritative memory belongs to Application. The compatibility
-    properties below intentionally expose the former ApplicationRun access
-    path while runtime and pipeline code migrate toward Application ownership.
-    Transactions opened during this run remain speculative until propagated to
-    the Application's committed root.
+    Durable authoritative memory and SaveBundle lineage belong to Application.
+    ApplicationRun owns only the identity and lifecycle state of one live
+    execution incarnation.
     """
 
     application: Application
     applicationRunId: str = field(default_factory=newRuntimeId)
     state: ApplicationRunState = ApplicationRunState.CREATED
-
-    @property
-    def committedState(self) -> CommittedValueLayer:
-        """Compatibility view of the Application-owned authoritative root."""
-        return self.application.committedState
-
-    @property
-    def saveBundleId(self) -> str | None:
-        """Compatibility view of the Application's bound SaveBundle lineage."""
-        return self.application.saveBundleId
-
-    @saveBundleId.setter
-    def saveBundleId(self, value: str | None) -> None:
-        if value is not None and (type(value) is not str or not value):
-            raise ValueError("saveBundleId must be a non-empty string or None.")
-        self.application.saveBundleId = value
 
     @property
     def active(self) -> bool:
