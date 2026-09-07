@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 12
+# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 13
 from __future__ import annotations
 
 import hashlib
@@ -143,10 +143,21 @@ def _vocabulary(
         raise ValueError("Chat emote vocabulary requires emotes object and composites list.")
 
     normalizedEmotes: dict[str, dict[str, object]] = {}
+    canonicalEmoteNames: dict[str, str] = {}
     for name, metadata in emotes.items():
         if type(name) is not str or not name or not isinstance(metadata, dict):
             raise ValueError("Chat emote definitions require non-empty string names and object metadata.")
-        normalizedEmotes[name] = dict(metadata)
+        folded = name.casefold()
+        if folded in canonicalEmoteNames:
+            raise ValueError(
+                "Chat emote definitions must be unique case-insensitively; "
+                f"{canonicalEmoteNames[folded]!r} conflicts with {name!r}."
+            )
+        canonicalEmoteNames[folded] = name
+        normalizedEmotes[folded] = {
+            "name": name,
+            "metadata": dict(metadata),
+        }
 
     normalizedComposites: list[dict[str, object]] = []
     seenPatterns: set[tuple[str, ...]] = set()
@@ -157,14 +168,21 @@ def _vocabulary(
         if not isinstance(tokens, list) or len(tokens) < 2 or any(type(token) is not str or not token for token in tokens):
             raise ValueError("Chat composite definitions require at least two non-empty string tokens.")
         pattern = tuple(tokens)
-        unknown = [token for token in pattern if token not in normalizedEmotes]
+        foldedPattern = tuple(token.casefold() for token in pattern)
+        unknown = [token for token in pattern if token.casefold() not in normalizedEmotes]
         if unknown:
             raise ValueError(f"Chat composite references unknown emote token(s): {', '.join(unknown)}.")
-        if pattern in seenPatterns:
+        if foldedPattern in seenPatterns:
             raise ValueError(f"Duplicate chat composite pattern: {' '.join(pattern)}.")
-        seenPatterns.add(pattern)
+        seenPatterns.add(foldedPattern)
         metadata = {key: value for key, value in compositeDefinition.items() if key != "tokens"}
-        normalizedComposites.append({"tokens": pattern, "metadata": metadata})
+        normalizedComposites.append(
+            {
+                "tokens": tuple(canonicalEmoteNames[token.casefold()] for token in pattern),
+                "foldedTokens": foldedPattern,
+                "metadata": metadata,
+            }
+        )
 
     normalizedComposites.sort(key=lambda item: len(item["tokens"]), reverse=True)
     return normalizedEmotes, normalizedComposites, after
@@ -206,8 +224,9 @@ def _appendSpan(spans: list[dict[str, object]], span: dict[str, object]) -> None
 
 def _matchComposite(tokens: list[str], index: int, composites: list[dict[str, object]]) -> dict[str, object] | None:
     for composite in composites:
-        pattern = composite["tokens"]
-        if tuple(tokens[index : index + len(pattern)]) == pattern:
+        pattern = composite["foldedTokens"]
+        candidate = tuple(token.casefold() for token in tokens[index : index + len(pattern)])
+        if candidate == pattern:
             return composite
     return None
 
@@ -291,12 +310,17 @@ def _lexMessage(message: str, emotes: dict[str, dict[str, object]], composites: 
             continue
 
         token = tokens[index]
-        metadata = emotes.get(token)
-        if metadata is not None:
+        emote = emotes.get(token.casefold())
+        if emote is not None:
             count, nextIndex = _occurrenceCount(tokens, index + 1)
             _appendSpan(
                 spans,
-                {"kind": "emote", "name": token, "count": count, "metadata": dict(metadata)},
+                {
+                    "kind": "emote",
+                    "name": emote["name"],
+                    "count": count,
+                    "metadata": dict(emote["metadata"]),
+                },
             )
             index = nextIndex
             continue
