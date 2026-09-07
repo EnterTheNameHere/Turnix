@@ -1,4 +1,4 @@
-# file: tests/backend/orchestration/test_runtime.py ; version: 3
+# file: tests/backend/orchestration/test_runtime.py ; version: 4
 import pytest
 
 from backend.orchestration.runtime import Job, JobState, OrchestrationUnit, OrchestrationUnitOutcome
@@ -133,3 +133,20 @@ def test_mutation_orchestration_unit_can_nest_under_existing_parent_transaction(
     parent.commit()
 
     assert root.load("test/value") == "nested"
+
+
+def test_failed_outcome_does_not_undo_already_committed_authoritative_mutation():
+    root = CommittedValueLayer()
+    unit = OrchestrationUnit.mutation(
+        applicationRunId="application-run",
+        transactionBase=root,
+    )
+    unit.start()
+    assert unit.memoryView is not None
+
+    unit.memoryView.set("test/value", "already-authoritative")
+    unit.commitMutation()
+    unit.finish(OrchestrationUnitOutcome.FAILED)
+
+    assert unit.outcome is OrchestrationUnitOutcome.FAILED
+    assert root.load("test/value") == "already-authoritative"
