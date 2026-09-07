@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 19
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 20
 from __future__ import annotations
 
 import json
@@ -719,13 +719,19 @@ def _renderSemanticGroup(
     return f"CHAT SEMANTIC: {_semanticMeaningText(meaning)} ×{totalCount} {suffix}"
 
 
-def _chatLine(item: QueryItem) -> str:
+def _chatLine(
+    item: QueryItem,
+    *,
+    repeatStartMarker: str = _DEFAULT_REPEAT_START_MARKER,
+    repeatEndMarker: str = _DEFAULT_REPEAT_END_MARKER,
+) -> str:
     """Renders one unbucketed chat item in the model-facing evidence format."""
-    return f"[{_chatStreamTime(item)} CHAT {_chatAuthor(item)}] {_chatPresentationContent(
-                    item,
-                    repeatStartMarker=repeatStartMarker,
-                    repeatEndMarker=repeatEndMarker,
-                )}"
+    content = _chatPresentationContent(
+        item,
+        repeatStartMarker=repeatStartMarker,
+        repeatEndMarker=repeatEndMarker,
+    )
+    return f"[{_chatStreamTime(item)} CHAT {_chatAuthor(item)}] {content}"
 
 
 def _transcriptStreamTime(item: QueryItem) -> str:
@@ -775,7 +781,17 @@ def _evidenceSections(
         if transcriptItems:
             sections.append("TRANSCRIPT WINDOW\n" + "\n".join(_transcriptLine(item) for item in transcriptItems))
         if chatItems:
-            sections.append("CHAT WINDOW\n" + "\n".join(_chatLine(item) for item in chatItems))
+            sections.append(
+                "CHAT WINDOW\n"
+                + "\n".join(
+                    _chatLine(
+                        item,
+                        repeatStartMarker=repeatStartMarker,
+                        repeatEndMarker=repeatEndMarker,
+                    )
+                    for item in chatItems
+                )
+            )
         return sections
 
     if chatLayout == "interleaved":
