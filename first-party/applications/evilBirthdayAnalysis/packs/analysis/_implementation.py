@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 17
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 18
 from __future__ import annotations
 
 import json
@@ -13,6 +13,8 @@ _CONTEXT_TEXT = (
     'She is presented as Neuro-sama\'s "evil" sister. This material comes from Evil\'s birthday stream.'
 )
 _CHAT_LAYOUTS = frozenset({"separate", "interleaved"})
+_DEFAULT_REPEAT_START_MARKER = "⟦"
+_DEFAULT_REPEAT_END_MARKER = "⟧"
 
 
 def _plain(value):
@@ -101,6 +103,21 @@ def _chatPresentation(settings: Mapping[str, object]) -> tuple[bool, str]:
     if type(layout) is not str or layout not in _CHAT_LAYOUTS:
         raise ValueError("Profile setting 'chatLayout' must be 'separate' or 'interleaved'.")
     return includeChat, layout
+
+
+def _repeatMarkers(config: Mapping[str, object]) -> tuple[str, str]:
+    rendering = config.get("chatRendering", {})
+    if not isinstance(rendering, Mapping):
+        raise TypeError("Application config chatRendering must be an object.")
+    start = rendering.get("repeatStartMarker", _DEFAULT_REPEAT_START_MARKER)
+    end = rendering.get("repeatEndMarker", _DEFAULT_REPEAT_END_MARKER)
+    if type(start) is not str or not start or type(end) is not str or not end:
+        raise ValueError("Chat repeat rendering markers must be non-empty exact strings.")
+    if "\n" in start or "\r" in start or "\n" in end or "\r" in end:
+        raise ValueError("Chat repeat rendering markers must not contain line breaks.")
+    if start == end or start in end or end in start:
+        raise ValueError("Chat repeat rendering markers must be distinct and non-overlapping.")
+    return start, end
 
 
 def _chatBudgetFraction(config: Mapping[str, object]) -> float:
@@ -406,7 +423,12 @@ def _sanitizePromptSections(ctx, sections: list[str], chatItems: list[QueryItem]
     }
 
 
-def _renderChatSpan(span: Mapping[str, object]) -> str:
+def _renderChatSpan(
+    span: Mapping[str, object],
+    *,
+    repeatStartMarker: str = _DEFAULT_REPEAT_START_MARKER,
+    repeatEndMarker: str = _DEFAULT_REPEAT_END_MARKER,
+) -> str:
     """Renders one interpreted chat span without mutating source/query evidence."""
     kind = span.get("kind")
     if kind == "text":
@@ -438,14 +460,28 @@ def _renderChatSpan(span: Mapping[str, object]) -> str:
             part
             for nestedSpan in nested
             if isinstance(nestedSpan, Mapping)
-            for part in [_renderChatSpan(nestedSpan)]
+            for part in [
+                _renderChatSpan(
+                    nestedSpan,
+                    repeatStartMarker=repeatStartMarker,
+                    repeatEndMarker=repeatEndMarker,
+                )
+            ]
             if part
         )
-        return f"({text}) ×{span.get('count', 1)}"
+        return (
+            f"{repeatStartMarker}{text}{repeatEndMarker} "
+            f"×{span.get('count', 1)}"
+        )
     return ""
 
 
-def _chatPresentationContent(item: QueryItem) -> str:
+def _chatPresentationContent(
+    item: QueryItem,
+    *,
+    repeatStartMarker: str = _DEFAULT_REPEAT_START_MARKER,
+    repeatEndMarker: str = _DEFAULT_REPEAT_END_MARKER,
+) -> str:
     """Returns presentation-only compressed chat text when semantic spans are available."""
     analysis = item.metadata.get("analysis")
     if isinstance(analysis, Mapping) and analysis.get("kind") == "userMessage":
@@ -459,7 +495,13 @@ def _chatPresentationContent(item: QueryItem) -> str:
             rendered = " ".join(
                 part
                 for span in spans
-                for part in [_renderChatSpan(span)]
+                for part in [
+                    _renderChatSpan(
+                        span,
+                        repeatStartMarker=repeatStartMarker,
+                        repeatEndMarker=repeatEndMarker,
+                    )
+                ]
                 if part
             )
             if rendered:
@@ -549,6 +591,7 @@ def _renderPersistentBurst(
 ) -> str:
     """Renders one fully-present closed burst without inventing omitted evidence."""
     canonicalMessage = value.get("canonicalMessage")
+    canonicalSpans = value.get("canonicalSpans")
     durationSeconds = value.get("durationSeconds")
     if type(canonicalMessage) is not str or not canonicalMessage:
         raise RuntimeError("Closed identical-message burst lacks canonicalMessage.")
@@ -670,7 +713,11 @@ def _renderSemanticGroup(
 
 def _chatLine(item: QueryItem) -> str:
     """Renders one unbucketed chat item in the model-facing evidence format."""
-    return f"[{_chatStreamTime(item)} CHAT {_chatAuthor(item)}] {_chatPresentationContent(item)}"
+    return f"[{_chatStreamTime(item)} CHAT {_chatAuthor(item)}] {_chatPresentationContent(
+                    item,
+                    repeatStartMarker=repeatStartMarker,
+                    repeatEndMarker=repeatEndMarker,
+                )}"
 
 
 def _transcriptStreamTime(item: QueryItem) -> str:
@@ -704,6 +751,8 @@ def _evidenceSections(
     chatItems: list[QueryItem],
     includeChat: bool,
     chatLayout: str,
+    repeatStartMarker: str = _DEFAULT_REPEAT_START_MARKER,
+    repeatEndMarker: str = _DEFAULT_REPEAT_END_MARKER,
 ) -> list[str]:
     transcriptItems = sorted(transcriptItems, key=_streamStart)
     chatItems = _orderedChat(chatItems)
@@ -792,7 +841,11 @@ def _evidenceSections(
                 if _persistentChatAggregateEntry(item) is None:
                     analysis = item.metadata.get("analysis")
                     if isinstance(analysis, Mapping) and analysis.get("kind") == "userMessage":
-                        fallbackGroups.setdefault(_chatPresentationContent(item), []).append(item)
+                        fallbackGroups.setdefault(_chatPresentationContent(
+                    item,
+                    repeatStartMarker=repeatStartMarker,
+                    repeatEndMarker=repeatEndMarker,
+                ), []).append(item)
 
             semanticGroups: dict[
                 tuple[str, str],
@@ -877,7 +930,11 @@ def _evidenceSections(
                         )
                     continue
 
-                content = _chatPresentationContent(item)
+                content = _chatPresentationContent(
+                    item,
+                    repeatStartMarker=repeatStartMarker,
+                    repeatEndMarker=repeatEndMarker,
+                )
                 persistentGroup = _persistentIdenticalChatGroup(item)
                 aggregateEntry = _persistentChatAggregateEntry(item)
                 if persistentGroup is not None:
@@ -938,6 +995,16 @@ def _renderPrompt(
     evidenceNotice: str | None = None,
 ) -> tuple[str, dict[str, int]]:
     sections = _fixedSections(byKind)
+    repeatStartMarker, repeatEndMarker = _repeatMarkers(ctx.config)
+    if includeChat:
+        sections.append(
+            "EVIDENCE FORMAT\n"
+            f"{repeatStartMarker}text{repeatEndMarker} ×N means the enclosed span occurred N consecutive times "
+            "inside one original chat message. The repeat delimiters are reserved renderer syntax and do not "
+            "occur literally in the source chat.\n"
+            "CHAT BURST: text ×N [..] represents N separate chat messages with the same or canonically "
+            "equivalent content aggregated across the stated short interval."
+        )
     if evidenceNotice is not None:
         if type(evidenceNotice) is not str or not evidenceNotice:
             raise ValueError("Model-facing evidence notice must be a non-empty string when supplied.")
@@ -948,6 +1015,8 @@ def _renderPrompt(
             chatItems=presentedChatItems,
             includeChat=includeChat,
             chatLayout=chatLayout,
+            repeatStartMarker=repeatStartMarker,
+            repeatEndMarker=repeatEndMarker,
         )
     )
     sections, identityStatistics = _sanitizePromptSections(ctx, sections, allChatItems)
