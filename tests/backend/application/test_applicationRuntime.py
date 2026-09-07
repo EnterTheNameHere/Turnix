@@ -1,4 +1,4 @@
-# file: tests/backend/application/test_applicationRuntime.py ; version: 1
+# file: tests/backend/application/test_applicationRuntime.py ; version: 2
 from pathlib import Path
 
 import pytest
@@ -86,13 +86,13 @@ def test_trace_publication_failure_does_not_change_runtime_lifecycle():
 def test_application_physically_owns_authoritative_memory():
     host = ApplicationRuntime(appPackId="test.app")
 
-    assert host.applicationRun.committedState is host.applicationRun.application.committedState
+    assert host.applicationRun.application.committedState is host.applicationRun.application.committedState
 
     transaction = host.applicationRun.application.committedState.openTransaction()
     transaction.set("test/application-owned", {"value": 1})
     transaction.commit()
 
-    assert host.applicationRun.committedState.load("test/application-owned") == {"value": 1}
+    assert host.applicationRun.application.committedState.load("test/application-owned") == {"value": 1}
 
 
 def test_contexts_share_application_run_authoritative_memory():
@@ -146,7 +146,7 @@ def test_save_bundle_rehydrates_same_application_into_new_run():
         firstApplicationId = firstHost.applicationRun.application.applicationId
         firstRunId = firstHost.applicationRun.applicationRunId
 
-        transaction = firstHost.applicationRun.committedState.openTransaction()
+        transaction = firstHost.applicationRun.application.committedState.openTransaction()
         transaction.set("chat/line/17/semantic", {"body": "hello"})
         transaction.setAbsent("chat/line/18/semantic")
         transaction.commit()
@@ -155,7 +155,7 @@ def test_save_bundle_rehydrates_same_application_into_new_run():
         assert bundle.appPackId == "test.app"
         assert bundle.applicationId == firstApplicationId
         assert bundle.generation == 1
-        assert firstHost.applicationRun.saveBundleId == bundle.saveBundleId
+        assert firstHost.applicationRun.application.saveBundleId == bundle.saveBundleId
         assert firstHost.applicationRun.application.saveBundleId == bundle.saveBundleId
     finally:
         firstHost.stop()
@@ -165,16 +165,16 @@ def test_save_bundle_rehydrates_same_application_into_new_run():
 
     assert secondHost.applicationRun.application.applicationId == firstApplicationId
     assert secondHost.applicationRun.applicationRunId != firstRunId
-    assert secondHost.applicationRun.saveBundleId == bundle.saveBundleId
+    assert secondHost.applicationRun.application.saveBundleId == bundle.saveBundleId
     assert secondHost.applicationRun.application.saveBundleId == bundle.saveBundleId
     assert (
-        secondHost.applicationRun.committedState
+        secondHost.applicationRun.application.committedState
         is secondHost.applicationRun.application.committedState
     )
 
     secondHost.start()
     try:
-        state = secondHost.applicationRun.committedState
+        state = secondHost.applicationRun.application.committedState
         assert state.load("chat/line/17/semantic") == {"body": "hello"}
         assert state.revisionId("chat/line/17/semantic") == 1
         assert state.state("chat/line/18/semantic") is ValueState.ABSENT
@@ -194,8 +194,8 @@ def test_save_bundle_rehydrates_same_application_into_new_run():
     thirdHost = ApplicationRuntime(saveBundle=SaveBundle.fromBytes(secondBundle.toBytes()))
     assert thirdHost.applicationRun.application.applicationId == firstApplicationId
     assert thirdHost.applicationRun.applicationRunId not in {firstRunId, secondHost.applicationRun.applicationRunId}
-    assert thirdHost.applicationRun.committedState.load("chat/line/17/semantic") == {"body": "changed"}
-    assert thirdHost.applicationRun.committedState.revisionId("chat/line/17/semantic") == 2
+    assert thirdHost.applicationRun.application.committedState.load("chat/line/17/semantic") == {"body": "changed"}
+    assert thirdHost.applicationRun.application.committedState.revisionId("chat/line/17/semantic") == 2
 
 
 def test_application_runtime_rejects_application_and_save_bundle_together():
@@ -241,7 +241,7 @@ def test_capability_memory_write_nests_under_supplied_transaction():
     )
     scope.publish()
 
-    outer = host.applicationRun.committedState.openTransaction()
+    outer = host.applicationRun.application.committedState.openTransaction()
     outerCommitted = False
     try:
         result = host.invokeCapability(
@@ -251,14 +251,14 @@ def test_capability_memory_write_nests_under_supplied_transaction():
 
         assert result == {"count": 1}
         assert outer.load("test/nested/value") == {"count": 1}
-        assert host.applicationRun.committedState.load("test/nested/value") is MISSING
-        assert host.applicationRun.committedState.revisionId("test/nested/value") == 0
+        assert host.applicationRun.application.committedState.load("test/nested/value") is MISSING
+        assert host.applicationRun.application.committedState.revisionId("test/nested/value") == 0
 
         outer.commit()
         outerCommitted = True
 
-        assert host.applicationRun.committedState.load("test/nested/value") == {"count": 1}
-        assert host.applicationRun.committedState.revisionId("test/nested/value") == 1
+        assert host.applicationRun.application.committedState.load("test/nested/value") == {"count": 1}
+        assert host.applicationRun.application.committedState.revisionId("test/nested/value") == 1
     finally:
         if not outerCommitted:
             outer.abort()
@@ -277,7 +277,7 @@ def test_application_runtime_persists_and_loads_application_through_filesystem_s
     firstApplicationId = firstHost.applicationRun.application.applicationId
     firstRunId = firstHost.applicationRun.applicationRunId
 
-    root = firstHost.applicationRun.committedState
+    root = firstHost.applicationRun.application.committedState
     transaction = root.openTransaction()
     transaction.set(
         "chat/line/17/semantic",
@@ -313,17 +313,17 @@ def test_application_runtime_persists_and_loads_application_through_filesystem_s
     assert secondHost.applicationRun.application.appPackId == "test.app"
     assert secondHost.applicationRun.application.applicationId == firstApplicationId
     assert secondHost.applicationRun.applicationRunId != firstRunId
-    assert secondHost.applicationRun.committedState.load("chat/line/17/semantic") == {
+    assert secondHost.applicationRun.application.committedState.load("chat/line/17/semantic") == {
         "body": "hello"
     }
-    assert secondHost.applicationRun.committedState.metadata(
+    assert secondHost.applicationRun.application.committedState.metadata(
         "chat/line/17/semantic"
     ) == {
         "producer": {"implementationId": "chat-semantics"},
         "validity": {"rawLine": "viewer: hello"},
     }
 
-    update = secondHost.applicationRun.committedState.openTransaction()
+    update = secondHost.applicationRun.application.committedState.openTransaction()
     update.set("chat/line/17/semantic", {"body": "changed"})
     update.commit()
     secondBundle = secondHost.saveApplication()
@@ -340,10 +340,10 @@ def test_application_runtime_persists_and_loads_application_through_filesystem_s
     )
 
     assert loadedAgain.bundle.generation == 2
-    assert thirdHost.applicationRun.committedState.load(
+    assert thirdHost.applicationRun.application.committedState.load(
         "chat/line/17/semantic"
     ) == {"body": "changed"}
-    assert thirdHost.applicationRun.committedState.revisionId(
+    assert thirdHost.applicationRun.application.committedState.revisionId(
         "chat/line/17/semantic"
     ) == 2
 
@@ -472,7 +472,7 @@ def test_application_runtime_failed_publication_does_not_advance_accepted_genera
     first = host.saveApplication()
     assert first.generation == 1
 
-    transaction = host.applicationRun.committedState.openTransaction()
+    transaction = host.applicationRun.application.committedState.openTransaction()
     transaction.set("test/value", 1)
     transaction.commit()
 
@@ -486,7 +486,7 @@ def test_application_runtime_failed_publication_does_not_advance_accepted_genera
     with pytest.raises(OSError, match="simulated durable publication failure"):
         host.saveApplication()
 
-    assert host.applicationRun.saveBundleId == first.saveBundleId
+    assert host.applicationRun.application.saveBundleId == first.saveBundleId
 
     monkeypatch.setattr(store, "publish", originalPublish)
     second = host.saveApplication()
