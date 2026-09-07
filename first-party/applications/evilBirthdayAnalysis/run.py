@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 13
+# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 14
 from __future__ import annotations
 
 import argparse
@@ -77,6 +77,13 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--preview-output",
+        help=(
+            "Write prompt preview text to this path. Defaults to "
+            "outputDirectory/prompt-previews/prompt-<HH-MM-SS>.txt."
+        ),
+    )
+    parser.add_argument(
         "--saves-root",
         default=str(REPO_ROOT / "saves"),
         help="Application persistence root. Defaults to the repository saves/ directory.",
@@ -141,19 +148,56 @@ def main() -> int:
             query = preview.get("query")
             if not isinstance(query, dict) or type(query.get("payload")) is not str:
                 raise RuntimeError("Prompt preview did not return exact text/plain payload.")
+            outputDirectory = config.get("outputDirectory")
+            if args.preview_output is None:
+                if type(outputDirectory) is not str or not outputDirectory.strip():
+                    raise ValueError(
+                        "Prompt preview requires outputDirectory when --preview-output is not supplied."
+                    )
+                safePosition = args.preview_prompt.replace(":", "-")
+                previewPath = (
+                    Path(outputDirectory)
+                    / "prompt-previews"
+                    / f"prompt-{safePosition}.txt"
+                )
+            else:
+                previewPath = Path(args.preview_output).expanduser()
+                if not previewPath.is_absolute():
+                    previewPath = (configPath.parent / previewPath).resolve()
+
+            metadataPath = previewPath.with_suffix(".json")
+            io.writeTextAtomic(previewPath, query["payload"])
+            io.writeJsonAtomic(
+                metadataPath,
+                {
+                    key: value
+                    for key, value in preview.items()
+                    if key != "query"
+                }
+                | {
+                    "query": {
+                        "formatId": query.get("formatId"),
+                        "metadata": query.get("metadata"),
+                        "promptFile": str(previewPath),
+                    }
+                },
+            )
+
+            executionProfile = preview.get("executionProfile")
+            contextWindow = (
+                executionProfile.get("contextWindowTokens")
+                if isinstance(executionProfile, dict)
+                else None
+            )
             sys.stdout.write(
                 f"\nPrompt preview at {args.preview_prompt}\n"
                 f"Provider: {preview.get('provider')}\n"
                 f"Model: {preview.get('model')}\n"
                 f"Input tokens: {preview.get('inputTokens')}\n"
-                f"Context window: "
-                f"{preview.get('executionProfile', {}).get('contextWindowTokens') if isinstance(preview.get('executionProfile'), dict) else None}\n"
-                "\n===== MODEL-FACING PROMPT =====\n"
+                f"Context window: {contextWindow}\n"
+                f"Prompt file: {previewPath}\n"
+                f"Metadata file: {metadataPath}\n"
             )
-            sys.stdout.write(query["payload"])
-            if not query["payload"].endswith("\n"):
-                sys.stdout.write("\n")
-            sys.stdout.write("===== END MODEL-FACING PROMPT =====\n")
             return 0
 
         job = runtime.runJob("evilAnalysis.run@1", {"streamObserver": observe})
