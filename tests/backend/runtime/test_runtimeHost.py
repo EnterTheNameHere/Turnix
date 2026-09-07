@@ -1,4 +1,4 @@
-# file: tests/backend/runtime/test_runtimeHost.py ; version: 7
+# file: tests/backend/runtime/test_runtimeHost.py ; version: 8
 from pathlib import Path
 
 import pytest
@@ -7,7 +7,7 @@ from backend.application import ApplicationRunState
 from backend.context import CodeEntryIdentity
 from backend.registration import RegistrationScope
 from backend.runtime.runtimeHost import RuntimeHost
-from backend.save import SaveBundle
+from backend.save import ApplicationStore, SaveBundle
 from backend.values import MISSING, ValueState
 
 
@@ -140,6 +140,7 @@ def test_save_bundle_rehydrates_same_application_into_new_run():
         transaction.commit()
 
         bundle = firstHost.captureSaveBundle()
+        assert bundle.appPackId == "test.app"
         assert bundle.applicationId == firstApplicationId
         assert bundle.generation == 1
         assert firstHost.applicationRun.saveBundleId == bundle.saveBundleId
@@ -246,3 +247,131 @@ def test_capability_memory_write_nests_under_supplied_transaction():
         scope.withdraw()
         host.unregisterCodeEntry(identity.codeEntryInstanceId)
         host.stop()
+
+
+
+def test_runtime_host_persists_and_loads_application_through_filesystem_store(tmp_path):
+    store = ApplicationStore(tmp_path / "saves")
+    firstHost = RuntimeHost(
+        appPackId="test.app",
+        applicationStore=store,
+    )
+    firstApplicationId = firstHost.applicationRun.application.applicationId
+    firstRunId = firstHost.applicationRun.applicationRunId
+
+    root = firstHost.applicationRun.committedState
+    transaction = root.openTransaction()
+    transaction.set(
+        "chat/line/17/semantic",
+        {"body": "hello"},
+        metadata={
+            "producer": {"implementationId": "chat-semantics"},
+            "validity": {"rawLine": "viewer: hello"},
+        },
+    )
+    transaction.commit()
+
+    firstBundle = firstHost.saveApplication()
+    assert firstBundle.generation == 1
+    assert (
+        tmp_path
+        / "saves"
+        / "test.app"
+        / firstApplicationId
+        / "generations"
+        / "00000001.bundle"
+    ).is_file()
+
+    del firstHost
+
+    secondHost, loaded = RuntimeHost.loadApplication(
+        applicationStore=store,
+        appPackId="test.app",
+        applicationId=firstApplicationId,
+    )
+
+    assert loaded.bundle.generation == 1
+    assert loaded.recoveredFromGeneration is None
+    assert secondHost.applicationRun.application.appPackId == "test.app"
+    assert secondHost.applicationRun.application.applicationId == firstApplicationId
+    assert secondHost.applicationRun.applicationRunId != firstRunId
+    assert secondHost.applicationRun.committedState.load("chat/line/17/semantic") == {
+        "body": "hello"
+    }
+    assert secondHost.applicationRun.committedState.metadata(
+        "chat/line/17/semantic"
+    ) == {
+        "producer": {"implementationId": "chat-semantics"},
+        "validity": {"rawLine": "viewer: hello"},
+    }
+
+    update = secondHost.applicationRun.committedState.openTransaction()
+    update.set("chat/line/17/semantic", {"body": "changed"})
+    update.commit()
+    secondBundle = secondHost.saveApplication()
+
+    assert secondBundle.saveBundleId == firstBundle.saveBundleId
+    assert secondBundle.generation == 2
+
+    del secondHost
+
+    thirdHost, loadedAgain = RuntimeHost.loadApplication(
+        applicationStore=ApplicationStore(tmp_path / "saves"),
+        appPackId="test.app",
+        applicationId=firstApplicationId,
+    )
+
+    assert loadedAgain.bundle.generation == 2
+    assert thirdHost.applicationRun.committedState.load(
+        "chat/line/17/semantic"
+    ) == {"body": "changed"}
+    assert thirdHost.applicationRun.committedState.revisionId(
+        "chat/line/17/semantic"
+    ) == 2
+
+
+def test_runtime_host_failed_publication_does_not_advance_accepted_generation(
+    tmp_path,
+    monkeypatch,
+):
+    store = ApplicationStore(tmp_path / "saves")
+    host = RuntimeHost(
+        appPackId="test.app",
+        applicationStore=store,
+    )
+
+    first = host.saveApplication()
+    assert first.generation == 1
+
+    transaction = host.applicationRun.committedState.openTransaction()
+    transaction.set("test/value", 1)
+    transaction.commit()
+
+    originalPublish = store.publish
+
+    def failPublish(_bundle):
+        raise OSError("simulated durable publication failure")
+
+    monkeypatch.setattr(store, "publish", failPublish)
+
+    with pytest.raises(OSError, match="simulated durable publication failure"):
+        host.saveApplication()
+
+    assert host.applicationRun.saveBundleId == first.saveBundleId
+
+    monkeypatch.setattr(store, "publish", originalPublish)
+    second = host.saveApplication()
+
+    assert second.generation == 2
+    assert second.saveBundleId == first.saveBundleId
+    loaded = store.load(
+        appPackId="test.app",
+        applicationId=host.applicationRun.application.applicationId,
+    )
+    assert loaded.bundle.generation == 2
+    assert loaded.bundle.restoreCommittedState().load("test/value") == 1
+
+
+def test_runtime_host_requires_app_pack_identity_for_new_application():
+    with pytest.raises(ValueError, match="requires appPackId"):
+        RuntimeHost()
