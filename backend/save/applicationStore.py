@@ -1,4 +1,4 @@
-# file: backend/save/applicationStore.py ; version: 4
+# file: backend/save/applicationStore.py ; version: 5
 from __future__ import annotations
 
 import hashlib
@@ -108,6 +108,34 @@ class ApplicationStore:
     @staticmethod
     def _bundleSha256(bundle: SaveBundle) -> str:
         return hashlib.sha256(bundle.toBytes()).hexdigest()
+
+    @classmethod
+    def _availableGenerations(
+        cls,
+        generationsDirectory: Path,
+        *,
+        atOrBelow: int,
+    ) -> tuple[int, ...]:
+        try:
+            entries = tuple(generationsDirectory.iterdir())
+        except OSError as err:
+            raise ValueError("Application generations directory is missing or unreadable.") from err
+
+        generations: set[int] = set()
+        for entry in entries:
+            if not entry.is_file() or not entry.name.endswith(".bundle"):
+                continue
+            stem = entry.name[:-len(".bundle")]
+            if not stem.isdecimal():
+                continue
+            generation = int(stem)
+            if generation <= 0 or generation > atOrBelow:
+                continue
+            if cls._generationName(generation) != entry.name:
+                continue
+            generations.add(generation)
+        return tuple(sorted(generations, reverse=True))
+
 
     def _applicationMetadata(self, bundle: SaveBundle) -> dict[str, object]:
         return {
@@ -308,7 +336,11 @@ class ApplicationStore:
         )
 
         generationsDirectory = applicationPath / "generations"
-        for generation in range(currentGeneration, 0, -1):
+        candidates = self._availableGenerations(
+            generationsDirectory,
+            atOrBelow=currentGeneration,
+        )
+        for generation in candidates:
             generationPath = generationsDirectory / self._generationName(generation)
             try:
                 payload = generationPath.read_bytes()
