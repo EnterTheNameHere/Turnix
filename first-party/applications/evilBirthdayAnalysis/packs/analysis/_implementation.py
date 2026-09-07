@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 21
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 22
 from __future__ import annotations
 
 import json
@@ -784,31 +784,6 @@ def _semanticMeaningText(meaning: Mapping[str, object]) -> str:
     return "; ".join(parts)
 
 
-def _renderSemanticGroup(
-    meaning: Mapping[str, object],
-    contributions: Sequence[tuple[QueryItem, int]],
-) -> str:
-    totalCount = sum(count for _item, count in contributions)
-    uniqueItems = {item.itemId for item, _count in contributions}
-    sourceAuthors = [
-        sourceAuthor
-        for item, _count in contributions
-        if type(sourceAuthor := item.metadata.get("sourceUsername")) is str
-    ]
-    messageCount = len(uniqueItems)
-    if len(sourceAuthors) != len(contributions):
-        suffix = f"[{messageCount} messages]"
-    else:
-        uniqueAuthors = len({author.casefold() for author in sourceAuthors})
-        userLabel = "user" if uniqueAuthors == 1 else "users"
-        messageLabel = "message" if messageCount == 1 else "messages"
-        if uniqueAuthors == messageCount:
-            suffix = f"[{uniqueAuthors} {userLabel}]"
-        else:
-            suffix = f"[{messageCount} {messageLabel}; {uniqueAuthors} {userLabel}]"
-    return f"CHAT SEMANTIC: {_semanticMeaningText(meaning)} ×{totalCount} {suffix}"
-
-
 def _chatLine(
     item: QueryItem,
     *,
@@ -1134,7 +1109,12 @@ def _renderPrompt(
             "inside one original chat message. The repeat delimiters are reserved renderer syntax and do not "
             "occur literally in the source chat.\n"
             "CHAT BURST: text ×N [..] represents N separate chat messages with the same or canonically "
-            "equivalent content aggregated across the stated short interval."
+            "equivalent content aggregated across the stated short interval.\n"
+            "CHAT SEMANTICS lists trusted meanings for reaction-only source messages. Those messages are represented "
+            "there instead of being repeated under CHAT REACTIONS.\n"
+            "CHAT REACTIONS lists reaction-only source messages without a complete trusted semantic meaning. "
+            "A bare entry represents one source message from one user; explicit multipliers summarize repeated "
+            "or aggregated participation."
         )
     if evidenceNotice is not None:
         if type(evidenceNotice) is not str or not evidenceNotice:
