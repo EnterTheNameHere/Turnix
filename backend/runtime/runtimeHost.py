@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 5
+# file: backend/runtime/runtimeHost.py ; version: 6
 from __future__ import annotations
 
 from copy import deepcopy
@@ -55,21 +55,15 @@ class RuntimeHost:
                 resolvedApplication = Application.new(appPackId=appPackId)
             else:
                 resolvedApplication = application
-            committedState = None
-            saveBundleId = None
         else:
             resolvedApplication = Application(
                 appPackId=saveBundle.appPackId,
                 applicationId=saveBundle.applicationId,
+                committedState=saveBundle.restoreCommittedState(),
+                saveBundleId=saveBundle.saveBundleId,
             )
-            committedState = saveBundle.restoreCommittedState()
-            saveBundleId = saveBundle.saveBundleId
 
-        self.applicationRun = ApplicationRun(
-            application=resolvedApplication,
-            **({} if committedState is None else {"committedState": committedState}),
-            saveBundleId=saveBundleId,
-        )
+        self.applicationRun = ApplicationRun(application=resolvedApplication)
         self.io = ManagedIo()
         self.capabilities = CapabilityRegistry()
         self.llmProviders = LlmProviderRegistry()
@@ -80,7 +74,7 @@ class RuntimeHost:
         self.tracer = tracer or Tracer(origin="actant.runtime", destinations=(TraceSinkDestination(),))
         self.llmPipeline = LlmProcessingPipeline(
             providers=self.llmProviders,
-            state=self.applicationRun.committedState,
+            state=self.applicationRun.application.committedState,
             capabilityInvoker=lambda capabilityId, payload=None, memoryView=None: self.invokeCapability(capabilityId, payload, memoryView=memoryView),
             trace=lambda reason, attributes: self.trace(reason, attributes=attributes),
         )
@@ -125,7 +119,7 @@ class RuntimeHost:
             return SaveBundle.create(
                 appPackId=self.applicationRun.application.appPackId,
                 applicationId=self.applicationRun.application.applicationId,
-                committedState=self.applicationRun.committedState,
+                committedState=self.applicationRun.application.committedState,
             )
         if (
             self._saveBundle.appPackId != self.applicationRun.application.appPackId
@@ -133,12 +127,12 @@ class RuntimeHost:
         ):
             raise RuntimeError("Bound SaveBundle Application identity no longer matches ApplicationRun.")
         return self._saveBundle.nextGeneration(
-            committedState=self.applicationRun.committedState,
+            committedState=self.applicationRun.application.committedState,
         )
 
     def _acceptSaveBundle(self, bundle: SaveBundle) -> None:
         self._saveBundle = bundle
-        self.applicationRun.saveBundleId = bundle.saveBundleId
+        self.applicationRun.application.saveBundleId = bundle.saveBundleId
 
     def saveApplication(self, applicationStore: ApplicationStore | None = None) -> SaveBundle:
         """Persists exactly one snapshot of the current authoritative root.
@@ -250,10 +244,10 @@ class RuntimeHost:
             capabilities=self.capabilities,
             llmProviders=self.llmProviders,
             llmPipeline=self.llmPipeline,
-            memory=self.applicationRun.committedState if memoryView is None else memoryView,
+            memory=self.applicationRun.application.committedState if memoryView is None else memoryView,
             registrationScope=registrationScope,
             config=self._config,
-            capabilityInvoker=lambda capabilityId, payload=None: self.invokeCapability(capabilityId, payload, memoryView=self.applicationRun.committedState if memoryView is None else memoryView),
+            capabilityInvoker=lambda capabilityId, payload=None: self.invokeCapability(capabilityId, payload, memoryView=self.applicationRun.application.committedState if memoryView is None else memoryView),
             allowRegistration=allowRegistration,
         )
 
