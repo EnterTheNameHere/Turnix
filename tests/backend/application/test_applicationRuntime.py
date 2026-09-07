@@ -1,4 +1,4 @@
-# file: tests/backend/application/test_applicationRuntime.py ; version: 7
+# file: tests/backend/application/test_applicationRuntime.py ; version: 8
 from pathlib import Path
 
 import pytest
@@ -6,6 +6,7 @@ import pytest
 from backend.application import ApplicationRunState
 from backend.context import CodeEntryIdentity
 from backend.registration import RegistrationScope
+from backend.orchestration import JobState
 from backend.packs.runtime import PackResolver
 from backend.application.applicationRuntime import ApplicationRuntime
 from backend.save import ApplicationStore, SaveBundle
@@ -529,3 +530,101 @@ def test_application_runtime_failed_publication_does_not_advance_accepted_genera
 def test_application_runtime_requires_app_pack_identity_for_new_application():
     with pytest.raises(ValueError, match="requires appPackId"):
         ApplicationRuntime(packResolver=PackResolver(roots=()))
+
+
+def test_run_job_commits_capability_mutation_only_after_successful_unit_completion():
+    runtime = ApplicationRuntime(
+        appPackId="test.app",
+        packResolver=PackResolver(roots=()),
+    )
+    runtime.start()
+    identity = CodeEntryIdentity(
+        applicationId=runtime.applicationRun.application.applicationId,
+        applicationRunId=runtime.applicationRun.applicationRunId,
+        packId="test.pack",
+        packVersion="1.0.0",
+        codeEntryId="entry",
+        codeEntryInstanceId="job-entry",
+        sourceSha256="source-sha",
+        implementationFormat="python-source@1",
+        implementationId="implementation-sha",
+    )
+    runtime.registerCodeEntry(identity, Path.cwd())
+    scope = RegistrationScope()
+
+    def handler(ctx, _payload):
+        transaction = ctx.memory.openTransaction()
+        transaction.set("test/job/value", {"accepted": True})
+        transaction.commit()
+        assert runtime.applicationRun.application.committedState.load("test/job/value") is MISSING
+        return "ok"
+
+    runtime.capabilities.register(
+        scope,
+        ownerId=identity.codeEntryInstanceId,
+        capabilityId="test.job@1",
+        handler=handler,
+    )
+    scope.publish()
+
+    try:
+        job = runtime.runJob("test.job@1")
+
+        assert job.state is JobState.SUCCEEDED
+        assert job.result == "ok"
+        assert runtime.applicationRun.application.committedState.load("test/job/value") == {
+            "accepted": True,
+        }
+        assert runtime.applicationRun.application.committedState.revisionId("test/job/value") == 1
+    finally:
+        scope.withdraw()
+        runtime.unregisterCodeEntry(identity.codeEntryInstanceId)
+        runtime.close()
+
+
+def test_run_job_failure_discards_capability_mutation_from_authoritative_root():
+    runtime = ApplicationRuntime(
+        appPackId="test.app",
+        packResolver=PackResolver(roots=()),
+    )
+    runtime.start()
+    identity = CodeEntryIdentity(
+        applicationId=runtime.applicationRun.application.applicationId,
+        applicationRunId=runtime.applicationRun.applicationRunId,
+        packId="test.pack",
+        packVersion="1.0.0",
+        codeEntryId="entry",
+        codeEntryInstanceId="failing-job-entry",
+        sourceSha256="source-sha",
+        implementationFormat="python-source@1",
+        implementationId="implementation-sha",
+    )
+    runtime.registerCodeEntry(identity, Path.cwd())
+    scope = RegistrationScope()
+
+    def handler(ctx, _payload):
+        transaction = ctx.memory.openTransaction()
+        transaction.set("test/job/value", "must-disappear")
+        transaction.commit()
+        raise RuntimeError("job exploded")
+
+    runtime.capabilities.register(
+        scope,
+        ownerId=identity.codeEntryInstanceId,
+        capabilityId="test.job.fail@1",
+        handler=handler,
+    )
+    scope.publish()
+
+    try:
+        job = runtime.runJob("test.job.fail@1")
+
+        assert job.state is JobState.FAILED
+        assert isinstance(job.error, RuntimeError)
+        assert str(job.error) == "job exploded"
+        assert runtime.applicationRun.application.committedState.load("test/job/value") is MISSING
+        assert runtime.applicationRun.application.committedState.revisionId("test/job/value") == 0
+    finally:
+        scope.withdraw()
+        runtime.unregisterCodeEntry(identity.codeEntryInstanceId)
+        runtime.close()
