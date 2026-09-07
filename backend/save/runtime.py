@@ -1,4 +1,4 @@
-# file: backend/save/runtime.py ; version: 2
+# file: backend/save/runtime.py ; version: 3
 from __future__ import annotations
 
 import json
@@ -32,6 +32,7 @@ class SaveBundle:
     """
 
     saveBundleId: str
+    appPackId: str
     applicationId: str
     generation: int
     _committedStateSnapshot: dict[str, object]
@@ -41,6 +42,8 @@ class SaveBundle:
     def __post_init__(self) -> None:
         if type(self.saveBundleId) is not str or not self.saveBundleId:
             raise ValueError("saveBundleId must be a non-empty string.")
+        if type(self.appPackId) is not str or not self.appPackId:
+            raise ValueError("appPackId must be a non-empty string.")
         if type(self.applicationId) is not str or not self.applicationId:
             raise ValueError("applicationId must be a non-empty string.")
         if type(self.generation) is not int or self.generation <= 0:
@@ -59,6 +62,7 @@ class SaveBundle:
     def create(
         cls,
         *,
+        appPackId: str,
         applicationId: str,
         committedState: CommittedValueLayer,
     ) -> SaveBundle:
@@ -67,6 +71,7 @@ class SaveBundle:
             raise TypeError("committedState must be a CommittedValueLayer.")
         return cls(
             saveBundleId=newRuntimeId(),
+            appPackId=appPackId,
             applicationId=applicationId,
             generation=1,
             _committedStateSnapshot=committedState.snapshot(),
@@ -78,6 +83,7 @@ class SaveBundle:
             raise TypeError("committedState must be a CommittedValueLayer.")
         return SaveBundle(
             saveBundleId=self.saveBundleId,
+            appPackId=self.appPackId,
             applicationId=self.applicationId,
             generation=self.generation + 1,
             _committedStateSnapshot=committedState.snapshot(),
@@ -92,6 +98,7 @@ class SaveBundle:
         return {
             "formatId": self._FORMAT_ID,
             "saveBundleId": self.saveBundleId,
+            "appPackId": self.appPackId,
             "applicationId": self.applicationId,
             "generation": self.generation,
             "committedState": deepcopy(self._committedStateSnapshot),
@@ -119,6 +126,7 @@ class SaveBundle:
             raise TypeError("SaveBundle committedState must be an object.")
         return cls(
             saveBundleId=snapshot.get("saveBundleId"),
+            appPackId=snapshot.get("appPackId"),
             applicationId=snapshot.get("applicationId"),
             generation=snapshot.get("generation"),
             _committedStateSnapshot=committedStateSnapshot,
