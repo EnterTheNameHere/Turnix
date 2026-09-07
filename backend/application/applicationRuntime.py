@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 6
+# file: backend/application/applicationRuntime.py ; version: 7
 from __future__ import annotations
 
 from copy import deepcopy
@@ -429,6 +429,7 @@ class ApplicationRuntime:
                 "orchestrationUnitId": unit.orchestrationUnitId,
                 "applicationId": self.applicationRun.application.applicationId,
                 "applicationRunId": unit.applicationRunId,
+                "transactionId": unit.transactionId,
                 "capabilityId": capabilityId,
                 "workKind": "job-capability",
             }
