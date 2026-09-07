@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 19
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 20
 from __future__ import annotations
 
 import importlib.util
@@ -1997,3 +1997,44 @@ def test_semantic_owned_reaction_is_not_duplicated_in_surface_reactions():
         "CHAT REACTIONS: modCheck"
     ]
     assert "vedalHeart" not in sections[0]
+
+
+
+def test_trusted_semantic_reaction_burst_uses_meaning_instead_of_surface_label():
+    burstValue = {
+        "canonicalSpans": [
+            {
+                "kind": "emote",
+                "name": "GIGAEVIL",
+                "count": 1,
+                "metadata": {
+                    "semanticClass": "praise",
+                    "classificationSource": "userDefined",
+                },
+            }
+        ],
+        "durationSeconds": 3,
+    }
+    group = [
+        QueryItem(
+            itemId=f"chat:{line_number}",
+            kind="chat",
+            content="GIGAEVIL",
+            metadata={
+                "streamStartSeconds": 60.0 + line_number,
+                "lineNumber": line_number,
+                "username": username,
+                "sourceUsername": username,
+                "analysis": {
+                    "kind": "userMessage",
+                    "streamTime": "00:01:00",
+                    "spans": burstValue["canonicalSpans"],
+                },
+            },
+        )
+        for line_number, username in [(201, "alice"), (202, "bob"), (203, "carol")]
+    ]
+
+    assert analysis._burstSemanticFragments(burstValue, group) == [
+        "praise ×3 [3 users; 3s]"
+    ]
