@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 15
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 16
 from __future__ import annotations
 
 import json
@@ -659,10 +659,12 @@ def _renderSemanticGroup(
         suffix = f"[{messageCount} messages]"
     else:
         uniqueAuthors = len({author.casefold() for author in sourceAuthors})
+        userLabel = "user" if uniqueAuthors == 1 else "users"
+        messageLabel = "message" if messageCount == 1 else "messages"
         if uniqueAuthors == messageCount:
-            suffix = f"[{uniqueAuthors} users]"
+            suffix = f"[{uniqueAuthors} {userLabel}]"
         else:
-            suffix = f"[{messageCount} messages; {uniqueAuthors} users]"
+            suffix = f"[{messageCount} {messageLabel}; {uniqueAuthors} {userLabel}]"
     return f"CHAT SEMANTIC: {_semanticMeaningText(meaning)} ×{totalCount} {suffix}"
 
 
@@ -766,8 +768,9 @@ def _evidenceSections(
             }
 
             # Presentation ownership is hierarchical:
-            # closed cross-second burst > same-second aggregate > individual.
-            # Fallback content grouping is only for QueryItems without persistent
+            # closed cross-second burst > exact same-second duplicate group >
+            # whole-message repeat > trusted semantic-unit group > individual.
+            # Legacy content grouping is only for QueryItems without persistent
             # temporal structure.
             persistentGroups: dict[tuple[str, tuple[int, ...]], list[QueryItem]] = {}
             fallbackGroups: dict[str, list[QueryItem]] = {}
