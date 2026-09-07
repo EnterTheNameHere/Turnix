@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 11
+# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 12
 from __future__ import annotations
 
 import hashlib
@@ -17,6 +17,12 @@ _BULK_GIFT_RE = re.compile(
     r"They've gifted a total of (?P<total>\d+) in the channel!$",
 )
 _TIMEOUT_RE = re.compile(r"^(?P<sender>.+?) has been timed out for (?P<seconds>\d+) seconds$")
+_SUBSCRIPTION_RE = re.compile(
+    r"^(?P<sender>.+?) subscribed (?P<method>with Prime|at Tier (?P<tier>[123]))\."
+    r"(?: They've subscribed for (?P<months>\d+) months?"
+    r"(?:, currently on a (?P<streak>\d+) month streak)?!)?"
+    r"(?: (?P<message>.*))?$"
+)
 _FOSSABOT_LONG_RE = re.compile(r"^@(?P<target>[^,]+), Your message is too long \[warning\]$")
 _MULTIPLIER_RE = re.compile(r"^[xX](?P<count>\d+)$")
 
@@ -356,6 +362,33 @@ def _knownBotEvent(username: str, message: str) -> dict[str, object] | None:
     if message.startswith("Wishlist Abandoned Archive on Steam: "):
         return {"type": "botInfo", "bot": username, "topic": "abandonedArchiveWishlist", "message": message}
     return None
+
+
+def _subscriptionEvent(
+    username: str,
+    message: str,
+) -> tuple[dict[str, object], str] | None:
+    matched = _SUBSCRIPTION_RE.fullmatch(message)
+    if matched is None or matched.group("sender").casefold() != username.casefold():
+        return None
+
+    method = matched.group("method")
+    tier = matched.group("tier")
+    months = matched.group("months")
+    streak = matched.group("streak")
+    authoredMessage = matched.group("message") or ""
+    event: dict[str, object] = {
+        "type": "subscription",
+        "subscriber": matched.group("sender"),
+        "method": "prime" if method == "with Prime" else "tier",
+    }
+    if tier is not None:
+        event["tier"] = int(tier)
+    if months is not None:
+        event["monthsSubscribed"] = int(months)
+    if streak is not None:
+        event["streakMonths"] = int(streak)
+    return event, authoredMessage
 
 
 def _generatedEvent(username: str, message: str) -> dict[str, object] | None:
@@ -1501,6 +1534,24 @@ def _lineSemantic(
         }
 
     username, message = split
+    subscription = _subscriptionEvent(username, message)
+    if subscription is not None:
+        platformEvent, authoredMessage = subscription
+        if authoredMessage:
+            return {
+                "kind": "userMessage",
+                "username": username,
+                "body": authoredMessage,
+                "spans": _lexMessage(authoredMessage, emotes, composites),
+                "platformEvent": platformEvent,
+            }
+        return {
+            "kind": "generatedEvent",
+            "username": username,
+            "body": message,
+            "event": platformEvent,
+        }
+
     generated = _generatedEvent(username, message)
     if generated is not None:
         return {
@@ -1769,13 +1820,21 @@ def _interpret(ctx, payload):
         if not isinstance(spans, list):
             raise RuntimeError(f"Persisted user chat semantic line {lineNumber} has invalid spans.")
         compactMessage = _renderSpans(spans)
-        record["analysis"] = {
+        analysis = {
             "kind": "userMessage",
             "spans": spans,
             "includedInText": insideRequestedWindow,
             "streamTimeSeconds": float(streamTimeSeconds),
             "streamTime": streamTime,
         }
+        platformEvent = semantic.get("platformEvent")
+        if platformEvent is not None:
+            if not isinstance(platformEvent, dict):
+                raise RuntimeError(
+                    f"Persisted user chat semantic line {lineNumber} has invalid platformEvent."
+                )
+            analysis["platformEvent"] = platformEvent
+        record["analysis"] = analysis
         if insideRequestedWindow:
             rendered.append(f"{streamTime} {username}: {compactMessage}")
         records.append(record)
