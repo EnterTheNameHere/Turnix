@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chat/codeEntry.py ; version: 5
+# file: first-party/applications/evilBirthdayAnalysis/packs/chat/codeEntry.py ; version: 6
 from __future__ import annotations
 
 import math
@@ -328,12 +328,15 @@ def _select(ctx, payload):
     if endVideo < startVideo:
         raise ValueError("Chat selector produced an inverted video-time window.")
 
-    parsedRecords, timestamps, mediaZeroWall, sourceObservation = _records(ctx, chatPath, chatStartTime)
+    parsedRecords, timestamps, streamZeroWall, sourceObservation = _records(ctx, chatPath, chatStartTime)
     streamStartVideoSeconds = _offsetSeconds(streamStartTime, fieldName="streamStartTime")
-    streamZeroWall = mediaZeroWall + timedelta(seconds=streamStartVideoSeconds)
-    requestedStartWall = mediaZeroWall + timedelta(seconds=startVideo)
+    mediaZeroWall = streamZeroWall - timedelta(seconds=streamStartVideoSeconds)
+
+    requestedStartStreamSeconds = startVideo - streamStartVideoSeconds
+    requestedEndStreamSeconds = endVideo - streamStartVideoSeconds
+    requestedStartWall = streamZeroWall + timedelta(seconds=requestedStartStreamSeconds)
     selectionStartWall = requestedStartWall - timedelta(seconds=lookbackSeconds)
-    requestedEndWall = mediaZeroWall + timedelta(seconds=endVideo)
+    requestedEndWall = streamZeroWall + timedelta(seconds=requestedEndStreamSeconds)
     selectionEndWall = requestedEndWall + timedelta(seconds=lookaheadSeconds)
 
     startIndex = bisect_left(timestamps, selectionStartWall)
@@ -367,14 +370,10 @@ def _select(ctx, payload):
         "wallClockAtStreamZero": streamZeroWall.strftime(_TIMESTAMP_FORMAT),
         "videoStartSeconds": startVideo,
         "videoEndSeconds": endVideo,
-        "streamStartSeconds": startVideo - streamStartVideoSeconds,
-        "streamEndSeconds": endVideo - streamStartVideoSeconds,
-        "contextStreamStartSeconds": (
-            startVideo - lookbackSeconds - streamStartVideoSeconds
-        ),
-        "contextStreamEndSeconds": (
-            endVideo + lookaheadSeconds - streamStartVideoSeconds
-        ),
+        "streamStartSeconds": requestedStartStreamSeconds,
+        "streamEndSeconds": requestedEndStreamSeconds,
+        "contextStreamStartSeconds": requestedStartStreamSeconds - lookbackSeconds,
+        "contextStreamEndSeconds": requestedEndStreamSeconds + lookaheadSeconds,
         "lookbackSeconds": lookbackSeconds,
         "lookaheadSeconds": lookaheadSeconds,
         "records": records,
