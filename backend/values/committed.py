@@ -1,4 +1,4 @@
-# file: backend/values/committed.py ; version: 16
+# file: backend/values/committed.py ; version: 17
 from __future__ import annotations
 
 import base64
@@ -9,6 +9,7 @@ from enum import StrEnum
 from threading import RLock
 
 from backend.core.errors import ActantError
+from backend.core.runtimeIds import newRuntimeId
 from backend.values.address import ValueAddress
 from backend.values.layer import ValueLayer
 from backend.values.payload import Chunk, ChunkValueRef, InlineValueRef, InMemoryChunkStore, ValueRef, decodeJsonValue, encodeJsonValue
@@ -489,6 +490,7 @@ class CommittedValueTransaction(ValueLayer):
         parent: CommittedValueTransaction | None,
     ) -> None:
         super().__init__(parent=root if parent is None else parent)
+        self.transactionId = newRuntimeId()
         self._root = root
         self._transactionParent = parent
         self._staged: dict[ValueAddress, _StagedRevision] = {}
