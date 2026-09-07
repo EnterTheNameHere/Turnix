@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 17
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 18
 from __future__ import annotations
 
 import importlib.util
@@ -1877,3 +1877,37 @@ def test_separate_layout_threads_configured_repeat_markers_into_chat_lines():
     query = analysis._buildQuery(ctx, payload)
 
     assert "[00:00:45 CHAT anonymized_1] <<<wistyRun>>>×4" in query["payload"]
+
+
+
+@pytest.mark.parametrize(
+    "event_type",
+    ["subscriptionGiftBatch", "subscriptionGift"],
+)
+def test_subscription_gift_generated_events_are_not_prompt_eligible(event_type: str):
+    analysis_snapshot = {
+        "kind": "generatedEvent",
+        "includedInText": True,
+        "event": {"type": event_type},
+    }
+
+    assert analysis._chatPromptEligible(analysis_snapshot) is False
+
+
+def test_other_generated_events_remain_prompt_eligible():
+    analysis_snapshot = {
+        "kind": "generatedEvent",
+        "includedInText": True,
+        "event": {"type": "timeout"},
+    }
+
+    assert analysis._chatPromptEligible(analysis_snapshot) is True
+
+
+def test_non_generated_chat_remains_prompt_eligible():
+    assert analysis._chatPromptEligible(
+        {
+            "kind": "userMessage",
+            "includedInText": True,
+        }
+    ) is True
