@@ -1,4 +1,4 @@
-# file: tests/backend/application/test_lifecycle.py ; version: 3
+# file: tests/backend/application/test_lifecycle.py ; version: 4
 import json
 from pathlib import Path
 
@@ -86,8 +86,7 @@ def test_create_and_load_follow_persistent_application_lifecycle_order(tmp_path:
         "load",
     ]
 
-    firstHost.packLoader.close()
-    firstHost.stop()
+    firstHost.close()
 
     secondHost, loaded = ApplicationRuntime.loadApplication(
         applicationStore=store,
@@ -123,8 +122,7 @@ def test_create_and_load_follow_persistent_application_lifecycle_order(tmp_path:
         "load",
     ]
 
-    secondHost.packLoader.close()
-    secondHost.stop()
+    secondHost.close()
 
 
 def test_failed_application_create_aborts_root_and_does_not_publish_application(
@@ -182,8 +180,7 @@ def test_noop_application_load_does_not_create_redundant_generation(tmp_path: Pa
     )
     assert accepted.generation == 1
 
-    firstHost.packLoader.close()
-    firstHost.stop()
+    firstHost.close()
 
     secondHost, _loaded = ApplicationRuntime.loadApplication(
         applicationStore=store,
@@ -203,5 +200,4 @@ def test_noop_application_load_does_not_create_redundant_generation(tmp_path: Pa
         applicationId=applicationId,
     ).bundle.generation == 1
 
-    secondHost.packLoader.close()
-    secondHost.stop()
+    secondHost.close()
