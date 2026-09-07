@@ -1,4 +1,4 @@
-# file: tests/backend/save/test_applicationStore.py ; version: 5
+# file: tests/backend/save/test_applicationStore.py ; version: 6
 from __future__ import annotations
 
 import json
@@ -43,6 +43,7 @@ def test_application_store_creates_expected_application_layout_and_loads_root(tm
 
     loaded = store.load(appPackId="test.app", applicationId="application-1")
     assert loaded.recoveredFromGeneration is None
+    assert loaded.durableGeneration == 1
     assert loaded.bundle.appPackId == "test.app"
     assert loaded.bundle.applicationId == "application-1"
     assert loaded.bundle.generation == 1
@@ -114,7 +115,7 @@ def test_application_store_rejects_nonsequential_or_wrong_identity_publication(t
 
     second = first.nextGeneration(committedState=state)
     third = second.nextGeneration(committedState=state)
-    with pytest.raises(ValueError, match="advance exactly one generation"):
+    with pytest.raises(ValueError, match="next unoccupied durable generation"):
         store.publish(third)
 
     wrongState = CommittedValueLayer()
@@ -145,6 +146,7 @@ def test_application_store_falls_back_to_previous_valid_generation_without_rewri
     loaded = store.load(appPackId="test.app", applicationId="application-1")
 
     assert loaded.bundle.generation == 1
+    assert loaded.durableGeneration == 2
     assert loaded.recoveredFromGeneration == 2
     assert loaded.bundle.restoreCommittedState().load("chat/line/17/semantic") == {"body": "hello"}
 
@@ -168,6 +170,7 @@ def test_application_store_recovery_scans_existing_generations_not_pointer_range
     loaded = store.load(appPackId="test.app", applicationId="application-1")
 
     assert loaded.bundle.generation == 1
+    assert loaded.durableGeneration == 10**12
     assert loaded.recoveredFromGeneration == 10**12
 
 
