@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 12
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 13
 from __future__ import annotations
 
 import importlib.util
@@ -65,6 +65,7 @@ def _interpretedChat(ctx, selector: dict[str, int]) -> tuple[dict[str, object], 
         or not isinstance(interpretedChat.get("secondBuckets"), list)
         or not isinstance(interpretedChat.get("secondAggregates"), list)
         or not isinstance(interpretedChat.get("identicalMessageBursts"), list)
+        or not isinstance(interpretedChat.get("secondPresentations"), list)
     ):
         raise RuntimeError("Chat interpretation capability returned an invalid snapshot.")
 
@@ -204,6 +205,77 @@ def _chatBurstReferences(chat: dict[str, object]) -> dict[int, dict[str, object]
     return byLine
 
 
+def _chatPresentationReferences(chat: dict[str, object]) -> dict[int, dict[str, object]]:
+    """Maps each physical line to its persistent presentation-plan owner(s)."""
+    plans = chat.get("secondPresentations")
+    if not isinstance(plans, list):
+        raise RuntimeError("Chat interpretation capability returned invalid secondPresentations.")
+
+    byLine: dict[int, dict[str, object]] = {}
+    for plan in plans:
+        if not isinstance(plan, dict):
+            raise RuntimeError("Chat presentation-plan reference must be an object.")
+        address = plan.get("address")
+        dependency = plan.get("dependency")
+        value = plan.get("value")
+        if type(address) is not str or not isinstance(dependency, dict) or not isinstance(value, dict):
+            raise RuntimeError("Chat presentation-plan reference is incomplete.")
+        entries = value.get("entries")
+        if not isinstance(entries, list):
+            raise RuntimeError("Chat presentation plan requires entries.")
+
+        ownersByLine: dict[int, list[dict[str, object]]] = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise RuntimeError("Chat presentation owner entry must be an object.")
+            kind = entry.get("kind")
+            if kind in {"burstOccurrence", "repeatMessage", "individual"}:
+                lineNumbers = [entry.get("lineNumber")]
+            elif kind == "identicalMessageGroup":
+                lineNumbers = entry.get("lineNumbers")
+            elif kind == "semanticUnitGroup":
+                members = entry.get("members")
+                if not isinstance(members, list):
+                    raise RuntimeError("Semantic-unit presentation owner requires members.")
+                lineNumbers = [
+                    member.get("lineNumber")
+                    for member in members
+                    if isinstance(member, dict)
+                ]
+                if len(lineNumbers) != len(members):
+                    raise RuntimeError("Semantic-unit presentation owner has invalid members.")
+            else:
+                raise RuntimeError(f"Unsupported chat presentation owner kind: {kind!r}.")
+
+            if (
+                not isinstance(lineNumbers, list)
+                or not lineNumbers
+                or any(type(lineNumber) is not int for lineNumber in lineNumbers)
+            ):
+                raise RuntimeError("Chat presentation owner has invalid line membership.")
+            for lineNumber in lineNumbers:
+                ownersByLine.setdefault(lineNumber, []).append(_plain(entry))
+
+        for lineNumber, owners in ownersByLine.items():
+            nonSemanticOwners = [
+                owner
+                for owner in owners
+                if owner.get("kind") != "semanticUnitGroup"
+            ]
+            if nonSemanticOwners and len(owners) != 1:
+                raise RuntimeError(
+                    f"Chat line {lineNumber} has overlapping presentation owners.",
+                )
+            if lineNumber in byLine:
+                raise RuntimeError(f"Chat line {lineNumber} belongs to multiple presentation plans.")
+            byLine[lineNumber] = {
+                "address": address,
+                "dependency": dependency,
+                "owners": owners,
+            }
+    return byLine
+
+
 def _previousChatItemReusable(
     previousItem: QueryItem,
     *,
@@ -234,6 +306,7 @@ def _chatQueryItems(
     bucketByLine = _chatBucketReferences(chat)
     aggregateByLine = _chatAggregateReferences(chat)
     burstByLine = _chatBurstReferences(chat)
+    presentationByLine = _chatPresentationReferences(chat)
 
     items: list[QueryItem] = []
     for record in records:
@@ -262,10 +335,13 @@ def _chatQueryItems(
         secondBucket = bucketByLine.get(lineNumber)
         secondAggregate = aggregateByLine.get(lineNumber)
         identicalMessageBurst = burstByLine.get(lineNumber)
+        secondPresentation = presentationByLine.get(lineNumber)
         if secondBucket is None:
             raise RuntimeError(f"Chat line {lineNumber} has no canonical second bucket.")
         if secondAggregate is None:
             raise RuntimeError(f"Chat line {lineNumber} has no structured second aggregate.")
+        if secondPresentation is None:
+            raise RuntimeError(f"Chat line {lineNumber} has no persistent presentation owner.")
 
         interpretationKind = analysis.get("kind")
         if interpretationKind == "unknownMessage":
@@ -293,6 +369,7 @@ def _chatQueryItems(
                     if identicalMessageBurst is None
                     else _plain(identicalMessageBurst)
                 ),
+                "secondPresentation": _plain(secondPresentation),
             },
             "source": {
                 "sourcePath": chat.get("sourcePath"),
