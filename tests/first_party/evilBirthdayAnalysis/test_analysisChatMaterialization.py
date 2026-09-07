@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 11
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 12
 from __future__ import annotations
 
 import importlib.util
@@ -209,12 +209,45 @@ class _MaterializationCapabilities:
                     }
                 )
 
+            secondPresentations = []
+            for aggregate in secondAggregates:
+                secondIndex = aggregate["value"]["secondIndex"]
+                segment = f"n{-secondIndex}" if secondIndex < 0 else f"s{secondIndex}"
+                address = f"evilanalysis/chat/second/{segment}/presentation"
+                presentationEntries = []
+                for aggregateEntry in aggregate["value"]["entries"]:
+                    if aggregateEntry["kind"] != "message":
+                        raise AssertionError(aggregateEntry)
+                    presentationEntries.append(
+                        {
+                            "kind": "individual",
+                            "lineNumber": aggregateEntry["lineNumber"],
+                            "semantic": aggregateEntry["semantic"],
+                        }
+                    )
+                secondPresentations.append(
+                    {
+                        "address": address,
+                        "dependency": {
+                            "address": address,
+                            "state": "present",
+                            "contentSha256": f"presentation-{secondIndex}",
+                            "metadataSha256": f"presentation-metadata-{secondIndex}",
+                        },
+                        "value": {
+                            "secondIndex": secondIndex,
+                            "entries": presentationEntries,
+                        },
+                    }
+                )
+
             included = [record for record in records if record["analysis"]["includedInText"]]
             return {
                 "records": records,
                 "secondBuckets": secondBuckets,
                 "secondAggregates": secondAggregates,
                 "identicalMessageBursts": [],
+                "secondPresentations": secondPresentations,
                 "text": "\n".join(
                     f"{record['streamTime']} {record['username']}: {record['body']}"
                     for record in included
@@ -649,6 +682,62 @@ def test_chatQueryItems_use_interpreted_body_but_keep_raw_message_as_source_evid
                 },
             },
         ],
+        "secondPresentations": [
+            {
+                "address": "evilanalysis/chat/second/s45/presentation",
+                "dependency": {
+                    "address": "evilanalysis/chat/second/s45/presentation",
+                    "state": "present",
+                    "contentSha256": "presentation-45",
+                    "metadataSha256": "presentation-metadata-45",
+                },
+                "value": {
+                    "secondIndex": 45,
+                    "entries": [
+                        {
+                            "kind": "individual",
+                            "lineNumber": 20,
+                            "semantic": {
+                                "address": "evilanalysis/chat/line/20/semantic",
+                                "dependency": {
+                                    "address": "evilanalysis/chat/line/20/semantic",
+                                    "state": "present",
+                                    "contentSha256": "semantic-20",
+                                    "metadataSha256": "metadata-20",
+                                },
+                            },
+                        }
+                    ],
+                },
+            },
+            {
+                "address": "evilanalysis/chat/second/s46/presentation",
+                "dependency": {
+                    "address": "evilanalysis/chat/second/s46/presentation",
+                    "state": "present",
+                    "contentSha256": "presentation-46",
+                    "metadataSha256": "presentation-metadata-46",
+                },
+                "value": {
+                    "secondIndex": 46,
+                    "entries": [
+                        {
+                            "kind": "individual",
+                            "lineNumber": 21,
+                            "semantic": {
+                                "address": "evilanalysis/chat/line/21/semantic",
+                                "dependency": {
+                                    "address": "evilanalysis/chat/line/21/semantic",
+                                    "state": "present",
+                                    "contentSha256": "semantic-21",
+                                    "metadataSha256": "metadata-21",
+                                },
+                            },
+                        }
+                    ],
+                },
+            },
+        ],
     }
 
     items = analysis._chatQueryItems(interpreted, previous={})
@@ -989,6 +1078,27 @@ def test_chat_query_item_rebuilds_when_persistent_dependency_changes():
         "secondBuckets": [bucket],
         "secondAggregates": [aggregate],
         "identicalMessageBursts": [],
+        "secondPresentations": [
+            {
+                "address": "evilanalysis/chat/second/s50/presentation",
+                "dependency": {
+                    "address": "evilanalysis/chat/second/s50/presentation",
+                    "state": "present",
+                    "contentSha256": "presentation-a",
+                    "metadataSha256": "presentation-meta-a",
+                },
+                "value": {
+                    "secondIndex": 50,
+                    "entries": [
+                        {
+                            "kind": "individual",
+                            "lineNumber": 40,
+                            "semantic": semantic,
+                        }
+                    ],
+                },
+            }
+        ],
     }
 
     first = analysis._chatQueryItems(chat, previous={})[0]
@@ -1377,6 +1487,31 @@ def test_chat_query_item_carries_closed_burst_reference_for_processing_evidence(
         "secondBuckets": [bucket],
         "secondAggregates": [aggregate],
         "identicalMessageBursts": [burst],
+        "secondPresentations": [
+            {
+                "address": "evilanalysis/chat/second/s50/presentation",
+                "dependency": {
+                    "address": "evilanalysis/chat/second/s50/presentation",
+                    "state": "present",
+                    "contentSha256": "presentation-50",
+                    "metadataSha256": "presentation-meta-50",
+                },
+                "value": {
+                    "secondIndex": 50,
+                    "entries": [
+                        {
+                            "kind": "burstOccurrence",
+                            "lineNumber": 80,
+                            "burst": {
+                                "address": burst["address"],
+                                "dependency": burst["dependency"],
+                                "eventKey": burst["eventKey"],
+                            },
+                        }
+                    ],
+                },
+            }
+        ],
     }
 
     item = analysis._chatQueryItems(chat, previous={})[0]
