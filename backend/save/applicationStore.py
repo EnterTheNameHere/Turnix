@@ -1,4 +1,4 @@
-# file: backend/save/applicationStore.py ; version: 5
+# file: backend/save/applicationStore.py ; version: 6
 from __future__ import annotations
 
 import hashlib
@@ -22,6 +22,7 @@ class LoadedApplicationSave:
     appPackId: str
     applicationId: str
     bundle: SaveBundle
+    durableGeneration: int
     recoveredFromGeneration: int | None = None
 
 
@@ -114,7 +115,7 @@ class ApplicationStore:
         cls,
         generationsDirectory: Path,
         *,
-        atOrBelow: int,
+        atOrBelow: int | None = None,
     ) -> tuple[int, ...]:
         try:
             entries = tuple(generationsDirectory.iterdir())
@@ -129,7 +130,9 @@ class ApplicationStore:
             if not stem.isdecimal():
                 continue
             generation = int(stem)
-            if generation <= 0 or generation > atOrBelow:
+            if generation <= 0:
+                continue
+            if atOrBelow is not None and generation > atOrBelow:
                 continue
             if cls._generationName(generation) != entry.name:
                 continue
@@ -270,13 +273,18 @@ class ApplicationStore:
             current,
             saveBundleId=saveBundleId,
         )
-        if bundle.generation != currentGeneration + 1:
+        generationsDirectory = applicationPath / "generations"
+        occupiedGenerations = self._availableGenerations(generationsDirectory)
+        durableGeneration = max((currentGeneration, *occupiedGenerations))
+        expectedGeneration = durableGeneration + 1
+        if bundle.generation != expectedGeneration:
             raise ValueError(
-                "SaveBundle publication must advance exactly one generation "
-                f"from {currentGeneration} to {currentGeneration + 1}.",
+                "SaveBundle publication must use the next unoccupied durable generation "
+                f"{expectedGeneration}; current accepted generation is {currentGeneration} "
+                f"and highest occupied generation is {durableGeneration}.",
             )
 
-        generationPath = applicationPath / "generations" / self._generationName(bundle.generation)
+        generationPath = generationsDirectory / self._generationName(bundle.generation)
         if generationPath.exists():
             raise FileExistsError(f"SaveBundle generation already exists: {generationPath}")
         descriptor, temporaryName = tempfile.mkstemp(
@@ -336,9 +344,12 @@ class ApplicationStore:
         )
 
         generationsDirectory = applicationPath / "generations"
-        candidates = self._availableGenerations(
-            generationsDirectory,
-            atOrBelow=currentGeneration,
+        occupiedGenerations = self._availableGenerations(generationsDirectory)
+        durableGeneration = max((currentGeneration, *occupiedGenerations))
+        candidates = tuple(
+            generation
+            for generation in occupiedGenerations
+            if generation <= currentGeneration
         )
         for generation in candidates:
             generationPath = generationsDirectory / self._generationName(generation)
@@ -362,6 +373,7 @@ class ApplicationStore:
                     appPackId=appPackId,
                     applicationId=applicationId,
                     bundle=bundle,
+                    durableGeneration=durableGeneration,
                     recoveredFromGeneration=(
                         None if generation == currentGeneration else currentGeneration
                     ),
