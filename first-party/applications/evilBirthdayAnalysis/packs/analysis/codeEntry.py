@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 15
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/codeEntry.py ; version: 16
 from __future__ import annotations
 
 import importlib.util
@@ -295,6 +295,7 @@ def _previousChatItemReusable(
     )
 
 _PROMPT_OMITTED_GENERATED_EVENT_TYPES = frozenset({
+    "subscription",
     "subscriptionGiftBatch",
     "subscriptionGift",
 })
