@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 10
+# file: backend/application/applicationRuntime.py ; version: 11
 from __future__ import annotations
 
 from copy import deepcopy
@@ -472,6 +472,7 @@ class ApplicationRuntime:
                     ioView=ioTransaction,
                 )
                 unit.commitMutation()
+                job.authoritativeStateAccepted = True
                 self.trace(
                     "OrchestrationUnitTransactionCommitted",
                     attributes=orchestrationAttributes,
