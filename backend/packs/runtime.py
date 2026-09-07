@@ -1,4 +1,4 @@
-# file: backend/packs/runtime.py ; version: 9
+# file: backend/packs/runtime.py ; version: 10
 from __future__ import annotations
 
 import hashlib
@@ -29,6 +29,7 @@ class CodeEntryDefinition:
 @dataclass(frozen=True, slots=True)
 class PackDefinition:
     packId: str
+    kind: str
     version: str
     root: Path
     codeEntries: tuple[CodeEntryDefinition, ...]
@@ -72,6 +73,9 @@ class PackResolver:
         packId = manifest.get("packId")
         if type(packId) is not str or not packId:
             raise ValueError(f"Pack manifest requires a non-empty string packId: {manifestPath}.")
+        kind = manifest.get("kind")
+        if type(kind) is not str or not kind:
+            raise ValueError(f"Pack {packId!r} requires a non-empty string kind.")
         version = manifest.get("version")
         if type(version) is not str or not version:
             raise ValueError(f"Pack {packId!r} requires a non-empty string version.")
@@ -96,6 +100,7 @@ class PackResolver:
 
         return PackDefinition(
             packId=packId,
+            kind=kind,
             version=version,
             root=manifestPath.parent.resolve(),
             codeEntries=tuple(entries),
