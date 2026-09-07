@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 3
+# file: backend/runtime/runtimeHost.py ; version: 4
 from __future__ import annotations
 
 from copy import deepcopy
@@ -30,6 +30,7 @@ class RuntimeHost:
     def __init__(
         self,
         *,
+        appPackId: str | None = None,
         application: Application | None = None,
         saveBundle: SaveBundle | None = None,
         config: dict[str, object] | None = None,
@@ -37,14 +38,26 @@ class RuntimeHost:
     ) -> None:
         if application is not None and saveBundle is not None:
             raise ValueError("RuntimeHost accepts either application or saveBundle, not both.")
+        if application is not None and appPackId is not None and application.appPackId != appPackId:
+            raise ValueError("RuntimeHost appPackId does not match supplied Application.")
+        if saveBundle is not None and appPackId is not None and saveBundle.appPackId != appPackId:
+            raise ValueError("RuntimeHost appPackId does not match supplied SaveBundle.")
 
         self._saveBundle = saveBundle
         if saveBundle is None:
-            resolvedApplication = application or Application.new()
+            if application is None:
+                if type(appPackId) is not str or not appPackId:
+                    raise ValueError("RuntimeHost requires appPackId when creating a new Application.")
+                resolvedApplication = Application.new(appPackId=appPackId)
+            else:
+                resolvedApplication = application
             committedState = None
             saveBundleId = None
         else:
-            resolvedApplication = Application(applicationId=saveBundle.applicationId)
+            resolvedApplication = Application(
+                appPackId=saveBundle.appPackId,
+                applicationId=saveBundle.applicationId,
+            )
             committedState = saveBundle.restoreCommittedState()
             saveBundleId = saveBundle.saveBundleId
 
@@ -86,11 +99,15 @@ class RuntimeHost:
         with self._lane:
             if self._saveBundle is None:
                 bundle = SaveBundle.create(
+                    appPackId=self.applicationRun.application.appPackId,
                     applicationId=self.applicationRun.application.applicationId,
                     committedState=self.applicationRun.committedState,
                 )
             else:
-                if self._saveBundle.applicationId != self.applicationRun.application.applicationId:
+                if (
+                    self._saveBundle.appPackId != self.applicationRun.application.appPackId
+                    or self._saveBundle.applicationId != self.applicationRun.application.applicationId
+                ):
                     raise RuntimeError("Bound SaveBundle Application identity no longer matches ApplicationRun.")
                 bundle = self._saveBundle.nextGeneration(
                     committedState=self.applicationRun.committedState,
