@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 3
+# file: backend/application/applicationRuntime.py ; version: 4
 from __future__ import annotations
 
 from copy import deepcopy
@@ -268,6 +268,13 @@ class ApplicationRuntime:
         with self._lane:
             if not self.applicationRun.active:
                 return
+
+            errors: list[Exception] = []
+            try:
+                self.packLoader.close()
+            except Exception as err:
+                errors.append(err)
+
             self.trace(
                 "application-run-stopped",
                 attributes={
@@ -277,24 +284,32 @@ class ApplicationRuntime:
             )
             self.applicationRun.stop()
 
+            if errors:
+                raise ExceptionGroup(
+                    "ApplicationRuntime stop reported Pack cleanup errors.",
+                    errors,
+                )
+
     def close(self) -> None:
         with self._lane:
             if self._closed:
                 return
 
             errors: list[Exception] = []
-            try:
-                self.packLoader.close()
-            except Exception as err:
-                errors.append(err)
-
-            try:
-                if self.applicationRun.active:
+            if self.applicationRun.active:
+                try:
                     self.stop()
-                else:
+                except Exception as err:
+                    errors.append(err)
+            else:
+                try:
+                    self.packLoader.close()
+                except Exception as err:
+                    errors.append(err)
+                try:
                     self.abortInitialization()
-            except Exception as err:
-                errors.append(err)
+                except Exception as err:
+                    errors.append(err)
 
             if self._ownsTracer and not self._tracerClosed:
                 try:
