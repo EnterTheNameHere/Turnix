@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 9
+# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 10
 from __future__ import annotations
 
 import hashlib
@@ -1248,6 +1248,29 @@ def _secondPresentationValue(
     entries: list[dict[str, object]] = []
     semanticGroups: dict[str, dict[str, object]] = {}
 
+    aggregateEntries = aggregateValue.get("entries")
+    if not isinstance(aggregateEntries, list):
+        raise RuntimeError("Presentation planning aggregate requires structured entries.")
+    identicalGroupByLine: dict[int, dict[str, object]] = {}
+    for aggregateEntry in aggregateEntries:
+        if not isinstance(aggregateEntry, dict):
+            raise RuntimeError("Presentation planning aggregate entry must be an object.")
+        if aggregateEntry.get("kind") != "identicalCanonicalMessage":
+            continue
+        lineNumbers = aggregateEntry.get("lineNumbers")
+        if (
+            not isinstance(lineNumbers, list)
+            or len(lineNumbers) < 2
+            or any(type(lineNumber) is not int for lineNumber in lineNumbers)
+        ):
+            raise RuntimeError("Identical-message aggregate has invalid line membership.")
+        for lineNumber in lineNumbers:
+            if lineNumber in identicalGroupByLine:
+                raise RuntimeError(f"Chat line {lineNumber} belongs to multiple identical-message groups.")
+            identicalGroupByLine[lineNumber] = aggregateEntry
+
+    emittedIdenticalGroups: set[tuple[int, ...]] = set()
+
     for member in bucketValue["members"]:
         if not isinstance(member, dict):
             raise RuntimeError("Presentation planning bucket member must be an object.")
@@ -1265,6 +1288,25 @@ def _secondPresentationValue(
                     "burst": burst,
                 }
             )
+            continue
+
+        identicalGroup = identicalGroupByLine.get(lineNumber)
+        if identicalGroup is not None:
+            groupLineNumbers = tuple(identicalGroup["lineNumbers"])
+            if groupLineNumbers not in emittedIdenticalGroups:
+                emittedIdenticalGroups.add(groupLineNumbers)
+                entries.append(
+                    {
+                        "kind": "identicalMessageGroup",
+                        "canonicalMessage": identicalGroup.get("canonicalMessage"),
+                        "canonicalSpans": identicalGroup.get("canonicalSpans"),
+                        "lineNumbers": list(groupLineNumbers),
+                        "semantic": identicalGroup.get("semantic"),
+                        "sourceUsernames": identicalGroup.get("sourceUsernames"),
+                        "messageCount": identicalGroup.get("messageCount"),
+                        "uniqueSourceUserCount": identicalGroup.get("uniqueSourceUserCount"),
+                    }
+                )
             continue
 
         semanticAddress = semanticReference.get("address")
