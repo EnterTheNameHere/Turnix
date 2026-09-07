@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 3
+# file: backend/runtime/runtimeHost.py ; version: 4
 from __future__ import annotations
 
 from enum import StrEnum
@@ -262,16 +262,11 @@ class RuntimeHost:
 
     @staticmethod
     def _closeRuntime(runtime: ApplicationRuntime) -> list[Exception]:
-        errors: list[Exception] = []
         try:
-            runtime.packLoader.close()
+            runtime.close()
         except Exception as err:
-            errors.append(err)
-        try:
-            runtime.stop()
-        except Exception as err:
-            errors.append(err)
-        return errors
+            return [err]
+        return []
 
     @staticmethod
     def _cleanupFailedOperation(
@@ -279,13 +274,6 @@ class RuntimeHost:
         runtime: ApplicationRuntime,
     ) -> None:
         try:
-            runtime.packLoader.close()
-        except Exception:
-            pass
-        try:
-            if runtime.applicationRun.active:
-                runtime.stop()
-            else:
-                runtime.abortInitialization()
+            runtime.close()
         except Exception:
             pass
