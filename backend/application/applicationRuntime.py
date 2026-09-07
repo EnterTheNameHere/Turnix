@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 9
+# file: backend/application/applicationRuntime.py ; version: 10
 from __future__ import annotations
 
 from copy import deepcopy
@@ -451,6 +451,10 @@ class ApplicationRuntime:
                 "OrchestrationUnitTransactionOpened",
                 attributes=orchestrationAttributes,
             )
+            self.trace(
+                "managed-io-transaction-opened",
+                attributes=orchestrationAttributes,
+            )
             unit.start()
             self.trace(
                 "OrchestrationUnitStarted",
@@ -472,13 +476,31 @@ class ApplicationRuntime:
                     "OrchestrationUnitTransactionCommitted",
                     attributes=orchestrationAttributes,
                 )
-                ioTransaction.commit()
+                try:
+                    ioTransaction.commit()
+                except Exception as err:
+                    self.trace(
+                        "managed-io-transaction-failed",
+                        message=str(err),
+                        attributes=orchestrationAttributes,
+                        level="error",
+                    )
+                    raise
+                self.trace(
+                    "managed-io-transaction-committed",
+                    attributes=orchestrationAttributes,
+                )
             except Exception as err:
                 mutationWasResolved = unit.mutationResolved
                 try:
                     ioTransaction.abort()
                 except RuntimeError:
                     pass
+                else:
+                    self.trace(
+                        "managed-io-transaction-aborted",
+                        attributes=orchestrationAttributes,
+                    )
                 unit.finish(OrchestrationUnitOutcome.FAILED)
                 if not mutationWasResolved:
                     self.trace(
