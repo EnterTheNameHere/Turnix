@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatProcessing.py ; version: 5
+# file: tests/first_party/evilBirthdayAnalysis/test_chatProcessing.py ; version: 6
 from __future__ import annotations
 
 import hashlib
@@ -158,9 +158,9 @@ def test_selector_is_half_open_and_does_not_interpret_records():
 def test_selector_renders_stream_relative_timing_as_derived_source_evidence():
     chat._parsedCache.clear()
     lines = (
-        "[2024-03-25 19:28:52] #vedal987 before: pre-stream",
-        "[2024-03-25 19:28:53] #vedal987 zero: stream-start",
-        "[2024-03-25 19:28:58] #vedal987 after: five-seconds",
+        "[2024-03-25 19:19:59] #vedal987 before: pre-stream",
+        "[2024-03-25 19:20:00] #vedal987 zero: stream-start",
+        "[2024-03-25 19:20:05] #vedal987 after: five-seconds",
     )
     selected = chat._select(
         _Ctx(lines=lines, streamStartTime="00:08:53"),
@@ -172,8 +172,9 @@ def test_selector_renders_stream_relative_timing_as_derived_source_evidence():
         "00:00:00",
         "00:00:05",
     ]
-    assert selected["records"][0]["timestampText"] == "2024-03-25 19:28:52"
-    assert selected["wallClockAtStreamZero"] == "2024-03-25 19:28:53"
+    assert selected["records"][0]["timestampText"] == "2024-03-25 19:19:59"
+    assert selected["wallClockAtStreamZero"] == "2024-03-25 19:20:00"
+    assert selected["wallClockAtMediaZero"] == "2024-03-25 19:11:07"
 
 
 def test_selector_can_return_raw_lookback_without_marking_it_inside_requested_window():
@@ -360,3 +361,28 @@ def test_repeat_marker_configuration_fails_closed(rendering, message):
 
     with pytest.raises(ValueError, match=message):
         chat._select(ctx, {"videoStartSeconds": 0, "videoEndSeconds": 1})
+
+
+
+def test_real_alignment_contract_maps_video_offset_to_stream_relative_chat_time():
+    chat._parsedCache.clear()
+    lines = (
+        "[2024-03-25 19:08:55] #vedal987 zero: stream-start",
+        "[2024-03-25 19:17:47] #vedal987 viewer: Vedal a genius what a lie",
+        "[2024-03-25 19:17:48] #vedal987 viewer: next-second",
+    )
+    ctx = _Ctx(lines=lines, streamStartTime="00:08:53")
+    ctx.config["chatStartTime"] = "19:08:55"
+
+    selected = chat._select(
+        ctx,
+        {"videoStartSeconds": 533, "videoEndSeconds": 1066},
+    )
+
+    assert selected["wallClockAtStreamZero"] == "2024-03-25 19:08:55"
+    assert selected["wallClockAtMediaZero"] == "2024-03-25 19:00:02"
+    assert [record["streamTime"] for record in selected["records"]] == [
+        "00:00:00",
+        "00:08:52",
+        "00:08:53",
+    ]
