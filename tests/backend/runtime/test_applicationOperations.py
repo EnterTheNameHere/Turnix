@@ -1,9 +1,9 @@
-# file: tests/backend/runtime/test_applicationOperations.py ; version: 1
+# file: tests/backend/runtime/test_applicationOperations.py ; version: 2
 import json
 from pathlib import Path
 
 from backend.packs.runtime import ManualActivationPlan, PackResolver
-from backend.runtime import ApplicationRuntimeOperations
+from backend.runtime.applicationOperations import ApplicationRuntimeOperations
 from backend.save import ApplicationStore
 
 
