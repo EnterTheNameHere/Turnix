@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 16
+# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 17
 from __future__ import annotations
 
 import importlib.util
@@ -1338,3 +1338,57 @@ def test_cheer_bits_prefix_remains_an_ordinary_user_message():
     assert record["analysis"]["includedInText"] is True
     assert record["body"] == "Cheer300 HAPPY BIRTHDAY EVIL"
     assert "Cheer300 HAPPY BIRTHDAY EVIL" in result["text"]
+
+
+
+def test_subscription_notice_with_attached_message_keeps_authored_payload_only():
+    result = _interpret(
+        _Ctx(),
+        [
+            _raw(
+                1,
+                "viewer: viewer subscribed with Prime. They've subscribed for 3 months! GIGAEVIL",
+                streamTimeSeconds=13.0,
+                streamTime="00:00:13",
+            )
+        ],
+    )
+
+    record = result["records"][0]
+    assert record["message"] == (
+        "viewer: viewer subscribed with Prime. They've subscribed for 3 months! GIGAEVIL"
+    )
+    assert record["body"] == "GIGAEVIL"
+    assert record["analysis"]["kind"] == "userMessage"
+    assert record["analysis"]["platformEvent"] == {
+        "type": "subscription",
+        "subscriber": "viewer",
+        "method": "prime",
+        "monthsSubscribed": 3,
+    }
+    assert record["analysis"]["spans"][0]["kind"] == "emote"
+    assert "subscribed with Prime" not in result["text"]
+    assert result["text"].endswith("viewer: GIGAEVIL")
+
+
+def test_subscription_notice_without_attached_message_stays_generated_event():
+    result = _interpret(
+        _Ctx(),
+        [
+            _raw(
+                1,
+                "viewer: viewer subscribed at Tier 1.",
+                streamTimeSeconds=14.0,
+                streamTime="00:00:14",
+            )
+        ],
+    )
+
+    record = result["records"][0]
+    assert record["analysis"]["kind"] == "generatedEvent"
+    assert record["analysis"]["event"] == {
+        "type": "subscription",
+        "subscriber": "viewer",
+        "method": "tier",
+        "tier": 1,
+    }
