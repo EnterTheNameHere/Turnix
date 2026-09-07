@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 7
+# file: backend/runtime/runtimeHost.py ; version: 8
 from __future__ import annotations
 
 from copy import deepcopy
@@ -83,6 +83,11 @@ class RuntimeHost:
     @property
     def config(self) -> dict[str, object]:
         return deepcopy(self._config)
+
+    @property
+    def acceptedSaveBundle(self) -> SaveBundle | None:
+        """Returns the host's currently accepted immutable SaveBundle generation."""
+        return self._saveBundle
 
     @classmethod
     def loadApplication(
