@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 12
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 13
 from __future__ import annotations
 
 import importlib.util
@@ -1134,6 +1134,7 @@ def _persistent_chat_item(
     second: int,
     aggregate_entry: dict[str, object],
     burst: dict[str, object] | None = None,
+    presentation_owners: list[dict[str, object]] | None = None,
 ) -> QueryItem:
     semantic_address = f"evilanalysis/chat/line/{line_number}/semantic"
     bucket_address = f"evilanalysis/chat/second/s{second}/semantic"
@@ -1182,6 +1183,20 @@ def _persistent_chat_item(
                     "entry": aggregate_entry,
                 },
                 "identicalMessageBurst": burst,
+                "secondPresentation": (
+                    None
+                    if presentation_owners is None
+                    else {
+                        "address": f"evilanalysis/chat/second/s{second}/presentation",
+                        "dependency": {
+                            "address": f"evilanalysis/chat/second/s{second}/presentation",
+                            "state": "present",
+                            "contentSha256": f"presentation-{second}",
+                            "metadataSha256": f"presentation-meta-{second}",
+                        },
+                        "owners": presentation_owners,
+                    }
+                ),
             },
         },
     )
@@ -1576,3 +1591,134 @@ def test_burst_ownership_suppresses_only_claimed_occurrences():
         "CHAT BURST: GIGAEVIL ×2 [2 users; 2s]\n"
         "CHAT other: Clap"
     ]
+
+
+
+def _semantic_group_owner(
+    *,
+    line_counts: list[tuple[int, int]],
+    semantic_class: str = "praise",
+) -> dict[str, object]:
+    return {
+        "kind": "semanticUnitGroup",
+        "meaning": {
+            "semanticClass": semantic_class,
+            "classificationSource": "userDefined",
+        },
+        "count": sum(count for _line, count in line_counts),
+        "members": [
+            {
+                "lineNumber": line_number,
+                "count": count,
+                "semantic": {
+                    "address": f"evilanalysis/chat/line/{line_number}/semantic",
+                },
+            }
+            for line_number, count in line_counts
+        ],
+    }
+
+
+def test_semantic_unit_owner_compacts_presented_messages_without_raw_duplication():
+    owner = _semantic_group_owner(line_counts=[(120, 1), (121, 2)])
+    first = _persistent_chat_item(
+        line_number=120,
+        username="alice",
+        content="GIGAEVIL",
+        second=55,
+        aggregate_entry={
+            "kind": "message",
+            "lineNumber": 120,
+            "semantic": {"address": "evilanalysis/chat/line/120/semantic"},
+        },
+        presentation_owners=[owner],
+    )
+    second = _persistent_chat_item(
+        line_number=121,
+        username="bob",
+        content="EVILLOVE x2",
+        second=55,
+        aggregate_entry={
+            "kind": "message",
+            "lineNumber": 121,
+            "semantic": {"address": "evilanalysis/chat/line/121/semantic"},
+        },
+        presentation_owners=[owner],
+    )
+
+    sections = analysis._evidenceSections(
+        transcriptItems=[],
+        chatItems=[first, second],
+        includeChat=True,
+        chatLayout="interleaved",
+    )
+
+    assert sections == [
+        "CHRONOLOGICAL EVIDENCE\n"
+        "[00:00:55]\n"
+        "CHAT SEMANTIC: semanticClass=praise ×3 [2 users]"
+    ]
+    assert "GIGAEVIL" not in sections[0]
+    assert "EVILLOVE" not in sections[0]
+
+
+def test_partial_semantic_group_selection_counts_only_presented_contribution():
+    owner = _semantic_group_owner(line_counts=[(122, 1), (123, 2)])
+    first = _persistent_chat_item(
+        line_number=122,
+        username="alice",
+        content="GIGAEVIL",
+        second=56,
+        aggregate_entry={
+            "kind": "message",
+            "lineNumber": 122,
+            "semantic": {"address": "evilanalysis/chat/line/122/semantic"},
+        },
+        presentation_owners=[owner],
+    )
+
+    sections = analysis._evidenceSections(
+        transcriptItems=[],
+        chatItems=[first],
+        includeChat=True,
+        chatLayout="interleaved",
+    )
+
+    assert sections == [
+        "CHRONOLOGICAL EVIDENCE\n"
+        "[00:00:56]\n"
+        "CHAT SEMANTIC: semanticClass=praise ×1 [1 users]"
+    ]
+    assert "×3" not in sections[0]
+
+
+def test_multiple_semantic_meanings_from_one_message_are_each_presented_once():
+    praise = _semantic_group_owner(line_counts=[(124, 1)], semantic_class="praise")
+    negative = _semantic_group_owner(line_counts=[(124, 2)], semantic_class="negative")
+    item = _persistent_chat_item(
+        line_number=124,
+        username="alice",
+        content="semantic source form",
+        second=57,
+        aggregate_entry={
+            "kind": "message",
+            "lineNumber": 124,
+            "semantic": {"address": "evilanalysis/chat/line/124/semantic"},
+        },
+        presentation_owners=[praise, negative],
+    )
+
+    sections = analysis._evidenceSections(
+        transcriptItems=[],
+        chatItems=[item],
+        includeChat=True,
+        chatLayout="interleaved",
+    )
+
+    assert sections == [
+        "CHRONOLOGICAL EVIDENCE\n"
+        "[00:00:57]\n"
+        "CHAT SEMANTIC: semanticClass=negative ×2 [1 users]\n"
+        "CHAT SEMANTIC: semanticClass=praise ×1 [1 users]"
+    ]
+    assert "semantic source form" not in sections[0]
