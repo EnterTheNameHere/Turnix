@@ -1,4 +1,4 @@
-# file: backend/application/runtime.py ; version: 1
+# file: backend/application/runtime.py ; version: 2
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -14,11 +14,18 @@ __all__ = ["Application", "ApplicationRun", "ApplicationRunState"]
 class Application:
     """Durable identity of one Actant application individual."""
 
+    appPackId: str
     applicationId: str
 
+    def __post_init__(self) -> None:
+        if type(self.appPackId) is not str or not self.appPackId:
+            raise ValueError("appPackId must be a non-empty string.")
+        if type(self.applicationId) is not str or not self.applicationId:
+            raise ValueError("applicationId must be a non-empty string.")
+
     @classmethod
-    def new(cls) -> "Application":
-        return cls(applicationId=newRuntimeId())
+    def new(cls, *, appPackId: str) -> "Application":
+        return cls(appPackId=appPackId, applicationId=newRuntimeId())
 
 
 class ApplicationRunState(StrEnum):
