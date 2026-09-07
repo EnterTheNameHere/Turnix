@@ -1,4 +1,4 @@
-# file: tests/backend/save/test_applicationStore.py ; version: 4
+# file: tests/backend/save/test_applicationStore.py ; version: 5
 from __future__ import annotations
 
 import json
@@ -151,6 +151,24 @@ def test_application_store_falls_back_to_previous_valid_generation_without_rewri
     assert (applicationPath / "current").read_bytes() == currentBefore
     assert (applicationPath / "generations" / "00000001.bundle").read_bytes() == firstBefore
     assert secondPath.read_bytes() == b"{not-valid-json"
+
+
+def test_application_store_recovery_scans_existing_generations_not_pointer_range(
+    tmp_path,
+):
+    _state, first = _bundle()
+    store = ApplicationStore(tmp_path / "saves")
+    applicationPath = store.createApplication(first)
+
+    currentPath = applicationPath / "current"
+    current = json.loads(currentPath.read_text(encoding="utf-8"))
+    current["generation"] = 10**12
+    currentPath.write_text(json.dumps(current), encoding="utf-8")
+
+    loaded = store.load(appPackId="test.app", applicationId="application-1")
+
+    assert loaded.bundle.generation == 1
+    assert loaded.recoveredFromGeneration == 10**12
 
 
 def test_application_store_rejects_current_pointer_save_bundle_identity_mismatch(
