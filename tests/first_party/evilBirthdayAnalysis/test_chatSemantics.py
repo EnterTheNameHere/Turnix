@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 9
+# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 10
 from __future__ import annotations
 
 import importlib.util
@@ -1034,3 +1034,153 @@ def test_open_burst_invalidates_prior_closed_start_slot_without_revision_churn()
     assert secondOpen["identicalMessageBursts"] == []
     assert memory.state(slot).value == "invalidated"
     assert memory.revisionId(slot) == 2
+
+
+
+def test_second_presentation_plan_keeps_exact_duplicate_group_above_semantic_pooling():
+    result = _interpret(
+        _Ctx(),
+        [
+            _raw(110, "alice: GIGAEVIL", streamTimeSeconds=110.0, streamTime="00:01:50"),
+            _raw(111, "bob: GIGAEVIL", streamTimeSeconds=110.0, streamTime="00:01:50"),
+        ],
+        contextStartSeconds=109.0,
+        contextEndSeconds=112.0,
+    )
+
+    plan = result["secondPresentations"][0]["value"]
+    assert plan["secondIndex"] == 110
+    assert plan["entries"] == [
+        {
+            "kind": "identicalMessageGroup",
+            "canonicalMessage": "GIGAEVIL",
+            "canonicalSpans": [
+                {
+                    "kind": "emote",
+                    "name": "GIGAEVIL",
+                    "count": 1,
+                    "metadata": {
+                        "semanticClass": "praise",
+                        "classificationSource": "userDefined",
+                    },
+                }
+            ],
+            "lineNumbers": [110, 111],
+            "semantic": [
+                result["records"][0]["semanticValue"],
+                result["records"][1]["semanticValue"],
+            ],
+            "sourceUsernames": ["alice", "bob"],
+            "messageCount": 2,
+            "uniqueSourceUserCount": 2,
+        }
+    ]
+
+
+def test_second_presentation_plan_keeps_repeat_message_above_semantic_pooling():
+    result = _interpret(
+        _Ctx(),
+        [
+            _raw(
+                112,
+                "alice: GIGAEVIL ReallyGunPull Tutel GIGAEVIL ReallyGunPull Tutel",
+                streamTimeSeconds=112.0,
+                streamTime="00:01:52",
+            )
+        ],
+    )
+
+    entry = result["secondPresentations"][0]["value"]["entries"][0]
+    assert entry["kind"] == "repeatMessage"
+    assert entry["lineNumber"] == 112
+    assert entry["count"] == 2
+    assert entry["rendered"] == "(GIGAEVIL ReallyGunPull Tutel) x2"
+    assert all(
+        owner["kind"] != "semanticUnitGroup"
+        for owner in result["secondPresentations"][0]["value"]["entries"]
+    )
+
+
+def test_second_presentation_plan_pools_trusted_semantic_units_across_messages():
+    emotes = {
+        **EMOTES,
+        "EVILLOVE": {
+            "semanticClass": "praise",
+            "classificationSource": "userDefined",
+        },
+    }
+    result = _interpret(
+        _Ctx(emotes=emotes),
+        [
+            _raw(113, "alice: GIGAEVIL", streamTimeSeconds=113.0, streamTime="00:01:53"),
+            _raw(114, "bob: EVILLOVE x2", streamTimeSeconds=113.0, streamTime="00:01:53"),
+        ],
+    )
+
+    entries = result["secondPresentations"][0]["value"]["entries"]
+    assert entries == [
+        {
+            "kind": "semanticUnitGroup",
+            "meaning": {
+                "semanticClass": "praise",
+                "classificationSource": "userDefined",
+            },
+            "count": 3,
+            "members": [
+                {
+                    "lineNumber": 113,
+                    "count": 1,
+                    "semantic": result["records"][0]["semanticValue"],
+                },
+                {
+                    "lineNumber": 114,
+                    "count": 2,
+                    "semantic": result["records"][1]["semanticValue"],
+                },
+            ],
+        }
+    ]
+
+
+def test_second_presentation_plan_keeps_unclassified_or_residual_text_individual():
+    result = _interpret(
+        _Ctx(),
+        [
+            _raw(115, "alice: Clap", streamTimeSeconds=115.0, streamTime="00:01:55"),
+            _raw(
+                116,
+                "bob: GIGAEVIL holy shit",
+                streamTimeSeconds=115.0,
+                streamTime="00:01:55",
+            ),
+        ],
+    )
+
+    entries = result["secondPresentations"][0]["value"]["entries"]
+    assert [entry["kind"] for entry in entries] == ["individual", "individual"]
+    assert [entry["lineNumber"] for entry in entries] == [115, 116]
+
+
+def test_second_presentation_plan_reuses_when_aggregate_and_burst_membership_are_unchanged():
+    memory = CommittedValueLayer()
+    ctx = _Ctx(memory)
+    records = [
+        _raw(117, "alice: GIGAEVIL", streamTimeSeconds=117.0, streamTime="00:01:57"),
+        _raw(118, "bob: EVILLOVE", streamTimeSeconds=117.0, streamTime="00:01:57"),
+    ]
+    emotes = {
+        **EMOTES,
+        "EVILLOVE": {
+            "semanticClass": "praise",
+            "classificationSource": "userDefined",
+        },
+    }
+    ctx = _Ctx(memory, emotes=emotes)
+    first = _interpret(ctx, records)
+    address = chatSemantics._secondPresentationAddress(117)
+    assert memory.revisionId(address) == 1
+
+    second = _interpret(ctx, records)
+
+    assert memory.revisionId(address) == 1
+    assert second["secondPresentations"][0]["dependency"] == first["secondPresentations"][0]["dependency"]
