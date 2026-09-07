@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 10
+# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 11
 from __future__ import annotations
 
 import importlib.util
@@ -1184,3 +1184,65 @@ def test_second_presentation_plan_reuses_when_aggregate_and_burst_membership_are
 
     assert memory.revisionId(address) == 1
     assert second["secondPresentations"][0]["dependency"] == first["secondPresentations"][0]["dependency"]
+
+
+
+def test_second_presentation_plan_gives_closed_burst_precedence_over_lower_owners():
+    result = _interpret(
+        _Ctx(),
+        [
+            _raw(
+                119,
+                "alice: GIGAEVIL GIGAEVIL",
+                streamTimeSeconds=119.0,
+                streamTime="00:01:59",
+            ),
+            _raw(
+                120,
+                "bob: GIGAEVIL GIGAEVIL",
+                streamTimeSeconds=120.0,
+                streamTime="00:02:00",
+            ),
+        ],
+        contextStartSeconds=118.0,
+        contextEndSeconds=122.0,
+    )
+
+    assert len(result["identicalMessageBursts"]) == 1
+    entries = [
+        entry
+        for plan in result["secondPresentations"]
+        for entry in plan["value"]["entries"]
+    ]
+    assert [entry["kind"] for entry in entries] == [
+        "burstOccurrence",
+        "burstOccurrence",
+    ]
+    assert all(entry["burst"]["eventKey"] for entry in entries)
+
+
+def test_second_presentation_plan_survives_save_bundle_rehydration():
+    memory = CommittedValueLayer()
+    emotes = {
+        **EMOTES,
+        "EVILLOVE": {
+            "semanticClass": "praise",
+            "classificationSource": "userDefined",
+        },
+    }
+    records = [
+        _raw(121, "alice: GIGAEVIL", streamTimeSeconds=121.0, streamTime="00:02:01"),
+        _raw(122, "bob: EVILLOVE x2", streamTimeSeconds=121.0, streamTime="00:02:01"),
+    ]
+    first = _interpret(_Ctx(memory, emotes=emotes), records)
+    address = chatSemantics._secondPresentationAddress(121)
+    firstDependency = first["secondPresentations"][0]["dependency"]
+    assert memory.revisionId(address) == 1
+
+    bundle = SaveBundle.create(applicationId="evil-analysis", committedState=memory)
+    restoredMemory = SaveBundle.fromBytes(bundle.toBytes()).restoreCommittedState()
+    restored = _interpret(_Ctx(restoredMemory, emotes=emotes), records)
+
+    assert restoredMemory.revisionId(address) == 1
+    assert restored["secondPresentations"][0]["dependency"] == firstDependency
+    assert restoredMemory.load(address) == first["secondPresentations"][0]["value"]
