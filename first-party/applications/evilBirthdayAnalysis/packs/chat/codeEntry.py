@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chat/codeEntry.py ; version: 4
+# file: first-party/applications/evilBirthdayAnalysis/packs/chat/codeEntry.py ; version: 5
 from __future__ import annotations
 
 import math
@@ -7,6 +7,9 @@ from datetime import date, datetime, time, timedelta
 
 _TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 _TIME_FORMAT = "%H:%M:%S"
+_DEFAULT_REPEAT_START_MARKER = "⟦"
+_DEFAULT_REPEAT_END_MARKER = "⟧"
+
 _parsedCache: dict[
     tuple[str, str],
     tuple[
@@ -161,6 +164,56 @@ def _finiteSeconds(payload: dict[str, object], key: str) -> float:
     return result
 
 
+def _repeatMarkers(config: dict[str, object]) -> tuple[str, str]:
+    rendering = config.get("chatRendering", {})
+    if not isinstance(rendering, dict):
+        raise TypeError("Application config chatRendering must be an object.")
+
+    start = rendering.get("repeatStartMarker", _DEFAULT_REPEAT_START_MARKER)
+    end = rendering.get("repeatEndMarker", _DEFAULT_REPEAT_END_MARKER)
+    for fieldName, value in (
+        ("repeatStartMarker", start),
+        ("repeatEndMarker", end),
+    ):
+        if type(value) is not str or not value:
+            raise ValueError(
+                f"Application config chatRendering.{fieldName} must be a non-empty exact string."
+            )
+        if "\n" in value or "\r" in value:
+            raise ValueError(
+                f"Application config chatRendering.{fieldName} must not contain line breaks."
+            )
+    if start == end:
+        raise ValueError(
+            "Application config chatRendering repeatStartMarker and repeatEndMarker must differ."
+        )
+    if start in end or end in start:
+        raise ValueError(
+            "Application config chatRendering repeat markers must not contain one another."
+        )
+    return start, end
+
+
+def _validateRepeatMarkersAgainstSource(
+    lines: tuple[str, ...] | list[str],
+    *,
+    startMarker: str,
+    endMarker: str,
+) -> None:
+    for lineNumber, line in enumerate(lines, start=1):
+        for markerName, marker in (
+            ("repeatStartMarker", startMarker),
+            ("repeatEndMarker", endMarker),
+        ):
+            if marker in line:
+                raise ValueError(
+                    "Chat repeat rendering marker collides with source chat: "
+                    f"chatRendering.{markerName}={marker!r} occurs at physical line {lineNumber}. "
+                    "Configure non-colliding chatRendering.repeatStartMarker and "
+                    "chatRendering.repeatEndMarker values."
+                )
+
+
 def _metadataObservation(observation: dict[str, object]) -> dict[str, object]:
     """Projects a strong observation onto the cheap cache-validation shape."""
     return {
@@ -188,6 +241,13 @@ def _records(
     sourceObservation = observed.get("observation")
     if not isinstance(lines, (list, tuple)) or not isinstance(sourceObservation, dict):
         raise RuntimeError("Observed chat read returned invalid data.")
+
+    repeatStartMarker, repeatEndMarker = _repeatMarkers(ctx.config)
+    _validateRepeatMarkersAgainstSource(
+        lines,
+        startMarker=repeatStartMarker,
+        endMarker=repeatEndMarker,
+    )
 
     key = (chatPath, chatStartTime)
     cached = _parsedCache.get(key)
