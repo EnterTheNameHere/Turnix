@@ -1,14 +1,13 @@
-# file: backend/runtime/runtimeHost.py ; version: 2
+# file: backend/runtime/runtimeHost.py ; version: 3
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import StrEnum
 from threading import RLock
 
 from backend.application.applicationRuntime import ApplicationRuntime
 from backend.application.lifecycle import ApplicationLifecycle
 from backend.core.runtimeIds import newRuntimeId
-from backend.packs.runtime import ManualActivationPlan, PackLoader, PackResolver
+from backend.packs.runtime import ManualActivationPlan, PackResolver
 from backend.save import ApplicationStore
 from backend.tracing import TraceSinkDestination, Tracer
 
@@ -19,12 +18,6 @@ class RuntimeHostState(StrEnum):
     CREATED = "Created"
     ACTIVE = "Active"
     STOPPED = "Stopped"
-
-
-@dataclass(slots=True)
-class _HostedApplicationRuntime:
-    runtime: ApplicationRuntime
-    packLoader: PackLoader
 
 
 class RuntimeHost:
@@ -53,7 +46,7 @@ class RuntimeHost:
         self._applicationStore = applicationStore
         self._packResolver = packResolver
         self._lane = RLock()
-        self._runtimesByRunId: dict[str, _HostedApplicationRuntime] = {}
+        self._runtimesByRunId: dict[str, ApplicationRuntime] = {}
         self._runIdByApplicationId: dict[str, str] = {}
         self._ownsTracer = tracer is None
         self.tracer = tracer or Tracer(
@@ -64,10 +57,7 @@ class RuntimeHost:
     @property
     def activeApplicationRuntimes(self) -> tuple[ApplicationRuntime, ...]:
         with self._lane:
-            return tuple(
-                hosted.runtime
-                for hosted in self._runtimesByRunId.values()
-            )
+            return tuple(self._runtimesByRunId.values())
 
     def start(self) -> None:
         with self._lane:
@@ -95,27 +85,18 @@ class RuntimeHost:
             runtime = ApplicationRuntime(
                 appPackId=appPackId,
                 applicationStore=self._applicationStore,
+                packResolver=self._packResolver,
                 config=config,
                 tracer=tracer,
-            )
-            loader = PackLoader(
-                runtime=runtime,
-                resolver=self._packResolver,
             )
             try:
                 ApplicationLifecycle.create(
                     runtime=runtime,
-                    packLoader=loader,
                     plan=plan,
                 )
-                self._register(
-                    _HostedApplicationRuntime(
-                        runtime=runtime,
-                        packLoader=loader,
-                    ),
-                )
+                self._register(runtime)
             except Exception:
-                self._cleanupFailedOperation(runtime=runtime, packLoader=loader)
+                self._cleanupFailedOperation(runtime=runtime)
                 raise
 
             self.trace(
@@ -144,27 +125,18 @@ class RuntimeHost:
                 applicationStore=self._applicationStore,
                 appPackId=appPackId,
                 applicationId=applicationId,
+                packResolver=self._packResolver,
                 config=config,
                 tracer=tracer,
-            )
-            loader = PackLoader(
-                runtime=runtime,
-                resolver=self._packResolver,
             )
             try:
                 ApplicationLifecycle.load(
                     runtime=runtime,
-                    packLoader=loader,
                     plan=plan,
                 )
-                self._register(
-                    _HostedApplicationRuntime(
-                        runtime=runtime,
-                        packLoader=loader,
-                    ),
-                )
+                self._register(runtime)
             except Exception:
-                self._cleanupFailedOperation(runtime=runtime, packLoader=loader)
+                self._cleanupFailedOperation(runtime=runtime)
                 raise
 
             self.trace(
@@ -182,7 +154,7 @@ class RuntimeHost:
             raise ValueError("applicationRunId must be a non-empty string.")
         with self._lane:
             try:
-                return self._runtimesByRunId[applicationRunId].runtime
+                return self._runtimesByRunId[applicationRunId]
             except KeyError as err:
                 raise LookupError(
                     f"ApplicationRun is not active in this RuntimeHost: {applicationRunId}.",
@@ -194,18 +166,18 @@ class RuntimeHost:
         with self._lane:
             self.requireActive()
             try:
-                hosted = self._runtimesByRunId.pop(applicationRunId)
+                runtime = self._runtimesByRunId.pop(applicationRunId)
             except KeyError as err:
                 raise LookupError(
                     f"ApplicationRun is not active in this RuntimeHost: {applicationRunId}.",
                 ) from err
 
-            applicationId = hosted.runtime.applicationRun.application.applicationId
+            applicationId = runtime.applicationRun.application.applicationId
             self._runIdByApplicationId.pop(applicationId, None)
-            errors = self._closeHosted(hosted)
+            errors = self._closeRuntime(runtime)
             self.trace(
                 "application-runtime-closed",
-                attributes=self._runtimeIdentity(hosted.runtime),
+                attributes=self._runtimeIdentity(runtime),
             )
             if errors:
                 raise ExceptionGroup(
@@ -220,10 +192,10 @@ class RuntimeHost:
 
             errors: list[Exception] = []
             for applicationRunId in tuple(self._runtimesByRunId):
-                hosted = self._runtimesByRunId.pop(applicationRunId)
-                applicationId = hosted.runtime.applicationRun.application.applicationId
+                runtime = self._runtimesByRunId.pop(applicationRunId)
+                applicationId = runtime.applicationRun.application.applicationId
                 self._runIdByApplicationId.pop(applicationId, None)
-                errors.extend(self._closeHosted(hosted))
+                errors.extend(self._closeRuntime(runtime))
 
             self.state = RuntimeHostState.STOPPED
             self.trace("runtime-host-stopped")
@@ -262,8 +234,7 @@ class RuntimeHost:
             return False
         return True
 
-    def _register(self, hosted: _HostedApplicationRuntime) -> None:
-        runtime = hosted.runtime
+    def _register(self, runtime: ApplicationRuntime) -> None:
         application = runtime.applicationRun.application
         applicationRunId = runtime.applicationRun.applicationRunId
         applicationId = application.applicationId
@@ -277,7 +248,7 @@ class RuntimeHost:
                 f"Application is already active in this RuntimeHost: {applicationId}.",
             )
 
-        self._runtimesByRunId[applicationRunId] = hosted
+        self._runtimesByRunId[applicationRunId] = runtime
         self._runIdByApplicationId[applicationId] = applicationRunId
 
     @staticmethod
@@ -290,14 +261,14 @@ class RuntimeHost:
         }
 
     @staticmethod
-    def _closeHosted(hosted: _HostedApplicationRuntime) -> list[Exception]:
+    def _closeRuntime(runtime: ApplicationRuntime) -> list[Exception]:
         errors: list[Exception] = []
         try:
-            hosted.packLoader.close()
+            runtime.packLoader.close()
         except Exception as err:
             errors.append(err)
         try:
-            hosted.runtime.stop()
+            runtime.stop()
         except Exception as err:
             errors.append(err)
         return errors
@@ -306,10 +277,9 @@ class RuntimeHost:
     def _cleanupFailedOperation(
         *,
         runtime: ApplicationRuntime,
-        packLoader: PackLoader,
     ) -> None:
         try:
-            packLoader.close()
+            runtime.packLoader.close()
         except Exception:
             pass
         try:
