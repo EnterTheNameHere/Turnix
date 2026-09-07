@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 8
+# file: backend/application/applicationRuntime.py ; version: 9
 from __future__ import annotations
 
 from copy import deepcopy
@@ -468,10 +468,11 @@ class ApplicationRuntime:
                     ioView=ioTransaction,
                 )
                 unit.commitMutation()
-                try:
-                    ioTransaction.commit()
-                except Exception:
-                    raise
+                self.trace(
+                    "OrchestrationUnitTransactionCommitted",
+                    attributes=orchestrationAttributes,
+                )
+                ioTransaction.commit()
             except Exception as err:
                 mutationWasResolved = unit.mutationResolved
                 try:
@@ -498,10 +499,6 @@ class ApplicationRuntime:
                     level="error",
                 )
             else:
-                self.trace(
-                    "OrchestrationUnitTransactionCommitted",
-                    attributes=orchestrationAttributes,
-                )
                 unit.finish(OrchestrationUnitOutcome.COMPLETED)
                 self.trace(
                     "OrchestrationUnitCompleted",
