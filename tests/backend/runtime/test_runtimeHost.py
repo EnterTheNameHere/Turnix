@@ -1,4 +1,4 @@
-# file: tests/backend/runtime/test_runtimeHost.py ; version: 1
+# file: tests/backend/runtime/test_runtimeHost.py ; version: 2
 import json
 from pathlib import Path
 
@@ -28,7 +28,7 @@ def _writeAppPack(root: Path) -> None:
 
 def _host(tmp_path: Path) -> RuntimeHost:
     packsRoot = tmp_path / "packs"
-    packsRoot.mkdir()
+    packsRoot.mkdir(parents=True)
     _writeAppPack(packsRoot)
     return RuntimeHost(
         applicationStore=ApplicationStore(tmp_path / "saves"),
