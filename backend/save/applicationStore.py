@@ -1,4 +1,4 @@
-# file: backend/save/applicationStore.py ; version: 1
+# file: backend/save/applicationStore.py ; version: 2
 from __future__ import annotations
 
 import hashlib
@@ -235,7 +235,14 @@ class ApplicationStore:
             )
             if validated.generation != bundle.generation:
                 raise RuntimeError("SaveBundle generation changed during publication validation.")
-            os.replace(temporary, generationPath)
+
+            # Generation files are immutable. link() atomically creates the
+            # destination only when absent, so a concurrent publisher cannot
+            # replace an already-visible generation after our earlier
+            # existence check.
+            os.link(temporary, generationPath)
+            temporary.unlink()
+
             self._replaceFileDurably(
                 applicationPath / "current",
                 self._canonicalJsonBytes(self._currentPointer(bundle)),
