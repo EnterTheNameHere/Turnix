@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 17
+# file: backend/context/codeEntryContext.py ; version: 18
 from __future__ import annotations
 
 from copy import deepcopy
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from backend.capabilities.runtime import CapabilityHandler, CapabilityRegistry
     from backend.core.immutableValue import ImmutableValue
-    from backend.io.managedIo import ManagedIo
+    from backend.io.managedIo import ManagedIo, ManagedIoTransaction
     from backend.llm.llmTypes import LlmStreamEvent, LlmStreamProvider
     from backend.llm.streamingRuntime import LlmProcessingPipeline, LlmProcessingResult, LlmProviderRegistry, StreamingLlmResult
     from backend.registration import RegistrationScope
@@ -25,7 +25,7 @@ __all__ = ["CodeEntryContext", "CodeEntryIdentity"]
 
 
 class _IoFacade:
-    def __init__(self, *, io: ManagedIo, requireValid: Callable[[], None]) -> None:
+    def __init__(self, *, io: ManagedIo | ManagedIoTransaction, requireValid: Callable[[], None]) -> None:
         self._io = io
         self._requireValid = requireValid
 
@@ -509,7 +509,7 @@ class CodeEntryContext:
         *,
         identity: CodeEntryIdentity,
         packRoot: Path,
-        io: ManagedIo,
+        io: ManagedIo | ManagedIoTransaction,
         capabilities: CapabilityRegistry,
         llmProviders: LlmProviderRegistry,
         llmPipeline: LlmProcessingPipeline,
