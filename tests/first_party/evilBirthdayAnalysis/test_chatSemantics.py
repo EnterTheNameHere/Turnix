@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 11
+# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 12
 from __future__ import annotations
 
 import importlib.util
@@ -1246,3 +1246,61 @@ def test_second_presentation_plan_survives_save_bundle_rehydration():
     assert restoredMemory.revisionId(address) == 1
     assert restored["secondPresentations"][0]["dependency"] == firstDependency
     assert restoredMemory.load(address) == first["secondPresentations"][0]["value"]
+
+
+
+def test_presentation_plan_revises_when_neighbor_context_creates_closed_burst():
+    memory = CommittedValueLayer()
+    ctx = _Ctx(memory)
+    first = _interpret(
+        ctx,
+        [
+            _raw(
+                130,
+                "alice: GIGAEVIL",
+                streamTimeSeconds=130.0,
+                streamTime="00:02:10",
+            )
+        ],
+        contextStartSeconds=129.0,
+        contextEndSeconds=132.0,
+    )
+
+    aggregateAddress = chatSemantics._secondAggregateAddress(130)
+    presentationAddress = chatSemantics._secondPresentationAddress(130)
+    assert memory.revisionId(aggregateAddress) == 1
+    assert memory.revisionId(presentationAddress) == 1
+    assert first["secondPresentations"][0]["value"]["entries"][0]["kind"] == "semanticUnitGroup"
+
+    second = _interpret(
+        ctx,
+        [
+            _raw(
+                130,
+                "alice: GIGAEVIL",
+                streamTimeSeconds=130.0,
+                streamTime="00:02:10",
+            ),
+            _raw(
+                131,
+                "bob: GIGAEVIL",
+                streamTimeSeconds=131.0,
+                streamTime="00:02:11",
+            ),
+        ],
+        contextStartSeconds=129.0,
+        contextEndSeconds=133.0,
+        sourceObservation={
+            **_SOURCE_OBSERVATION,
+            "contentSha256": "neighbor-created-burst",
+        },
+    )
+
+    plan130 = next(
+        plan
+        for plan in second["secondPresentations"]
+        if plan["value"]["secondIndex"] == 130
+    )
+    assert memory.revisionId(aggregateAddress) == 1
+    assert memory.revisionId(presentationAddress) == 2
+    assert plan130["value"]["entries"][0]["kind"] == "burstOccurrence"
