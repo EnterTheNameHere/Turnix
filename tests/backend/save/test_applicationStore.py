@@ -1,4 +1,4 @@
-# file: tests/backend/save/test_applicationStore.py ; version: 2
+# file: tests/backend/save/test_applicationStore.py ; version: 3
 from __future__ import annotations
 
 import json
@@ -152,6 +152,46 @@ def test_application_store_falls_back_to_previous_valid_generation_without_rewri
     assert secondPath.read_bytes() == b"{not-valid-json"
 
 
+def test_application_store_rejects_current_pointer_save_bundle_identity_mismatch(
+    tmp_path,
+):
+    state, first = _bundle()
+    store = ApplicationStore(tmp_path / "saves")
+    applicationPath = store.createApplication(first)
+
+    currentPath = applicationPath / "current"
+    current = json.loads(currentPath.read_text(encoding="utf-8"))
+    current["saveBundleId"] = "wrong-save-bundle"
+    currentPath.write_text(json.dumps(current), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="current pointer SaveBundle identity"):
+        store.load(appPackId="test.app", applicationId="application-1")
+
+    second = first.nextGeneration(committedState=state)
+    with pytest.raises(ValueError, match="current pointer SaveBundle identity"):
+        store.publish(second)
+
+
+def test_application_store_does_not_delete_foreign_creation_staging(tmp_path):
+    _state, bundle = _bundle()
+    store = ApplicationStore(tmp_path / "saves")
+    appPackDirectory = tmp_path / "saves" / "test.app"
+    appPackDirectory.mkdir(parents=True)
+
+    foreignStaging = appPackDirectory / ".creating-application-1-foreign"
+    foreignStaging.mkdir()
+    marker = foreignStaging / "marker.txt"
+    marker.write_text("foreign staging evidence", encoding="utf-8")
+
+    store.createApplication(bundle)
+
+    assert marker.read_text(encoding="utf-8") == "foreign staging evidence"
+    assert store.applicationPath(
+        appPackId="test.app",
+        applicationId="application-1",
+    ).is_dir()
+
+
 def test_application_store_never_overwrites_generation_published_by_racing_writer(
     tmp_path,
     monkeypatch,
@@ -206,7 +246,7 @@ def test_application_store_creation_failure_does_not_publish_application_directo
         store.createApplication(bundle)
 
     assert not target.exists()
-    assert not (target.parent / ".creating-application-failure").exists()
+    assert not list(target.parent.glob(".creating-application-failure-*"))
 
 
 def test_application_store_rejects_path_traversal_identity(tmp_path):
