@@ -1,4 +1,4 @@
-# file: tests/backend/io/test_managedIo.py ; version: 1
+# file: tests/backend/io/test_managedIo.py ; version: 2
 from __future__ import annotations
 
 import hashlib
@@ -75,3 +75,52 @@ def test_strong_observation_detects_content_change(tmp_path) -> None:
 def test_hashing_non_file_source_is_rejected(tmp_path) -> None:
     with pytest.raises(IoPathError, match="regular file"):
         ManagedIo().observeFile(tmp_path, contentHash=True)
+
+
+def test_staged_write_is_invisible_until_commit(tmp_path) -> None:
+    path = tmp_path / "result.json"
+    io = ManagedIo()
+    transaction = io.openTransaction()
+
+    transaction.writeJsonAtomic(path, {"value": 1})
+
+    assert path.exists() is False
+
+    transaction.commit()
+
+    assert path.read_text(encoding="utf-8") == '{\n  "value": 1\n}\n'
+
+
+def test_staged_write_abort_discards_output(tmp_path) -> None:
+    path = tmp_path / "result.txt"
+    io = ManagedIo()
+    transaction = io.openTransaction()
+
+    transaction.writeTextAtomic(path, "staged")
+    transaction.abort()
+
+    assert path.exists() is False
+
+
+def test_staged_write_batch_replaces_multiple_destinations_on_commit(tmp_path) -> None:
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    first.write_text("old-first", encoding="utf-8")
+    second.write_text("old-second", encoding="utf-8")
+
+    transaction = ManagedIo().openTransaction()
+    transaction.writeTextAtomic(first, "new-first")
+    transaction.writeTextAtomic(second, "new-second")
+    transaction.commit()
+
+    assert first.read_text(encoding="utf-8") == "new-first"
+    assert second.read_text(encoding="utf-8") == "new-second"
+
+
+def test_resolved_staged_io_transaction_rejects_reuse(tmp_path) -> None:
+    transaction = ManagedIo().openTransaction()
+    transaction.writeTextAtomic(tmp_path / "value.txt", "value")
+    transaction.commit()
+
+    with pytest.raises(RuntimeError, match="already committed"):
+        transaction.writeTextAtomic(tmp_path / "other.txt", "other")
