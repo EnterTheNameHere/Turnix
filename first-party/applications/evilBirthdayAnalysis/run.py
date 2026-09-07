@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 14
+# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 15
 from __future__ import annotations
 
 import argparse
@@ -72,7 +72,7 @@ def main() -> int:
         "--preview-prompt",
         metavar="HH:MM:SS",
         help=(
-            "Prepare and print one exact model-facing analysis prompt at the requested "
+            "Prepare and write one exact model-facing analysis prompt at the requested "
             "stream position without invoking model generation."
         ),
     )
