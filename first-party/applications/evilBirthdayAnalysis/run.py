@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 8
+# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 9
 from __future__ import annotations
 
 import argparse
@@ -65,7 +65,7 @@ def main() -> int:
     planPath = Path(__file__).with_name("activation-plan.json")
     plan = ManualActivationPlan.fromJson(io.readJson(planPath))
 
-    host = RuntimeHost(config=config)
+    host = RuntimeHost(appPackId="evilBirthdayAnalysis", config=config)
     resolver = PackResolver(roots=(REPO_ROOT / "first-party",))
     loader = PackLoader(host=host, resolver=resolver)
     host.start()
