@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 7
+# file: backend/application/applicationRuntime.py ; version: 8
 from __future__ import annotations
 
 from copy import deepcopy
@@ -8,7 +8,7 @@ from threading import RLock
 from backend.application.runtime import Application, ApplicationRun, ApplicationRunState
 from backend.capabilities.runtime import CapabilityRegistry
 from backend.context.codeEntryContext import CodeEntryContext, CodeEntryIdentity
-from backend.io.managedIo import ManagedIo
+from backend.io.managedIo import ManagedIo, ManagedIoTransaction
 from backend.llm.streamingRuntime import LlmProviderRegistry, LlmProcessingPipeline
 from backend.orchestration.runtime import Job, OrchestrationUnit, OrchestrationUnitOutcome
 from backend.packs.runtime import PackLoader, PackResolver
@@ -341,19 +341,25 @@ class ApplicationRuntime:
         registrationScope: RegistrationScope,
         allowRegistration: bool = False,
         memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
+        ioView: ManagedIo | ManagedIoTransaction | None = None,
     ) -> CodeEntryContext:
         self.requireOperational()
         return CodeEntryContext(
             identity=identity,
             packRoot=packRoot,
-            io=self.io,
+            io=self.io if ioView is None else ioView,
             capabilities=self.capabilities,
             llmProviders=self.llmProviders,
             llmPipeline=self.llmPipeline,
             memory=self.applicationRun.application.committedState if memoryView is None else memoryView,
             registrationScope=registrationScope,
             config=self._config,
-            capabilityInvoker=lambda capabilityId, payload=None: self.invokeCapability(capabilityId, payload, memoryView=self.applicationRun.application.committedState if memoryView is None else memoryView),
+            capabilityInvoker=lambda capabilityId, payload=None: self.invokeCapability(
+                capabilityId,
+                payload,
+                memoryView=self.applicationRun.application.committedState if memoryView is None else memoryView,
+                ioView=self.io if ioView is None else ioView,
+            ),
             allowRegistration=allowRegistration,
         )
 
@@ -372,6 +378,7 @@ class ApplicationRuntime:
         payload: object | None = None,
         *,
         memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
+        ioView: ManagedIo | ManagedIoTransaction | None = None,
     ) -> object:
         with self._lane:
             self.requireOperational()
@@ -394,6 +401,7 @@ class ApplicationRuntime:
                 packRoot=packRoot,
                 registrationScope=scope,
                 memoryView=memoryView,
+                ioView=ioView,
             )
             try:
                 result = self.capabilities.invokeResolved(registration, context=context, payload=payload)
@@ -424,12 +432,14 @@ class ApplicationRuntime:
                 applicationRunId=self.applicationRun.applicationRunId,
                 transactionBase=self.applicationRun.application.committedState,
             )
+            ioTransaction = self.io.openTransaction()
             orchestrationAttributes = {
                 "jobId": job.jobId,
                 "orchestrationUnitId": unit.orchestrationUnitId,
                 "applicationId": self.applicationRun.application.applicationId,
                 "applicationRunId": unit.applicationRunId,
                 "transactionId": unit.transactionId,
+                "ioTransactionId": ioTransaction.ioTransactionId,
                 "capabilityId": capabilityId,
                 "workKind": "job-capability",
             }
@@ -455,10 +465,19 @@ class ApplicationRuntime:
                     capabilityId,
                     payload,
                     memoryView=unit.memoryView,
+                    ioView=ioTransaction,
                 )
                 unit.commitMutation()
+                try:
+                    ioTransaction.commit()
+                except Exception:
+                    raise
             except Exception as err:
                 mutationWasResolved = unit.mutationResolved
+                try:
+                    ioTransaction.abort()
+                except RuntimeError:
+                    pass
                 unit.finish(OrchestrationUnitOutcome.FAILED)
                 if not mutationWasResolved:
                     self.trace(
