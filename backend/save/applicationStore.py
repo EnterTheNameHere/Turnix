@@ -1,10 +1,11 @@
-# file: backend/save/applicationStore.py ; version: 2
+# file: backend/save/applicationStore.py ; version: 3
 from __future__ import annotations
 
 import hashlib
 import json
 import os
 import shutil
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -123,6 +124,27 @@ class ApplicationStore:
             "sha256": self._bundleSha256(bundle),
         }
 
+    def _validateCurrentPointer(
+        self,
+        current: dict[str, object],
+        *,
+        saveBundleId: str,
+    ) -> int:
+        pointerSaveBundleId = current.get("saveBundleId")
+        if pointerSaveBundleId != saveBundleId:
+            raise ValueError("Application current pointer SaveBundle identity does not match Application metadata.")
+        generation = current.get("generation")
+        if type(generation) is not int or generation <= 0:
+            raise ValueError("Application current pointer requires positive generation.")
+        sha256 = current.get("sha256")
+        if type(sha256) is not str or len(sha256) != 64:
+            raise ValueError("Application current pointer requires a SHA-256 digest.")
+        try:
+            int(sha256, 16)
+        except ValueError as err:
+            raise ValueError("Application current pointer requires a SHA-256 digest.") from err
+        return generation
+
     def _validateBundleIdentity(
         self,
         bundle: SaveBundle,
@@ -154,11 +176,14 @@ class ApplicationStore:
 
         appPackDirectory = target.parent
         appPackDirectory.mkdir(parents=True, exist_ok=True)
-        staging = appPackDirectory / f".creating-{bundle.applicationId}"
-        if staging.exists():
-            shutil.rmtree(staging)
+        staging = Path(
+            tempfile.mkdtemp(
+                prefix=f".creating-{bundle.applicationId}-",
+                dir=appPackDirectory,
+            ),
+        )
         generations = staging / "generations"
-        generations.mkdir(parents=True)
+        generations.mkdir()
 
         try:
             self._writeFileDurably(
@@ -211,9 +236,10 @@ class ApplicationStore:
         )
 
         current = self._readCurrent(applicationPath)
-        currentGeneration = current["generation"]
-        if type(currentGeneration) is not int:
-            raise RuntimeError("Application current generation is invalid.")
+        currentGeneration = self._validateCurrentPointer(
+            current,
+            saveBundleId=saveBundleId,
+        )
         if bundle.generation != currentGeneration + 1:
             raise ValueError(
                 "SaveBundle publication must advance exactly one generation "
@@ -267,9 +293,10 @@ class ApplicationStore:
             raise ValueError("Application metadata requires saveBundleId.")
 
         current = self._readCurrent(applicationPath)
-        currentGeneration = current.get("generation")
-        if type(currentGeneration) is not int or currentGeneration <= 0:
-            raise ValueError("Application current pointer requires positive generation.")
+        currentGeneration = self._validateCurrentPointer(
+            current,
+            saveBundleId=saveBundleId,
+        )
 
         generationsDirectory = applicationPath / "generations"
         for generation in range(currentGeneration, 0, -1):
