@@ -1,4 +1,4 @@
-# file: tests/backend/save/test_saveBundle.py ; version: 2
+# file: tests/backend/save/test_saveBundle.py ; version: 3
 from __future__ import annotations
 
 import pytest
@@ -58,7 +58,7 @@ def test_committed_state_snapshot_contains_only_reachable_chunks() -> None:
 
 def test_save_bundle_bytes_are_deterministic_and_round_trip() -> None:
     state = _state()
-    bundle = SaveBundle.create(applicationId="application-1", committedState=state)
+    bundle = SaveBundle.create(appPackId="test.app", applicationId="application-1", committedState=state)
 
     firstBytes = bundle.toBytes()
     secondBytes = bundle.toBytes()
@@ -67,6 +67,7 @@ def test_save_bundle_bytes_are_deterministic_and_round_trip() -> None:
 
     restoredBundle = SaveBundle.fromBytes(firstBytes)
     assert restoredBundle.saveBundleId == bundle.saveBundleId
+    assert restoredBundle.appPackId == "test.app"
     assert restoredBundle.applicationId == "application-1"
     assert restoredBundle.generation == 1
 
@@ -78,7 +79,7 @@ def test_save_bundle_bytes_are_deterministic_and_round_trip() -> None:
 
 def test_next_generation_keeps_bundle_and_application_identity() -> None:
     state = _state()
-    first = SaveBundle.create(applicationId="application-1", committedState=state)
+    first = SaveBundle.create(appPackId="test.app", applicationId="application-1", committedState=state)
 
     update = state.openTransaction()
     update.set("chat/line/17/semantic", {"body": "changed"})
@@ -94,7 +95,7 @@ def test_next_generation_keeps_bundle_and_application_identity() -> None:
 
 
 def test_save_bundle_rejects_tampered_chunk_payload() -> None:
-    bundle = SaveBundle.create(applicationId="application-1", committedState=_state())
+    bundle = SaveBundle.create(appPackId="test.app", applicationId="application-1", committedState=_state())
     snapshot = bundle.snapshot()
     chunks = snapshot["committedState"]["chunks"]
     assert isinstance(chunks, list) and chunks
@@ -117,7 +118,7 @@ def test_save_bundle_preserves_value_metadata():
     transaction.set("chat/line/17/semantic", {"body": "hello"}, metadata=metadata)
     transaction.commit()
 
-    bundle = SaveBundle.create(applicationId="application-1", committedState=state)
+    bundle = SaveBundle.create(appPackId="test.app", applicationId="application-1", committedState=state)
     restored = SaveBundle.fromBytes(bundle.toBytes()).restoreCommittedState()
 
     assert restored.metadata("chat/line/17/semantic") == metadata
