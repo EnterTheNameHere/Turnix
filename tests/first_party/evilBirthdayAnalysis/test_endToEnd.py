@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_endToEnd.py ; version: 2
+# file: tests/first_party/evilBirthdayAnalysis/test_endToEnd.py ; version: 3
 from __future__ import annotations
 
 import hashlib
@@ -381,13 +381,18 @@ def test_real_evil_prompt_preview_builds_exact_query_without_engine_call(tmp_pat
         assert root.load("processing/evilbirthday/lastrun") is MISSING
 
         snapshot = root.snapshot()
+        addresses = [
+            entry["address"]
+            for entry in snapshot["values"]
+            if isinstance(entry, dict) and type(entry.get("address")) is str
+        ]
         assert not any(
             address.startswith("processing/evilbirthday/runs/")
-            for address in snapshot
+            for address in addresses
         )
         assert not any(
             address.startswith("evilanalysis/results/")
-            for address in snapshot
+            for address in addresses
         )
         output = Path(config["outputDirectory"])
         assert output.exists() is False or list(output.iterdir()) == []
