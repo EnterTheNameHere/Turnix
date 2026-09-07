@@ -1,4 +1,4 @@
-# file: backend/io/__init__.py ; version: 2
+# file: backend/io/__init__.py ; version: 3
 from backend.io.managedIo import (
     IoDecodeError,
     IoEncodeError,
@@ -8,6 +8,7 @@ from backend.io.managedIo import (
     IoPermissionError,
     IoWriteError,
     ManagedIo,
+    ManagedIoTransaction,
     ObservedFileRead,
     SourceObservation,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "IoPermissionError",
     "IoWriteError",
     "ManagedIo",
+    "ManagedIoTransaction",
     "ObservedFileRead",
     "SourceObservation",
 ]
