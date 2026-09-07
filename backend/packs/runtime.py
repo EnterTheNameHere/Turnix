@@ -1,4 +1,4 @@
-# file: backend/packs/runtime.py ; version: 11
+# file: backend/packs/runtime.py ; version: 12
 from __future__ import annotations
 
 import hashlib
@@ -172,7 +172,7 @@ class PackLoader:
         self._activationBarrierReached = False
 
     def activate(self, plan: ManualActivationPlan) -> None:
-        self._host.requireActive()
+        self._host.requireOperational()
         checkpoint = len(self._loadedPacks)
         previousBarrier = self._activationBarrierReached
         self._activationBarrierReached = False
@@ -200,7 +200,7 @@ class PackLoader:
         self._host.trace("activation-plan-completed", attributes={"packIds": list(plan.packIds)})
 
     def activatePack(self, pack: PackDefinition) -> None:
-        self._host.requireActive()
+        self._host.requireOperational()
         self._activationBarrierReached = False
         if pack.kind == "appPack" and pack.packId != self._host.applicationRun.application.appPackId:
             raise ValueError(
@@ -319,7 +319,7 @@ class PackLoader:
         *,
         memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
     ) -> None:
-        self._host.requireActive()
+        self._host.requireOperational()
         if not self._activationBarrierReached:
             raise RuntimeError("Application lifecycle cannot run before the activation-plan barrier.")
 
