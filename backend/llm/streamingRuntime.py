@@ -1,4 +1,4 @@
-# file: backend/llm/streamingRuntime.py ; version: 4
+# file: backend/llm/streamingRuntime.py ; version: 5
 from __future__ import annotations
 
 import hashlib
@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "LlmProcessingPipeline",
+    "LlmProcessingPreview",
     "LlmProcessingResult",
     "LlmProviderRegistry",
     "StreamingLlmPipeline",
@@ -57,6 +58,20 @@ class StreamingLlmResult:
     rawText: str
     providerMetadata: Mapping[str, ImmutableValue] = field(default_factory=dict)
     observerErrors: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class LlmProcessingPreview:
+    """Prepared model-facing processing state without an EngineCall."""
+
+    queryItems: tuple[QueryItem, ...]
+    reusableQueryItems: tuple[QueryItem, ...]
+    query: LlmQuery
+    providerName: str
+    providerOwnerId: str
+    providerOptions: Mapping[str, ImmutableValue]
+    executionProfile: LlmExecutionProfile
+    inputTokens: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +139,120 @@ class LlmProcessingPipeline:
             model=model,
             streamObserver=streamObserver,
         )
+
+    def prepareProcessing(
+        self,
+        *,
+        memoryKey: str,
+        inputValue: object,
+        buildQueryItemsCapabilityId: str,
+        buildQueryCapabilityId: str,
+        providerName: str,
+        model: str | None = None,
+        providerOptions: Mapping[str, ImmutableValue] | None = None,
+        filterQueryItemsCapabilityId: str | None = None,
+        memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
+    ) -> LlmProcessingPreview:
+        """Prepares the exact model-facing query without invoking the provider stream.
+
+        Reusable preparation is accepted into the supplied transaction base so
+        source/semantic materialization performed for preview can be reused by a
+        later real ProcessingRun. No ProcessingRun record, response evidence, or
+        completion result is created because no EngineCall occurred.
+        """
+        if self._state is None or self._capabilityInvoker is None:
+            raise RuntimeError("prepareProcessing() requires committed state and a capability invoker.")
+        if type(memoryKey) is not str or not memoryKey or not memoryKey.replace("-", "").replace("_", "").isalnum() or not memoryKey.islower():
+            raise ValueError("memoryKey must be a lowercase Value-address-safe identifier.")
+
+        transactionBase = self._state if memoryView is None else memoryView
+        transaction = transactionBase.openTransaction()
+        committed = False
+        try:
+            registration, provider, options, profile = self._resolveExecution(
+                providerName=providerName,
+                model=model,
+                providerOptions=providerOptions,
+            )
+            executionSnapshot = {
+                "providerName": providerName,
+                "providerOwnerId": registration.ownerId,
+                "model": model,
+                "providerOptions": plainImmutableValue(options),
+                "contextWindowTokens": profile.contextWindowTokens,
+                "metadata": plainImmutableValue(profile.metadata),
+            }
+            currentItemsAddress = f"processing/{memoryKey}/currentqueryitems"
+            previousSnapshots = self._loadCurrentQueryItems(
+                transaction=transaction,
+                memoryKey=memoryKey,
+                currentItemsAddress=currentItemsAddress,
+            )
+            built = self._capabilityInvoker(
+                buildQueryItemsCapabilityId,
+                {
+                    "input": inputValue,
+                    "previousQueryItems": previousSnapshots,
+                    "execution": executionSnapshot,
+                },
+                transaction,
+            )
+            reusableItems = self._requireQueryItems(built, stage="BUILD_QUERY_ITEMS")
+            self._stageReusableQueryItems(transaction, memoryKey=memoryKey, items=reusableItems)
+
+            acceptedItems = reusableItems
+            if filterQueryItemsCapabilityId is not None:
+                filtered = self._capabilityInvoker(
+                    filterQueryItemsCapabilityId,
+                    {
+                        "input": inputValue,
+                        "queryItems": [item.snapshot() for item in reusableItems],
+                        "execution": executionSnapshot,
+                    },
+                    transaction,
+                )
+                acceptedItems = self._requireQueryItems(filtered, stage="FILTER_QUERY_ITEMS")
+                self._requireFilteredSubset(reusableItems, acceptedItems)
+
+            builtQuery = self._capabilityInvoker(
+                buildQueryCapabilityId,
+                {
+                    "input": inputValue,
+                    "queryItems": [item.snapshot() for item in acceptedItems],
+                    "execution": executionSnapshot,
+                },
+                transaction,
+            )
+            query = self._requireQuery(builtQuery)
+            inputTokens: int | None = None
+            estimator = profile.tokenEstimator
+            if estimator is not None:
+                measured = estimator.estimateInputTokens(query)
+                if type(measured) is not int or measured < 0:
+                    raise LlmProviderProtocolError(
+                        f"Provider token estimator returned an invalid value: {measured!r}.",
+                    )
+                inputTokens = measured
+
+            transaction.set(currentItemsAddress, [item.itemId for item in reusableItems])
+            transaction.commit()
+            committed = True
+            return LlmProcessingPreview(
+                queryItems=acceptedItems,
+                reusableQueryItems=reusableItems,
+                query=query,
+                providerName=providerName,
+                providerOwnerId=registration.ownerId,
+                providerOptions=options,
+                executionProfile=profile,
+                inputTokens=inputTokens,
+            )
+        finally:
+            if not committed:
+                try:
+                    transaction.abort()
+                except RuntimeError:
+                    pass
 
     def runProcessing(
         self,
