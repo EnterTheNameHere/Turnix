@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 13
+# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 14
 from __future__ import annotations
 
 import importlib.util
@@ -907,7 +907,11 @@ def test_identical_message_burst_survives_save_bundle_rehydration():
     )
     burstAddress = first["identicalMessageBursts"][0]["address"]
 
-    bundle = SaveBundle.create(applicationId="evil-analysis", committedState=memory)
+    bundle = SaveBundle.create(
+        appPackId="evilBirthdayAnalysis",
+        applicationId="evil-analysis",
+        committedState=memory,
+    )
     restoredMemory = SaveBundle.fromBytes(bundle.toBytes()).restoreCommittedState()
     restored = _interpret(
         _Ctx(restoredMemory),
@@ -1243,7 +1247,11 @@ def test_second_presentation_plan_survives_save_bundle_rehydration():
     firstDependency = first["secondPresentations"][0]["dependency"]
     assert memory.revisionId(address) == 1
 
-    bundle = SaveBundle.create(applicationId="evil-analysis", committedState=memory)
+    bundle = SaveBundle.create(
+        appPackId="evilBirthdayAnalysis",
+        applicationId="evil-analysis",
+        committedState=memory,
+    )
     restoredMemory = SaveBundle.fromBytes(bundle.toBytes()).restoreCommittedState()
     restored = _interpret(_Ctx(restoredMemory, emotes=emotes), records)
 
