@@ -1,4 +1,4 @@
-# file: tests/backend/values/test_valueTransaction.py ; version: 2
+# file: tests/backend/values/test_valueTransaction.py ; version: 3
 from __future__ import annotations
 
 import pytest
@@ -150,3 +150,17 @@ def testResolvedTransactionRejectsFurtherHandleAccess(resolution: str) -> None:
         handle.load()
     with pytest.raises(RuntimeError):
         handle.set("later")
+
+
+def testTransactionsHaveStableDistinctRuntimeIdentity() -> None:
+    layer = CommittedValueLayer()
+    parent = layer.openTransaction()
+    child = parent.openTransaction()
+
+    assert parent.transactionId
+    assert child.transactionId
+    assert parent.transactionId != child.transactionId
+    assert parent.transactionId == parent.transactionId
+
+    child.abort()
+    parent.abort()
