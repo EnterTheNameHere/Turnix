@@ -1,4 +1,4 @@
-# file: backend/application/runtime.py ; version: 4
+# file: backend/application/runtime.py ; version: 5
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -20,8 +20,10 @@ class Application:
     Application state.
 
     saveBundleId identifies the currently bound SaveBundle lineage when one has
-    been established. Publication policy and generation tracking remain outside
-    this domain object.
+    been established. durableGeneration is the highest filesystem generation
+    slot that must never be reused: either accepted by the current pointer or
+    already occupied by an immutable generation artifact. It is persistence
+    sequencing metadata, not a committed-root revision or checkpoint.
     """
 
     appPackId: str
