@@ -1,4 +1,4 @@
-# file: tests/backend/runtime/test_runtimeHost.py ; version: 10
+# file: tests/backend/runtime/test_runtimeHost.py ; version: 11
 from pathlib import Path
 
 import pytest
@@ -346,6 +346,63 @@ def test_runtime_host_persists_and_loads_application_through_filesystem_store(tm
     assert thirdHost.applicationRun.committedState.revisionId(
         "chat/line/17/semantic"
     ) == 2
+
+
+def test_runtime_host_skips_orphan_generation_left_before_current_pointer_update(
+    tmp_path,
+):
+    store = ApplicationStore(tmp_path / "saves")
+    firstHost = RuntimeHost(
+        appPackId="test.app",
+        applicationStore=store,
+    )
+    applicationId = firstHost.applicationRun.application.applicationId
+    first = firstHost.saveApplication()
+
+    stagedState = first.restoreCommittedState()
+    stagedUpdate = stagedState.openTransaction()
+    stagedUpdate.set("test/orphan", "must-not-be-restored")
+    stagedUpdate.commit()
+    orphan = first.nextGeneration(committedState=stagedState)
+
+    applicationPath = store.applicationPath(
+        appPackId="test.app",
+        applicationId=applicationId,
+    )
+    orphanPath = applicationPath / "generations" / "00000002.bundle"
+    orphanPath.write_bytes(orphan.toBytes())
+    orphanEvidence = orphanPath.read_bytes()
+
+    loadedHost, loaded = RuntimeHost.loadApplication(
+        applicationStore=store,
+        appPackId="test.app",
+        applicationId=applicationId,
+    )
+
+    assert loaded.bundle.generation == 1
+    assert loaded.recoveredFromGeneration is None
+    assert loaded.durableGeneration == 2
+    assert loadedHost.applicationRun.application.durableGeneration == 2
+    assert loadedHost.applicationRun.application.committedState.load("test/orphan") is MISSING
+
+    update = loadedHost.applicationRun.application.committedState.openTransaction()
+    update.set("test/recovered", "generation-three")
+    update.commit()
+
+    third = loadedHost.saveApplication()
+
+    assert third.generation == 3
+    assert orphanPath.read_bytes() == orphanEvidence
+    assert (applicationPath / "generations" / "00000003.bundle").read_bytes() == third.toBytes()
+
+    loadedAgain = store.load(
+        appPackId="test.app",
+        applicationId=applicationId,
+    )
+    assert loadedAgain.bundle.generation == 3
+    restored = loadedAgain.bundle.restoreCommittedState()
+    assert restored.load("test/orphan") is MISSING
+    assert restored.load("test/recovered") == "generation-three"
 
 
 def test_runtime_host_can_save_after_recovering_from_corrupt_current_generation(
