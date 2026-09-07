@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 15
+# file: tests/first_party/evilBirthdayAnalysis/test_chatSemantics.py ; version: 16
 from __future__ import annotations
 
 import importlib.util
@@ -1317,3 +1317,24 @@ def test_presentation_plan_revises_when_neighbor_context_creates_closed_burst():
     assert memory.revisionId(aggregateAddress) == 1
     assert memory.revisionId(presentationAddress) == 2
     assert plan130["value"]["entries"][0]["kind"] == "burstOccurrence"
+
+
+
+def test_cheer_bits_prefix_remains_an_ordinary_user_message():
+    result = _interpret(
+        _Ctx(),
+        [
+            _raw(
+                1,
+                "viewer: Cheer300 HAPPY BIRTHDAY EVIL",
+                streamTimeSeconds=12.0,
+                streamTime="00:00:12",
+            )
+        ],
+    )
+
+    record = result["records"][0]
+    assert record["analysis"]["kind"] == "userMessage"
+    assert record["analysis"]["includedInText"] is True
+    assert record["body"] == "Cheer300 HAPPY BIRTHDAY EVIL"
+    assert "Cheer300 HAPPY BIRTHDAY EVIL" in result["text"]
