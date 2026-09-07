@@ -1,4 +1,4 @@
-# file: backend/application/lifecycle.py ; version: 2
+# file: backend/application/lifecycle.py ; version: 3
 from __future__ import annotations
 
 from backend.packs.runtime import ManualActivationPlan, PackLoader
@@ -26,7 +26,7 @@ class ApplicationLifecycle:
     ) -> SaveBundle:
         """Creates and publishes a new persistent Application, then starts its run."""
         if runtime.acceptedSaveBundle is not None:
-            raise RuntimeError("Application creation requires a ApplicationRuntime with no accepted SaveBundle.")
+            raise RuntimeError("Application creation requires an ApplicationRuntime with no accepted SaveBundle.")
 
         runtime.beginInitialization()
         try:
@@ -74,7 +74,7 @@ class ApplicationLifecycle:
         """Runs loaded-Application lifecycle and starts a fresh ApplicationRun."""
         accepted = runtime.acceptedSaveBundle
         if accepted is None:
-            raise RuntimeError("Application loading requires a ApplicationRuntime restored from an accepted SaveBundle.")
+            raise RuntimeError("Application loading requires an ApplicationRuntime restored from an accepted SaveBundle.")
 
         runtime.beginInitialization()
         try:
