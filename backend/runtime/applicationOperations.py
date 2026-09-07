@@ -1,11 +1,11 @@
-# file: backend/runtime/applicationOperations.py ; version: 2
+# file: backend/runtime/applicationOperations.py ; version: 3
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from backend.application.lifecycle import ApplicationLifecycle
 from backend.packs.runtime import ManualActivationPlan, PackLoader, PackResolver
-from backend.runtime.runtimeHost import RuntimeHost
+from backend.application.applicationRuntime import ApplicationRuntime
 from backend.save import ApplicationStore, LoadedApplicationSave
 from backend.tracing import Tracer
 
@@ -22,7 +22,7 @@ class ApplicationRuntimeSession:
     such sessions.
     """
 
-    runtime: RuntimeHost
+    runtime: ApplicationRuntime
     packLoader: PackLoader
     loadedSave: LoadedApplicationSave | None = None
     _closed: bool = False
@@ -59,9 +59,9 @@ class ApplicationRuntimeOperations:
     entry scripts must compose these operations rather than owning separate
     Application, SaveBundle, or ApplicationRun lifecycle semantics.
 
-    RuntimeHost is still being migrated toward the DA-28 host-level shape.
-    Until that split is complete, RuntimeHost is the concrete one-run runtime
-    object instantiated behind this shared operation boundary.
+    ApplicationRuntime is the concrete one-run execution environment instantiated
+    behind this shared operation boundary. A later RuntimeHost layer will own
+    zero or more such runtimes.
     """
 
     def __init__(
@@ -85,16 +85,16 @@ class ApplicationRuntimeOperations:
         config: dict[str, object] | None = None,
         tracer: Tracer | None = None,
     ) -> ApplicationRuntimeSession:
-        runtime = RuntimeHost(
+        runtime = ApplicationRuntime(
             appPackId=appPackId,
             applicationStore=self._applicationStore,
             config=config,
             tracer=tracer,
         )
-        loader = PackLoader(host=runtime, resolver=self._packResolver)
+        loader = PackLoader(runtime=runtime, resolver=self._packResolver)
         try:
             ApplicationLifecycle.create(
-                host=runtime,
+                runtime=runtime,
                 packLoader=loader,
                 plan=plan,
             )
@@ -115,17 +115,17 @@ class ApplicationRuntimeOperations:
         config: dict[str, object] | None = None,
         tracer: Tracer | None = None,
     ) -> ApplicationRuntimeSession:
-        runtime, loaded = RuntimeHost.loadApplication(
+        runtime, loaded = ApplicationRuntime.loadApplication(
             applicationStore=self._applicationStore,
             appPackId=appPackId,
             applicationId=applicationId,
             config=config,
             tracer=tracer,
         )
-        loader = PackLoader(host=runtime, resolver=self._packResolver)
+        loader = PackLoader(runtime=runtime, resolver=self._packResolver)
         try:
             ApplicationLifecycle.load(
-                host=runtime,
+                runtime=runtime,
                 packLoader=loader,
                 plan=plan,
             )
@@ -139,7 +139,7 @@ class ApplicationRuntimeOperations:
         )
 
     @staticmethod
-    def _cleanupFailedOperation(*, runtime: RuntimeHost, loader: PackLoader) -> None:
+    def _cleanupFailedOperation(*, runtime: ApplicationRuntime, loader: PackLoader) -> None:
         # ApplicationLifecycle already performs best-effort cleanup after it
         # enters lifecycle handling. These calls make the operation boundary
         # idempotently safe for failures that occur before or around that path.
