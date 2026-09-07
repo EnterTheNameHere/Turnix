@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 10
+# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 11
 from __future__ import annotations
 
 import argparse
@@ -11,7 +11,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from backend.io.managedIo import ManagedIo  # noqa: E402
 from backend.packs.runtime import ManualActivationPlan, PackResolver  # noqa: E402
-from backend.runtime.applicationOperations import ApplicationRuntimeOperations  # noqa: E402
+from backend.runtime.runtimeHost import RuntimeHost  # noqa: E402
 from backend.save import ApplicationStore  # noqa: E402
 
 
@@ -82,27 +82,30 @@ def main() -> int:
     plan = ManualActivationPlan.fromJson(io.readJson(planPath))
 
     store = ApplicationStore(Path(args.saves_root).expanduser().resolve())
-    operations = ApplicationRuntimeOperations(
+    host = RuntimeHost(
         applicationStore=store,
         packResolver=PackResolver(roots=(REPO_ROOT / "first-party",)),
     )
+    host.start()
     if args.new_application:
-        session = operations.createApplication(
+        runtime = host.createApplication(
             appPackId="evilBirthdayAnalysis",
             plan=plan,
             config=config,
         )
-        sys.stdout.write(f"Created Application {session.applicationId}\n")
+        sys.stdout.write(
+            f"Created Application {runtime.applicationRun.application.applicationId}\n"
+        )
     else:
-        session = operations.loadApplication(
+        runtime = host.loadApplication(
             appPackId="evilBirthdayAnalysis",
             applicationId=args.application_id,
             plan=plan,
             config=config,
         )
-        sys.stdout.write(f"Loaded Application {session.applicationId}\n")
-
-    runtime = session.runtime
+        sys.stdout.write(
+            f"Loaded Application {runtime.applicationRun.application.applicationId}\n"
+        )
 
     def observe(event) -> None:
         if event.eventType == "delta" and event.text:
@@ -140,11 +143,13 @@ def main() -> int:
                         sys.stdout.write(f"[{entry.get('windowIndex')}] {saved['path']}\n")
         savedBundle = runtime.saveApplication()
         sys.stdout.write(
-            f"Saved Application {session.applicationId} generation {savedBundle.generation}.\n"
+            "Saved Application "
+            f"{runtime.applicationRun.application.applicationId} "
+            f"generation {savedBundle.generation}.\n"
         )
         return 0
     finally:
-        session.close()
+        host.stop()
 
 
 if __name__ == "__main__":
