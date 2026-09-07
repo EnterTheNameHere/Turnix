@@ -1,4 +1,4 @@
-# file: tests/backend/packs/test_packLoader.py ; version: 4
+# file: tests/backend/packs/test_packLoader.py ; version: 5
 import json
 from pathlib import Path
 
@@ -41,9 +41,9 @@ def test_plan_failure_rolls_back_packs_activated_by_that_plan(tmp_path: Path):
         "    raise RuntimeError('intentional failure')\n",
     )
 
-    runtime = ApplicationRuntime(appPackId="test.app")
+    runtime = ApplicationRuntime(appPackId="test.app", packResolver=PackResolver(roots=(tmp_path,)))
     runtime.start()
-    loader = PackLoader(runtime=runtime, resolver=PackResolver(roots=(tmp_path,)))
+    loader = runtime.packLoader
     try:
         with pytest.raises(RuntimeError, match="intentional failure"):
             loader.activate(ManualActivationPlan(packIds=("test.first", "test.broken")))
@@ -65,9 +65,9 @@ def test_successful_pack_is_visible_until_loader_close(tmp_path: Path):
         "    ctx.capabilities.register('test.good@1', lambda ctx, payload: 'ok')\n",
     )
 
-    runtime = ApplicationRuntime(appPackId="test.app")
+    runtime = ApplicationRuntime(appPackId="test.app", packResolver=PackResolver(roots=(tmp_path,)))
     runtime.start()
-    loader = PackLoader(runtime=runtime, resolver=PackResolver(roots=(tmp_path,)))
+    loader = runtime.packLoader
     try:
         loader.activate(ManualActivationPlan(packIds=("test.good",)))
         assert runtime.invokeCapability("test.good@1") == "ok"
@@ -90,9 +90,9 @@ def test_failing_onload_is_best_effort_unloaded_with_none_state(tmp_path: Path):
         f"    ctx.io.writeTextAtomic({str(marker)!r}, repr(state))\n",
     )
 
-    runtime = ApplicationRuntime(appPackId="test.app")
+    runtime = ApplicationRuntime(appPackId="test.app", packResolver=PackResolver(roots=(tmp_path,)))
     runtime.start()
-    loader = PackLoader(runtime=runtime, resolver=PackResolver(roots=(tmp_path,)))
+    loader = runtime.packLoader
     try:
         with pytest.raises(RuntimeError, match="load exploded"):
             loader.activate(ManualActivationPlan(packIds=("test.cleanup",)))
@@ -112,10 +112,10 @@ def test_code_entry_implementation_identity_tracks_exact_executed_source(tmp_pat
     )
     _writePack(tmp_path, "test.identity", source)
 
-    runtime = ApplicationRuntime(appPackId="test.app")
-    runtime.start()
     resolver = PackResolver(roots=(tmp_path,))
-    loader = PackLoader(runtime=runtime, resolver=resolver)
+    runtime = ApplicationRuntime(appPackId="test.app", packResolver=resolver)
+    runtime.start()
+    loader = runtime.packLoader
     try:
         loader.activate(ManualActivationPlan(packIds=("test.identity",)))
         first = runtime.invokeCapability("test.identity@1")
@@ -154,9 +154,9 @@ def test_non_app_pack_cannot_declare_application_lifecycle_hook(tmp_path: Path):
         "    pass\n",
     )
 
-    runtime = ApplicationRuntime(appPackId="test.app")
+    runtime = ApplicationRuntime(appPackId="test.app", packResolver=PackResolver(roots=(tmp_path,)))
     runtime.start()
-    loader = PackLoader(runtime=runtime, resolver=PackResolver(roots=(tmp_path,)))
+    loader = runtime.packLoader
     try:
         with pytest.raises(ValueError, match="Non-appPack.*onApplicationLoad"):
             loader.activate(ManualActivationPlan(packIds=("test.mod",)))
@@ -174,10 +174,10 @@ def test_application_lifecycle_requires_completed_activation_plan(tmp_path: Path
         kind="appPack",
     )
 
-    runtime = ApplicationRuntime(appPackId="test.app")
-    runtime.start()
     resolver = PackResolver(roots=(tmp_path,))
-    loader = PackLoader(runtime=runtime, resolver=resolver)
+    runtime = ApplicationRuntime(appPackId="test.app", packResolver=resolver)
+    runtime.start()
+    loader = runtime.packLoader
     try:
         loader.activatePack(resolver.requireSingle("test.app"))
         with pytest.raises(RuntimeError, match="activation-plan barrier"):
@@ -209,9 +209,9 @@ def test_application_load_runs_only_after_all_pack_onloads_and_receives_code_ent
         "    ctx.capabilities.register('test.dependency@1', lambda ctx, payload: 'ready')\n",
     )
 
-    runtime = ApplicationRuntime(appPackId="test.app")
+    runtime = ApplicationRuntime(appPackId="test.app", packResolver=PackResolver(roots=(tmp_path,)))
     runtime.start()
-    loader = PackLoader(runtime=runtime, resolver=PackResolver(roots=(tmp_path,)))
+    loader = runtime.packLoader
     try:
         loader.activate(
             ManualActivationPlan(packIds=("test.app", "test.dependency")),
@@ -241,9 +241,9 @@ def test_application_create_changes_remain_under_supplied_outer_transaction(tmp_
         kind="appPack",
     )
 
-    runtime = ApplicationRuntime(appPackId="test.app")
+    runtime = ApplicationRuntime(appPackId="test.app", packResolver=PackResolver(roots=(tmp_path,)))
     runtime.start()
-    loader = PackLoader(runtime=runtime, resolver=PackResolver(roots=(tmp_path,)))
+    loader = runtime.packLoader
     root = runtime.applicationRun.application.committedState
     outer = root.openTransaction()
     try:
