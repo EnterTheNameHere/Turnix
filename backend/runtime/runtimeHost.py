@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 6
+# file: backend/runtime/runtimeHost.py ; version: 7
 from __future__ import annotations
 
 from copy import deepcopy
@@ -70,6 +70,7 @@ class RuntimeHost:
         self._config = {} if config is None else deepcopy(config)
         self._codeEntries: dict[str, tuple[CodeEntryIdentity, Path]] = {}
         self._lane = RLock()
+        self._initializing = False
         self._ownsTracer = tracer is None
         self.tracer = tracer or Tracer(origin="actant.runtime", destinations=(TraceSinkDestination(),))
         self.llmPipeline = LlmProcessingPipeline(
@@ -194,9 +195,39 @@ class RuntimeHost:
             return False
         return True
 
+    def beginInitialization(self) -> None:
+        with self._lane:
+            if self.applicationRun.state.value != "Created":
+                raise RuntimeError("Runtime initialization requires a newly created ApplicationRun.")
+            if self._initializing:
+                raise RuntimeError("Runtime initialization is already active.")
+            self._initializing = True
+            self.trace(
+                "application-run-initialization-started",
+                attributes={
+                    "applicationId": self.applicationRun.application.applicationId,
+                    "applicationRunId": self.applicationRun.applicationRunId,
+                },
+            )
+
+    def abortInitialization(self) -> None:
+        with self._lane:
+            if not self._initializing:
+                return
+            self._initializing = False
+            self.trace(
+                "application-run-initialization-aborted",
+                attributes={
+                    "applicationId": self.applicationRun.application.applicationId,
+                    "applicationRunId": self.applicationRun.applicationRunId,
+                },
+                level="warning",
+            )
+
     def start(self) -> None:
         with self._lane:
             self.applicationRun.start()
+            self._initializing = False
             self.trace(
                 "application-run-started",
                 attributes={
@@ -227,6 +258,10 @@ class RuntimeHost:
         if not self.applicationRun.active:
             raise RuntimeError("ApplicationRun is not active.")
 
+    def requireOperational(self) -> None:
+        if not self._initializing and not self.applicationRun.active:
+            raise RuntimeError("RuntimeHost is neither initializing nor running an active ApplicationRun.")
+
     def createContext(
         self,
         *,
@@ -236,7 +271,7 @@ class RuntimeHost:
         allowRegistration: bool = False,
         memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
     ) -> CodeEntryContext:
-        self.requireActive()
+        self.requireOperational()
         return CodeEntryContext(
             identity=identity,
             packRoot=packRoot,
@@ -252,7 +287,7 @@ class RuntimeHost:
         )
 
     def registerCodeEntry(self, identity: CodeEntryIdentity, packRoot: Path) -> None:
-        self.requireActive()
+        self.requireOperational()
         if identity.codeEntryInstanceId in self._codeEntries:
             raise RuntimeError(f"CodeEntry instance is already active: {identity.codeEntryInstanceId}.")
         self._codeEntries[identity.codeEntryInstanceId] = (identity, packRoot.resolve())
@@ -268,7 +303,7 @@ class RuntimeHost:
         memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
     ) -> object:
         with self._lane:
-            self.requireActive()
+            self.requireOperational()
             registration = self.capabilities.resolve(capabilityId)
             try:
                 identity, packRoot = self._codeEntries[registration.ownerId]
