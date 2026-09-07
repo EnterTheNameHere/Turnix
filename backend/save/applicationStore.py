@@ -1,4 +1,4 @@
-# file: backend/save/applicationStore.py ; version: 3
+# file: backend/save/applicationStore.py ; version: 4
 from __future__ import annotations
 
 import hashlib
@@ -84,11 +84,13 @@ class ApplicationStore:
 
     @staticmethod
     def _replaceFileDurably(path: Path, payload: bytes) -> None:
-        temporary = path.with_name(f".{path.name}.tmp")
+        descriptor, temporaryName = tempfile.mkstemp(
+            prefix=f".{path.name}.tmp-",
+            dir=path.parent,
+        )
+        temporary = Path(temporaryName)
         try:
-            if temporary.exists():
-                temporary.unlink()
-            with temporary.open("xb") as stream:
+            with os.fdopen(descriptor, "wb") as stream:
                 stream.write(payload)
                 stream.flush()
                 os.fsync(stream.fileno())
@@ -247,11 +249,18 @@ class ApplicationStore:
             )
 
         generationPath = applicationPath / "generations" / self._generationName(bundle.generation)
-        temporary = generationPath.with_name(f".{generationPath.name}.tmp")
+        if generationPath.exists():
+            raise FileExistsError(f"SaveBundle generation already exists: {generationPath}")
+        descriptor, temporaryName = tempfile.mkstemp(
+            prefix=f".{generationPath.name}.tmp-",
+            dir=generationPath.parent,
+        )
+        temporary = Path(temporaryName)
         try:
-            if generationPath.exists() or temporary.exists():
-                raise FileExistsError(f"SaveBundle generation already exists: {generationPath}")
-            self._writeFileDurably(temporary, bundle.toBytes())
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(bundle.toBytes())
+                stream.flush()
+                os.fsync(stream.fileno())
             validated = SaveBundle.fromBytes(temporary.read_bytes())
             self._validateBundleIdentity(
                 validated,
