@@ -1,4 +1,4 @@
-# file: tests/backend/application/test_applicationRuntime.py ; version: 2
+# file: tests/backend/application/test_applicationRuntime.py ; version: 3
 from pathlib import Path
 
 import pytest
@@ -6,6 +6,7 @@ import pytest
 from backend.application import ApplicationRunState
 from backend.context import CodeEntryIdentity
 from backend.registration import RegistrationScope
+from backend.packs.runtime import PackResolver
 from backend.application.applicationRuntime import ApplicationRuntime
 from backend.save import ApplicationStore, SaveBundle
 from backend.values import MISSING, ValueState
@@ -20,7 +21,7 @@ class RaisingTracer:
 
 
 def test_application_run_is_non_restartable_and_requires_active_work():
-    host = ApplicationRuntime(appPackId="test.app")
+    host = ApplicationRuntime(appPackId="test.app", packResolver=PackResolver(roots=()))
     assert host.applicationRun.state is ApplicationRunState.CREATED
 
     with pytest.raises(RuntimeError):
@@ -47,7 +48,7 @@ def test_runtime_config_is_detached_from_caller_and_public_snapshots():
 
 
 def test_non_activation_context_rejects_registration():
-    host = ApplicationRuntime(appPackId="test.app")
+    host = ApplicationRuntime(appPackId="test.app", packResolver=PackResolver(roots=()))
     host.start()
     identity = CodeEntryIdentity(
         applicationId=host.applicationRun.application.applicationId,
@@ -84,7 +85,7 @@ def test_trace_publication_failure_does_not_change_runtime_lifecycle():
 
 
 def test_application_physically_owns_authoritative_memory():
-    host = ApplicationRuntime(appPackId="test.app")
+    host = ApplicationRuntime(appPackId="test.app", packResolver=PackResolver(roots=()))
 
     assert host.applicationRun.application.committedState is host.applicationRun.application.committedState
 
@@ -96,7 +97,7 @@ def test_application_physically_owns_authoritative_memory():
 
 
 def test_contexts_share_application_run_authoritative_memory():
-    host = ApplicationRuntime(appPackId="test.app")
+    host = ApplicationRuntime(appPackId="test.app", packResolver=PackResolver(roots=()))
     host.start()
     identity = CodeEntryIdentity(
         applicationId=host.applicationRun.application.applicationId,
@@ -140,7 +141,7 @@ def test_contexts_share_application_run_authoritative_memory():
 
 
 def test_save_bundle_rehydrates_same_application_into_new_run():
-    firstHost = ApplicationRuntime(appPackId="test.app")
+    firstHost = ApplicationRuntime(appPackId="test.app", packResolver=PackResolver(roots=()))
     firstHost.start()
     try:
         firstApplicationId = firstHost.applicationRun.application.applicationId
@@ -161,7 +162,7 @@ def test_save_bundle_rehydrates_same_application_into_new_run():
         firstHost.stop()
 
     persisted = SaveBundle.fromBytes(bundle.toBytes())
-    secondHost = ApplicationRuntime(saveBundle=persisted)
+    secondHost = ApplicationRuntime(saveBundle=persisted, packResolver=PackResolver(roots=()))
 
     assert secondHost.applicationRun.application.applicationId == firstApplicationId
     assert secondHost.applicationRun.applicationRunId != firstRunId
@@ -191,7 +192,7 @@ def test_save_bundle_rehydrates_same_application_into_new_run():
     finally:
         secondHost.stop()
 
-    thirdHost = ApplicationRuntime(saveBundle=SaveBundle.fromBytes(secondBundle.toBytes()))
+    thirdHost = ApplicationRuntime(saveBundle=SaveBundle.fromBytes(secondBundle.toBytes()), packResolver=PackResolver(roots=()))
     assert thirdHost.applicationRun.application.applicationId == firstApplicationId
     assert thirdHost.applicationRun.applicationRunId not in {firstRunId, secondHost.applicationRun.applicationRunId}
     assert thirdHost.applicationRun.application.committedState.load("chat/line/17/semantic") == {"body": "changed"}
@@ -199,19 +200,20 @@ def test_save_bundle_rehydrates_same_application_into_new_run():
 
 
 def test_application_runtime_rejects_application_and_save_bundle_together():
-    source = ApplicationRuntime(appPackId="test.app")
+    source = ApplicationRuntime(appPackId="test.app", packResolver=PackResolver(roots=()))
     bundle = source.captureSaveBundle()
 
     with pytest.raises(ValueError, match="either application or saveBundle"):
         ApplicationRuntime(
             application=source.applicationRun.application,
             saveBundle=bundle,
+            packResolver=PackResolver(roots=()),
         )
 
 
 
 def test_capability_memory_write_nests_under_supplied_transaction():
-    host = ApplicationRuntime(appPackId="test.app")
+    host = ApplicationRuntime(appPackId="test.app", packResolver=PackResolver(roots=()))
     host.start()
     identity = CodeEntryIdentity(
         applicationId=host.applicationRun.application.applicationId,
@@ -273,6 +275,7 @@ def test_application_runtime_persists_and_loads_application_through_filesystem_s
     firstHost = ApplicationRuntime(
         appPackId="test.app",
         applicationStore=store,
+        packResolver=PackResolver(roots=()),
     )
     firstApplicationId = firstHost.applicationRun.application.applicationId
     firstRunId = firstHost.applicationRun.applicationRunId
@@ -304,6 +307,7 @@ def test_application_runtime_persists_and_loads_application_through_filesystem_s
 
     secondHost, loaded = ApplicationRuntime.loadApplication(
         applicationStore=store,
+        packResolver=PackResolver(roots=()),
         appPackId="test.app",
         applicationId=firstApplicationId,
     )
@@ -335,6 +339,7 @@ def test_application_runtime_persists_and_loads_application_through_filesystem_s
 
     thirdHost, loadedAgain = ApplicationRuntime.loadApplication(
         applicationStore=ApplicationStore(tmp_path / "saves"),
+        packResolver=PackResolver(roots=()),
         appPackId="test.app",
         applicationId=firstApplicationId,
     )
@@ -355,6 +360,7 @@ def test_application_runtime_skips_orphan_generation_left_before_current_pointer
     firstHost = ApplicationRuntime(
         appPackId="test.app",
         applicationStore=store,
+        packResolver=PackResolver(roots=()),
     )
     applicationId = firstHost.applicationRun.application.applicationId
     first = firstHost.saveApplication()
@@ -375,6 +381,7 @@ def test_application_runtime_skips_orphan_generation_left_before_current_pointer
 
     loadedHost, loaded = ApplicationRuntime.loadApplication(
         applicationStore=store,
+        packResolver=PackResolver(roots=()),
         appPackId="test.app",
         applicationId=applicationId,
     )
@@ -412,6 +419,7 @@ def test_application_runtime_can_save_after_recovering_from_corrupt_current_gene
     firstHost = ApplicationRuntime(
         appPackId="test.app",
         applicationStore=store,
+        packResolver=PackResolver(roots=()),
     )
     applicationId = firstHost.applicationRun.application.applicationId
 
@@ -432,6 +440,7 @@ def test_application_runtime_can_save_after_recovering_from_corrupt_current_gene
 
     recoveredHost, loaded = ApplicationRuntime.loadApplication(
         applicationStore=store,
+        packResolver=PackResolver(roots=()),
         appPackId="test.app",
         applicationId=applicationId,
     )
@@ -467,6 +476,7 @@ def test_application_runtime_failed_publication_does_not_advance_accepted_genera
     host = ApplicationRuntime(
         appPackId="test.app",
         applicationStore=store,
+        packResolver=PackResolver(roots=()),
     )
 
     first = host.saveApplication()
@@ -503,4 +513,4 @@ def test_application_runtime_failed_publication_does_not_advance_accepted_genera
 
 def test_application_runtime_requires_app_pack_identity_for_new_application():
     with pytest.raises(ValueError, match="requires appPackId"):
-        ApplicationRuntime()
+        ApplicationRuntime(packResolver=PackResolver(roots=()))
