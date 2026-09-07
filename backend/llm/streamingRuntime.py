@@ -1,4 +1,4 @@
-# file: backend/llm/streamingRuntime.py ; version: 5
+# file: backend/llm/streamingRuntime.py ; version: 6
 from __future__ import annotations
 
 import hashlib
@@ -455,13 +455,8 @@ class LlmProcessingPipeline:
             address = self._queryItemAddress(memoryKey, item.itemId)
             snapshot = item.snapshot()
             existing = transaction.load(address)
-            if existing is MISSING:
+            if existing is MISSING or existing != snapshot:
                 transaction.set(address, snapshot)
-                continue
-            if existing != snapshot:
-                raise RuntimeError(
-                    f"QueryItem identity {item.itemId!r} resolved to different content within processing memory.",
-                )
 
     @staticmethod
     def _queryItemAddress(memoryKey: str, itemId: str) -> str:
