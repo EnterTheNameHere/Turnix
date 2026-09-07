@@ -1,4 +1,4 @@
-# file: tests/backend/runtime/test_runtimeHost.py ; version: 9
+# file: tests/backend/runtime/test_runtimeHost.py ; version: 10
 from pathlib import Path
 
 import pytest
@@ -346,6 +346,60 @@ def test_runtime_host_persists_and_loads_application_through_filesystem_store(tm
     assert thirdHost.applicationRun.committedState.revisionId(
         "chat/line/17/semantic"
     ) == 2
+
+
+def test_runtime_host_can_save_after_recovering_from_corrupt_current_generation(
+    tmp_path,
+):
+    store = ApplicationStore(tmp_path / "saves")
+    firstHost = RuntimeHost(
+        appPackId="test.app",
+        applicationStore=store,
+    )
+    applicationId = firstHost.applicationRun.application.applicationId
+
+    first = firstHost.saveApplication()
+    transaction = firstHost.applicationRun.application.committedState.openTransaction()
+    transaction.set("test/value", "generation-two")
+    transaction.commit()
+    second = firstHost.saveApplication()
+    assert second.generation == 2
+
+    applicationPath = store.applicationPath(
+        appPackId="test.app",
+        applicationId=applicationId,
+    )
+    corruptSecond = applicationPath / "generations" / "00000002.bundle"
+    corruptSecond.write_bytes(b"{corrupt-generation-two")
+    corruptEvidence = corruptSecond.read_bytes()
+
+    recoveredHost, loaded = RuntimeHost.loadApplication(
+        applicationStore=store,
+        appPackId="test.app",
+        applicationId=applicationId,
+    )
+
+    assert loaded.bundle.generation == 1
+    assert loaded.recoveredFromGeneration == 2
+    assert recoveredHost.applicationRun.application.durableGeneration == 2
+
+    update = recoveredHost.applicationRun.application.committedState.openTransaction()
+    update.set("test/value", "recovered-generation-three")
+    update.commit()
+
+    third = recoveredHost.saveApplication()
+
+    assert third.generation == 3
+    assert corruptSecond.read_bytes() == corruptEvidence
+    assert (applicationPath / "generations" / "00000003.bundle").read_bytes() == third.toBytes()
+
+    loadedAgain = store.load(
+        appPackId="test.app",
+        applicationId=applicationId,
+    )
+    assert loadedAgain.recoveredFromGeneration is None
+    assert loadedAgain.bundle.generation == 3
+    assert loadedAgain.bundle.restoreCommittedState().load("test/value") == "recovered-generation-three"
 
 
 def test_runtime_host_failed_publication_does_not_advance_accepted_generation(
