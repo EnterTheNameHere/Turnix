@@ -1,6 +1,7 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 14
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 15
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
@@ -571,6 +572,100 @@ def _renderPersistentBurst(
     return f"CHAT BURST: {canonicalMessage} ×{count} {suffix}"
 
 
+def _persistentPresentationOwners(
+    item: QueryItem,
+) -> tuple[str, Sequence[Mapping[str, object]]] | None:
+    memory = item.metadata.get("memory")
+    if not isinstance(memory, Mapping):
+        return None
+    presentation = memory.get("secondPresentation")
+    if presentation is None:
+        return None
+    if not isinstance(presentation, Mapping):
+        raise RuntimeError(f"Chat QueryItem {item.itemId!r} has invalid presentation metadata.")
+    address = presentation.get("address")
+    owners = presentation.get("owners")
+    if (
+        type(address) is not str
+        or not isinstance(owners, Sequence)
+        or isinstance(owners, (str, bytes))
+        or not owners
+        or any(not isinstance(owner, Mapping) for owner in owners)
+    ):
+        raise RuntimeError(f"Chat QueryItem {item.itemId!r} has incomplete presentation metadata.")
+    return address, owners
+
+
+def _semanticOwnerContribution(
+    item: QueryItem,
+    owner: Mapping[str, object],
+) -> tuple[Mapping[str, object], int]:
+    meaning = owner.get("meaning")
+    members = owner.get("members")
+    if not isinstance(meaning, Mapping):
+        raise RuntimeError("Semantic-unit presentation owner lacks meaning.")
+    if (
+        not isinstance(members, Sequence)
+        or isinstance(members, (str, bytes))
+    ):
+        raise RuntimeError("Semantic-unit presentation owner lacks members.")
+    lineNumber = _chatLineNumber(item)
+    matches = [
+        member
+        for member in members
+        if isinstance(member, Mapping) and member.get("lineNumber") == lineNumber
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"Semantic-unit presentation owner must contain line {lineNumber} exactly once.",
+        )
+    count = matches[0].get("count")
+    if type(count) is not int or count <= 0:
+        raise RuntimeError("Semantic-unit presentation contribution has invalid count.")
+    return meaning, count
+
+
+def _semanticMeaningText(meaning: Mapping[str, object]) -> str:
+    fields = [
+        (key, value)
+        for key, value in sorted(meaning.items())
+        if key != "classificationSource"
+    ]
+    if not fields:
+        raise RuntimeError("Semantic-unit presentation meaning has no model-facing fields.")
+    parts: list[str] = []
+    for key, value in fields:
+        if isinstance(value, (dict, list, tuple)):
+            rendered = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        else:
+            rendered = str(value)
+        parts.append(f"{key}={rendered}")
+    return "; ".join(parts)
+
+
+def _renderSemanticGroup(
+    meaning: Mapping[str, object],
+    contributions: Sequence[tuple[QueryItem, int]],
+) -> str:
+    totalCount = sum(count for _item, count in contributions)
+    uniqueItems = {item.itemId for item, _count in contributions}
+    sourceAuthors = [
+        sourceAuthor
+        for item, _count in contributions
+        if type(sourceAuthor := item.metadata.get("sourceUsername")) is str
+    ]
+    messageCount = len(uniqueItems)
+    if len(sourceAuthors) != len(contributions):
+        suffix = f"[{messageCount} messages]"
+    else:
+        uniqueAuthors = len({author.casefold() for author in sourceAuthors})
+        if uniqueAuthors == messageCount:
+            suffix = f"[{uniqueAuthors} users]"
+        else:
+            suffix = f"[{messageCount} messages; {uniqueAuthors} users]"
+    return f"CHAT SEMANTIC: {_semanticMeaningText(meaning)} ×{totalCount} {suffix}"
+
+
 def _chatLine(item: QueryItem) -> str:
     """Renders one unbucketed chat item in the model-facing evidence format."""
     return f"[{_chatStreamTime(item)} CHAT {_chatAuthor(item)}] {_chatPresentationContent(item)}"
@@ -696,6 +791,59 @@ def _evidenceSections(
                     if isinstance(analysis, Mapping) and analysis.get("kind") == "userMessage":
                         fallbackGroups.setdefault(_chatPresentationContent(item), []).append(item)
 
+            semanticGroups: dict[
+                tuple[str, str],
+                dict[str, object],
+            ] = {}
+            semanticOwnedItemIds: set[str] = set()
+            for item in bucketItems:
+                if item.kind != "chat" or item.itemId in burstOwnedItemIds:
+                    continue
+                presentation = _persistentPresentationOwners(item)
+                if presentation is None:
+                    continue
+                planAddress, owners = presentation
+                semanticOwners = [
+                    owner
+                    for owner in owners
+                    if owner.get("kind") == "semanticUnitGroup"
+                ]
+                if not semanticOwners:
+                    continue
+                if len(semanticOwners) != len(owners):
+                    raise RuntimeError(
+                        f"Chat QueryItem {item.itemId!r} mixes semantic and non-semantic presentation owners.",
+                    )
+                semanticOwnedItemIds.add(item.itemId)
+                for owner in semanticOwners:
+                    meaning, count = _semanticOwnerContribution(item, owner)
+                    meaningKey = json.dumps(
+                        dict(meaning),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    )
+                    groupKey = (planAddress, meaningKey)
+                    group = semanticGroups.setdefault(
+                        groupKey,
+                        {
+                            "meaning": meaning,
+                            "contributions": [],
+                        },
+                    )
+                    group["contributions"].append((item, count))
+
+            semanticGroupsByAnchor: dict[str, list[dict[str, object]]] = {}
+            for groupKey in sorted(semanticGroups):
+                group = semanticGroups[groupKey]
+                contributions = group["contributions"]
+                anchorItem = min(
+                    (item for item, _count in contributions),
+                    key=lambda item: (_streamStart(item), _chatLineNumber(item)),
+                )
+                semanticGroupsByAnchor.setdefault(anchorItem.itemId, []).append(group)
+
             lines = [f"[{streamTime}]"]
             for item in bucketItems:
                 if item.kind == "transcript":
@@ -715,6 +863,16 @@ def _evidenceSections(
                             lines.append(_renderPersistentBurst(burstValue, burstGroup))
                         consumedChatIds.update(groupItem.itemId for groupItem in burstGroup)
                         continue
+
+                if item.itemId in semanticOwnedItemIds:
+                    for group in semanticGroupsByAnchor.get(item.itemId, []):
+                        lines.append(
+                            _renderSemanticGroup(
+                                group["meaning"],
+                                group["contributions"],
+                            )
+                        )
+                    continue
 
                 content = _chatPresentationContent(item)
                 persistentGroup = _persistentIdenticalChatGroup(item)
