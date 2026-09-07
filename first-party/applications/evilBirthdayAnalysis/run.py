@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 11
+# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 12
 from __future__ import annotations
 
 import argparse
@@ -114,8 +114,6 @@ def main() -> int:
 
     try:
         job = runtime.runJob("evilAnalysis.run@1", {"streamObserver": observe})
-        if job.error is not None:
-            raise job.error
         result = job.result
         if isinstance(result, dict):
             results = result.get("results")
@@ -141,12 +139,17 @@ def main() -> int:
                     saved = entry.get("saved")
                     if isinstance(saved, dict) and saved.get("path"):
                         sys.stdout.write(f"[{entry.get('windowIndex')}] {saved['path']}\n")
-        savedBundle = runtime.saveApplication()
-        sys.stdout.write(
-            "Saved Application "
-            f"{runtime.applicationRun.application.applicationId} "
-            f"generation {savedBundle.generation}.\n"
-        )
+        if job.authoritativeStateAccepted:
+            savedBundle = runtime.saveApplication()
+            sys.stdout.write(
+                "Saved Application "
+                f"{runtime.applicationRun.application.applicationId} "
+                f"generation {savedBundle.generation}.\n"
+            )
+
+        if job.error is not None:
+            raise job.error
+
         return 0
     finally:
         host.stop()
