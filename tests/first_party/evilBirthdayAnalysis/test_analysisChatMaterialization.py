@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 15
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 16
 from __future__ import annotations
 
 import importlib.util
@@ -1795,3 +1795,47 @@ def test_model_facing_prompt_legend_uses_configured_repeat_markers():
     query = analysis._buildQuery(ctx, payload)
 
     assert "<<<text>>>×N means the enclosed span occurred N consecutive times" in query["payload"]
+
+
+
+def test_multiple_repeat_counts_in_one_chat_message_have_explicit_binding_boundaries():
+    item = QueryItem(
+        itemId="chat:repeat-example",
+        kind="chat",
+        content=(
+            "GalaxyUnpacked batatAyaya rikkuComfy "
+            "wistyRun wistyRun wistyRun wistyRun "
+            "trickyySpin trickyySpin trickyySpin trickyyGiggy trickyySheCome "
+            "laynaWub laynaWub laynaWub laynaWub "
+            "GalaxyUnpacked GalaxyUnpacked GalaxyUnpacked GalaxyUnpacked GalaxyUnpacked "
+            "GalaxyUnpacked GalaxyUnpacked GalaxyUnpacked GalaxyUnpacked GalaxyUnpacked rikkuLove"
+        ),
+        metadata={
+            "streamStartSeconds": 1.0,
+            "lineNumber": 999,
+            "username": "viewer",
+            "sourceUsername": "viewer",
+            "analysis": {
+                "kind": "userMessage",
+                "streamTime": "00:00:01",
+                "spans": [
+                    {"kind": "emote", "name": "GalaxyUnpacked", "count": 1},
+                    {"kind": "emote", "name": "batatAyaya", "count": 1},
+                    {"kind": "emote", "name": "rikkuComfy", "count": 1},
+                    {"kind": "emote", "name": "wistyRun", "count": 4},
+                    {"kind": "emote", "name": "trickyySpin", "count": 3},
+                    {"kind": "emote", "name": "trickyyGiggy", "count": 1},
+                    {"kind": "emote", "name": "trickyySheCome", "count": 1},
+                    {"kind": "emote", "name": "laynaWub", "count": 4},
+                    {"kind": "emote", "name": "GalaxyUnpacked", "count": 10},
+                    {"kind": "emote", "name": "rikkuLove", "count": 1},
+                ],
+            },
+        },
+    )
+
+    assert analysis._chatPresentationContent(item) == (
+        "GalaxyUnpacked batatAyaya rikkuComfy "
+        "⟦wistyRun⟧×4 ⟦trickyySpin⟧×3 trickyyGiggy trickyySheCome "
+        "⟦laynaWub⟧×4 ⟦GalaxyUnpacked⟧×10 rikkuLove"
+    )
