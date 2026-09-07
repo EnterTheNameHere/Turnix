@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 16
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 17
 from __future__ import annotations
 
 import importlib.util
@@ -1839,3 +1839,41 @@ def test_multiple_repeat_counts_in_one_chat_message_have_explicit_binding_bounda
         "⟦wistyRun⟧×4 ⟦trickyySpin⟧×3 trickyyGiggy trickyySheCome "
         "⟦laynaWub⟧×4 ⟦GalaxyUnpacked⟧×10 rikkuLove"
     )
+
+
+
+def test_separate_layout_threads_configured_repeat_markers_into_chat_lines():
+    item = QueryItem(
+        itemId="chat:custom-repeat",
+        kind="chat",
+        content="wistyRun wistyRun wistyRun wistyRun",
+        metadata={
+            "streamStartSeconds": 45.0,
+            "lineNumber": 200,
+            "username": "viewer_name",
+            "sourceUsername": "viewer_name",
+            "analysis": {
+                "kind": "userMessage",
+                "streamTime": "00:00:45",
+                "spans": [
+                    {"kind": "emote", "name": "wistyRun", "count": 4},
+                ],
+            },
+        },
+    )
+    ctx = _BuildQueryCtx(
+        chatRendering={
+            "repeatStartMarker": "<<<",
+            "repeatEndMarker": ">>>",
+        }
+    )
+    payload = _queryPayload(includeChat=True, chatLayout="separate")
+    payload["queryItems"] = [
+        snapshot
+        for snapshot in payload["queryItems"]
+        if snapshot["kind"] != "chat"
+    ] + [item.snapshot()]
+
+    query = analysis._buildQuery(ctx, payload)
+
+    assert "[00:00:45 CHAT anonymized_1] <<<wistyRun>>>×4" in query["payload"]
