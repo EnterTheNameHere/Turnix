@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 16
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 17
 from __future__ import annotations
 
 import json
@@ -1383,8 +1383,11 @@ def _run(ctx, payload):
             raise RuntimeError("Window completion returned an invalid persistent result.")
         persistentResult = completed["result"]
 
-        # Export is a post-commit projection. Failure here does not roll back
-        # the authoritative ProcessingRun or durable result state.
+        # ProcessingRun completion has accepted its child transaction into the
+        # enclosing orchestration transaction at this point, but the outer
+        # OrchestrationUnit may still be speculative. Export is therefore a
+        # non-authoritative projection whose final acceptance/evidence coupling
+        # is a separate artifact/export boundary.
         exportRecord = _exportWindowRecord(
             ctx=ctx,
             inputValue=inputValue,
