@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 18
+# file: backend/context/codeEntryContext.py ; version: 19
 from __future__ import annotations
 
 from copy import deepcopy
@@ -17,7 +17,13 @@ if TYPE_CHECKING:
     from backend.core.immutableValue import ImmutableValue
     from backend.io.managedIo import ManagedIo, ManagedIoTransaction
     from backend.llm.llmTypes import LlmStreamEvent, LlmStreamProvider
-    from backend.llm.streamingRuntime import LlmProcessingPipeline, LlmProcessingResult, LlmProviderRegistry, StreamingLlmResult
+    from backend.llm.streamingRuntime import (
+    LlmProcessingPipeline,
+    LlmProcessingPreview,
+    LlmProcessingResult,
+    LlmProviderRegistry,
+    StreamingLlmResult,
+)
     from backend.registration import RegistrationScope
     from backend.values.committed import CommittedValueLayer, CommittedValueTransaction
 
@@ -443,6 +449,31 @@ class _LlmFacade:
             model=model,
             providerOptions=providerOptions,
             streamObserver=streamObserver,
+        )
+
+    def prepareProcessing(
+        self,
+        *,
+        memoryKey: str,
+        inputValue: object,
+        buildQueryItemsCapabilityId: str,
+        buildQueryCapabilityId: str,
+        providerName: str,
+        model: str | None = None,
+        providerOptions: Mapping[str, ImmutableValue] | None = None,
+        filterQueryItemsCapabilityId: str | None = None,
+    ) -> LlmProcessingPreview:
+        self._requireValid()
+        return self._pipeline.prepareProcessing(
+            memoryKey=memoryKey,
+            inputValue=inputValue,
+            buildQueryItemsCapabilityId=buildQueryItemsCapabilityId,
+            buildQueryCapabilityId=buildQueryCapabilityId,
+            filterQueryItemsCapabilityId=filterQueryItemsCapabilityId,
+            providerName=providerName,
+            model=model,
+            providerOptions=providerOptions,
+            memoryView=self._memory,
         )
 
     def runProcessing(
