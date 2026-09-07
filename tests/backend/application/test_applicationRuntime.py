@@ -1,4 +1,4 @@
-# file: tests/backend/application/test_applicationRuntime.py ; version: 9
+# file: tests/backend/application/test_applicationRuntime.py ; version: 10
 from pathlib import Path
 
 import pytest
@@ -571,6 +571,7 @@ def test_run_job_commits_capability_mutation_only_after_successful_unit_completi
         job = runtime.runJob("test.job@1")
 
         assert job.state is JobState.SUCCEEDED
+        assert job.authoritativeStateAccepted is True
         assert job.result == "ok"
         assert runtime.applicationRun.application.committedState.load("test/job/value") == {
             "accepted": True,
@@ -620,6 +621,7 @@ def test_run_job_failure_discards_capability_mutation_from_authoritative_root():
         job = runtime.runJob("test.job.fail@1")
 
         assert job.state is JobState.FAILED
+        assert job.authoritativeStateAccepted is False
         assert isinstance(job.error, RuntimeError)
         assert str(job.error) == "job exploded"
         assert runtime.applicationRun.application.committedState.load("test/job/value") is MISSING
@@ -723,6 +725,75 @@ def test_run_job_failure_aborts_staged_managed_io(tmp_path):
         assert job.state is JobState.FAILED
         assert output.exists() is False
         assert runtime.applicationRun.application.committedState.load("test/job/io") is MISSING
+    finally:
+        scope.withdraw()
+        runtime.unregisterCodeEntry(identity.codeEntryInstanceId)
+        runtime.close()
+
+
+def test_run_job_reports_state_accepted_when_managed_io_publication_fails_after_commit(
+    tmp_path,
+    monkeypatch,
+):
+    runtime = ApplicationRuntime(
+        appPackId="test.app",
+        packResolver=PackResolver(roots=()),
+    )
+    runtime.start()
+    identity = CodeEntryIdentity(
+        applicationId=runtime.applicationRun.application.applicationId,
+        applicationRunId=runtime.applicationRun.applicationRunId,
+        packId="test.pack",
+        packVersion="1.0.0",
+        codeEntryId="entry",
+        codeEntryInstanceId="io-publication-failure-entry",
+        sourceSha256="source-sha",
+        implementationFormat="python-source@1",
+        implementationId="implementation-sha",
+    )
+    runtime.registerCodeEntry(identity, Path.cwd())
+    scope = RegistrationScope()
+    output = tmp_path / "result.json"
+
+    def handler(ctx, _payload):
+        transaction = ctx.memory.openTransaction()
+        transaction.set("test/job/state", "accepted-before-io")
+        transaction.commit()
+        ctx.io.writeJsonAtomic(output, {"published": False})
+        return "result-before-io-failure"
+
+    runtime.capabilities.register(
+        scope,
+        ownerId=identity.codeEntryInstanceId,
+        capabilityId="test.job.io.publication-fail@1",
+        handler=handler,
+    )
+    scope.publish()
+
+    originalOpen = runtime.io.openTransaction
+
+    def openFailingIoTransaction():
+        transaction = originalOpen()
+
+        def failCommit():
+            raise RuntimeError("simulated managed I/O publication failure")
+
+        monkeypatch.setattr(transaction, "commit", failCommit)
+        return transaction
+
+    monkeypatch.setattr(runtime.io, "openTransaction", openFailingIoTransaction)
+
+    try:
+        job = runtime.runJob("test.job.io.publication-fail@1")
+
+        assert job.state is JobState.FAILED
+        assert job.authoritativeStateAccepted is True
+        assert isinstance(job.error, RuntimeError)
+        assert str(job.error) == "simulated managed I/O publication failure"
+        assert runtime.applicationRun.application.committedState.load(
+            "test/job/state"
+        ) == "accepted-before-io"
+        assert output.exists() is False
     finally:
         scope.withdraw()
         runtime.unregisterCodeEntry(identity.codeEntryInstanceId)
