@@ -1,4 +1,4 @@
-# file: backend/application/runtime.py ; version: 2
+# file: backend/application/runtime.py ; version: 3
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -10,18 +10,36 @@ from backend.values.committed import CommittedValueLayer
 __all__ = ["Application", "ApplicationRun", "ApplicationRunState"]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class Application:
-    """Durable identity of one Actant application individual."""
+    """One durable Actant Application identity and its authoritative root.
+
+    committedState belongs to the Application because it is the state that
+    survives across ApplicationRuns through SaveBundle persistence. A run only
+    provides one non-restartable runtime incarnation over this same conceptual
+    Application state.
+
+    saveBundleId identifies the currently bound SaveBundle lineage when one has
+    been established. Publication policy and generation tracking remain outside
+    this domain object.
+    """
 
     appPackId: str
     applicationId: str
+    committedState: CommittedValueLayer = field(default_factory=CommittedValueLayer)
+    saveBundleId: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.appPackId) is not str or not self.appPackId:
             raise ValueError("appPackId must be a non-empty string.")
         if type(self.applicationId) is not str or not self.applicationId:
             raise ValueError("applicationId must be a non-empty string.")
+        if not isinstance(self.committedState, CommittedValueLayer):
+            raise TypeError("committedState must be a CommittedValueLayer.")
+        if self.saveBundleId is not None and (
+            type(self.saveBundleId) is not str or not self.saveBundleId
+        ):
+            raise ValueError("saveBundleId must be a non-empty string or None.")
 
     @classmethod
     def new(cls, *, appPackId: str) -> "Application":
@@ -38,25 +56,32 @@ class ApplicationRunState(StrEnum):
 class ApplicationRun:
     """One non-restartable live execution period of an Application.
 
-    committedState is the live authoritative Value layer for this run. It may
-    begin empty for a new Application or be rehydrated from the Application's
-    bound SaveBundle when loading an existing durable Application.
-
-    The layer is runtime residency, not persistence identity. saveBundleId
-    records the active persistence closure when one is bound; the SaveBundle
-    owns durable cross-run continuity. ProcessingRuns and Pack CodeEntries open
-    speculative transactions against the same committedState object.
-
-    This boundary follows DA-04/DA-20: ApplicationRun is live execution,
-    Application is durable identity, and SaveBundle is durable persistence
-    closure.
+    Durable authoritative memory belongs to Application. The compatibility
+    properties below intentionally expose the former ApplicationRun access
+    path while runtime and pipeline code migrate toward Application ownership.
+    Transactions opened during this run remain speculative until propagated to
+    the Application's committed root.
     """
 
     application: Application
     applicationRunId: str = field(default_factory=newRuntimeId)
-    committedState: CommittedValueLayer = field(default_factory=CommittedValueLayer)
-    saveBundleId: str | None = None
     state: ApplicationRunState = ApplicationRunState.CREATED
+
+    @property
+    def committedState(self) -> CommittedValueLayer:
+        """Compatibility view of the Application-owned authoritative root."""
+        return self.application.committedState
+
+    @property
+    def saveBundleId(self) -> str | None:
+        """Compatibility view of the Application's bound SaveBundle lineage."""
+        return self.application.saveBundleId
+
+    @saveBundleId.setter
+    def saveBundleId(self, value: str | None) -> None:
+        if value is not None and (type(value) is not str or not value):
+            raise ValueError("saveBundleId must be a non-empty string or None.")
+        self.application.saveBundleId = value
 
     @property
     def active(self) -> bool:
