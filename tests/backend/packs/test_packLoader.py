@@ -1,10 +1,10 @@
-# file: tests/backend/packs/test_packLoader.py ; version: 5
+# file: tests/backend/packs/test_packLoader.py ; version: 6
 import json
 from pathlib import Path
 
 import pytest
 
-from backend.packs.runtime import ManualActivationPlan, PackLoader, PackResolver
+from backend.packs.runtime import ManualActivationPlan, PackResolver
 from backend.application.applicationRuntime import ApplicationRuntime
 from backend.values import MISSING
 
@@ -53,8 +53,7 @@ def test_plan_failure_rolls_back_packs_activated_by_that_plan(tmp_path: Path):
         with pytest.raises(LookupError):
             runtime.capabilities.resolve("test.broken@1")
     finally:
-        loader.close()
-        runtime.stop()
+        runtime.close()
 
 
 def test_successful_pack_is_visible_until_loader_close(tmp_path: Path):
@@ -75,8 +74,7 @@ def test_successful_pack_is_visible_until_loader_close(tmp_path: Path):
         with pytest.raises(LookupError):
             runtime.capabilities.resolve("test.good@1")
     finally:
-        loader.close()
-        runtime.stop()
+        runtime.close()
 
 
 def test_failing_onload_is_best_effort_unloaded_with_none_state(tmp_path: Path):
@@ -98,8 +96,7 @@ def test_failing_onload_is_best_effort_unloaded_with_none_state(tmp_path: Path):
             loader.activate(ManualActivationPlan(packIds=("test.cleanup",)))
         assert marker.read_text(encoding="utf-8") == "None"
     finally:
-        loader.close()
-        runtime.stop()
+        runtime.close()
 
 
 
@@ -143,8 +140,7 @@ def test_code_entry_implementation_identity_tracks_exact_executed_source(tmp_pat
         assert third["sourceSha256"] != first["sourceSha256"]
         assert third["implementationId"] != first["implementationId"]
     finally:
-        loader.close()
-        runtime.stop()
+        runtime.close()
 
 def test_non_app_pack_cannot_declare_application_lifecycle_hook(tmp_path: Path):
     _writePack(
@@ -161,8 +157,7 @@ def test_non_app_pack_cannot_declare_application_lifecycle_hook(tmp_path: Path):
         with pytest.raises(ValueError, match="Non-appPack.*onApplicationLoad"):
             loader.activate(ManualActivationPlan(packIds=("test.mod",)))
     finally:
-        loader.close()
-        runtime.stop()
+        runtime.close()
 
 
 def test_application_lifecycle_requires_completed_activation_plan(tmp_path: Path):
@@ -183,8 +178,7 @@ def test_application_lifecycle_requires_completed_activation_plan(tmp_path: Path
         with pytest.raises(RuntimeError, match="activation-plan barrier"):
             loader.invokeApplicationLoad()
     finally:
-        loader.close()
-        runtime.stop()
+        runtime.close()
 
 
 def test_application_load_runs_only_after_all_pack_onloads_and_receives_code_entry_state(
@@ -226,8 +220,7 @@ def test_application_load_runs_only_after_all_pack_onloads_and_receives_code_ent
             "dependency": "ready",
         }
     finally:
-        loader.close()
-        runtime.stop()
+        runtime.close()
 
 
 def test_application_create_changes_remain_under_supplied_outer_transaction(tmp_path: Path):
@@ -256,6 +249,5 @@ def test_application_create_changes_remain_under_supplied_outer_transaction(tmp_
         outer.abort()
         assert root.load("lifecycle/create") is MISSING
     finally:
-        loader.close()
-        runtime.stop()
+        runtime.close()
 
