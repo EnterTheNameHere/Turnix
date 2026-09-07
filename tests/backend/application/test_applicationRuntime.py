@@ -1,4 +1,4 @@
-# file: tests/backend/application/test_applicationRuntime.py ; version: 5
+# file: tests/backend/application/test_applicationRuntime.py ; version: 6
 from pathlib import Path
 
 import pytest
@@ -44,7 +44,7 @@ def test_application_run_is_non_restartable_and_requires_active_work():
 
     host.start()
     assert host.applicationRun.state is ApplicationRunState.ACTIVE
-    host.stop()
+    host.close()
     assert host.applicationRun.state is ApplicationRunState.STOPPED
 
     with pytest.raises(RuntimeError):
