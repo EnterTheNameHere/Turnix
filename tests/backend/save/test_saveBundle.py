@@ -1,4 +1,4 @@
-# file: tests/backend/save/test_saveBundle.py ; version: 3
+# file: tests/backend/save/test_saveBundle.py ; version: 4
 from __future__ import annotations
 
 import pytest
@@ -92,6 +92,30 @@ def test_next_generation_keeps_bundle_and_application_identity() -> None:
     assert second.generation == 2
     assert second.restoreCommittedState().revisionId("chat/line/17/semantic") == 2
     assert second.restoreCommittedState().load("chat/line/17/semantic") == {"body": "changed"}
+
+
+def test_save_bundle_can_advance_past_occupied_recovery_generation() -> None:
+    state = _state()
+    first = SaveBundle.create(
+        appPackId="test.app",
+        applicationId="application-1",
+        committedState=state,
+    )
+
+    recoveredNext = first.advanceToGeneration(
+        generation=3,
+        committedState=state,
+    )
+
+    assert recoveredNext.saveBundleId == first.saveBundleId
+    assert recoveredNext.applicationId == first.applicationId
+    assert recoveredNext.generation == 3
+
+    with pytest.raises(ValueError, match="greater than the current bundle generation"):
+        first.advanceToGeneration(
+            generation=1,
+            committedState=state,
+        )
 
 
 def test_save_bundle_rejects_tampered_chunk_payload() -> None:
