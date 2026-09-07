@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_endToEnd.py ; version: 1
+# file: tests/first_party/evilBirthdayAnalysis/test_endToEnd.py ; version: 2
 from __future__ import annotations
 
 import hashlib
@@ -9,6 +9,7 @@ from backend.orchestration import JobState
 from backend.packs.runtime import ManualActivationPlan, PackResolver
 from backend.runtime.runtimeHost import RuntimeHost
 from backend.save import ApplicationStore
+from backend.values import MISSING
 
 
 _REPO_ROOT = Path(__file__).parents[3]
@@ -65,8 +66,15 @@ class _Provider:
         )
 
 
+class _PreviewOnlyProvider(_Provider):
+    def stream(self, request):
+        raise AssertionError("prompt preview must not invoke provider stream")
+        yield  # pragma: no cover
+
+
 def onLoad(ctx):
     ctx.llm.registerProvider("test.fake", _Provider())
+    ctx.llm.registerProvider("test.preview", _PreviewOnlyProvider())
 """.lstrip(),
         encoding="utf-8",
     )
@@ -317,3 +325,71 @@ def test_real_evil_analysis_runs_end_to_end_and_reuses_persistent_material_after
     assert restored.load(
         f"processing/evilbirthday/runs/{secondProcessingRunId}"
     )["response"]["rawText"] == "FAKE RESPONSE"
+
+
+def test_real_evil_prompt_preview_builds_exact_query_without_engine_call(tmp_path: Path):
+    fakeRoot = tmp_path / "packs"
+    _writeFakeLlmPack(fakeRoot)
+    config = _writeFixtureFiles(tmp_path)
+    config["llm"] = {
+        "provider": "test.preview",
+        "model": "fake-model",
+        "providerOptions": {},
+    }
+    store = ApplicationStore(tmp_path / "saves")
+    resolver = PackResolver(
+        roots=(
+            fakeRoot,
+            _REPO_ROOT / "first-party",
+        )
+    )
+    host = RuntimeHost(
+        applicationStore=store,
+        packResolver=resolver,
+    )
+    host.start()
+    runtime = host.createApplication(
+        appPackId="evilBirthdayAnalysis",
+        plan=_plan(),
+        config=config,
+    )
+
+    try:
+        job = runtime.runJob(
+            "evilAnalysis.previewPrompt@1",
+            {"position": "00:00:00"},
+        )
+
+        assert job.state is JobState.SUCCEEDED
+        assert job.authoritativeStateAccepted is True
+        preview = job.result
+        assert isinstance(preview, dict)
+        assert preview["provider"] == "test.preview"
+        assert preview["model"] == "fake-model"
+        assert type(preview["inputTokens"]) is int
+        assert preview["inputTokens"] > 0
+        assert preview["executionProfile"]["contextWindowTokens"] == 4096
+
+        query = preview["query"]
+        assert query["formatId"] == "text/plain"
+        assert "I am Evil today" in query["payload"]
+        assert "this is wild" in query["payload"]
+        assert "Analyze Evil's characterization" in query["payload"]
+
+        root = runtime.applicationRun.application.committedState
+        assert root.revisionId("evilanalysis/chat/line/1/semantic") == 1
+        assert root.load("processing/evilbirthday/lastrun") is MISSING
+
+        snapshot = root.snapshot()
+        assert not any(
+            address.startswith("processing/evilbirthday/runs/")
+            for address in snapshot
+        )
+        assert not any(
+            address.startswith("evilanalysis/results/")
+            for address in snapshot
+        )
+        output = Path(config["outputDirectory"])
+        assert output.exists() is False or list(output.iterdir()) == []
+    finally:
+        host.stop()
