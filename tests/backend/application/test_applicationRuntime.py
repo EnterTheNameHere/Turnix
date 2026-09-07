@@ -1,4 +1,4 @@
-# file: tests/backend/application/test_applicationRuntime.py ; version: 6
+# file: tests/backend/application/test_applicationRuntime.py ; version: 7
 from pathlib import Path
 
 import pytest
@@ -94,7 +94,7 @@ def test_trace_publication_failure_does_not_change_runtime_lifecycle():
     assert host.applicationRun.state is ApplicationRunState.ACTIVE
     assert host.trace("test") is False
 
-    host.stop()
+    host.close()
     assert host.applicationRun.state is ApplicationRunState.STOPPED
 
 
