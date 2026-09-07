@@ -1,4 +1,4 @@
-# file: backend/packs/runtime.py ; version: 12
+# file: backend/packs/runtime.py ; version: 13
 from __future__ import annotations
 
 import hashlib
@@ -16,7 +16,7 @@ from backend.registration import RegistrationScope
 from backend.values.committed import CommittedValueLayer, CommittedValueTransaction
 
 if TYPE_CHECKING:
-    from backend.runtime.runtimeHost import RuntimeHost
+    from backend.application.applicationRuntime import ApplicationRuntime
 
 __all__ = ["ManualActivationPlan", "PackDefinition", "PackLoader", "PackResolver"]
 
@@ -165,18 +165,18 @@ class PackLoader:
     was given.
     """
 
-    def __init__(self, *, host: RuntimeHost, resolver: PackResolver) -> None:
-        self._host = host
+    def __init__(self, *, runtime: ApplicationRuntime, resolver: PackResolver) -> None:
+        self._runtime = runtime
         self._resolver = resolver
         self._loadedPacks: list[_LoadedPack] = []
         self._activationBarrierReached = False
 
     def activate(self, plan: ManualActivationPlan) -> None:
-        self._host.requireOperational()
+        self._runtime.requireOperational()
         checkpoint = len(self._loadedPacks)
         previousBarrier = self._activationBarrierReached
         self._activationBarrierReached = False
-        self._host.trace("activation-plan-started", attributes={"packIds": list(plan.packIds)})
+        self._runtime.trace("activation-plan-started", attributes={"packIds": list(plan.packIds)})
         try:
             for packId in plan.packIds:
                 self.activatePack(self._resolver.requireSingle(packId))
@@ -184,7 +184,7 @@ class PackLoader:
             cleanupErrors = self._closeLoadedPacks(self._loadedPacks[checkpoint:])
             del self._loadedPacks[checkpoint:]
             self._activationBarrierReached = previousBarrier
-            self._host.trace(
+            self._runtime.trace(
                 "activation-plan-failed",
                 message=str(activationError),
                 attributes={"packIds": list(plan.packIds)},
@@ -197,20 +197,20 @@ class PackLoader:
                 ) from None
             raise
         self._activationBarrierReached = True
-        self._host.trace("activation-plan-completed", attributes={"packIds": list(plan.packIds)})
+        self._runtime.trace("activation-plan-completed", attributes={"packIds": list(plan.packIds)})
 
     def activatePack(self, pack: PackDefinition) -> None:
-        self._host.requireOperational()
+        self._runtime.requireOperational()
         self._activationBarrierReached = False
-        if pack.kind == "appPack" and pack.packId != self._host.applicationRun.application.appPackId:
+        if pack.kind == "appPack" and pack.packId != self._runtime.applicationRun.application.appPackId:
             raise ValueError(
                 f"Cannot activate appPack {pack.packId!r} for Application owned by "
-                f"{self._host.applicationRun.application.appPackId!r}.",
+                f"{self._runtime.applicationRun.application.appPackId!r}.",
             )
         if any(item.pack.packId == pack.packId for item in self._loadedPacks):
             raise RuntimeError(f"Pack is already active in this ApplicationRun: {pack.packId}.")
 
-        self._host.trace("pack-activation-started", attributes={"packId": pack.packId})
+        self._runtime.trace("pack-activation-started", attributes={"packId": pack.packId})
         scope = RegistrationScope()
         entries: list[_LoadedCodeEntry] = []
         loadedModules: list[ModuleType] = []
@@ -237,8 +237,8 @@ class PackLoader:
                             f"{definition.codeEntryId!r} declares Application lifecycle hook(s): {names}.",
                         )
                 identity = CodeEntryIdentity(
-                    applicationId=self._host.applicationRun.application.applicationId,
-                    applicationRunId=self._host.applicationRun.applicationRunId,
+                    applicationId=self._runtime.applicationRun.application.applicationId,
+                    applicationRunId=self._runtime.applicationRun.applicationRunId,
                     packId=pack.packId,
                     packVersion=pack.version,
                     codeEntryId=definition.codeEntryId,
@@ -254,7 +254,7 @@ class PackLoader:
                 # state=None rather than relying on every Pack to self-clean.
                 loadedEntry = _LoadedCodeEntry(identity=identity, pack=pack, module=module, state=None)
                 entries.append(loadedEntry)
-                context = self._host.createContext(
+                context = self._runtime.createContext(
                     identity=identity,
                     packRoot=pack.root,
                     registrationScope=scope,
@@ -267,20 +267,20 @@ class PackLoader:
                     context.invalidate()
 
             for item in entries:
-                self._host.registerCodeEntry(item.identity, item.pack.root)
+                self._runtime.registerCodeEntry(item.identity, item.pack.root)
                 registeredOwners.append(item.identity.codeEntryInstanceId)
             scope.publish()
 
         except Exception as activationError:
             scope.withdraw()
             for ownerId in reversed(registeredOwners):
-                self._host.unregisterCodeEntry(ownerId)
+                self._runtime.unregisterCodeEntry(ownerId)
 
             cleanupErrors = self._unloadEntries(entries)
             for module in reversed(loadedModules):
                 sys.modules.pop(module.__name__, None)
 
-            self._host.trace(
+            self._runtime.trace(
                 "pack-activation-failed",
                 message=str(activationError),
                 attributes={"packId": pack.packId},
@@ -294,7 +294,7 @@ class PackLoader:
             raise
 
         self._loadedPacks.append(_LoadedPack(pack=pack, entries=tuple(entries), registrationScope=scope))
-        self._host.trace(
+        self._runtime.trace(
             "pack-activation-completed",
             attributes={
                 "packId": pack.packId,
@@ -319,11 +319,11 @@ class PackLoader:
         *,
         memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
     ) -> None:
-        self._host.requireOperational()
+        self._runtime.requireOperational()
         if not self._activationBarrierReached:
             raise RuntimeError("Application lifecycle cannot run before the activation-plan barrier.")
 
-        application = self._host.applicationRun.application
+        application = self._runtime.applicationRun.application
         matches = [
             loadedPack
             for loadedPack in self._loadedPacks
@@ -340,7 +340,7 @@ class PackLoader:
                 f"Defining Pack {loadedPack.pack.packId!r} must have kind 'appPack'.",
             )
 
-        self._host.trace(
+        self._runtime.trace(
             "application-lifecycle-hook-started",
             attributes={"hook": hookName, "appPackId": loadedPack.pack.packId},
         )
@@ -349,7 +349,7 @@ class PackLoader:
             if callback is None:
                 continue
             scope = RegistrationScope()
-            context = self._host.createContext(
+            context = self._runtime.createContext(
                 identity=item.identity,
                 packRoot=item.pack.root,
                 registrationScope=scope,
@@ -361,7 +361,7 @@ class PackLoader:
             finally:
                 context.invalidate()
                 scope.withdraw()
-        self._host.trace(
+        self._runtime.trace(
             "application-lifecycle-hook-completed",
             attributes={"hook": hookName, "appPackId": loadedPack.pack.packId},
         )
@@ -376,14 +376,14 @@ class PackLoader:
     def _closeLoadedPacks(self, packs: tuple[_LoadedPack, ...] | list[_LoadedPack]) -> list[Exception]:
         errors: list[Exception] = []
         for loadedPack in reversed(tuple(packs)):
-            self._host.trace("pack-unload-started", attributes={"packId": loadedPack.pack.packId})
+            self._runtime.trace("pack-unload-started", attributes={"packId": loadedPack.pack.packId})
             loadedPack.registrationScope.withdraw()
             packErrors = self._unloadEntries(list(loadedPack.entries))
             errors.extend(packErrors)
             for item in reversed(loadedPack.entries):
-                self._host.unregisterCodeEntry(item.identity.codeEntryInstanceId)
+                self._runtime.unregisterCodeEntry(item.identity.codeEntryInstanceId)
                 sys.modules.pop(item.module.__name__, None)
-            self._host.trace(
+            self._runtime.trace(
                 "pack-unload-completed" if not packErrors else "pack-unload-failed",
                 attributes={"packId": loadedPack.pack.packId, "errorCount": len(packErrors)},
                 level="info" if not packErrors else "error",
@@ -397,7 +397,7 @@ class PackLoader:
             if callback is None:
                 continue
             cleanupScope = RegistrationScope()
-            context = self._host.createContext(
+            context = self._runtime.createContext(
                 identity=item.identity,
                 packRoot=item.pack.root,
                 registrationScope=cleanupScope,
