@@ -1,4 +1,4 @@
-# file: backend/packs/runtime.py ; version: 10
+# file: backend/packs/runtime.py ; version: 11
 from __future__ import annotations
 
 import hashlib
@@ -13,11 +13,14 @@ from typing import TYPE_CHECKING
 from backend.context.codeEntryContext import CodeEntryIdentity
 from backend.core.runtimeIds import newRuntimeId
 from backend.registration import RegistrationScope
+from backend.values.committed import CommittedValueLayer, CommittedValueTransaction
 
 if TYPE_CHECKING:
     from backend.runtime.runtimeHost import RuntimeHost
 
 __all__ = ["ManualActivationPlan", "PackDefinition", "PackLoader", "PackResolver"]
+
+_APPLICATION_HOOK_NAMES = ("onApplicationCreate", "onApplicationLoad", "onApplicationRun")
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,10 +169,13 @@ class PackLoader:
         self._host = host
         self._resolver = resolver
         self._loadedPacks: list[_LoadedPack] = []
+        self._activationBarrierReached = False
 
     def activate(self, plan: ManualActivationPlan) -> None:
         self._host.requireActive()
         checkpoint = len(self._loadedPacks)
+        previousBarrier = self._activationBarrierReached
+        self._activationBarrierReached = False
         self._host.trace("activation-plan-started", attributes={"packIds": list(plan.packIds)})
         try:
             for packId in plan.packIds:
@@ -177,6 +183,7 @@ class PackLoader:
         except Exception as activationError:
             cleanupErrors = self._closeLoadedPacks(self._loadedPacks[checkpoint:])
             del self._loadedPacks[checkpoint:]
+            self._activationBarrierReached = previousBarrier
             self._host.trace(
                 "activation-plan-failed",
                 message=str(activationError),
@@ -189,10 +196,17 @@ class PackLoader:
                     [activationError, *cleanupErrors],
                 ) from None
             raise
+        self._activationBarrierReached = True
         self._host.trace("activation-plan-completed", attributes={"packIds": list(plan.packIds)})
 
     def activatePack(self, pack: PackDefinition) -> None:
         self._host.requireActive()
+        self._activationBarrierReached = False
+        if pack.kind == "appPack" and pack.packId != self._host.applicationRun.application.appPackId:
+            raise ValueError(
+                f"Cannot activate appPack {pack.packId!r} for Application owned by "
+                f"{self._host.applicationRun.application.appPackId!r}.",
+            )
         if any(item.pack.packId == pack.packId for item in self._loadedPacks):
             raise RuntimeError(f"Pack is already active in this ApplicationRun: {pack.packId}.")
 
@@ -211,6 +225,17 @@ class PackLoader:
                     instanceId=instanceId,
                 )
                 loadedModules.append(module)
+                if pack.kind != "appPack":
+                    applicationHooks = [
+                        name for name in _APPLICATION_HOOK_NAMES
+                        if getattr(module, name, None) is not None
+                    ]
+                    if applicationHooks:
+                        names = ", ".join(applicationHooks)
+                        raise ValueError(
+                            f"Non-appPack {pack.packId!r} CodeEntry "
+                            f"{definition.codeEntryId!r} declares Application lifecycle hook(s): {names}.",
+                        )
                 identity = CodeEntryIdentity(
                     applicationId=self._host.applicationRun.application.applicationId,
                     applicationRunId=self._host.applicationRun.applicationRunId,
@@ -277,7 +302,72 @@ class PackLoader:
             },
         )
 
+    def invokeApplicationCreate(self, *, memoryView: CommittedValueTransaction) -> None:
+        if not isinstance(memoryView, CommittedValueTransaction):
+            raise TypeError("onApplicationCreate requires a CommittedValueTransaction memoryView.")
+        self._invokeApplicationHook("onApplicationCreate", memoryView=memoryView)
+
+    def invokeApplicationLoad(self) -> None:
+        self._invokeApplicationHook("onApplicationLoad")
+
+    def invokeApplicationRun(self) -> None:
+        self._invokeApplicationHook("onApplicationRun")
+
+    def _invokeApplicationHook(
+        self,
+        hookName: str,
+        *,
+        memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
+    ) -> None:
+        self._host.requireActive()
+        if not self._activationBarrierReached:
+            raise RuntimeError("Application lifecycle cannot run before the activation-plan barrier.")
+
+        application = self._host.applicationRun.application
+        matches = [
+            loadedPack
+            for loadedPack in self._loadedPacks
+            if loadedPack.pack.packId == application.appPackId
+        ]
+        if len(matches) != 1:
+            raise RuntimeError(
+                f"Application lifecycle requires exactly one active defining Pack "
+                f"{application.appPackId!r}.",
+            )
+        loadedPack = matches[0]
+        if loadedPack.pack.kind != "appPack":
+            raise RuntimeError(
+                f"Defining Pack {loadedPack.pack.packId!r} must have kind 'appPack'.",
+            )
+
+        self._host.trace(
+            "application-lifecycle-hook-started",
+            attributes={"hook": hookName, "appPackId": loadedPack.pack.packId},
+        )
+        for item in loadedPack.entries:
+            callback = getattr(item.module, hookName, None)
+            if callback is None:
+                continue
+            scope = RegistrationScope()
+            context = self._host.createContext(
+                identity=item.identity,
+                packRoot=item.pack.root,
+                registrationScope=scope,
+                allowRegistration=False,
+                memoryView=memoryView,
+            )
+            try:
+                callback(context, item.state)
+            finally:
+                context.invalidate()
+                scope.withdraw()
+        self._host.trace(
+            "application-lifecycle-hook-completed",
+            attributes={"hook": hookName, "appPackId": loadedPack.pack.packId},
+        )
+
     def close(self) -> None:
+        self._activationBarrierReached = False
         cleanupErrors = self._closeLoadedPacks(tuple(self._loadedPacks))
         self._loadedPacks.clear()
         if cleanupErrors:
