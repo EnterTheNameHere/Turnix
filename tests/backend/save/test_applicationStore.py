@@ -1,4 +1,4 @@
-# file: tests/backend/save/test_applicationStore.py ; version: 6
+# file: tests/backend/save/test_applicationStore.py ; version: 7
 from __future__ import annotations
 
 import json
@@ -242,6 +242,38 @@ def test_application_store_never_overwrites_generation_published_by_racing_write
         store.publish(second)
 
     assert generationPath.read_bytes() == competingPayload
+
+
+def test_application_store_flushes_generation_and_pointer_directories(
+    tmp_path,
+    monkeypatch,
+):
+    state, first = _bundle()
+    store = ApplicationStore(tmp_path / "saves")
+    applicationPath = store.createApplication(first)
+
+    flushed: list[object] = []
+
+    def recordDirectory(path):
+        flushed.append(path)
+
+    monkeypatch.setattr(
+        ApplicationStore,
+        "_syncDirectory",
+        staticmethod(recordDirectory),
+    )
+
+    update = state.openTransaction()
+    update.set("chat/line/17/semantic", {"body": "generation-two"})
+    update.commit()
+    second = first.nextGeneration(committedState=state)
+
+    store.publish(second)
+
+    assert flushed == [
+        applicationPath / "generations",
+        applicationPath,
+    ]
 
 
 def test_application_store_ignores_stale_unique_temporary_files(tmp_path):
