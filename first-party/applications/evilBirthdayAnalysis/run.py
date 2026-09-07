@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 9
+# file: first-party/applications/evilBirthdayAnalysis/run.py ; version: 10
 from __future__ import annotations
 
 import argparse
@@ -10,8 +10,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from backend.io.managedIo import ManagedIo  # noqa: E402
-from backend.packs.runtime import ManualActivationPlan, PackLoader, PackResolver  # noqa: E402
-from backend.runtime.runtimeHost import RuntimeHost  # noqa: E402
+from backend.packs.runtime import ManualActivationPlan, PackResolver  # noqa: E402
+from backend.runtime.applicationOperations import ApplicationRuntimeOperations  # noqa: E402
+from backend.save import ApplicationStore  # noqa: E402
 
 
 def _normalizePath(value: object, *, configDirectory: Path) -> object:
@@ -57,6 +58,21 @@ def _normalizePaths(config: dict[str, object], *, configDirectory: Path) -> dict
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the Evil Birthday analysis AppPack.")
     parser.add_argument("config", nargs="?", default=str(Path(__file__).with_name("config.json")))
+    application = parser.add_mutually_exclusive_group(required=True)
+    application.add_argument(
+        "--new-application",
+        action="store_true",
+        help="Create a new durable Evil Birthday analysis Application.",
+    )
+    application.add_argument(
+        "--application-id",
+        help="Load and run one existing durable Application by exact applicationId.",
+    )
+    parser.add_argument(
+        "--saves-root",
+        default=str(REPO_ROOT / "saves"),
+        help="Application persistence root. Defaults to the repository saves/ directory.",
+    )
     args = parser.parse_args()
 
     io = ManagedIo()
@@ -65,10 +81,28 @@ def main() -> int:
     planPath = Path(__file__).with_name("activation-plan.json")
     plan = ManualActivationPlan.fromJson(io.readJson(planPath))
 
-    host = RuntimeHost(appPackId="evilBirthdayAnalysis", config=config)
-    resolver = PackResolver(roots=(REPO_ROOT / "first-party",))
-    loader = PackLoader(host=host, resolver=resolver)
-    host.start()
+    store = ApplicationStore(Path(args.saves_root).expanduser().resolve())
+    operations = ApplicationRuntimeOperations(
+        applicationStore=store,
+        packResolver=PackResolver(roots=(REPO_ROOT / "first-party",)),
+    )
+    if args.new_application:
+        session = operations.createApplication(
+            appPackId="evilBirthdayAnalysis",
+            plan=plan,
+            config=config,
+        )
+        sys.stdout.write(f"Created Application {session.applicationId}\n")
+    else:
+        session = operations.loadApplication(
+            appPackId="evilBirthdayAnalysis",
+            applicationId=args.application_id,
+            plan=plan,
+            config=config,
+        )
+        sys.stdout.write(f"Loaded Application {session.applicationId}\n")
+
+    runtime = session.runtime
 
     def observe(event) -> None:
         if event.eventType == "delta" and event.text:
@@ -76,8 +110,7 @@ def main() -> int:
             sys.stdout.flush()
 
     try:
-        loader.activate(plan)
-        job = host.runJob("evilAnalysis.run@1", {"streamObserver": observe})
+        job = runtime.runJob("evilAnalysis.run@1", {"streamObserver": observe})
         if job.error is not None:
             raise job.error
         result = job.result
@@ -105,12 +138,13 @@ def main() -> int:
                     saved = entry.get("saved")
                     if isinstance(saved, dict) and saved.get("path"):
                         sys.stdout.write(f"[{entry.get('windowIndex')}] {saved['path']}\n")
+        savedBundle = runtime.saveApplication()
+        sys.stdout.write(
+            f"Saved Application {session.applicationId} generation {savedBundle.generation}.\n"
+        )
         return 0
     finally:
-        try:
-            loader.close()
-        finally:
-            host.stop()
+        session.close()
 
 
 if __name__ == "__main__":
