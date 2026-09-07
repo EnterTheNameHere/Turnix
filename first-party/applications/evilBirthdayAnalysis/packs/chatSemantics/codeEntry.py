@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 8
+# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 9
 from __future__ import annotations
 
 import hashlib
@@ -1345,6 +1345,20 @@ def _persistentSecondPresentation(
         raise RuntimeError("Presentation planning requires complete aggregate reference.")
     secondIndex = value["secondIndex"]
 
+    secondBucket = value.get("secondBucket")
+    if not isinstance(secondBucket, dict) or type(secondBucket.get("address")) is not str:
+        raise RuntimeError("Presentation planning aggregate lacks second-bucket reference.")
+    bucketValue = ctx.memory.load(secondBucket["address"])
+    if not isinstance(bucketValue, dict) or not isinstance(bucketValue.get("members"), list):
+        raise RuntimeError("Presentation planning aggregate references unavailable second bucket.")
+    bucketLineNumbers = {
+        member["lineNumber"]
+        for member in bucketValue["members"]
+        if isinstance(member, dict) and type(member.get("lineNumber")) is int
+    }
+    if len(bucketLineNumbers) != len(bucketValue["members"]):
+        raise RuntimeError("Presentation planning bucket contains invalid or duplicate line membership.")
+
     relevantBursts = sorted(
         (
             {
@@ -1352,16 +1366,7 @@ def _persistentSecondPresentation(
                 "burst": burst,
             }
             for lineNumber, burst in burstByLine.items()
-            if math.floor(
-                float(
-                    next(
-                        member["streamTimeSeconds"]
-                        for member in ctx.memory.load(value["secondBucket"]["address"])["members"]
-                        if member["lineNumber"] == lineNumber
-                    )
-                )
-            )
-            == secondIndex
+            if lineNumber in bucketLineNumbers
         ),
         key=lambda item: item["lineNumber"],
     )
