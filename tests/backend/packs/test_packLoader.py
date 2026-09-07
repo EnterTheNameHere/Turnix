@@ -1,4 +1,4 @@
-# file: tests/backend/packs/test_packLoader.py ; version: 6
+# file: tests/backend/packs/test_packLoader.py ; version: 7
 import json
 from pathlib import Path
 
@@ -54,6 +54,31 @@ def test_plan_failure_rolls_back_packs_activated_by_that_plan(tmp_path: Path):
             runtime.capabilities.resolve("test.broken@1")
     finally:
         runtime.close()
+
+
+def test_application_runtime_stop_unloads_owned_packs_before_run_stops(tmp_path: Path):
+    marker = tmp_path / "unloaded.txt"
+    _writePack(
+        tmp_path,
+        "test.stop",
+        "def onLoad(ctx):\n"
+        "    pass\n\n"
+        "def onUnload(ctx, state):\n"
+        f"    ctx.io.writeTextAtomic({str(marker)!r}, 'unloaded')\n",
+    )
+
+    runtime = ApplicationRuntime(
+        appPackId="test.app",
+        packResolver=PackResolver(roots=(tmp_path,)),
+    )
+    runtime.start()
+    runtime.packLoader.activate(
+        ManualActivationPlan(packIds=("test.stop",)),
+    )
+
+    runtime.stop()
+
+    assert marker.read_text(encoding="utf-8") == "unloaded"
 
 
 def test_successful_pack_is_visible_until_loader_close(tmp_path: Path):
