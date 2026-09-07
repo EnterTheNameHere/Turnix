@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 14
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 15
 from __future__ import annotations
 
 import importlib.util
@@ -292,9 +292,17 @@ class _BuildQueryCapabilities:
 
 
 class _BuildQueryCtx:
-    def __init__(self, tokenCounter=None, *, optionalFraction=0.60):
+    def __init__(
+        self,
+        tokenCounter=None,
+        *,
+        optionalFraction=0.60,
+        chatRendering: dict[str, object] | None = None,
+    ):
         self.capabilities = _BuildQueryCapabilities(tokenCounter)
         self.config = {"chatBudget": {"optionalContextMaxFraction": optionalFraction}}
+        if chatRendering is not None:
+            self.config["chatRendering"] = chatRendering
 
 
 def _queryItems() -> list[QueryItem]:
@@ -988,7 +996,7 @@ def test_interleaved_chat_presentation_uses_semantic_repeat_spans_without_mutati
     assert sections == [
         "CHRONOLOGICAL EVIDENCE\n"
         "[00:00:49]\n"
-        "CHAT viewer_name: (bring gun) ×3"
+        "CHAT viewer_name: ⟦bring gun⟧×3"
     ]
     assert item.content == "bring gun bring gun bring gun"
 
@@ -1724,3 +1732,66 @@ def test_multiple_semantic_meanings_from_one_message_are_each_presented_once():
         "CHAT SEMANTIC: semanticClass=praise ×1 [1 user]"
     ]
     assert "semantic source form" not in sections[0]
+
+
+
+def test_within_message_repeat_rendering_has_unambiguous_reserved_span_boundaries():
+    assert analysis._renderChatSpan(
+        {"kind": "emote", "name": "wistyRun", "count": 4}
+    ) == "⟦wistyRun⟧×4"
+    assert analysis._renderChatSpan(
+        {
+            "kind": "composite",
+            "tokens": ["FeelsBirthdayMan", "Clap"],
+            "count": 5,
+        }
+    ) == "⟦FeelsBirthdayMan Clap⟧×5"
+    assert analysis._renderChatSpan(
+        {
+            "kind": "repeat",
+            "count": 3,
+            "spans": [{"kind": "text", "text": "bring gun"}],
+        }
+    ) == "⟦bring gun⟧×3"
+
+
+def test_repeat_rendering_supports_explicit_custom_reserved_markers():
+    assert analysis._renderChatSpan(
+        {"kind": "emote", "name": "wistyRun", "count": 4},
+        repeatStartMarker="<<<",
+        repeatEndMarker=">>>",
+    ) == "<<<wistyRun>>>×4"
+
+
+def test_model_facing_prompt_explains_repeat_and_chat_burst_grammar():
+    ctx = _BuildQueryCtx()
+    payload = _queryPayload(includeChat=True, chatLayout="interleaved")
+
+    query = analysis._buildQuery(ctx, payload)
+
+    assert (
+        "EVIDENCE FORMAT\n"
+        "⟦text⟧×N means the enclosed span occurred N consecutive times "
+        "inside one original chat message."
+    ) in query["payload"]
+    assert (
+        "The repeat delimiters are reserved renderer syntax and do not "
+        "occur literally in the source chat."
+    ) in query["payload"]
+    assert (
+        "CHAT BURST: text ×N [..] represents N separate chat messages"
+    ) in query["payload"]
+
+
+def test_model_facing_prompt_legend_uses_configured_repeat_markers():
+    ctx = _BuildQueryCtx(
+        chatRendering={
+            "repeatStartMarker": "<<<",
+            "repeatEndMarker": ">>>",
+        }
+    )
+    payload = _queryPayload(includeChat=True, chatLayout="interleaved")
+
+    query = analysis._buildQuery(ctx, payload)
+
+    assert "<<<text>>>×N means the enclosed span occurred N consecutive times" in query["payload"]
