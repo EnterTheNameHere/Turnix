@@ -1,4 +1,4 @@
-# file: tests/backend/packs/test_packLoader.py ; version: 1
+# file: tests/backend/packs/test_packLoader.py ; version: 2
 import json
 from pathlib import Path
 
@@ -40,7 +40,7 @@ def test_plan_failure_rolls_back_packs_activated_by_that_plan(tmp_path: Path):
         "    raise RuntimeError('intentional failure')\n",
     )
 
-    host = RuntimeHost()
+    host = RuntimeHost(appPackId="test.app")
     host.start()
     loader = PackLoader(host=host, resolver=PackResolver(roots=(tmp_path,)))
     try:
@@ -64,7 +64,7 @@ def test_successful_pack_is_visible_until_loader_close(tmp_path: Path):
         "    ctx.capabilities.register('test.good@1', lambda ctx, payload: 'ok')\n",
     )
 
-    host = RuntimeHost()
+    host = RuntimeHost(appPackId="test.app")
     host.start()
     loader = PackLoader(host=host, resolver=PackResolver(roots=(tmp_path,)))
     try:
@@ -89,7 +89,7 @@ def test_failing_onload_is_best_effort_unloaded_with_none_state(tmp_path: Path):
         f"    ctx.io.writeTextAtomic({str(marker)!r}, repr(state))\n",
     )
 
-    host = RuntimeHost()
+    host = RuntimeHost(appPackId="test.app")
     host.start()
     loader = PackLoader(host=host, resolver=PackResolver(roots=(tmp_path,)))
     try:
@@ -111,7 +111,7 @@ def test_code_entry_implementation_identity_tracks_exact_executed_source(tmp_pat
     )
     _writePack(tmp_path, "test.identity", source)
 
-    host = RuntimeHost()
+    host = RuntimeHost(appPackId="test.app")
     host.start()
     resolver = PackResolver(roots=(tmp_path,))
     loader = PackLoader(host=host, resolver=resolver)
