@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 9
+# file: backend/runtime/runtimeHost.py ; version: 10
 from __future__ import annotations
 
 from copy import deepcopy
@@ -118,8 +118,7 @@ class RuntimeHost:
             config=config,
             tracer=tracer,
         )
-        if loaded.recoveredFromGeneration is not None:
-            host.applicationRun.application.durableGeneration = loaded.recoveredFromGeneration
+        host.applicationRun.application.durableGeneration = loaded.durableGeneration
         return host, loaded
 
     def _nextSaveBundleCandidate(self) -> SaveBundle:
