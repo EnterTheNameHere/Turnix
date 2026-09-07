@@ -1,7 +1,8 @@
-# file: tests/backend/save/test_applicationStore.py ; version: 3
+# file: tests/backend/save/test_applicationStore.py ; version: 4
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -207,19 +208,42 @@ def test_application_store_never_overwrites_generation_published_by_racing_write
 
     generationPath = applicationPath / "generations" / "00000002.bundle"
     competingPayload = b"already-published-by-other-writer"
-    originalWrite = store._writeFileDurably
+    originalLink = os.link
 
-    def raceAfterExistenceCheck(path, payload):
-        if path.name == ".00000002.bundle.tmp":
-            generationPath.write_bytes(competingPayload)
-        originalWrite(path, payload)
+    def raceAtImmutableCreate(source, destination):
+        assert destination == generationPath
+        generationPath.write_bytes(competingPayload)
+        originalLink(source, destination)
 
-    monkeypatch.setattr(store, "_writeFileDurably", raceAfterExistenceCheck)
+    monkeypatch.setattr(os, "link", raceAtImmutableCreate)
 
     with pytest.raises(FileExistsError):
         store.publish(second)
 
     assert generationPath.read_bytes() == competingPayload
+
+
+def test_application_store_ignores_stale_unique_temporary_files(tmp_path):
+    state, first = _bundle()
+    store = ApplicationStore(tmp_path / "saves")
+    applicationPath = store.createApplication(first)
+
+    generations = applicationPath / "generations"
+    staleGenerationTemp = generations / ".00000002.bundle.tmp-stale"
+    staleCurrentTemp = applicationPath / ".current.tmp-stale"
+    staleGenerationTemp.write_bytes(b"stale generation temp")
+    staleCurrentTemp.write_bytes(b"stale current temp")
+
+    update = state.openTransaction()
+    update.set("chat/line/17/semantic", {"body": "generation-two"})
+    update.commit()
+    second = first.nextGeneration(committedState=state)
+
+    store.publish(second)
+
+    assert (generations / "00000002.bundle").read_bytes() == second.toBytes()
+    assert staleGenerationTemp.read_bytes() == b"stale generation temp"
+    assert staleCurrentTemp.read_bytes() == b"stale current temp"
 
 
 def test_application_store_creation_failure_does_not_publish_application_directory(tmp_path, monkeypatch):
