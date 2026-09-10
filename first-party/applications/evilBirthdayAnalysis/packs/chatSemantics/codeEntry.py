@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 13
+# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 14
 from __future__ import annotations
 
 import hashlib
@@ -10,6 +10,8 @@ from collections.abc import Mapping
 _SEMANTIC_KEYS = ("semanticClass", "entity", "target")
 _TRUSTED_CLASSIFICATION_SOURCE = "userDefined"
 _GIFT_BATCH_MAX_SECONDS = 120
+_UNICODE_TAG_START = 0xE0000
+_UNICODE_TAG_END = 0xE007F
 
 _SINGLE_GIFT_RE = re.compile(r"^(?P<sender>.+?) gifted a Tier (?P<tier>[123]) sub to (?P<recipient>.+)!$")
 _BULK_GIFT_RE = re.compile(
@@ -188,6 +190,28 @@ def _vocabulary(
     return normalizedEmotes, normalizedComposites, after
 
 
+def _isSemanticEdgeNoise(character: str) -> bool:
+    codePoint = ord(character)
+    return character.isspace() or _UNICODE_TAG_START <= codePoint <= _UNICODE_TAG_END
+
+
+def _sanitizeSemanticBody(value: str) -> str:
+    """Removes source-format edge noise only from the interpreted message body.
+
+    Raw chat evidence remains byte-for-byte represented by rawLine/rawMessage.
+    Unicode Tags block characters are default-ignorable source artifacts in the
+    observed Twitch export and must not become lexical text spans merely because
+    Python's ordinary whitespace splitting does not discard them.
+    """
+    start = 0
+    end = len(value)
+    while start < end and _isSemanticEdgeNoise(value[start]):
+        start += 1
+    while end > start and _isSemanticEdgeNoise(value[end - 1]):
+        end -= 1
+    return value[start:end]
+
+
 def _splitUserMessage(value: str) -> tuple[str, str] | None:
     """Dynamically recognize the current username/body form without requiring it at ingestion."""
     separator = value.find(": ")
@@ -196,7 +220,7 @@ def _splitUserMessage(value: str) -> tuple[str, str] | None:
     username = value[:separator]
     if not username:
         return None
-    return username, value[separator + 2 :]
+    return username, _sanitizeSemanticBody(value[separator + 2 :])
 
 
 def _spanIdentity(span: dict[str, object]) -> tuple[object, ...]:
@@ -789,7 +813,7 @@ def _aggregateCanonicalOccurrences(
         raise RuntimeError("Second aggregate lacks second-bucket address.")
     bucketValue = ctx.memory.load(bucketAddress)
     if not isinstance(bucketValue, dict) or not isinstance(bucketValue.get("members"), list):
-        raise RuntimeError("Second aggregate references unavailable second bucket.")
+        raise RuntimeError("Second aggregate references unavailable bucket.")
     timeByLine = {
         member["lineNumber"]: member["streamTimeSeconds"]
         for member in bucketValue["members"]
@@ -1775,9 +1799,6 @@ def _interpret(ctx, payload):
             generated = semantic.get("event")
             if not isinstance(generated, dict):
                 raise RuntimeError(f"Persisted generated chat event at line {lineNumber} is invalid.")
-            # Batch reconstruction mutates recipient lists, so each window gets
-            # its own detached event object rather than modifying the persisted
-            # line-local semantic value.
             generated = {
                 key: (list(value) if isinstance(value, list) else value)
                 for key, value in generated.items()
