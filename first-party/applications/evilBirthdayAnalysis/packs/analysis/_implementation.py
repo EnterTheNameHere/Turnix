@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 24
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 25
 from __future__ import annotations
 
 import json
@@ -837,6 +837,38 @@ def _renderPersistentBurst(
     return f"CHAT BURST: {canonicalMessage} ×{count} {suffix}"
 
 
+def _reactionBurstFragment(
+    value: Mapping[str, object],
+    group: Sequence[QueryItem],
+    *,
+    repeatStartMarker: str,
+    repeatEndMarker: str,
+) -> str:
+    canonicalMessage = value.get("canonicalMessage")
+    durationSeconds = value.get("durationSeconds")
+    if type(canonicalMessage) is not str or not canonicalMessage:
+        raise RuntimeError("Reaction burst lacks canonicalMessage.")
+    if type(durationSeconds) is not int or durationSeconds < 2:
+        raise RuntimeError("Reaction burst has invalid durationSeconds.")
+
+    count = len(group)
+    unit = f"{repeatStartMarker}{canonicalMessage}{repeatEndMarker}"
+    sourceAuthors = [
+        sourceAuthor
+        for item in group
+        if type(sourceAuthor := item.metadata.get("sourceUsername")) is str
+    ]
+    if len(sourceAuthors) != count:
+        suffix = f"[{count} messages; {durationSeconds}s]"
+    else:
+        uniqueAuthors = len({author.casefold() for author in sourceAuthors})
+        if uniqueAuthors == count:
+            suffix = f"[{uniqueAuthors} users; {durationSeconds}s]"
+        else:
+            suffix = f"[{count} messages; {uniqueAuthors} users; {durationSeconds}s]"
+    return f"{unit}×{count} {suffix}"
+
+
 def _persistentPresentationOwners(
     item: QueryItem,
 ) -> tuple[str, Sequence[Mapping[str, object]]] | None:
@@ -1141,7 +1173,14 @@ def _evidenceSections(
                             if burstSemantics is not None:
                                 semanticFragments.extend(burstSemantics)
                             elif _reactionOnlyBurst(burstValue):
-                                reactionFragments.append(renderedBurst.removeprefix("CHAT BURST: "))
+                                reactionFragments.append(
+                                    _reactionBurstFragment(
+                                        burstValue,
+                                        burstGroup,
+                                        repeatStartMarker=repeatStartMarker,
+                                        repeatEndMarker=repeatEndMarker,
+                                    )
+                                )
                             else:
                                 lines.append(renderedBurst)
                         consumedChatIds.update(groupItem.itemId for groupItem in burstGroup)
