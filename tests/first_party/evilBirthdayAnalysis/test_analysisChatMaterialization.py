@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 21
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 22
 from __future__ import annotations
 
 import importlib.util
@@ -1666,7 +1666,7 @@ def test_semantic_unit_owner_compacts_presented_messages_without_raw_duplication
     assert sections == [
         "CHRONOLOGICAL EVIDENCE\n"
         "[00:00:55]\n"
-        "CHAT SEMANTICS: praise ×3 [2 users]"
+        "CHAT SEMANTICS: ⟦praise⟧×3 [2 users]"
     ]
     assert "GIGAEVIL" not in sections[0]
     assert "EVILLOVE" not in sections[0]
@@ -1697,7 +1697,7 @@ def test_partial_semantic_group_selection_counts_only_presented_contribution():
     assert sections == [
         "CHRONOLOGICAL EVIDENCE\n"
         "[00:00:56]\n"
-        "CHAT SEMANTICS: praise"
+        "CHAT SEMANTICS: ⟦praise⟧"
     ]
     assert "×3" not in sections[0]
 
@@ -1728,7 +1728,7 @@ def test_multiple_semantic_meanings_from_one_message_are_each_presented_once():
     assert sections == [
         "CHRONOLOGICAL EVIDENCE\n"
         "[00:00:57]\n"
-        "CHAT SEMANTICS: negative ×2; praise"
+        "CHAT SEMANTICS: ⟦negative⟧×2; ⟦praise⟧"
     ]
     assert "semantic source form" not in sections[0]
 
@@ -1948,7 +1948,7 @@ def test_reaction_only_surface_messages_share_one_summary_line():
     assert sections == [
         "CHRONOLOGICAL EVIDENCE\n"
         "[00:09:35]\n"
-        "CHAT REACTIONS: Lol; OK; RIPBOZO"
+        "CHAT REACTIONS: ⟦Lol⟧; ⟦OK⟧; ⟦RIPBOZO⟧"
     ]
 
 
@@ -1993,8 +1993,8 @@ def test_semantic_owned_reaction_is_not_duplicated_in_surface_reactions():
     assert sections == [
         "CHRONOLOGICAL EVIDENCE\n"
         "[00:00:58]\n"
-        "CHAT SEMANTICS: affection\n"
-        "CHAT REACTIONS: modCheck"
+        "CHAT SEMANTICS: ⟦affection⟧\n"
+        "CHAT REACTIONS: ⟦modCheck⟧"
     ]
     assert "vedalHeart" not in sections[0]
 
@@ -2035,6 +2035,60 @@ def test_trusted_semantic_reaction_burst_uses_meaning_instead_of_surface_label()
         for line_number, username in [(201, "alice"), (202, "bob"), (203, "carol")]
     ]
 
-    assert analysis._burstSemanticFragments(burstValue, group) == [
-        "praise ×3 [3 users; 3s]"
+    assert analysis._burstSemanticFragments(
+        burstValue,
+        group,
+        repeatStartMarker="⟦",
+        repeatEndMarker="⟧",
+    ) == [
+        "⟦praise⟧×3 [3 users; 3s]"
+    ]
+
+
+
+def test_reaction_and_semantic_aggregate_brackets_use_configured_markers():
+    semanticOwner = _semantic_group_owner(line_counts=[(301, 2)], semantic_class="praise")
+    semantic = _persistent_chat_item(
+        line_number=301,
+        username="alice",
+        content="GIGAEVIL GIGAEVIL",
+        second=70,
+        aggregate_entry={
+            "kind": "message",
+            "lineNumber": 301,
+            "semantic": {"address": "evilanalysis/chat/line/301/semantic"},
+        },
+        presentation_owners=[semanticOwner],
+    )
+    reaction = QueryItem(
+        itemId="chat:302",
+        kind="chat",
+        content="modCheck",
+        metadata={
+            "streamStartSeconds": 70.0,
+            "lineNumber": 302,
+            "username": "bob",
+            "sourceUsername": "bob",
+            "analysis": {
+                "kind": "userMessage",
+                "streamTime": "00:01:10",
+                "spans": [{"kind": "emote", "name": "modCheck", "count": 1}],
+            },
+        },
+    )
+
+    sections = analysis._evidenceSections(
+        transcriptItems=[],
+        chatItems=[semantic, reaction],
+        includeChat=True,
+        chatLayout="interleaved",
+        repeatStartMarker="<<<",
+        repeatEndMarker=">>>",
+    )
+
+    assert sections == [
+        "CHRONOLOGICAL EVIDENCE\n"
+        "[00:01:10]\n"
+        "CHAT SEMANTICS: <<<praise>>>×2\n"
+        "CHAT REACTIONS: <<<modCheck>>>"
     ]
