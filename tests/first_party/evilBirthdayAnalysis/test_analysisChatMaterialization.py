@@ -1,4 +1,4 @@
-# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 22
+# file: tests/first_party/evilBirthdayAnalysis/test_analysisChatMaterialization.py ; version: 23
 from __future__ import annotations
 
 import importlib.util
@@ -1149,6 +1149,8 @@ def _persistent_chat_item(
     semantic_address = f"evilanalysis/chat/line/{line_number}/semantic"
     bucket_address = f"evilanalysis/chat/second/s{second}/semantic"
     aggregate_address = f"evilanalysis/chat/second/s{second}/aggregate"
+    hours, remainder = divmod(second, 3600)
+    minutes, seconds = divmod(remainder, 60)
     return QueryItem(
         itemId=f"chat:{line_number}",
         kind="chat",
@@ -1160,7 +1162,7 @@ def _persistent_chat_item(
             "sourceUsername": username,
             "analysis": {
                 "kind": "userMessage",
-                "streamTime": f"00:00:{second:02d}",
+                "streamTime": f"{hours:02d}:{minutes:02d}:{seconds:02d}",
                 "spans": [{"kind": "text", "text": content}],
             },
             "memory": {
