@@ -1,4 +1,4 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 23
+# file: first-party/applications/evilBirthdayAnalysis/packs/analysis/_implementation.py ; version: 24
 from __future__ import annotations
 
 import json
@@ -586,6 +586,9 @@ def _trustedReactionUnitsFromSpans(
 def _burstSemanticFragments(
     value: Mapping[str, object],
     group: Sequence[QueryItem],
+    *,
+    repeatStartMarker: str,
+    repeatEndMarker: str,
 ) -> list[str] | None:
     spans = value.get("canonicalSpans")
     durationSeconds = value.get("durationSeconds")
@@ -633,10 +636,11 @@ def _burstSemanticFragments(
     for key in sorted(byMeaning):
         current = byMeaning[key]
         totalCount = int(current["count"]) * messageCount
-        countText = "" if totalCount == 1 else f" ×{totalCount}"
-        fragments.append(
-            f"{_semanticMeaningLabel(current['meaning'])}{countText} {suffix}"
+        label = (
+            f"{repeatStartMarker}{_semanticMeaningLabel(current['meaning'])}{repeatEndMarker}"
         )
+        countText = "" if totalCount == 1 else f"×{totalCount}"
+        fragments.append(f"{label}{countText} {suffix}")
     return fragments
 
 
@@ -677,6 +681,9 @@ def _semanticMeaningLabel(meaning: Mapping[str, object]) -> str:
 def _semanticGroupFragment(
     meaning: Mapping[str, object],
     contributions: Sequence[tuple[QueryItem, int]],
+    *,
+    repeatStartMarker: str,
+    repeatEndMarker: str,
 ) -> str:
     totalCount = sum(count for _item, count in contributions)
     uniqueItems = {item.itemId for item, _count in contributions}
@@ -686,8 +693,10 @@ def _semanticGroupFragment(
         if type(sourceAuthor := item.metadata.get("sourceUsername")) is str
     ]
     messageCount = len(uniqueItems)
-    label = _semanticMeaningLabel(meaning)
-    countText = "" if totalCount == 1 else f" ×{totalCount}"
+    label = (
+        f"{repeatStartMarker}{_semanticMeaningLabel(meaning)}{repeatEndMarker}"
+    )
+    countText = "" if totalCount == 1 else f"×{totalCount}"
     if len(sourceAuthors) != len(contributions):
         return f"{label}{countText} [{messageCount} messages]"
     uniqueAuthors = len({author.casefold() for author in sourceAuthors})
@@ -698,21 +707,28 @@ def _semanticGroupFragment(
     return f"{label}{countText} [{messageCount} messages; {uniqueAuthors} users]"
 
 
-def _reactionGroupFragment(content: str, group: Sequence[QueryItem]) -> str:
+def _reactionGroupFragment(
+    content: str,
+    group: Sequence[QueryItem],
+    *,
+    repeatStartMarker: str,
+    repeatEndMarker: str,
+) -> str:
     count = len(group)
+    unit = f"{repeatStartMarker}{content}{repeatEndMarker}"
     if count <= 1:
-        return content
+        return unit
     sourceAuthors = [
         sourceAuthor
         for item in group
         if type(sourceAuthor := item.metadata.get("sourceUsername")) is str
     ]
     if len(sourceAuthors) != count:
-        return f"{content} ×{count} [{count} messages]"
+        return f"{unit}×{count} [{count} messages]"
     uniqueAuthors = len({author.casefold() for author in sourceAuthors})
     if uniqueAuthors == count:
-        return f"{content} ×{count} [{uniqueAuthors} users]"
-    return f"{content} ×{count} [{count} messages; {uniqueAuthors} users]"
+        return f"{unit}×{count} [{uniqueAuthors} users]"
+    return f"{unit}×{count} [{count} messages; {uniqueAuthors} users]"
 
 
 def _persistentChatAggregateEntry(item: QueryItem) -> tuple[str, Mapping[str, object]] | None:
@@ -1116,7 +1132,12 @@ def _evidenceSections(
                         burstValue, burstGroup = completeBurst
                         if item is burstGroup[0]:
                             renderedBurst = _renderPersistentBurst(burstValue, burstGroup)
-                            burstSemantics = _burstSemanticFragments(burstValue, burstGroup)
+                            burstSemantics = _burstSemanticFragments(
+                                burstValue,
+                                burstGroup,
+                                repeatStartMarker=repeatStartMarker,
+                                repeatEndMarker=repeatEndMarker,
+                            )
                             if burstSemantics is not None:
                                 semanticFragments.extend(burstSemantics)
                             elif _reactionOnlyBurst(burstValue):
@@ -1132,6 +1153,8 @@ def _evidenceSections(
                             _semanticGroupFragment(
                                 group["meaning"],
                                 group["contributions"],
+                                repeatStartMarker=repeatStartMarker,
+                                repeatEndMarker=repeatEndMarker,
                             )
                         )
                     continue
@@ -1151,7 +1174,9 @@ def _evidenceSections(
                     group = fallbackGroups.get(content, [])
                 if len(group) <= 1:
                     if _reactionOnlyItem(item):
-                        reactionFragments.append(content)
+                        reactionFragments.append(
+                            f"{repeatStartMarker}{content}{repeatEndMarker}"
+                        )
                     else:
                         lines.append(f"CHAT {_chatAuthor(item)}: {content}")
                     continue
@@ -1171,7 +1196,14 @@ def _evidenceSections(
                 else:
                     suffix = f"[{count} messages; {uniqueAuthors} users]"
                 if all(_reactionOnlyItem(groupItem) for groupItem in group):
-                    reactionFragments.append(_reactionGroupFragment(content, group))
+                    reactionFragments.append(
+                        _reactionGroupFragment(
+                            content,
+                            group,
+                            repeatStartMarker=repeatStartMarker,
+                            repeatEndMarker=repeatEndMarker,
+                        )
+                    )
                 else:
                     lines.append(f"CHAT: {content} ×{count} {suffix}")
 
@@ -1222,10 +1254,11 @@ def _renderPrompt(
             "CHAT BURST: text ×N [..] represents N separate chat messages with the same or canonically "
             "equivalent content aggregated across the stated short interval.\n"
             "CHAT SEMANTICS lists trusted meanings for reaction-only source messages. Those messages are represented "
-            "there instead of being repeated under CHAT REACTIONS.\n"
+            "there instead of being repeated under CHAT REACTIONS. Each aggregate unit is enclosed by the reserved "
+            "repeat markers; a unit without a multiplier represents one occurrence.\n"
             "CHAT REACTIONS lists reaction-only source messages without a complete trusted semantic meaning. "
-            "A bare entry represents one source message from one user; explicit multipliers summarize repeated "
-            "or aggregated participation."
+            "Each aggregate unit is enclosed by the reserved repeat markers; ⟦text⟧ represents one source message "
+            "and ⟦text⟧×N represents repeated or aggregated participation."
         )
     if evidenceNotice is not None:
         if type(evidenceNotice) is not str or not evidenceNotice:
