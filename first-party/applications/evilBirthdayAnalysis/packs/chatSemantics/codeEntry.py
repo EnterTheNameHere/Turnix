@@ -1,10 +1,11 @@
-# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 14
+# file: first-party/applications/evilBirthdayAnalysis/packs/chatSemantics/codeEntry.py ; version: 15
 from __future__ import annotations
 
 import hashlib
 import json
 import math
 import re
+import warnings as pythonWarnings
 from collections.abc import Mapping
 
 _SEMANTIC_KEYS = ("semanticClass", "entity", "target")
@@ -12,6 +13,8 @@ _TRUSTED_CLASSIFICATION_SOURCE = "userDefined"
 _GIFT_BATCH_MAX_SECONDS = 120
 _UNICODE_TAG_START = 0xE0000
 _UNICODE_TAG_END = 0xE007F
+_PETPET_MODIFIER = "PETPET"
+_PETPET_FOLDED = _PETPET_MODIFIER.casefold()
 
 _SINGLE_GIFT_RE = re.compile(r"^(?P<sender>.+?) gifted a Tier (?P<tier>[123]) sub to (?P<recipient>.+)!$")
 _BULK_GIFT_RE = re.compile(
@@ -150,6 +153,8 @@ def _vocabulary(
         if type(name) is not str or not name or not isinstance(metadata, dict):
             raise ValueError("Chat emote definitions require non-empty string names and object metadata.")
         folded = name.casefold()
+        if folded == _PETPET_FOLDED:
+            raise ValueError("PETPET is a reserved postfix emote modifier and must not be defined as a standalone emote.")
         if folded in canonicalEmoteNames:
             raise ValueError(
                 "Chat emote definitions must be unique case-insensitively; "
@@ -246,12 +251,43 @@ def _appendSpan(spans: list[dict[str, object]], span: dict[str, object]) -> None
     spans.append(span)
 
 
+def _petpetWarnings(message: str, emotes: dict[str, dict[str, object]]) -> list[dict[str, object]]:
+    tokens = message.split()
+    warnings: list[dict[str, object]] = []
+    for index, token in enumerate(tokens):
+        if token.casefold() != _PETPET_FOLDED:
+            continue
+        precedingToken = tokens[index - 1] if index > 0 else None
+        if precedingToken is not None and precedingToken.casefold() in emotes:
+            continue
+        warnings.append(
+            {
+                "code": "unboundPetpet",
+                "token": _PETPET_MODIFIER,
+                "sourceToken": token,
+                "tokenIndex": index,
+                "precedingToken": precedingToken,
+                "message": (
+                    "PETPET is not immediately preceded by a recognized emote; "
+                    "the preceding base may be missing from chatEmotes.json."
+                ),
+            }
+        )
+    return warnings
+
+
 def _matchComposite(tokens: list[str], index: int, composites: list[dict[str, object]]) -> dict[str, object] | None:
     for composite in composites:
         pattern = composite["foldedTokens"]
-        candidate = tuple(token.casefold() for token in tokens[index : index + len(pattern)])
-        if candidate == pattern:
-            return composite
+        nextIndex = index + len(pattern)
+        candidate = tuple(token.casefold() for token in tokens[index:nextIndex])
+        if candidate != pattern:
+            continue
+        if nextIndex < len(tokens) and tokens[nextIndex].casefold() == _PETPET_FOLDED:
+            # PETPET modifies the immediately preceding emote, so its postfix
+            # binding is tighter than a fixed composite that would consume it.
+            continue
+        return composite
     return None
 
 
@@ -317,6 +353,30 @@ def _lexMessage(message: str, emotes: dict[str, dict[str, object]], composites: 
     spans: list[dict[str, object]] = []
     index = 0
     while index < len(tokens):
+        token = tokens[index]
+        emote = emotes.get(token.casefold())
+        if (
+            emote is not None
+            and index + 1 < len(tokens)
+            and tokens[index + 1].casefold() == _PETPET_FOLDED
+        ):
+            count, nextIndex = _occurrenceCount(tokens, index + 2)
+            _appendSpan(
+                spans,
+                {
+                    "kind": "composite",
+                    "tokens": [emote["name"], _PETPET_MODIFIER],
+                    "count": count,
+                    "metadata": {
+                        "composition": "postfixOverlay",
+                        "modifier": _PETPET_MODIFIER,
+                        "baseEmote": emote["name"],
+                    },
+                },
+            )
+            index = nextIndex
+            continue
+
         composite = _matchComposite(tokens, index, composites)
         if composite is not None:
             pattern = composite["tokens"]
@@ -333,8 +393,6 @@ def _lexMessage(message: str, emotes: dict[str, dict[str, object]], composites: 
             index = nextIndex
             continue
 
-        token = tokens[index]
-        emote = emotes.get(token.casefold())
         if emote is not None:
             count, nextIndex = _occurrenceCount(tokens, index + 1)
             _appendSpan(
@@ -1122,8 +1180,6 @@ def _persistentIdenticalMessageBursts(
         startSecond = runSeconds[0]
         endSecond = runSeconds[-1]
 
-        # If the preceding second is not fully observed, we cannot prove this
-        # second is the logical start slot and must not publish it.
         if contextStartSeconds > float(startSecond - 1):
             continue
 
@@ -1143,8 +1199,6 @@ def _persistentIdenticalMessageBursts(
     for startSecond in range(firstEligibleStart, lastEligibleStart + 1):
         runs = eventRunsByStart.get(startSecond, [])
         if startSecond in openStarts:
-            # Include every observed second through the coverage edge so a
-            # changed partial run changes invalidation validity.
             inputEndSecond = max(
                 runSeconds[-1]
                 for canonicalKey, runSeconds in _canonicalRuns(secondsByCanonical)
@@ -1262,10 +1316,7 @@ def _semanticUnitPresentation(
             {"meaning": meaning, "count": 0},
         )
         normalized["count"] = int(normalized["count"]) + count
-    return [
-        normalizedByMeaning[key]
-        for key in sorted(normalizedByMeaning)
-    ]
+    return [normalizedByMeaning[key] for key in sorted(normalizedByMeaning)]
 
 
 def _meaningKey(meaning: dict[str, object]) -> str:
@@ -1448,10 +1499,7 @@ def _secondPresentationValue(
             }
         )
 
-    entries.extend(
-        semanticGroups[key]
-        for key in sorted(semanticGroups)
-    )
+    entries.extend(semanticGroups[key] for key in sorted(semanticGroups))
     return {
         "secondIndex": secondIndex,
         "entries": entries,
@@ -1586,13 +1634,17 @@ def _lineSemantic(
     if subscription is not None:
         platformEvent, authoredMessage = subscription
         if authoredMessage:
-            return {
+            warnings = _petpetWarnings(authoredMessage, emotes)
+            semantic = {
                 "kind": "userMessage",
                 "username": username,
                 "body": authoredMessage,
                 "spans": _lexMessage(authoredMessage, emotes, composites),
                 "platformEvent": platformEvent,
             }
+            if warnings:
+                semantic["warnings"] = warnings
+            return semantic
         return {
             "kind": "generatedEvent",
             "username": username,
@@ -1618,13 +1670,16 @@ def _lineSemantic(
             "event": botEvent,
         }
 
-    spans = _lexMessage(message, emotes, composites)
-    return {
+    warnings = _petpetWarnings(message, emotes)
+    semantic = {
         "kind": "userMessage",
         "username": username,
         "body": message,
-        "spans": spans,
+        "spans": _lexMessage(message, emotes, composites),
     }
+    if warnings:
+        semantic["warnings"] = warnings
+    return semantic
 
 
 def _lineSemanticBasis(
@@ -1742,6 +1797,7 @@ def _interpret(ctx, payload):
     emotes, composites, vocabularyObservation = _vocabulary(ctx)
     records: list[dict[str, object]] = []
     rendered: list[str] = []
+    diagnostics: list[dict[str, object]] = []
     openBatches: dict[tuple[str, int], tuple[float, dict[str, object], int]] = {}
 
     for rawRecord in rawRecords:
@@ -1872,6 +1928,24 @@ def _interpret(ctx, payload):
             "streamTimeSeconds": float(streamTimeSeconds),
             "streamTime": streamTime,
         }
+        semanticWarnings = semantic.get("warnings", [])
+        if not isinstance(semanticWarnings, list) or any(not isinstance(item, dict) for item in semanticWarnings):
+            raise RuntimeError(f"Persisted user chat semantic line {lineNumber} has invalid warnings.")
+        if semanticWarnings:
+            analysis["warnings"] = [dict(item) for item in semanticWarnings]
+            for warning in semanticWarnings:
+                diagnostic = {
+                    "lineNumber": lineNumber,
+                    "streamTime": streamTime,
+                    "username": username,
+                    **warning,
+                }
+                diagnostics.append(diagnostic)
+                pythonWarnings.warn(
+                    f"Chat line {lineNumber} ({streamTime}): {warning['message']}",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
         platformEvent = semantic.get("platformEvent")
         if platformEvent is not None:
             if not isinstance(platformEvent, dict):
@@ -1904,6 +1978,7 @@ def _interpret(ctx, payload):
         "burstStartCells": burstStartCells,
         "identicalMessageBursts": identicalMessageBursts,
         "secondPresentations": secondPresentations,
+        "warnings": diagnostics,
         "text": "\n".join(rendered),
     }
 
