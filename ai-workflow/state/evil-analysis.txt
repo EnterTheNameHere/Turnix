@@ -45,6 +45,114 @@ The defining appPack currently declares no CodeEntries itself. Behavior is
 provided by activated subordinate Packs. This is a current materialization fact,
 not a rule that AppPacks must be code-free.
 
+Effective analysis capability graph
+-----------------------------------
+The normal CLI executes one outer runtime.runJob("evilAnalysis.run@1"). That
+Job creates the top-level OrchestrationUnit transaction and ManagedIoTransaction.
+All capability invocations below inherit those views through fresh
+CodeEntryContexts.
+
+evilAnalysis.run@1 performs application-specific batch/window orchestration. For
+each analysis window it prepares chat side evidence and invokes
+ctx.llm.runProcessing() with:
+- memoryKey "evilbirthday";
+- evilAnalysis.buildQueryItems@1;
+- evilAnalysis.buildQuery@1;
+- evilAnalysis.completeWindow@1;
+- configured shared LLM provider/model/options.
+
+buildQueryItems composes reusable model evidence through application
+capabilities. The live wrapper replaces the older direct raw-chat path with
+raw-chat selection followed by evilAnalysis.chatInterpret@1. Transcript,
+prompt, chat semantic/presentation, identity-sanitization, and token-budget
+algorithms are application behavior rather than generic ProcessingPipeline
+semantics.
+
+buildQuery performs application-specific rendering and chat budgeting after the
+provider execution profile is resolved. Exact token measurement is obtained
+through evilAnalysis.tokenBudget@1, which ultimately uses provider/model-aware
+LLM token estimation.
+
+runProcessing stages reusable QueryItems, the exact accepted QueryItems, exact
+model-facing query evidence, response evidence, execution evidence, and
+ProcessingRun identity in its child transaction. completeWindow runs in that
+same ProcessingRun transaction and stages the durable application result keyed
+by processingRunId. Its child transaction therefore cannot independently escape
+the ProcessingRun transaction.
+
+Because the LLM facade passes the current invocation memory view into
+runProcessing(), this ProcessingRun transaction is a child of the outer Job
+transaction in the real Evil path. runProcessing() returning means its state has
+been promoted into the still-speculative Job transaction, not yet published to
+the committed Application root.
+
+Export boundary
+---------------
+After each ProcessingRun returns, evilAnalysis.run@1 builds a human/diagnostic
+export projection and calls evilAnalysis.results@1. The results Pack writes JSON
+through ctx.io.writeJsonAtomic(). Because the capability inherits the outer
+Job's ManagedIoTransaction, the physical output remains staged until runJob()
+reaches its managed-I/O commit.
+
+Export errors are deliberately caught per window and represented as exportError
+inside the Job result. A failed export capability therefore does not currently
+fail the analysis Job and does not reject that window's staged authoritative
+ProcessingRun/result state. This is application policy, not a generic
+ProcessingPipeline guarantee.
+
+If no uncaught later failure occurs, runJob() first commits the outer memory
+transaction and then publishes the staged ManagedIo batch. Only after the Job
+returns does the CLI call runtime.saveApplication() when
+authoritativeStateAccepted is true.
+
+This yields three distinct persistence/evidence surfaces that must not be
+collapsed conceptually:
+1. authoritative Application values accepted by the Job mutation commit;
+2. human/diagnostic result JSON published by the Job ManagedIo transaction;
+3. durable Application SaveBundle generation published by saveApplication()
+   after the Job.
+
+A managed-I/O publication failure after memory commit produces a failed Job with
+authoritativeStateAccepted=True. The CLI still saves that accepted Application
+state before re-raising job.error. This is deliberate current authority behavior
+and is separately documented in design-reconciliation.txt.
+
+Prompt preview path
+-------------------
+previewPrompt@1 runs under a normal Job but uses ctx.llm.prepareProcessing()
+rather than EngineCall. Reusable QueryItem preparation is promoted into the
+outer Job transaction. After successful Job return, the CLI saves the
+Application generation, then writes the preview text/metadata projection using
+the CLI-owned ManagedIo outside the Job transaction.
+
+The preview output files are therefore post-Job projections, not part of the
+preview Job's ManagedIo transaction. This is currently suitable because preview
+files are user-requested diagnostic artifacts rather than authoritative
+Application state.
+
+Reusable contract exposed by this application
+---------------------------------------------
+The reusable framework shape demonstrated here is:
+- one outer OrchestrationUnit owns authoritative mutation acceptance;
+- ProcessingRun executes as a child transactional procedure when entered from a
+  Pack invocation;
+- application-defined capabilities provide stage-specific transformations;
+- reusable prepared items survive successful runs independently of per-run
+  filtering;
+- provider execution profile is available before model-facing selection/build;
+- exact query/response/execution evidence is retained with ProcessingRun;
+- completion can derive application state inside the same ProcessingRun
+  transaction;
+- display/stream observers are non-authoritative;
+- artifact/export publication is a separate concern from ProcessingRun state;
+- durable Application SaveBundle publication is a separate concern again.
+
+The materialization-test application should be able to reuse this transactional
+execution spine without inheriting Evil-specific QueryItem types, prompt
+rendering, chat budgeting, or batch/window algorithms. Its classic/manual-turn
+mode and Actant/checkpoint mode are likely to create new pressure on generic
+ProcessingPipeline sequencing, retained run state, and restart semantics.
+
 Integration pressure already exercised
 --------------------------------------
 This application currently exercises at least:

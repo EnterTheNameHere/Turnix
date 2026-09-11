@@ -21,8 +21,9 @@ The repository has been explored from the working Evil Birthday application
 inward rather than assuming every backend file is live.
 
 Verified live/shared surfaces are documented in state/actant.txt. Design versus
-implementation classification for the relevant live slice is now documented in
-state/design-reconciliation.txt.
+implementation classification for the relevant live slice is documented in
+state/design-reconciliation.txt. The effective Evil capability/transaction/
+export graph is documented in state/evil-analysis.txt.
 
 The user reports the Evil application is fully functional with its external
 data sources and all repository tests are green. End-to-end Evil execution is
@@ -52,10 +53,10 @@ outer Job transaction. Direct runProcessing() against the committed root can,
 however, make ProcessingRun completion the effective authoritative commit
 boundary; do not make that the final generic ProcessingPipeline contract.
 
-The previously flagged runJob() memory-before-I/O ordering is now classified
-more precisely. DA-04 and DA-24 explicitly allow already committed state to
-remain authoritative even when the owning OrchestrationUnit later fails. A
-repository regression test deliberately requires a failed Job with
+The previously flagged runJob() memory-before-I/O ordering is classified more
+precisely. DA-04 and DA-24 explicitly allow already committed state to remain
+authoritative even when the owning OrchestrationUnit later fails. A repository
+regression test deliberately requires a failed Job with
  authoritativeStateAccepted=True after managed-I/O publication failure. This is
 therefore not an accidental ordering defect. The incomplete part is DA-07:
 current ManagedIo is not yet the full IoManager with identity-bearing rollback
@@ -69,6 +70,37 @@ for later promotion.
 
 Producer/validity/provenance/dependency identity and SourceObservation remain
 candidate newer implementation design awaiting documentation integration.
+
+Evil execution graph findings
+-----------------------------
+One outer evilAnalysis.run@1 Job owns the whole configured batch. Every
+per-window LlmProcessingPipeline.runProcessing() is a child transaction because
+the CodeEntry LLM facade passes the current invocation memory view. Its
+completeWindow capability stages application result identity in that same child
+transaction. ProcessingRun success therefore promotes into the still-speculative
+outer Job; it does not independently publish Application state in the exercised
+path.
+
+Per-window result export is not actually an immediate irreversible side effect:
+evilAnalysis.results@1 writes through the same outer Job ManagedIoTransaction,
+so files remain staged until Job I/O publication. Export exceptions are caught
+per window and represented as result evidence; they do not currently fail the
+Job. This is Evil application policy.
+
+After Job return the CLI separately calls saveApplication() whenever
+ authoritativeStateAccepted is true. Therefore authoritative value acceptance,
+result-JSON publication, and SaveBundle generation publication are three
+separate boundaries. On managed-I/O failure after memory commit, the Job fails
+but the CLI still saves the accepted Application state before re-raising the
+error.
+
+Prompt preview uses prepareProcessing() inside a Job, saves accepted reusable
+preparation after Job return, then writes preview files as CLI-owned diagnostic
+projections outside that Job transaction.
+
+The reusable shape to carry into materialization testing is the outer
+OrchestrationUnit -> child ProcessingRun -> optional transactional completion
+spine, not Evil's prompt/chat/window algorithms.
 
 Shared llama.cpp findings
 -------------------------
@@ -84,20 +116,38 @@ codeEntry.py has many undocumented classes/helpers/lifecycle functions, and
 change there must bring touched files into the current source rules and expand
 coverage appropriate to the change.
 
+Processing tests reviewed
+-------------------------
+Current tests deliberately cover reusable QueryItem carry-forward, failure
+rollback, filter-as-subset semantics, provider-profile-before-build ordering,
+historical run snapshot retention when a stable QueryItem identity changes,
+observer failure as evidence rather than processing failure, opaque query
+payload evidence, completionInput forwarding without automatic retention,
+completion failure rollback, and child capability memory not escaping a failed
+ProcessingRun.
+
+These tests validate the currently materialized LLM pipeline strongly, but they
+are not tests for the full DA-31 generic ProcessingPipeline: no Hook
+registration/participation plan, retry/restart, generic processor definition,
+or checkpoint semantics exists yet.
+
 Next integration work
 ---------------------
-1. Trace the Evil analysis effective capability graph around prompt building,
-   runProcessing(), completion, and result export. Record only reusable
-   contracts; do not absorb application algorithms.
-2. Read the relevant LLM provider/processing tests in detail and classify which
-   DA-31 boundaries are intentionally covered versus absent.
-3. Inspect the materialization-test application branch/state once its concrete
-   first iteration exists or the application thread exports a framework
-   requirement. Reuse llama.cpp and the existing Job/ProcessingRun transaction
-   shape rather than inventing a second execution path.
-4. Make framework/shared-Pack code changes only when a concrete shared
-   requirement or verified divergence demands them.
-5. Keep design-reconciliation.txt current whenever a classification changes.
+1. Inspect the materialization-test application state/branch as soon as its
+   concrete implementation appears or its thread exports a framework
+   requirement. Compare its classic/manual-turn and Actant workflows against
+   the reusable execution spine above.
+2. Determine whether its first iteration can use existing Job +
+   LlmProcessingPipeline unchanged. Do not materialize generic checkpoints until
+   a concrete restart requirement demands their semantics.
+3. When shared provider changes are required, extend
+   first-party/llmDrivers/llamaCpp rather than creating an application-local
+   provider, and bring touched Python files under current documentation/version
+   rules.
+4. Keep design-reconciliation.txt current whenever a classification changes.
+5. Finish obsolete docs/design/ai/helpers cleanup when convenient; those files
+   remain excluded from implementation knowledge regardless of connector
+   deletion difficulties.
 
 Python/test rules
 -----------------
