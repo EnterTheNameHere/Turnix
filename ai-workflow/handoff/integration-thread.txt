@@ -20,11 +20,9 @@ Baseline established
 The repository has been explored from the working Evil Birthday application
 inward rather than assuming every backend file is live.
 
-Verified live/shared surfaces now documented in state/actant.txt include:
-RuntimeHost, ApplicationRuntime, ApplicationLifecycle, manual Pack activation,
-Python CodeEntry loading, CodeEntryContext, capabilities, committed values,
-managed I/O, SaveBundle/ApplicationStore persistence, LLM processing, and the
-separate first-party llama.cpp provider.
+Verified live/shared surfaces are documented in state/actant.txt. Design versus
+implementation classification for the relevant live slice is now documented in
+state/design-reconciliation.txt.
 
 The user reports the Evil application is fully functional with its external
 data sources and all repository tests are green. End-to-end Evil execution is
@@ -40,43 +38,66 @@ cannot index them under current CMR rules.
 Do not read docs/design/rewrite_recommendations/ or docs/design/upcoming/ as
 implementation knowledge. They are authoring/rewrite workspace.
 
-Implementation reconciliation rule
-----------------------------------
-Repository presence does not imply liveness. Classify design/implementation
-mismatches as incomplete implementation, apparent defect/divergence, or
-candidate newer design embodied in implementation. Several live files explicitly
-mark producer/validity/provenance, SourceObservation, committed-value snapshot,
-and SaveBundle semantics as design-significant material awaiting documentation
-promotion; preserve those as candidate newer design rather than deleting them to
-match older documents.
+Reconciliation results
+----------------------
+ManualActivationPlan + mechanical PackLoader preserve the DA-14/DA-29 authority
+shape and are an intentionally incomplete PackManager substitute.
 
-Important unresolved semantic point
------------------------------------
-ApplicationRuntime.runJob() currently commits the authoritative value
-transaction before ManagedIoTransaction.commit(). authoritativeStateAccepted is
-set after the value commit. If I/O publication then fails, the Job fails but the
-memory mutation has already become authoritative. The intended project concept
-has described the topmost orchestration unit as the successful grouping and
-transaction acceptance boundary. This ordering therefore needs deliberate
-design reconciliation before we build further generic orchestration/checkpoint
-semantics on it. Do not silently change it without checking the relevant design
-and application requirements.
+CodeEntryContext substantially preserves DA-30 ModCallContext lifetime and
+mediation semantics for the currently implemented facade subset.
 
-Next exploration/integration work
----------------------------------
-1. Read the relevant legacy orchestration, memory/state/journal, application,
-   Pack/CodeEntry, LLM, and I/O design sections selected through CMR-04. Do not
-   ingest unrelated design areas.
-2. Compare those contracts with the verified live implementation state.
-3. Record candidate newer implementation design separately from true gaps or
-   defects.
-4. Trace the llama.cpp CodeEntry/provider contract and Evil's effective
-   capability graph far enough to identify the exact reusable surfaces the
-   materialization application should consume.
-5. Inspect relevant tests to establish which contracts are explicitly covered
-   versus merely exercised by Evil.
-6. Only then make framework/shared-Pack implementation changes required by the
-   materialization application or discovered integration defects.
+LlmProcessingPipeline is a fixed LLM-specific partial materialization of DA-31.
+The exercised Evil path correctly nests its ProcessingRun transaction under the
+outer Job transaction. Direct runProcessing() against the committed root can,
+however, make ProcessingRun completion the effective authoritative commit
+boundary; do not make that the final generic ProcessingPipeline contract.
+
+The previously flagged runJob() memory-before-I/O ordering is now classified
+more precisely. DA-04 and DA-24 explicitly allow already committed state to
+remain authoritative even when the owning OrchestrationUnit later fails. A
+repository regression test deliberately requires a failed Job with
+ authoritativeStateAccepted=True after managed-I/O publication failure. This is
+therefore not an accidental ordering defect. The incomplete part is DA-07:
+current ManagedIo is not yet the full IoManager with identity-bearing rollback
+points, provider system, root enforcement, and recovery semantics. Do not claim
+cross-domain memory+filesystem atomicity that does not exist.
+
+SaveBundle/ApplicationStore match DA-20 identity shape but materialize only the
+committed-value portion of the designed durable closure. Immutable generation
+and current-pointer recovery mechanics are candidate implementation-spec design
+for later promotion.
+
+Producer/validity/provenance/dependency identity and SourceObservation remain
+candidate newer implementation design awaiting documentation integration.
+
+Shared llama.cpp findings
+-------------------------
+first-party/llmDrivers/llamaCpp is the correct shared provider for both active
+applications. It owns one long-lived driver per loaded CodeEntry, supports
+managed/external server operation and model switching, and exposes exact token
+estimation plus streaming chat completion.
+
+Current dedicated tests cover parallelSlots and exact token estimation only.
+The provider and its test file predate the new source-documentation rules:
+codeEntry.py has many undocumented classes/helpers/lifecycle functions, and
+ test_llamaCpp.py lacks the required first-line path/version marker. Any code
+change there must bring touched files into the current source rules and expand
+coverage appropriate to the change.
+
+Next integration work
+---------------------
+1. Trace the Evil analysis effective capability graph around prompt building,
+   runProcessing(), completion, and result export. Record only reusable
+   contracts; do not absorb application algorithms.
+2. Read the relevant LLM provider/processing tests in detail and classify which
+   DA-31 boundaries are intentionally covered versus absent.
+3. Inspect the materialization-test application branch/state once its concrete
+   first iteration exists or the application thread exports a framework
+   requirement. Reuse llama.cpp and the existing Job/ProcessingRun transaction
+   shape rather than inventing a second execution path.
+4. Make framework/shared-Pack code changes only when a concrete shared
+   requirement or verified divergence demands them.
+5. Keep design-reconciliation.txt current whenever a classification changes.
 
 Python/test rules
 -----------------

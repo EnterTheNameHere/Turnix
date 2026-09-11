@@ -1,0 +1,207 @@
+ACTANT INTEGRATION STATE - DESIGN / IMPLEMENTATION RECONCILIATION
+
+Owner
+-----
+Actant integration thread.
+
+Scope
+-----
+This file classifies verified live implementation against the smallest relevant
+legacy design set. It does not restate whole design documents. The legacy DA
+files below are DRAFT in CMR-04; they remain the current design material for
+these not-yet-migrated areas. Tracing is excluded because it has separately
+migrated to design/area/.
+
+Classification terms
+--------------------
+MATCH:
+The materialized behavior preserves the relevant design shape for the currently
+implemented slice.
+
+INCOMPLETE:
+The implementation intentionally or presently materializes only part of the
+designed domain without introducing a conflicting authority.
+
+DIVERGENCE:
+The live implementation currently contradicts or bypasses an applicable design
+boundary and requires deliberate correction/reconciliation.
+
+CANDIDATE NEWER DESIGN:
+The live implementation adds coherent semantics not represented by the current
+legacy design and there is evidence those semantics were intentional. Preserve
+for later design integration rather than deleting merely to match older text.
+
+Pack activation and graph preparation
+-------------------------------------
+Classification: MATCH + INCOMPLETE.
+
+DA-14 defines an activation plan as selected graph intent prepared outside the
+activation loader and says a mechanical loader does not own dependency or
+activation ordering, graph solving, missing-dependency repair, or cyclic
+admission. DA-29 assigns selected-graph and activation-plan preparation to
+PackManager.
+
+ManualActivationPlan + PackLoader preserve this authority split. The manual
+plan is therefore a valid temporary producer of accepted order while PackManager
+is absent. PackResolver's uniqueness-only recursive discovery/resolution is not
+the designed PackManager/root/version resolution system; it is an incomplete
+bootstrap slice and must remain mechanically narrow.
+
+CodeEntryContext / ModCallContext
+---------------------------------
+Classification: MATCH + INCOMPLETE.
+
+DA-30 requires a fresh invocation-scoped Pack-facing gateway, invalid retained
+contexts, mediated facades, acting-Pack attribution, transactional memory
+mutation, and no ordinary Pack-owned transaction commit or terminal Job-state
+assignment. Current CodeEntryContext follows that central shape: contexts are
+fresh, invalidated after invocation, memory writes nest under the supplied
+transaction view, registration is phase-scoped, and backend service objects are
+not handed to Pack callbacks.
+
+The implementation exposes only the currently needed facade subset and uses the
+historical Python class name CodeEntryContext rather than the design term
+ModCallContext. Missing jobs/hooks/processing/events/timers/resources/permissions
+facades are incomplete design, not evidence that DA-30 rejected them.
+
+ProcessingPipeline
+------------------
+Classification: INCOMPLETE with one ownership divergence.
+
+DA-31 defines ProcessingPipeline as a reusable staged procedure whose definition
+owns stage order/contracts, Hook participation, mutation permissions,
+retry/restart, streaming, validation, finalization, retention, tracing, and
+debugger exposure. ProcessingRun temporary state is non-authoritative; an owning
+OrchestrationUnit decides final commit/abort. Hooks receive fresh contexts and
+cannot directly commit the transaction.
+
+Current LlmProcessingPipeline materializes a useful fixed LLM-specific subset:
+execution-profile resolution, reusable QueryItem construction, optional
+filtering, query construction, provider streaming, response evidence, optional
+completion, and transactional staging. It has no generic ProcessingPipeline
+registration/definition object, Hook plan, participation policy, retry/restart,
+or generic non-LLM processor surface yet.
+
+The current runProcessing() opens and commits its own transaction when called
+without an enclosing memoryView. Under DA-31, ProcessingRun completion does not
+automatically commit Application state; the owning OrchestrationUnit decides
+commit/abort. In the exercised Evil path runProcessing() receives the outer Job
+transaction and its child commit only promotes into that parent, so the live
+application preserves the authority boundary. Direct top-level use of
+LlmProcessingPipeline.runProcessing() with the committed root as its transaction
+base can, however, make ProcessingRun completion the effective authoritative
+commit boundary. Treat this as an API/ownership divergence to remove when the
+generic processing surface is materialized or before exposing such direct use as
+supported framework behavior.
+
+Orchestration and managed I/O publication
+----------------------------------------
+Classification: CURRENTLY EXPLICIT IMPLEMENTATION POLICY; not established as a
+DA-24/DA-04 contradiction, but requires DA-07 completion/reconciliation.
+
+DA-04 makes committed memory authoritative at its commit boundary. DA-24
+explicitly states that OrchestrationUnit outcome and transaction commit are
+distinct: a failed OrchestrationUnit does not convert already committed mutation
+back into uncommitted mutation. Therefore the current runJob() behavior where a
+memory commit succeeds and a later I/O publication fails is compatible with
+those authority rules in isolation.
+
+The repository has an explicit regression test requiring exactly this result: a
+failed Job with authoritativeStateAccepted=True and retained committed memory
+when ManagedIo publication fails after memory commit. This is not an accidental
+ordering bug.
+
+DA-07, however, designs IoManager as the sole persistent-I/O authority with
+rollback points for identity-bearing mutations and multi-file consistency. The
+current ManagedIo/ManagedIoTransaction is intentionally smaller: it provides
+staged non-streaming writes and best-effort runtime rollback, not the complete
+IoManager/provider/root-policy/crash-recovery system.
+
+Consequently do not promise atomic "memory + arbitrary filesystem publication"
+as a current OrchestrationUnit guarantee. If a future workflow requires one
+success boundary across committed state and identity-bearing persistence, solve
+that through the completed DA-07 persistence/rollback design rather than by
+pretending the memory commit can be undone after it became authoritative.
+
+Persistent Application / SaveBundle
+-----------------------------------
+Classification: MATCH in identity shape + CANDIDATE NEWER DESIGN in concrete
+storage mechanics + INCOMPLETE against the full SaveBundle closure.
+
+DA-20 distinguishes Application, ApplicationRun, AppPack, and SaveBundle
+identities; loading the same durable Application creates a fresh ApplicationRun;
+SaveBundle is the durable persistence closure; persistent I/O remains DA-07
+mediated.
+
+Current SaveBundle/ApplicationStore preserve applicationId and saveBundleId
+across immutable generations and restore the same Application into a fresh
+ApplicationRun. Tests explicitly cover this identity behavior, immutable orphan
+generation handling, corruption recovery, and subsequent publication.
+
+The current SaveBundle stores the committed-value snapshot only. DA-20 allows a
+much wider durable closure including AppDefinition/graph evidence,
+configuration/policy, generated static data, application data, finalized Window
+history, and retained material. Current storage is therefore an intentionally
+incomplete closure, not the final SaveBundle format.
+
+Immutable generation files plus an atomically replaced current pointer and the
+recovery policy around orphan/corrupt generations are coherent concrete
+mechanics not defined by DA-20. Source marks these mechanics as implementation
+specification material for later promotion. Preserve them as candidate newer
+design pending the eventual SaveBundle implementation specification.
+
+Value metadata and source observation
+-------------------------------------
+Classification: CANDIDATE NEWER DESIGN.
+
+Committed-value producer/validity/provenance metadata, isReusable()/isCurrent(),
+commit-stable dependency identity, SourceObservation, and exact observed reads
+are coherent live semantics explicitly marked in source as design-significant.
+They do not currently have equivalent complete contracts in the legacy design
+areas reviewed here. Preserve them for design migration/integration.
+
+Shared llama.cpp provider
+-------------------------
+Classification: usable shared implementation surface, but source-quality
+cleanup required before treating it as production-complete under current
+repository rules.
+
+The first-party llama.cpp Pack owns a long-lived driver from onLoad to onUnload,
+registers provider name "llama.cpp", supports managed or external servers,
+model selection, exact token estimation through llama.cpp template/tokenize
+endpoints, streaming chat completions, and common sampling options. This is the
+correct shared provider boundary for both current applications.
+
+Its existing test coverage verifies parallel-slot configuration and exact token
+estimation. It does not yet comprehensively cover stream parsing, sampling
+payload mapping, managed process lifecycle/model switching, protocol failures,
+or provider registration lifecycle.
+
+The file also predates the newly adopted source-documentation rule: several
+classes/functions/private helpers/lifecycle functions do not yet have required
+production-quality docstrings. Existing test_llamaCpp.py also predates the
+first-line source path/version rule. These are cleanup requirements, not runtime
+semantic failures.
+
+Immediate integration consequences
+----------------------------------
+1. Do not "fix" runJob() by attempting to roll back an already committed memory
+   transaction after later managed-I/O failure. Current tests intentionally lock
+   the present authority result and DA-04/DA-24 allow already-committed state to
+   survive later OrchestrationUnit failure.
+
+2. Do not expose direct root-committing LlmProcessingPipeline.runProcessing() as
+   the final generic processing contract. ProcessingRun mutation belongs under
+   owning OrchestrationUnit transaction authority.
+
+3. Preserve ManualActivationPlan as a narrow temporary plan source; do not add
+   graph intelligence to PackLoader/PackResolver as a shortcut around
+   PackManager.
+
+4. Reuse first-party/llmDrivers/llamaCpp for the materialization application.
+   Extend its generic provider behavior there when both consumers need it.
+
+5. Treat IoManager completion, generic ProcessingPipeline/Hooks, full
+   PackManager, and full SaveBundle closure as future materialization driven by
+   concrete application pressure, not as a mandate to implement the entire
+   design corpus now.
