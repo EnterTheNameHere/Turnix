@@ -1,0 +1,182 @@
+ACTANT INTEGRATION STATE - CORE MATERIALIZATION
+
+Owner
+-----
+Actant integration thread.
+
+Scope
+-----
+This records verified current implementation state relevant to the two active
+application consumers. It is not a complete inventory of backend/ and does not
+claim unused repository code is current.
+
+Known-good execution spine
+--------------------------
+The Evil Birthday CLI currently constructs ManagedIo, reads a manually supplied
+activation plan, creates ApplicationStore and RuntimeHost, then creates or loads
+an ApplicationRuntime and executes work through runtime.runJob(). The user
+reports this application is fully functional with its external data sources and
+that all repository tests are green.
+
+RuntimeHost owns live ApplicationRuntime instances. ApplicationLifecycle owns
+semantic ordering around Pack activation, application lifecycle hooks,
+persistence, and ApplicationRun startup. ApplicationRuntime owns the live
+capability registry, LLM provider registry/pipeline, PackLoader, committed root,
+managed I/O, tracing boundary, and Job orchestration.
+
+Manual activation substitution
+------------------------------
+ManualActivationPlan is an explicit ordered list only. PackLoader deliberately
+performs no dependency solving or ordering intelligence. It mechanically
+resolves and activates the supplied sequence.
+
+This is a temporary production-shaped substitution for the future PackManager:
+PackManager will eventually discover/resolve dependencies and produce the
+activation plan. ManualActivationPlan must not become a competing authority or
+force consumer rewrites when PackManager is materialized.
+
+Pack/CodeEntry lifecycle
+------------------------
+PackResolver currently discovers manifest.json recursively below configured
+roots, snapshots discovered candidates on first use, and requires exactly one
+candidate for an exact packId. This is uniqueness-only resolution, not the full
+designed root/version/resolution policy.
+
+PackLoader currently supports Python-source CodeEntries. A CodeEntry module is
+loaded once for its ApplicationRun activation, onLoad may return long-lived
+state, and the same loaded module/state participates in later invocations until
+unload. Registration scopes are published only after successful Pack activation
+and withdrawn during unload/failure cleanup.
+
+Application lifecycle hooks are restricted to the defining appPack. Activation
+must reach the plan barrier before application lifecycle hooks run.
+
+CodeEntryContext
+----------------
+Each Pack invocation receives a fresh invocation-scoped CodeEntryContext. The
+context exposes facades for managed I/O, authoritative values, capabilities,
+and LLM execution. Context invalidation removes invocation authority and
+best-effort aborts unresolved nested memory transactions opened through the
+facade.
+
+Registration is available during CodeEntry onLoad activation and disabled for
+ordinary/lifecycle invocation contexts. Capability and provider ownership uses
+the CodeEntry runtime instance identity.
+
+Authoritative mutation / orchestration
+--------------------------------------
+ApplicationRuntime.runJob() is the currently materialized top-level mutation
+unit used by the Evil application. It creates an OrchestrationUnit backed by a
+CommittedValueTransaction and a ManagedIoTransaction, invokes the requested
+capability against those views, commits authoritative value mutation, then
+commits staged managed I/O. Failure aborts unresolved staged I/O and unresolved
+value mutation and returns a failed Job.
+
+The current implementation marks authoritativeStateAccepted immediately after
+the committed-value transaction succeeds. Therefore a subsequent managed-I/O
+commit failure can produce a failed Job whose authoritative memory mutation has
+already been accepted. This is an implementation fact to reconcile with the
+intended top-level success/transaction semantics before relying on it as the
+final orchestration contract. Do not silently reinterpret it as atomic memory +
+filesystem publication.
+
+Value System - implementation-significant newer material
+--------------------------------------------------------
+CommittedValueLayer is the current authoritative mutable value provider. Stable
+ValueAddress identity is separate from revision. Authority state is PRESENT,
+ABSENT, or INVALIDATED. Revision 0 represents no established committed state;
+committed transitions advance revisions.
+
+CommittedValueTransaction supports nested strict-stack transactions. Child
+commit promotes staged state into its parent; only outer commit publishes to the
+root. First-touch committed revision IDs provide conflict detection, and root
+publication validates all bases before publishing any replacement.
+
+Committed revisions store immutable ValueRefs and reachable chunks. Current
+persistence retains only the latest revision. Snapshot format is
+actant.committed-values@2.
+
+The implementation additionally carries generic per-revision metadata outside
+the payload. CodeEntry-facing writes automatically include producer identity;
+Packs may provide validity and provenance. isReusable()/isCurrent() compare
+producer and Pack-owned validity. dependency() supplies commit-stable content
+and metadata identities and deliberately does not create or imply a global
+dependency graph.
+
+These producer/validity/provenance/dependency semantics are explicitly marked in
+source as design-significant material to promote into Value System/CodeEntry
+design. Treat them as candidate newer implementation design, not as accidental
+extra fields and not yet as globally authoritative specification.
+
+Managed I/O - implementation-significant newer material
+--------------------------------------------------------
+ManagedIo is the Pack-facing mediated filesystem service. It translates normal
+filesystem failures into Actant I/O errors and supports exact observed reads.
+SourceObservation records path/state/size/mtime and optional strong content
+SHA-256. Observed reads can bind returned bytes to the observation of those
+exact bytes.
+
+ManagedIoTransaction stages non-streaming text/JSON writes in memory. Commit
+prepares temporary files and publishes the batch with best-effort runtime
+rollback. It explicitly does not provide crash-recovery journaling.
+
+SourceObservation is explicitly marked in implementation as design-significant
+future I/O/source-observation design. Treat it as candidate newer implementation
+design pending documentation reconciliation.
+
+Persistence
+-----------
+SaveBundle is an immutable representation of one Application generation's
+already-authoritative committed root. SaveBundle does not itself create
+authority. It preserves saveBundleId/applicationId across generations and uses
+actant.save-bundle@1.
+
+ApplicationStore is the filesystem persistence authority. It stores immutable
+generation files below saves/<appPackId>/<applicationId>/ and atomically updates
+a small current pointer after a new generation is written and validated. Open
+transactions are outside the SaveBundle boundary and cannot accidentally enter
+durable state.
+
+SaveBundle representation/persistence closure and ApplicationStore publication
+contain implementation-level design explicitly identified in source as material
+for later design-specification promotion.
+
+LLM processing
+--------------
+LlmProcessingPipeline is the currently exercised reusable staged LLM pipeline.
+It resolves a provider execution profile, builds reusable QueryItems through
+capabilities, optionally filters them, builds the provider-neutral LlmQuery,
+streams the provider call, stores ProcessingRun evidence, optionally invokes a
+completion capability inside the ProcessingRun transaction, and commits that
+transaction.
+
+Reusable QueryItems are individually persisted and referenced by identity.
+Filtering affects accepted items for one run without deleting reusable prepared
+items. Completion may derive additional persistent state but is documented not
+to publish irreversible external effects. Export is intentionally outside the
+pipeline after successful runProcessing().
+
+prepareProcessing() prepares the exact model-facing query without EngineCall and
+commits reusable preparation into the supplied transaction base for later reuse.
+
+ProcessingStage currently includes PREPARE_INPUT, RESOLVE_EXECUTION_PROFILE,
+BUILD_QUERY_ITEMS, FILTER_QUERY_ITEMS, BUILD_QUERY, PREPARE_PROVIDER_CALL,
+STREAM_EVENT, PARSE_RESPONSE, UPDATE_QUERY_ITEMS, and COMPLETE. Not every stage
+necessarily has independently pluggable handlers in the current implementation;
+do not confuse the current enum/pipeline materialization with the complete
+designed pipeline system.
+
+Tracing
+-------
+Tracing implementation is live infrastructure but is not authoritative design.
+For tracing semantics, use the migrated tracing design documents under
+ design/area/. Reconcile Python tracing implementation to those documents when
+tracing becomes integration work.
+
+Liveness caution
+----------------
+No statement in this file promotes every module under backend/ to current
+implementation. Unreferenced, incompatible, or superseded files are expected to
+exist after iterative development. Expand this state only after establishing a
+consumer/import/test path or after intentionally selecting a dormant subsystem
+for integration.
