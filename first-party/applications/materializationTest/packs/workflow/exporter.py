@@ -1,4 +1,4 @@
-# file: first-party/applications/materializationTest/packs/workflow/exporter.py ; version: 1
+# file: first-party/applications/materializationTest/packs/workflow/exporter.py ; version: 2
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,6 +6,7 @@ from pathlib import Path
 _MEMORY_KEY = "materializationtest"
 _RUN_STATE_ADDRESS = "materialization-test/run-state"
 _EXPORT_FORMAT = "materialization-test.evidence@1"
+_QUESTIONNAIRE_SECTION_IDS = tuple(f"{number:02d}" for number in range(1, 14))
 
 
 def _requireMapping(value: object, name: str) -> dict[str, object]:
@@ -110,21 +111,53 @@ def _loadProcessingRuns(ctx, state: dict[str, object]) -> list[dict[str, object]
     return snapshots
 
 
-def _testDefinition(ctx) -> dict[str, object]:
-    """Load the exact application-owned test definition used by this configuration.
+def _questionnaireDefinition(ctx) -> list[dict[str, object]]:
+    """Load the exact ordered questionnaire section documents for export.
 
     Args:
         ctx: Active CodeEntryContext exposing configuration and managed I/O.
 
     Returns:
-        Exact JSON-compatible prompt/test definition object.
+        The thirteen exact JSON questionnaire section objects in benchmark order.
 
     Raises:
-        ValueError: If ``promptsFile`` is missing or blank.
-        TypeError: If the prompt document is not an object.
+        ValueError: If ``questionnaireDirectory`` is missing or blank.
+        TypeError: If a section document is not an object.
+    """
+    directory = _requireString(ctx.config.get("questionnaireDirectory"), "questionnaireDirectory")
+    root = directory.rstrip("/")
+    sections: list[dict[str, object]] = []
+    for sectionId in _QUESTIONNAIRE_SECTION_IDS:
+        path = f"{root}/{sectionId}.json"
+        sections.append(_requireMapping(ctx.io.readJson(path), f"Questionnaire section {sectionId}"))
+    return sections
+
+
+def _testDefinition(ctx) -> dict[str, object]:
+    """Load the exact application-owned test definition used by this configuration.
+
+    Prompt definitions and questionnaire sections remain separate source artifacts
+    in the application. Export preserves that structure instead of flattening or
+    reconstructing the benchmark definition.
+
+    Args:
+        ctx: Active CodeEntryContext exposing configuration and managed I/O.
+
+    Returns:
+        Exact JSON-compatible prompt and ordered questionnaire source documents.
+
+    Raises:
+        ValueError: If a configured definition path is missing or blank.
+        TypeError: If the prompt or questionnaire documents have invalid shapes.
     """
     promptsFile = _requireString(ctx.config.get("promptsFile"), "promptsFile")
-    return _requireMapping(ctx.io.readJson(promptsFile), "Prompt definitions")
+    prompts = _requireMapping(ctx.io.readJson(promptsFile), "Prompt definitions")
+    return {
+        "prompts": prompts,
+        "questionnaire": {
+            "sections": _questionnaireDefinition(ctx),
+        },
+    }
 
 
 def _exportPath(ctx) -> Path:
