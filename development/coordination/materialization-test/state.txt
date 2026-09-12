@@ -41,22 +41,22 @@ prompts.json currently contains:
 - questionnaireInstructions;
 - the old questionnaire array temporarily retained during migration.
 
-The real questionnaire has 117 explicit numbered requirements. It is now also
-split into semantic data files:
+The real questionnaire has 117 explicit numbered requirements. It is also split
+into semantic data files:
 
   first-party/applications/materializationTest/questionnaire/01.json
   ...
   first-party/applications/materializationTest/questionnaire/13.json
 
 Each file contains sectionId, title, and an explicit ordered requirements array.
-Question boundaries remain data; no prose/newline parser derives them. The new
+Question boundaries remain data; no prose/newline parser derives them. The
 questionnaire loader validates the fixed 13-section benchmark, section identity,
 explicit per-section numbering, uniqueness, and the expected 117 total. Config
-now contains questionnaireDirectory = "questionnaire".
+contains questionnaireDirectory = "questionnaire".
 
 The migration is deliberately staged: the old prompts.json questionnaire remains
-until workflow consumption and export are switched and verified, then the
-duplicate will be removed.
+until workflow consumption is switched and verified, then the duplicate will be
+removed.
 
 GROUNDING SEMANTIC ISSUE FOUND
 A rendered-prompt audit found that the historical grounding string combines two
@@ -128,7 +128,12 @@ already accepted benchmark run.
 materializationTest.export@1 emits:
   <outputDirectory>/<applicationId>/<applicationRunId>/evidence.json
 
-Evidence format is materialization-test.evidence@1 and contains application
+Exporter version 2 now preserves the benchmark definition as source documents:
+- testDefinition.prompts is the exact prompts.json object;
+- testDefinition.questionnaire.sections is the exact ordered list of 01.json
+  through 13.json objects.
+
+Evidence format remains materialization-test.evidence@1 and contains application
 identity, exact test definition/configuration, authoritative workflow state, and
 all referenced shared ProcessingRun snapshots. Exact model-facing prompts are
 dereferenced from ProcessingRun evidence rather than reconstructed.
@@ -138,16 +143,11 @@ the Actant rule that authoritative state may have been accepted even when the
 owning Job later fails.
 
 PYTHON 3.15 VERIFICATION
-The user reported all green for:
-
-  python -m pytest tests/first_party/materializationTest/test_workflow.py \
-      tests/first_party/materializationTest/test_exporter.py
-
-This verifies workflow version 8 / workflow tests version 5 together with the
-exporter as of 2026-09-12.
-
-The newly added sectional questionnaire loader/tests have not yet been run by the
-user under Python 3.15 and must not be called verified yet.
+The user reported all green for workflow version 8 / workflow tests version 5.
+The user separately reported the sectional questionnaire loader/tests version 1
+all green. The user then reported exporter version 2 / exporter tests version 2
+all green after the sectional evidence migration. These are Python-3.15 verified
+as of 2026-09-12.
 
 SHARED ACTANT CONTRACTS
 Shared process and ephemeral-workspace facilities are synchronized from
@@ -172,17 +172,18 @@ parallel application-specific timing authority onto Materialization while this
 shared requirement is outstanding.
 
 NEXT WORK
-1. Wire workflow consumption to the sectional questionnaire loader and add/update
-   projection tests.
-2. Switch exporter test-definition evidence to include the sectional
-   questionnaire deterministically.
+1. Fold the validated sectional questionnaire loader into workflow codeEntry.py;
+   do not depend on sibling Python-module import behavior.
+2. Switch workflow questionnaire consumption to questionnaireDirectory and add
+   projection/data-contract tests.
 3. Split grounding into groundingReference + groundingResponseInstruction and
    project only groundingReference in Native.
 4. Remove prompt text that positively permits prose outside source fences while
    retaining tolerant extraction/evidence behavior.
-5. Remove duplicated questionnaire from prompts.json only after the new loader
-   path is wired and verified.
-6. Run focused Python 3.15 workflow/exporter/questionnaire suites.
-7. Synchronize shared LLM timing when integration responds.
-8. Implement Classic only after provider-neutral structured history semantics are
+5. Remove temporary workflow/questionnaire.py and its standalone test after its
+   contract is covered through workflow tests.
+6. Remove duplicated questionnaire from prompts.json after workflow migration.
+7. Run focused Python 3.15 workflow/exporter/questionnaire suites.
+8. Synchronize shared LLM timing when integration responds.
+9. Implement Classic only after provider-neutral structured history semantics are
    reconciled.
