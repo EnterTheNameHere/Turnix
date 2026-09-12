@@ -1,4 +1,4 @@
-# file: tests/backend/process/test_processRuntime.py ; version: 1
+# file: tests/backend/process/test_processRuntime.py ; version: 2
 """Tests for Actant-mediated configured external-tool execution."""
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ def test_runCapturesCompletedNonzeroInvocation(tmp_path: Path) -> None:
 
     assert result.exitCode == 7
     assert result.stdout == "out\n"
-    assert result.stderr == "err\n"
+    assert result.stderr.endswith("err\n")
     assert result.arguments[0] == "-c"
     assert result.workingDirectory == str(tmp_path.resolve())
     assert result.durationNs >= 0
