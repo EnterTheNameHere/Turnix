@@ -1,7 +1,8 @@
-# file: backend/llm/streamingRuntime.py ; version: 6
+# file: backend/llm/streamingRuntime.py ; version: 7
 from __future__ import annotations
 
 import hashlib
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -30,25 +31,32 @@ class LlmProviderRegistry:
     """Published registry of provider-neutral streaming LLM providers."""
 
     def __init__(self) -> None:
+        """Creates an empty provider registry."""
         self._registry: RegistrationRegistry[LlmStreamProvider] = RegistrationRegistry()
 
     def register(self, scope: RegistrationScope, *, ownerId: str, name: str, provider: LlmStreamProvider) -> None:
+        """Stages one provider registration in the supplied registration scope."""
         if not callable(getattr(provider, "stream", None)) or not callable(getattr(provider, "getExecutionProfile", None)):
             raise TypeError("provider must satisfy the LlmStreamProvider contract.")
         scope.register(self._registry, ownerId=ownerId, name=name, value=provider)
 
     def requireRegistration(self, name: str) -> Registration[LlmStreamProvider]:
+        """Returns the published provider registration for a logical name."""
         return self._registry.require(name)
 
     def require(self, name: str) -> LlmStreamProvider:
+        """Returns the published provider implementation for a logical name."""
         return self.requireRegistration(name).value
 
     def unregisterOwnedBy(self, ownerId: str) -> None:
+        """Removes all published providers owned by one CodeEntry instance."""
         self._registry.unregisterOwnedBy(ownerId)
 
 
 @dataclass(frozen=True, slots=True)
 class StreamingLlmResult:
+    """Completed provider call with exact response and generic execution timing."""
+
     query: LlmQuery
     model: str | None
     providerName: str
@@ -56,8 +64,19 @@ class StreamingLlmResult:
     providerOptions: Mapping[str, ImmutableValue]
     executionProfile: LlmExecutionProfile
     rawText: str
+    startedTimeNs: int
+    endedTimeNs: int
+    durationNs: int
     providerMetadata: Mapping[str, ImmutableValue] = field(default_factory=dict)
     observerErrors: tuple[str, ...] = ()
+
+    def timingSnapshot(self) -> dict[str, int]:
+        """Returns JSON-compatible timing evidence for the provider execution span."""
+        return {
+            "startedTimeNs": self.startedTimeNs,
+            "endedTimeNs": self.endedTimeNs,
+            "durationNs": self.durationNs,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +130,7 @@ class LlmProcessingPipeline:
         capabilityInvoker: Callable[[str, object | None, CommittedValueTransaction | None], object] | None = None,
         trace: Callable[[str, dict[str, object]], None] | None = None,
     ) -> None:
+        """Binds provider, optional state, capability, and tracing dependencies."""
         self._providers = providers
         self._state = state
         self._capabilityInvoker = capabilityInvoker
@@ -125,6 +145,7 @@ class LlmProcessingPipeline:
         providerOptions: Mapping[str, ImmutableValue] | None = None,
         streamObserver: Callable[[LlmStreamEvent], None] | None = None,
     ) -> StreamingLlmResult:
+        """Runs one provider call without creating persistent ProcessingRun state."""
         registration, provider, options, profile = self._resolveExecution(
             providerName=providerName,
             model=model,
@@ -270,6 +291,7 @@ class LlmProcessingPipeline:
         streamObserver: Callable[[LlmStreamEvent], None] | None = None,
         memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
     ) -> LlmProcessingResult:
+        """Runs and transactionally persists one complete LLM ProcessingRun."""
         if self._state is None or self._capabilityInvoker is None:
             raise RuntimeError("runProcessing() requires committed state and a capability invoker.")
         if type(memoryKey) is not str or not memoryKey or not memoryKey.replace("-", "").replace("_", "").isalnum() or not memoryKey.islower():
@@ -363,10 +385,7 @@ class LlmProcessingPipeline:
                     "processingRunId": run.processingRunId,
                     "reusableQueryItemIds": [item.itemId for item in reusableItems],
                     "acceptedQueryItemIds": [item.itemId for item in acceptedItems],
-                    "acceptedQueryItems": [
-                        item.snapshot()
-                        for item in acceptedItems
-                    ],
+                    "acceptedQueryItems": [item.snapshot() for item in acceptedItems],
                     "query": self._queryEvidence(llmResult.query),
                     "response": {
                         "rawText": llmResult.rawText,
@@ -374,14 +393,12 @@ class LlmProcessingPipeline:
                         "sha256": hashlib.sha256(llmResult.rawText.encode("utf-8")).hexdigest(),
                     },
                     "execution": executionSnapshot,
+                    "providerTiming": llmResult.timingSnapshot(),
                     "providerMetadata": plainImmutableValue(llmResult.providerMetadata),
                     "observerErrors": list(llmResult.observerErrors),
                 },
             )
-            transaction.set(
-                f"processing/{memoryKey}/lastrun",
-                {"processingRunId": run.processingRunId},
-            )
+            transaction.set(f"processing/{memoryKey}/lastrun", {"processingRunId": run.processingRunId})
 
             run.enterStage(ProcessingStage.COMPLETE)
             completionResult = None
@@ -427,6 +444,7 @@ class LlmProcessingPipeline:
         memoryKey: str,
         currentItemsAddress: str,
     ) -> list[dict[str, object]]:
+        """Loads the previous reusable QueryItem snapshots for one memory key."""
         currentIds = transaction.load(currentItemsAddress)
         if currentIds is MISSING:
             return []
@@ -451,6 +469,7 @@ class LlmProcessingPipeline:
         memoryKey: str,
         items: tuple[QueryItem, ...],
     ) -> None:
+        """Stages changed reusable QueryItems under stable content-independent addresses."""
         for item in items:
             address = self._queryItemAddress(memoryKey, item.itemId)
             snapshot = item.snapshot()
@@ -460,6 +479,7 @@ class LlmProcessingPipeline:
 
     @staticmethod
     def _queryItemAddress(memoryKey: str, itemId: str) -> str:
+        """Returns the stable committed address for one reusable QueryItem identity."""
         digest = hashlib.sha256(itemId.encode("utf-8")).hexdigest()
         return f"processing/{memoryKey}/items/{digest}"
 
@@ -472,9 +492,6 @@ class LlmProcessingPipeline:
         authoritative ProcessingRun memory, alongside hashes useful for quick
         comparison and audit. Opaque provider payloads retain type/metadata
         evidence only until a provider-neutral persistence codec exists.
-
-        This is design-significant: exact model-facing input and exact model
-        response belong to persistent memory; export files are projections.
         """
         evidence: dict[str, object] = {
             "formatId": query.formatId,
@@ -504,6 +521,7 @@ class LlmProcessingPipeline:
         acceptedItems: tuple[QueryItem, ...],
         llmResult: StreamingLlmResult,
     ) -> dict[str, object]:
+        """Builds completion input including exact provider evidence and timing."""
         return {
             "processingRunId": run.processingRunId,
             "input": inputValue,
@@ -519,6 +537,7 @@ class LlmProcessingPipeline:
                     "contextWindowTokens": llmResult.executionProfile.contextWindowTokens,
                     "metadata": plainImmutableValue(llmResult.executionProfile.metadata),
                 },
+                "timing": llmResult.timingSnapshot(),
                 "providerMetadata": plainImmutableValue(llmResult.providerMetadata),
                 "observerErrors": list(llmResult.observerErrors),
                 "query": {
@@ -542,6 +561,7 @@ class LlmProcessingPipeline:
         Mapping[str, ImmutableValue],
         LlmExecutionProfile,
     ]:
+        """Resolves provider registration, immutable options, and execution profile."""
         registration = self._providers.requireRegistration(providerName)
         provider = registration.value
         options = ImmutableValueFreezer().freezeMapping(providerOptions, "providerOptions")
@@ -562,12 +582,24 @@ class LlmProcessingPipeline:
         streamObserver: Callable[[LlmStreamEvent], None] | None,
         processingRun: ProcessingRun | None = None,
     ) -> StreamingLlmResult:
+        """Consumes one provider stream and measures its complete execution span.
+
+        The wall-clock endpoints and monotonic duration bracket provider.stream()
+        creation through validation of its terminal completed event. Query
+        construction, execution-profile resolution, ProcessingRun persistence,
+        and completion handling are outside this timing boundary. Synchronous
+        stream observers execute inside the boundary because they participate in
+        consumption/backpressure of the provider stream.
+        """
         request = LlmCallRequest(query=query, model=model, providerOptions=options)
         parts: list[str] = []
         completed = False
         finalMetadata: Mapping[str, ImmutableValue] = {}
         observerErrors: list[str] = []
-        for index, event in enumerate(provider.stream(request)):
+        startedTimeNs = time.time_ns()
+        startedMonotonicNs = time.monotonic_ns()
+        stream = provider.stream(request)
+        for index, event in enumerate(stream):
             if not isinstance(event, LlmStreamEvent):
                 raise LlmProviderProtocolError(f"Provider yielded non-LlmStreamEvent at index {index}.")
             if completed:
@@ -589,6 +621,8 @@ class LlmProcessingPipeline:
                     self._emitObserverFailure(processingRun, err)
         if not completed:
             raise LlmProviderProtocolError("Provider stream ended without a completed event.")
+        endedMonotonicNs = time.monotonic_ns()
+        endedTimeNs = time.time_ns()
         if processingRun is not None:
             processingRun.enterStage(ProcessingStage.PARSE_RESPONSE)
         return StreamingLlmResult(
@@ -599,12 +633,16 @@ class LlmProcessingPipeline:
             providerOptions=request.providerOptions,
             executionProfile=profile,
             rawText="".join(parts),
+            startedTimeNs=startedTimeNs,
+            endedTimeNs=endedTimeNs,
+            durationNs=endedMonotonicNs - startedMonotonicNs,
             providerMetadata=finalMetadata,
             observerErrors=tuple(observerErrors),
         )
 
     @staticmethod
     def _requireQueryItems(value: object, *, stage: str) -> tuple[QueryItem, ...]:
+        """Validates a capability result as unique immutable QueryItems."""
         if not isinstance(value, (list, tuple)):
             raise TypeError(f"{stage} must return a list or tuple of QueryItems/snapshots.")
         items: list[QueryItem] = []
@@ -619,6 +657,7 @@ class LlmProcessingPipeline:
 
     @staticmethod
     def _requireFilteredSubset(source: tuple[QueryItem, ...], filtered: tuple[QueryItem, ...]) -> None:
+        """Requires filtering to select unchanged source items without introducing data."""
         sourceById = {item.itemId: item for item in source}
         for item in filtered:
             original = sourceById.get(item.itemId)
@@ -629,6 +668,7 @@ class LlmProcessingPipeline:
 
     @staticmethod
     def _requireQuery(value: object) -> LlmQuery:
+        """Normalizes a BUILD_QUERY result to the provider-neutral LlmQuery type."""
         if isinstance(value, LlmQuery):
             return value
         if not isinstance(value, dict):
@@ -639,6 +679,7 @@ class LlmProcessingPipeline:
         return LlmQuery(formatId=value.get("formatId"), payload=value.get("payload"), metadata=metadata)
 
     def _emitObserverFailure(self, run: ProcessingRun | None, err: Exception) -> None:
+        """Emits non-authoritative observer-failure tracing without affecting inference."""
         if self._trace is None:
             return
         attributes: dict[str, object] = {"errorType": type(err).__qualname__, "message": str(err)}
@@ -650,6 +691,7 @@ class LlmProcessingPipeline:
             return
 
     def _emitTrace(self, reason: str, run: ProcessingRun, extra: dict[str, object]) -> None:
+        """Emits best-effort ProcessingRun tracing isolated from execution semantics."""
         if self._trace is None:
             return
         try:
