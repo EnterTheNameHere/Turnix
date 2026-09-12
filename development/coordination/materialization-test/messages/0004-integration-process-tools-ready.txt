@@ -1,0 +1,87 @@
+FROM
+Actant integration thread.
+
+TO
+Materialization-test development thread.
+
+IN-REPLY-TO
+0001-materialization-to-integration.txt
+0002-integration-to-materialization.txt
+0003-integration-process-substrate-progress.txt
+
+STATUS
+implemented; Python-3.15-verified; ready-to-sync
+
+SUBJECT
+Configured external-tool execution is available through CodeEntryContext.
+
+INTEGRATION HEAD
+53bfdd379b6deea07112644983efaeaee718c832
+
+VERIFICATION
+The user ran the focused Python 3.15 suite after the final CodeEntryContext
+construction change and reported all green:
+
+  python -m pytest tests/backend/process tests/backend/context/test_codeEntryContext.py tests/backend/application/test_processContextIntegration.py tests/backend/application/test_applicationRuntime.py
+
+CONTRACT NOW AVAILABLE
+Actant owns configured completed-process execution. Runtime configuration binds
+logical tool names to executable authority; CodeEntry code does not supply an
+executable or shell command.
+
+Production ApplicationRuntime contexts expose:
+
+  ctx.process.run(
+      toolName,
+      arguments,
+      workingDirectory=...,
+      timeoutSeconds=...,
+  )
+
+The return value is a JSON-compatible evidence object containing generic
+execution facts including toolName, configuredExecutable, resolvedExecutable,
+arguments, workingDirectory, timing, exitCode, stdout, and stderr.
+
+A nonzero child exit code is a normally completed result. Process resolution,
+launch/OS execution, communication, and timeout failures are Actant
+ProcessExecutionError failures rather than analyzer findings.
+
+Direct low-level CodeEntryContext construction without an explicitly supplied
+process facade receives a deny-all empty process registry. Omission therefore
+does not grant ambient subprocess authority.
+
+V1 CONFIGURATION
+The materialized v1 intentionally narrows executable configuration to an
+absolute executable path. This fits the materialization requirement to point at
+the exact Ruff/ty executables used by the user's Windows/VS Code environment and
+avoids PATH-dependent authority/evidence in the first implementation.
+
+Do not rely on the earlier provisional statement that a bare executable name may
+resolve through host PATH. If a later consumer genuinely needs PATH lookup, add
+that as explicit shared integration pressure rather than doing it inside the
+Pack.
+
+V1 process execution inherits the Actant host environment. CodeEntry cannot
+supply arbitrary environment replacement/overrides.
+
+TRANSACTION SEMANTICS
+Running the external tool is irreversible. The process evidence becomes
+Application authority only when the calling workflow stores and accepts it
+through normal Actant transaction/orchestration boundaries. Aborting state later
+cannot un-run Ruff or ty.
+
+MATERIALIZATION OWNERSHIP
+The Materialization Test remains responsible for:
+- exact generated artifact/revision identity;
+- argv templates and analyzer phase meaning;
+- interpretation of Ruff/ty output and exit status;
+- deciding whether findings trigger a repair;
+- call limits and scoring semantics.
+
+Actant remains responsible for generic tool authority and execution evidence.
+
+NEXT ACTION
+Sync actant-integration through commit
+53bfdd379b6deea07112644983efaeaee718c832, move Ruff/ty executable bindings into
+Actant runtime processTools configuration, and implement analyzer execution via
+ctx.process. Do not add an application-owned subprocess wrapper.
