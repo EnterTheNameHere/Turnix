@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 14
+# file: backend/application/applicationRuntime.py ; version: 13
 from __future__ import annotations
 
 from copy import deepcopy
@@ -19,8 +19,6 @@ from backend.registration import RegistrationScope
 from backend.save import ApplicationStore, LoadedApplicationSave, SaveBundle
 from backend.tracing import TraceSinkDestination, Tracer
 from backend.values.committed import CommittedValueLayer, CommittedValueTransaction
-from backend.workspace.context import WorkspaceFacade
-from backend.workspace.runtime import EphemeralWorkspace
 
 __all__ = ["ApplicationRuntime"]
 
@@ -34,8 +32,6 @@ class ApplicationRuntime:
 
     Host-configured process tools are resolved once for this ApplicationRun and
     exposed to CodeEntry calls only through invocation-bound ``ctx.process``.
-    Each invocation also receives a private ephemeral ``ctx.workspace`` for
-    process-visible, nonpersistent materialization.
     """
 
     def __init__(
@@ -49,7 +45,23 @@ class ApplicationRuntime:
         config: dict[str, object] | None = None,
         tracer: Tracer | None = None,
     ) -> None:
-        """Creates one ApplicationRun and its mediated runtime services."""
+        """Creates one ApplicationRun and its mediated runtime services.
+
+        Args:
+            appPackId: Defining AppPack identity when creating a new Application.
+            application: Existing in-memory Application to run.
+            saveBundle: Durable Application snapshot to restore instead.
+            applicationStore: Optional durable store used by saveApplication().
+            packResolver: Resolver used by this run's PackLoader.
+            config: Detached host/application runtime configuration.
+            tracer: Optional externally owned tracer.
+
+        Raises:
+            ValueError: If mutually exclusive or inconsistent Application inputs
+                are supplied, or a new Application has no valid AppPack ID.
+            TypeError: If the supplied store or resolver has the wrong type, or
+                process-tool configuration is structurally invalid.
+        """
         if application is not None and saveBundle is not None:
             raise ValueError("ApplicationRuntime accepts either application or saveBundle, not both.")
         if application is not None and appPackId is not None and application.appPackId != appPackId:
@@ -122,7 +134,12 @@ class ApplicationRuntime:
         config: dict[str, object] | None = None,
         tracer: Tracer | None = None,
     ) -> tuple["ApplicationRuntime", LoadedApplicationSave]:
-        """Creates a fresh ApplicationRuntime from one durable Application root snapshot."""
+        """Creates a fresh ApplicationRuntime from one durable Application root snapshot.
+
+        Loading restores only the SaveBundle's committed root. No transaction
+        hierarchy exists in the new runtime. AppPack lifecycle hooks are a later
+        layer above this storage operation.
+        """
         if not isinstance(applicationStore, ApplicationStore):
             raise TypeError("applicationStore must be an ApplicationStore.")
         loaded = applicationStore.load(appPackId=appPackId, applicationId=applicationId)
@@ -169,13 +186,19 @@ class ApplicationRuntime:
         application.durableGeneration = bundle.generation
 
     def saveApplication(self, applicationStore: ApplicationStore | None = None) -> SaveBundle:
-        """Persists exactly one snapshot of the current authoritative root."""
+        """Persists exactly one snapshot of the current authoritative root.
+
+        Filesystem publication is attempted before the runtime accepts the new
+        SaveBundle generation. A failed publication therefore leaves the
+        runtime's accepted durable generation unchanged and retryable.
+        """
         with self._lane:
             store = applicationStore or self._applicationStore
             if store is None:
                 raise RuntimeError("ApplicationRuntime has no ApplicationStore bound for persistence.")
             if not isinstance(store, ApplicationStore):
                 raise TypeError("applicationStore must be an ApplicationStore.")
+
             candidate = self._nextSaveBundleCandidate()
             if self._saveBundle is None:
                 store.createApplication(candidate)
@@ -186,7 +209,16 @@ class ApplicationRuntime:
             return candidate
 
     def captureSaveBundle(self) -> SaveBundle:
-        """Captures the next in-memory SaveBundle generation for this Application."""
+        """Captures the next in-memory SaveBundle generation for this Application.
+
+        The returned bundle protects committed state at the instant of capture.
+        This method does not claim filesystem or persistent-I/O publication;
+        storage authority remains a separate boundary.
+
+        When this host was loaded from a SaveBundle, capture preserves that
+        saveBundleId and advances its generation. For a new Application, the
+        first capture establishes generation 1 of a new SaveBundle identity.
+        """
         with self._lane:
             bundle = self._nextSaveBundleCandidate()
             self._acceptSaveBundle(bundle)
@@ -221,7 +253,13 @@ class ApplicationRuntime:
             if self._initializing:
                 raise RuntimeError("Runtime initialization is already active.")
             self._initializing = True
-            self.trace("application-run-initialization-started", attributes={"applicationId": self.applicationRun.application.applicationId, "applicationRunId": self.applicationRun.applicationRunId})
+            self.trace(
+                "application-run-initialization-started",
+                attributes={
+                    "applicationId": self.applicationRun.application.applicationId,
+                    "applicationRunId": self.applicationRun.applicationRunId,
+                },
+            )
 
     def abortInitialization(self) -> None:
         """Ends an active initialization phase without starting the run."""
@@ -229,35 +267,61 @@ class ApplicationRuntime:
             if not self._initializing:
                 return
             self._initializing = False
-            self.trace("application-run-initialization-aborted", attributes={"applicationId": self.applicationRun.application.applicationId, "applicationRunId": self.applicationRun.applicationRunId}, level="warning")
+            self.trace(
+                "application-run-initialization-aborted",
+                attributes={
+                    "applicationId": self.applicationRun.application.applicationId,
+                    "applicationRunId": self.applicationRun.applicationRunId,
+                },
+                level="warning",
+            )
 
     def start(self) -> None:
         """Starts the initialized ApplicationRun and closes initialization."""
         with self._lane:
             self.applicationRun.start()
             self._initializing = False
-            self.trace("application-run-started", attributes={"applicationId": self.applicationRun.application.applicationId, "applicationRunId": self.applicationRun.applicationRunId})
+            self.trace(
+                "application-run-started",
+                attributes={
+                    "applicationId": self.applicationRun.application.applicationId,
+                    "applicationRunId": self.applicationRun.applicationRunId,
+                },
+            )
 
     def stop(self) -> None:
         """Stops an active run after attempting Pack cleanup."""
         with self._lane:
             if not self.applicationRun.active:
                 return
+
             errors: list[Exception] = []
             try:
                 self.packLoader.close()
             except Exception as err:
                 errors.append(err)
-            self.trace("application-run-stopped", attributes={"applicationId": self.applicationRun.application.applicationId, "applicationRunId": self.applicationRun.applicationRunId})
+
+            self.trace(
+                "application-run-stopped",
+                attributes={
+                    "applicationId": self.applicationRun.application.applicationId,
+                    "applicationRunId": self.applicationRun.applicationRunId,
+                },
+            )
             self.applicationRun.stop()
+
             if errors:
-                raise ExceptionGroup("ApplicationRuntime stop reported Pack cleanup errors.", errors)
+                raise ExceptionGroup(
+                    "ApplicationRuntime stop reported Pack cleanup errors.",
+                    errors,
+                )
 
     def close(self) -> None:
         """Closes Pack/runtime resources and the internally owned tracer once."""
         with self._lane:
             if self._closed:
                 return
+
             errors: list[Exception] = []
             if self.applicationRun.active:
                 try:
@@ -273,15 +337,20 @@ class ApplicationRuntime:
                     self.abortInitialization()
                 except Exception as err:
                     errors.append(err)
+
             if self._ownsTracer and not self._tracerClosed:
                 try:
                     self.tracer.close()
                 except Exception:
                     pass
                 self._tracerClosed = True
+
             self._closed = True
             if errors:
-                raise ExceptionGroup("ApplicationRuntime close reported errors.", errors)
+                raise ExceptionGroup(
+                    "ApplicationRuntime close reported errors.",
+                    errors,
+                )
 
     def requireActive(self) -> None:
         """Requires this runtime to own an active ApplicationRun."""
@@ -306,41 +375,36 @@ class ApplicationRuntime:
         """Creates one fresh call-specific CodeEntryContext with explicit facilities."""
         self.requireOperational()
         contextReference: CodeEntryContext | None = None
-        workspaceRuntime = EphemeralWorkspace()
 
         def requireContextValid() -> None:
-            """Delegates invocation-facade lifetime checks to the constructed context."""
+            """Delegates process-facade lifetime checks to the constructed context."""
             if contextReference is None:
-                raise RuntimeError("CodeEntryContext invocation authority is not initialized.")
+                raise RuntimeError("CodeEntryContext process authority is not initialized.")
             contextReference.requireValid()
 
-        process = ProcessFacade(runner=self.processRunner, requireValid=requireContextValid)
-        workspace = WorkspaceFacade(workspace=workspaceRuntime, requireValid=requireContextValid)
-        try:
-            context = CodeEntryContext(
-                identity=identity,
-                packRoot=packRoot,
-                io=self.io if ioView is None else ioView,
-                capabilities=self.capabilities,
-                llmProviders=self.llmProviders,
-                llmPipeline=self.llmPipeline,
-                process=process,
-                workspace=workspace,
-                workspaceRuntime=workspaceRuntime,
-                memory=self.applicationRun.application.committedState if memoryView is None else memoryView,
-                registrationScope=registrationScope,
-                config=self._config,
-                capabilityInvoker=lambda capabilityId, payload=None: self.invokeCapability(
-                    capabilityId,
-                    payload,
-                    memoryView=self.applicationRun.application.committedState if memoryView is None else memoryView,
-                    ioView=self.io if ioView is None else ioView,
-                ),
-                allowRegistration=allowRegistration,
-            )
-        except Exception:
-            workspaceRuntime.close()
-            raise
+        process = ProcessFacade(
+            runner=self.processRunner,
+            requireValid=requireContextValid,
+        )
+        context = CodeEntryContext(
+            identity=identity,
+            packRoot=packRoot,
+            io=self.io if ioView is None else ioView,
+            capabilities=self.capabilities,
+            llmProviders=self.llmProviders,
+            llmPipeline=self.llmPipeline,
+            process=process,
+            memory=self.applicationRun.application.committedState if memoryView is None else memoryView,
+            registrationScope=registrationScope,
+            config=self._config,
+            capabilityInvoker=lambda capabilityId, payload=None: self.invokeCapability(
+                capabilityId,
+                payload,
+                memoryView=self.applicationRun.application.committedState if memoryView is None else memoryView,
+                ioView=self.io if ioView is None else ioView,
+            ),
+            allowRegistration=allowRegistration,
+        )
         contextReference = context
         return context
 
@@ -355,7 +419,14 @@ class ApplicationRuntime:
         """Withdraws one loaded CodeEntry instance from runtime invocation."""
         self._codeEntries.pop(codeEntryInstanceId, None)
 
-    def invokeCapability(self, capabilityId: str, payload: object | None = None, *, memoryView: CommittedValueLayer | CommittedValueTransaction | None = None, ioView: ManagedIo | ManagedIoTransaction | None = None) -> object:
+    def invokeCapability(
+        self,
+        capabilityId: str,
+        payload: object | None = None,
+        *,
+        memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
+        ioView: ManagedIo | ManagedIoTransaction | None = None,
+    ) -> object:
         """Invokes one resolved capability with a fresh call-specific context."""
         with self._lane:
             self.requireOperational()
@@ -364,16 +435,37 @@ class ApplicationRuntime:
                 identity, packRoot = self._codeEntries[registration.ownerId]
             except KeyError as err:
                 raise RuntimeError(f"Capability owner is not an active CodeEntry: {registration.ownerId}.") from err
-            self.trace("capability-invocation-started", attributes={"capabilityId": capabilityId, "ownerId": registration.ownerId, "codeEntryInstanceId": identity.codeEntryInstanceId})
+            self.trace(
+                "capability-invocation-started",
+                attributes={
+                    "capabilityId": capabilityId,
+                    "ownerId": registration.ownerId,
+                    "codeEntryInstanceId": identity.codeEntryInstanceId,
+                },
+            )
             scope = RegistrationScope()
-            context = self.createContext(identity=identity, packRoot=packRoot, registrationScope=scope, memoryView=memoryView, ioView=ioView)
+            context = self.createContext(
+                identity=identity,
+                packRoot=packRoot,
+                registrationScope=scope,
+                memoryView=memoryView,
+                ioView=ioView,
+            )
             try:
                 result = self.capabilities.invokeResolved(registration, context=context, payload=payload)
             except Exception as err:
-                self.trace("capability-invocation-failed", message=str(err), attributes={"capabilityId": capabilityId, "ownerId": registration.ownerId}, level="error")
+                self.trace(
+                    "capability-invocation-failed",
+                    message=str(err),
+                    attributes={"capabilityId": capabilityId, "ownerId": registration.ownerId},
+                    level="error",
+                )
                 raise
             else:
-                self.trace("capability-invocation-completed", attributes={"capabilityId": capabilityId, "ownerId": registration.ownerId})
+                self.trace(
+                    "capability-invocation-completed",
+                    attributes={"capabilityId": capabilityId, "ownerId": registration.ownerId},
+                )
                 return result
             finally:
                 context.invalidate()
@@ -385,9 +477,21 @@ class ApplicationRuntime:
             self.requireActive()
             job = Job.new()
             job.start()
-            unit = OrchestrationUnit.mutation(applicationRunId=self.applicationRun.applicationRunId, transactionBase=self.applicationRun.application.committedState)
+            unit = OrchestrationUnit.mutation(
+                applicationRunId=self.applicationRun.applicationRunId,
+                transactionBase=self.applicationRun.application.committedState,
+            )
             ioTransaction = self.io.openTransaction()
-            orchestrationAttributes = {"jobId": job.jobId, "orchestrationUnitId": unit.orchestrationUnitId, "applicationId": self.applicationRun.application.applicationId, "applicationRunId": unit.applicationRunId, "transactionId": unit.transactionId, "ioTransactionId": ioTransaction.ioTransactionId, "capabilityId": capabilityId, "workKind": "job-capability"}
+            orchestrationAttributes = {
+                "jobId": job.jobId,
+                "orchestrationUnitId": unit.orchestrationUnitId,
+                "applicationId": self.applicationRun.application.applicationId,
+                "applicationRunId": unit.applicationRunId,
+                "transactionId": unit.transactionId,
+                "ioTransactionId": ioTransaction.ioTransactionId,
+                "capabilityId": capabilityId,
+                "workKind": "job-capability",
+            }
             self.trace("OrchestrationUnitCreated", attributes=orchestrationAttributes)
             self.trace("OrchestrationUnitTransactionOpened", attributes=orchestrationAttributes)
             self.trace("managed-io-transaction-opened", attributes=orchestrationAttributes)
@@ -395,14 +499,24 @@ class ApplicationRuntime:
             self.trace("OrchestrationUnitStarted", attributes=orchestrationAttributes)
             self.trace("job-started", attributes=orchestrationAttributes)
             try:
-                result = self.invokeCapability(capabilityId, payload, memoryView=unit.memoryView, ioView=ioTransaction)
+                result = self.invokeCapability(
+                    capabilityId,
+                    payload,
+                    memoryView=unit.memoryView,
+                    ioView=ioTransaction,
+                )
                 unit.commitMutation()
                 job.authoritativeStateAccepted = True
                 self.trace("OrchestrationUnitTransactionCommitted", attributes=orchestrationAttributes)
                 try:
                     ioTransaction.commit()
                 except Exception as err:
-                    self.trace("managed-io-transaction-failed", message=str(err), attributes=orchestrationAttributes, level="error")
+                    self.trace(
+                        "managed-io-transaction-failed",
+                        message=str(err),
+                        attributes=orchestrationAttributes,
+                        level="error",
+                    )
                     raise
                 self.trace("managed-io-transaction-committed", attributes=orchestrationAttributes)
             except Exception as err:
@@ -416,9 +530,19 @@ class ApplicationRuntime:
                 unit.finish(OrchestrationUnitOutcome.FAILED)
                 if not mutationWasResolved:
                     self.trace("OrchestrationUnitTransactionAborted", attributes=orchestrationAttributes)
-                self.trace("OrchestrationUnitFailed", message=str(err), attributes=orchestrationAttributes, level="error")
+                self.trace(
+                    "OrchestrationUnitFailed",
+                    message=str(err),
+                    attributes=orchestrationAttributes,
+                    level="error",
+                )
                 job.fail(err)
-                self.trace("job-failed", message=str(err), attributes=orchestrationAttributes, level="error")
+                self.trace(
+                    "job-failed",
+                    message=str(err),
+                    attributes=orchestrationAttributes,
+                    level="error",
+                )
             else:
                 unit.finish(OrchestrationUnitOutcome.COMPLETED)
                 self.trace("OrchestrationUnitCompleted", attributes=orchestrationAttributes)
