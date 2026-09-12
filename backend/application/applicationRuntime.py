@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 12
+# file: backend/application/applicationRuntime.py ; version: 13
 from __future__ import annotations
 
 from copy import deepcopy
@@ -142,10 +142,7 @@ class ApplicationRuntime:
         """
         if not isinstance(applicationStore, ApplicationStore):
             raise TypeError("applicationStore must be an ApplicationStore.")
-        loaded = applicationStore.load(
-            appPackId=appPackId,
-            applicationId=applicationId,
-        )
+        loaded = applicationStore.load(appPackId=appPackId, applicationId=applicationId)
         runtime = cls(
             saveBundle=loaded.bundle,
             applicationStore=applicationStore,
@@ -175,9 +172,7 @@ class ApplicationRuntime:
             durableGeneration = self._saveBundle.generation
         targetGeneration = durableGeneration + 1
         if targetGeneration == self._saveBundle.generation + 1:
-            return self._saveBundle.nextGeneration(
-                committedState=application.committedState,
-            )
+            return self._saveBundle.nextGeneration(committedState=application.committedState)
         return self._saveBundle.advanceToGeneration(
             generation=targetGeneration,
             committedState=application.committedState,
@@ -377,13 +372,20 @@ class ApplicationRuntime:
         memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
         ioView: ManagedIo | ManagedIoTransaction | None = None,
     ) -> CodeEntryContext:
-        """Creates one fresh call-specific CodeEntryContext.
-
-        Process authority is attached here because it is an ApplicationRun-owned
-        mediated service but must obey the same per-call lifetime as every other
-        CodeEntryContext facility.
-        """
+        """Creates one fresh call-specific CodeEntryContext with explicit facilities."""
         self.requireOperational()
+        contextReference: CodeEntryContext | None = None
+
+        def requireContextValid() -> None:
+            """Delegates process-facade lifetime checks to the constructed context."""
+            if contextReference is None:
+                raise RuntimeError("CodeEntryContext process authority is not initialized.")
+            contextReference.requireValid()
+
+        process = ProcessFacade(
+            runner=self.processRunner,
+            requireValid=requireContextValid,
+        )
         context = CodeEntryContext(
             identity=identity,
             packRoot=packRoot,
@@ -391,6 +393,7 @@ class ApplicationRuntime:
             capabilities=self.capabilities,
             llmProviders=self.llmProviders,
             llmPipeline=self.llmPipeline,
+            process=process,
             memory=self.applicationRun.application.committedState if memoryView is None else memoryView,
             registrationScope=registrationScope,
             config=self._config,
@@ -402,10 +405,7 @@ class ApplicationRuntime:
             ),
             allowRegistration=allowRegistration,
         )
-        context.process = ProcessFacade(
-            runner=self.processRunner,
-            requireValid=context.requireValid,
-        )
+        contextReference = context
         return context
 
     def registerCodeEntry(self, identity: CodeEntryIdentity, packRoot: Path) -> None:
@@ -492,27 +492,12 @@ class ApplicationRuntime:
                 "capabilityId": capabilityId,
                 "workKind": "job-capability",
             }
-            self.trace(
-                "OrchestrationUnitCreated",
-                attributes=orchestrationAttributes,
-            )
-            self.trace(
-                "OrchestrationUnitTransactionOpened",
-                attributes=orchestrationAttributes,
-            )
-            self.trace(
-                "managed-io-transaction-opened",
-                attributes=orchestrationAttributes,
-            )
+            self.trace("OrchestrationUnitCreated", attributes=orchestrationAttributes)
+            self.trace("OrchestrationUnitTransactionOpened", attributes=orchestrationAttributes)
+            self.trace("managed-io-transaction-opened", attributes=orchestrationAttributes)
             unit.start()
-            self.trace(
-                "OrchestrationUnitStarted",
-                attributes=orchestrationAttributes,
-            )
-            self.trace(
-                "job-started",
-                attributes=orchestrationAttributes,
-            )
+            self.trace("OrchestrationUnitStarted", attributes=orchestrationAttributes)
+            self.trace("job-started", attributes=orchestrationAttributes)
             try:
                 result = self.invokeCapability(
                     capabilityId,
@@ -522,10 +507,7 @@ class ApplicationRuntime:
                 )
                 unit.commitMutation()
                 job.authoritativeStateAccepted = True
-                self.trace(
-                    "OrchestrationUnitTransactionCommitted",
-                    attributes=orchestrationAttributes,
-                )
+                self.trace("OrchestrationUnitTransactionCommitted", attributes=orchestrationAttributes)
                 try:
                     ioTransaction.commit()
                 except Exception as err:
@@ -536,10 +518,7 @@ class ApplicationRuntime:
                         level="error",
                     )
                     raise
-                self.trace(
-                    "managed-io-transaction-committed",
-                    attributes=orchestrationAttributes,
-                )
+                self.trace("managed-io-transaction-committed", attributes=orchestrationAttributes)
             except Exception as err:
                 mutationWasResolved = unit.mutationResolved
                 try:
@@ -547,16 +526,10 @@ class ApplicationRuntime:
                 except RuntimeError:
                     pass
                 else:
-                    self.trace(
-                        "managed-io-transaction-aborted",
-                        attributes=orchestrationAttributes,
-                    )
+                    self.trace("managed-io-transaction-aborted", attributes=orchestrationAttributes)
                 unit.finish(OrchestrationUnitOutcome.FAILED)
                 if not mutationWasResolved:
-                    self.trace(
-                        "OrchestrationUnitTransactionAborted",
-                        attributes=orchestrationAttributes,
-                    )
+                    self.trace("OrchestrationUnitTransactionAborted", attributes=orchestrationAttributes)
                 self.trace(
                     "OrchestrationUnitFailed",
                     message=str(err),
@@ -572,13 +545,7 @@ class ApplicationRuntime:
                 )
             else:
                 unit.finish(OrchestrationUnitOutcome.COMPLETED)
-                self.trace(
-                    "OrchestrationUnitCompleted",
-                    attributes=orchestrationAttributes,
-                )
+                self.trace("OrchestrationUnitCompleted", attributes=orchestrationAttributes)
                 job.succeed(result)
-                self.trace(
-                    "job-completed",
-                    attributes=orchestrationAttributes,
-                )
+                self.trace("job-completed", attributes=orchestrationAttributes)
             return job
