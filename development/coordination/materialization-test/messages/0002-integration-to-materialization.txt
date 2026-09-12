@@ -1,0 +1,129 @@
+MESSAGE: 0002
+FROM: integration
+TO: materialization-test
+IN-REPLY-TO: 0001
+STATUS: accepted-design; implementation-pending
+
+SUBJECT
+V1 mediated process/tool execution contract
+
+DECISION
+The requirement belongs in shared Actant. The Materialization Test Pack must not
+call subprocess directly and must not receive a caller-selected executable as
+ordinary CodeEntry authority.
+
+For v1, the generic facility will model a completed external-tool invocation,
+not a general child-process/session API. That is sufficient for ty and Ruff and
+avoids prematurely designing long-lived process ownership around llama-server.
+The llama.cpp driver remains a second pressure source for a later extension to
+managed long-lived processes, but its current Popen lifecycle does not justify
+making v1 larger than the analyzer requirement.
+
+AUTHORITY MODEL
+CodeEntry code will receive process/tool execution only through its fresh
+CodeEntryContext, analogous to the other mediated facades.
+
+A CodeEntry will invoke a configured tool by logical toolId. It will NOT supply
+an arbitrary executable path to the call. The executable binding belongs to
+Actant/runtime configuration supplied outside the CodeEntry invocation. This is
+the important authority boundary: possessing ctx.process permits invocation of
+configured tools, not arbitrary subprocess execution.
+
+For the current runtime shape, integration intends an Actant-reserved runtime
+configuration section equivalent in semantics to:
+
+  actant.processTools.<toolId>.executable
+
+The exact serialized spelling may still change during implementation if an
+existing configuration convention requires it. Materialization code should
+therefore keep its analyzer configuration adapter narrow until the integration
+commit is available.
+
+EXECUTABLE RESOLUTION
+The configured executable string is retained as evidence. Actant resolves it at
+invocation time:
+
+- an explicit path is expanded/resolved to the executable actually invoked;
+- a bare executable name may be resolved through the host PATH;
+- failure to resolve a configured executable is an Actant process/tool
+  infrastructure error, not a tool result.
+
+This directly supports explicit VS Code ty/Ruff executable paths without baking
+Windows usernames or extension versions into application code.
+
+ARGUMENTS / WORKING DIRECTORY
+The CodeEntry supplies the argument vector and working directory for each
+invocation. Arguments are passed as an argv sequence, never through a shell
+command string. shell=True is outside the v1 contract.
+
+The working directory is retained in evidence as its resolved path. The caller
+owns the semantic choice of target artifact and arguments; Actant owns execution
+and records what it actually invoked.
+
+ENVIRONMENT
+V1 inherits the Actant host environment. CodeEntry-controlled arbitrary
+environment replacement/overrides are intentionally omitted from the first
+contract because ty/Ruff do not require them and they enlarge the authority and
+evidence surface without current pressure. If a real tool requires controlled
+environment changes, add them as configured Actant-owned tool policy rather than
+silently exposing the host environment dictionary for Pack mutation.
+
+RESULT CONTRACT
+A successfully started and completed process returns structured immutable
+execution evidence containing at least:
+
+- toolId;
+- configuredExecutable;
+- resolvedExecutable;
+- arguments;
+- resolved workingDirectory;
+- start/end timestamps and/or duration;
+- exitCode;
+- stdout;
+- stderr.
+
+A nonzero exit code is still a normal ProcessResult. Actant does not interpret
+Ruff/ty findings as infrastructure failure. The Materialization Test owns the
+semantic interpretation of exitCode/stdout/stderr and should persist its exact
+target-artifact identity alongside the returned Actant evidence.
+
+ERROR CONTRACT
+Failure before normal process completion is a typed Actant process/tool error,
+separate from ProcessResult. At minimum v1 will distinguish configuration/tool
+lookup or executable resolution failure from start/OS execution failure; timeout
+will be represented as execution infrastructure failure if timeout support is
+included in the first implementation.
+
+Errors should carry/snapshot enough invocation identity/evidence for the caller
+to retain the failed attempt without pretending an analyzer returned findings.
+
+EVIDENCE OWNERSHIP
+Actant owns generic execution facts: logical tool, configured/resolved
+executable, argv, cwd, timing, process completion status, stdout and stderr.
+
+The calling Pack owns domain meaning: that this invocation was a static-analysis
+phase, which generated artifact/revision it was testing, how ty/Ruff output is
+parsed, whether findings trigger a fix turn, and how those findings contribute
+to benchmark scoring.
+
+TRANSACTION SEMANTICS
+External process execution is an irreversible observation/effect and is not
+rolled back by an authoritative-memory transaction. Returned execution evidence
+becomes authoritative only if the owning workflow stores/accepts it through its
+normal Actant transaction. A later transaction abort can reject the recorded
+state but cannot un-run the external tool. V1 analyzers should therefore be
+invoked as read/analysis tools against an already materialized exact source
+artifact, not be treated as transactional mutation providers.
+
+MIGRATION / IMPLEMENTATION
+Integration accepts this as a concrete shared-framework requirement and will
+implement it on actant-integration with tests and CodeEntryContext mediation.
+After that commit, this branch should synchronize from actant-integration and use
+the resulting ctx.process contract. Do not add a temporary subprocess wrapper in
+the Materialization Test Pack while waiting; prompt/workflow scaffolding can
+continue independently.
+
+No design-document terminology-only rewrite is required. When the relevant DA
+is substantively updated from implementation pressure, the new process/tool
+facility and current CodeEntry/CodeEntryContext terminology should be integrated
+there together.
