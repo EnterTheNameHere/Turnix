@@ -41,24 +41,37 @@ Keep prompt representation deliberately simple. JSON file(s) initially contain:
 Do not invent a prompt-component language before requirements demand it.
 
 CURRENT MATERIALIZATION
-The first application scaffold exists under:
+The application scaffold exists under:
 
   first-party/applications/materializationTest/
 
 It contains an AppPack manifest, manual activation plan, config.json,
 prompts.json, CLI runner, and materializationTest.workflow Pack.
 
-The workflow supports inspection through materializationTest.describe@1 and the
-first Actant-native phase through materializationTest.run@1. The initial phase
-constructs grounding + initial-materialization + source-output-protocol
-QueryItems, renders an exact text/plain query, executes it through
-ctx.llm.runProcessing(), retains the complete raw response, strictly extracts a
-Python source candidate, and commits response/extraction state plus ProcessingRun
-identity into application memory.
+Actant-native initial materialization plus the first static-analysis repair loop
+are now materialized. materializationTest.run@1:
+- constructs grounding + initial instruction + source-output protocol QueryItems;
+- executes through ctx.llm.runProcessing() and retains complete raw responses;
+- strictly extracts one Python fenced source candidate;
+- materializes the exact source through invocation-private ctx.workspace;
+- invokes configured Ruff and ty logical tools through ctx.process against the
+  same ephemeral candidate path;
+- treats nonzero analyzer exits as ordinary model/code findings;
+- records generic process evidence, exact source, UTF-8 size/SHA-256 identity,
+  extraction evidence, raw response, and ProcessingRun identity per attempt;
+- reconstructs repair inference from grounding + current source + current
+  analyzer diagnostics + historical static-analysis correction text + fixed
+  source-output protocol;
+- repeats until both analyzers exit zero or the five-call budget is exhausted;
+- classifies extraction-failed, analyzer-limit-reached,
+  analyzer-execution-failed, or clean distinctly.
+
+The ephemeral workspace artifact is not durable evidence; exact source and its
+identity are stored in application state. ProcessExecutionError is treated as
+infrastructure/application failure evidence rather than analyzer findings.
 
 Classic strategy is represented in configuration but intentionally not yet
-implemented. Analyzer/fix, self-audit, questionnaire and export remain to
-materialize.
+implemented. Self-audit, questionnaire and export remain to materialize.
 
 SOURCE RESPONSE PROTOCOL
 Every source-producing inference, including initial materialization, every
@@ -79,7 +92,7 @@ Acceptance is deliberately strict:
 - the exact extracted body is the artifact supplied to ty/Ruff.
 
 No Python runtime execution/import check is part of v1. Ruff and ty are the
-historical validation mechanism and must inspect the extracted artifact without
+historical validation mechanism and inspect the extracted artifact without
 executing it.
 
 CALL LIMITS AND FAILURE SEMANTICS
@@ -99,43 +112,49 @@ valuable scoring evidence. If no valid source was ever extracted, the harness
 must not invent an empty source artifact.
 
 STATIC ANALYSIS REQUIREMENT
-The application must run ty and Ruff against the exact generated source
-artifact. Analyzer application config currently contains logical toolId plus argv
-templates. Executable authority now belongs in shared Actant runtime processTools
-configuration rather than the workflow Pack.
+The application runs ty and Ruff against the exact generated source artifact.
+Analyzer application config contains logical toolId plus argv templates.
+Executable authority belongs in shared Actant runtime processTools configuration,
+not the workflow Pack.
 
-Analyzer evidence should preserve at least tool identity, configured and
-resolved executable, arguments, working directory, target artifact, timing,
-exit code, stdout, and stderr. Analyzer findings are expected test input and
-must be distinguished from failure to launch/execute the analyzer.
+Analyzer evidence preserves the generic ProcessResult snapshot, including tool
+identity, configured/resolved executable, arguments, working directory, timing,
+exit code, stdout, and stderr. Analyzer findings are expected test input and are
+distinguished from failure to launch/execute the analyzer.
 
-SHARED PROCESS CONTRACT
-Integration completed the shared process-tool path and published it in message
-0004. The verified integration head is:
+SHARED PROCESS AND WORKSPACE CONTRACTS
+Integration completed and the materialization branch synchronized both shared
+facilities. Process integration head was:
 
   53bfdd379b6deea07112644983efaeaee718c832
 
+Workspace integration head was:
+
+  4459d5b7b2a3b9bb3d3b00e91311e6e45deef4ff
+
 Production CodeEntry contexts expose ctx.process.run() for logical configured
 tools. Runtime configuration owns logical-name -> executable binding. V1 requires
-absolute executable paths and does not use PATH lookup. CodeEntry supplies argv,
-optional cwd, and optional timeout but cannot supply an arbitrary executable,
-shell command, or environment replacement.
+absolute executable paths. CodeEntry supplies argv, optional cwd, and optional
+timeout but cannot supply arbitrary executable, shell command, or environment
+replacement.
 
-Completed execution returns JSON-compatible evidence including tool identity,
-configured/resolved executable, arguments, cwd, timing, exit code, stdout and
-stderr. Nonzero exit is normal completion. Infrastructure execution failures are
-ProcessExecutionError.
+Production CodeEntry contexts also expose invocation-private
+ctx.workspace.materializeText()/materializeBytes(). Workspace materialization is
+immediate and process-visible but non-authoritative, non-persistent scratch state.
+The context owns cleanup and callers may provide only contained relative paths.
+This is the correct bridge for exact analyzer inputs and must not be replaced by
+direct pathlib/open/subprocess behavior in the application Pack.
 
-The user ran the focused Python 3.15 process/context/ApplicationRuntime tests
-after final context construction and reported all green. The materialization
-branch may now synchronize this integration head and implement Ruff/ty through
-ctx.process. Do not add an application-owned subprocess wrapper.
+The user ran Integration's focused Python 3.15 process/context/workspace suites
+and reported them green before synchronization. Materialization-specific workflow
+tests have been added for strict source extraction and analyzer mediation, but
+have NOT yet been reported run under Python 3.15.
 
 CURRENT PIPELINE FIT
 The current QueryItem and LlmProcessingPipeline shape is sufficient for the
-prompt-side first implementation. LlmProcessingPipeline records exact query and
-response evidence transactionally. ApplicationRuntime.runJob plus child
-ProcessingRuns provides a usable outer/inner transaction spine for v1.
+Actant-native prompt path. LlmProcessingPipeline records exact query and response
+evidence transactionally. ApplicationRuntime.runJob plus child ProcessingRuns
+provides a usable outer/inner transaction spine for v1.
 
 CHECKPOINTS
 Automatic restart/checkpointing is desired later but is not a v1 requirement.
@@ -153,7 +172,9 @@ COORDINATION PROTOCOL
 - Shared/reusable Actant changes ultimately belong on actant-integration.
 - Application-specific materialization semantics stay on this branch.
 
-CURRENT BLOCKER / NEXT SHARED EVENT
-Shared process execution is no longer a blocker. Next materialization-side work
-is to sync integration head 53bfdd379b6deea07112644983efaeaee718c832 and
-materialize the Ruff/ty analyzer/fix phase using ctx.process.
+CURRENT BLOCKER / NEXT WORK
+No shared architectural blocker is currently known. Next application work is to
+review/verify the new materialization analyzer loop, then implement the separate
+self-audit + analyzer-repair budget, followed by questionnaire semantics and
+export. Classic strategy remains later work because it requires faithful
+accumulating chat-history semantics rather than Actant-native reconstruction.
