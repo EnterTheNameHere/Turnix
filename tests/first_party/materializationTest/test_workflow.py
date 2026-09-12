@@ -1,4 +1,4 @@
-# file: tests/first_party/materializationTest/test_workflow.py ; version: 2
+# file: tests/first_party/materializationTest/test_workflow.py ; version: 3
 from __future__ import annotations
 
 import importlib.util
@@ -185,3 +185,77 @@ def test_buildQueryItems_selfAuditRepair_uses_only_latest_repair_projection() ->
         "current diagnostics",
         "one Python fence",
     ]
+
+
+def test_requireQuestions_preserves_order_and_exact_question_text() -> None:
+    """Question boundaries are explicit data and question contents stay exact."""
+    questions = ["01. First?\r\nExplain.", "02. Second?"]
+
+    assert workflow._requireQuestions(questions, "questionnaire") == tuple(questions)
+
+
+def test_requireQuestions_rejects_implicit_or_blank_questionnaire_shapes() -> None:
+    """The harness never guesses question boundaries from free-form text."""
+    with pytest.raises(TypeError, match="must be a list"):
+        workflow._requireQuestions("01. First?\n02. Second?", "questionnaire")
+    with pytest.raises(ValueError, match="at least one"):
+        workflow._requireQuestions([], "questionnaire")
+    with pytest.raises(ValueError, match=r"questionnaire\[1\]"):
+        workflow._requireQuestions(["valid", "   "], "questionnaire")
+
+
+def test_buildQueryItems_questionnaire_with_source_uses_one_question() -> None:
+    """Native questionnaire projection contains one question and frozen source."""
+    payload = {
+        "input": {
+            "phase": "questionnaire",
+            "grounding": "grounding",
+            "currentSource": "print('frozen')\n",
+            "question": "Does requirement 17 pass?",
+        },
+    }
+
+    items = workflow._buildQueryItems(None, payload)
+
+    assert [item.kind for item in items] == ["grounding", "source", "question"]
+    assert [item.content for item in items] == [
+        "grounding",
+        "print('frozen')\n",
+        "Does requirement 17 pass?",
+    ]
+
+
+def test_buildQueryItems_questionnaire_without_source_exposes_failure_state() -> None:
+    """A failed materialization is described truthfully instead of using fake source."""
+    payload = {
+        "input": {
+            "phase": "questionnaire",
+            "grounding": "grounding",
+            "materializationState": (
+                "No valid Python source artifact was extracted during materialization.\n"
+                "Materialization outcome: extraction-failed.\n"
+                "Self-audit outcome: not-reached."
+            ),
+            "question": "Did you implement the required class?",
+        },
+    }
+
+    items = workflow._buildQueryItems(None, payload)
+
+    assert [item.kind for item in items] == ["grounding", "state", "question"]
+    assert "No valid Python source artifact" in items[1].content
+    assert items[2].content == "Did you implement the required class?"
+
+
+def test_materializationStateForQuestionnaire_reports_no_source_without_inventing_one() -> None:
+    """No-source questionnaire context identifies failure but contains no fake file."""
+    rendered = workflow._materializationStateForQuestionnaire(
+        {
+            "materializationOutcome": "extraction-failed",
+            "selfAuditOutcome": "not-reached",
+        },
+    )
+
+    assert "No valid Python source artifact" in rendered
+    assert "extraction-failed" in rendered
+    assert "```python" not in rendered
