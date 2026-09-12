@@ -1,4 +1,4 @@
-# file: first-party/applications/materializationTest/run.py ; version: 1
+# file: first-party/applications/materializationTest/run.py ; version: 2
 from __future__ import annotations
 
 import argparse
@@ -16,7 +16,7 @@ from backend.save import ApplicationStore  # noqa: E402
 
 
 def _normalizePath(value: object, *, configDirectory: Path) -> object:
-    """Resolves one application-owned path relative to its configuration file."""
+    """Resolve one application-owned path relative to its configuration file."""
     if type(value) is not str:
         return value
     path = Path(value).expanduser()
@@ -24,7 +24,7 @@ def _normalizePath(value: object, *, configDirectory: Path) -> object:
 
 
 def _normalizePaths(config: dict[str, object], *, configDirectory: Path) -> dict[str, object]:
-    """Normalizes only paths currently owned by the Materialization Test config."""
+    """Normalize only filesystem paths currently owned by application configuration."""
     normalized = dict(config)
     for key in ("promptsFile", "workspaceDirectory", "outputDirectory"):
         if key in normalized:
@@ -55,8 +55,25 @@ def _normalizePaths(config: dict[str, object], *, configDirectory: Path) -> dict
     return normalized
 
 
+def _saveAccepted(runtime, job) -> None:
+    """Persist authoritative state accepted by a Job before propagating its error.
+
+    Actant may accept authoritative memory before a later side-effect publication
+    fails. Saving before re-raising preserves that accepted state rather than
+    losing it merely because the Job also carries an error.
+    """
+    if not job.authoritativeStateAccepted:
+        return
+    savedBundle = runtime.saveApplication()
+    sys.stdout.write(
+        "Saved Application "
+        f"{runtime.applicationRun.application.applicationId} "
+        f"generation {savedBundle.generation}.\n"
+    )
+
+
 def main() -> int:
-    """Runs or inspects one durable Materialization Test Application."""
+    """Run, inspect, persist, and export one durable Materialization Test Application."""
     parser = argparse.ArgumentParser(description="Run the Materialization Test AppPack.")
     parser.add_argument("config", nargs="?", default=str(Path(__file__).with_name("config.json")))
     application = parser.add_mutually_exclusive_group(required=True)
@@ -99,27 +116,31 @@ def main() -> int:
 
         if args.describe:
             job = runtime.runJob("materializationTest.describe@1", None)
+            _saveAccepted(runtime, job)
             if job.error is not None:
                 raise job.error
             sys.stdout.write(f"{job.result!r}\n")
-        else:
-            def observe(event) -> None:
-                if event.eventType == "delta" and event.text:
-                    sys.stdout.write(event.text)
-                    sys.stdout.flush()
+            return 0
 
-            job = runtime.runJob("materializationTest.run@1", {"streamObserver": observe})
-            if job.error is not None:
-                raise job.error
-            sys.stdout.write("\nMaterialization workflow run completed.\n")
+        def observe(event) -> None:
+            """Stream model text to the terminal without altering persisted evidence."""
+            if event.eventType == "delta" and event.text:
+                sys.stdout.write(event.text)
+                sys.stdout.flush()
 
-        if job.authoritativeStateAccepted:
-            savedBundle = runtime.saveApplication()
-            sys.stdout.write(
-                "Saved Application "
-                f"{runtime.applicationRun.application.applicationId} "
-                f"generation {savedBundle.generation}.\n"
-            )
+        job = runtime.runJob("materializationTest.run@1", {"streamObserver": observe})
+        _saveAccepted(runtime, job)
+        if job.error is not None:
+            raise job.error
+        sys.stdout.write("\nMaterialization workflow run completed.\n")
+
+        exportJob = runtime.runJob("materializationTest.export@1", None)
+        _saveAccepted(runtime, exportJob)
+        if exportJob.error is not None:
+            raise exportJob.error
+        if not isinstance(exportJob.result, dict) or type(exportJob.result.get("path")) is not str:
+            raise RuntimeError("Materialization evidence export returned an invalid result.")
+        sys.stdout.write(f"Evidence: {exportJob.result['path']}\n")
         return 0
     finally:
         host.stop()
