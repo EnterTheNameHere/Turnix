@@ -21,32 +21,66 @@ LLM materialization benchmark. V1 finish line is:
   -> questionnaire -> export sufficient scoring evidence
 
 STRATEGIES
-Both strategies use the same test definition and source prompt material.
-
 Classic reproduces the historical LM-Studio-like accumulating conversation as
 closely as practical. Its questionnaire is one request containing all questions.
+Classic is not implemented yet because faithful accumulated user/assistant roles
+must not be flattened into one text/plain user message.
 
 Actant-native reconstructs each inference from authoritative state and relevant
-QueryItems. Its questionnaire performs one independent inference per question
-against the same requirements and frozen latest legitimate source artifact.
+QueryItems. Its questionnaire performs one independent inference per requirement
+against the same original requirements and frozen latest legitimate source.
 
-PROMPT / TEST DATA
-prompts.json remains deliberately simple:
-- grounding: exact string
-- initialMaterialization: exact string containing implementation requirements
-- staticAnalysisReport: exact string/template
-- searchForBugsAndFix: exact string
-- questionnaire: ordered non-empty array of exact question strings
+REAL BENCHMARK DATA
+The benchmark is the EventJournal Python 3.15 materialization task.
 
-Question boundaries are explicit data. The harness does not parse numbering or
-newlines to infer questions and does not introduce a prompt DSL.
+prompts.json currently contains:
+- grounding (temporary combined reference + standalone grounding-turn wrapper);
+- initialMaterialization;
+- staticAnalysisReport;
+- searchForBugsAndFix;
+- questionnaireInstructions;
+- the old questionnaire array temporarily retained during migration.
+
+The real questionnaire has 117 explicit numbered requirements. It is now also
+split into semantic data files:
+
+  first-party/applications/materializationTest/questionnaire/01.json
+  ...
+  first-party/applications/materializationTest/questionnaire/13.json
+
+Each file contains sectionId, title, and an explicit ordered requirements array.
+Question boundaries remain data; no prose/newline parser derives them. The new
+questionnaire loader validates the fixed 13-section benchmark, section identity,
+explicit per-section numbering, uniqueness, and the expected 117 total. Config
+now contains questionnaireDirectory = "questionnaire".
+
+The migration is deliberately staged: the old prompts.json questionnaire remains
+until workflow consumption and export are switched and verified, then the
+duplicate will be removed.
+
+GROUNDING SEMANTIC ISSUE FOUND
+A rendered-prompt audit found that the historical grounding string combines two
+different things:
+1. authoritative grounding/reference material;
+2. instructions for the standalone historical grounding conversation turn,
+   including "do not implement yet" and a requested grounding summary.
+
+Native must not project those turn-specific instructions into the same inference
+as implementation/repair/questionnaire work. Planned data shape is:
+- groundingReference: reusable authoritative material;
+- groundingResponseInstruction: Classic-only first-turn instruction.
+
+Classic later sends both as its first user turn. Native sends only
+`groundingReference` with relevant requirements/state/instruction.
+
+A second audit finding is that the generated source protocol currently tells the
+model prose outside the Python fence is allowed, while the real benchmark source
+prompts require no outside prose. The extraction harness should remain tolerant
+and preserve outside prose as scoring evidence, but the prompt must stop
+positively permitting it.
 
 CURRENT ACTANT-NATIVE IMPLEMENTATION
-The application scaffold is under:
-
-  first-party/applications/materializationTest/
-
-The native execution path is materialized through questionnaire:
+Workflow codeEntry.py version 8 implements:
 1. Initial materialization.
 2. Ruff + ty analysis of exact extracted source.
 3. Repair loop, maximum five source-producing calls total.
@@ -55,128 +89,100 @@ The native execution path is materialized through questionnaire:
 6. Questionnaire regardless of source/materialization outcome when LLM remains
    callable.
 
-Each ProcessingRun preserves the exact model-facing query and raw response in
-shared LLM pipeline evidence. Workflow state additionally records source
-attempts, extraction outcomes, exact source text and SHA-256/UTF-8 identity,
-generic process snapshots, phase outcomes, questionnaire questions/answers, and
-ProcessingRun IDs.
+Native repair/self-audit projections retain the original
+initialMaterialization requirements. Current source appears exactly once in a
+repair prompt; analyzer reports do not duplicate it. Native questionnaire sees
+grounding, original requirements, frozen source/failure state, common
+questionnaireInstructions, and exactly one requirement.
 
-SOURCE RESPONSE PROTOCOL
-Every source-producing inference must return the complete file in exactly one
-fenced Python code block using ```python. Prose/reasoning may occur outside it.
-The completed response is parsed only after streaming finishes.
+SOURCE RESPONSE / ANALYZER SEMANTICS
+Every source-producing response is extracted only after streaming completes.
+Exactly one non-empty fenced Python block is required. No heuristic block choice,
+fence repair, dedent, or newline normalization occurs. Ordinary prose outside the
+single valid fence remains extraction-tolerated and preserved in raw evidence.
+Generated Python is not executed/imported as benchmark validation.
 
-Rejected immediately as model-output failure:
-- zero fenced blocks;
-- more than one fenced block;
-- wrong or absent language info string;
-- malformed/unclosed fence;
-- empty/whitespace-only source.
-
-There is no heuristic block selection, prose extraction, fence repair, dedent,
-newline normalization, or formatting retry. Exact extracted body is the source
-artifact supplied to both analyzers. Generated Python is not executed/imported
-as validation in v1.
-
-ANALYZER SEMANTICS
-The application uses invocation-private ctx.workspace to materialize exact
-source immediately for process visibility, then ctx.process.run() for configured
-Ruff and ty logical tools. Both analyzers receive the same ephemeral path.
-
-The workspace artifact is scratch, not authoritative/persistent evidence. The
-exact source and identity are retained in application state. Process result
-snapshots are JSON-compatible generic evidence. Nonzero exit is ordinary
-analyzer/model evidence; ProcessExecutionError is infrastructure/application
-failure evidence.
-
-Native repair projection is:
-- grounding;
-- current source exactly once;
-- current Ruff/ty diagnostics + correction instruction;
-- fixed source-output protocol.
-
-The static-analysis report does not embed another copy of current source.
-
-SELF-AUDIT SEMANTICS
-Self-audit starts only after initial materialization reaches analyzer-clean.
-Its first call sees grounding + clean current source + historical bug-search/fix
-instruction + source protocol. Repairs see only grounding + latest source +
-latest diagnostics/correction + source protocol. It has its own five-call limit.
-The latest legitimate source remains available even if a later self-audit call
-fails extraction or analyzer execution.
+The application materializes exact candidate source through ctx.workspace and
+runs configured Ruff and ty through ctx.process.run(). Both analyzers consume the
+same scratch artifact. Nonzero exit is model/code evidence; process execution
+failure is infrastructure/application evidence.
 
 QUESTIONNAIRE SEMANTICS
-Questionnaire is not suppressed by materialization or self-audit model-output
-failure. Native questionnaire performs one independent inference per question.
-Every question sees:
-- grounding;
-- the original initialMaterialization requirements;
-- the same frozen latest legitimate source, when one exists;
-- exactly one questionnaire question.
+Questionnaire is attempted even after materialization/self-audit model-output or
+analyzer-infrastructure failure when the LLM remains callable. If no valid source
+exists, Native supplies explicit failure state rather than inventing a file.
+Only LlmError is classified as questionnaire inference failure; programming or
+application exceptions propagate.
 
-If no valid source was ever extracted, the source is replaced by explicit
-failure-state text; the harness never invents an empty/fake source artifact.
-Raw answers are scoring evidence and are not trusted as harness truth.
+LATEST LEGITIMATE SOURCE
+A later extraction failure retains the previous valid source. If a new valid
+source is extracted but analyzer execution fails, that newly extracted source is
+the latest legitimate artifact even though analyzer cleanliness is unknown.
+Questionnaire uses that latest legitimate artifact.
 
-Only LLM-domain LlmError failures are converted into questionnaire
-inference-failed/partially-completed outcomes. Arbitrary programming/runtime
-exceptions are not swallowed as model failures; they propagate as application
-failures.
+EXPORT / PUBLICATION
+Exporter is a separate Job after the benchmark Job has accepted authoritative
+state and the CLI has saved it. Export failure therefore does not invalidate an
+already accepted benchmark run.
 
-Questionnaire outcomes:
-- completed
-- partially-completed
-- inference-failed
+materializationTest.export@1 emits:
+  <outputDirectory>/<applicationId>/<applicationRunId>/evidence.json
 
-SHARED PROCESS / WORKSPACE CONTRACTS
-Shared process and ephemeral-workspace facilities are synchronized from
-actant-integration. Production CodeEntryContext exposes:
+Evidence format is materialization-test.evidence@1 and contains application
+identity, exact test definition/configuration, authoritative workflow state, and
+all referenced shared ProcessingRun snapshots. Exact model-facing prompts are
+dereferenced from ProcessingRun evidence rather than reconstructed.
 
-  ctx.process.run(...)
-  ctx.workspace.materializeText(...)
-  ctx.workspace.materializeBytes(...)
-
-Process executable authority belongs to host/runtime processTools configuration.
-V1 configured executables are absolute paths. The Pack supplies logical tool
-name and arguments, not arbitrary executable/environment authority.
+run.py saves accepted authoritative state before raising a Job error, preserving
+the Actant rule that authoritative state may have been accepted even when the
+owning Job later fails.
 
 PYTHON 3.15 VERIFICATION
-The user has repeatedly run:
+The user reported all green for:
 
-  python -m pytest tests/first_party/materializationTest/test_workflow.py
+  python -m pytest tests/first_party/materializationTest/test_workflow.py \
+      tests/first_party/materializationTest/test_exporter.py
 
-and reported all green through workflow/test versions 6/3, including strict
-extraction, exact workspace analyzer mediation, self-audit projection, explicit
-questionnaire boundaries, and native questionnaire source/failure-state
-projection.
+This verifies workflow version 8 / workflow tests version 5 together with the
+exporter as of 2026-09-12.
 
-Workflow version 7 / test version 4 is the current semantic-tightening pass and
-requires a fresh user Python 3.15 run before it is called verified. It adds:
-- questionnaire requirements to every native question;
-- no duplicate source in repair diagnostics;
-- LlmError-only questionnaire inference failure classification.
+The newly added sectional questionnaire loader/tests have not yet been run by the
+user under Python 3.15 and must not be called verified yet.
 
-The shared process/context/workspace focused suites were also previously run by
-the user under Python 3.15 and reported green before synchronization.
+SHARED ACTANT CONTRACTS
+Shared process and ephemeral-workspace facilities are synchronized from
+actant-integration and were previously Python-3.15 verified by the user:
+- ctx.process.run(...)
+- ctx.workspace.materializeText(...)
+- ctx.workspace.materializeBytes(...)
 
-CURRENT PIPELINE FIT
-Current QueryItem and LlmProcessingPipeline semantics are sufficient for the
-native path. ApplicationRuntime.runJob plus child ProcessingRuns provides the
-outer/inner transaction spine. The llama.cpp proving-ground provider currently
-supports text/plain queries and sends each as one user chat message; this is
-suitable for native reconstruction but not sufficient by itself for faithful
-Classic accumulated user/assistant role history.
+Process executable authority belongs to host/runtime processTools configuration.
+Configured executables are absolute paths in v1. Pack code supplies logical tool
+name and arguments, not arbitrary executable/environment authority.
 
-CHECKPOINTS
-Automatic restart/checkpointing is desirable later but not a v1 requirement.
-Phase/progression remains explicit so checkpointing can be added without
-redesigning benchmark semantics.
+LLM TIMING
+Benchmark scoring requires LLM wall-clock timing. Analyzer process evidence
+already carries shared process timing, but ProcessingRun evidence did not when
+last inspected. Materialization requested shared LLM/ProcessingRun timing in:
+
+  messages/0008-materialization-to-integration-llm-timing.txt
+
+No integration response is present in this branch's mailbox yet. Do not bolt a
+parallel application-specific timing authority onto Materialization while this
+shared requirement is outstanding.
 
 NEXT WORK
-1. Run the focused Python 3.15 workflow suite for workflow v7 / tests v4.
-2. If green, treat Actant-native execution semantics through questionnaire as
-   stable enough to design/export scoring evidence.
-3. Materialize export after reviewing persistence/publication boundaries.
-4. Implement Classic later; first reconcile faithful structured chat-history
-   representation with the provider-neutral LLM query/provider contract rather
-   than flattening accumulated turns into one user message.
+1. Wire workflow consumption to the sectional questionnaire loader and add/update
+   projection tests.
+2. Switch exporter test-definition evidence to include the sectional
+   questionnaire deterministically.
+3. Split grounding into groundingReference + groundingResponseInstruction and
+   project only groundingReference in Native.
+4. Remove prompt text that positively permits prose outside source fences while
+   retaining tolerant extraction/evidence behavior.
+5. Remove duplicated questionnaire from prompts.json only after the new loader
+   path is wired and verified.
+6. Run focused Python 3.15 workflow/exporter/questionnaire suites.
+7. Synchronize shared LLM timing when integration responds.
+8. Implement Classic only after provider-neutral structured history semantics are
+   reconciled.
