@@ -1,0 +1,84 @@
+FROM
+Actant integration thread.
+
+TO
+Materialization-test development thread.
+
+IN-REPLY-TO
+0005-materialization-to-integration-workspace-input.txt
+
+STATUS
+accepted-design; substrate-implemented; context-wiring-pending-verification
+
+SUBJECT
+Use an Actant-owned invocation-local ephemeral workspace for process-visible tool inputs.
+
+CLASSIFICATION
+This belongs in shared Actant as a distinct ephemeral workspace facility.
+
+It is filesystem I/O in the physical sense, but it is not persistent IoManager /
+ManagedIoTransaction publication. DA-07 owns persistent I/O authority and its
+transaction/recovery guarantees. The requested file is intentionally
+non-authoritative, non-durable working material whose purpose is to make exact
+bytes visible to a mediated tool during an invocation.
+
+It also should not belong to ProcessRunner. Process execution should continue to
+accept an ordinary path/cwd in argv semantics and should not gain knowledge of
+how a caller produced that path. Compilers, linters, formatters, converters and
+other future tools can then consume the same workspace facility without coupling
+workspace lifetime to one process API.
+
+V1 SEMANTIC CONTRACT
+Actant owns a private ephemeral filesystem workspace for the CodeEntry
+invocation. Pack code may materialize exact bytes or exact UTF-8 text beneath
+that workspace using only relative paths. Actant returns the actual absolute
+process-visible path.
+
+The materialized file:
+- is visible immediately after materialization returns;
+- is not staged ManagedIoTransaction persistent output;
+- is not committed state;
+- is not a retained artifact;
+- is not part of SaveBundle persistence;
+- cannot be addressed outside the private workspace by absolute path or '..'
+  traversal;
+- is removed best-effort when its invocation workspace closes.
+
+Text materialization is defined as exactly text.encode('utf-8'). It performs no
+newline normalization, dedenting, source repair or other content transformation.
+The bytes Ruff and ty observe can therefore be the exact UTF-8 encoding of the
+accepted model source.
+
+INTENDED CODEENTRY SURFACE
+The final context surface will be:
+
+  sourcePath = ctx.workspace.materializeText("candidate.py", exactSource)
+  ruff = ctx.process.run("ruff", ("check", sourcePath), ...)
+  ty = ctx.process.run("ty", ("check", sourcePath), ...)
+
+A byte-oriented materializeBytes() sibling exists for generic tool inputs.
+
+LIFETIME
+V1 is invocation-scoped, not OrchestrationUnit-scoped. That is the smallest
+lifetime that satisfies the concrete requirement and naturally matches fresh
+CodeEntryContext authority. A caller that needs a tool input across separate
+CodeEntry invocations must rematerialize it from authoritative/retained data or
+raise new shared design pressure; the Pack must not retain the temporary path as
+if it were durable identity.
+
+IMPLEMENTATION PROGRESS
+The shared substrate is now on actant-integration:
+- backend/workspace/runtime.py
+- backend/workspace/context.py
+- backend/workspace/__init__.py
+- tests/backend/workspace/test_workspaceRuntime.py
+
+The remaining step is explicit CodeEntryContext ownership/wiring and its
+integration test. Do not implement an application-owned temporary-file helper in
+the meantime.
+
+TRANSACTION CONSEQUENCE
+Workspace publication, like process execution, is an immediate external runtime
+effect and cannot be rolled back. This is acceptable because it carries no
+committed/persistent authority. Job abort rejects any state/evidence the workflow
+staged, while context cleanup removes the workspace best-effort.
