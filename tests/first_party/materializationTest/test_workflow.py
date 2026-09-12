@@ -1,4 +1,4 @@
-# file: tests/first_party/materializationTest/test_workflow.py ; version: 1
+# file: tests/first_party/materializationTest/test_workflow.py ; version: 2
 from __future__ import annotations
 
 import importlib.util
@@ -119,3 +119,69 @@ def test_analyzeSource_treats_nonzero_exit_as_findings_not_execution_failure() -
     assert result["clean"] is False
     assert result["analyzers"]["ruff"]["exitCode"] == 1
     assert result["analyzers"]["ty"]["exitCode"] == 0
+
+
+def test_analyzeSource_selfAudit_uses_distinct_workspace_namespace() -> None:
+    """Independent self-audit attempts cannot collide with initial attempts."""
+    ctx = _Ctx({"ruff": 0, "ty": 0})
+
+    workflow._analyzeSource(
+        ctx,
+        "print('audited')\n",
+        attemptNumber=1,
+        phaseName="self-audit",
+    )
+
+    assert ctx.workspace.calls == [
+        ("self-audit/attempt-1/candidate.py", "print('audited')\n"),
+    ]
+
+
+def test_buildQueryItems_selfAudit_projects_clean_source_and_bug_search() -> None:
+    """Self-audit inference sees the clean artifact and historical audit instruction."""
+    payload = {
+        "input": {
+            "phase": "self-audit",
+            "grounding": "grounding",
+            "currentSource": "print('clean')\n",
+            "searchForBugsAndFix": "inspect for bugs and fix them",
+            "sourceProtocol": "one Python fence",
+        },
+    }
+
+    items = workflow._buildQueryItems(None, payload)
+
+    assert [item.kind for item in items] == [
+        "grounding",
+        "source",
+        "instruction",
+        "output-protocol",
+    ]
+    assert [item.content for item in items] == [
+        "grounding",
+        "print('clean')\n",
+        "inspect for bugs and fix them",
+        "one Python fence",
+    ]
+
+
+def test_buildQueryItems_selfAuditRepair_uses_only_latest_repair_projection() -> None:
+    """Self-audit repair excludes obsolete audit prose and previous candidates."""
+    payload = {
+        "input": {
+            "phase": "self-audit-repair",
+            "grounding": "grounding",
+            "currentSource": "print('latest')\n",
+            "staticAnalysisReport": "current diagnostics",
+            "sourceProtocol": "one Python fence",
+        },
+    }
+
+    items = workflow._buildQueryItems(None, payload)
+
+    assert [item.content for item in items] == [
+        "grounding",
+        "print('latest')\n",
+        "current diagnostics",
+        "one Python fence",
+    ]
