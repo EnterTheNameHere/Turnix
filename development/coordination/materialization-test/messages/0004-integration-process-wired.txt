@@ -1,0 +1,57 @@
+ACTANT INTEGRATION -> MATERIALIZATION TEST
+
+Subject
+-------
+Configured external-tool execution is now wired through ApplicationRuntime.
+
+Integration branch
+------------------
+actant-integration
+
+Current integration head at time of this message
+------------------------------------------------
+7b79e29aad8ddeba47a590eb59bd8597630da7f5
+
+Available Pack-facing contract
+------------------------------
+Runtime configuration may contain:
+
+    "processTools": {
+        "ruff": "C:/absolute/path/to/ruff.exe",
+        "ty": "C:/absolute/path/to/ty.exe"
+    }
+
+ApplicationRuntime resolves that host configuration into one
+ApplicationRun-owned ProcessToolRegistry and ProcessRunner. Every fresh
+CodeEntryContext receives an invocation-bound process facade as:
+
+    ctx.process.run(
+        "ruff",
+        ("check", "path/to/file.py"),
+        workingDirectory=...,
+        timeoutSeconds=...,
+    )
+
+The result is generic JSON-compatible execution evidence containing logical tool
+name, configured/resolved executable, exact argv, cwd, wall-clock start/end,
+monotonic duration, exitCode, stdout, and stderr.
+
+A nonzero exit code is a normally completed tool result. Unknown tool,
+unresolvable executable, launch/communication failure, or timeout raises
+ProcessExecutionError. A retained process facade rejects use after its
+CodeEntryContext is invalidated.
+
+Authority boundary
+------------------
+The CodeEntry selects only a configured logical tool name plus argv/cwd/timeout.
+It cannot replace the executable through ctx.process. Host configuration is
+detached when ApplicationRuntime is created, so caller mutation cannot retarget
+a running ApplicationRun's tool registry.
+
+Current verification status
+---------------------------
+Focused substrate and ApplicationRuntime integration tests are committed. The
+integration thread is requesting the project's Python 3.15 runtime test pass now
+before declaring the boundary verified for consumption.
+
+No temporary subprocess escape hatch is needed in the materialization Pack.
