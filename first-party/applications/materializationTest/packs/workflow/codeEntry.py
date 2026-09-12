@@ -1,9 +1,9 @@
-# file: first-party/applications/materializationTest/packs/workflow/codeEntry.py ; version: 4
+# file: first-party/applications/materializationTest/packs/workflow/codeEntry.py ; version: 5
 from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 
 from backend.llm.llmTypes import LlmQuery
 from backend.process.api import ProcessExecutionError
@@ -12,6 +12,7 @@ from backend.processing.runtime import QueryItem
 _MEMORY_KEY = "materializationtest"
 _RUN_STATE_ADDRESS = "materialization-test/run-state"
 _MATERIALIZATION_CALL_LIMIT = 5
+_SELF_AUDIT_CALL_LIMIT = 5
 _SOURCE_FENCE_INSTRUCTION = (
     "Return the complete materialized Python file in exactly one fenced Python "
     "code block using ```python. The code block must be non-empty. Do not emit "
@@ -46,41 +47,25 @@ def _extractPythonSource(response: str) -> str:
     triple-backtick line as an opening fence. A valid response therefore has
     exactly two fence tokens: one ``python`` opening and one empty-info closing.
     The exact text between those tokens is returned without newline conversion.
-
-    Args:
-        response: Complete raw model response after streaming has finished.
-
-    Returns:
-        Exact text between the opening and closing fences.
-
-    Raises:
-        TypeError: If response is not an exact built-in string.
-        SourceExtractionError: If the response violates the one-Python-block
-            protocol in any way.
     """
     if type(response) is not str:
         raise TypeError("Model response must be a string.")
-
     fences = list(_FENCE_PATTERN.finditer(response))
     if not fences:
         raise SourceExtractionError("Expected exactly one fenced code block; found 0 opening fences.")
-
     opening = fences[0]
     if opening.group(1).strip() != "python":
         raise SourceExtractionError("The single fenced code block must use the python info string.")
     if len(fences) == 1:
         raise SourceExtractionError("The Python code block is not closed by a standalone triple-backtick fence.")
-
     closing = fences[1]
     if closing.group(1).strip():
         raise SourceExtractionError("The Python code block is not closed by a standalone triple-backtick fence.")
-
     if len(fences) > 2:
         third = fences[2]
         if third.end() == len(response) and not response[third.start():].endswith(("\n", "\r")):
             raise SourceExtractionError("The response contains an additional malformed fenced code block.")
         raise SourceExtractionError("The response contains more than one fenced code block.")
-
     source = response[opening.end():closing.start()]
     if not source.strip():
         raise SourceExtractionError("The Python code block is empty or whitespace-only.")
@@ -90,9 +75,14 @@ def _extractPythonSource(response: str) -> str:
 def _promptDefinitions(ctx) -> dict[str, str]:
     """Loads and validates the deliberately simple v1 prompt document."""
     promptPath = _requireString(ctx.config.get("promptsFile"), "promptsFile")
-    raw = ctx.io.readJson(promptPath)
-    definitions = _requireMapping(raw, "Prompt definitions")
-    required = ("grounding", "initialMaterialization", "staticAnalysisReport", "searchForBugsAndFix", "questionnaire")
+    definitions = _requireMapping(ctx.io.readJson(promptPath), "Prompt definitions")
+    required = (
+        "grounding",
+        "initialMaterialization",
+        "staticAnalysisReport",
+        "searchForBugsAndFix",
+        "questionnaire",
+    )
     return {key: _requireString(definitions.get(key), f"Prompt definition {key!r}") for key in required}
 
 
@@ -138,17 +128,29 @@ def _buildQueryItems(_ctx, payload):
             ("initial-materialization", "instruction", inputValue.get("initialMaterialization")),
             ("source-output-protocol", "output-protocol", inputValue.get("sourceProtocol")),
         )
-    elif phase == "materialization-repair":
+    elif phase in {"materialization-repair", "self-audit-repair"}:
         parts = (
             ("grounding", "grounding", inputValue.get("grounding")),
             ("current-source", "source", inputValue.get("currentSource")),
             ("static-analysis-report", "diagnostics", inputValue.get("staticAnalysisReport")),
             ("source-output-protocol", "output-protocol", inputValue.get("sourceProtocol")),
         )
+    elif phase == "self-audit":
+        parts = (
+            ("grounding", "grounding", inputValue.get("grounding")),
+            ("current-source", "source", inputValue.get("currentSource")),
+            ("self-audit", "instruction", inputValue.get("searchForBugsAndFix")),
+            ("source-output-protocol", "output-protocol", inputValue.get("sourceProtocol")),
+        )
     else:
         raise ValueError(f"Unsupported materialization phase: {phase!r}.")
     return [
-        QueryItem(itemId=f"materialization-test:{itemId}", kind=kind, content=_requireString(content, itemId), metadata={"phase": phase, "role": kind})
+        QueryItem(
+            itemId=f"materialization-test:{itemId}",
+            kind=kind,
+            content=_requireString(content, itemId),
+            metadata={"phase": phase, "role": kind},
+        )
         for itemId, kind, content in parts
     ]
 
@@ -165,7 +167,11 @@ def _buildQuery(_ctx, payload):
         candidatePhase = items[0].metadata.get("phase")
         if type(candidatePhase) is str:
             phase = candidatePhase
-    return LlmQuery(formatId="text/plain", payload="\n\n".join(item.content for item in items), metadata={"application": "materializationTest", "phase": phase, "strategy": "actant-native"})
+    return LlmQuery(
+        formatId="text/plain",
+        payload="\n\n".join(item.content for item in items),
+        metadata={"application": "materializationTest", "phase": phase, "strategy": "actant-native"},
+    )
 
 
 def _sourceEvidence(source: str) -> dict[str, object]:
@@ -174,9 +180,18 @@ def _sourceEvidence(source: str) -> dict[str, object]:
     return {"utf8Bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
 
 
-def _analyzeSource(ctx, source: str, *, attemptNumber: int) -> dict[str, object]:
+def _analyzeSource(
+    ctx,
+    source: str,
+    *,
+    attemptNumber: int,
+    phaseName: str = "materialization",
+) -> dict[str, object]:
     """Materializes and statically analyzes one exact source candidate."""
-    sourcePath = ctx.workspace.materializeText(f"materialization/attempt-{attemptNumber}/candidate.py", source)
+    sourcePath = ctx.workspace.materializeText(
+        f"{phaseName}/attempt-{attemptNumber}/candidate.py",
+        source,
+    )
     results: dict[str, object] = {}
     clean = True
     for analyzerName, toolName, argumentTemplate in _analyzerDefinitions(ctx):
@@ -188,25 +203,65 @@ def _analyzeSource(ctx, source: str, *, attemptNumber: int) -> dict[str, object]
     return {"source": _sourceEvidence(source), "analyzers": results, "clean": clean}
 
 
-def _renderStaticAnalysisReport(template: str, source: str, analysis: Mapping[str, object]) -> str:
+def _renderStaticAnalysisReport(
+    template: str,
+    source: str,
+    analysis: Mapping[str, object],
+) -> str:
     """Renders current source and raw analyzer diagnostics for one repair call."""
     analyzerResults = _requireMapping(analysis.get("analyzers"), "analysis.analyzers")
     sections = [template, "Current complete Python source:", f"```python\n{source}```"]
     for analyzerName in ("ruff", "ty"):
         result = _requireMapping(analyzerResults.get(analyzerName), f"analysis.{analyzerName}")
-        sections.extend((f"{analyzerName} exit code: {result.get('exitCode')}", f"{analyzerName} stdout:\n{result.get('stdout', '')}", f"{analyzerName} stderr:\n{result.get('stderr', '')}"))
+        sections.extend(
+            (
+                f"{analyzerName} exit code: {result.get('exitCode')}",
+                f"{analyzerName} stdout:\n{result.get('stdout', '')}",
+                f"{analyzerName} stderr:\n{result.get('stderr', '')}",
+            ),
+        )
     sections.append("Correct the reported static-analysis problems and return the complete resulting file.")
     return "\n\n".join(sections)
 
 
-def _runSourceInference(ctx, *, inputValue: Mapping[str, object], provider: str, model: str | None, providerOptions: Mapping[str, object], streamObserver: object):
+def _runSourceInference(
+    ctx,
+    *,
+    inputValue: Mapping[str, object],
+    provider: str,
+    model: str | None,
+    providerOptions: Mapping[str, object],
+    streamObserver: object,
+):
     """Runs one source-producing ProcessingRun through the shared LLM pipeline."""
-    return ctx.llm.runProcessing(memoryKey=_MEMORY_KEY, inputValue=dict(inputValue), buildQueryItemsCapabilityId="materializationTest.buildQueryItems@1", buildQueryCapabilityId="materializationTest.buildQuery@1", providerName=provider, model=model, providerOptions=providerOptions, streamObserver=streamObserver)
+    return ctx.llm.runProcessing(
+        memoryKey=_MEMORY_KEY,
+        inputValue=dict(inputValue),
+        buildQueryItemsCapabilityId="materializationTest.buildQueryItems@1",
+        buildQueryCapabilityId="materializationTest.buildQuery@1",
+        providerName=provider,
+        model=model,
+        providerOptions=providerOptions,
+        streamObserver=streamObserver,
+    )
 
 
-def _attemptRecord(*, callNumber: int, processingRunId: str, rawResponse: str, source: str | None, extraction: Mapping[str, object], analysis: Mapping[str, object] | None) -> dict[str, object]:
+def _attemptRecord(
+    *,
+    callNumber: int,
+    processingRunId: str,
+    rawResponse: str,
+    source: str | None,
+    extraction: Mapping[str, object],
+    analysis: Mapping[str, object] | None,
+) -> dict[str, object]:
     """Builds durable evidence for one source-producing call."""
-    record: dict[str, object] = {"callNumber": callNumber, "processingRunId": processingRunId, "rawResponse": rawResponse, "sourceExtraction": dict(extraction)}
+    record: dict[str, object] = {
+        "callNumber": callNumber,
+        "processingRunId": processingRunId,
+        "rawResponse": rawResponse,
+        "sourceExtraction": dict(extraction),
+    }
     if source is not None:
         record["source"] = source
         record["sourceIdentity"] = _sourceEvidence(source)
@@ -215,37 +270,189 @@ def _attemptRecord(*, callNumber: int, processingRunId: str, rawResponse: str, s
     return record
 
 
+def _runSelfAudit(
+    ctx,
+    *,
+    prompts: Mapping[str, str],
+    initialSource: str,
+    provider: str,
+    model: str | None,
+    providerOptions: Mapping[str, object],
+    streamObserver: object,
+) -> dict[str, object]:
+    """Runs self-audit plus its independent analyzer-repair budget.
+
+    The first call always receives the analyzer-clean materialization and the
+    historical bug-search/fix instruction. Subsequent calls receive only the
+    latest candidate and latest analyzer report. The phase has its own five-call
+    ceiling and the same strict source-response protocol as initial materialization.
+    """
+    attempts: list[dict[str, object]] = []
+    currentSource = initialSource
+    currentAnalysis: Mapping[str, object] | None = None
+    outcome = "analyzer-limit-reached"
+    infrastructureError: dict[str, object] | None = None
+
+    for callNumber in range(1, _SELF_AUDIT_CALL_LIMIT + 1):
+        if callNumber == 1:
+            inputValue: Mapping[str, object] = {
+                "phase": "self-audit",
+                "grounding": prompts["grounding"],
+                "currentSource": currentSource,
+                "searchForBugsAndFix": prompts["searchForBugsAndFix"],
+                "sourceProtocol": _SOURCE_FENCE_INSTRUCTION,
+            }
+        else:
+            assert currentAnalysis is not None
+            inputValue = {
+                "phase": "self-audit-repair",
+                "grounding": prompts["grounding"],
+                "currentSource": currentSource,
+                "staticAnalysisReport": _renderStaticAnalysisReport(
+                    prompts["staticAnalysisReport"],
+                    currentSource,
+                    currentAnalysis,
+                ),
+                "sourceProtocol": _SOURCE_FENCE_INSTRUCTION,
+            }
+
+        result = _runSourceInference(
+            ctx,
+            inputValue=inputValue,
+            provider=provider,
+            model=model,
+            providerOptions=providerOptions,
+            streamObserver=streamObserver,
+        )
+        try:
+            source = _extractPythonSource(result.llm.rawText)
+        except SourceExtractionError as err:
+            attempts.append(
+                _attemptRecord(
+                    callNumber=callNumber,
+                    processingRunId=result.processingRunId,
+                    rawResponse=result.llm.rawText,
+                    source=None,
+                    extraction={"outcome": "failed", "reason": str(err)},
+                    analysis=None,
+                ),
+            )
+            outcome = "extraction-failed"
+            break
+
+        extraction = {"outcome": "accepted", **_sourceEvidence(source)}
+        currentSource = source
+        try:
+            currentAnalysis = _analyzeSource(
+                ctx,
+                source,
+                attemptNumber=callNumber,
+                phaseName="self-audit",
+            )
+        except ProcessExecutionError as err:
+            infrastructureError = {"type": type(err).__name__, "message": str(err)}
+            attempts.append(
+                _attemptRecord(
+                    callNumber=callNumber,
+                    processingRunId=result.processingRunId,
+                    rawResponse=result.llm.rawText,
+                    source=source,
+                    extraction=extraction,
+                    analysis=None,
+                ),
+            )
+            outcome = "analyzer-execution-failed"
+            break
+
+        attempts.append(
+            _attemptRecord(
+                callNumber=callNumber,
+                processingRunId=result.processingRunId,
+                rawResponse=result.llm.rawText,
+                source=source,
+                extraction=extraction,
+                analysis=currentAnalysis,
+            ),
+        )
+        if currentAnalysis.get("clean") is True:
+            outcome = "clean"
+            break
+
+    resultState: dict[str, object] = {
+        "outcome": outcome,
+        "callCount": len(attempts),
+        "callLimit": _SELF_AUDIT_CALL_LIMIT,
+        "attempts": attempts,
+        "currentSource": currentSource,
+        "currentSourceIdentity": _sourceEvidence(currentSource),
+    }
+    if infrastructureError is not None:
+        resultState["analyzerExecutionError"] = infrastructureError
+    return resultState
+
+
 def _run(ctx, payload):
-    """Runs Actant-native initial materialization and analyzer repair loop."""
+    """Runs Actant-native materialization, repair, and self-audit phases."""
     request = {} if payload is None else _requireMapping(payload, "Materialization run request")
     strategy = _requireString(ctx.config.get("strategy"), "strategy")
     if strategy not in {"classic", "actant-native"}:
         raise ValueError("strategy must be 'classic' or 'actant-native'.")
     if strategy != "actant-native":
         raise NotImplementedError("Classic strategy is scaffolded but not materialized yet.")
+
     prompts = _promptDefinitions(ctx)
     provider, model, providerOptions = _llmConfig(ctx)
+    streamObserver = request.get("streamObserver")
     attempts: list[dict[str, object]] = []
     currentSource: str | None = None
     currentAnalysis: Mapping[str, object] | None = None
     materializationOutcome = "analyzer-limit-reached"
-    phase = "initial-materialization-failed"
     infrastructureError: dict[str, object] | None = None
+
     for callNumber in range(1, _MATERIALIZATION_CALL_LIMIT + 1):
         if callNumber == 1:
-            inputValue: Mapping[str, object] = {"phase": "initial-materialization", "grounding": prompts["grounding"], "initialMaterialization": prompts["initialMaterialization"], "sourceProtocol": _SOURCE_FENCE_INSTRUCTION}
+            inputValue: Mapping[str, object] = {
+                "phase": "initial-materialization",
+                "grounding": prompts["grounding"],
+                "initialMaterialization": prompts["initialMaterialization"],
+                "sourceProtocol": _SOURCE_FENCE_INSTRUCTION,
+            }
         else:
             assert currentSource is not None
             assert currentAnalysis is not None
-            inputValue = {"phase": "materialization-repair", "grounding": prompts["grounding"], "currentSource": currentSource, "staticAnalysisReport": _renderStaticAnalysisReport(prompts["staticAnalysisReport"], currentSource, currentAnalysis), "sourceProtocol": _SOURCE_FENCE_INSTRUCTION}
-        result = _runSourceInference(ctx, inputValue=inputValue, provider=provider, model=model, providerOptions=providerOptions, streamObserver=request.get("streamObserver"))
+            inputValue = {
+                "phase": "materialization-repair",
+                "grounding": prompts["grounding"],
+                "currentSource": currentSource,
+                "staticAnalysisReport": _renderStaticAnalysisReport(
+                    prompts["staticAnalysisReport"],
+                    currentSource,
+                    currentAnalysis,
+                ),
+                "sourceProtocol": _SOURCE_FENCE_INSTRUCTION,
+            }
+        result = _runSourceInference(
+            ctx,
+            inputValue=inputValue,
+            provider=provider,
+            model=model,
+            providerOptions=providerOptions,
+            streamObserver=streamObserver,
+        )
         try:
             source = _extractPythonSource(result.llm.rawText)
         except SourceExtractionError as err:
-            extraction = {"outcome": "failed", "reason": str(err)}
-            attempts.append(_attemptRecord(callNumber=callNumber, processingRunId=result.processingRunId, rawResponse=result.llm.rawText, source=None, extraction=extraction, analysis=None))
+            attempts.append(
+                _attemptRecord(
+                    callNumber=callNumber,
+                    processingRunId=result.processingRunId,
+                    rawResponse=result.llm.rawText,
+                    source=None,
+                    extraction={"outcome": "failed", "reason": str(err)},
+                    analysis=None,
+                ),
+            )
             materializationOutcome = "extraction-failed"
-            phase = "initial-materialization-failed"
             break
         extraction = {"outcome": "accepted", **_sourceEvidence(source)}
         currentSource = source
@@ -253,26 +460,86 @@ def _run(ctx, payload):
             currentAnalysis = _analyzeSource(ctx, source, attemptNumber=callNumber)
         except ProcessExecutionError as err:
             infrastructureError = {"type": type(err).__name__, "message": str(err)}
-            attempts.append(_attemptRecord(callNumber=callNumber, processingRunId=result.processingRunId, rawResponse=result.llm.rawText, source=source, extraction=extraction, analysis=None))
+            attempts.append(
+                _attemptRecord(
+                    callNumber=callNumber,
+                    processingRunId=result.processingRunId,
+                    rawResponse=result.llm.rawText,
+                    source=source,
+                    extraction=extraction,
+                    analysis=None,
+                ),
+            )
             materializationOutcome = "analyzer-execution-failed"
-            phase = "initial-materialization-failed"
             break
-        attempts.append(_attemptRecord(callNumber=callNumber, processingRunId=result.processingRunId, rawResponse=result.llm.rawText, source=source, extraction=extraction, analysis=currentAnalysis))
+        attempts.append(
+            _attemptRecord(
+                callNumber=callNumber,
+                processingRunId=result.processingRunId,
+                rawResponse=result.llm.rawText,
+                source=source,
+                extraction=extraction,
+                analysis=currentAnalysis,
+            ),
+        )
         if currentAnalysis.get("clean") is True:
             materializationOutcome = "clean"
-            phase = "initial-materialization-clean"
             break
-        if callNumber == _MATERIALIZATION_CALL_LIMIT:
-            materializationOutcome = "analyzer-limit-reached"
-            phase = "initial-materialization-failed"
-    state: dict[str, object] = {"strategy": strategy, "phase": phase, "materializationOutcome": materializationOutcome, "materializationCallCount": len(attempts), "materializationCallLimit": _MATERIALIZATION_CALL_LIMIT, "materializationAttempts": attempts, "selfAuditOutcome": "not-reached", "questionnaireOutcome": "not-reached"}
+
+    state: dict[str, object] = {
+        "strategy": strategy,
+        "materializationOutcome": materializationOutcome,
+        "materializationCallCount": len(attempts),
+        "materializationCallLimit": _MATERIALIZATION_CALL_LIMIT,
+        "materializationAttempts": attempts,
+        "selfAuditOutcome": "not-reached",
+        "selfAuditCallCount": 0,
+        "selfAuditCallLimit": _SELF_AUDIT_CALL_LIMIT,
+        "selfAuditAttempts": [],
+        "questionnaireOutcome": "not-reached",
+    }
     if currentSource is not None:
         state["currentSource"] = currentSource
         state["currentSourceIdentity"] = _sourceEvidence(currentSource)
     if infrastructureError is not None:
-        state["analyzerExecutionError"] = infrastructureError
+        state["materializationAnalyzerExecutionError"] = infrastructureError
+
+    if materializationOutcome == "clean":
+        assert currentSource is not None
+        selfAudit = _runSelfAudit(
+            ctx,
+            prompts=prompts,
+            initialSource=currentSource,
+            provider=provider,
+            model=model,
+            providerOptions=providerOptions,
+            streamObserver=streamObserver,
+        )
+        state["selfAuditOutcome"] = selfAudit["outcome"]
+        state["selfAuditCallCount"] = selfAudit["callCount"]
+        state["selfAuditAttempts"] = selfAudit["attempts"]
+        state["currentSource"] = selfAudit["currentSource"]
+        state["currentSourceIdentity"] = selfAudit["currentSourceIdentity"]
+        if "analyzerExecutionError" in selfAudit:
+            state["selfAuditAnalyzerExecutionError"] = selfAudit["analyzerExecutionError"]
+
+    if materializationOutcome != "clean":
+        state["phase"] = "initial-materialization-failed"
+    elif state["selfAuditOutcome"] == "clean":
+        state["phase"] = "self-audit-clean"
+    else:
+        state["phase"] = "self-audit-failed"
+
     transaction = ctx.memory.openTransaction()
-    transaction.set(_RUN_STATE_ADDRESS, state, provenance={"kind": "materialization-test-run", "materializationOutcome": materializationOutcome})
+    transaction.set(
+        _RUN_STATE_ADDRESS,
+        state,
+        provenance={
+            "kind": "materialization-test-run",
+            "materializationOutcome": materializationOutcome,
+            "selfAuditOutcome": state["selfAuditOutcome"],
+        },
+    )
     transaction.commit()
     return state
 
@@ -281,7 +548,31 @@ def _describe(ctx, _payload):
     """Returns the configured protocol skeleton without starting inference."""
     prompts = _promptDefinitions(ctx)
     analyzers = _analyzerDefinitions(ctx)
-    return {"strategy": ctx.config.get("strategy"), "phases": ["initial-materialization", "static-analysis-fix-loop", "self-audit-and-fix", "static-analysis-fix-loop", "questionnaire", "export"], "sourceResponseProtocol": {"requiredCodeBlocks": 1, "language": "python", "nonWhitespaceSourceRequired": True, "malformedResponseTerminatesPhase": True}, "callLimits": {"materializationAndRepairs": _MATERIALIZATION_CALL_LIMIT, "selfAuditAndRepairs": 5}, "questionnaireRunsAfterMaterializationFailure": True, "promptKeys": list(prompts), "analyzers": [name for name, _toolName, _arguments in analyzers], "processExecution": "Actant ctx.workspace + ctx.process"}
+    return {
+        "strategy": ctx.config.get("strategy"),
+        "phases": [
+            "initial-materialization",
+            "static-analysis-fix-loop",
+            "self-audit-and-fix",
+            "static-analysis-fix-loop",
+            "questionnaire",
+            "export",
+        ],
+        "sourceResponseProtocol": {
+            "requiredCodeBlocks": 1,
+            "language": "python",
+            "nonWhitespaceSourceRequired": True,
+            "malformedResponseTerminatesPhase": True,
+        },
+        "callLimits": {
+            "materializationAndRepairs": _MATERIALIZATION_CALL_LIMIT,
+            "selfAuditAndRepairs": _SELF_AUDIT_CALL_LIMIT,
+        },
+        "questionnaireRunsAfterMaterializationFailure": True,
+        "promptKeys": list(prompts),
+        "analyzers": [name for name, _toolName, _arguments in analyzers],
+        "processExecution": "Actant ctx.workspace + ctx.process",
+    }
 
 
 def onLoad(ctx):
