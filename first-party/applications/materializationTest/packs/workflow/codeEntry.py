@@ -1,4 +1,4 @@
-# file: first-party/applications/materializationTest/packs/workflow/codeEntry.py ; version: 7
+# file: first-party/applications/materializationTest/packs/workflow/codeEntry.py ; version: 8
 from __future__ import annotations
 
 import hashlib
@@ -42,19 +42,7 @@ def _requireString(value: object, name: str) -> str:
 
 
 def _requireQuestions(value: object, name: str) -> tuple[str, ...]:
-    """Validate and freeze explicit ordered questionnaire boundaries.
-
-    Args:
-        value: JSON-compatible list expected to contain exact question strings.
-        name: Configuration path included in validation failures.
-
-    Returns:
-        Ordered immutable question tuple without text normalization.
-
-    Raises:
-        TypeError: If the container or an element has the wrong type.
-        ValueError: If there are no questions or one is blank.
-    """
+    """Validate and freeze explicit ordered questionnaire boundaries."""
     if not isinstance(value, list):
         raise TypeError(f"{name} must be a list.")
     if not value:
@@ -70,13 +58,7 @@ def _requireQuestions(value: object, name: str) -> tuple[str, ...]:
 
 
 def _extractPythonSource(response: str) -> str:
-    """Extract the one protocol-valid Python fence from a completed response.
-
-    The parser treats standalone triple-backtick lines as structural tokens. A
-    valid response has one ``python`` opening token and one empty-info closing
-    token. Text between them is returned byte-for-byte at the string level; no
-    newline conversion, dedenting, or heuristic recovery is performed.
-    """
+    """Extract the one protocol-valid Python fence from a completed response."""
     if type(response) is not str:
         raise TypeError("Model response must be a string.")
     fences = list(_FENCE_PATTERN.finditer(response))
@@ -102,11 +84,17 @@ def _extractPythonSource(response: str) -> str:
 
 
 def _promptDefinitions(ctx) -> dict[str, object]:
-    """Load and validate the simple benchmark prompt/test definition document."""
+    """Load and validate the benchmark prompt/test definition document."""
     promptPath = _requireString(ctx.config.get("promptsFile"), "promptsFile")
     definitions = _requireMapping(ctx.io.readJson(promptPath), "Prompt definitions")
     result: dict[str, object] = {}
-    for key in ("grounding", "initialMaterialization", "staticAnalysisReport", "searchForBugsAndFix"):
+    for key in (
+        "grounding",
+        "initialMaterialization",
+        "staticAnalysisReport",
+        "searchForBugsAndFix",
+        "questionnaireInstructions",
+    ):
         result[key] = _requireString(definitions.get(key), f"Prompt definition {key!r}")
     result["questionnaire"] = _requireQuestions(
         definitions.get("questionnaire"),
@@ -167,12 +155,13 @@ def _buildQueryItems(_ctx, payload):
     if phase == "initial-materialization":
         parts = (
             ("grounding", "grounding", inputValue.get("grounding")),
-            ("initial-materialization", "instruction", inputValue.get("initialMaterialization")),
+            ("requirements", "requirements", inputValue.get("requirements")),
             ("source-output-protocol", "output-protocol", inputValue.get("sourceProtocol")),
         )
     elif phase in {"materialization-repair", "self-audit-repair"}:
         parts = (
             ("grounding", "grounding", inputValue.get("grounding")),
+            ("requirements", "requirements", inputValue.get("requirements")),
             ("current-source", "source", inputValue.get("currentSource")),
             ("static-analysis-report", "diagnostics", inputValue.get("staticAnalysisReport")),
             ("source-output-protocol", "output-protocol", inputValue.get("sourceProtocol")),
@@ -180,6 +169,7 @@ def _buildQueryItems(_ctx, payload):
     elif phase == "self-audit":
         parts = (
             ("grounding", "grounding", inputValue.get("grounding")),
+            ("requirements", "requirements", inputValue.get("requirements")),
             ("current-source", "source", inputValue.get("currentSource")),
             ("self-audit", "instruction", inputValue.get("searchForBugsAndFix")),
             ("source-output-protocol", "output-protocol", inputValue.get("sourceProtocol")),
@@ -194,7 +184,10 @@ def _buildQueryItems(_ctx, payload):
             partsList.append(("current-source", "source", currentSource))
         else:
             partsList.append(("materialization-state", "state", inputValue.get("materializationState")))
-        partsList.append(("question", "question", inputValue.get("question")))
+        partsList.extend((
+            ("questionnaire-instructions", "instruction", inputValue.get("questionnaireInstructions")),
+            ("question", "question", inputValue.get("question")),
+        ))
         parts = tuple(partsList)
     else:
         raise ValueError(f"Unsupported materialization phase: {phase!r}.")
@@ -249,12 +242,7 @@ def _analyzeSource(ctx, source: str, *, attemptNumber: int, phaseName: str = "ma
 
 
 def _renderStaticAnalysisReport(template: str, analysis: Mapping[str, object]) -> str:
-    """Render only current analyzer diagnostics and the historical correction instruction.
-
-    The current source is deliberately absent because native repair projects it
-    as its own QueryItem. This prevents the same artifact from appearing twice
-    in the exact model-facing query.
-    """
+    """Render current analyzer diagnostics without duplicating current source."""
     analyzerResults = _requireMapping(analysis.get("analyzers"), "analysis.analyzers")
     sections = [template]
     for analyzerName in ("ruff", "ty"):
@@ -305,11 +293,13 @@ def _runSelfAudit(ctx, *, prompts: Mapping[str, object], initialSource: str, pro
     currentAnalysis: Mapping[str, object] | None = None
     outcome = "analyzer-limit-reached"
     infrastructureError: dict[str, object] | None = None
+    requirements = _promptText(prompts, "initialMaterialization")
     for callNumber in range(1, _SELF_AUDIT_CALL_LIMIT + 1):
         if callNumber == 1:
             inputValue: Mapping[str, object] = {
                 "phase": "self-audit",
                 "grounding": _promptText(prompts, "grounding"),
+                "requirements": requirements,
                 "currentSource": currentSource,
                 "searchForBugsAndFix": _promptText(prompts, "searchForBugsAndFix"),
                 "sourceProtocol": _SOURCE_FENCE_INSTRUCTION,
@@ -319,6 +309,7 @@ def _runSelfAudit(ctx, *, prompts: Mapping[str, object], initialSource: str, pro
             inputValue = {
                 "phase": "self-audit-repair",
                 "grounding": _promptText(prompts, "grounding"),
+                "requirements": requirements,
                 "currentSource": currentSource,
                 "staticAnalysisReport": _renderStaticAnalysisReport(_promptText(prompts, "staticAnalysisReport"), currentAnalysis),
                 "sourceProtocol": _SOURCE_FENCE_INSTRUCTION,
@@ -366,15 +357,7 @@ def _materializationStateForQuestionnaire(state: Mapping[str, object]) -> str:
 
 
 def _runQuestionnaire(ctx, *, prompts: Mapping[str, object], state: Mapping[str, object], provider: str, model: str | None, providerOptions: Mapping[str, object], streamObserver: object) -> dict[str, object]:
-    """Run one native inference per question against fixed requirements and artifact.
-
-    Each question receives grounding, the same original implementation
-    requirements, and the same frozen latest legitimate source. If no valid
-    source exists, the source position is replaced with truthful failure state.
-    Only LLM-domain failures are converted into questionnaire outcome evidence;
-    harness/programming failures propagate rather than masquerading as model
-    inference failures.
-    """
+    """Run one native inference per requirement against one frozen artifact."""
     questions = _questionnaire(prompts)
     sourceValue = state.get("currentSource")
     currentSource = sourceValue if type(sourceValue) is str else None
@@ -385,6 +368,7 @@ def _runQuestionnaire(ctx, *, prompts: Mapping[str, object], state: Mapping[str,
             "phase": "questionnaire",
             "grounding": _promptText(prompts, "grounding"),
             "requirements": _promptText(prompts, "initialMaterialization"),
+            "questionnaireInstructions": _promptText(prompts, "questionnaireInstructions"),
             "question": question,
         }
         if currentSource is not None:
@@ -422,12 +406,13 @@ def _run(ctx, payload):
     currentAnalysis: Mapping[str, object] | None = None
     materializationOutcome = "analyzer-limit-reached"
     infrastructureError: dict[str, object] | None = None
+    requirements = _promptText(prompts, "initialMaterialization")
     for callNumber in range(1, _MATERIALIZATION_CALL_LIMIT + 1):
         if callNumber == 1:
             inputValue: Mapping[str, object] = {
                 "phase": "initial-materialization",
                 "grounding": _promptText(prompts, "grounding"),
-                "initialMaterialization": _promptText(prompts, "initialMaterialization"),
+                "requirements": requirements,
                 "sourceProtocol": _SOURCE_FENCE_INSTRUCTION,
             }
         else:
@@ -435,6 +420,7 @@ def _run(ctx, payload):
             inputValue = {
                 "phase": "materialization-repair",
                 "grounding": _promptText(prompts, "grounding"),
+                "requirements": requirements,
                 "currentSource": currentSource,
                 "staticAnalysisReport": _renderStaticAnalysisReport(_promptText(prompts, "staticAnalysisReport"), currentAnalysis),
                 "sourceProtocol": _SOURCE_FENCE_INSTRUCTION,
