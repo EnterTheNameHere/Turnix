@@ -101,8 +101,8 @@ must not invent an empty source artifact.
 STATIC ANALYSIS REQUIREMENT
 The application must run ty and Ruff against the exact generated source
 artifact. Analyzer application config currently contains logical toolId plus argv
-templates only; executable authority is intentionally absent pending shared
-Actant process-tool integration.
+templates. Executable authority now belongs in shared Actant runtime processTools
+configuration rather than the workflow Pack.
 
 Analyzer evidence should preserve at least tool identity, configured and
 resolved executable, arguments, working directory, target artifact, timing,
@@ -110,18 +110,26 @@ exit code, stdout, and stderr. Analyzer findings are expected test input and
 must be distinguished from failure to launch/execute the analyzer.
 
 SHARED PROCESS CONTRACT
-Integration accepted message 0001 in message 0002. V1 will expose mediated
-completed-tool execution through fresh CodeEntryContext. CodeEntry invokes a
-logical toolId and supplies argv/cwd; executable binding belongs to Actant/runtime
-configuration outside ordinary CodeEntry authority. shell=True and arbitrary
-environment mutation are outside v1. A completed process returns structured
-execution evidence even for nonzero exit status; lookup/resolution/start failures
-are typed Actant infrastructure errors. Actant owns generic process evidence;
-the Materialization Test owns analyzer/artifact meaning.
+Integration completed the shared process-tool path and published it in message
+0004. The verified integration head is:
 
-Integration implementation is still pending. Do not add a temporary subprocess
-wrapper here. Synchronize the resulting shared implementation from
-actant-integration when integration reports it ready.
+  53bfdd379b6deea07112644983efaeaee718c832
+
+Production CodeEntry contexts expose ctx.process.run() for logical configured
+tools. Runtime configuration owns logical-name -> executable binding. V1 requires
+absolute executable paths and does not use PATH lookup. CodeEntry supplies argv,
+optional cwd, and optional timeout but cannot supply an arbitrary executable,
+shell command, or environment replacement.
+
+Completed execution returns JSON-compatible evidence including tool identity,
+configured/resolved executable, arguments, cwd, timing, exit code, stdout and
+stderr. Nonzero exit is normal completion. Infrastructure execution failures are
+ProcessExecutionError.
+
+The user ran the focused Python 3.15 process/context/ApplicationRuntime tests
+after final context construction and reported all green. The materialization
+branch may now synchronize this integration head and implement Ruff/ty through
+ctx.process. Do not add an application-owned subprocess wrapper.
 
 CURRENT PIPELINE FIT
 The current QueryItem and LlmProcessingPipeline shape is sufficient for the
@@ -146,5 +154,6 @@ COORDINATION PROTOCOL
 - Application-specific materialization semantics stay on this branch.
 
 CURRENT BLOCKER / NEXT SHARED EVENT
-Proper analyzer execution waits for the integration implementation promised in
-message 0002. Materialization-side workflow work can continue independently.
+Shared process execution is no longer a blocker. Next materialization-side work
+is to sync integration head 53bfdd379b6deea07112644983efaeaee718c832 and
+materialize the Ruff/ty analyzer/fix phase using ctx.process.
