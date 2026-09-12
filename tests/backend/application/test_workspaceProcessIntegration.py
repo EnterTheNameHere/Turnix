@@ -1,4 +1,4 @@
-# file: tests/backend/application/test_workspaceProcessIntegration.py ; version: 1
+# file: tests/backend/application/test_workspaceProcessIntegration.py ; version: 2
 """Integration tests for invocation workspace inputs consumed by process tools."""
 
 from __future__ import annotations
@@ -62,14 +62,14 @@ def test_workspace_artifact_is_process_visible_and_removed_after_call(
         "python",
         (
             "-c",
-            "import pathlib,sys; sys.stdout.buffer.write(pathlib.Path(sys.argv[1]).read_bytes())",
+            "import pathlib,sys; print(pathlib.Path(sys.argv[1]).read_bytes().hex())",
             artifactPath,
         ),
         workingDirectory=tmp_path,
     )
 
     assert result["exitCode"] == 0
-    assert result["stdout"] == source
+    assert result["stdout"] == f"{source.encode('utf-8').hex()}\n"
     assert Path(artifactPath).read_bytes() == source.encode("utf-8")
 
     workspace = context.workspace
