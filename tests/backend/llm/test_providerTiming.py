@@ -1,9 +1,10 @@
-# file: tests/backend/llm/test_providerTiming.py ; version: 1
+# file: tests/backend/llm/test_providerTiming.py ; version: 2
 """Tests for shared LLM provider-execution timing evidence."""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
+from types import SimpleNamespace
 
 from backend.llm.llmTypes import LlmExecutionProfile, LlmQuery, LlmStreamEvent
 from backend.llm.streamingRuntime import LlmProcessingPipeline, LlmProviderRegistry
@@ -34,12 +35,26 @@ def _providers() -> LlmProviderRegistry:
     return providers
 
 
+def _patchClock(monkeypatch, wallTimes: tuple[int, int], monotonicTimes: tuple[int, int]) -> None:
+    """Replaces only the LLM runtime clock reference with deterministic clocks.
+
+    Replacing methods on Python's shared ``time`` module would also alter
+    ``uuid.uuid7()`` internals used when a ProcessingRun creates its runtime ID.
+    The test therefore replaces the module reference owned by streamingRuntime
+    rather than mutating the process-wide module object.
+    """
+    wallIterator = iter(wallTimes)
+    monotonicIterator = iter(monotonicTimes)
+    clock = SimpleNamespace(
+        time_ns=lambda: next(wallIterator),
+        monotonic_ns=lambda: next(monotonicIterator),
+    )
+    monkeypatch.setattr("backend.llm.streamingRuntime.time", clock)
+
+
 def test_direct_run_reports_wall_endpoints_and_monotonic_duration(monkeypatch) -> None:
     """Direct provider execution exposes timing using the process-evidence field names."""
-    wallTimes = iter((1_000, 1_900))
-    monotonicTimes = iter((50_000, 50_700))
-    monkeypatch.setattr("backend.llm.streamingRuntime.time.time_ns", lambda: next(wallTimes))
-    monkeypatch.setattr("backend.llm.streamingRuntime.time.monotonic_ns", lambda: next(monotonicTimes))
+    _patchClock(monkeypatch, (1_000, 1_900), (50_000, 50_700))
 
     result = LlmProcessingPipeline(providers=_providers()).run(
         providerName="timed",
@@ -58,10 +73,7 @@ def test_direct_run_reports_wall_endpoints_and_monotonic_duration(monkeypatch) -
 
 def test_processing_run_persists_provider_timing(monkeypatch) -> None:
     """Authoritative ProcessingRun evidence retains the exact provider timing snapshot."""
-    wallTimes = iter((2_000, 2_800))
-    monotonicTimes = iter((80_000, 80_600))
-    monkeypatch.setattr("backend.llm.streamingRuntime.time.time_ns", lambda: next(wallTimes))
-    monkeypatch.setattr("backend.llm.streamingRuntime.time.monotonic_ns", lambda: next(monotonicTimes))
+    _patchClock(monkeypatch, (2_000, 2_800), (80_000, 80_600))
     state = CommittedValueLayer()
 
     def invoke(capabilityId: str, payload: object, memoryView: object) -> object:
@@ -95,10 +107,7 @@ def test_processing_run_persists_provider_timing(monkeypatch) -> None:
 
 def test_completion_receives_same_provider_timing_as_persistent_evidence(monkeypatch) -> None:
     """Completion consumers see the same shared timing authority persisted for the run."""
-    wallTimes = iter((3_000, 3_500))
-    monotonicTimes = iter((90_000, 90_400))
-    monkeypatch.setattr("backend.llm.streamingRuntime.time.time_ns", lambda: next(wallTimes))
-    monkeypatch.setattr("backend.llm.streamingRuntime.time.monotonic_ns", lambda: next(monotonicTimes))
+    _patchClock(monkeypatch, (3_000, 3_500), (90_000, 90_400))
     state = CommittedValueLayer()
     seenTiming: dict[str, int] | None = None
 
