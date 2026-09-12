@@ -30,8 +30,7 @@ Two strategies must use the same test definition and source prompt material:
    the same final frozen materialization and requirements.
 
 V1 PROMPT DATA
-Keep prompt representation deliberately simple. JSON file(s) may initially
-contain these placeholder strings:
+Keep prompt representation deliberately simple. JSON file(s) initially contain:
 
 - grounding instructions
 - initial mazerialization test instructions
@@ -41,32 +40,56 @@ contain these placeholder strings:
 
 Do not invent a prompt-component language before requirements demand it.
 
+CURRENT MATERIALIZATION
+The first application scaffold now exists under:
+
+  first-party/applications/materializationTest/
+
+It contains an AppPack manifest, manual activation plan, config.json,
+prompts.json, CLI runner, and materializationTest.workflow Pack.
+
+The workflow currently supports inspection through materializationTest.describe@1
+and the first Actant-native phase through materializationTest.run@1. The initial
+phase constructs grounding + initial-materialization QueryItems, renders an exact
+text/plain query, executes it through ctx.llm.runProcessing(), and commits the
+exact initial response plus ProcessingRun identity into application memory.
+
+Classic strategy is represented in configuration but intentionally not yet
+implemented. The analyzer/fix, self-audit, questionnaire, source extraction and
+export phases remain to materialize. Do not treat the current initial response
+as a validated Python source artifact yet; source extraction/acceptance semantics
+still need to be defined from the real manual-test response shape.
+
 STATIC ANALYSIS REQUIREMENT
 The application must run ty and Ruff against the exact generated source
-artifact. Each tool must support an explicitly configured executable path so a
-user can select the same executable used by VS Code on Windows 11. Do not bake
-in a username or a guessed VS Code extension path.
+artifact. Analyzer application config currently contains logical toolId plus argv
+templates only; executable authority is intentionally absent pending shared
+Actant process-tool integration.
 
 Analyzer evidence should preserve at least tool identity, configured and
 resolved executable, arguments, working directory, target artifact, timing,
 exit code, stdout, and stderr. Analyzer findings are expected test input and
 must be distinguished from failure to launch/execute the analyzer.
 
-SHARED ACTANT PRESSURE FOUND
-CodeEntryContext currently mediates I/O, memory, capabilities and LLM access,
-but exposes no process/tool execution facility. The Materialization Test should
-not hide arbitrary subprocess authority inside its Pack merely to run ty/Ruff.
-A generic Actant-owned mediated process/tool execution boundary is requested
-from the integration work. The existing llama.cpp driver directly uses
-subprocess to manage llama-server and is a second candidate consumer of such a
-shared facility.
+SHARED PROCESS CONTRACT
+Integration accepted message 0001 in message 0002. V1 will expose mediated
+completed-tool execution through fresh CodeEntryContext. CodeEntry invokes a
+logical toolId and supplies argv/cwd; executable binding belongs to Actant/runtime
+configuration outside ordinary CodeEntry authority. shell=True and arbitrary
+environment mutation are outside v1. A completed process returns structured
+execution evidence even for nonzero exit status; lookup/resolution/start failures
+are typed Actant infrastructure errors. Actant owns generic process evidence;
+the Materialization Test owns analyzer/artifact meaning.
+
+Integration implementation is still pending. Do not add a temporary subprocess
+wrapper here. Synchronize the resulting shared implementation from
+actant-integration when integration reports it ready.
 
 CURRENT PIPELINE FIT
 The current QueryItem and LlmProcessingPipeline shape is sufficient for the
-prompt-side first implementation. LlmProcessingPipeline already records exact
-query/response evidence and allows completion logic to update application state
-transactionally. ApplicationRuntime.runJob plus child ProcessingRuns provides a
-usable outer/inner transaction spine for v1.
+prompt-side first implementation. LlmProcessingPipeline records exact query and
+response evidence transactionally. ApplicationRuntime.runJob plus child
+ProcessingRuns provides a usable outer/inner transaction spine for v1.
 
 CHECKPOINTS
 Automatic restart/checkpointing is desired later but is not a v1 requirement.
@@ -84,8 +107,6 @@ COORDINATION PROTOCOL
 - Shared/reusable Actant changes ultimately belong on actant-integration.
 - Application-specific materialization semantics stay on this branch.
 
-OPEN SHARED QUESTION
-What is the smallest correct generic Actant process/tool execution contract for
-v1, including invocation authority, executable/path handling, working directory,
-arguments, captured stdout/stderr, exit status, timing/evidence, and the boundary
-between expected nonzero tool findings and infrastructure execution failure?
+CURRENT BLOCKER / NEXT SHARED EVENT
+Proper analyzer execution waits for the integration implementation promised in
+message 0002. Materialization-side workflow work can continue independently.
