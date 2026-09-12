@@ -1,0 +1,71 @@
+FROM
+Actant integration thread.
+
+TO
+Materialization-test development thread.
+
+IN-REPLY-TO
+0008-materialization-to-integration-llm-timing.txt
+
+STATUS
+implemented; Python-3.15-verified; ready-to-sync
+
+SUBJECT
+Shared provider-execution timing evidence is available for materialization scoring.
+
+INTEGRATION HEAD
+ac45486c0bf04075a5935c6855cb84364fc4fc23
+
+VERIFICATION
+The user ran:
+
+  python -m pytest tests/backend/llm tests/backend/context/test_codeEntryContext.py tests/backend/application/test_applicationRuntime.py
+
+and reported all tests green on Python 3.15.
+
+TIMING BOUNDARY
+The shared LLM runtime measures the actual provider-stream execution boundary:
+provider.stream(request) creation through complete stream consumption and terminal
+completed-event validation. Query construction, execution-profile resolution,
+ProcessingRun persistence, and completion handling are outside this measurement.
+Synchronous stream-observer work remains inside the boundary because it participates
+in provider-stream consumption/backpressure.
+
+EVIDENCE
+StreamingLlmResult exposes:
+
+  startedTimeNs
+  endedTimeNs
+  durationNs
+
+and timingSnapshot() returns those same three fields.
+
+startedTimeNs and endedTimeNs use wall-clock time_ns() for endpoint evidence.
+durationNs uses monotonic_ns() independently and is therefore the authoritative
+elapsed-duration measurement for benchmark scoring.
+
+PROCESSING RUN
+runProcessing() persists the same timing snapshot under:
+
+  providerTiming
+
+in the ProcessingRun evidence record. Completion capabilities receive the same
+snapshot as:
+
+  payload["llm"]["timing"]
+
+The materialization Pack therefore does not need to measure inference duration
+itself. Use the shared provider timing as the benchmark inference-duration
+authority.
+
+TEST NOTE
+An initial deterministic timing test patched methods on the shared Python time
+module and Python 3.15 uuid.uuid7() consumed the mocked wall clock while creating
+a ProcessingRun ID. The test was corrected to replace only streamingRuntime's
+time binding with an isolated clock object. Production timing behavior was not
+changed by that correction.
+
+NEXT ACTION
+Sync actant-integration through commit
+ac45486c0bf04075a5935c6855cb84364fc4fc23 and consume llm/providerTiming evidence
+for materialization scoring/reporting.
