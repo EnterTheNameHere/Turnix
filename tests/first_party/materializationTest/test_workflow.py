@@ -1,4 +1,4 @@
-# file: tests/first_party/materializationTest/test_workflow.py ; version: 4
+# file: tests/first_party/materializationTest/test_workflow.py ; version: 5
 from __future__ import annotations
 
 import importlib.util
@@ -107,19 +107,28 @@ def test_analyzeSource_selfAudit_uses_distinct_workspace_namespace() -> None:
     assert ctx.workspace.calls == [("self-audit/attempt-1/candidate.py", "print('audited')\n")]
 
 
-def test_buildQueryItems_selfAudit_projects_clean_source_and_bug_search() -> None:
-    """Self-audit inference sees the clean artifact and historical audit instruction."""
-    payload = {"input": {"phase": "self-audit", "grounding": "grounding", "currentSource": "print('clean')\n", "searchForBugsAndFix": "inspect for bugs and fix them", "sourceProtocol": "one Python fence"}}
+def test_buildQueryItems_repair_retains_requirements_once() -> None:
+    """Native repair retains authoritative requirements without duplicating source."""
+    source = "print('latest')\n"
+    payload = {"input": {"phase": "materialization-repair", "grounding": "grounding", "requirements": "original requirements", "currentSource": source, "staticAnalysisReport": "current diagnostics", "sourceProtocol": "one Python fence"}}
     items = workflow._buildQueryItems(None, payload)
-    assert [item.kind for item in items] == ["grounding", "source", "instruction", "output-protocol"]
-    assert [item.content for item in items] == ["grounding", "print('clean')\n", "inspect for bugs and fix them", "one Python fence"]
+    assert [item.kind for item in items] == ["grounding", "requirements", "source", "diagnostics", "output-protocol"]
+    assert [item.content for item in items] == ["grounding", "original requirements", source, "current diagnostics", "one Python fence"]
 
 
-def test_buildQueryItems_selfAuditRepair_uses_only_latest_repair_projection() -> None:
-    """Self-audit repair excludes obsolete audit prose and previous candidates."""
-    payload = {"input": {"phase": "self-audit-repair", "grounding": "grounding", "currentSource": "print('latest')\n", "staticAnalysisReport": "current diagnostics", "sourceProtocol": "one Python fence"}}
+def test_buildQueryItems_selfAudit_projects_requirements_source_and_bug_search() -> None:
+    """Self-audit sees original requirements, clean artifact, and audit instruction."""
+    payload = {"input": {"phase": "self-audit", "grounding": "grounding", "requirements": "original requirements", "currentSource": "print('clean')\n", "searchForBugsAndFix": "inspect for bugs and fix them", "sourceProtocol": "one Python fence"}}
     items = workflow._buildQueryItems(None, payload)
-    assert [item.content for item in items] == ["grounding", "print('latest')\n", "current diagnostics", "one Python fence"]
+    assert [item.kind for item in items] == ["grounding", "requirements", "source", "instruction", "output-protocol"]
+    assert [item.content for item in items] == ["grounding", "original requirements", "print('clean')\n", "inspect for bugs and fix them", "one Python fence"]
+
+
+def test_buildQueryItems_selfAuditRepair_uses_requirements_and_latest_projection() -> None:
+    """Self-audit repair retains requirements while excluding obsolete audit prose."""
+    payload = {"input": {"phase": "self-audit-repair", "grounding": "grounding", "requirements": "original requirements", "currentSource": "print('latest')\n", "staticAnalysisReport": "current diagnostics", "sourceProtocol": "one Python fence"}}
+    items = workflow._buildQueryItems(None, payload)
+    assert [item.content for item in items] == ["grounding", "original requirements", "print('latest')\n", "current diagnostics", "one Python fence"]
 
 
 def test_renderStaticAnalysisReport_does_not_duplicate_current_source() -> None:
@@ -134,7 +143,7 @@ def test_renderStaticAnalysisReport_does_not_duplicate_current_source() -> None:
     report = workflow._renderStaticAnalysisReport("analysis template", analysis)
     assert source not in report
     assert "ruff finding" in report
-    payload = {"input": {"phase": "materialization-repair", "grounding": "grounding", "currentSource": source, "staticAnalysisReport": report, "sourceProtocol": "one Python fence"}}
+    payload = {"input": {"phase": "materialization-repair", "grounding": "grounding", "requirements": "requirements", "currentSource": source, "staticAnalysisReport": report, "sourceProtocol": "one Python fence"}}
     items = workflow._buildQueryItems(None, payload)
     rendered = "\n\n".join(item.content for item in items)
     assert rendered.count(source) == 1
@@ -156,22 +165,23 @@ def test_requireQuestions_rejects_implicit_or_blank_questionnaire_shapes() -> No
         workflow._requireQuestions(["valid", "   "], "questionnaire")
 
 
-def test_buildQueryItems_questionnaire_with_source_includes_requirements_and_one_question() -> None:
-    """Native questionnaire sees requirements, frozen source, and exactly one question."""
-    payload = {"input": {"phase": "questionnaire", "grounding": "grounding", "requirements": "all implementation requirements", "currentSource": "print('frozen')\n", "question": "Does requirement 17 pass?"}}
+def test_buildQueryItems_questionnaire_with_source_includes_instructions_and_one_question() -> None:
+    """Native questionnaire sees requirements, frozen source, audit rules, and one question."""
+    payload = {"input": {"phase": "questionnaire", "grounding": "grounding", "requirements": "all implementation requirements", "currentSource": "print('frozen')\n", "questionnaireInstructions": "judge one requirement", "question": "Does requirement 17 pass?"}}
     items = workflow._buildQueryItems(None, payload)
-    assert [item.kind for item in items] == ["grounding", "requirements", "source", "question"]
-    assert [item.content for item in items] == ["grounding", "all implementation requirements", "print('frozen')\n", "Does requirement 17 pass?"]
+    assert [item.kind for item in items] == ["grounding", "requirements", "source", "instruction", "question"]
+    assert [item.content for item in items] == ["grounding", "all implementation requirements", "print('frozen')\n", "judge one requirement", "Does requirement 17 pass?"]
 
 
-def test_buildQueryItems_questionnaire_without_source_exposes_failure_state_and_requirements() -> None:
-    """Failed materialization remains truthful while requirements stay visible."""
-    payload = {"input": {"phase": "questionnaire", "grounding": "grounding", "requirements": "required class contract", "materializationState": "No valid Python source artifact was extracted during materialization.\nMaterialization outcome: extraction-failed.\nSelf-audit outcome: not-reached.", "question": "Did you implement the required class?"}}
+def test_buildQueryItems_questionnaire_without_source_exposes_failure_state_and_instructions() -> None:
+    """Failed materialization remains truthful while requirements and audit rules stay visible."""
+    payload = {"input": {"phase": "questionnaire", "grounding": "grounding", "requirements": "required class contract", "materializationState": "No valid Python source artifact was extracted during materialization.\nMaterialization outcome: extraction-failed.\nSelf-audit outcome: not-reached.", "questionnaireInstructions": "judge one requirement", "question": "Did you implement the required class?"}}
     items = workflow._buildQueryItems(None, payload)
-    assert [item.kind for item in items] == ["grounding", "requirements", "state", "question"]
+    assert [item.kind for item in items] == ["grounding", "requirements", "state", "instruction", "question"]
     assert items[1].content == "required class contract"
     assert "No valid Python source artifact" in items[2].content
-    assert items[3].content == "Did you implement the required class?"
+    assert items[3].content == "judge one requirement"
+    assert items[4].content == "Did you implement the required class?"
 
 
 def test_materializationStateForQuestionnaire_reports_no_source_without_inventing_one() -> None:
