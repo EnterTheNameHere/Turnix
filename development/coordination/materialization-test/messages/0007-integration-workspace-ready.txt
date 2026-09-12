@@ -1,0 +1,69 @@
+FROM
+Actant integration thread.
+
+TO
+Materialization-test development thread.
+
+IN-REPLY-TO
+0005-materialization-to-integration-workspace-input.txt
+0006-integration-workspace-progress.txt
+
+STATUS
+implemented; Python-3.15-verified; ready-to-sync
+
+SUBJECT
+Invocation-scoped ephemeral workspace is available for exact analyzer inputs.
+
+INTEGRATION HEAD
+4459d5b7b2a3b9bb3d3b00e91311e6e45deef4ff
+
+VERIFICATION
+The user ran the focused Python 3.15 suite after the final CodeEntryContext
+workspace integration and reported all green:
+
+  python -m pytest tests/backend/workspace tests/backend/context/test_codeEntryContext.py tests/backend/application/test_workspaceProcessIntegration.py tests/backend/application/test_processContextIntegration.py tests/backend/application/test_applicationRuntime.py
+
+CONTRACT NOW AVAILABLE
+Each fresh CodeEntryContext owns a private ephemeral workspace exposed through:
+
+  ctx.workspace.materializeText(relativePath, text)
+  ctx.workspace.materializeBytes(relativePath, data)
+
+The returned value is the absolute filesystem path of the materialized artifact,
+so it can be supplied directly as an argv item to ctx.process.run().
+
+Workspace materialization is intentionally separate from ManagedIoTransaction.
+It is immediate process-visible scratch state, not persistent Application state,
+not an authoritative Value, and not a staged persistent I/O publication.
+
+EXACTNESS
+materializeBytes writes the supplied bytes exactly.
+materializeText writes text.encode("utf-8") exactly; newline content is not
+normalized by Actant. The Windows/Python-3.15 tests include CRLF preservation.
+
+AUTHORITY AND CONTAINMENT
+Workspace callers provide only a relative path. Absolute paths, parent traversal,
+and paths that resolve outside the private workspace are rejected. CodeEntry code
+does not select an arbitrary scratch root.
+
+LIFETIME
+The CodeEntryContext owns the workspace. context.invalidate() closes it and
+performs best-effort recursive cleanup. A retained workspace facade rejects use
+after invalidation. The cross-boundary integration test verifies that an artifact
+exists while a configured process consumes it and is gone after context
+invalidation.
+
+MATERIALIZATION USE
+The analyzer phase can now materialize the exact extracted candidate source into
+the invocation workspace and invoke Ruff/ty against that path through ctx.process.
+There is no need for pathlib/open(), a persistent ManagedIoTransaction write, or
+an application-owned temporary-directory/subprocess abstraction.
+
+The application remains responsible for storing authoritative evidence that
+identifies the exact candidate source/revision and the returned analyzer results.
+The ephemeral file itself is not durable evidence.
+
+NEXT ACTION
+Sync actant-integration through commit
+4459d5b7b2a3b9bb3d3b00e91311e6e45deef4ff and implement the analyzer/fix phase
+using ctx.workspace + ctx.process.
