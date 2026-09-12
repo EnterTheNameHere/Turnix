@@ -36,6 +36,32 @@ from the last accepted checkpoint after interruption. This is not required for
 the first iteration. Do not prematurely distort current orchestration/persistence
 interfaces around an unimplemented checkpoint subsystem.
 
+Configured external tools
+-------------------------
+Actant now owns the shared completed-process boundary required for Ruff/ty static
+analysis. Host/runtime configuration maps logical tool names under processTools
+to absolute executable paths. CodeEntry code invokes only the logical tool name
+through ctx.process; it cannot select an arbitrary executable or shell command.
+
+ctx.process.run() accepts an argument vector, optional working directory, and
+optional timeout. A normally completed invocation returns generic evidence with
+the logical tool name, configured/resolved executable, exact arguments, resolved
+working directory, timing, exit code, stdout, and stderr. Nonzero exit is a
+normal completed result, so Ruff/ty findings remain distinct from Actant
+infrastructure failure. Resolution, launch, communication, and timeout failures
+raise ProcessExecutionError.
+
+The external process itself is irreversible. Its returned evidence becomes
+authoritative only if the owning workflow stores and accepts that evidence
+through normal Actant transaction/orchestration boundaries. Aborting later state
+cannot un-run the external tool.
+
+The process substrate and ApplicationRuntime/CodeEntryContext path were exercised
+on the user's Python 3.15 Windows environment on 2026-09-12 together with the
+ApplicationRuntime regression tests and were reported green. The subsequent
+context-construction cleanup preserves that same process contract and should be
+rechecked before the materialization branch consumes its final integration SHA.
+
 Shared integration pressure
 ---------------------------
 The application should reuse the shared first-party llama.cpp provider rather

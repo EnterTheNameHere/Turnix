@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 11
+# file: backend/application/applicationRuntime.py ; version: 13
 from __future__ import annotations
 
 from copy import deepcopy
@@ -12,6 +12,9 @@ from backend.io.managedIo import ManagedIo, ManagedIoTransaction
 from backend.llm.streamingRuntime import LlmProviderRegistry, LlmProcessingPipeline
 from backend.orchestration.runtime import Job, OrchestrationUnit, OrchestrationUnitOutcome
 from backend.packs.runtime import PackLoader, PackResolver
+from backend.process.configuration import processToolDefinitionsFromConfig
+from backend.process.context import ProcessFacade
+from backend.process.runtime import ProcessRunner, ProcessToolRegistry
 from backend.registration import RegistrationScope
 from backend.save import ApplicationStore, LoadedApplicationSave, SaveBundle
 from backend.tracing import TraceSinkDestination, Tracer
@@ -26,6 +29,9 @@ class ApplicationRuntime:
     Tracing is evidence only. Trace publication or tracer-close failures are
     deliberately isolated here so loss of observability cannot alter runtime
     lifecycle, capability execution, Job outcome, or authoritative state.
+
+    Host-configured process tools are resolved once for this ApplicationRun and
+    exposed to CodeEntry calls only through invocation-bound ``ctx.process``.
     """
 
     def __init__(
@@ -39,6 +45,23 @@ class ApplicationRuntime:
         config: dict[str, object] | None = None,
         tracer: Tracer | None = None,
     ) -> None:
+        """Creates one ApplicationRun and its mediated runtime services.
+
+        Args:
+            appPackId: Defining AppPack identity when creating a new Application.
+            application: Existing in-memory Application to run.
+            saveBundle: Durable Application snapshot to restore instead.
+            applicationStore: Optional durable store used by saveApplication().
+            packResolver: Resolver used by this run's PackLoader.
+            config: Detached host/application runtime configuration.
+            tracer: Optional externally owned tracer.
+
+        Raises:
+            ValueError: If mutually exclusive or inconsistent Application inputs
+                are supplied, or a new Application has no valid AppPack ID.
+            TypeError: If the supplied store or resolver has the wrong type, or
+                process-tool configuration is structurally invalid.
+        """
         if application is not None and saveBundle is not None:
             raise ValueError("ApplicationRuntime accepts either application or saveBundle, not both.")
         if application is not None and appPackId is not None and application.appPackId != appPackId:
@@ -73,6 +96,8 @@ class ApplicationRuntime:
         self.capabilities = CapabilityRegistry()
         self.llmProviders = LlmProviderRegistry()
         self._config = {} if config is None else deepcopy(config)
+        self.processTools = ProcessToolRegistry(processToolDefinitionsFromConfig(self._config))
+        self.processRunner = ProcessRunner(self.processTools)
         self._codeEntries: dict[str, tuple[CodeEntryIdentity, Path]] = {}
         self._lane = RLock()
         self._initializing = False
@@ -90,6 +115,7 @@ class ApplicationRuntime:
 
     @property
     def config(self) -> dict[str, object]:
+        """Returns a detached copy of this ApplicationRun's configuration."""
         return deepcopy(self._config)
 
     @property
@@ -116,10 +142,7 @@ class ApplicationRuntime:
         """
         if not isinstance(applicationStore, ApplicationStore):
             raise TypeError("applicationStore must be an ApplicationStore.")
-        loaded = applicationStore.load(
-            appPackId=appPackId,
-            applicationId=applicationId,
-        )
+        loaded = applicationStore.load(appPackId=appPackId, applicationId=applicationId)
         runtime = cls(
             saveBundle=loaded.bundle,
             applicationStore=applicationStore,
@@ -149,15 +172,14 @@ class ApplicationRuntime:
             durableGeneration = self._saveBundle.generation
         targetGeneration = durableGeneration + 1
         if targetGeneration == self._saveBundle.generation + 1:
-            return self._saveBundle.nextGeneration(
-                committedState=application.committedState,
-            )
+            return self._saveBundle.nextGeneration(committedState=application.committedState)
         return self._saveBundle.advanceToGeneration(
             generation=targetGeneration,
             committedState=application.committedState,
         )
 
     def _acceptSaveBundle(self, bundle: SaveBundle) -> None:
+        """Accepts an already captured or published SaveBundle identity."""
         self._saveBundle = bundle
         application = self.applicationRun.application
         application.saveBundleId = bundle.saveBundleId
@@ -224,6 +246,7 @@ class ApplicationRuntime:
         return True
 
     def beginInitialization(self) -> None:
+        """Opens the initialization phase for a fresh ApplicationRun."""
         with self._lane:
             if self.applicationRun.state is not ApplicationRunState.CREATED:
                 raise RuntimeError("Runtime initialization requires a newly created ApplicationRun.")
@@ -239,6 +262,7 @@ class ApplicationRuntime:
             )
 
     def abortInitialization(self) -> None:
+        """Ends an active initialization phase without starting the run."""
         with self._lane:
             if not self._initializing:
                 return
@@ -253,6 +277,7 @@ class ApplicationRuntime:
             )
 
     def start(self) -> None:
+        """Starts the initialized ApplicationRun and closes initialization."""
         with self._lane:
             self.applicationRun.start()
             self._initializing = False
@@ -265,6 +290,7 @@ class ApplicationRuntime:
             )
 
     def stop(self) -> None:
+        """Stops an active run after attempting Pack cleanup."""
         with self._lane:
             if not self.applicationRun.active:
                 return
@@ -291,6 +317,7 @@ class ApplicationRuntime:
                 )
 
     def close(self) -> None:
+        """Closes Pack/runtime resources and the internally owned tracer once."""
         with self._lane:
             if self._closed:
                 return
@@ -326,10 +353,12 @@ class ApplicationRuntime:
                 )
 
     def requireActive(self) -> None:
+        """Requires this runtime to own an active ApplicationRun."""
         if not self.applicationRun.active:
             raise RuntimeError("ApplicationRun is not active.")
 
     def requireOperational(self) -> None:
+        """Requires initialization or active-run authority for runtime work."""
         if not self._initializing and not self.applicationRun.active:
             raise RuntimeError("ApplicationRuntime is neither initializing nor running an active ApplicationRun.")
 
@@ -343,14 +372,28 @@ class ApplicationRuntime:
         memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
         ioView: ManagedIo | ManagedIoTransaction | None = None,
     ) -> CodeEntryContext:
+        """Creates one fresh call-specific CodeEntryContext with explicit facilities."""
         self.requireOperational()
-        return CodeEntryContext(
+        contextReference: CodeEntryContext | None = None
+
+        def requireContextValid() -> None:
+            """Delegates process-facade lifetime checks to the constructed context."""
+            if contextReference is None:
+                raise RuntimeError("CodeEntryContext process authority is not initialized.")
+            contextReference.requireValid()
+
+        process = ProcessFacade(
+            runner=self.processRunner,
+            requireValid=requireContextValid,
+        )
+        context = CodeEntryContext(
             identity=identity,
             packRoot=packRoot,
             io=self.io if ioView is None else ioView,
             capabilities=self.capabilities,
             llmProviders=self.llmProviders,
             llmPipeline=self.llmPipeline,
+            process=process,
             memory=self.applicationRun.application.committedState if memoryView is None else memoryView,
             registrationScope=registrationScope,
             config=self._config,
@@ -362,14 +405,18 @@ class ApplicationRuntime:
             ),
             allowRegistration=allowRegistration,
         )
+        contextReference = context
+        return context
 
     def registerCodeEntry(self, identity: CodeEntryIdentity, packRoot: Path) -> None:
+        """Registers one loaded CodeEntry as eligible for runtime invocation."""
         self.requireOperational()
         if identity.codeEntryInstanceId in self._codeEntries:
             raise RuntimeError(f"CodeEntry instance is already active: {identity.codeEntryInstanceId}.")
         self._codeEntries[identity.codeEntryInstanceId] = (identity, packRoot.resolve())
 
     def unregisterCodeEntry(self, codeEntryInstanceId: str) -> None:
+        """Withdraws one loaded CodeEntry instance from runtime invocation."""
         self._codeEntries.pop(codeEntryInstanceId, None)
 
     def invokeCapability(
@@ -380,6 +427,7 @@ class ApplicationRuntime:
         memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
         ioView: ManagedIo | ManagedIoTransaction | None = None,
     ) -> object:
+        """Invokes one resolved capability with a fresh call-specific context."""
         with self._lane:
             self.requireOperational()
             registration = self.capabilities.resolve(capabilityId)
@@ -424,6 +472,7 @@ class ApplicationRuntime:
                 scope.withdraw()
 
     def runJob(self, capabilityId: str, payload: object | None = None) -> Job:
+        """Runs one serialized mutating capability Job with memory and I/O boundaries."""
         with self._lane:
             self.requireActive()
             job = Job.new()
@@ -443,27 +492,12 @@ class ApplicationRuntime:
                 "capabilityId": capabilityId,
                 "workKind": "job-capability",
             }
-            self.trace(
-                "OrchestrationUnitCreated",
-                attributes=orchestrationAttributes,
-            )
-            self.trace(
-                "OrchestrationUnitTransactionOpened",
-                attributes=orchestrationAttributes,
-            )
-            self.trace(
-                "managed-io-transaction-opened",
-                attributes=orchestrationAttributes,
-            )
+            self.trace("OrchestrationUnitCreated", attributes=orchestrationAttributes)
+            self.trace("OrchestrationUnitTransactionOpened", attributes=orchestrationAttributes)
+            self.trace("managed-io-transaction-opened", attributes=orchestrationAttributes)
             unit.start()
-            self.trace(
-                "OrchestrationUnitStarted",
-                attributes=orchestrationAttributes,
-            )
-            self.trace(
-                "job-started",
-                attributes=orchestrationAttributes,
-            )
+            self.trace("OrchestrationUnitStarted", attributes=orchestrationAttributes)
+            self.trace("job-started", attributes=orchestrationAttributes)
             try:
                 result = self.invokeCapability(
                     capabilityId,
@@ -473,10 +507,7 @@ class ApplicationRuntime:
                 )
                 unit.commitMutation()
                 job.authoritativeStateAccepted = True
-                self.trace(
-                    "OrchestrationUnitTransactionCommitted",
-                    attributes=orchestrationAttributes,
-                )
+                self.trace("OrchestrationUnitTransactionCommitted", attributes=orchestrationAttributes)
                 try:
                     ioTransaction.commit()
                 except Exception as err:
@@ -487,10 +518,7 @@ class ApplicationRuntime:
                         level="error",
                     )
                     raise
-                self.trace(
-                    "managed-io-transaction-committed",
-                    attributes=orchestrationAttributes,
-                )
+                self.trace("managed-io-transaction-committed", attributes=orchestrationAttributes)
             except Exception as err:
                 mutationWasResolved = unit.mutationResolved
                 try:
@@ -498,16 +526,10 @@ class ApplicationRuntime:
                 except RuntimeError:
                     pass
                 else:
-                    self.trace(
-                        "managed-io-transaction-aborted",
-                        attributes=orchestrationAttributes,
-                    )
+                    self.trace("managed-io-transaction-aborted", attributes=orchestrationAttributes)
                 unit.finish(OrchestrationUnitOutcome.FAILED)
                 if not mutationWasResolved:
-                    self.trace(
-                        "OrchestrationUnitTransactionAborted",
-                        attributes=orchestrationAttributes,
-                    )
+                    self.trace("OrchestrationUnitTransactionAborted", attributes=orchestrationAttributes)
                 self.trace(
                     "OrchestrationUnitFailed",
                     message=str(err),
@@ -523,13 +545,7 @@ class ApplicationRuntime:
                 )
             else:
                 unit.finish(OrchestrationUnitOutcome.COMPLETED)
-                self.trace(
-                    "OrchestrationUnitCompleted",
-                    attributes=orchestrationAttributes,
-                )
+                self.trace("OrchestrationUnitCompleted", attributes=orchestrationAttributes)
                 job.succeed(result)
-                self.trace(
-                    "job-completed",
-                    attributes=orchestrationAttributes,
-                )
+                self.trace("job-completed", attributes=orchestrationAttributes)
             return job
