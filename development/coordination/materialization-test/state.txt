@@ -41,24 +41,62 @@ Keep prompt representation deliberately simple. JSON file(s) initially contain:
 Do not invent a prompt-component language before requirements demand it.
 
 CURRENT MATERIALIZATION
-The first application scaffold now exists under:
+The first application scaffold exists under:
 
   first-party/applications/materializationTest/
 
 It contains an AppPack manifest, manual activation plan, config.json,
 prompts.json, CLI runner, and materializationTest.workflow Pack.
 
-The workflow currently supports inspection through materializationTest.describe@1
-and the first Actant-native phase through materializationTest.run@1. The initial
-phase constructs grounding + initial-materialization QueryItems, renders an exact
-text/plain query, executes it through ctx.llm.runProcessing(), and commits the
-exact initial response plus ProcessingRun identity into application memory.
+The workflow supports inspection through materializationTest.describe@1 and the
+first Actant-native phase through materializationTest.run@1. The initial phase
+constructs grounding + initial-materialization + source-output-protocol
+QueryItems, renders an exact text/plain query, executes it through
+ctx.llm.runProcessing(), retains the complete raw response, strictly extracts a
+Python source candidate, and commits response/extraction state plus ProcessingRun
+identity into application memory.
 
 Classic strategy is represented in configuration but intentionally not yet
-implemented. The analyzer/fix, self-audit, questionnaire, source extraction and
-export phases remain to materialize. Do not treat the current initial response
-as a validated Python source artifact yet; source extraction/acceptance semantics
-still need to be defined from the real manual-test response shape.
+implemented. Analyzer/fix, self-audit, questionnaire and export remain to
+materialize.
+
+SOURCE RESPONSE PROTOCOL
+Every source-producing inference, including initial materialization, every
+analyzer repair, and self-audit, is instructed to return the complete file in
+exactly one fenced Python code block using ```python.
+
+Acceptance is deliberately strict:
+- exactly one fenced code block in the complete response;
+- its info string must be python;
+- the fence must close normally;
+- extracted source must contain non-whitespace content;
+- prose/reasoning outside the one fence is allowed and retained in raw response;
+- zero, multiple, wrong-language, malformed/unclosed, or empty blocks are model
+  output failure for that phase;
+- no heuristic recovery, block selection, Python-looking prose extraction,
+  dedenting, newline normalization, or format-repair inference is allowed;
+- extraction occurs only after the complete streamed response is available;
+- the exact extracted body is the artifact supplied to ty/Ruff.
+
+No Python runtime execution/import check is part of v1. Ruff and ty are the
+historical validation mechanism and must inspect the extracted artifact without
+executing it.
+
+CALL LIMITS AND FAILURE SEMANTICS
+Initial materialization plus analyzer repairs has a maximum of five LLM calls.
+Calls 1-4 may lead to another repair when ty/Ruff findings remain. If call 5
+still has analyzer findings, the materialization phase fails with analyzer limit
+reached. Any malformed source-producing response terminates that phase
+immediately rather than consuming another call to repair formatting.
+
+Self-audit starts only after analyzer-clean initial materialization and has an
+independent maximum of five calls: self-audit is call 1, followed by at most four
+analyzer repair calls under the same strict source-response protocol.
+
+Questionnaire execution is not suppressed by materialization or self-audit
+failure. Failed implementation state and subsequent questionnaire claims are
+valuable scoring evidence. If no valid source was ever extracted, the harness
+must not invent an empty source artifact.
 
 STATIC ANALYSIS REQUIREMENT
 The application must run ty and Ruff against the exact generated source
