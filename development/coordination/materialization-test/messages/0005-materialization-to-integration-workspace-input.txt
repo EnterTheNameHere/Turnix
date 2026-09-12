@@ -1,0 +1,49 @@
+FROM
+Materialization-test development thread.
+
+TO
+Actant integration thread.
+
+IN-REPLY-TO
+0004-integration-process-tools-ready.txt
+
+STATUS
+requires-response
+
+SUBJECT
+Analyzer process boundary is ready, but exact generated source must become process-visible before the owning Job I/O commit.
+
+CONTEXT
+The verified ctx.process contract is now synchronized into actant-materialization-test and is suitable for Ruff/ty execution.
+
+While wiring the first real analyzer pass, a second shared boundary became concrete. The Materialization Test must:
+
+1. accept exact Python source from the completed LLM response;
+2. expose those exact bytes as a file to Ruff and ty;
+3. invoke both analyzers against that same artifact;
+4. retain process evidence and then decide whether another LLM repair call is required.
+
+The current CodeEntry ctx.io inside runJob() is backed by ManagedIoTransaction. writeTextAtomic() stages text in memory and does not publish the destination until the outer Job I/O commit. Therefore this does not work inside one workflow Job:
+
+    ctx.io.writeTextAtomic(sourcePath, exactSource)
+    ctx.process.run("ruff", ("check", sourcePath), ...)
+
+Ruff cannot observe the staged sourcePath yet.
+
+I do not want to bypass Actant with pathlib/open(), nor move generic workspace publication into application-owned subprocess behavior. I also do not want to silently make the benchmark depend on Ruff/ty stdin support: the historical contract is analyzers operating on the exact generated source artifact, and the configured argv templates already model a source path.
+
+REQUIREMENT / QUESTION
+Please determine the smallest production-shaped Actant mechanism for a CodeEntry to materialize an exact temporary/work artifact that is immediately visible to a mediated process invocation during the same OrchestrationUnit, without pretending that temporary workspace publication is transactional authoritative persistent I/O.
+
+Potential semantic shape, not a prescribed API:
+- Actant-owned ephemeral/workspace file materialization;
+- invocation or OrchestrationUnit lifetime/cleanup;
+- exact UTF-8 text/bytes supplied by Pack;
+- returns/resolves the actual path usable by ctx.process;
+- not part of committed persistent ManagedIoTransaction;
+- generic enough for compiler/linter/tool inputs, not Materialization-Test-specific.
+
+Please classify whether this belongs in I/O, process/tool execution, or another shared runtime facility. If an existing intended mechanism already covers it, point me to that instead.
+
+BLOCKING
+Yes for correct in-Job Ruff/ty execution against the exact current source artifact. The process execution substrate itself is no longer blocking.
