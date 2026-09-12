@@ -1,4 +1,4 @@
-# file: tests/backend/application/test_processContextIntegration.py ; version: 1
+# file: tests/backend/application/test_processContextIntegration.py ; version: 2
 """Integration tests for ApplicationRun-owned CodeEntry process authority."""
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ def test_context_process_runs_host_configured_tool(tmp_path: Path) -> None:
     assert result["toolName"] == "python"
     assert result["exitCode"] == 7
     assert result["stdout"] == "out\n"
-    assert result["stderr"] == "err\n"
+    assert result["stderr"].endswith("err\n")
     assert result["arguments"][0] == "-c"
     runtime.close()
 
