@@ -1,4 +1,4 @@
-# file: first-party/applications/materializationTest/packs/workflow/codeEntry.py ; version: 5
+# file: first-party/applications/materializationTest/packs/workflow/codeEntry.py ; version: 6
 from __future__ import annotations
 
 import hashlib
@@ -40,6 +40,34 @@ def _requireString(value: object, name: str) -> str:
     return value
 
 
+def _requireQuestions(value: object, name: str) -> tuple[str, ...]:
+    """Validates and freezes the ordered questionnaire question sequence.
+
+    Args:
+        value: Boundary value expected to be a JSON array of question strings.
+        name: Human-readable configuration path used in validation errors.
+
+    Returns:
+        Ordered immutable tuple preserving each exact question string.
+
+    Raises:
+        TypeError: If the value is not a list or an element is not a string.
+        ValueError: If the list is empty or an element is blank.
+    """
+    if not isinstance(value, list):
+        raise TypeError(f"{name} must be a list.")
+    if not value:
+        raise ValueError(f"{name} must contain at least one question.")
+    questions: list[str] = []
+    for index, question in enumerate(value):
+        if type(question) is not str:
+            raise TypeError(f"{name}[{index}] must be a string.")
+        if not question.strip():
+            raise ValueError(f"{name}[{index}] must be a non-blank string.")
+        questions.append(question)
+    return tuple(questions)
+
+
 def _extractPythonSource(response: str) -> str:
     """Extracts the one protocol-valid Python fence from a completed response.
 
@@ -72,18 +100,35 @@ def _extractPythonSource(response: str) -> str:
     return source
 
 
-def _promptDefinitions(ctx) -> dict[str, str]:
-    """Loads and validates the deliberately simple v1 prompt document."""
+def _promptDefinitions(ctx) -> dict[str, object]:
+    """Loads and validates the deliberately simple v1 prompt document.
+
+    Questionnaire boundaries are data, not inferred syntax: ``questionnaire``
+    is an ordered JSON array whose elements are the exact individual questions.
+    """
     promptPath = _requireString(ctx.config.get("promptsFile"), "promptsFile")
     definitions = _requireMapping(ctx.io.readJson(promptPath), "Prompt definitions")
-    required = (
-        "grounding",
-        "initialMaterialization",
-        "staticAnalysisReport",
-        "searchForBugsAndFix",
-        "questionnaire",
+    result: dict[str, object] = {}
+    for key in ("grounding", "initialMaterialization", "staticAnalysisReport", "searchForBugsAndFix"):
+        result[key] = _requireString(definitions.get(key), f"Prompt definition {key!r}")
+    result["questionnaire"] = _requireQuestions(
+        definitions.get("questionnaire"),
+        "Prompt definition 'questionnaire'",
     )
-    return {key: _requireString(definitions.get(key), f"Prompt definition {key!r}") for key in required}
+    return result
+
+
+def _promptText(prompts: Mapping[str, object], key: str) -> str:
+    """Returns one validated textual prompt member from loaded definitions."""
+    return _requireString(prompts.get(key), f"Prompt definition {key!r}")
+
+
+def _questionnaire(prompts: Mapping[str, object]) -> tuple[str, ...]:
+    """Returns the already-validated ordered questionnaire definition."""
+    value = prompts.get("questionnaire")
+    if not isinstance(value, tuple) or not all(type(question) is str for question in value):
+        raise TypeError("Loaded questionnaire must be a tuple of strings.")
+    return value
 
 
 def _llmConfig(ctx) -> tuple[str, str | None, Mapping[str, object]]:
@@ -142,6 +187,17 @@ def _buildQueryItems(_ctx, payload):
             ("self-audit", "instruction", inputValue.get("searchForBugsAndFix")),
             ("source-output-protocol", "output-protocol", inputValue.get("sourceProtocol")),
         )
+    elif phase == "questionnaire":
+        partsList: list[tuple[str, str, object]] = [
+            ("grounding", "grounding", inputValue.get("grounding")),
+        ]
+        currentSource = inputValue.get("currentSource")
+        if currentSource is not None:
+            partsList.append(("current-source", "source", currentSource))
+        else:
+            partsList.append(("materialization-state", "state", inputValue.get("materializationState")))
+        partsList.append(("question", "question", inputValue.get("question")))
+        parts = tuple(partsList)
     else:
         raise ValueError(f"Unsupported materialization phase: {phase!r}.")
     return [
@@ -224,7 +280,7 @@ def _renderStaticAnalysisReport(
     return "\n\n".join(sections)
 
 
-def _runSourceInference(
+def _runInference(
     ctx,
     *,
     inputValue: Mapping[str, object],
@@ -233,7 +289,7 @@ def _runSourceInference(
     providerOptions: Mapping[str, object],
     streamObserver: object,
 ):
-    """Runs one source-producing ProcessingRun through the shared LLM pipeline."""
+    """Runs one benchmark ProcessingRun through the shared LLM pipeline."""
     return ctx.llm.runProcessing(
         memoryKey=_MEMORY_KEY,
         inputValue=dict(inputValue),
@@ -273,7 +329,7 @@ def _attemptRecord(
 def _runSelfAudit(
     ctx,
     *,
-    prompts: Mapping[str, str],
+    prompts: Mapping[str, object],
     initialSource: str,
     provider: str,
     model: str | None,
@@ -297,26 +353,26 @@ def _runSelfAudit(
         if callNumber == 1:
             inputValue: Mapping[str, object] = {
                 "phase": "self-audit",
-                "grounding": prompts["grounding"],
+                "grounding": _promptText(prompts, "grounding"),
                 "currentSource": currentSource,
-                "searchForBugsAndFix": prompts["searchForBugsAndFix"],
+                "searchForBugsAndFix": _promptText(prompts, "searchForBugsAndFix"),
                 "sourceProtocol": _SOURCE_FENCE_INSTRUCTION,
             }
         else:
             assert currentAnalysis is not None
             inputValue = {
                 "phase": "self-audit-repair",
-                "grounding": prompts["grounding"],
+                "grounding": _promptText(prompts, "grounding"),
                 "currentSource": currentSource,
                 "staticAnalysisReport": _renderStaticAnalysisReport(
-                    prompts["staticAnalysisReport"],
+                    _promptText(prompts, "staticAnalysisReport"),
                     currentSource,
                     currentAnalysis,
                 ),
                 "sourceProtocol": _SOURCE_FENCE_INSTRUCTION,
             }
 
-        result = _runSourceInference(
+        result = _runInference(
             ctx,
             inputValue=inputValue,
             provider=provider,
@@ -391,8 +447,95 @@ def _runSelfAudit(
     return resultState
 
 
+def _materializationStateForQuestionnaire(state: Mapping[str, object]) -> str:
+    """Renders truthful implementation state when no valid source exists.
+
+    The questionnaire must still execute after malformed initial model output.
+    This projection exposes only the relevant failure facts and explicitly says
+    that no valid source artifact exists, rather than manufacturing one.
+    """
+    return (
+        "No valid Python source artifact was extracted during materialization.\n"
+        f"Materialization outcome: {state.get('materializationOutcome')}.\n"
+        f"Self-audit outcome: {state.get('selfAuditOutcome')}."
+    )
+
+
+def _runQuestionnaire(
+    ctx,
+    *,
+    prompts: Mapping[str, object],
+    state: Mapping[str, object],
+    provider: str,
+    model: str | None,
+    providerOptions: Mapping[str, object],
+    streamObserver: object,
+) -> dict[str, object]:
+    """Runs the Actant-native questionnaire as one independent inference per question.
+
+    Every question receives the same frozen best legitimate source artifact when
+    one exists. If materialization never produced valid source, every question
+    instead receives an explicit truthful failure-state projection. Answers are
+    unconstrained model text and are retained verbatim as scoring evidence.
+    """
+    questions = _questionnaire(prompts)
+    sourceValue = state.get("currentSource")
+    currentSource = sourceValue if type(sourceValue) is str else None
+    materializationState = None if currentSource is not None else _materializationStateForQuestionnaire(state)
+    answers: list[dict[str, object]] = []
+
+    for index, question in enumerate(questions):
+        inputValue: dict[str, object] = {
+            "phase": "questionnaire",
+            "grounding": _promptText(prompts, "grounding"),
+            "question": question,
+        }
+        if currentSource is not None:
+            inputValue["currentSource"] = currentSource
+        else:
+            assert materializationState is not None
+            inputValue["materializationState"] = materializationState
+        try:
+            result = _runInference(
+                ctx,
+                inputValue=inputValue,
+                provider=provider,
+                model=model,
+                providerOptions=providerOptions,
+                streamObserver=streamObserver,
+            )
+        except Exception as err:
+            return {
+                "outcome": "inference-failed" if not answers else "partially-completed",
+                "questionCount": len(questions),
+                "completedCount": len(answers),
+                "answers": answers,
+                "failure": {
+                    "questionIndex": index,
+                    "question": question,
+                    "type": type(err).__name__,
+                    "message": str(err),
+                },
+            }
+        answers.append(
+            {
+                "questionIndex": index,
+                "question": question,
+                "processingRunId": result.processingRunId,
+                "rawResponse": result.llm.rawText,
+            },
+        )
+
+    return {
+        "outcome": "completed",
+        "questionCount": len(questions),
+        "completedCount": len(answers),
+        "answers": answers,
+    }
+
+
 def _run(ctx, payload):
-    """Runs Actant-native materialization, repair, and self-audit phases."""
+    """Runs Actant-native materialization, self-audit, and questionnaire phases."""
     request = {} if payload is None else _requireMapping(payload, "Materialization run request")
     strategy = _requireString(ctx.config.get("strategy"), "strategy")
     if strategy not in {"classic", "actant-native"}:
@@ -413,8 +556,8 @@ def _run(ctx, payload):
         if callNumber == 1:
             inputValue: Mapping[str, object] = {
                 "phase": "initial-materialization",
-                "grounding": prompts["grounding"],
-                "initialMaterialization": prompts["initialMaterialization"],
+                "grounding": _promptText(prompts, "grounding"),
+                "initialMaterialization": _promptText(prompts, "initialMaterialization"),
                 "sourceProtocol": _SOURCE_FENCE_INSTRUCTION,
             }
         else:
@@ -422,16 +565,16 @@ def _run(ctx, payload):
             assert currentAnalysis is not None
             inputValue = {
                 "phase": "materialization-repair",
-                "grounding": prompts["grounding"],
+                "grounding": _promptText(prompts, "grounding"),
                 "currentSource": currentSource,
                 "staticAnalysisReport": _renderStaticAnalysisReport(
-                    prompts["staticAnalysisReport"],
+                    _promptText(prompts, "staticAnalysisReport"),
                     currentSource,
                     currentAnalysis,
                 ),
                 "sourceProtocol": _SOURCE_FENCE_INSTRUCTION,
             }
-        result = _runSourceInference(
+        result = _runInference(
             ctx,
             inputValue=inputValue,
             provider=provider,
@@ -497,6 +640,9 @@ def _run(ctx, payload):
         "selfAuditCallLimit": _SELF_AUDIT_CALL_LIMIT,
         "selfAuditAttempts": [],
         "questionnaireOutcome": "not-reached",
+        "questionnaireQuestionCount": len(_questionnaire(prompts)),
+        "questionnaireCompletedCount": 0,
+        "questionnaireAnswers": [],
     }
     if currentSource is not None:
         state["currentSource"] = currentSource
@@ -523,12 +669,26 @@ def _run(ctx, payload):
         if "analyzerExecutionError" in selfAudit:
             state["selfAuditAnalyzerExecutionError"] = selfAudit["analyzerExecutionError"]
 
-    if materializationOutcome != "clean":
-        state["phase"] = "initial-materialization-failed"
-    elif state["selfAuditOutcome"] == "clean":
-        state["phase"] = "self-audit-clean"
+    questionnaire = _runQuestionnaire(
+        ctx,
+        prompts=prompts,
+        state=state,
+        provider=provider,
+        model=model,
+        providerOptions=providerOptions,
+        streamObserver=streamObserver,
+    )
+    state["questionnaireOutcome"] = questionnaire["outcome"]
+    state["questionnaireQuestionCount"] = questionnaire["questionCount"]
+    state["questionnaireCompletedCount"] = questionnaire["completedCount"]
+    state["questionnaireAnswers"] = questionnaire["answers"]
+    if "failure" in questionnaire:
+        state["questionnaireFailure"] = questionnaire["failure"]
+
+    if questionnaire["outcome"] == "completed":
+        state["phase"] = "questionnaire-completed"
     else:
-        state["phase"] = "self-audit-failed"
+        state["phase"] = "questionnaire-failed"
 
     transaction = ctx.memory.openTransaction()
     transaction.set(
@@ -538,6 +698,7 @@ def _run(ctx, payload):
             "kind": "materialization-test-run",
             "materializationOutcome": materializationOutcome,
             "selfAuditOutcome": state["selfAuditOutcome"],
+            "questionnaireOutcome": state["questionnaireOutcome"],
         },
     )
     transaction.commit()
@@ -569,6 +730,8 @@ def _describe(ctx, _payload):
             "selfAuditAndRepairs": _SELF_AUDIT_CALL_LIMIT,
         },
         "questionnaireRunsAfterMaterializationFailure": True,
+        "questionnaireMode": "one-inference-per-question",
+        "questionnaireQuestionCount": len(_questionnaire(prompts)),
         "promptKeys": list(prompts),
         "analyzers": [name for name, _toolName, _arguments in analyzers],
         "processExecution": "Actant ctx.workspace + ctx.process",
