@@ -1,0 +1,96 @@
+MATERIALIZATION -> INTEGRATION: PRESERVE PROVIDER REASONING EVIDENCE
+===================================================================
+
+STATUS
+Blocking shared-evidence request discovered by the first GPT-OSS-120B pressure
+run of Materialization Test.
+
+OWNERSHIP
+This is shared LLM/provider/ProcessingRun behavior and therefore belongs on
+actant-integration. Materialization Test should consume the shared evidence; it
+must not create a second llama.cpp-specific evidence authority in application
+state.
+
+OBSERVED PRESSURE FAILURE
+The GPT-OSS-120B Native run used:
+
+  reasoningEffort = high
+  maxTokens = 16384
+
+The initial materialization ProcessingRun completed after roughly 2,110 seconds.
+llama.cpp provider metadata reported predicted_n = 16384, exactly the configured
+completion ceiling, while the ProcessingRun response rawText was the empty string
+(0 UTF-8 bytes, SHA-256 of empty bytes).
+
+Materialization therefore correctly classified the attempt as extraction-failed:
+there was no text from which a Python fence could be extracted. It then proceeded
+to the questionnaire with explicit no-source state.
+
+The current llama.cpp SSE parser only reads choices[0].delta.content. Any
+provider-emitted reasoning/thinking field is ignored. Consequently the exported
+ProcessingRun proves that 16,384 tokens were generated but cannot prove what
+channel those tokens occupied or whether llama.cpp emitted reasoning content that
+Actant discarded.
+
+REQUIRED SEMANTICS
+Preserve sufficient exact provider-output evidence to diagnose this class of run.
+At minimum, when a supported provider emits a distinct reasoning/thinking stream,
+the complete emitted reasoning text must survive into durable ProcessingRun
+evidence separately from normal assistant response text.
+
+The normal response contract must remain unchanged:
+
+  - result.llm.rawText remains only the assistant/final content used by consumers.
+  - reasoning text must NOT be concatenated into rawText.
+  - Materialization source extraction must continue to operate only on rawText.
+  - provider reasoning is evidence/auxiliary output, not an assistant conversation
+    turn and not materialized source.
+
+Evidence must preserve exact text and ordering well enough to answer:
+
+  - did the provider emit reasoning text?
+  - how many UTF-8 bytes of reasoning were emitted?
+  - what exact reasoning text was emitted?
+  - did final-content text ever begin before termination?
+  - what finish/stop reason did the provider report, when available?
+
+Please preserve provider completion/finish reason as evidence as well. For this
+pressure case it is important to distinguish a token-limit termination from a
+normal stop rather than infer it solely from predicted_n == maxTokens.
+
+DESIGN CONSTRAINT
+Do not solve this only by adding a Materialization-specific llama.cpp field. The
+same distinction can exist in other reasoning-capable providers. Please establish
+a provider-neutral shared representation for auxiliary/reasoning output, while
+letting the llama.cpp adapter map the concrete llama.cpp/OpenAI-compatible SSE
+fields into it.
+
+If the provider emits multiple relevant fields or aliases depending on model/chat
+template, preserve the concrete protocol evidence needed to avoid silently losing
+information. Reject malformed field types rather than coercing them.
+
+PROCESSINGRUN / EXPORT
+The shared ProcessingRun is already the authority for exact rendered query,
+normal raw response, provider timing, and provider metadata. Reasoning evidence
+should be persisted there as part of the same inference evidence. Materialization
+exporter version 2 already dereferences complete ProcessingRun snapshots, so no
+application-specific duplication should be necessary if the shared snapshot is
+extended correctly.
+
+TESTS REQUESTED
+Please cover at least:
+
+  1. content-only streaming remains unchanged;
+  2. reasoning-only chunks preserve reasoning while rawText remains empty;
+  3. interleaved reasoning/content preserves each channel exactly;
+  4. finish/stop reason is retained;
+  5. malformed reasoning field type is rejected;
+  6. ProcessingRun snapshot round-trip/export-visible evidence contains the
+     complete reasoning text;
+  7. existing text/plain and actant.llm.messages@1 behavior remains unchanged.
+
+PRESSURE PURPOSE
+After this lands and is merged back, Materialization will rerun GPT-OSS with tuned
+reasoning/token settings. If it again exhausts the completion budget before final
+content, evidence must tell us directly what happened rather than leaving a
+16,384-token generation represented as an unexplained empty response.
