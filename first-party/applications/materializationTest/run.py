@@ -1,4 +1,4 @@
-# file: first-party/applications/materializationTest/run.py ; version: 2
+# file: first-party/applications/materializationTest/run.py ; version: 3
 from __future__ import annotations
 
 import argparse
@@ -24,17 +24,35 @@ def _normalizePath(value: object, *, configDirectory: Path) -> object:
 
 
 def _normalizePaths(config: dict[str, object], *, configDirectory: Path) -> dict[str, object]:
-    """Normalize only filesystem paths currently owned by application configuration."""
+    """Normalize filesystem paths owned by application/runtime configuration."""
     normalized = dict(config)
-    for key in ("promptsFile", "workspaceDirectory", "outputDirectory"):
+    for key in (
+        "promptsFile",
+        "questionnaireDirectory",
+        "workspaceDirectory",
+        "outputDirectory",
+    ):
         if key in normalized:
-            normalized[key] = _normalizePath(normalized[key], configDirectory=configDirectory)
+            normalized[key] = _normalizePath(
+                normalized[key],
+                configDirectory=configDirectory,
+            )
+
+    processTools = normalized.get("processTools")
+    if isinstance(processTools, dict):
+        normalized["processTools"] = {
+            name: _normalizePath(executable, configDirectory=configDirectory)
+            for name, executable in processTools.items()
+        }
 
     llama = normalized.get("llamaCpp")
     if isinstance(llama, dict):
         llama = dict(llama)
         if "executable" in llama:
-            llama["executable"] = _normalizePath(llama["executable"], configDirectory=configDirectory)
+            llama["executable"] = _normalizePath(
+                llama["executable"],
+                configDirectory=configDirectory,
+            )
         models = llama.get("models")
         if isinstance(models, dict):
             normalizedModels: dict[object, object] = {}
