@@ -8,10 +8,10 @@ BRANCH
 actant-materialization-test, based on actant-integration.
 
 PURPOSE
-This file is consolidated synchronization truth for the Materialization Test
-application. Numbered files under messages/ preserve cross-thread correspondence
-and rationale. Shared/reusable Actant changes belong on actant-integration;
-application-specific benchmark semantics belong here.
+Consolidated synchronization truth for the Materialization Test application.
+Numbered files under messages/ preserve cross-thread correspondence and rationale.
+Shared/reusable Actant changes belong on actant-integration; application-specific
+benchmark semantics belong here.
 
 CURRENT GOAL
 Build the second independent Actant application consumer: an unattended local
@@ -21,66 +21,41 @@ LLM materialization benchmark. V1 finish line is:
   -> questionnaire -> export sufficient scoring evidence
 
 STRATEGIES
-Classic reproduces the historical LM-Studio-like accumulating conversation as
-closely as practical. Its questionnaire is one request containing all questions.
-Classic is not implemented yet because faithful accumulated user/assistant roles
-must not be flattened into one text/plain user message.
-
 Actant-native reconstructs each inference from authoritative state and relevant
 QueryItems. Its questionnaire performs one independent inference per requirement
 against the same original requirements and frozen latest legitimate source.
 
+Classic reproduces the historical LM-Studio-like accumulating conversation as
+closely as practical. Its questionnaire is one request containing all 117
+requirements. Classic is currently blocked on shared provider-neutral structured
+chat history; see messages/0010-materialization-to-integration-structured-llm-history.txt.
+Flattening accumulated user/assistant history into one text/plain user message is
+not an acceptable benchmark substitute.
+
 REAL BENCHMARK DATA
 The benchmark is the EventJournal Python 3.15 materialization task.
 
-prompts.json currently contains:
-- grounding (temporary combined reference + standalone grounding-turn wrapper);
+prompts.json now contains:
+- groundingReference: reusable authoritative reference material;
+- groundingResponseInstruction: standalone Classic first-turn instruction;
 - initialMaterialization;
 - staticAnalysisReport;
 - searchForBugsAndFix;
-- questionnaireInstructions;
-- the old questionnaire array temporarily retained during migration.
+- questionnaireInstructions.
 
-The real questionnaire has 117 explicit numbered requirements. It is also split
-into semantic data files:
+The 117 questionnaire requirements exist only as explicit semantic data files:
 
   first-party/applications/materializationTest/questionnaire/01.json
   ...
   first-party/applications/materializationTest/questionnaire/13.json
 
 Each file contains sectionId, title, and an explicit ordered requirements array.
-Question boundaries remain data; no prose/newline parser derives them. The
-questionnaire loader validates the fixed 13-section benchmark, section identity,
-explicit per-section numbering, uniqueness, and the expected 117 total. Config
-contains questionnaireDirectory = "questionnaire".
-
-The migration is deliberately staged: the old prompts.json questionnaire remains
-until workflow consumption is switched and verified, then the duplicate will be
-removed.
-
-GROUNDING SEMANTIC ISSUE FOUND
-A rendered-prompt audit found that the historical grounding string combines two
-different things:
-1. authoritative grounding/reference material;
-2. instructions for the standalone historical grounding conversation turn,
-   including "do not implement yet" and a requested grounding summary.
-
-Native must not project those turn-specific instructions into the same inference
-as implementation/repair/questionnaire work. Planned data shape is:
-- groundingReference: reusable authoritative material;
-- groundingResponseInstruction: Classic-only first-turn instruction.
-
-Classic later sends both as its first user turn. Native sends only
-`groundingReference` with relevant requirements/state/instruction.
-
-A second audit finding is that the generated source protocol currently tells the
-model prose outside the Python fence is allowed, while the real benchmark source
-prompts require no outside prose. The extraction harness should remain tolerant
-and preserve outside prose as scoring evidence, but the prompt must stop
-positively permitting it.
+Workflow codeEntry.py loads the fixed 13 files through questionnaireDirectory and
+validates section identity, explicit per-section numbering, uniqueness, and the
+expected 117 total. No prose/newline parser derives question boundaries.
 
 CURRENT ACTANT-NATIVE IMPLEMENTATION
-Workflow codeEntry.py version 8 implements:
+Workflow codeEntry.py version 9 implements:
 1. Initial materialization.
 2. Ruff + ty analysis of exact extracted source.
 3. Repair loop, maximum five source-producing calls total.
@@ -89,18 +64,23 @@ Workflow codeEntry.py version 8 implements:
 6. Questionnaire regardless of source/materialization outcome when LLM remains
    callable.
 
-Native repair/self-audit projections retain the original
-initialMaterialization requirements. Current source appears exactly once in a
-repair prompt; analyzer reports do not duplicate it. Native questionnaire sees
-grounding, original requirements, frozen source/failure state, common
-questionnaireInstructions, and exactly one requirement.
+Native projections use groundingReference only; the Classic-only grounding turn
+instruction is no longer mixed into implementation, repair, audit, or
+questionnaire inference. Repair/self-audit retain original initialMaterialization
+requirements. Current source appears exactly once in a repair prompt; analyzer
+reports do not duplicate it. Native questionnaire sees grounding reference,
+original requirements, frozen source/failure state, common questionnaire
+instructions, and exactly one requirement.
 
 SOURCE RESPONSE / ANALYZER SEMANTICS
-Every source-producing response is extracted only after streaming completes.
-Exactly one non-empty fenced Python block is required. No heuristic block choice,
-fence repair, dedent, or newline normalization occurs. Ordinary prose outside the
-single valid fence remains extraction-tolerated and preserved in raw evidence.
-Generated Python is not executed/imported as benchmark validation.
+Every source-producing prompt requires exactly one non-empty fenced Python block
+and requests no surrounding text. Extraction remains deliberately tolerant of
+ordinary prose outside one otherwise-valid Python fence so protocol noncompliance
+can remain raw scoring evidence without corrupting exact source extraction.
+
+Extraction occurs only after streaming completes. No heuristic block choice,
+fence repair, dedent, or newline normalization occurs. Generated Python is not
+executed/imported as benchmark validation.
 
 The application materializes exact candidate source through ctx.workspace and
 runs configured Ruff and ty through ctx.process.run(). Both analyzers consume the
@@ -128,7 +108,7 @@ already accepted benchmark run.
 materializationTest.export@1 emits:
   <outputDirectory>/<applicationId>/<applicationRunId>/evidence.json
 
-Exporter version 2 now preserves the benchmark definition as source documents:
+Exporter version 2 preserves the benchmark definition as source documents:
 - testDefinition.prompts is the exact prompts.json object;
 - testDefinition.questionnaire.sections is the exact ordered list of 01.json
   through 13.json objects.
@@ -142,16 +122,9 @@ run.py saves accepted authoritative state before raising a Job error, preserving
 the Actant rule that authoritative state may have been accepted even when the
 owning Job later fails.
 
-PYTHON 3.15 VERIFICATION
-The user reported all green for workflow version 8 / workflow tests version 5.
-The user separately reported the sectional questionnaire loader/tests version 1
-all green. The user then reported exporter version 2 / exporter tests version 2
-all green after the sectional evidence migration. These are Python-3.15 verified
-as of 2026-09-12.
-
 SHARED ACTANT CONTRACTS
 Shared process and ephemeral-workspace facilities are synchronized from
-actant-integration and were previously Python-3.15 verified by the user:
+actant-integration and Python-3.15 verified by the user:
 - ctx.process.run(...)
 - ctx.workspace.materializeText(...)
 - ctx.workspace.materializeBytes(...)
@@ -160,30 +133,41 @@ Process executable authority belongs to host/runtime processTools configuration.
 Configured executables are absolute paths in v1. Pack code supplies logical tool
 name and arguments, not arbitrary executable/environment authority.
 
-LLM TIMING
-Benchmark scoring requires LLM wall-clock timing. Analyzer process evidence
-already carries shared process timing, but ProcessingRun evidence did not when
-last inspected. Materialization requested shared LLM/ProcessingRun timing in:
+Shared LLM provider timing is also synchronized. Provider timing covers provider
+stream creation through complete stream consumption and terminal completion
+validation. ProcessingRun persists providerTiming and completion payload exposes
+llm.timing. Materialization does not create a competing inference timer.
 
-  messages/0008-materialization-to-integration-llm-timing.txt
+PYTHON 3.15 VERIFICATION
+On 2026-09-13 the user reported all green for the focused workflow/exporter suite
+after the v9 migration:
+- workflow codeEntry.py version 9;
+- workflow tests version 6;
+- exporter version 2 / exporter tests version 2;
+- sectional questionnaire loader folded into workflow;
+- obsolete workflow/questionnaire.py and test_questionnaire.py removed;
+- prompts split and duplicated questionnaire removed.
 
-No integration response is present in this branch's mailbox yet. Do not bolt a
-parallel application-specific timing authority onto Materialization while this
-shared requirement is outstanding.
+The synchronized materialization branch commit for this verified migration is
+b05c593fa05051c8cd286f0cacfd39d953445008.
+
+CLASSIC SHARED REQUIREMENT
+Current LlmQuery is already formatId + opaque payload, but first-party llama.cpp
+accepts only text/plain and converts it to one synthetic user message. Classic
+requires exact ordered user/assistant history and matching token estimation.
+Materialization requested a shared structured representation and llama.cpp
+support in messages/0010-materialization-to-integration-structured-llm-history.txt
+on actant-integration. Integration owns the shared representation/provider
+contract; Materialization owns accumulated benchmark turns and Classic phase
+semantics.
 
 NEXT WORK
-1. Fold the validated sectional questionnaire loader into workflow codeEntry.py;
-   do not depend on sibling Python-module import behavior.
-2. Switch workflow questionnaire consumption to questionnaireDirectory and add
-   projection/data-contract tests.
-3. Split grounding into groundingReference + groundingResponseInstruction and
-   project only groundingReference in Native.
-4. Remove prompt text that positively permits prose outside source fences while
-   retaining tolerant extraction/evidence behavior.
-5. Remove temporary workflow/questionnaire.py and its standalone test after its
-   contract is covered through workflow tests.
-6. Remove duplicated questionnaire from prompts.json after workflow migration.
-7. Run focused Python 3.15 workflow/exporter/questionnaire suites.
-8. Synchronize shared LLM timing when integration responds.
-9. Implement Classic only after provider-neutral structured history semantics are
-   reconciled.
+1. Correct application runtime path normalization for questionnaireDirectory.
+2. Add/verify configuration needed for host-authorized Ruff and ty executables
+   without guessing machine-specific paths.
+3. Audit the complete Native configure/run/export path for first real benchmark
+   execution and add missing application tests.
+4. Consume shared structured LLM history once Integration responds, then
+   implement Classic with exact accumulated user/assistant turns.
+5. Run the first complete Native benchmark and inspect exported evidence/scoring
+   sufficiency.
