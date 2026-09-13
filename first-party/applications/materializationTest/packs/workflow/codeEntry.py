@@ -1,4 +1,4 @@
-# file: first-party/applications/materializationTest/packs/workflow/codeEntry.py ; version: 8
+# file: first-party/applications/materializationTest/packs/workflow/codeEntry.py ; version: 9
 from __future__ import annotations
 
 import hashlib
@@ -14,11 +14,12 @@ _MEMORY_KEY = "materializationtest"
 _RUN_STATE_ADDRESS = "materialization-test/run-state"
 _MATERIALIZATION_CALL_LIMIT = 5
 _SELF_AUDIT_CALL_LIMIT = 5
+_SECTION_IDS = tuple(f"{number:02d}" for number in range(1, 14))
+_QUESTION_COUNT = 117
 _SOURCE_FENCE_INSTRUCTION = (
     "Return the complete materialized Python file in exactly one fenced Python "
     "code block using ```python. The code block must be non-empty. Do not emit "
-    "any other fenced code blocks. Reasoning or other prose, if any, must remain "
-    "outside the code block."
+    "any other fenced code blocks or any text before or after the code block."
 )
 _FENCE_PATTERN = re.compile(r"(?m)^[ \t]*```([^\r\n`]*)[ \t]*(?:\r?\n|$)")
 
@@ -41,19 +42,91 @@ def _requireString(value: object, name: str) -> str:
     return value
 
 
-def _requireQuestions(value: object, name: str) -> tuple[str, ...]:
-    """Validate and freeze explicit ordered questionnaire boundaries."""
+def _requireRequirements(value: object, name: str) -> tuple[str, ...]:
+    """Validate and freeze one section's explicit ordered requirements."""
     if not isinstance(value, list):
         raise TypeError(f"{name} must be a list.")
     if not value:
-        raise ValueError(f"{name} must contain at least one question.")
+        raise ValueError(f"{name} must contain at least one requirement.")
+
+    requirements: list[str] = []
+    for index, requirement in enumerate(value):
+        requirements.append(_requireString(requirement, f"{name}[{index}]"))
+    return tuple(requirements)
+
+
+def _loadQuestionnaire(ctx) -> tuple[str, ...]:
+    """Load and validate the thirteen authoritative questionnaire sections.
+
+    Args:
+        ctx: Active CodeEntry context providing configuration and managed JSON
+            reads.
+
+    Returns:
+        The 117 exact requirement strings in fixed semantic-section order.
+
+    Raises:
+        TypeError: If a questionnaire document or member has the wrong runtime
+            type.
+        ValueError: If the configured directory, section identity, title,
+            numbering, uniqueness, or total requirement count is invalid.
+
+    The questionnaire files are explicit benchmark data. This loader performs
+    no discovery and derives no question boundaries from prose.
+    """
+    directory = _requireString(
+        ctx.config.get("questionnaireDirectory"),
+        "questionnaireDirectory",
+    )
+    directory = directory.rstrip("/")
+    if not directory:
+        raise ValueError("questionnaireDirectory must identify a directory.")
+
     questions: list[str] = []
-    for index, question in enumerate(value):
-        if type(question) is not str:
-            raise TypeError(f"{name}[{index}] must be a string.")
-        if not question.strip():
-            raise ValueError(f"{name}[{index}] must be a non-blank string.")
-        questions.append(question)
+    seenQuestions: set[str] = set()
+
+    for sectionId in _SECTION_IDS:
+        path = f"{directory}/{sectionId}.json"
+        section = _requireMapping(
+            ctx.io.readJson(path),
+            f"Questionnaire section {sectionId}",
+        )
+        actualSectionId = _requireString(
+            section.get("sectionId"),
+            f"{path}.sectionId",
+        )
+        if actualSectionId != sectionId:
+            raise ValueError(
+                f"{path}.sectionId must be {sectionId!r}, "
+                f"not {actualSectionId!r}."
+            )
+
+        _requireString(section.get("title"), f"{path}.title")
+        requirements = _requireRequirements(
+            section.get("requirements"),
+            f"{path}.requirements",
+        )
+
+        for index, requirement in enumerate(requirements, start=1):
+            expectedPrefix = f"{sectionId}.{index:02d}. "
+            if not requirement.startswith(expectedPrefix):
+                raise ValueError(
+                    f"{path}.requirements[{index - 1}] must begin with "
+                    f"{expectedPrefix!r}."
+                )
+            if requirement in seenQuestions:
+                raise ValueError(
+                    f"Duplicate questionnaire requirement: {requirement!r}."
+                )
+            seenQuestions.add(requirement)
+            questions.append(requirement)
+
+    if len(questions) != _QUESTION_COUNT:
+        raise ValueError(
+            "Materialization questionnaire must contain exactly "
+            f"{_QUESTION_COUNT} requirements, not {len(questions)}."
+        )
+
     return tuple(questions)
 
 
@@ -84,36 +157,31 @@ def _extractPythonSource(response: str) -> str:
 
 
 def _promptDefinitions(ctx) -> dict[str, object]:
-    """Load and validate the benchmark prompt/test definition document."""
+    """Load and validate the benchmark prompt definition document."""
     promptPath = _requireString(ctx.config.get("promptsFile"), "promptsFile")
-    definitions = _requireMapping(ctx.io.readJson(promptPath), "Prompt definitions")
+    definitions = _requireMapping(
+        ctx.io.readJson(promptPath),
+        "Prompt definitions",
+    )
     result: dict[str, object] = {}
     for key in (
-        "grounding",
+        "groundingReference",
+        "groundingResponseInstruction",
         "initialMaterialization",
         "staticAnalysisReport",
         "searchForBugsAndFix",
         "questionnaireInstructions",
     ):
-        result[key] = _requireString(definitions.get(key), f"Prompt definition {key!r}")
-    result["questionnaire"] = _requireQuestions(
-        definitions.get("questionnaire"),
-        "Prompt definition 'questionnaire'",
-    )
+        result[key] = _requireString(
+            definitions.get(key),
+            f"Prompt definition {key!r}",
+        )
     return result
 
 
 def _promptText(prompts: Mapping[str, object], key: str) -> str:
     """Return one already-loaded textual prompt member after defensive validation."""
     return _requireString(prompts.get(key), f"Prompt definition {key!r}")
-
-
-def _questionnaire(prompts: Mapping[str, object]) -> tuple[str, ...]:
-    """Return the validated ordered questionnaire without deriving boundaries."""
-    value = prompts.get("questionnaire")
-    if not isinstance(value, tuple) or not all(type(question) is str for question in value):
-        raise TypeError("Loaded questionnaire must be a tuple of strings.")
-    return value
 
 
 def _llmConfig(ctx) -> tuple[str, str | None, Mapping[str, object]]:
@@ -298,7 +366,7 @@ def _runSelfAudit(ctx, *, prompts: Mapping[str, object], initialSource: str, pro
         if callNumber == 1:
             inputValue: Mapping[str, object] = {
                 "phase": "self-audit",
-                "grounding": _promptText(prompts, "grounding"),
+                "grounding": _promptText(prompts, "groundingReference"),
                 "requirements": requirements,
                 "currentSource": currentSource,
                 "searchForBugsAndFix": _promptText(prompts, "searchForBugsAndFix"),
@@ -308,7 +376,7 @@ def _runSelfAudit(ctx, *, prompts: Mapping[str, object], initialSource: str, pro
             assert currentAnalysis is not None
             inputValue = {
                 "phase": "self-audit-repair",
-                "grounding": _promptText(prompts, "grounding"),
+                "grounding": _promptText(prompts, "groundingReference"),
                 "requirements": requirements,
                 "currentSource": currentSource,
                 "staticAnalysisReport": _renderStaticAnalysisReport(_promptText(prompts, "staticAnalysisReport"), currentAnalysis),
@@ -356,9 +424,8 @@ def _materializationStateForQuestionnaire(state: Mapping[str, object]) -> str:
     )
 
 
-def _runQuestionnaire(ctx, *, prompts: Mapping[str, object], state: Mapping[str, object], provider: str, model: str | None, providerOptions: Mapping[str, object], streamObserver: object) -> dict[str, object]:
+def _runQuestionnaire(ctx, *, prompts: Mapping[str, object], questions: tuple[str, ...], state: Mapping[str, object], provider: str, model: str | None, providerOptions: Mapping[str, object], streamObserver: object) -> dict[str, object]:
     """Run one native inference per requirement against one frozen artifact."""
-    questions = _questionnaire(prompts)
     sourceValue = state.get("currentSource")
     currentSource = sourceValue if type(sourceValue) is str else None
     materializationState = None if currentSource is not None else _materializationStateForQuestionnaire(state)
@@ -366,7 +433,7 @@ def _runQuestionnaire(ctx, *, prompts: Mapping[str, object], state: Mapping[str,
     for index, question in enumerate(questions):
         inputValue: dict[str, object] = {
             "phase": "questionnaire",
-            "grounding": _promptText(prompts, "grounding"),
+            "grounding": _promptText(prompts, "groundingReference"),
             "requirements": _promptText(prompts, "initialMaterialization"),
             "questionnaireInstructions": _promptText(prompts, "questionnaireInstructions"),
             "question": question,
@@ -399,6 +466,7 @@ def _run(ctx, payload):
     if strategy != "actant-native":
         raise NotImplementedError("Classic strategy is scaffolded but not materialized yet.")
     prompts = _promptDefinitions(ctx)
+    questions = _loadQuestionnaire(ctx)
     provider, model, providerOptions = _llmConfig(ctx)
     streamObserver = request.get("streamObserver")
     attempts: list[dict[str, object]] = []
@@ -411,7 +479,7 @@ def _run(ctx, payload):
         if callNumber == 1:
             inputValue: Mapping[str, object] = {
                 "phase": "initial-materialization",
-                "grounding": _promptText(prompts, "grounding"),
+                "grounding": _promptText(prompts, "groundingReference"),
                 "requirements": requirements,
                 "sourceProtocol": _SOURCE_FENCE_INSTRUCTION,
             }
@@ -419,7 +487,7 @@ def _run(ctx, payload):
             assert currentSource is not None and currentAnalysis is not None
             inputValue = {
                 "phase": "materialization-repair",
-                "grounding": _promptText(prompts, "grounding"),
+                "grounding": _promptText(prompts, "groundingReference"),
                 "requirements": requirements,
                 "currentSource": currentSource,
                 "staticAnalysisReport": _renderStaticAnalysisReport(_promptText(prompts, "staticAnalysisReport"), currentAnalysis),
@@ -456,7 +524,7 @@ def _run(ctx, payload):
         "selfAuditCallLimit": _SELF_AUDIT_CALL_LIMIT,
         "selfAuditAttempts": [],
         "questionnaireOutcome": "not-reached",
-        "questionnaireQuestionCount": len(_questionnaire(prompts)),
+        "questionnaireQuestionCount": len(questions),
         "questionnaireCompletedCount": 0,
         "questionnaireAnswers": [],
     }
@@ -475,7 +543,7 @@ def _run(ctx, payload):
         state["currentSourceIdentity"] = selfAudit["currentSourceIdentity"]
         if "analyzerExecutionError" in selfAudit:
             state["selfAuditAnalyzerExecutionError"] = selfAudit["analyzerExecutionError"]
-    questionnaire = _runQuestionnaire(ctx, prompts=prompts, state=state, provider=provider, model=model, providerOptions=providerOptions, streamObserver=streamObserver)
+    questionnaire = _runQuestionnaire(ctx, prompts=prompts, questions=questions, state=state, provider=provider, model=model, providerOptions=providerOptions, streamObserver=streamObserver)
     state["questionnaireOutcome"] = questionnaire["outcome"]
     state["questionnaireQuestionCount"] = questionnaire["questionCount"]
     state["questionnaireCompletedCount"] = questionnaire["completedCount"]
@@ -501,6 +569,7 @@ def _run(ctx, payload):
 def _describe(ctx, _payload):
     """Return the configured protocol skeleton without performing model inference."""
     prompts = _promptDefinitions(ctx)
+    questions = _loadQuestionnaire(ctx)
     analyzers = _analyzerDefinitions(ctx)
     return {
         "strategy": ctx.config.get("strategy"),
@@ -509,7 +578,7 @@ def _describe(ctx, _payload):
         "callLimits": {"materializationAndRepairs": _MATERIALIZATION_CALL_LIMIT, "selfAuditAndRepairs": _SELF_AUDIT_CALL_LIMIT},
         "questionnaireRunsAfterMaterializationFailure": True,
         "questionnaireMode": "one-inference-per-question",
-        "questionnaireQuestionCount": len(_questionnaire(prompts)),
+        "questionnaireQuestionCount": len(questions),
         "promptKeys": list(prompts),
         "analyzers": [name for name, _toolName, _arguments in analyzers],
         "processExecution": "Actant ctx.workspace + ctx.process",

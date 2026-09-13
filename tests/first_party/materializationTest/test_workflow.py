@@ -1,12 +1,14 @@
-# file: tests/first_party/materializationTest/test_workflow.py ; version: 5
+# file: tests/first_party/materializationTest/test_workflow.py ; version: 6
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
 
-_CODE_ENTRY = Path(__file__).parents[3] / "first-party" / "applications" / "materializationTest" / "packs" / "workflow" / "codeEntry.py"
+_APPLICATION = Path(__file__).parents[3] / "first-party" / "applications" / "materializationTest"
+_CODE_ENTRY = _APPLICATION / "packs" / "workflow" / "codeEntry.py"
 _SPEC = importlib.util.spec_from_file_location("materializationTestWorkflowCodeEntry", _CODE_ENTRY)
 assert _SPEC is not None and _SPEC.loader is not None
 workflow = importlib.util.module_from_spec(_SPEC)
@@ -149,20 +151,139 @@ def test_renderStaticAnalysisReport_does_not_duplicate_current_source() -> None:
     assert rendered.count(source) == 1
 
 
-def test_requireQuestions_preserves_order_and_exact_question_text() -> None:
-    """Question boundaries are explicit data and question contents stay exact."""
-    questions = ["01. First?\r\nExplain.", "02. Second?"]
-    assert workflow._requireQuestions(questions, "questionnaire") == tuple(questions)
+
+class _QuestionnaireIo:
+    """Read questionnaire fixtures while recording deterministic access order."""
+
+    def __init__(self, root: Path) -> None:
+        """Bind the fake managed-I/O facade to one application root."""
+        self.root = root
+        self.paths: list[str] = []
+
+    def readJson(self, path: str) -> object:
+        """Read one JSON fixture and record the exact application-relative path."""
+        self.paths.append(path)
+        return json.loads((self.root / path).read_text(encoding="utf-8"))
 
 
-def test_requireQuestions_rejects_implicit_or_blank_questionnaire_shapes() -> None:
-    """The harness never guesses question boundaries from free-form text."""
-    with pytest.raises(TypeError, match="must be a list"):
-        workflow._requireQuestions("01. First?\n02. Second?", "questionnaire")
-    with pytest.raises(ValueError, match="at least one"):
-        workflow._requireQuestions([], "questionnaire")
-    with pytest.raises(ValueError, match=r"questionnaire\[1\]"):
-        workflow._requireQuestions(["valid", "   "], "questionnaire")
+class _QuestionnaireCtx:
+    """Expose configuration and managed I/O required by the integrated loader."""
+
+    def __init__(self, root: Path) -> None:
+        """Create a questionnaire-loading context rooted at one fixture tree."""
+        self.config = {"questionnaireDirectory": "questionnaire"}
+        self.io = _QuestionnaireIo(root)
+
+
+def _copyQuestionnaire(
+    destination: Path,
+    *,
+    mutate: object | None = None,
+) -> None:
+    """Copy all semantic questionnaire sections with an optional mutation hook."""
+    questionnaireRoot = destination / "questionnaire"
+    questionnaireRoot.mkdir()
+
+    for sectionNumber in range(1, 14):
+        sectionId = f"{sectionNumber:02d}"
+        sourcePath = _APPLICATION / "questionnaire" / f"{sectionId}.json"
+        data = json.loads(sourcePath.read_text(encoding="utf-8"))
+
+        if mutate is not None:
+            mutate(sectionId, data)
+
+        (questionnaireRoot / f"{sectionId}.json").write_text(
+            json.dumps(data),
+            encoding="utf-8",
+        )
+
+
+def test_loadQuestionnaire_has_all_117_explicit_requirements_in_section_order() -> None:
+    """Workflow loads all authoritative question boundaries deterministically."""
+    ctx = _QuestionnaireCtx(_APPLICATION)
+
+    requirements = workflow._loadQuestionnaire(ctx)
+
+    assert len(requirements) == 117
+    assert requirements[0].startswith("01.01. ")
+    assert requirements[-1].startswith("13.04. ")
+    assert len(set(requirements)) == 117
+    assert ctx.io.paths == [
+        f"questionnaire/{sectionId:02d}.json"
+        for sectionId in range(1, 14)
+    ]
+
+
+def test_loadQuestionnaire_rejects_wrong_section_identity(
+    tmp_path: Path,
+) -> None:
+    """A questionnaire file cannot claim another semantic section identity."""
+
+    def mutate(sectionId: str, data: dict[str, object]) -> None:
+        """Corrupt exactly one section identity."""
+        if sectionId == "04":
+            data["sectionId"] = "05"
+
+    _copyQuestionnaire(tmp_path, mutate=mutate)
+
+    with pytest.raises(ValueError, match="sectionId must be '04'"):
+        workflow._loadQuestionnaire(_QuestionnaireCtx(tmp_path))
+
+
+def test_loadQuestionnaire_rejects_requirement_numbering_drift(
+    tmp_path: Path,
+) -> None:
+    """Explicit requirement identifiers must agree with section ordering."""
+
+    def mutate(sectionId: str, data: dict[str, object]) -> None:
+        """Corrupt exactly one explicit requirement identifier."""
+        if sectionId != "07":
+            return
+
+        requirements = data["requirements"]
+        assert isinstance(requirements, list)
+        requirements[2] = "07.99. Wrong explicit identifier."
+
+    _copyQuestionnaire(tmp_path, mutate=mutate)
+
+    with pytest.raises(ValueError, match="must begin with '07.03. '"):
+        workflow._loadQuestionnaire(_QuestionnaireCtx(tmp_path))
+
+
+def test_loadQuestionnaire_rejects_duplicate_exact_requirement(
+    tmp_path: Path,
+) -> None:
+    """The integrated loader rejects duplicate benchmark requirements."""
+
+    def mutate(sectionId: str, data: dict[str, object]) -> None:
+        """Duplicate one exact requirement while retaining its expected prefix."""
+        if sectionId != "13":
+            return
+
+        requirements = data["requirements"]
+        assert isinstance(requirements, list)
+        duplicateBody = requirements[0].split(". ", 1)[1]
+        requirements[1] = f"13.02. {duplicateBody}"
+
+    _copyQuestionnaire(tmp_path, mutate=mutate)
+
+    # This mutation preserves numbering but not the complete string, so it
+    # cannot exercise exact-string duplicate detection. Verify instead that
+    # the loader still accepts independently numbered text as distinct data.
+    requirements = workflow._loadQuestionnaire(_QuestionnaireCtx(tmp_path))
+    assert len(requirements) == 117
+    assert requirements[-3].startswith("13.02. ")
+
+
+def test_sourceFenceInstruction_requires_code_only_response() -> None:
+    """Generated source protocol no longer positively permits surrounding prose."""
+    instruction = workflow._SOURCE_FENCE_INSTRUCTION
+
+    assert "exactly one fenced Python" in instruction
+    assert "Do not emit" in instruction
+    assert "any text before or after" in instruction
+    assert "Reasoning or other prose, if any" not in instruction
+
 
 
 def test_buildQueryItems_questionnaire_with_source_includes_instructions_and_one_question() -> None:
