@@ -1,8 +1,9 @@
-# file: first-party/applications/materializationTest/run.py ; version: 3
+# file: first-party/applications/materializationTest/run.py ; version: 4
 from __future__ import annotations
 
 import argparse
 import sys
+from copy import deepcopy
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -13,6 +14,64 @@ from backend.io.managedIo import ManagedIo  # noqa: E402
 from backend.packs.runtime import ManualActivationPlan, PackResolver  # noqa: E402
 from backend.runtime.runtimeHost import RuntimeHost  # noqa: E402
 from backend.save import ApplicationStore  # noqa: E402
+
+
+def _mergeConfig(base: object, override: object) -> object:
+    """Recursively overlay one local configuration value onto a base value.
+
+    Mapping values merge recursively so a local file can extend registries such
+    as ``llamaCpp.models`` without copying unrelated defaults. Every non-mapping
+    value, including lists and null, replaces the base value as one atomic value.
+
+    Args:
+        base: Default configuration value.
+        override: Local value with higher precedence.
+
+    Returns:
+        A detached merged value. Neither input is mutated.
+    """
+    if isinstance(base, dict) and isinstance(override, dict):
+        merged = deepcopy(base)
+        for key, value in override.items():
+            if key in merged:
+                merged[key] = _mergeConfig(merged[key], value)
+            else:
+                merged[key] = deepcopy(value)
+        return merged
+    return deepcopy(override)
+
+
+def _loadConfig(io: ManagedIo, configPath: Path) -> dict[str, object]:
+    """Load base configuration and automatically apply its optional local shadow.
+
+    For ``config.json`` the sibling shadow is ``config.local.json``. The same
+    convention applies to another explicitly selected JSON file, for example
+    ``benchmark.json`` -> ``benchmark.local.json``. Absence of the local file is
+    normal and leaves the base configuration unchanged.
+
+    Args:
+        io: Managed I/O service used to read configuration JSON.
+        configPath: Absolute path of the selected base configuration.
+
+    Returns:
+        Detached recursively merged configuration object.
+
+    Raises:
+        TypeError: If either configuration document is not a JSON object.
+    """
+    base = io.readJson(configPath)
+    if not isinstance(base, dict):
+        raise TypeError("Materialization base configuration must be an object.")
+    localPath = configPath.with_name(f"{configPath.stem}.local{configPath.suffix}")
+    if not localPath.is_file():
+        return deepcopy(base)
+    local = io.readJson(localPath)
+    if not isinstance(local, dict):
+        raise TypeError("Materialization local configuration must be an object.")
+    merged = _mergeConfig(base, local)
+    if not isinstance(merged, dict):
+        raise TypeError("Merged Materialization configuration must be an object.")
+    return merged
 
 
 def _normalizePath(value: object, *, configDirectory: Path) -> object:
@@ -33,10 +92,7 @@ def _normalizePaths(config: dict[str, object], *, configDirectory: Path) -> dict
         "outputDirectory",
     ):
         if key in normalized:
-            normalized[key] = _normalizePath(
-                normalized[key],
-                configDirectory=configDirectory,
-            )
+            normalized[key] = _normalizePath(normalized[key], configDirectory=configDirectory)
 
     processTools = normalized.get("processTools")
     if isinstance(processTools, dict):
@@ -49,10 +105,7 @@ def _normalizePaths(config: dict[str, object], *, configDirectory: Path) -> dict
     if isinstance(llama, dict):
         llama = dict(llama)
         if "executable" in llama:
-            llama["executable"] = _normalizePath(
-                llama["executable"],
-                configDirectory=configDirectory,
-            )
+            llama["executable"] = _normalizePath(llama["executable"], configDirectory=configDirectory)
         models = llama.get("models")
         if isinstance(models, dict):
             normalizedModels: dict[object, object] = {}
@@ -107,7 +160,10 @@ def main() -> int:
 
     io = ManagedIo()
     configPath = Path(args.config).expanduser().resolve()
-    config = _normalizePaths(io.readJson(configPath), configDirectory=configPath.parent)
+    config = _normalizePaths(
+        _loadConfig(io, configPath),
+        configDirectory=configPath.parent,
+    )
     plan = ManualActivationPlan.fromJson(io.readJson(Path(__file__).with_name("activation-plan.json")))
     store = ApplicationStore(Path(args.saves_root).expanduser().resolve())
     host = RuntimeHost(
