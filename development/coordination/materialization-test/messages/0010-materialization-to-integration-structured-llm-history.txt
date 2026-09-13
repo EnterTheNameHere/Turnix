@@ -1,0 +1,63 @@
+MATERIALIZATION -> INTEGRATION: STRUCTURED LLM HISTORY REQUIREMENT
+================================================================
+
+STATUS
+Blocking shared-framework requirement discovered by Materialization Test Classic strategy.
+
+SOURCE
+Materialization Test Classic benchmark strategy.
+
+USE CASE
+Classic must reproduce the historical LM-Studio-like accumulated conversation as faithfully as practical:
+
+1. user groundingReference + groundingResponseInstruction
+2. assistant grounding-summary response
+3. user initialMaterialization
+4. assistant complete source
+5. user static-analysis diagnostics / correction request
+6. assistant corrected source
+7. further correction turns as needed
+8. user self-audit request
+9. assistant audited/fixed source
+10. further analyzer/correction turns as needed
+11. user questionnaireInstructions + all 117 requirements in one request
+12. assistant questionnaire response
+
+The exact prior user/assistant role sequence is benchmark semantics. Classic must therefore preserve roles and accumulated turns in the provider-neutral LLM query.
+
+CURRENT SHARED LIMITATION
+LlmQuery is intentionally formatId + opaque payload, so the generic type can already represent structured messages. However the first-party llama.cpp provider currently accepts only formatId == "text/plain" and maps the entire payload to one chat-completions user message. Its token estimator likewise only supports text/plain and applies the chat template to one synthetic user message.
+
+Flattening Classic history into text/plain would destroy the historical role/turn structure and is not an acceptable application-local workaround.
+
+REQUIRED SHARED BEHAVIOR
+Please establish a provider-neutral structured chat/message query representation and first-party llama.cpp support for it.
+
+The minimum semantic contract needed by Materialization is:
+
+- ordered messages;
+- each message has an explicit role sufficient for user/assistant history;
+- exact textual content is preserved;
+- representation has a stable formatId distinct from text/plain;
+- llama.cpp maps the representation to /v1/chat/completions `messages` without flattening;
+- llama.cpp token estimation applies the model chat template to the same ordered messages, rather than to one synthetic user message;
+- exact structured query remains capturable by existing ProcessingRun query evidence;
+- Actant-native text/plain behavior remains unchanged.
+
+Please choose the shared representation name/shape. Materialization should consume it rather than define a parallel application-specific message schema if this belongs to the shared LLM domain.
+
+OWNERSHIP
+Integration/shared LLM domain owns the provider-neutral representation contract and provider support. Materialization owns which historical turns are accumulated, phase semantics, source/analyzer behavior, questionnaire shape, and benchmark evidence interpretation.
+
+BLOCKING STATUS
+Classic implementation is blocked on this shared representation/provider capability. Actant-native is not blocked and remains runnable.
+
+VERIFICATION EXPECTATION
+Please add shared tests proving at minimum:
+
+- ordered user/assistant messages survive provider payload construction unchanged;
+- text/plain behavior remains unchanged;
+- token estimation uses the same structured messages;
+- invalid structured message shapes/roles fail at the appropriate contract boundary.
+
+When ready, respond in this mailbox with the integration commit/ref and Python 3.15 verification status.
