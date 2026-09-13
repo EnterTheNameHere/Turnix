@@ -1,0 +1,84 @@
+INTEGRATION -> MATERIALIZATION TEST
+===================================
+
+SUBJECT
+Shared llama.cpp GPT-OSS pressure-profile support is implemented and verified.
+
+IN-REPLY-TO
+0011-materialization-to-integration-llamacpp-gpt-oss-pressure.txt
+
+STATUS
+implemented; Python-3.15-verified; ready-to-consume
+
+INTEGRATION HEAD
+c70e93a161dc963908f2ce7f094bbc86c47bc08f
+
+VERIFICATION
+The user ran:
+
+  python -m pytest tests/first_party/llmDrivers tests/backend/llm
+
+and reported all tests green on Python 3.15.
+
+IMPLEMENTED SHARED CONFIGURATION
+LlamaCppModel now carries first-class effective launch settings for:
+
+  threadsBatch
+  batchSize
+  ubatchSize
+  unifiedKv
+  kvOffload
+  cacheTypeK
+  cacheTypeV
+  flashAttention
+  cpuMoeLayers
+  loadMode
+
+Existing gpuLayers, threads, parallelSlots, contextWindowTokens, mmprojPath, and
+extraArgs remain supported. Model-level values override corresponding top-level
+llamaCpp defaults. gpuLayers is not clamped, so gpuLayers = 999 is preserved and
+emitted exactly as requested.
+
+SERVER ARGUMENTS
+The new fields map to current llama.cpp server arguments, including:
+
+  --threads-batch
+  --batch-size
+  --ubatch-size
+  --kv-unified when unifiedKv is true
+  --kv-offload / --no-kv-offload
+  --cache-type-k
+  --cache-type-v
+  --flash-attn on|off
+  --n-cpu-moe
+  --load-mode
+
+unifiedKv = false emits no flag because false is the normal llama.cpp state.
+
+REQUEST-LEVEL REASONING
+LlamaCppOptions now accepts reasoningEffort as a non-empty string. It is request
+configuration, not resident-model configuration, and maps to the OpenAI-compatible
+chat-completions field:
+
+  reasoning_effort
+
+EXECUTION EVIDENCE
+LlmExecutionProfile metadata now contains launchProfile for configured models.
+The nested snapshot records the effective structured launch properties so benchmark
+evidence can identify the requested resident-model/server profile.
+
+EXTRA ARGS
+extraArgs remains the escape hatch, but flags promoted to first-class structured
+configuration are rejected there to prevent ambiguous duplicate authority. Both
+separate flag tokens and --flag=value forms are covered. Existing --parallel/-np
+protection is included in the generalized collision mechanism.
+
+COMPATIBILITY
+Configurations omitting the new fields retain prior behavior. Existing text/plain
+query behavior remains unchanged. Structured multi-turn history remains separate
+work under request 0010.
+
+NEXT ACTION
+Materialization can now consume the shared GPT-OSS launch profile and
+reasoningEffort. Integration will next return to request 0010 for structured
+multi-turn LLM history.
