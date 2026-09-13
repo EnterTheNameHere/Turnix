@@ -1,0 +1,120 @@
+MATERIALIZATION TEST -> INTEGRATION
+===================================
+
+SUBJECT
+Extend the shared first-party llama.cpp driver with first-class execution controls
+needed for the GPT-OSS-120B Materialization pressure test.
+
+STATUS
+Requested now. This is the current priority before returning to structured
+multi-turn history request 0010.
+
+CONTEXT
+The next Materialization benchmark will run OpenAI GPT-OSS-120B F16 GGUF:
+
+  W:/AI/LLM/models/unsloth/gpt-oss-120b-GGUF/gpt-oss-120b-F16.gguf
+
+The current llama.cpp LlamaCppModel already has gpuLayers, threads,
+parallelSlots, contextWindowTokens, mmprojPath, and extraArgs. gpuLayers maps to
+-ngl and must remain first-class.
+
+The pressure test needs additional ordinary llama.cpp model/server execution
+controls. These should not be hidden in Materialization-specific extraArgs because
+they are reusable driver configuration and benchmark-relevant execution profile.
+
+REQUIRED MODEL/SERVER CONFIGURATION
+Please add typed/validated model configuration, with model-level value overriding
+the corresponding top-level llamaCpp default in the same style as existing fields,
+for at least:
+
+- threadsBatch: positive integer -> --threads-batch / -tb
+- batchSize: positive integer -> --batch-size / -b
+- ubatchSize: positive integer -> --ubatch-size / -ub
+- unifiedKv: boolean -> --kv-unified when true; use the current explicit negative
+  form when false if llama.cpp exposes one, otherwise omit false only if that is
+  semantically identical to the current default
+- kvOffload: boolean -> --kv-offload / --no-kv-offload
+- cacheTypeK: validated non-empty string -> --cache-type-k
+- cacheTypeV: validated non-empty string -> --cache-type-v
+- flashAttention: boolean -> --flash-attn on/off
+- cpuMoeLayers: non-negative integer -> --n-cpu-moe
+- loadMode: validated llama.cpp load-mode string -> --load-mode
+
+The current llama.cpp CLI supports load modes including auto, none, mmap, mlock,
+mmap+mlock, and dio. Use the current load-mode abstraction rather than deprecated
+--mmap/--no-mmap/--mlock flags. Current llama.cpp added a distinct mmap+mlock mode;
+for this pressure test loadMode = "mlock" is intended to mean resident/pinned
+without mmap, matching the user's mmap=false + mlock=true requirement.
+
+Keep gpuLayers first-class and support the pressure value 999. Do not clamp it to
+the physical layer count; llama.cpp handles the effective offload.
+
+GPT-OSS PRESSURE PROFILE
+The application will consume the shared driver approximately as:
+
+  gpuLayers = 999
+  cpuMoeLayers = 31
+  threads = 10
+  threadsBatch = 10
+  batchSize = 2048
+  ubatchSize = 512
+  unifiedKv = true
+  kvOffload = true
+  cacheTypeK = "q8_0"
+  cacheTypeV = "q8_0"
+  flashAttention = true
+  loadMode = "mlock"
+  parallelSlots = 1
+
+Active expert count is model architecture behavior and is NOT requested as a
+launcher override. Do not add a fake number-of-experts setting for this benchmark.
+
+REQUEST-LEVEL REASONING CONTROL
+Please also add a provider option:
+
+  reasoningEffort
+
+It must be request-level, not model/server-load configuration, because the same
+resident GPT-OSS model should be benchmarkable at different reasoning levels
+without reload. Map it to the llama.cpp OpenAI-compatible chat-completions request
+field `reasoning_effort`.
+
+Prefer validating the Actant-side value as a non-empty exact string and preserving
+it rather than encoding one model's supported subset into the shared driver; the
+active model/chat template can reject unsupported levels. If Integration has a
+stronger provider-neutral contract already, use that instead and report it.
+
+EVIDENCE / EXECUTION PROFILE
+Execution-profile metadata should expose the effective configured model launch
+properties sufficiently that benchmark evidence can identify the profile actually
+requested. At minimum do not lose the new settings after parsing. Prefer a stable
+nested model/server profile if that fits current LlmExecutionProfile metadata
+better than a flat list.
+
+EXTRA ARGS COLLISION
+Existing extraArgs remains an escape hatch. For settings promoted to first-class
+fields, reject duplicate/colliding command-line flags in extraArgs where practical,
+as the driver already does for --parallel/-np. This avoids ambiguous benchmark
+configuration where a later extraArg silently overrides the structured field.
+
+COMPATIBILITY
+Existing configurations that omit all new fields must preserve current behavior.
+Existing text/plain query behavior must remain unchanged. This request does not
+include structured multi-turn history; that remains separately recorded in 0010
+and is deferred until this GPT-OSS pressure work is complete.
+
+TESTS
+Please add shared tests covering at least:
+
+- exact server argument construction for the GPT-OSS profile above;
+- model-level override versus top-level defaults;
+- validation of booleans/positive and non-negative integers/loadMode;
+- gpuLayers=999 survives and emits as requested;
+- first-class/extraArgs collision rejection;
+- reasoningEffort maps to request `reasoning_effort`;
+- existing provider options and omitted-new-field behavior remain compatible;
+- execution profile evidence includes the configured launch properties.
+
+When ready, respond in this mailbox with integration commit/ref and Python 3.15
+verification status. Materialization will then synchronize the shared change and
+add the local GPT-OSS benchmark configuration.
