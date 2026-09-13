@@ -1,4 +1,4 @@
-# file: first-party/applications/materializationTest/packs/workflow/progressCodeEntry.py ; version: 1
+# file: first-party/applications/materializationTest/packs/workflow/progressCodeEntry.py ; version: 2
 from __future__ import annotations
 
 import importlib.util
@@ -31,7 +31,7 @@ def _loadImplementation():
 
 _impl = _loadImplementation()
 _originalRunInference = _impl._runInference
-_completedProcessingRunIds: list[str] = []
+_completedProcessingRunIdsByApplicationRun: dict[str, list[str]] = {}
 
 
 def _requireString(value: object, name: str) -> str:
@@ -71,10 +71,18 @@ def _testDefinition(ctx) -> dict[str, object]:
     return {"prompts": prompts, "questionnaire": {"sections": sections}}
 
 
+def _completedProcessingRunIds(ctx) -> list[str]:
+    """Return process-local progress identities isolated by ApplicationRun."""
+    return _completedProcessingRunIdsByApplicationRun.setdefault(
+        ctx.identity.applicationRunId,
+        [],
+    )
+
+
 def _processingRuns(ctx) -> list[dict[str, object]]:
     """Dereference every ProcessingRun known complete at this safe observation boundary."""
     snapshots: list[dict[str, object]] = []
-    for processingRunId in _completedProcessingRunIds:
+    for processingRunId in _completedProcessingRunIds(ctx):
         address = f"processing/materializationtest/runs/{processingRunId}"
         snapshot = ctx.memory.load(address)
         if not isinstance(snapshot, dict):
@@ -87,9 +95,10 @@ def _processingRuns(ctx) -> list[dict[str, object]]:
 
 def _writeProgressEvidence(ctx, *, processingRunId: str) -> None:
     """Atomically publish a non-restorable evidence projection after one completed inference."""
-    if processingRunId in _completedProcessingRunIds:
+    completedIds = _completedProcessingRunIds(ctx)
+    if processingRunId in completedIds:
         raise RuntimeError(f"Duplicate completed ProcessingRun {processingRunId!r}.")
-    _completedProcessingRunIds.append(processingRunId)
+    completedIds.append(processingRunId)
     try:
         processingRuns = _processingRuns(ctx)
         evidence = {
@@ -111,7 +120,7 @@ def _writeProgressEvidence(ctx, *, processingRunId: str) -> None:
         }
         ctx.io.writeJsonAtomic(_exportPath(ctx), evidence)
     except Exception:
-        _completedProcessingRunIds.pop()
+        completedIds.pop()
         raise
 
 
@@ -139,6 +148,11 @@ def _runInference(
 
 def onLoad(ctx):
     """Activate the normal workflow with live evidence publication at inference boundaries."""
-    _completedProcessingRunIds.clear()
+    _completedProcessingRunIdsByApplicationRun[ctx.identity.applicationRunId] = []
     _impl._runInference = _runInference
     _impl.onLoad(ctx)
+
+
+def onUnload(ctx, _state):
+    """Release process-local progress bookkeeping for this ApplicationRun."""
+    _completedProcessingRunIdsByApplicationRun.pop(ctx.identity.applicationRunId, None)
