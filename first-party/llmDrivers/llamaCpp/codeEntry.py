@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 6
+# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 7
 from __future__ import annotations
 
 import json
@@ -13,11 +13,29 @@ from urllib.error import HTTPError, URLError
 
 from backend.core.immutableValue import ImmutableValue, ImmutableValueFreezer
 from backend.llm.errors import LlmProviderConnectionError, LlmProviderProtocolError
-from backend.llm.llmTypes import LlmCallRequest, LlmExecutionProfile, LlmQuery, LlmStreamEvent
+from backend.llm.llmTypes import (
+    LlmCallRequest,
+    LlmExecutionProfile,
+    LlmQuery,
+    LlmStreamEvent,
+)
+
+_LOAD_MODES = frozenset({"auto", "none", "mmap", "mlock", "mmap+mlock", "dio"})
+_FIRST_CLASS_FLAGS = frozenset(
+    {
+        "--parallel", "-np", "--ctx-size", "-c", "--n-gpu-layers", "-ngl",
+        "--threads", "-t", "--threads-batch", "-tb", "--batch-size", "-b",
+        "--ubatch-size", "-ub", "--kv-unified", "--no-kv-unified",
+        "--kv-offload", "--no-kv-offload", "--cache-type-k", "--cache-type-v",
+        "--flash-attn", "--n-cpu-moe", "--load-mode", "--mmproj",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
 class LlamaCppOptions:
+    """Validated request-level options for one llama.cpp inference."""
+
     temperature: float = 0.7
     maxTokens: int | None = None
     topP: float | None = None
@@ -26,30 +44,74 @@ class LlamaCppOptions:
     repeatPenalty: float | None = None
     seed: int | None = None
     timeoutSeconds: float = 120.0
+    reasoningEffort: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class LlamaCppModel:
+    """Effective validated launch configuration for one resident model."""
+
     name: str
     modelPath: Path
     mmprojPath: Path | None
     contextWindowTokens: int | None
     gpuLayers: int | None
     threads: int | None
+    threadsBatch: int | None
+    batchSize: int | None
+    ubatchSize: int | None
+    unifiedKv: bool | None
+    kvOffload: bool | None
+    cacheTypeK: str | None
+    cacheTypeV: str | None
+    flashAttention: bool | None
+    cpuMoeLayers: int | None
+    loadMode: str | None
     parallelSlots: int
     extraArgs: tuple[str, ...]
+
+    def launchProfile(self) -> dict[str, ImmutableValue]:
+        """Returns stable JSON-compatible evidence of effective launch settings."""
+        profile: dict[str, ImmutableValue] = {
+            "modelPath": str(self.modelPath),
+            "parallelSlots": self.parallelSlots,
+        }
+        optional = {
+            "mmprojPath": None if self.mmprojPath is None else str(self.mmprojPath),
+            "contextWindowTokens": self.contextWindowTokens,
+            "gpuLayers": self.gpuLayers,
+            "threads": self.threads,
+            "threadsBatch": self.threadsBatch,
+            "batchSize": self.batchSize,
+            "ubatchSize": self.ubatchSize,
+            "unifiedKv": self.unifiedKv,
+            "kvOffload": self.kvOffload,
+            "cacheTypeK": self.cacheTypeK,
+            "cacheTypeV": self.cacheTypeV,
+            "flashAttention": self.flashAttention,
+            "cpuMoeLayers": self.cpuMoeLayers,
+            "loadMode": self.loadMode,
+        }
+        profile.update({key: value for key, value in optional.items() if value is not None})
+        if self.extraArgs:
+            profile["extraArgs"] = self.extraArgs
+        return profile
 
 
 class LlamaCppTokenEstimator:
     """Exact text/plain query estimator backed by the active llama.cpp model."""
 
     def __init__(self, *, driver: "LlamaCppDriver", timeoutSeconds: float) -> None:
+        """Binds estimation to one driver and request timeout."""
         self._driver = driver
         self._timeoutSeconds = timeoutSeconds
 
     def estimateInputTokens(self, query: LlmQuery) -> int:
+        """Returns the exact token count after llama.cpp chat-template expansion."""
         if query.formatId != "text/plain" or type(query.payload) is not str:
-            raise ValueError("llama.cpp token estimation supports exact-string text/plain queries only.")
+            raise ValueError(
+                "llama.cpp token estimation supports exact-string text/plain queries only."
+            )
         templated = self._driver.postJson(
             "/apply-template",
             {"messages": [{"role": "user", "content": query.payload}]},
@@ -57,7 +119,9 @@ class LlamaCppTokenEstimator:
         )
         prompt = templated.get("prompt")
         if type(prompt) is not str:
-            raise LlmProviderProtocolError("llama.cpp /apply-template response does not contain a string prompt.")
+            raise LlmProviderProtocolError(
+                "llama.cpp /apply-template response does not contain a string prompt."
+            )
         tokenized = self._driver.postJson(
             "/tokenize",
             {
@@ -70,7 +134,9 @@ class LlamaCppTokenEstimator:
         )
         tokens = tokenized.get("tokens")
         if not isinstance(tokens, list):
-            raise LlmProviderProtocolError("llama.cpp /tokenize response does not contain a tokens list.")
+            raise LlmProviderProtocolError(
+                "llama.cpp /tokenize response does not contain a tokens list."
+            )
         return len(tokens)
 
 
@@ -78,9 +144,16 @@ class LlamaCppStreamProvider:
     """Provider-neutral streaming adapter backed by one long-lived llama.cpp driver."""
 
     def __init__(self, *, driver: "LlamaCppDriver") -> None:
+        """Binds the provider to the CodeEntry-owned driver."""
         self.driver = driver
 
-    def getExecutionProfile(self, *, model: str | None, providerOptions: Mapping[str, ImmutableValue]) -> LlmExecutionProfile:
+    def getExecutionProfile(
+        self,
+        *,
+        model: str | None,
+        providerOptions: Mapping[str, ImmutableValue],
+    ) -> LlmExecutionProfile:
+        """Resolves model residency and returns benchmark-relevant execution evidence."""
         options = _parseInferenceOptions(providerOptions)
         selected = self.driver.ensureModel(model)
         metadata: dict[str, ImmutableValue] = {
@@ -89,26 +162,23 @@ class LlamaCppStreamProvider:
             "managedServer": self.driver.manageServer,
         }
         if selected is not None:
-            metadata.update(
-                {
-                    "activeModel": selected.name,
-                    "modelPath": str(selected.modelPath),
-                    "parallelSlots": selected.parallelSlots,
-                },
-            )
-            if selected.mmprojPath is not None:
-                metadata["mmprojPath"] = str(selected.mmprojPath)
+            metadata["activeModel"] = selected.name
+            metadata["launchProfile"] = selected.launchProfile()
         return LlmExecutionProfile(
             contextWindowTokens=(
                 selected.contextWindowTokens
                 if selected is not None
                 else self.driver.externalContextWindowTokens
             ),
-            tokenEstimator=LlamaCppTokenEstimator(driver=self.driver, timeoutSeconds=options.timeoutSeconds),
+            tokenEstimator=LlamaCppTokenEstimator(
+                driver=self.driver,
+                timeoutSeconds=options.timeoutSeconds,
+            ),
             metadata=metadata,
         )
 
     def stream(self, request: LlmCallRequest) -> Iterator[LlmStreamEvent]:
+        """Streams one OpenAI-compatible chat-completions request from llama.cpp."""
         selected = self.driver.ensureModel(request.model)
         options = _parseInferenceOptions(request.providerOptions)
         payload = _buildPayload(
@@ -129,10 +199,12 @@ class LlamaCppStreamProvider:
         except HTTPError as err:
             active = "" if selected is None else f" for model {selected.name!r}"
             raise LlmProviderConnectionError(
-                f"llama.cpp returned HTTP {err.code} for {endpoint}{active}.",
+                f"llama.cpp returned HTTP {err.code} for {endpoint}{active}."
             ) from err
         except (URLError, TimeoutError) as err:
-            raise LlmProviderConnectionError(f"Failed communicating with llama.cpp at {endpoint}.") from err
+            raise LlmProviderConnectionError(
+                f"Failed communicating with llama.cpp at {endpoint}."
+            ) from err
 
 
 def _optionalFloat(
@@ -143,6 +215,7 @@ def _optionalFloat(
     maximum: float | None = None,
     strictlyPositive: bool = False,
 ) -> float | None:
+    """Reads and validates one optional finite numeric provider option."""
     value = source.get(key)
     if value is None:
         return None
@@ -160,7 +233,13 @@ def _optionalFloat(
     return result
 
 
-def _optionalInt(source: Mapping[str, ImmutableValue], key: str, *, positive: bool = False) -> int | None:
+def _optionalInt(
+    source: Mapping[str, ImmutableValue],
+    key: str,
+    *,
+    positive: bool = False,
+) -> int | None:
+    """Reads and validates one optional exact-integer provider option."""
     value = source.get(key)
     if value is None:
         return None
@@ -172,13 +251,19 @@ def _optionalInt(source: Mapping[str, ImmutableValue], key: str, *, positive: bo
 
 
 def _parseInferenceOptions(source: Mapping[str, ImmutableValue]) -> LlamaCppOptions:
-    allowed = {"temperature", "maxTokens", "topP", "topK", "minP", "repeatPenalty", "seed", "timeoutSeconds"}
+    """Parses the complete supported request-level llama.cpp option set."""
+    allowed = {
+        "temperature", "maxTokens", "topP", "topK", "minP", "repeatPenalty",
+        "seed", "timeoutSeconds", "reasoningEffort",
+    }
     unknown = set(source) - allowed
     if unknown:
         raise ValueError(f"Unsupported llama.cpp provider option: {min(unknown)!r}.")
-
     temperature = _optionalFloat(source, "temperature", minimum=0.0)
     timeout = _optionalFloat(source, "timeoutSeconds", strictlyPositive=True)
+    reasoning = source.get("reasoningEffort")
+    if reasoning is not None and (type(reasoning) is not str or not reasoning.strip()):
+        raise ValueError("llama.cpp provider option 'reasoningEffort' must be non-empty text.")
     return LlamaCppOptions(
         temperature=0.7 if temperature is None else temperature,
         maxTokens=_optionalInt(source, "maxTokens", positive=True),
@@ -188,12 +273,22 @@ def _parseInferenceOptions(source: Mapping[str, ImmutableValue]) -> LlamaCppOpti
         repeatPenalty=_optionalFloat(source, "repeatPenalty", strictlyPositive=True),
         seed=_optionalInt(source, "seed"),
         timeoutSeconds=120.0 if timeout is None else timeout,
+        reasoningEffort=reasoning,
     )
 
 
-def _buildPayload(request: LlmCallRequest, options: LlamaCppOptions, *, includeRequestedModel: bool) -> dict[str, object]:
+def _buildPayload(
+    request: LlmCallRequest,
+    options: LlamaCppOptions,
+    *,
+    includeRequestedModel: bool,
+) -> dict[str, object]:
+    """Builds one exact OpenAI-compatible request payload from Actant options."""
     if request.query.formatId != "text/plain":
-        raise ValueError(f"llama.cpp proving-ground provider supports only text/plain, not {request.query.formatId!r}.")
+        raise ValueError(
+            "llama.cpp proving-ground provider supports only text/plain, not "
+            f"{request.query.formatId!r}."
+        )
     if type(request.query.payload) is not str:
         raise TypeError("text/plain LlmQuery payload must be an exact built-in string.")
     payload: dict[str, object] = {
@@ -203,22 +298,20 @@ def _buildPayload(request: LlmCallRequest, options: LlamaCppOptions, *, includeR
     }
     if includeRequestedModel and request.model is not None:
         payload["model"] = request.model
-    if options.maxTokens is not None:
-        payload["max_tokens"] = options.maxTokens
-    if options.topP is not None:
-        payload["top_p"] = options.topP
-    if options.topK is not None:
-        payload["top_k"] = options.topK
-    if options.minP is not None:
-        payload["min_p"] = options.minP
-    if options.repeatPenalty is not None:
-        payload["repeat_penalty"] = options.repeatPenalty
-    if options.seed is not None:
-        payload["seed"] = options.seed
+    mappings = (
+        ("max_tokens", options.maxTokens), ("top_p", options.topP),
+        ("top_k", options.topK), ("min_p", options.minP),
+        ("repeat_penalty", options.repeatPenalty), ("seed", options.seed),
+        ("reasoning_effort", options.reasoningEffort),
+    )
+    for key, value in mappings:
+        if value is not None:
+            payload[key] = value
     return payload
 
 
 def _readEvents(response) -> Iterator[LlmStreamEvent]:
+    """Parses llama.cpp SSE bytes into provider-neutral stream events."""
     finalMetadata: dict[str, ImmutableValue] = {}
     for rawLine in response:
         if not isinstance(rawLine, bytes):
@@ -240,13 +333,18 @@ def _readEvents(response) -> Iterator[LlmStreamEvent]:
         if not isinstance(chunk, dict):
             raise LlmProviderProtocolError("llama.cpp stream chunk must be a JSON object.")
         if "error" in chunk:
-            raise LlmProviderProtocolError(f"llama.cpp stream reported an error: {chunk['error']!r}.")
+            raise LlmProviderProtocolError(
+                f"llama.cpp stream reported an error: {chunk['error']!r}."
+            )
         metadataSource = {
             key: chunk[key]
             for key in ("model", "usage", "timings", "system_fingerprint")
             if key in chunk
         }
-        metadata = ImmutableValueFreezer().freezeMapping(metadataSource, "llamaCppStreamMetadata")
+        metadata = ImmutableValueFreezer().freezeMapping(
+            metadataSource,
+            "llamaCppStreamMetadata",
+        )
         finalMetadata.update(metadata)
         choices = chunk.get("choices", [])
         if not isinstance(choices, list):
@@ -270,16 +368,19 @@ def _readEvents(response) -> Iterator[LlmStreamEvent]:
 
 
 def _positiveInt(value: object, name: str) -> int:
+    """Validates and returns one positive exact integer."""
     if type(value) is not int or value <= 0:
         raise ValueError(f"{name} must be a positive exact integer.")
     return value
 
 
 def _optionalPositiveInt(value: object, name: str) -> int | None:
+    """Validates an optional positive exact integer."""
     return None if value is None else _positiveInt(value, name)
 
 
 def _optionalNonNegativeInt(value: object, name: str) -> int | None:
+    """Validates an optional non-negative exact integer."""
     if value is None:
         return None
     if type(value) is not int or value < 0:
@@ -287,27 +388,60 @@ def _optionalNonNegativeInt(value: object, name: str) -> int | None:
     return value
 
 
+def _optionalBool(value: object, name: str) -> bool | None:
+    """Validates an optional exact boolean."""
+    if value is None:
+        return None
+    if type(value) is not bool:
+        raise ValueError(f"{name} must be a boolean.")
+    return value
+
+
+def _optionalString(value: object, name: str) -> str | None:
+    """Validates an optional non-empty exact string while preserving its value."""
+    if value is None:
+        return None
+    if type(value) is not str or not value.strip():
+        raise ValueError(f"{name} must be a non-empty string.")
+    return value
+
+
+def _optionalLoadMode(value: object, name: str) -> str | None:
+    """Validates one optional llama.cpp load-mode identifier."""
+    result = _optionalString(value, name)
+    if result is not None and result not in _LOAD_MODES:
+        allowed = ", ".join(sorted(_LOAD_MODES))
+        raise ValueError(f"{name} must be one of: {allowed}.")
+    return result
+
+
 def _stringList(value: object, name: str) -> tuple[str, ...]:
+    """Validates a JSON-style list of exact strings."""
     if not isinstance(value, list) or not all(type(item) is str for item in value):
         raise ValueError(f"{name} must be a list of strings.")
     return tuple(value)
 
 
-def _rejectParallelArg(extraArgs: tuple[str, ...], name: str) -> None:
-    if any(argument in {"--parallel", "-np"} for argument in extraArgs):
-        raise ValueError(f"{name} must use parallelSlots instead of --parallel/-np in extraArgs.")
+def _rejectFirstClassArgs(extraArgs: tuple[str, ...], name: str) -> None:
+    """Rejects escape-hatch flags whose authority belongs to structured fields."""
+    for argument in extraArgs:
+        flag = argument.split("=", 1)[0]
+        if flag in _FIRST_CLASS_FLAGS:
+            raise ValueError(
+                f"{name} contains first-class flag {flag!r}; use its structured setting."
+            )
 
 
 class LlamaCppDriver:
     """Long-lived CodeEntry-owned llama-server and model-residency manager."""
 
     def __init__(self, config: Mapping[str, object]) -> None:
+        """Validates driver configuration without starting a managed server."""
         self.config = dict(config)
         manageValue = self.config.get("manageServer", False)
         if type(manageValue) is not bool:
             raise TypeError("llamaCpp.manageServer must be a boolean.")
         self.manageServer = manageValue
-
         hostValue = self.config.get("host", "127.0.0.1")
         if type(hostValue) is not str or not hostValue.strip():
             raise ValueError("llamaCpp.host must be a non-empty string.")
@@ -323,13 +457,12 @@ class LlamaCppDriver:
         if self.manageServer and self.baseUrl != managedBaseUrl:
             raise ValueError(
                 "Managed llama.cpp baseUrl must identify the server Actant launches at "
-                f"{managedBaseUrl!r}; received {self.baseUrl!r}.",
+                f"{managedBaseUrl!r}; received {self.baseUrl!r}."
             )
         self.externalContextWindowTokens = _optionalPositiveInt(
             self.config.get("contextWindowTokens"),
             "llamaCpp.contextWindowTokens",
         )
-
         self.executable: Path | None = None
         if self.manageServer:
             executableValue = self.config.get("executable")
@@ -337,25 +470,32 @@ class LlamaCppDriver:
                 raise ValueError("Managed llama.cpp requires llamaCpp.executable.")
             self.executable = Path(executableValue).resolve()
             if not self.executable.is_file():
-                raise FileNotFoundError(f"llama-server executable does not exist: {self.executable}.")
-
+                raise FileNotFoundError(
+                    f"llama-server executable does not exist: {self.executable}."
+                )
         self.models = self._buildModels()
         defaultValue = self.config.get("defaultModel")
         if self.models:
             if defaultValue is None:
                 if len(self.models) != 1:
-                    raise ValueError("llamaCpp.defaultModel is required when multiple models are configured.")
+                    raise ValueError(
+                        "llamaCpp.defaultModel is required when multiple models are configured."
+                    )
                 defaultValue = next(iter(self.models))
             if type(defaultValue) is not str or defaultValue not in self.models:
                 raise ValueError("llamaCpp.defaultModel must name one configured model.")
             self.defaultModel: str | None = defaultValue
         else:
             self.defaultModel = None
-
         self.process: subprocess.Popen[bytes] | None = None
         self.activeModelName: str | None = None
 
+    def _modelValue(self, raw: Mapping[str, object], key: str) -> object:
+        """Resolves one model field over its top-level driver default."""
+        return raw[key] if key in raw else self.config.get(key)
+
     def _buildModels(self) -> dict[str, LlamaCppModel]:
+        """Builds immutable effective model configurations with override precedence."""
         source = self.config.get("models")
         if source is None:
             if not self.manageServer:
@@ -369,67 +509,93 @@ class LlamaCppDriver:
             source = {nameValue: {"modelPath": modelPath}}
         if not isinstance(source, dict):
             raise ValueError("llamaCpp.models must be an object keyed by model name.")
-
         models: dict[str, LlamaCppModel] = {}
         for name, raw in source.items():
             if type(name) is not str or not name:
                 raise ValueError("llamaCpp.models keys must be non-empty strings.")
             if not isinstance(raw, dict):
                 raise ValueError(f"llamaCpp.models[{name!r}] must be an object.")
+            prefix = f"llamaCpp.models[{name!r}]"
             modelPathValue = raw.get("modelPath")
             if type(modelPathValue) is not str or not modelPathValue:
-                raise ValueError(f"llamaCpp.models[{name!r}].modelPath is required.")
+                raise ValueError(f"{prefix}.modelPath is required.")
             modelPath = Path(modelPathValue).resolve()
             if self.manageServer and not modelPath.is_file():
                 raise FileNotFoundError(f"llama.cpp model does not exist: {modelPath}.")
-
-            mmprojValue = raw.get("mmprojPath", self.config.get("mmprojPath"))
+            mmprojValue = self._modelValue(raw, "mmprojPath")
             mmprojPath: Path | None = None
             if mmprojValue is not None:
                 if type(mmprojValue) is not str or not mmprojValue:
-                    raise ValueError(f"llamaCpp.models[{name!r}].mmprojPath must be a non-empty string.")
+                    raise ValueError(f"{prefix}.mmprojPath must be a non-empty string.")
                 mmprojPath = Path(mmprojValue).resolve()
                 if self.manageServer and not mmprojPath.is_file():
                     raise FileNotFoundError(f"llama.cpp mmproj does not exist: {mmprojPath}.")
-
-            contextWindow = _optionalPositiveInt(
-                raw.get("contextWindowTokens", self.config.get("contextWindowTokens")),
-                f"llamaCpp.models[{name!r}].contextWindowTokens",
+            parallelValue = (
+                raw["parallelSlots"] if "parallelSlots" in raw
+                else self.config.get("parallelSlots", 1)
             )
-            gpuLayers = _optionalNonNegativeInt(
-                raw.get("gpuLayers", self.config.get("gpuLayers")),
-                f"llamaCpp.models[{name!r}].gpuLayers",
+            extraValue = (
+                raw["extraArgs"] if "extraArgs" in raw
+                else self.config.get("extraArgs", [])
             )
-            threads = _optionalPositiveInt(
-                raw.get("threads", self.config.get("threads")),
-                f"llamaCpp.models[{name!r}].threads",
-            )
-            parallelSlots = _positiveInt(
-                raw.get("parallelSlots", self.config.get("parallelSlots", 1)),
-                f"llamaCpp.models[{name!r}].parallelSlots",
-            )
-            extra = _stringList(
-                raw.get("extraArgs", self.config.get("extraArgs", [])),
-                f"llamaCpp.models[{name!r}].extraArgs",
-            )
-            _rejectParallelArg(extra, f"llamaCpp.models[{name!r}].extraArgs")
+            extra = _stringList(extraValue, f"{prefix}.extraArgs")
+            _rejectFirstClassArgs(extra, f"{prefix}.extraArgs")
             models[name] = LlamaCppModel(
                 name=name,
                 modelPath=modelPath,
                 mmprojPath=mmprojPath,
-                contextWindowTokens=contextWindow,
-                gpuLayers=gpuLayers,
-                threads=threads,
-                parallelSlots=parallelSlots,
+                contextWindowTokens=_optionalPositiveInt(
+                    self._modelValue(raw, "contextWindowTokens"),
+                    f"{prefix}.contextWindowTokens",
+                ),
+                gpuLayers=_optionalNonNegativeInt(
+                    self._modelValue(raw, "gpuLayers"), f"{prefix}.gpuLayers"
+                ),
+                threads=_optionalPositiveInt(
+                    self._modelValue(raw, "threads"), f"{prefix}.threads"
+                ),
+                threadsBatch=_optionalPositiveInt(
+                    self._modelValue(raw, "threadsBatch"), f"{prefix}.threadsBatch"
+                ),
+                batchSize=_optionalPositiveInt(
+                    self._modelValue(raw, "batchSize"), f"{prefix}.batchSize"
+                ),
+                ubatchSize=_optionalPositiveInt(
+                    self._modelValue(raw, "ubatchSize"), f"{prefix}.ubatchSize"
+                ),
+                unifiedKv=_optionalBool(
+                    self._modelValue(raw, "unifiedKv"), f"{prefix}.unifiedKv"
+                ),
+                kvOffload=_optionalBool(
+                    self._modelValue(raw, "kvOffload"), f"{prefix}.kvOffload"
+                ),
+                cacheTypeK=_optionalString(
+                    self._modelValue(raw, "cacheTypeK"), f"{prefix}.cacheTypeK"
+                ),
+                cacheTypeV=_optionalString(
+                    self._modelValue(raw, "cacheTypeV"), f"{prefix}.cacheTypeV"
+                ),
+                flashAttention=_optionalBool(
+                    self._modelValue(raw, "flashAttention"), f"{prefix}.flashAttention"
+                ),
+                cpuMoeLayers=_optionalNonNegativeInt(
+                    self._modelValue(raw, "cpuMoeLayers"), f"{prefix}.cpuMoeLayers"
+                ),
+                loadMode=_optionalLoadMode(
+                    self._modelValue(raw, "loadMode"), f"{prefix}.loadMode"
+                ),
+                parallelSlots=_positiveInt(parallelValue, f"{prefix}.parallelSlots"),
                 extraArgs=extra,
             )
         return models
 
     def start(self) -> None:
+        """Starts the configured default model when Actant owns the server."""
         if self.manageServer:
             self.ensureModel(self.defaultModel)
 
     def ensureModel(self, model: str | None) -> LlamaCppModel | None:
+        """Ensures the requested managed model is resident and returns its profile."""
         if not self.models:
             return None
         selectedName = self.defaultModel if model is None else model
@@ -439,42 +605,50 @@ class LlamaCppDriver:
             selected = self.models[selectedName]
         except KeyError as err:
             raise LookupError(f"llama.cpp model is not configured: {selectedName!r}.") from err
-
         if not self.manageServer:
             return selected
-        if self.activeModelName == selectedName and self.process is not None and self.process.poll() is None:
+        if (
+            self.activeModelName == selectedName
+            and self.process is not None
+            and self.process.poll() is None
+        ):
             return selected
-
         self.stop()
         self._startModel(selected)
         return selected
 
     def _serverArgs(self, model: LlamaCppModel) -> list[str]:
+        """Materializes the exact llama-server argv for one effective model profile."""
         if self.executable is None:
             raise RuntimeError("Managed llama.cpp executable is unavailable.")
         args = [
-            str(self.executable),
-            "-m",
-            str(model.modelPath),
-            "--host",
-            self.host,
-            "--port",
-            str(self.port),
-            "--parallel",
-            str(model.parallelSlots),
+            str(self.executable), "-m", str(model.modelPath), "--host", self.host,
+            "--port", str(self.port), "--parallel", str(model.parallelSlots),
         ]
-        if model.contextWindowTokens is not None:
-            args += ["-c", str(model.contextWindowTokens)]
-        if model.gpuLayers is not None:
-            args += ["-ngl", str(model.gpuLayers)]
-        if model.threads is not None:
-            args += ["-t", str(model.threads)]
+        pairs = (
+            ("-c", model.contextWindowTokens), ("-ngl", model.gpuLayers),
+            ("-t", model.threads), ("--threads-batch", model.threadsBatch),
+            ("--batch-size", model.batchSize), ("--ubatch-size", model.ubatchSize),
+            ("--cache-type-k", model.cacheTypeK), ("--cache-type-v", model.cacheTypeV),
+            ("--n-cpu-moe", model.cpuMoeLayers), ("--load-mode", model.loadMode),
+        )
+        for flag, value in pairs:
+            if value is not None:
+                args += [flag, str(value)]
+        if model.unifiedKv is True:
+            args.append("--kv-unified")
+        # False is llama.cpp's default, so omission preserves the requested state.
+        if model.kvOffload is not None:
+            args.append("--kv-offload" if model.kvOffload else "--no-kv-offload")
+        if model.flashAttention is not None:
+            args += ["--flash-attn", "on" if model.flashAttention else "off"]
         if model.mmprojPath is not None:
             args += ["--mmproj", str(model.mmprojPath)]
         args.extend(model.extraArgs)
         return args
 
     def _startModel(self, model: LlamaCppModel) -> None:
+        """Starts one managed llama-server and waits until its health endpoint is ready."""
         args = self._serverArgs(model)
         self.process = subprocess.Popen(args, stdin=subprocess.DEVNULL)
         self.activeModelName = model.name
@@ -488,13 +662,19 @@ class LlamaCppDriver:
             raise
 
     def _waitReady(self, timeoutSeconds: float) -> None:
+        """Waits for managed-server health or raises on timeout/early process exit."""
         if not math.isfinite(timeoutSeconds) or timeoutSeconds <= 0:
-            raise ValueError("llamaCpp.startupTimeoutSeconds must be a positive finite number.")
+            raise ValueError(
+                "llamaCpp.startupTimeoutSeconds must be a positive finite number."
+            )
         deadline = time.monotonic() + timeoutSeconds
         health = f"{self.baseUrl}/health"
         while time.monotonic() < deadline:
             if self.process is not None and self.process.poll() is not None:
-                raise RuntimeError(f"llama-server exited during startup with code {self.process.returncode}.")
+                raise RuntimeError(
+                    "llama-server exited during startup with code "
+                    f"{self.process.returncode}."
+                )
             try:
                 with urlRequest.urlopen(health, timeout=1.0) as response:
                     if 200 <= response.status < 300:
@@ -502,9 +682,18 @@ class LlamaCppDriver:
             except (URLError, HTTPError, TimeoutError):
                 pass
             time.sleep(0.2)
-        raise TimeoutError(f"llama-server did not become ready within {timeoutSeconds} seconds.")
+        raise TimeoutError(
+            f"llama-server did not become ready within {timeoutSeconds} seconds."
+        )
 
-    def postJson(self, endpoint: str, payload: dict[str, object], *, timeoutSeconds: float) -> dict[str, object]:
+    def postJson(
+        self,
+        endpoint: str,
+        payload: dict[str, object],
+        *,
+        timeoutSeconds: float,
+    ) -> dict[str, object]:
+        """Posts one JSON request to llama.cpp and requires an object response."""
         if type(endpoint) is not str or not endpoint.startswith("/"):
             raise ValueError("llama.cpp endpoint must be an absolute HTTP path.")
         if not math.isfinite(timeoutSeconds) or timeoutSeconds <= 0:
@@ -519,18 +708,27 @@ class LlamaCppDriver:
             with urlRequest.urlopen(request, timeout=timeoutSeconds) as response:
                 raw = response.read()
         except HTTPError as err:
-            raise LlmProviderConnectionError(f"llama.cpp returned HTTP {err.code} for {endpoint}.") from err
+            raise LlmProviderConnectionError(
+                f"llama.cpp returned HTTP {err.code} for {endpoint}."
+            ) from err
         except (URLError, TimeoutError) as err:
-            raise LlmProviderConnectionError(f"Failed communicating with llama.cpp at {endpoint}.") from err
+            raise LlmProviderConnectionError(
+                f"Failed communicating with llama.cpp at {endpoint}."
+            ) from err
         try:
             decoded = json.loads(raw.decode("utf-8", errors="strict"))
         except (UnicodeDecodeError, json.JSONDecodeError) as err:
-            raise LlmProviderProtocolError(f"llama.cpp returned invalid JSON from {endpoint}.") from err
+            raise LlmProviderProtocolError(
+                f"llama.cpp returned invalid JSON from {endpoint}."
+            ) from err
         if not isinstance(decoded, dict):
-            raise LlmProviderProtocolError(f"llama.cpp returned a non-object JSON response from {endpoint}.")
+            raise LlmProviderProtocolError(
+                f"llama.cpp returned a non-object JSON response from {endpoint}."
+            )
         return decoded
 
     def stop(self) -> None:
+        """Stops the managed server, escalating to kill after the grace period."""
         process, self.process = self.process, None
         self.activeModelName = None
         if process is None or process.poll() is not None:
@@ -544,6 +742,7 @@ class LlamaCppDriver:
 
 
 def onLoad(ctx):
+    """Creates the shared driver, starts it, and registers the llama.cpp provider."""
     config = ctx.config.get("llamaCpp", {})
     if not isinstance(config, dict):
         raise ValueError("llamaCpp configuration must be an object.")
@@ -558,6 +757,7 @@ def onLoad(ctx):
 
 
 def onUnload(ctx, driver):
+    """Stops a driver created by onLoad while tolerating foreign lifecycle state."""
     del ctx
     if isinstance(driver, LlamaCppDriver):
         driver.stop()
