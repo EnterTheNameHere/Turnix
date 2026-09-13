@@ -35,139 +35,92 @@ not an acceptable benchmark substitute.
 REAL BENCHMARK DATA
 The benchmark is the EventJournal Python 3.15 materialization task.
 
-prompts.json now contains:
-- groundingReference: reusable authoritative reference material;
-- groundingResponseInstruction: standalone Classic first-turn instruction;
-- initialMaterialization;
-- staticAnalysisReport;
-- searchForBugsAndFix;
-- questionnaireInstructions.
-
-The 117 questionnaire requirements exist only as explicit semantic data files:
-
-  first-party/applications/materializationTest/questionnaire/01.json
-  ...
-  first-party/applications/materializationTest/questionnaire/13.json
-
-Each file contains sectionId, title, and an explicit ordered requirements array.
-Workflow codeEntry.py loads the fixed 13 files through questionnaireDirectory and
-validates section identity, explicit per-section numbering, uniqueness, and the
-expected 117 total. No prose/newline parser derives question boundaries.
+prompts.json contains groundingReference, groundingResponseInstruction,
+initialMaterialization, staticAnalysisReport, searchForBugsAndFix, and
+questionnaireInstructions. The 117 questionnaire requirements exist only as
+explicit semantic data files questionnaire/01.json through questionnaire/13.json.
+Workflow codeEntry.py loads those fixed files through questionnaireDirectory and
+validates section identity, explicit numbering, uniqueness, and total count.
 
 CURRENT ACTANT-NATIVE IMPLEMENTATION
-Workflow codeEntry.py version 9 implements:
-1. Initial materialization.
-2. Ruff + ty analysis of exact extracted source.
-3. Repair loop, maximum five source-producing calls total.
-4. Self-audit only after analyzer-clean initial materialization.
-5. Independent Ruff + ty repair loop, maximum five source-producing calls.
-6. Questionnaire regardless of source/materialization outcome when LLM remains
-   callable.
+Workflow codeEntry.py version 9 implements initial materialization, Ruff + ty
+analysis, bounded repair, self-audit with its own bounded repair budget, and the
+117-question independent Native questionnaire. Native projections use only
+reusable groundingReference and preserve original requirements in repair/audit.
 
-Native projections use groundingReference only; the Classic-only grounding turn
-instruction is no longer mixed into implementation, repair, audit, or
-questionnaire inference. Repair/self-audit retain original initialMaterialization
-requirements. Current source appears exactly once in a repair prompt; analyzer
-reports do not duplicate it. Native questionnaire sees grounding reference,
-original requirements, frozen source/failure state, common questionnaire
-instructions, and exactly one requirement.
-
-SOURCE RESPONSE / ANALYZER SEMANTICS
 Every source-producing prompt requires exactly one non-empty fenced Python block
-and requests no surrounding text. Extraction remains deliberately tolerant of
-ordinary prose outside one otherwise-valid Python fence so protocol noncompliance
-can remain raw scoring evidence without corrupting exact source extraction.
+with no surrounding text. Extraction remains deliberately tolerant of ordinary
+prose outside one otherwise-valid fence so protocol noncompliance remains raw
+scoring evidence. Generated source is never executed/imported as validation.
 
-Extraction occurs only after streaming completes. No heuristic block choice,
-fence repair, dedent, or newline normalization occurs. Generated Python is not
-executed/imported as benchmark validation.
+Analyzer candidates are exact extracted source materialized through ctx.workspace.
+Ruff and ty run through host-authorized ctx.process. Nonzero exit is model/code
+evidence; ProcessExecutionError is infrastructure evidence. Shared providerTiming
+is authoritative for LLM benchmark duration; Materialization adds no competing
+timer.
 
-The application materializes exact candidate source through ctx.workspace and
-runs configured Ruff and ty through ctx.process.run(). Both analyzers consume the
-same scratch artifact. Nonzero exit is model/code evidence; process execution
-failure is infrastructure/application evidence.
-
-QUESTIONNAIRE SEMANTICS
-Questionnaire is attempted even after materialization/self-audit model-output or
-analyzer-infrastructure failure when the LLM remains callable. If no valid source
-exists, Native supplies explicit failure state rather than inventing a file.
-Only LlmError is classified as questionnaire inference failure; programming or
-application exceptions propagate.
-
-LATEST LEGITIMATE SOURCE
-A later extraction failure retains the previous valid source. If a new valid
-source is extracted but analyzer execution fails, that newly extracted source is
-the latest legitimate artifact even though analyzer cleanliness is unknown.
-Questionnaire uses that latest legitimate artifact.
+QUESTIONNAIRE / LATEST SOURCE
+Questionnaire is attempted after materialization/self-audit failure when the LLM
+remains callable. If no valid source exists, Native supplies explicit failure
+state. A later extraction failure retains the previous valid source; a newly
+extracted source remains latest legitimate source even if analyzer execution then
+fails. Only LlmError is classified as questionnaire inference failure.
 
 EXPORT / PUBLICATION
-Exporter is a separate Job after the benchmark Job has accepted authoritative
-state and the CLI has saved it. Export failure therefore does not invalidate an
-already accepted benchmark run.
+Exporter version 2 is a separate Job after accepted benchmark state is saved.
+It emits <outputDirectory>/<applicationId>/<applicationRunId>/evidence.json with
+format materialization-test.evidence@1. Evidence contains application identity,
+exact prompt/questionnaire source documents, configuration, authoritative workflow
+state, and all referenced shared ProcessingRun snapshots. Exact model-facing
+queries/responses/provider timing are therefore exported from ProcessingRun truth.
 
-materializationTest.export@1 emits:
-  <outputDirectory>/<applicationId>/<applicationRunId>/evidence.json
+RUN PATH
+run.py version 3 normalizes all application-owned filesystem configuration against
+the config file directory, including questionnaireDirectory. It also normalizes
+host processTools executable paths when configured, while ApplicationRuntime still
+requires absolute resolved executable authority. llama.cpp executable/model paths
+are normalized as before. run.py saves accepted authoritative state before
+propagating Job errors, then runs export as a separate Job.
 
-Exporter version 2 preserves the benchmark definition as source documents:
-- testDefinition.prompts is the exact prompts.json object;
-- testDefinition.questionnaire.sections is the exact ordered list of 01.json
-  through 13.json objects.
-
-Evidence format remains materialization-test.evidence@1 and contains application
-identity, exact test definition/configuration, authoritative workflow state, and
-all referenced shared ProcessingRun snapshots. Exact model-facing prompts are
-dereferenced from ProcessingRun evidence rather than reconstructed.
-
-run.py saves accepted authoritative state before raising a Job error, preserving
-the Actant rule that authoritative state may have been accepted even when the
-owning Job later fails.
-
-SHARED ACTANT CONTRACTS
-Shared process and ephemeral-workspace facilities are synchronized from
-actant-integration and Python-3.15 verified by the user:
-- ctx.process.run(...)
-- ctx.workspace.materializeText(...)
-- ctx.workspace.materializeBytes(...)
-
-Process executable authority belongs to host/runtime processTools configuration.
-Configured executables are absolute paths in v1. Pack code supplies logical tool
-name and arguments, not arbitrary executable/environment authority.
-
-Shared LLM provider timing is also synchronized. Provider timing covers provider
-stream creation through complete stream consumption and terminal completion
-validation. ProcessingRun persists providerTiming and completion payload exposes
-llm.timing. Materialization does not create a competing inference timer.
+No Ruff/ty executable paths are guessed or committed. A real benchmark config must
+provide host-authorized processTools entries for logical tools "ruff" and "ty".
+The checked-in config remains a template with MODEL_PATH.gguf and therefore is not
+yet directly runnable as a benchmark without machine-specific configuration.
 
 PYTHON 3.15 VERIFICATION
-On 2026-09-13 the user reported all green for the focused workflow/exporter suite
-after the v9 migration:
-- workflow codeEntry.py version 9;
-- workflow tests version 6;
-- exporter version 2 / exporter tests version 2;
-- sectional questionnaire loader folded into workflow;
-- obsolete workflow/questionnaire.py and test_questionnaire.py removed;
-- prompts split and duplicated questionnaire removed.
+The user reported all green on 2026-09-13 for:
 
-The synchronized materialization branch commit for this verified migration is
-b05c593fa05051c8cd286f0cacfd39d953445008.
+  python -m pytest tests/first_party/materializationTest/test_run.py
+                   tests/first_party/materializationTest/test_workflow.py
+                   tests/first_party/materializationTest/test_exporter.py
+
+This verifies run.py version 3 path normalization, workflow codeEntry.py version 9
+and workflow tests version 6, and exporter version 2 / exporter tests version 2.
+The earlier v9 migration removed workflow/questionnaire.py, test_questionnaire.py,
+and the duplicated prompts questionnaire after folding its contract into workflow.
+
+SHARED ACTANT CONTRACTS
+Synchronized and Python-3.15 verified shared facilities include ctx.process,
+ctx.workspace, and shared LLM provider timing. Provider timing covers
+provider.stream(request) creation through complete stream consumption and terminal
+completed-event validation. ProcessingRun persists providerTiming and completion
+payload exposes llm.timing.
 
 CLASSIC SHARED REQUIREMENT
-Current LlmQuery is already formatId + opaque payload, but first-party llama.cpp
-accepts only text/plain and converts it to one synthetic user message. Classic
-requires exact ordered user/assistant history and matching token estimation.
-Materialization requested a shared structured representation and llama.cpp
-support in messages/0010-materialization-to-integration-structured-llm-history.txt
-on actant-integration. Integration owns the shared representation/provider
-contract; Materialization owns accumulated benchmark turns and Classic phase
-semantics.
+Current LlmQuery is formatId + opaque payload, but first-party llama.cpp accepts
+only text/plain and converts it to one synthetic user message. Classic requires
+exact ordered user/assistant history and matching token estimation. Materialization
+requested shared structured representation and llama.cpp support in message 0010.
+Integration owns the shared representation/provider contract; Materialization owns
+accumulated benchmark turns and Classic phase semantics.
 
 NEXT WORK
-1. Correct application runtime path normalization for questionnaireDirectory.
-2. Add/verify configuration needed for host-authorized Ruff and ty executables
-   without guessing machine-specific paths.
-3. Audit the complete Native configure/run/export path for first real benchmark
-   execution and add missing application tests.
-4. Consume shared structured LLM history once Integration responds, then
-   implement Classic with exact accumulated user/assistant turns.
-5. Run the first complete Native benchmark and inspect exported evidence/scoring
-   sufficiency.
+1. Await/consume Integration response to structured LLM history and implement
+   Classic when shared support is ready.
+2. Prepare a machine-specific runtime config for the first Native benchmark:
+   actual modelPath plus processTools absolute Ruff/ty executables. Do not commit
+   guessed local paths as benchmark defaults.
+3. Run the first complete Native benchmark and inspect exported evidence for
+   scoring sufficiency and any runtime-only defects.
+4. Add scoring/reporting semantics only from evidence actually needed after that
+   first complete run; do not pre-invent a parallel evidence authority.
