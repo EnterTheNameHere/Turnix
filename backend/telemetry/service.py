@@ -1,13 +1,24 @@
-# file: backend/telemetry/service.py ; version: 3
+# file: backend/telemetry/service.py ; version: 4
 from __future__ import annotations
 
 import time
 from collections import deque
 from dataclasses import dataclass
 from threading import Event, RLock, Thread
+from typing import TYPE_CHECKING
 
-from backend.telemetry.model import SignalUnavailable, TelemetryMode, TelemetrySnapshot
-from backend.telemetry.providers import GpuTelemetryProvider, MachineTelemetryProvider
+from backend.telemetry.model import (
+    CpuUtilizationObservation,
+    GpuObservation,
+    SignalUnavailable,
+    SwapObservation,
+    SystemMemoryObservation,
+    TelemetryMode,
+    TelemetrySnapshot,
+)
+
+if TYPE_CHECKING:
+    from backend.telemetry.providers import GpuTelemetryProvider, MachineTelemetryProvider
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +48,8 @@ class TelemetryConfiguration:
 
 
 class TelemetryService:
-    """Owns current host observations and disposable bounded sampling history.
+    """
+    Owns current host observations and disposable bounded sampling history.
 
     The service contains no resource-policy thresholds. Provider failures become
     explicit unavailable observations, and retained samples never become Actant
@@ -86,11 +98,11 @@ class TelemetryService:
                 try:
                     self._machine.primeCpu()
                     self._cpuPrimed = True
-                except Exception:
+                except (OSError, RuntimeError, ValueError):
                     self._cpuPrimed = False
                 try:
                     self._cpuStatic = self._machine.cpuStatic()
-                except Exception as err:
+                except (OSError, RuntimeError, ValueError) as err:
                     self._cpuStatic = SignalUnavailable(f"CPU topology unavailable: {type(err).__name__}")
             self.sample()
             if self.configuration.historyEnabled:
@@ -108,13 +120,16 @@ class TelemetryService:
             elif not self._cpuPrimed:
                 cpuUtilization = SignalUnavailable("CPU utilization counters were not primed")
             else:
-                cpuUtilization = self._readMachine("cpuUtilization")
+                cpuUtilization = self._readCpuUtilization()
             snapshot = TelemetrySnapshot(
                 sampledTimeNs=time.time_ns(),
-                systemMemory=self._readMachine("systemMemory") if memoryEnabled else SignalUnavailable("memory disabled"),
-                swap=self._readMachine("swap") if memoryEnabled else SignalUnavailable("memory disabled"),
+                systemMemory=(
+                    self._readSystemMemory() if memoryEnabled else SignalUnavailable("memory disabled")
+                ),
+                swap=self._readSwap() if memoryEnabled else SignalUnavailable("memory disabled"),
                 cpuStatic=(self._cpuStatic or SignalUnavailable("CPU topology unavailable"))
-                if cpuEnabled else SignalUnavailable("CPU disabled"),
+                if cpuEnabled
+                else SignalUnavailable("CPU disabled"),
                 cpuUtilization=cpuUtilization,
                 gpu=self._readGpu() if gpuEnabled else SignalUnavailable("GPU disabled"),
             )
@@ -133,7 +148,7 @@ class TelemetryService:
         if self._gpu is not None:
             try:
                 self._gpu.close()
-            except Exception:
+            except (OSError, RuntimeError, ValueError):
                 pass
 
     def _samplingLoop(self) -> None:
@@ -155,20 +170,38 @@ class TelemetryService:
             gpu=snapshot.gpu if gpuHistory else SignalUnavailable("GPU history disabled"),
         )
 
-    def _readMachine(self, operationName: str):
-        """Reads one machine-provider operation and maps provider failure to unavailable."""
+    def _readSystemMemory(self) -> SystemMemoryObservation | SignalUnavailable:
+        """Reads physical-memory telemetry while preserving provider failure as unavailable."""
         if self._machine is None:
             return SignalUnavailable("machine telemetry provider unavailable")
         try:
-            return getattr(self._machine, operationName)()
-        except Exception as err:
-            return SignalUnavailable(f"{operationName} unavailable: {type(err).__name__}")
+            return self._machine.systemMemory()
+        except (OSError, RuntimeError, ValueError) as err:
+            return SignalUnavailable(f"systemMemory unavailable: {type(err).__name__}")
 
-    def _readGpu(self):
+    def _readSwap(self) -> SwapObservation | SignalUnavailable:
+        """Reads swap/pagefile telemetry while preserving provider failure as unavailable."""
+        if self._machine is None:
+            return SignalUnavailable("machine telemetry provider unavailable")
+        try:
+            return self._machine.swap()
+        except (OSError, RuntimeError, ValueError) as err:
+            return SignalUnavailable(f"swap unavailable: {type(err).__name__}")
+
+    def _readCpuUtilization(self) -> CpuUtilizationObservation | SignalUnavailable:
+        """Reads CPU utilization while preserving provider failure as unavailable."""
+        if self._machine is None:
+            return SignalUnavailable("machine telemetry provider unavailable")
+        try:
+            return self._machine.cpuUtilization()
+        except (OSError, RuntimeError, ValueError) as err:
+            return SignalUnavailable(f"cpuUtilization unavailable: {type(err).__name__}")
+
+    def _readGpu(self) -> GpuObservation | SignalUnavailable:
         """Reads GPU telemetry and maps absent/failing providers to unavailable."""
         if self._gpu is None:
             return SignalUnavailable("GPU telemetry provider unavailable")
         try:
             return self._gpu.gpu()
-        except Exception as err:
+        except (OSError, RuntimeError, ValueError) as err:
             return SignalUnavailable(f"GPU telemetry unavailable: {type(err).__name__}")
