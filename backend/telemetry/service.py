@@ -1,4 +1,4 @@
-# file: backend/telemetry/service.py ; version: 2
+# file: backend/telemetry/service.py ; version: 3
 from __future__ import annotations
 
 import time
@@ -59,6 +59,7 @@ class TelemetryService:
         self._history: deque[TelemetrySnapshot] = deque(maxlen=self.configuration.historySamples)
         self._current: TelemetrySnapshot | None = None
         self._cpuStatic = None
+        self._cpuPrimed = False
         self._stopEvent = Event()
         self._thread: Thread | None = None
         self._started = False
@@ -84,8 +85,9 @@ class TelemetryService:
             if self._machine is not None and self.configuration.cpuMode is not TelemetryMode.DISABLED:
                 try:
                     self._machine.primeCpu()
+                    self._cpuPrimed = True
                 except Exception:
-                    pass
+                    self._cpuPrimed = False
                 try:
                     self._cpuStatic = self._machine.cpuStatic()
                 except Exception as err:
@@ -101,13 +103,19 @@ class TelemetryService:
             memoryEnabled = self.configuration.memoryMode is not TelemetryMode.DISABLED
             cpuEnabled = self.configuration.cpuMode is not TelemetryMode.DISABLED
             gpuEnabled = self.configuration.gpuMode is not TelemetryMode.DISABLED
+            if not cpuEnabled:
+                cpuUtilization = SignalUnavailable("CPU disabled")
+            elif not self._cpuPrimed:
+                cpuUtilization = SignalUnavailable("CPU utilization counters were not primed")
+            else:
+                cpuUtilization = self._readMachine("cpuUtilization")
             snapshot = TelemetrySnapshot(
                 sampledTimeNs=time.time_ns(),
                 systemMemory=self._readMachine("systemMemory") if memoryEnabled else SignalUnavailable("memory disabled"),
                 swap=self._readMachine("swap") if memoryEnabled else SignalUnavailable("memory disabled"),
                 cpuStatic=(self._cpuStatic or SignalUnavailable("CPU topology unavailable"))
                 if cpuEnabled else SignalUnavailable("CPU disabled"),
-                cpuUtilization=self._readMachine("cpuUtilization") if cpuEnabled else SignalUnavailable("CPU disabled"),
+                cpuUtilization=cpuUtilization,
                 gpu=self._readGpu() if gpuEnabled else SignalUnavailable("GPU disabled"),
             )
             self._current = snapshot
