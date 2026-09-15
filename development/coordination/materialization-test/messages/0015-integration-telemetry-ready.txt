@@ -1,0 +1,97 @@
+TELEMETRY INTEGRATION RESPONSE
+==============================
+
+Owner: actant-integration
+Responds to: 0014-actant-to-integration-telemetry.txt
+Status: IMPLEMENTED + PYTHON 3.15 VERIFIED
+
+01. RESULT
+---------
+
+Actant now has a shared internal telemetry domain under:
+
+    backend/telemetry/
+
+This is Actant-owned infrastructure. It is not owned by the materialization-test
+application and is not part of the llama.cpp Pack. Applications and resource
+policy may consume its observations later without becoming telemetry authority.
+
+02. IMPLEMENTED BOUNDARY
+------------------------
+
+The domain currently provides:
+
+- provider-neutral observation models;
+- psutil-backed host CPU/RAM/swap observation;
+- NVML-backed NVIDIA GPU/VRAM observation;
+- optional GPU diagnostics where NVML exposes them;
+- independently configurable DISABLED, CURRENT, and HISTORY modes for memory,
+  CPU, and GPU groups;
+- CPU utilization counter priming before publication;
+- cached static CPU topology;
+- current observation caching;
+- bounded disposable history;
+- explicit SignalUnavailable values instead of fabricated measurements;
+- provider failure isolation;
+- background sampling only when history is requested.
+
+Telemetry history is observational and non-authoritative. It is not committed
+Actant State, transactional Memory, or a substitute for tracing.
+
+03. SEMANTIC SEPARATION
+-----------------------
+
+The implementation deliberately preserves three separate concerns:
+
+    machine telemetry
+        observations about the host
+
+    controlled-server observation
+        facts Actant knows about a server/process it owns or controls
+
+    resource policy
+        decisions made from observations
+
+No resource-policy thresholds or llama.cpp-specific allocation assumptions are
+embedded in the telemetry service.
+
+04. DEPENDENCIES
+----------------
+
+The implementation uses explicit baseline dependencies:
+
+    psutil
+    nvidia-ml-py / pynvml
+
+The default construction path treats unavailable host/GPU facilities as an
+observational availability problem rather than making unrelated Actant runtime
+startup depend on a usable NVIDIA device.
+
+05. VERIFICATION
+----------------
+
+Verified by the user under the project Python 3.15 environment:
+
+    python -m ruff check backend/telemetry tests/backend/telemetry
+    python -m pytest tests/backend/telemetry
+
+Both are green after lint/failure-handling cleanup.
+
+Final relevant source versions at verification:
+
+    backend/telemetry/__init__.py  version 2
+    backend/telemetry/providers.py version 3
+    backend/telemetry/service.py   version 5
+
+06. CURRENT LIMITS / FUTURE PRESSURE
+------------------------------------
+
+This first slice intentionally does not attempt to answer how much of llama.cpp
+is resident in VRAM, how model tensors/KV cache divide GPU allocation, or what
+resource limits Actant should enforce. Those require controlled-server evidence
+and/or resource-policy work rather than pretending machine telemetry can infer
+provider-internal ownership.
+
+The domain is production-shaped for the currently requested host observations,
+but additional providers/platform-specific measurements can be added behind the
+provider boundary when a concrete consumer creates that requirement.
