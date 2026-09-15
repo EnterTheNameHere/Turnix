@@ -1,5 +1,7 @@
-# file: backend/telemetry/__init__.py ; version: 1
+# file: backend/telemetry/__init__.py ; version: 2
 from __future__ import annotations
+
+import pynvml
 
 from backend.telemetry.model import (
     CpuStaticObservation,
@@ -35,15 +37,11 @@ def createDefaultTelemetryService(
     """Creates Windows-first host telemetry while treating unavailable providers as optional."""
     try:
         machineProvider = PsutilMachineTelemetryProvider()
-    except (ImportError, OSError):
+    except (ImportError, OSError, RuntimeError):
         machineProvider = None
     try:
         gpuProvider = NvmlGpuTelemetryProvider()
-    except (ImportError, OSError, RuntimeError):
-        gpuProvider = None
-    except Exception:
-        # NVML exposes vendor-specific exception classes across package versions.
-        # Provider absence must not make unrelated Actant runtime startup fail.
+    except (ImportError, OSError, RuntimeError, ValueError, pynvml.NVMLError):
         gpuProvider = None
     return TelemetryService(
         machineProvider=machineProvider,
