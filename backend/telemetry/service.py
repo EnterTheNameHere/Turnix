@@ -1,4 +1,4 @@
-# file: backend/telemetry/service.py ; version: 1
+# file: backend/telemetry/service.py ; version: 2
 from __future__ import annotations
 
 import time
@@ -22,6 +22,9 @@ class TelemetryConfiguration:
 
     def __post_init__(self) -> None:
         """Validates cadence and bounded-retention configuration."""
+        for name in ("memoryMode", "cpuMode", "gpuMode"):
+            if not isinstance(getattr(self, name), TelemetryMode):
+                raise TypeError(f"{name} must be a TelemetryMode.")
         if type(self.sampleIntervalSeconds) not in {int, float} or self.sampleIntervalSeconds <= 0:
             raise ValueError("sampleIntervalSeconds must be positive.")
         if type(self.historySamples) is not int or self.historySamples <= 0:
@@ -68,7 +71,7 @@ class TelemetryService:
 
     @property
     def history(self) -> tuple[TelemetrySnapshot, ...]:
-        """Returns an immutable view of retained disposable samples."""
+        """Returns retained samples with current-only groups deliberately omitted."""
         with self._lane:
             return tuple(self._history)
 
@@ -81,9 +84,12 @@ class TelemetryService:
             if self._machine is not None and self.configuration.cpuMode is not TelemetryMode.DISABLED:
                 try:
                     self._machine.primeCpu()
+                except Exception:
+                    pass
+                try:
                     self._cpuStatic = self._machine.cpuStatic()
                 except Exception as err:
-                    self._cpuStatic = SignalUnavailable(f"machine telemetry unavailable: {type(err).__name__}")
+                    self._cpuStatic = SignalUnavailable(f"CPU topology unavailable: {type(err).__name__}")
             self.sample()
             if self.configuration.historyEnabled:
                 self._thread = Thread(target=self._samplingLoop, name="actant-telemetry", daemon=True)
@@ -95,28 +101,24 @@ class TelemetryService:
             memoryEnabled = self.configuration.memoryMode is not TelemetryMode.DISABLED
             cpuEnabled = self.configuration.cpuMode is not TelemetryMode.DISABLED
             gpuEnabled = self.configuration.gpuMode is not TelemetryMode.DISABLED
-            systemMemory = self._readMachine("systemMemory") if memoryEnabled else SignalUnavailable("memory disabled")
-            swap = self._readMachine("swap") if memoryEnabled else SignalUnavailable("memory disabled")
-            cpuUtilization = self._readMachine("cpuUtilization") if cpuEnabled else SignalUnavailable("CPU disabled")
-            cpuStatic = self._cpuStatic if cpuEnabled else SignalUnavailable("CPU disabled")
-            if cpuStatic is None:
-                cpuStatic = SignalUnavailable("CPU topology unavailable")
-            gpu = self._readGpu() if gpuEnabled else SignalUnavailable("GPU disabled")
             snapshot = TelemetrySnapshot(
-                sampledTimeNs=time.time_ns(), systemMemory=systemMemory, swap=swap,
-                cpuStatic=cpuStatic, cpuUtilization=cpuUtilization, gpu=gpu,
+                sampledTimeNs=time.time_ns(),
+                systemMemory=self._readMachine("systemMemory") if memoryEnabled else SignalUnavailable("memory disabled"),
+                swap=self._readMachine("swap") if memoryEnabled else SignalUnavailable("memory disabled"),
+                cpuStatic=(self._cpuStatic or SignalUnavailable("CPU topology unavailable"))
+                if cpuEnabled else SignalUnavailable("CPU disabled"),
+                cpuUtilization=self._readMachine("cpuUtilization") if cpuEnabled else SignalUnavailable("CPU disabled"),
+                gpu=self._readGpu() if gpuEnabled else SignalUnavailable("GPU disabled"),
             )
             self._current = snapshot
             if self.configuration.historyEnabled:
-                self._history.append(snapshot)
+                self._history.append(self._forHistory(snapshot))
             return snapshot
 
     def stop(self) -> None:
         """Stops background sampling and releases optional provider resources."""
         self._stopEvent.set()
         thread = self._thread
-        if thread is not None and thread is not Thread.current_thread if False else False:
-            pass
         if thread is not None:
             thread.join(timeout=self.configuration.sampleIntervalSeconds * 2.0 + 1.0)
         self._thread = None
@@ -130,6 +132,20 @@ class TelemetryService:
         """Samples at the configured cadence until shutdown without blocking signal reads."""
         while not self._stopEvent.wait(self.configuration.sampleIntervalSeconds):
             self.sample()
+
+    def _forHistory(self, snapshot: TelemetrySnapshot) -> TelemetrySnapshot:
+        """Masks groups which requested current values but not historical retention."""
+        memoryHistory = self.configuration.memoryMode is TelemetryMode.HISTORY
+        cpuHistory = self.configuration.cpuMode is TelemetryMode.HISTORY
+        gpuHistory = self.configuration.gpuMode is TelemetryMode.HISTORY
+        return TelemetrySnapshot(
+            sampledTimeNs=snapshot.sampledTimeNs,
+            systemMemory=snapshot.systemMemory if memoryHistory else SignalUnavailable("memory history disabled"),
+            swap=snapshot.swap if memoryHistory else SignalUnavailable("memory history disabled"),
+            cpuStatic=snapshot.cpuStatic if cpuHistory else SignalUnavailable("CPU history disabled"),
+            cpuUtilization=snapshot.cpuUtilization if cpuHistory else SignalUnavailable("CPU history disabled"),
+            gpu=snapshot.gpu if gpuHistory else SignalUnavailable("GPU history disabled"),
+        )
 
     def _readMachine(self, operationName: str):
         """Reads one machine-provider operation and maps provider failure to unavailable."""
