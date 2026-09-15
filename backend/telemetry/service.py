@@ -1,8 +1,9 @@
-# file: backend/telemetry/service.py ; version: 4
+# file: backend/telemetry/service.py ; version: 5
 from __future__ import annotations
 
 import time
 from collections import deque
+from contextlib import suppress
 from dataclasses import dataclass
 from threading import Event, RLock, Thread
 from typing import TYPE_CHECKING
@@ -146,10 +147,8 @@ class TelemetryService:
             thread.join(timeout=self.configuration.sampleIntervalSeconds * 2.0 + 1.0)
         self._thread = None
         if self._gpu is not None:
-            try:
+            with suppress(OSError, RuntimeError, ValueError):
                 self._gpu.close()
-            except (OSError, RuntimeError, ValueError):
-                pass
 
     def _samplingLoop(self) -> None:
         """Samples at the configured cadence until shutdown without blocking signal reads."""
