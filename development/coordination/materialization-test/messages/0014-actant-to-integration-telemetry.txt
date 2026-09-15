@@ -1,0 +1,362 @@
+ACTANT -> INTEGRATION
+=====================
+
+SUBJECT
+Add a small shared machine/runtime telemetry capability owned by Integration, with
+Windows-first CPU/RAM/swap and NVIDIA GPU/VRAM observation suitable for both live
+inspection and later resource-aware llama.cpp orchestration.
+
+STATUS
+Requested for Integration ownership.
+
+This is not a request for a new telemetry branch and should not become one. The
+capability belongs with the shared Actant integration/runtime work. This message is
+a hand-off of requirements and intent; Integration should choose the concrete
+placement and implementation shape that best fits the current codebase.
+
+WHY THIS EXISTS
+Actant is moving toward resource-aware orchestration rather than treating an LLM
+server as a black box which is either running or not running.
+
+For llama.cpp in particular we want enough machine observation to answer questions
+such as:
+
+- Is there enough installed and currently available RAM for the intended model and
+  server configuration?
+- Is there enough VRAM installed, and enough VRAM free right now?
+- Is memory pressure already high enough that an otherwise technically valid model
+  configuration is likely to be a bad runtime choice?
+- Is CPU saturation hidden by a modest aggregate CPU percentage because one logical
+  core is actually pinned?
+- Is the GPU busy, idle, or apparently starved while inference is running?
+- Is swap/pagefile use indicating that RAM pressure has already crossed into a
+  degraded regime?
+- If Actant owns a running llama.cpp server, can it decide that the current resource
+  situation warrants stopping the server, changing configuration, and starting it
+  again rather than continuing with avoidable pressure/latency?
+
+The first use is observation and evidence. Later consumers may use the same signals
+for model/server planning, warnings, configuration selection, and controlled
+restart/reconfiguration. Telemetry itself should not hard-code those policies.
+
+INITIAL SCOPE / SIMPLICITY BOUNDARY
+Keep the first implementation deliberately simple:
+
+- one machine/system memory pool;
+- one CPU topology exposed as physical/logical core counts;
+- one NVIDIA GPU / one relevant VRAM pool;
+- Windows-first behavior is sufficient for current development;
+- do not build a NUMA abstraction, multi-socket scheduler, heterogeneous GPU
+  planner, MIG abstraction, iGPU+dGPU arbitration, or other exotic hardware model
+  merely to make the API theoretically universal.
+
+It is fine to shape identifiers/types so multiple devices could be represented in
+future, but the first implementation does not need to test or solve them.
+
+REQUIRED MACHINE SIGNALS
+At minimum provide current-value access to the following.
+
+System RAM:
+
+- installed/total bytes;
+- available bytes;
+- used bytes;
+- free bytes if the platform/library exposes it meaningfully;
+- usage percentage if useful as a direct provider value or stable derivation.
+
+`available` is the important planning/headroom signal. Do not equate literal free
+RAM with usable headroom; modern operating systems deliberately use otherwise idle
+memory for cache.
+
+Swap/pagefile:
+
+- total bytes;
+- used bytes;
+- free bytes;
+- usage percentage.
+
+Non-zero swap/pagefile use alone must not be interpreted as an active emergency.
+Pages may remain there after pressure subsides. This capability is telemetry, not
+policy. If a reliable active paging-rate signal later becomes available, it can be
+added separately.
+
+CPU:
+
+- physical core count;
+- logical core count;
+- aggregate utilization percentage;
+- per-logical-core utilization percentages;
+- a convenient highest/busiest logical-core utilization value, or enough data for
+  the telemetry layer to derive `max(perCore)` cheaply.
+
+Per-core observation matters because an inference workload can be constrained by a
+single saturated execution path while the machine-wide percentage still looks
+comfortable.
+
+GPU / VRAM:
+
+- total VRAM bytes;
+- used VRAM bytes;
+- free VRAM bytes;
+- GPU utilization percentage;
+- memory-controller/bus utilization percentage where NVML exposes it.
+
+The memory-controller utilization signal must be named so it cannot be confused
+with percentage of VRAM capacity allocated. They are different quantities.
+
+USEFUL OPTIONAL GPU SIGNALS
+If they are nearly free once NVML is present, Integration may also expose:
+
+- GPU temperature;
+- power draw;
+- power limit;
+- graphics/SM clock;
+- memory clock;
+- performance state;
+- fan speed where supported.
+
+These are diagnostic extras, not required to block the first telemetry capability.
+
+CURRENT VALUES AND HISTORY / GRAPHING
+Dynamic signals should support two distinct uses:
+
+1. obtain the current value;
+2. retain bounded sampled history suitable for graphing.
+
+The caller should be able to enable/disable useful signal groups independently.
+Examples include enabling current RAM/VRAM values continuously while enabling
+per-core CPU history only when a diagnostic view is open.
+
+Do not make historical telemetry authoritative application state. A bounded
+in-memory ring buffer is sufficient for the first design. Something on the order of
+one sample per second with a configurable few minutes of history is already enough
+for useful UI graphs and pressure inspection, while remaining trivial in size.
+
+Prefer keeping collection separate from retention/presentation, approximately:
+
+  platform/provider observation
+      -> immutable/current telemetry sample/snapshot
+      -> sampler/current-value cache
+      -> optional bounded history
+      -> consumers (UI, diagnostics, future policy)
+
+The collector should not care whether a sample is rendered as a number, graphed,
+logged, or consumed by resource policy.
+
+Sampling should not require blocking sleeps inside individual signal reads. CPU
+utilization APIs which require a previous sample should be primed and then sampled
+from the normal telemetry cadence.
+
+TURN ON / OFF SEMANTICS
+The goal is not simply one global `telemetry=true` switch. The design should permit
+individual or grouped signals to be inactive when nobody needs them, especially
+richer/high-cardinality signals such as per-logical-core history.
+
+Integration should choose the exact public configuration model, but the capability
+should be able to represent distinctions equivalent to:
+
+- signal disabled;
+- current value enabled;
+- sampled history enabled at a configured cadence/retention.
+
+Static properties such as installed RAM and core counts do not need periodic
+sampling once discovered unless the chosen provider requires refresh.
+
+PROVIDER / IMPLEMENTATION ADVICE
+For the current Python runtime, prefer direct APIs over command parsing.
+
+A small dependency split appears sufficient:
+
+- `psutil` for RAM, swap/pagefile, CPU topology/utilization and process RAM;
+- NVIDIA NVML through the maintained `nvidia-ml-py` Python package (`pynvml`
+  import surface) for NVIDIA GPU/VRAM/utilization and optional GPU diagnostics.
+
+Avoid making PowerShell, WMI command output, `nvidia-smi` text parsing, PyTorch, or
+CUDA framework bindings part of the baseline unless implementation evidence shows
+that a required signal cannot be obtained cleanly through the direct APIs above.
+Telemetry must not depend on the inference framework.
+
+For psutil RAM semantics, preserve the provider's meaningful values rather than
+inventing `used = total - available` and discarding other information. In
+particular, `available` is intentionally the cross-platform estimate of memory that
+can be supplied to processes without causing swapping, while `used`/`free` have
+platform-specific semantics.
+
+For psutil CPU utilization, non-blocking `cpu_percent(interval=None)` style calls
+require a previous observation; the first result is not useful. Prime those counters
+when the provider starts and then sample them from the telemetry cadence.
+
+For swap/pagefile, psutil provides total/used/free/percent. Do not claim active
+page-in/page-out rates on Windows merely because portable fields exist; psutil's
+swap-in/swap-out counters are not useful there.
+
+WINDOWS COMMIT INFORMATION
+If cleanly available without distorting the first implementation, Windows commit
+usage/limit may later be useful alongside physical RAM and pagefile values. Treat
+that as an extension, not a prerequisite for the initial capability.
+
+LLAMA.CPP BOUNDARY -- IMPORTANT
+Do not assume stock `llama-server` exposes detailed GPU allocation telemetry.
+Current server HTTP surfaces such as health/props/slots/metrics do not provide a
+reliable breakdown of:
+
+- model weights in VRAM;
+- model weights in RAM;
+- KV cache VRAM/RAM allocation;
+- compute/scratch buffer allocation;
+- total per-device llama.cpp allocation.
+
+llama.cpp internally knows and logs some memory information, but parsing verbose
+startup log text should NOT be the baseline telemetry contract. Log parsing would
+be brittle against upstream formatting changes and couples a general telemetry
+capability to one server implementation detail.
+
+Similarly, do not promise exact per-process llama.cpp VRAM ownership from NVML on
+the current Windows/WDDM development environment. NVML's useful per-process GPU
+memory accounting is limited under WDDM because Windows manages that accounting.
+The generic machine telemetry contract should therefore expose total device
+capacity/usage/free accurately without pretending it knows exact process ownership
+when it does not.
+
+LLAMA.CPP OBSERVATION / FUTURE RESOURCE POLICY
+Keep generic machine telemetry distinct from llama.cpp/server observation.
+Conceptually:
+
+  Telemetry
+      What is the machine doing?
+
+  Llama/server observation
+      What server/configuration/activity does Actant control and know about?
+
+  Resource policy
+      Given those observations, what should Actant decide to do?
+
+The server adapter can separately contribute facts it genuinely knows, such as the
+server PID, configured model, configured context/parallelism/offload settings,
+request activity, and performance/timing information exposed by llama-server.
+Do not fabricate unavailable memory breakdowns to fill this model.
+
+OBSERVED SERVER-INDUCED VRAM DELTA
+Because Actant controls server lifecycle, a useful later measurement is the change
+in total GPU VRAM occupancy around a controlled server transition:
+
+  before server start
+  after model load settles
+  before server stop
+  after server stop settles
+
+For example, if total device use changes from 1.2 GiB to 14.8 GiB during an
+otherwise quiet controlled start, Actant can record an *observed server-induced
+VRAM delta* of roughly 13.6 GiB.
+
+If implemented, name/represent this explicitly as an observation/estimate, not as
+an authoritative `llamaServerVramUsedBytes`. Other GPU workloads can change during
+the measurement window. A corresponding recovery measurement after controlled
+stop can strengthen the evidence.
+
+This lifecycle-delta idea belongs with future server/resource observation rather
+than being required for the first generic machine sampler, unless it falls out
+naturally from Integration's existing llama.cpp lifecycle code.
+
+PROCESS RAM
+Because Actant knows the PID of a server it starts, psutil can later provide
+server-process resident memory (RSS/working set on Windows). This is useful server
+observation and is much safer to attribute than GPU memory under WDDM.
+
+POLICY MUST REMAIN SEPARATE
+Do not bake thresholds such as "VRAM above 90% is bad" into telemetry definitions.
+Telemetry should report observations. Resource-policy consumers can later derive
+signals such as:
+
+- RAM pressure/headroom;
+- VRAM pressure/headroom;
+- CPU saturation;
+- GPU saturation/starvation;
+- memory transport/offload risk;
+- whether a planned server configuration fits;
+- whether stopping/reconfiguring/restarting an Actant-owned server is warranted.
+
+The point of keeping this separate is that the same 15 GiB VRAM occupancy can mean
+very different things depending on model size, KV requirements, other applications,
+and observed throughput.
+
+WHY THIS MATTERS FOR DENSE / PARTIALLY OFFLOADED MODELS
+A model can technically run while still being a poor configuration. If substantial
+weights or other hot data remain CPU-resident, inference may become dominated by
+RAM/PCIe transfer rather than GPU compute. Merely observing that the machine still
+has large amounts of system RAM available does not mean the configuration is good.
+
+The useful future decision comes from combining machine telemetry with server
+configuration and measured inference behavior. For example:
+
+- high GPU compute utilization + good throughput may mean the GPU is productively
+  saturated;
+- low/moderate GPU compute, high memory-controller activity, CPU pressure and poor
+  token throughput may indicate transfer/offload pressure;
+- almost-full VRAM with a known Actant server can motivate a controlled restart
+  with altered context/batch/offload settings;
+- almost-full VRAM caused substantially by an unrelated application should not be
+  "fixed" by blindly restarting Actant's server.
+
+Telemetry therefore acts as sensory input to orchestration, not just a dashboard.
+
+DATA / AUTHORITY EXPECTATION
+Telemetry samples and graph history are observational and non-authoritative. They
+must not be confused with committed Actant State, Memory transaction semantics, or
+journal/audit authority. Consumers may record selected evidence elsewhere when an
+operation needs an audit trail, but the rolling telemetry history itself should be
+cheap, bounded and disposable.
+
+FAILURE / AVAILABILITY BEHAVIOR
+Telemetry should degrade gracefully when a provider is unavailable.
+
+Examples:
+
+- NVIDIA driver/NVML unavailable;
+- no supported NVIDIA GPU;
+- a particular optional sensor unsupported;
+- process disappears between lookup and sampling.
+
+Do not make the whole Actant runtime fail merely because an optional telemetry
+provider cannot initialize. Required/optional semantics and diagnostics should be
+clear enough that consumers can distinguish "zero" from "unavailable".
+
+TEST / VERIFICATION EXPECTATION
+Please add tests around the reusable semantics rather than requiring CI to own the
+same physical hardware as the development machine. At minimum cover:
+
+- RAM/swap/CPU provider values are mapped without unit loss;
+- per-core values and peak-core derivation behave correctly;
+- first CPU sample/priming semantics do not leak a misleading zero as real data;
+- GPU memory total/used/free and compute vs memory-controller utilization remain
+  semantically distinct;
+- unsupported/absent GPU telemetry degrades without crashing unrelated runtime;
+- signal enable/disable/current/history behavior;
+- bounded history retention;
+- static signals are not needlessly sampled if the design distinguishes them;
+- provider failures produce unavailable/error state rather than fake zero values;
+- no resource-policy threshold is embedded into the generic telemetry contract.
+
+Use provider seams/fakes/mocks so these tests are deterministic and do not require
+an NVIDIA GPU in normal CI.
+
+PYTHON COMPATIBILITY
+Materialize implementation for Python 3.15. Where a construct/library surface would
+otherwise make that incompatible with Python 3.14, provide the project's normal
+3.14 fallback rather than silently reducing the 3.15 target.
+
+INTEGRATION FREEDOM
+The names and example decomposition in this request are semantic guidance, not a
+mandated class diagram. Integration should first inspect existing runtime/config,
+tracing, server lifecycle, and dependency boundaries and fit telemetry into the
+architecture rather than creating parallel infrastructure.
+
+Please report back in this mailbox with:
+
+- chosen placement/API shape;
+- dependencies added and why;
+- implemented signal set;
+- known platform/provider limitations;
+- tests and Python 3.15 verification status;
+- integration commit/ref;
+- any follow-up questions or design pressure discovered during implementation.
