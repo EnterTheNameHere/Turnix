@@ -1,8 +1,10 @@
-# file: backend/telemetry/providers.py ; version: 2
+# file: backend/telemetry/providers.py ; version: 3
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+import psutil
+import pynvml
 
 from backend.telemetry.model import (
     CpuStaticObservation,
@@ -12,6 +14,9 @@ from backend.telemetry.model import (
     SwapObservation,
     SystemMemoryObservation,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class MachineTelemetryProvider(Protocol):
@@ -55,9 +60,7 @@ class PsutilMachineTelemetryProvider:
 
     def __init__(self, psutilModule: object | None = None) -> None:
         """Binds to psutil, permitting an injected module seam for deterministic tests."""
-        if psutilModule is None:
-            import psutil as psutilModule  # type: ignore[import-not-found]
-        self._psutil = psutilModule
+        self._psutil = psutil if psutilModule is None else psutilModule
 
     def primeCpu(self) -> None:
         """Primes both aggregate and per-core psutil CPU percentage counters."""
@@ -68,16 +71,21 @@ class PsutilMachineTelemetryProvider:
         """Preserves psutil virtual-memory total, available, used, free, and percent."""
         value = self._psutil.virtual_memory()
         return SystemMemoryObservation(
-            totalBytes=int(value.total), availableBytes=int(value.available),
-            usedBytes=int(value.used), freeBytes=int(value.free), usagePercent=float(value.percent),
+            totalBytes=int(value.total),
+            availableBytes=int(value.available),
+            usedBytes=int(value.used),
+            freeBytes=int(value.free),
+            usagePercent=float(value.percent),
         )
 
     def swap(self) -> SwapObservation:
         """Preserves psutil swap/pagefile capacity values without claiming paging rate."""
         value = self._psutil.swap_memory()
         return SwapObservation(
-            totalBytes=int(value.total), usedBytes=int(value.used),
-            freeBytes=int(value.free), usagePercent=float(value.percent),
+            totalBytes=int(value.total),
+            usedBytes=int(value.used),
+            freeBytes=int(value.free),
+            usagePercent=float(value.percent),
         )
 
     def cpuStatic(self) -> CpuStaticObservation:
@@ -85,8 +93,12 @@ class PsutilMachineTelemetryProvider:
         physical = self._psutil.cpu_count(logical=False)
         logical = self._psutil.cpu_count(logical=True)
         return CpuStaticObservation(
-            physicalCores=int(physical) if physical is not None else SignalUnavailable("physical CPU count unavailable"),
-            logicalCores=int(logical) if logical is not None else SignalUnavailable("logical CPU count unavailable"),
+            physicalCores=(
+                int(physical) if physical is not None else SignalUnavailable("physical CPU count unavailable")
+            ),
+            logicalCores=(
+                int(logical) if logical is not None else SignalUnavailable("logical CPU count unavailable")
+            ),
         )
 
     def cpuUtilization(self) -> CpuUtilizationObservation:
@@ -103,23 +115,26 @@ class NvmlGpuTelemetryProvider:
         """Initializes NVML and selects one device by index."""
         if type(deviceIndex) is not int or deviceIndex < 0:
             raise ValueError("deviceIndex must be a non-negative exact integer.")
-        if nvmlModule is None:
-            import pynvml as nvmlModule  # type: ignore[import-not-found]
-        self._nvml = nvmlModule
+        self._nvml = pynvml if nvmlModule is None else nvmlModule
         self._nvml.nvmlInit()
         try:
             self._handle = self._nvml.nvmlDeviceGetHandleByIndex(deviceIndex)
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             self._nvml.nvmlShutdown()
             raise
         self.deviceIndex = deviceIndex
         self._closed = False
 
-    def _optional(self, label: str, read: Callable[[], object], transform: Callable[[object], object]) -> object:
+    def _optional(
+        self,
+        label: str,
+        read: Callable[[], object],
+        transform: Callable[[object], object],
+    ) -> object:
         """Reads one optional sensor and converts unsupported/failing reads to unavailable."""
         try:
             return transform(read())
-        except Exception as err:
+        except (OSError, RuntimeError, ValueError, pynvml.NVMLError) as err:
             return SignalUnavailable(f"{label} unavailable: {type(err).__name__}")
 
     def gpu(self) -> GpuObservation:
@@ -133,31 +148,47 @@ class NvmlGpuTelemetryProvider:
         graphicsClock = getattr(self._nvml, "NVML_CLOCK_GRAPHICS", 0)
         memoryClock = getattr(self._nvml, "NVML_CLOCK_MEM", 2)
         return GpuObservation(
-            deviceIndex=self.deviceIndex, name=str(name), totalVramBytes=int(memory.total),
-            usedVramBytes=int(memory.used), freeVramBytes=int(memory.free),
+            deviceIndex=self.deviceIndex,
+            name=str(name),
+            totalVramBytes=int(memory.total),
+            usedVramBytes=int(memory.used),
+            freeVramBytes=int(memory.free),
             gpuUtilizationPercent=float(utilization.gpu),
             memoryControllerUtilizationPercent=float(utilization.memory),
             temperatureCelsius=self._optional(
-                "temperature", lambda: self._nvml.nvmlDeviceGetTemperature(self._handle, temperatureSensor), float,
+                "temperature",
+                lambda: self._nvml.nvmlDeviceGetTemperature(self._handle, temperatureSensor),
+                float,
             ),
             powerDrawWatts=self._optional(
-                "power draw", lambda: self._nvml.nvmlDeviceGetPowerUsage(self._handle), lambda value: float(value) / 1000.0,
+                "power draw",
+                lambda: self._nvml.nvmlDeviceGetPowerUsage(self._handle),
+                lambda value: float(value) / 1000.0,
             ),
             powerLimitWatts=self._optional(
-                "power limit", lambda: self._nvml.nvmlDeviceGetEnforcedPowerLimit(self._handle),
+                "power limit",
+                lambda: self._nvml.nvmlDeviceGetEnforcedPowerLimit(self._handle),
                 lambda value: float(value) / 1000.0,
             ),
             graphicsClockMhz=self._optional(
-                "graphics clock", lambda: self._nvml.nvmlDeviceGetClockInfo(self._handle, graphicsClock), int,
+                "graphics clock",
+                lambda: self._nvml.nvmlDeviceGetClockInfo(self._handle, graphicsClock),
+                int,
             ),
             memoryClockMhz=self._optional(
-                "memory clock", lambda: self._nvml.nvmlDeviceGetClockInfo(self._handle, memoryClock), int,
+                "memory clock",
+                lambda: self._nvml.nvmlDeviceGetClockInfo(self._handle, memoryClock),
+                int,
             ),
             performanceState=self._optional(
-                "performance state", lambda: self._nvml.nvmlDeviceGetPerformanceState(self._handle), lambda value: str(value),
+                "performance state",
+                lambda: self._nvml.nvmlDeviceGetPerformanceState(self._handle),
+                str,
             ),
             fanSpeedPercent=self._optional(
-                "fan speed", lambda: self._nvml.nvmlDeviceGetFanSpeed(self._handle), float,
+                "fan speed",
+                lambda: self._nvml.nvmlDeviceGetFanSpeed(self._handle),
+                float,
             ),
         )
 
