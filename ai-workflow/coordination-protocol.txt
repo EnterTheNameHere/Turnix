@@ -1,0 +1,217 @@
+ACTANT COORDINATION PROTOCOL
+============================
+
+01. PURPOSE
+-----------
+
+01.01. Multiple independently contextualized AI conversations may work on different
+parts of Actant without sharing live conversational context.
+
+01.02. This coordination system provides repository-resident routing, state, mail,
+and continuation information so those conversations can coordinate without relying
+on chat memory.
+
+01.03. It is not a replacement for design documents, implementation source, Git
+history, or issue tracking. It carries the minimum durable context needed for one
+workstream to understand another workstream's current material state, requirements,
+messages, ownership, and continuation point.
+
+02. COORDINATION REF
+--------------------
+
+02.01. The canonical coordination ref is:
+
+    actant-integration
+
+02.02. Working branch and coordination ref are different concepts. A conversation
+may implement on another branch while reading and publishing coordination material
+on the canonical coordination ref.
+
+02.03. Every coordination read/write MUST explicitly use the coordination ref. Do
+not inherit the current implementation branch implicitly.
+
+02.04. Using actant-integration as the coordination ref does not make Integration
+the semantic owner of all coordination material. Ownership is declared per
+workstream/document/message.
+
+03. WORKSTREAMS
+---------------
+
+03.01. A workstream is an independently contextualized implementation or analysis
+area with a declared purpose, owner, working branch when applicable, state document,
+handoff document when applicable, and mailbox.
+
+03.02. A workstream does not need a dedicated Git branch when its work is purely
+coordination, intake, or another activity for which a branch adds no value.
+
+03.03. Creating a new message or idea does not imply creating a new workstream.
+Workstream creation is a routing decision made when the idea requires sustained,
+independently owned continuation.
+
+04. MAIL MODES
+-------------
+
+04.01. ADDRESSED MAIL has a known recipient workstream. It is written to that
+recipient's inbox.
+
+04.02. INTAKE MAIL records an idea, requirement, finding, or question whose owner is
+not yet established. It is written to ai-workflow/mail/intake/.
+
+04.03. Intake may be resolved by assigning it to an existing workstream, creating a
+new workstream, handling it immediately as a small task, deferring it, or rejecting
+it as unnecessary.
+
+04.04. A dedicated dispatcher/intake conversation may perform routing, but direct
+workstream-to-workstream mail remains valid when the recipient is already known.
+The dispatcher is therefore optional infrastructure, not a mandatory hop.
+
+05. MESSAGE SEMANTICS
+---------------------
+
+05.01. Messages SHOULD be immutable after publication except for correction of a
+clear factual/formatting error. Responses are new messages or durable state updates.
+Git history preserves chronology.
+
+05.02. A message SHOULD identify:
+
+- sender or source;
+- recipient, or UNASSIGNED for intake;
+- subject;
+- purpose/context;
+- requested action or information;
+- ownership expectation if known;
+- blocking status if relevant;
+- relevant branch/ref/source/tests;
+- completion/report-back expectation when relevant.
+
+05.03. Messages are operational communication. Durable facts discovered while
+handling them belong in STATE or KNOWLEDGE rather than remaining available only by
+reading old mail.
+
+05.04. Once a message is handled, the recipient SHOULD move or supersede it into
+its archive area. Inbox membership therefore represents outstanding coordination,
+not historical completeness.
+
+06. MAIL ROUTING
+---------------
+
+06.01. Canonical mail roots are:
+
+    ai-workflow/mail/intake/
+    ai-workflow/mail/integration/inbox/
+    ai-workflow/mail/integration/archive/
+    ai-workflow/mail/materialization-test/inbox/
+    ai-workflow/mail/materialization-test/archive/
+    ai-workflow/mail/evil-analysis/inbox/
+    ai-workflow/mail/evil-analysis/archive/
+
+06.02. Additional workstreams MUST receive equivalent recipient-based mailbox
+locations and be added to ai-workflow/index.txt.
+
+06.03. Mail is routed by recipient, not by the branch/thread where the message was
+created.
+
+06.04. The legacy path development/coordination/materialization-test/messages/
+contains historical coordination traffic created before this protocol. Treat it as
+legacy evidence; do not use it for new mail.
+
+07. STATE CONTRACT
+------------------
+
+07.01. Every active workstream MUST have a current STATE document, either dedicated
+or represented by an explicitly named shared state document.
+
+07.02. State describes what is materially true now, not a chronological diary.
+Replace obsolete claims; Git preserves history.
+
+07.03. Workstream state SHOULD make the following discoverable when relevant:
+
+Identity
+- workstream ID;
+- purpose;
+- owner;
+- working branch/ref and parent relationship.
+
+Current position
+- current implementation status;
+- verified/exercised behavior;
+- incomplete behavior;
+- temporary substitutions/workarounds;
+- relevant synchronization point.
+
+Provides
+- capabilities/contracts other workstreams may rely on.
+
+Requires
+- unresolved dependencies or requirements on other workstreams.
+
+Current objective
+- the work presently being pursued.
+
+Open coordination
+- outstanding incoming/outgoing message references when they materially affect
+  continuation.
+
+Continuation
+- the next meaningful action if work resumes.
+
+07.04. Application state emphasizes application implementation and Actant pressure.
+Integration state emphasizes available shared/internal capabilities, known gaps, and
+consumer-facing contracts.
+
+08. THREAD START BARRIER
+------------------------
+
+08.01. Before substantial work in a new or resumed conversation:
+
+1. Read ai-workflow/index.txt from the canonical coordination ref.
+2. Read ai-workflow/coordination-protocol.txt.
+3. Identify the workstream and its declared working branch/ref.
+4. Read the workstream's current STATE.
+5. Read its HANDOFF if one exists.
+6. Read current messages in that workstream's inbox.
+7. Read only cross-workstream state/knowledge needed for the immediate work.
+8. Verify recorded branch/synchronization position against repository reality.
+9. Reconcile materially stale state before compounding implementation on it.
+
+08.02. An intake/dispatcher conversation instead reads the registry and intake,
+then routes each item without silently becoming its implementation owner unless
+that ownership is the explicit routing decision.
+
+09. THREAD FINISH BARRIER
+-------------------------
+
+09.01. Before reporting substantial work as finished, handed off, or safely paused,
+check:
+
+1. Implementation is materialized/committed at the stated ref where applicable.
+2. Required verification/test results are reflected in STATE.
+3. STATE still describes what is materially true now.
+4. Provides/Requires changed by the work are updated.
+5. Outgoing requirements/messages are written to the correct recipient mailbox.
+6. Handled incoming mail is archived/resolved.
+7. Durable facts discovered through mail are promoted into STATE/KNOWLEDGE.
+8. HANDOFF identifies unfinished work and exact next action when continuation is
+   still required.
+9. The shared index/workstream registry reflects any added, moved, split, or retired
+   workstream/document/mailbox.
+10. Only after those checks should the conversation report completion to the user.
+
+09.02. Pausing unfinished work uses the same barrier; the difference is that HANDOFF
+must preserve the remaining objective, material position, uncertainty, and next
+action.
+
+10. OWNERSHIP AND AUTHORITY
+---------------------------
+
+10.01. Mail does not create design authority. DA/DD/ODA/IS and successor design
+material retain their established authority.
+
+10.02. Mail does not create implementation ownership merely because a thread wrote
+the first description of an idea. Ownership follows the workstream/component that
+should semantically own the solution.
+
+10.03. STATE is the current coordination view, repository implementation is the
+material evidence, and design documents remain design authority. When these differ,
+investigate and classify the difference rather than silently choosing whichever was
+read first.
