@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 4
+# file: backend/runtime/runtimeHost.py ; version: 5
 from __future__ import annotations
 
 from enum import StrEnum
@@ -8,6 +8,11 @@ from backend.application.applicationRuntime import ApplicationRuntime
 from backend.application.lifecycle import ApplicationLifecycle
 from backend.core.runtimeIds import newRuntimeId
 from backend.packs.runtime import ManualActivationPlan, PackResolver
+from backend.runtime.sharedServices import (
+    SharedServiceRegistry,
+    bindApplicationRunSharedServices,
+    unbindApplicationRunSharedServices,
+)
 from backend.save import ApplicationStore
 from backend.tracing import TraceSinkDestination, Tracer
 
@@ -15,6 +20,8 @@ __all__ = ["RuntimeHost", "RuntimeHostState"]
 
 
 class RuntimeHostState(StrEnum):
+    """Lifecycle states for one RuntimeHost instance."""
+
     CREATED = "Created"
     ACTIVE = "Active"
     STOPPED = "Stopped"
@@ -36,6 +43,7 @@ class RuntimeHost:
         packResolver: PackResolver,
         tracer: Tracer | None = None,
     ) -> None:
+        """Creates one RuntimeHost around shared storage, Pack resolution, and services."""
         if not isinstance(applicationStore, ApplicationStore):
             raise TypeError("applicationStore must be an ApplicationStore.")
         if not isinstance(packResolver, PackResolver):
@@ -48,6 +56,7 @@ class RuntimeHost:
         self._lane = RLock()
         self._runtimesByRunId: dict[str, ApplicationRuntime] = {}
         self._runIdByApplicationId: dict[str, str] = {}
+        self.sharedServices = SharedServiceRegistry()
         self._ownsTracer = tracer is None
         self.tracer = tracer or Tracer(
             origin="actant.runtime-host",
@@ -56,10 +65,12 @@ class RuntimeHost:
 
     @property
     def activeApplicationRuntimes(self) -> tuple[ApplicationRuntime, ...]:
+        """Returns the live ApplicationRuntimes currently owned by this host."""
         with self._lane:
             return tuple(self._runtimesByRunId.values())
 
     def start(self) -> None:
+        """Transitions this RuntimeHost into its active lifetime once."""
         with self._lane:
             if self.state is RuntimeHostState.ACTIVE:
                 raise RuntimeError("RuntimeHost is already active.")
@@ -69,6 +80,7 @@ class RuntimeHost:
             self.trace("runtime-host-started")
 
     def requireActive(self) -> None:
+        """Requires this RuntimeHost to be active before host operations proceed."""
         if self.state is not RuntimeHostState.ACTIVE:
             raise RuntimeError("RuntimeHost is not active.")
 
@@ -80,6 +92,7 @@ class RuntimeHost:
         config: dict[str, object] | None = None,
         tracer: Tracer | None = None,
     ) -> ApplicationRuntime:
+        """Creates, initializes, starts, and registers one new ApplicationRuntime."""
         with self._lane:
             self.requireActive()
             runtime = ApplicationRuntime(
@@ -89,6 +102,8 @@ class RuntimeHost:
                 config=config,
                 tracer=tracer,
             )
+            applicationRunId = runtime.applicationRun.applicationRunId
+            bindApplicationRunSharedServices(applicationRunId, self.sharedServices)
             try:
                 ApplicationLifecycle.create(
                     runtime=runtime,
@@ -97,6 +112,7 @@ class RuntimeHost:
                 self._register(runtime)
             except Exception:
                 self._cleanupFailedOperation(runtime=runtime)
+                unbindApplicationRunSharedServices(applicationRunId)
                 raise
 
             self.trace(
@@ -114,6 +130,7 @@ class RuntimeHost:
         config: dict[str, object] | None = None,
         tracer: Tracer | None = None,
     ) -> ApplicationRuntime:
+        """Loads, initializes, starts, and registers one durable ApplicationRuntime."""
         with self._lane:
             self.requireActive()
             if applicationId in self._runIdByApplicationId:
@@ -129,6 +146,8 @@ class RuntimeHost:
                 config=config,
                 tracer=tracer,
             )
+            applicationRunId = runtime.applicationRun.applicationRunId
+            bindApplicationRunSharedServices(applicationRunId, self.sharedServices)
             try:
                 ApplicationLifecycle.load(
                     runtime=runtime,
@@ -137,6 +156,7 @@ class RuntimeHost:
                 self._register(runtime)
             except Exception:
                 self._cleanupFailedOperation(runtime=runtime)
+                unbindApplicationRunSharedServices(applicationRunId)
                 raise
 
             self.trace(
@@ -150,6 +170,7 @@ class RuntimeHost:
             return runtime
 
     def applicationRuntime(self, applicationRunId: str) -> ApplicationRuntime:
+        """Returns one active ApplicationRuntime by its ApplicationRun identity."""
         if type(applicationRunId) is not str or not applicationRunId:
             raise ValueError("applicationRunId must be a non-empty string.")
         with self._lane:
@@ -161,6 +182,7 @@ class RuntimeHost:
                 ) from err
 
     def closeApplicationRun(self, applicationRunId: str) -> None:
+        """Closes and unregisters one active ApplicationRun from this RuntimeHost."""
         if type(applicationRunId) is not str or not applicationRunId:
             raise ValueError("applicationRunId must be a non-empty string.")
         with self._lane:
@@ -175,6 +197,7 @@ class RuntimeHost:
             applicationId = runtime.applicationRun.application.applicationId
             self._runIdByApplicationId.pop(applicationId, None)
             errors = self._closeRuntime(runtime)
+            unbindApplicationRunSharedServices(applicationRunId)
             self.trace(
                 "application-runtime-closed",
                 attributes=self._runtimeIdentity(runtime),
@@ -186,6 +209,7 @@ class RuntimeHost:
                 )
 
     def stop(self) -> None:
+        """Closes all ApplicationRuntimes, shared host services, and owned tracing."""
         with self._lane:
             if self.state is RuntimeHostState.STOPPED:
                 return
@@ -196,6 +220,12 @@ class RuntimeHost:
                 applicationId = runtime.applicationRun.application.applicationId
                 self._runIdByApplicationId.pop(applicationId, None)
                 errors.extend(self._closeRuntime(runtime))
+                unbindApplicationRunSharedServices(applicationRunId)
+
+            try:
+                self.sharedServices.close()
+            except Exception as err:
+                errors.append(err)
 
             self.state = RuntimeHostState.STOPPED
             self.trace("runtime-host-stopped")
@@ -207,7 +237,7 @@ class RuntimeHost:
 
             if errors:
                 raise ExceptionGroup(
-                    "RuntimeHost shutdown reported ApplicationRuntime cleanup errors.",
+                    "RuntimeHost shutdown reported cleanup errors.",
                     errors,
                 )
 
@@ -219,6 +249,7 @@ class RuntimeHost:
         attributes: dict[str, object] | None = None,
         level: str = "info",
     ) -> bool:
+        """Attempts to emit host evidence without affecting runtime semantics."""
         try:
             self.tracer.emitEvent(
                 domain="runtime-host",
@@ -235,6 +266,7 @@ class RuntimeHost:
         return True
 
     def _register(self, runtime: ApplicationRuntime) -> None:
+        """Registers one successfully initialized ApplicationRuntime in this host."""
         application = runtime.applicationRun.application
         applicationRunId = runtime.applicationRun.applicationRunId
         applicationId = application.applicationId
@@ -253,6 +285,7 @@ class RuntimeHost:
 
     @staticmethod
     def _runtimeIdentity(runtime: ApplicationRuntime) -> dict[str, object]:
+        """Returns stable host trace identity for one ApplicationRuntime."""
         application = runtime.applicationRun.application
         return {
             "appPackId": application.appPackId,
@@ -262,6 +295,7 @@ class RuntimeHost:
 
     @staticmethod
     def _closeRuntime(runtime: ApplicationRuntime) -> list[Exception]:
+        """Closes one ApplicationRuntime and returns cleanup errors as evidence."""
         try:
             runtime.close()
         except Exception as err:
@@ -273,6 +307,7 @@ class RuntimeHost:
         *,
         runtime: ApplicationRuntime,
     ) -> None:
+        """Best-effort closes a runtime whose create/load operation failed."""
         try:
             runtime.close()
         except Exception:
