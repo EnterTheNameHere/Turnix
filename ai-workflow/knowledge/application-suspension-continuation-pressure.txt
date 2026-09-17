@@ -1,0 +1,208 @@
+ACTANT APPLICATION SUSPENSION / CONTINUATION PRESSURE
+=====================================================
+
+Status
+------
+Implementation-pressure working material. This document records semantic direction
+before implementation. It is not yet an authoritative DA/IS replacement.
+
+01. CORE RULE
+------------
+
+01.01. Suspension is a resource-state transition, not an authority-state transition.
+
+01.02. A suspended ApplicationRun remains the same ApplicationRun and preserves the
+same applicationRunId across suspension and wake.
+
+01.03. Python objects, loaded modules, in-memory registries, threads, provider objects,
+processes, and other concrete runtime realization are implementation details and do not
+define ApplicationRun identity.
+
+01.04. A suspended ApplicationRun may therefore have little or no resident
+ApplicationRuntime realization while remaining semantically the same run.
+
+02. RESOURCE RELEASE
+--------------------
+
+02.01. Suspension should release as much non-authoritative resident resource as
+practical.
+
+02.02. Where possible this includes:
+
+- model/VRAM residency;
+- shared provider acquisitions;
+- application-local provider facades and CodeEntry instances;
+- PackLoader/runtime caches;
+- process-tool/runtime objects;
+- transient memory structures;
+- threads/processes which need not remain resident.
+
+02.03. The strongest useful suspension may unload or terminate the concrete
+ApplicationRuntime realization completely while retaining enough managed persistent
+state and continuation information to reconstruct the same ApplicationRun later.
+
+02.04. Logical availability/addressability is separate from residency. A suspended
+application may remain known to RuntimeHost and may be woken by an incoming request,
+event, timer, user action, or policy decision.
+
+03. PERSISTENT DOES NOT MEAN AUTHORITATIVE
+-----------------------------------------
+
+03.01. Actant does not disallow persistence of unfinished/non-authoritative work.
+
+03.02. An active transaction must not be committed merely because suspension or
+resource pressure asks the runtime to quiesce.
+
+03.03. If a transaction/continuation can be serialized safely, Actant may persist its
+staged/non-authoritative representation for later continuation.
+
+03.04. Persisting unfinished transaction/continuation data does not promote it into
+committed State and does not imply that the owning work completed successfully.
+
+03.05. Durable authority and durable continuation are therefore separate categories:
+
+    authoritative durable state
+        accepted committed State / SaveBundle material
+
+    durable continuation
+        non-authoritative information sufficient to resume unfinished work
+
+03.06. If unfinished work cannot be persisted/resumed directly, Actant may instead
+preserve an earlier restart/checkpoint boundary and cancel/discard only the work which
+cannot survive suspension.
+
+04. JOB SEMANTICS ACROSS SUSPENSION
+----------------------------------
+
+04.01. Jobs retain their own lifecycle semantics. Suspension must not redefine Job
+success, completion, cancellation, timeout, supersession, or result authority.
+
+04.02. A Job completed before suspension remains completed. It must not be restarted
+merely because concrete executor/runtime objects were unloaded.
+
+04.03. A running Job may, according to its execution contract and implementation
+capability:
+
+- reach completion before suspension;
+- be preserved for continuation;
+- receive a cancellation request;
+- block or delay suspension while it must continue running.
+
+04.04. If suspension causes a Job to be cancelled, cancellation is an observable
+terminal outcome communicated to the Job creator/owning workflow.
+
+04.05. Actant must not silently recreate arbitrary cancelled Jobs after wake. The
+creator/owning workflow decides whether cancelled work is still needed, discards any
+unfinished/non-authoritative data as required, and starts replacement work explicitly
+when appropriate.
+
+04.06. Completed accepted Job data should remain available according to normal Job
+retention/persistence rules even when live executor objects disappear.
+
+05. CANCELLABILITY / SUSPENSION BARRIERS
+---------------------------------------
+
+05.01. Not all Jobs need to be equally cancellable.
+
+05.02. Suspension should have a quiescing/grace phase rather than immediately killing
+all active work.
+
+05.03. Directional flow:
+
+    ACTIVE
+      |
+      | suspend requested
+      v
+    SUSPENDING
+      - stop accepting work incompatible with suspension
+      - request cancellation where permitted/necessary
+      - allow active work a grace period to reach terminal or resumable state
+      - persist resumable continuation where supported
+      - release resources as work quiesces
+      |
+      +--> suspension conditions satisfied --> SUSPENDED
+      |
+      +--> grace period expires --> policy/user decision or current fallback
+
+05.04. A concrete initial grace period such as 10 seconds may be used as implementation
+configuration/policy. The number is not semantic design.
+
+05.05. Future policy/user-decision behavior may allow waiting longer, abandoning a
+suspension request, or escalating cancellation where permitted.
+
+05.06. Until user-decision infrastructure exists, implementation should use an
+explicit deterministic fallback and report it. It must not silently commit
+transactions or corrupt Job semantics merely to force suspension.
+
+05.07. The design may eventually need to distinguish concepts such as:
+
+- cancellable: supports semantic cooperative cancellation;
+- abandonable: concrete execution may be destroyed with an interrupted/cancelled
+  outcome;
+- must-complete / suspension-blocking: suspension cannot proceed without stronger
+  authority or an explicit decision.
+
+These names/categories are not yet frozen public API.
+
+06. WAKE / RECONSTRUCTION
+-------------------------
+
+06.01. Waking reconstructs runtime realization for the same ApplicationRun.
+
+06.02. Wake restores authoritative application state and any valid durable
+continuation material, then recreates runtime facilities as needed.
+
+06.03. Work that completed before suspension remains completed.
+
+06.04. Work that was cancelled is not silently presented as resumed. The owning
+workflow observes cancellation and may create replacement work.
+
+06.05. Work whose continuation was explicitly preserved may resume according to its
+own continuation contract.
+
+06.06. RuntimeHost therefore needs to distinguish at least:
+
+- Application/ApplicationRun identity and logical availability;
+- resident ApplicationRuntime realization;
+- authoritative durable state;
+- durable non-authoritative continuation;
+- active/terminal Job records and outcomes;
+- shared resource acquisitions/residency.
+
+07. DESIGN CONSEQUENCES
+----------------------
+
+07.01. ApplicationRun lifetime must not be equated with one continuously resident
+ApplicationRuntime Python object.
+
+07.02. Host ingress/addressability may wake a suspended ApplicationRun before work is
+dispatched to it.
+
+07.03. Shared model/resource services must permit suspended applications to release
+expensive resources without losing logical identity.
+
+07.04. Transaction serialization/checkpointing is a continuation mechanism, not an
+authoritative commit mechanism.
+
+07.05. Job persistence/retention and transaction/continuation persistence are separate
+concerns even when both participate in suspension.
+
+08. OPEN IMPLEMENTATION QUESTIONS
+--------------------------------
+
+The following are intentionally unresolved until implementation pressure is examined:
+
+- exact serialized form for unfinished transactions/continuations;
+- which current transaction types are safely persistable;
+- whether continuation lives in SaveBundle, a sibling persistence closure, or another
+  host-managed artifact;
+- how Job records/results are retained independently of live executor objects;
+- exact lifecycle state names/transitions for ACTIVE/SUSPENDING/SUSPENDED/WAKING;
+- how suspension interacts with application lifecycle hooks and CodeEntry load/unload;
+- what makes a Job suspension-blocking versus cancellable/abandonable;
+- default grace-period and current fallback policy;
+- crash recovery while an ApplicationRun is suspended or while suspension is being
+  materialized.
+
+Implementation should resolve these incrementally without weakening the semantic rules
+above.
