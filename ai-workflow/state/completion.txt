@@ -14,13 +14,30 @@ CURRENT POSITION
 ----------------
 Implementation status:
 - Workstream established; application implementation has not started yet.
-- The intended first materialization is a VS Code extension plus an Actant
+- Live source inspection of the current runtime/provider path is complete.
+- The intended first materialization remains a VS Code extension plus an Actant
   application which receives editor context, invokes an Actant-managed model path,
   and returns completion text to VS Code.
 
 Verified/exercised behavior:
 - actant-completion was verified identical to actant-integration at
   af3b844a01a75616238c073203dd88d16d104376 when this state was established.
+- RuntimeHost is the live host boundary and owns zero or more ApplicationRuntime
+  instances; applications are created/loaded through ApplicationLifecycle and then
+  invoked through ApplicationRuntime.
+- ApplicationRun currently has only CREATED, ACTIVE, and STOPPED lifecycle states.
+- ApplicationRuntime owns its PackLoader, capability registry, LLM provider registry,
+  LLM processing pipeline, managed I/O, committed state, process facade, and tracing.
+- The first-party llama.cpp CodeEntry currently owns a long-lived LlamaCppDriver.
+  onLoad constructs it, starts the configured default managed model immediately,
+  and registers the provider; onUnload stops it.
+- LlamaCppDriver currently owns llama-server subprocess lifetime, activeModelName,
+  managed-model switching by stop/start, readiness polling, HTTP/SSE requests, and
+  model/tokenization execution profile support.
+- LlmProcessingPipeline supports provider streaming plus a streamObserver, but no
+  Actant cancellation primitive was found in the live path.
+- No live external RPC/WebSocket/HTTP application-ingress layer was found in the
+  current backend runtime tree. Older web/server code must not be assumed live.
 
 Incomplete behavior:
 - VS Code extension/integration does not yet exist.
@@ -28,18 +45,26 @@ Incomplete behavior:
 - No Completion request transport, editor observation contract, prompt behavior,
   or insertion/inline-completion behavior is materialized.
 - Managed model/server lifecycle and resource arbitration required by Completion
-  are not yet established as shared Actant facilities.
+  remain application/CodeEntry-local in the current llama.cpp implementation rather
+  than host/shared Actant authority.
+- No dormant/wake-on-request application lifecycle exists.
+- No cancellation/staleness contract currently reaches LLM provider execution.
 
 Temporary substitutions/workarounds:
-- None yet. Early implementation may use explicitly limited production-shaped
-  substitutions, but must not make a Completion-owned llama.cpp lifecycle into the
-  shared authority.
+- The first explicit/manual Completion request path may use a narrow Completion-owned
+  external transport adapter around RuntimeHost. It is an ingress adapter, not a new
+  authority for Actant application semantics or final shared transport design.
+- Completion may initially consume the current first-party llama.cpp provider while
+  there is no concurrent model-resource contention. It must not fork or duplicate
+  the provider/server lifecycle locally.
 
 Relevant synchronization point:
 - actant-completion and actant-integration were identical at
   af3b844a01a75616238c073203dd88d16d104376 before coordination registration.
-- Later Integration changes must be consumed by explicit user-performed Git
-  synchronization; the Completion thread cannot perform merges itself.
+- Later Integration source/shared-Pack changes must be consumed by explicit
+  user-performed Git synchronization; the Completion thread cannot perform merges.
+- Coordination-only changes on actant-integration are read directly and do not by
+  themselves require merging into actant-completion.
 
 PROVIDES
 --------
@@ -48,44 +73,59 @@ PROVIDES
   streaming/cancellation, and eventually dormant/wake-on-request application
   semantics.
 - Application-owned VS Code integration once materialized.
+- Concrete evidence that current managed llama.cpp residency is scoped to one
+  CodeEntry/ApplicationRuntime and therefore cannot arbitrate independently running
+  Actant applications by itself.
 
 REQUIRES
 --------
-Shared Actant/Integration ownership is expected for reusable behavior exposed by
-Completion, including as requirements become concrete:
-- managed llama.cpp/model-server lifecycle rather than an application-owned server;
+Shared Actant/Integration ownership is required for reusable behavior exposed by
+Completion:
+- managed llama.cpp/model-server lifetime above an individual application-owned
+  CodeEntry;
 - model/resource acquisition and release suitable for coexistence with the
   materialization-test application and later AI Buddy;
 - eventual ability for a logically available application to release expensive
   inference resources while idle and reactivate on an incoming request;
+- externally initiated application activation/dispatch semantics independent of the
+  model request itself;
 - cancellation/staleness semantics where a request may cease to be useful while
   activation or model execution is in progress.
 
-These are pressure requirements, not claims that the final shared abstractions or
+These requirements were sent to Integration in:
+ai-workflow/mail/integration/inbox/2026-09-17-completion-ingress-and-model-residency.txt
+
+They are pressure requirements, not claims that the final shared abstractions or
 state model have already been designed.
 
 CURRENT OBJECTIVE
 -----------------
-Materialize the smallest useful Completion application path:
-1. inspect current Actant runtime/provider/application construction paths;
-2. determine the smallest production-shaped shared model execution boundary already
-   available or missing;
-3. build the VS Code extension/integration and Completion application without
-   bypassing Actant into a standalone completion server;
-4. export concrete reusable requirements to Integration as they are encountered.
+Materialize the smallest useful Completion application path without waiting for the
+future shared scheduler/resource authority:
+1. define the first editor-observation/completion request contract;
+2. create a narrow external ingress which targets the Completion Application rather
+   than exposing llama.cpp directly;
+3. create the Completion AppPack/capability path using current RuntimeHost and the
+   shared first-party llama.cpp provider;
+4. create a VS Code extension command for explicit completion at the cursor;
+5. preserve seams for later Integration-owned activation, model residency, and
+   cancellation facilities instead of baking temporary ownership into Completion.
 
 OPEN COORDINATION
 -----------------
-No outstanding addressed mail at workstream creation. Shared model lifecycle/resource
-requirements are expected to produce Integration mail once implementation inspection
-makes the required contract concrete enough to act on safely.
+Outgoing request to Integration:
+ai-workflow/mail/integration/inbox/2026-09-17-completion-ingress-and-model-residency.txt
+
+The first manual request path is not blocked by that work. Integration should report
+back when a shared facility is ready and identify the commit Completion should merge.
 
 CONTINUATION
 ------------
-Inspect the live implementation paths on actant-completion for application startup,
-external request transport, shared llama.cpp/provider facilities, and model process
-ownership. Establish what can be reused before choosing the first Completion source
-layout.
+Design and materialize the first Completion source layout and request contract. Keep
+transport application-owned and intentionally narrow, invoke Completion through an
+ApplicationRuntime capability, and reuse the existing first-party llama.cpp provider
+without treating its current CodeEntry-owned model residency as the final shared
+resource authority.
 
 MAINTENANCE RULE
 ----------------
