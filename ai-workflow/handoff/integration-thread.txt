@@ -1,161 +1,178 @@
 ACTANT INTEGRATION THREAD - CURRENT HANDOFF
+===========================================
 
 Owner
 -----
 Actant integration thread.
 
-Current objective
------------------
-Use two independent AppPack consumers as design pressure while materializing
-only the Actant/shared-Pack functionality they currently need. Prefer reusable,
-production-shaped contracts and breaking cleanup over compatibility with stale
-implementation.
-
 Branch
 ------
 Shared writable integration branch: actant-integration
 
-Baseline established
---------------------
-The repository has been explored from the working Evil Birthday application
-inward rather than assuming every backend file is live.
+Current objective
+-----------------
+Reconcile and materialize the new shared-runtime pressure exposed independently by
+Actant Completion and AI Buddy without allowing the first implementation patch to
+become accidental design.
 
-Verified live/shared surfaces are documented in state/actant.txt. Design versus
-implementation classification for the relevant live slice is documented in
-state/design-reconciliation.txt. The effective Evil capability/transaction/
-export graph is documented in state/evil-analysis.txt.
+The immediate shared problem is broader than one application or provider:
 
-The user reports the Evil application is fully functional with its external
-data sources and all repository tests are green. End-to-end Evil execution is
-not possible here because those sources are intentionally absent.
+- RuntimeHost already knows about multiple ApplicationRuntimes;
+- ApplicationRuntime still owns provider/Pack/runtime facilities whose concrete
+  lifetime may be cross-application;
+- the current llama.cpp CodeEntry owns managed llama-server/model residency inside one
+  ApplicationRuntime;
+- Completion and AI Buddy both require shared model/runtime ownership and execution
+  cancellation;
+- Completion additionally requires externally initiated dispatch to an application;
+- AI Buddy additionally creates long-lived multi-application/mixed-latency pressure;
+- strong application suspension may need to remove almost all resident runtime state
+  while preserving the same ApplicationRun identity.
 
-Documentation transition
-------------------------
-CMR-04 remains the legacy specification index. Migrated/new design lives under
- design/ as areas are deliberately moved. Tracing is currently known to be
-migrated and its design/area documents are authoritative even though CMR-04
-cannot index them under current CMR rules.
+Read before implementation
+--------------------------
+The current pre-implementation working material is:
 
-Do not read docs/design/rewrite_recommendations/ or docs/design/upcoming/ as
-implementation knowledge. They are authoring/rewrite workspace.
+- ai-workflow/knowledge/shared-runtime-resource-pressure.txt
+  Shared host-service/model-residency/cancellation/ingress direction derived from
+  Completion + AI Buddy pressure.
 
-Reconciliation results
+- ai-workflow/knowledge/application-suspension-continuation-pressure.txt
+  Suspension semantics: same ApplicationRun/applicationRunId, aggressive runtime
+  unloading, durable non-authoritative continuation, Job outcomes, quiescing/grace,
+  and wake/reconstruction.
+
+The originating application requests are:
+
+- ai-workflow/mail/integration/inbox/
+  2026-09-17-completion-ingress-and-model-residency.txt
+
+- ai-workflow/mail/integration/inbox/
+  2026-09-17-ai-buddy-shared-host-and-concurrency.txt
+
+Relevant live implementation
+----------------------------
+- backend/runtime/runtimeHost.py
+  RuntimeHost is already the host-level lifetime registry for zero or more active
+  ApplicationRuntime instances.
+
+- backend/application/applicationRuntime.py
+  Each ApplicationRuntime currently owns its own capability registry, LLM provider
+  registry/pipeline, PackLoader, process-tool registry, loaded CodeEntries, committed
+  state, and application execution environment.
+
+- first-party/llmDrivers/llamaCpp/codeEntry.py
+  Managed llama.cpp lifetime is currently CodeEntry/ApplicationRuntime-local.
+  LlamaCppDriver owns llama-server process lifetime and model switching by stop/start.
+
+- backend/llm/streamingRuntime.py
+  LLM execution supports streaming/observation but has no Actant cancellation path.
+
+- backend/telemetry/
+  Machine telemetry is available and deliberately separate from resource ownership
+  and policy.
+
+Relevant design inputs
 ----------------------
-ManualActivationPlan + mechanical PackLoader preserve the DA-14/DA-29 authority
-shape and are an intentionally incomplete PackManager substitute.
+Treat these as design inputs, not implementation-preservation requirements:
 
-CodeEntryContext substantially preserves DA-30 ModCallContext lifetime and
-mediation semantics for the currently implemented facade subset.
+- docs/design/DA-19_JOBS_LONG_RUNNING_WORK_AND_CANCELLATION.txt
+- docs/design/DA-28_RUNTIME_HOST_WORKSPACE_OWNERSHIP_AND_COMMAND_SURFACE.txt
+- docs/design/IS-03_WORKSPACE_OWNERSHIP_AND_HOST_LOCKING.txt
+- docs/design/IS-04_RUNTIME_HOST_COMMAND_SURFACE.txt
+- docs/design/IS-05_RUNTIME_HOST_STARTUP_MODES.txt
+- docs/design/IS-06_RUNTIME_HOST_LAN_AND_CLIENT_CONNECTIONS.txt
 
-LlmProcessingPipeline is a fixed LLM-specific partial materialization of DA-31.
-The exercised Evil path correctly nests its ProcessingRun transaction under the
-outer Job transaction. Direct runProcessing() against the committed root can,
-however, make ProcessingRun completion the effective authoritative commit
-boundary; do not make that the final generic ProcessingPipeline contract.
+DA-19 remains especially important because cancellation should materialize Job
+semantics rather than create an unrelated LLM-only cancellation lifecycle.
 
-The previously flagged runJob() memory-before-I/O ordering is classified more
-precisely. DA-04 and DA-24 explicitly allow already committed state to remain
-authoritative even when the owning OrchestrationUnit later fails. A repository
-regression test deliberately requires a failed Job with
- authoritativeStateAccepted=True after managed-I/O publication failure. This is
-therefore not an accidental ordering defect. The incomplete part is DA-07:
-current ManagedIo is not yet the full IoManager with identity-bearing rollback
-points, provider system, root enforcement, and recovery semantics. Do not claim
-cross-domain memory+filesystem atomicity that does not exist.
+Established semantic direction
+------------------------------
+1. Application-local semantic execution/state remains separate from host-owned shared
+   scarce-resource lifetime.
 
-SaveBundle/ApplicationStore match DA-20 identity shape but materialize only the
-committed-value portion of the designed durable closure. Immutable generation
-and current-pointer recovery mechanics are candidate implementation-spec design
-for later promotion.
+2. RuntimeHost is the natural upper lifetime/composition boundary, but shared domains
+   should be separate service objects rather than turning RuntimeHost into a monolith.
 
-Producer/validity/provenance/dependency identity and SourceObservation remain
-candidate newer implementation design awaiting documentation integration.
+3. Do not create a RuntimeHost-specific llama.cpp manager as the final abstraction.
+   Shared model/execution residency must be provider-neutral; llama.cpp is the first
+   concrete realization.
 
-Evil execution graph findings
------------------------------
-One outer evilAnalysis.run@1 Job owns the whole configured batch. Every
-per-window LlmProcessingPipeline.runProcessing() is a child transaction because
-the CodeEntry LLM facade passes the current invocation memory view. Its
-completeWindow capability stages application result identity in that same child
-transaction. ProcessingRun success therefore promotes into the still-speculative
-outer Job; it does not independently publish Application state in the exercised
-path.
+4. Application provider registration/facades may remain application-local while
+   delegating expensive physical runtime/model ownership to a host service.
 
-Per-window result export is not actually an immediate irreversible side effect:
-evilAnalysis.results@1 writes through the same outer Job ManagedIoTransaction,
-so files remain staged until Job I/O publication. Export exceptions are caught
-per window and represented as result evidence; they do not currently fail the
-Job. This is Evil application policy.
+5. External ingress targets Actant/an Application first. Model acquisition is a
+   downstream concern. Logical application addressability must not require model
+   residency.
 
-After Job return the CLI separately calls saveApplication() whenever
- authoritativeStateAccepted is true. Therefore authoritative value acceptance,
-result-JSON publication, and SaveBundle generation publication are three
-separate boundaries. On managed-I/O failure after memory commit, the Job fails
-but the CLI still saves the accepted Application state before re-raising the
-error.
+6. Suspension is a resource-state transition, not an authority-state transition.
+   Suspension preserves the same ApplicationRun/applicationRunId even if concrete
+   Python/runtime objects are destroyed and reconstructed.
 
-Prompt preview uses prepareProcessing() inside a Job, saves accepted reusable
-preparation after Job return, then writes preview files as CLI-owned diagnostic
-projections outside that Job transaction.
+7. Active transactions must never commit merely because suspension/resource pressure
+   asks work to finish. Unfinished transaction/continuation data may be persisted
+   non-authoritatively when safely resumable.
 
-The reusable shape to carry into materialization testing is the outer
-OrchestrationUnit -> child ProcessingRun -> optional transactional completion
-spine, not Evil's prompt/chat/window algorithms.
+8. Jobs keep ordinary lifecycle semantics across suspension. Completed Jobs remain
+   completed. Running Jobs may complete, be preserved, be cancelled, or delay/block
+   suspension according to their contract/policy. Cancellation caused by suspension
+   must be reported to the owning workflow; Actant must not silently restart arbitrary
+   cancelled Jobs.
 
-Shared llama.cpp findings
--------------------------
-first-party/llmDrivers/llamaCpp is the correct shared provider for both active
-applications. It owns one long-lived driver per loaded CodeEntry, supports
-managed/external server operation and model switching, and exposes exact token
-estimation plus streaming chat completion.
+9. Suspension should quiesce with a configurable grace period rather than immediately
+   killing all work. A proving implementation may use a deterministic fallback until
+   user-decision/policy infrastructure exists; the grace duration itself is not
+   semantic design.
 
-Current dedicated tests cover parallelSlots and exact token estimation only.
-The provider and its test file predate the new source-documentation rules:
-codeEntry.py has many undocumented classes/helpers/lifecycle functions, and
- test_llamaCpp.py lacks the required first-line path/version marker. Any code
-change there must bring touched files into the current source rules and expand
-coverage appropriate to the change.
+Likely implementation sequence
+------------------------------
+Do not begin by implementing the whole historical host/client design family.
 
-Processing tests reviewed
--------------------------
-Current tests deliberately cover reusable QueryItem carry-forward, failure
-rollback, filter-as-subset semantics, provider-profile-before-build ordering,
-historical run snapshot retention when a stable QueryItem identity changes,
-observer failure as evidence rather than processing failure, opaque query
-payload evidence, completionInput forwarding without automatic retention,
-completion failure rollback, and child capability memory not escaping a failed
-ProcessingRun.
+Preferred pressure-driven sequence:
 
-These tests validate the currently materialized LLM pipeline strongly, but they
-are not tests for the full DA-31 generic ProcessingPipeline: no Hook
-registration/participation plan, retry/restart, generic processor definition,
-or checkpoint semantics exists yet.
+1. Define/materialize a host-owned provider-neutral shared model/execution residency
+   boundary and adapt managed llama.cpp lifetime to it.
+2. Reconcile and materialize execution cancellation through DA-19 Job semantics and
+   provider execution.
+3. Materialize enough host ingress/dispatch for externally initiated work against an
+   existing ApplicationRun.
+4. Add strong suspension/wake realization incrementally, preserving ApplicationRun
+   identity while releasing resources.
+5. Add broader resource arbitration/scheduler policy only when concrete consumers
+   force its contract.
 
-Next integration work
----------------------
-1. Inspect the materialization-test application state/branch as soon as its
-   concrete implementation appears or its thread exports a framework
-   requirement. Compare its classic/manual-turn and Actant workflows against
-   the reusable execution spine above.
-2. Determine whether its first iteration can use existing Job +
-   LlmProcessingPipeline unchanged. Do not materialize generic checkpoints until
-   a concrete restart requirement demands their semantics.
-3. When shared provider changes are required, extend
-   first-party/llmDrivers/llamaCpp rather than creating an application-local
-   provider, and bring touched Python files under current documentation/version
-   rules.
-4. Keep design-reconciliation.txt current whenever a classification changes.
-5. Finish obsolete docs/design/ai/helpers cleanup when convenient; those files
-   remain excluded from implementation knowledge regardless of connector
-   deletion difficulties.
+Before the first code change
+----------------------------
+Inspect the smallest relevant current tests and design contracts around RuntimeHost,
+ApplicationRun/Job lifecycle, LLM provider registration, llama.cpp lifecycle, and
+persistence. Decide the narrow first abstraction and update the pressure documents if
+that inspection changes any assumption.
+
+Do not implement suspension by serializing arbitrary Python execution state as an
+Actant semantic requirement. What must survive is Actant-visible identity, authority,
+outcomes, and explicit continuation contracts; concrete object reconstruction is an
+implementation detail.
+
+Coordination obligations
+------------------------
+When a shared facility is materialized:
+
+- update ai-workflow/state/actant.txt and any affected shared-Pack state;
+- update design-reconciliation classification where the implementation becomes newer
+  design material or intentionally diverges from existing DA/IS shape;
+- reply to Completion at ai-workflow/mail/completion/inbox/ with the Integration commit
+  it should consume;
+- reply to AI Buddy at ai-workflow/mail/ai-buddy/inbox/ with the Integration commit it
+  should consume;
+- archive the handled Integration inbox requests according to the coordination
+  protocol.
 
 Python/test rules
 -----------------
-All changed Python source follows the repository first-line path/version rule,
-targets Python 3.15, and carries production-quality class/function docstrings.
-Increment the per-file source version whenever code changes. Do not add Python
-3.14 compatibility merely because this thread lacks a 3.15 runtime.
+All changed Python source follows the repository first-line path/version rule, targets
+Python 3.15, and carries production-quality class/function docstrings. Increment the
+per-file source version whenever code changes.
 
-Create/update tests with implementation changes. The user runs Python 3.15 tests
-when runtime verification becomes necessary; request exact commands and explain
-what uncertainty they resolve.
+Create/update tests with implementation changes. The user runs Python 3.15 tests when
+runtime verification becomes necessary; request exact commands and state what
+uncertainty the run resolves.
