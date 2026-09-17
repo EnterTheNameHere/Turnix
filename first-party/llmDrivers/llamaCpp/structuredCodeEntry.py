@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/structuredCodeEntry.py ; version: 1
+# file: first-party/llmDrivers/llamaCpp/structuredCodeEntry.py ; version: 2
 from __future__ import annotations
 
 import importlib.util
@@ -6,6 +6,7 @@ import json
 import sys
 import urllib.request as urlRequest
 from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 
@@ -21,10 +22,15 @@ from backend.llm.structuredMessages import (
     LLM_MESSAGES_FORMAT_ID,
     LlmMessages,
 )
+from backend.runtime.sharedServices import (
+    SharedServiceLease,
+    sharedServicesForApplicationRun,
+)
 
 
 _IMPLEMENTATION_NAME = "actantFirstPartyLlamaCppImplementation"
 _IMPLEMENTATION_PATH = Path(__file__).with_name("codeEntry.py")
+_MANAGED_SERVICE_ID = "llm.driver.llama.cpp.managed"
 
 
 def _loadImplementation():
@@ -52,6 +58,29 @@ _impl = _loadImplementation()
 LlamaCppDriver = _impl.LlamaCppDriver
 LlamaCppModel = _impl.LlamaCppModel
 LlamaCppOptions = _impl.LlamaCppOptions
+
+
+@dataclass(slots=True)
+class _LlamaCppRuntimeState:
+    """Tracks one application provider facade and its host/shared driver claim."""
+
+    driver: object
+    sharedLease: SharedServiceLease[object] | None
+
+
+def _managedCompatibilityKey(config: Mapping[str, object]) -> str:
+    """Returns deterministic configuration identity for one managed host driver."""
+    try:
+        return json.dumps(
+            dict(config),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+    except (TypeError, ValueError) as err:
+        raise ValueError(
+            "Managed llama.cpp configuration must be JSON-compatible for host sharing."
+        ) from err
 
 
 def _messagesForQuery(query: LlmQuery) -> list[dict[str, str]]:
@@ -111,7 +140,7 @@ class LlamaCppStreamProvider:
     """llama.cpp provider supporting plain text and structured message queries."""
 
     def __init__(self, *, driver: LlamaCppDriver) -> None:
-        """Binds this provider to one long-lived CodeEntry-owned driver."""
+        """Binds this application-local provider facade to one driver resource."""
         self.driver = driver
 
     def getExecutionProfile(
@@ -210,25 +239,49 @@ def _buildPayload(
 
 
 def onLoad(ctx):
-    """Creates the driver and publishes the structured-capable llama.cpp provider."""
+    """Publishes one application provider facade over local or host-shared driver state."""
     config = ctx.config.get("llamaCpp", {})
     if not isinstance(config, dict):
         raise ValueError("llamaCpp configuration must be an object.")
-    driver = LlamaCppDriver(config)
+
+    manageServer = config.get("manageServer", False)
+    if type(manageServer) is not bool:
+        raise TypeError("llamaCpp.manageServer must be a boolean.")
+
+    lease: SharedServiceLease[object] | None = None
+    if manageServer:
+        registry = sharedServicesForApplicationRun(ctx.identity.applicationRunId)
+        lease = registry.acquire(
+            serviceId=_MANAGED_SERVICE_ID,
+            compatibilityKey=_managedCompatibilityKey(config),
+            factory=lambda: LlamaCppDriver(config),
+            closer=lambda resource: resource.stop(),
+        )
+        driver = lease.resource
+    else:
+        driver = LlamaCppDriver(config)
+
     try:
-        driver.start()
         ctx.llm.registerProvider(
             "llama.cpp",
             LlamaCppStreamProvider(driver=driver),
         )
     except Exception:
-        driver.stop()
+        if lease is None:
+            driver.stop()
+        else:
+            lease.release()
         raise
-    return driver
+    return _LlamaCppRuntimeState(driver=driver, sharedLease=lease)
 
 
-def onUnload(ctx, driver):
-    """Stops a driver created by onLoad while tolerating foreign lifecycle state."""
+def onUnload(ctx, state):
+    """Releases this application's provider claim without owning another application's resource."""
     del ctx
-    if isinstance(driver, LlamaCppDriver):
-        driver.stop()
+    if not isinstance(state, _LlamaCppRuntimeState):
+        return
+    if state.sharedLease is not None:
+        state.sharedLease.release()
+        return
+    if isinstance(state.driver, LlamaCppDriver):
+        state.driver.stop()
