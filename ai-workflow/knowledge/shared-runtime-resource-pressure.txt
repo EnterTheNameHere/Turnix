@@ -1,0 +1,195 @@
+ACTANT SHARED RUNTIME / RESOURCE PRESSURE
+========================================
+
+Status
+------
+Implementation-pressure working material. This document is durable integration
+knowledge, not authoritative DA/IS specification. It records independently exposed
+requirements and current architectural direction before implementation chooses the
+concrete abstraction.
+
+Sources
+-------
+The current pressure is independently exposed by:
+
+- Actant Completion
+  ai-workflow/mail/integration/inbox/
+  2026-09-17-completion-ingress-and-model-residency.txt
+
+- AI Buddy
+  ai-workflow/mail/integration/inbox/
+  2026-09-17-ai-buddy-shared-host-and-concurrency.txt
+
+Relevant existing material includes current RuntimeHost/ApplicationRuntime ownership,
+the first-party llama.cpp provider, LlmProcessingPipeline, telemetry, DA-19 Job
+semantics, DA-28 RuntimeHost semantics, and IS-03..IS-06 host/client/startup material.
+Those design documents are inputs, not preservation requirements where live pressure
+reveals a better shape.
+
+01. ESTABLISHED PRESSURE
+------------------------
+
+01.01. RuntimeHost already owns the lifetime registry for zero or more simultaneously
+active ApplicationRuntime instances and is the natural upper boundary for shared
+running-host facilities.
+
+01.02. Current ApplicationRuntime ownership is too low for expensive resources whose
+semantics cross applications. Each ApplicationRuntime currently owns its own
+LlmProviderRegistry, PackLoader, process-tool registry, capability registry, and loaded
+CodeEntries.
+
+01.03. The current first-party llama.cpp CodeEntry creates and owns a LlamaCppDriver,
+which in managed mode owns one llama-server subprocess and its resident model. Loading
+the same provider in multiple applications therefore creates mutually unaware server
+and model lifetime authorities.
+
+01.04. Completion, AI Buddy, and Materialization Test create concrete coexistence
+pressure:
+
+- Completion may remain logically available and latency-sensitive;
+- AI Buddy may remain logically available with mixed interactive/opportunistic work;
+- Materialization Test may temporarily request a large/heavy model;
+- all may need the same finite RAM/VRAM/CPU/GPU resources.
+
+01.05. Applications must not become separate Actant universes which independently own
+cross-application scarce resources merely because they have separate ApplicationRuntime
+instances.
+
+02. OWNERSHIP DIRECTION
+----------------------
+
+02.01. Preserve application-local semantic execution and authoritative state.
+ApplicationRuntime remains the execution environment for one ApplicationRun.
+
+02.02. Introduce host-owned/shared runtime services for facilities whose semantic
+lifetime is above one ApplicationRuntime.
+
+02.03. RuntimeHost should own or compose those services as part of the running-host
+boundary, but substantial domains should remain separate service objects rather than
+turning RuntimeHost itself into a monolithic manager.
+
+02.04. Do not solve shared model pressure as a RuntimeHost-specific llama.cpp manager.
+The shared contract should describe model/execution residency and acquisition in
+provider-neutral terms. llama.cpp is one realization of that contract.
+
+02.05. An application-local provider registration/facade may remain useful. Semantic
+availability to an application and physical ownership of shared provider/runtime
+resources are separate concerns. A provider facade may delegate expensive execution to
+a host-owned service.
+
+02.06. The target shape is directionally:
+
+    RuntimeHost
+        ApplicationRuntime registry
+        shared host services
+            model/execution residency authority
+            future other cross-application services
+        eventual ingress/dispatch boundary
+
+    ApplicationRuntime A -- provider facade --+
+    ApplicationRuntime B -- provider facade --+--> shared model execution service
+    ApplicationRuntime C -- provider facade --+
+
+03. MODEL / EXECUTION RESIDENCY
+------------------------------
+
+03.01. Shared model/runtime authority needs enough information to represent configured
+execution resources, currently resident resources, active acquisitions/executions, and
+requesting Application/ApplicationRun identity.
+
+03.02. Immediate proving-ground operations may use llama.cpp's practical replacement
+mechanism: stop the managed server and start the requested model/server again.
+
+03.03. That mechanism must not become the provider-neutral semantic contract. Other
+providers may hold multiple models, use external servers, use cloud execution, or have
+different release/materialization mechanics.
+
+03.04. The shared layer should eventually support at least acquisition, release,
+replacement/unload, and observation. Scheduling/arbitration policy is a later layer
+unless implementation requires a minimal deterministic policy.
+
+03.05. Machine telemetry remains separate:
+
+    telemetry
+        what is the machine doing?
+
+    controlled-resource observation
+        what servers/models/resources does Actant own or know it controls?
+
+    demand
+        which applications/work request resources?
+
+    policy
+        what should Actant do about contention?
+
+Telemetry may inform policy later but does not own resource policy.
+
+04. EXTERNAL INGRESS / ADDRESSABILITY
+------------------------------------
+
+04.01. Completion establishes a concrete need for externally initiated work against an
+already-running Actant application.
+
+04.02. Incoming work targets Actant/the Application first, not a model provider. Model
+acquisition is a downstream execution concern.
+
+04.03. Therefore logical application availability/addressability must be independent of
+expensive model residency and, eventually, independent of full ApplicationRuntime
+residency.
+
+04.04. Existing DA-28 and IS-04/IS-05 direction remains useful: entry/command/client
+surfaces should compose shared RuntimeHost operations without becoming runtime
+authority themselves.
+
+04.05. Completion may initially use a narrow application-owned transport adapter as a
+proving surface, but it must not define the final shared transport/host authority or
+expose llama.cpp directly as the application boundary.
+
+05. CANCELLATION / INTERRUPTION
+------------------------------
+
+05.01. Completion and AI Buddy independently require cancellation that can reach active
+provider execution rather than merely marking the eventual result stale.
+
+05.02. Cancellation is a reusable execution/Job concern, not application-specific
+llama.cpp control.
+
+05.03. Preserve distinctions between:
+
+- result/request staleness: the result is no longer useful;
+- cancellation requested: the owner asks active work to stop;
+- execution stopped: the underlying execution actually ceased;
+- terminal Job outcome: governed by Job semantics.
+
+05.04. DA-19 already owns Job cancellation, timeout, supersession, progress, and
+execution-stop semantics. Any implementation-level cancellation signal/token should
+materialize those semantics rather than create a competing LLM-only lifecycle model.
+
+05.05. Provider-specific cancellation realization may differ. Applications should not
+own the low-level abort mechanism.
+
+06. AI BUDDY SCHEDULER PRESSURE
+-------------------------------
+
+06.01. AI Buddy additionally exposes possible reusable concepts such as bounded
+execution slices, runnable/waiting continuation, latency classes, interruptible work,
+and scheduled wake.
+
+06.02. This pressure is currently less independently corroborated than shared model
+residency/cancellation. Do not prematurely materialize a generic scheduler until AI
+Buddy experiments produce a concrete reusable contract.
+
+07. IMPLEMENTATION ORDER
+------------------------
+
+The current preferred sequencing is:
+
+1. host-owned/shared model execution and residency authority;
+2. reusable execution cancellation reconciled with Job semantics;
+3. host ingress/dispatch sufficient for an already-running/suspended application to be
+   addressed;
+4. broader resource policy/scheduling only when concrete pressure requires it.
+
+This ordering is working direction, not frozen design. Implementation may expose a
+better boundary and should update this document rather than preserve a weak early
+shape.
