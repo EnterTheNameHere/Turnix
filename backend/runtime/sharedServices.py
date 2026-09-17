@@ -1,9 +1,9 @@
-# file: backend/runtime/sharedServices.py ; version: 1
+# file: backend/runtime/sharedServices.py ; version: 2
 from __future__ import annotations
 
 from dataclasses import dataclass
 from threading import RLock
-from typing import TYPE_CHECKING, Generic, TypeVar
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -17,27 +17,25 @@ __all__ = [
     "unbindApplicationRunSharedServices",
 ]
 
-_T = TypeVar("_T")
-
 
 class SharedServiceConflictError(RuntimeError):
     """Reports incompatible attempts to share one host service identity."""
 
 
 @dataclass(slots=True)
-class _SharedServiceRecord(Generic[_T]):
+class _SharedServiceRecord[T]:
     """Owns one host service resource and its active lease count."""
 
     compatibilityKey: str
-    resource: _T
-    closer: Callable[[_T], None]
+    resource: T
+    closer: Callable[[T], None]
     leases: int = 0
 
 
-class SharedServiceLease(Generic[_T]):
+class SharedServiceLease[T]:
     """Reference-counted claim on one RuntimeHost-owned shared service resource."""
 
-    def __init__(self, *, registry: "SharedServiceRegistry", serviceId: str, resource: _T) -> None:
+    def __init__(self, *, registry: SharedServiceRegistry, serviceId: str, resource: T) -> None:
         """Binds one lease to its host registry and shared resource."""
         self._registry = registry
         self._serviceId = serviceId
@@ -54,7 +52,7 @@ class SharedServiceLease(Generic[_T]):
         if self._released:
             return
         self._released = True
-        self._registry._release(self._serviceId)
+        self._registry.releaseLease(self._serviceId)
 
 
 class SharedServiceRegistry:
@@ -73,14 +71,14 @@ class SharedServiceRegistry:
         self._records: dict[str, _SharedServiceRecord[object]] = {}
         self._closed = False
 
-    def acquire(
+    def acquire[T](
         self,
         *,
         serviceId: str,
         compatibilityKey: str,
-        factory: Callable[[], _T],
-        closer: Callable[[_T], None],
-    ) -> SharedServiceLease[_T]:
+        factory: Callable[[], T],
+        closer: Callable[[T], None],
+    ) -> SharedServiceLease[T]:
         """Acquires a compatible host service, creating it on the first lease."""
         if type(serviceId) is not str or not serviceId:
             raise ValueError("serviceId must be a non-empty exact string.")
@@ -97,7 +95,7 @@ class SharedServiceRegistry:
             existing = self._records.get(serviceId)
             if existing is None:
                 resource = factory()
-                record: _SharedServiceRecord[_T] = _SharedServiceRecord(
+                record: _SharedServiceRecord[T] = _SharedServiceRecord(
                     compatibilityKey=compatibilityKey,
                     resource=resource,
                     closer=closer,
@@ -117,7 +115,7 @@ class SharedServiceRegistry:
                 resource=existing.resource,
             )
 
-    def _release(self, serviceId: str) -> None:
+    def releaseLease(self, serviceId: str) -> None:
         """Drops one lease and closes a service when no ApplicationRun still claims it."""
         with self._lane:
             record = self._records.get(serviceId)
@@ -141,7 +139,7 @@ class SharedServiceRegistry:
         for record in reversed(records):
             try:
                 record.closer(record.resource)
-            except Exception as err:
+            except Exception as err:  # noqa: BLE001 - host cleanup must collect arbitrary service failures.
                 errors.append(err)
         if errors:
             raise ExceptionGroup("SharedServiceRegistry close reported errors.", errors)
