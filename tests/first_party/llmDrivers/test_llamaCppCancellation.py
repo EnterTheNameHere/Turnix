@@ -1,10 +1,10 @@
-# file: tests/first_party/llmDrivers/test_llamaCppCancellation.py ; version: 2
+# file: tests/first_party/llmDrivers/test_llamaCppCancellation.py ; version: 3
 from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 from backend.llm.llmTypes import LlmCallRequest, LlmQuery, LlmStreamEvent
 from backend.orchestration import CancellationSignal
@@ -51,7 +51,7 @@ class _Response:
         """Records provider execution-stop attempts."""
         self.closeCalls += 1
 
-    def __enter__(self) -> _Response:
+    def __enter__(self) -> Self:
         """Returns this response as its context value."""
         return self
 
@@ -78,7 +78,7 @@ def test_llama_cpp_cancellation_closes_active_http_response(
         yield LlmStreamEvent(eventType="completed")
 
     monkeypatch.setattr(llamaCpp.urlRequest, "urlopen", openResponse)
-    monkeypatch.setattr(llamaCpp._impl, "_readEvents", readEvents)
+    monkeypatch.setattr(llamaCpp._impl, "_readEvents", readEvents)  # noqa: SLF001 - test replaces adapter substrate parser.
 
     provider = llamaCpp.LlamaCppStreamProvider(driver=_Driver())
     request = LlmCallRequest(
