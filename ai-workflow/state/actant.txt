@@ -201,9 +201,8 @@ onLoad publishes the provider facade without starting the configured default mod
 Provider execution/profile work continues to call ensureModel(), so the first
 operation that actually requires the model materializes residency.
 
-This slice establishes shared ownership and lifetime only. It does not yet provide
-resource arbitration, priority, concurrent incompatible-model scheduling, cancellation,
-or suspension/wake semantics.
+This slice establishes shared ownership and lifetime. Resource arbitration, priority,
+concurrent incompatible-model scheduling, and suspension/wake semantics remain open.
 
 Verification
 ------------
@@ -212,3 +211,43 @@ User-validated on Python 3.15 after commit
 - targeted Ruff checks passed;
 - tests/backend/runtime passed;
 - tests/first_party/llmDrivers passed.
+
+
+Job / execution cancellation
+----------------------------
+ApplicationRuntime.runJob() now supports a stable caller-retained Job handle before
+blocking execution. Job cancellation request and terminal outcome are distinct:
+Pending work may become Cancelled immediately, while a Running Job remains Running
+until its executor acknowledges cancellation and records the terminal Cancelled
+outcome.
+
+A Job-owned CancellationSignal now propagates through invocation-scoped
+CodeEntryContext authority and LLM execution. Pack code can observe/check cancellation
+through ctx.cancellation. LLM facade calls carry the same signal into
+LlmProcessingPipeline and LlmCallRequest.
+
+ProcessingRun now distinguishes Cancelled from Failed. A cancelled ProcessingRun
+aborts unresolved speculative processing state and emits cancellation evidence rather
+than failure evidence.
+
+The first-party structured llama.cpp provider realizes active inference cancellation
+by registering a provider-specific stop callback that closes the active HTTP response.
+The provider does not own Job lifecycle classification; the generic pipeline normalizes
+provider stop under an active request to ExecutionCancelled, and the Job layer records
+the terminal outcome.
+
+Current limits are deliberate:
+- managed-model startup/readiness inside getExecutionProfile()/ensureModel() is not yet
+  interruptible;
+- long-running capability internals must cooperatively observe ctx.cancellation;
+- cancellation does not yet imply resource priority, eviction, or arbitration policy.
+
+Cancellation verification
+-------------------------
+User-validated on Python 3.15 after commit
+8d32a254904b9fd7b50ef861302840855fb32806:
+- targeted Ruff checks passed with repository metric-only complexity rules disabled;
+- backend orchestration/application/LLM tests passed;
+- first-party llama.cpp driver tests passed;
+- cross-thread running Job cancellation, speculative rollback, ProcessingRun
+  cancellation classification, and active llama.cpp response-stop behavior are covered.
