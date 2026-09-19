@@ -138,22 +138,42 @@ Preferred pressure-driven sequence:
    processing, ProcessingRun cancellation/rollback, and active llama.cpp inference
    stop; Python-3.15 Ruff/tests validated at
    8d32a254904b9fd7b50ef861302840855fb32806.
-3. Next: determine and materialize the minimum provider-neutral resource-arbitration
-   seam required so shared managed-model ownership is safe under real concurrent
-   demand.
-4. Materialize enough host ingress/dispatch for externally initiated work against an
+3. NEXT: materialize a provider-neutral model execution-resource boundary above
+   SharedServiceRegistry and below provider mechanics. The first slice tracks requested
+   residency plus active execution claims and implements only:
+   - materialize when empty;
+   - share/acquire when compatible;
+   - replace incompatible idle residency;
+   - return typed contention when incompatible residency is actively used.
+   It must not add generic priority, queueing, preemption, telemetry scoring, or silent
+   provider termination.
+4. Adapt managed llama.cpp to realize that contract. Driver/server stop/start remains a
+   concrete mechanism, not the generic semantic boundary.
+5. Exercise Completion, Materialization Test, and AI Buddy pressure against explicit
+   contention. If active preemption becomes necessary, policy must request cancellation
+   through the owning Job and wait for claim release before residency replacement.
+6. Materialize enough host ingress/dispatch for externally initiated work against an
    existing ApplicationRun.
-5. Add strong suspension/wake realization incrementally, preserving ApplicationRun
+7. Add strong suspension/wake realization incrementally, preserving ApplicationRun
    identity while releasing resources.
-6. Add broader scheduler/resource policy only when concrete consumers force its
+8. Add broader scheduler/resource policy only when concrete consumers force its
    contract.
 
-Before the first code change
-----------------------------
-Inspect the smallest relevant current tests and design contracts around RuntimeHost,
-ApplicationRun/Job lifecycle, LLM provider registration, llama.cpp lifecycle, and
-persistence. Decide the narrow first abstraction and update the pressure documents if
-that inspection changes any assumption.
+Before the next code change
+---------------------------
+Inspect the current shared-service tests, llama.cpp structured adapter/driver boundary,
+LlmProcessingPipeline execution entry, and the Job cancellation signal now in use.
+
+The intended first abstraction is not a scheduler. Preserve:
+
+    SharedServiceRegistry -> lifetime
+    execution resource    -> residency / active claims / contention
+    Job                   -> cancellation and outcome
+    provider              -> concrete load/unload/execute
+    telemetry             -> observation only
+
+If current code inspection reveals that this boundary cannot be introduced cleanly,
+update the pressure document before broadening the abstraction.
 
 Do not implement suspension by serializing arbitrary Python execution state as an
 Actant semantic requirement. What must survive is Actant-visible identity, authority,
