@@ -108,7 +108,84 @@ different release/materialization mechanics.
 replacement/unload, and observation. Scheduling/arbitration policy is a later layer
 unless implementation requires a minimal deterministic policy.
 
-03.05. Machine telemetry remains separate:
+03.05. SharedServiceRegistry remains a lifetime/compatibility mechanism. It must not
+become the model scheduler, VRAM policy engine, Job owner, or provider-specific
+residency controller.
+
+03.06. The next provider-neutral layer is a scarce execution-resource boundary above
+shared service lifetime and below application semantics. Its responsibility is to
+coordinate model/runtime residency and active execution claims on one controlled
+execution resource.
+
+Directionally:
+
+    Application / Job
+        execution demand
+            |
+            v
+    model execution resource
+        resident model/runtime
+        active execution claims
+        compatibility/contention
+            |
+            v
+    provider residency adapter
+        llama.cpp first
+        concrete load/unload/execute mechanics
+
+03.07. The first demand shape needs only enough identity to explain ownership and
+contention:
+
+- requesting applicationRunId;
+- requesting Job identity/cancellation signal where a Job exists;
+- provider/resource identity;
+- requested model identity.
+
+Do not add generic priority classes, queue weights, VRAM scores, or retry semantics
+before a concrete consumer requires them.
+
+03.08. The first deterministic arbitration behavior is intentionally narrow:
+
+- no model resident -> materialize the requested model and execute;
+- same compatible model resident -> acquire execution on that residency;
+- incompatible model resident but idle -> replace/unload residency automatically,
+  then materialize the requested model;
+- incompatible model resident with active execution -> expose typed contention rather
+  than silently preempting, killing, queueing, or choosing a winner.
+
+The contention result/error must carry enough evidence to identify requested residency,
+current residency, and active owning work/application identity where available.
+
+03.09. Active-work preemption, when later justified by policy, must compose through Job
+cancellation rather than bypassing it:
+
+    policy/resource pressure
+        -> request cancellation on owning Job
+        -> Job/provider cancellation path stops execution
+        -> execution claim releases
+        -> resource becomes idle
+        -> residency replacement may proceed
+
+The resource arbiter must not terminate provider execution behind the Job lifecycle and
+then reconstruct a cancellation outcome after the fact.
+
+03.10. Provider-specific mechanisms remain below the generic resource contract.
+llama.cpp may realize replacement through server/model stop/start. Another provider may
+hold several models concurrently, use a remote endpoint, or release resources
+differently. The generic contract describes residency/claims/contention, not
+llama.cpp process mechanics.
+
+03.11. Machine telemetry is deliberately not authoritative for the first arbitration
+slice. Controlled residency gives stronger knowledge about Actant-owned resources than
+free-VRAM heuristics. Later policy may combine:
+
+    known Actant residency
+    + machine telemetry
+    + model/resource requirements
+
+to decide whether multiple residencies may coexist.
+
+03.12. Machine telemetry remains separate:
 
     telemetry
         what is the machine doing?
@@ -184,12 +261,43 @@ Buddy experiments produce a concrete reusable contract.
 
 The current preferred sequencing is:
 
-1. host-owned/shared model execution and residency authority;
-2. reusable execution cancellation reconciled with Job semantics;
-3. host ingress/dispatch sufficient for an already-running/suspended application to be
-   addressed;
-4. broader resource policy/scheduling only when concrete pressure requires it.
+1. DONE: host-owned shared service lifetime and compatible managed llama.cpp sharing;
+2. DONE: reusable Job-owned execution cancellation through provider execution;
+3. NEXT: provider-neutral execution-resource contract with residency + active claims;
+4. llama.cpp realization of idle replacement and explicit active contention;
+5. exercise Completion / Materialization Test / AI Buddy pressure against that seam;
+6. only then add waiting, cancellation-based preemption, priority, queueing, telemetry-
+   informed coexistence, or broader scheduling where concrete pressure requires it;
+7. host ingress/dispatch sufficient for an already-running/suspended application to be
+   addressed remains the following independent host-surface concern.
 
 This ordering is working direction, not frozen design. Implementation may expose a
 better boundary and should update this document rather than preserve a weak early
 shape.
+
+
+08. ARBITRATION INVARIANTS
+--------------------------
+
+The next implementation should preserve these boundaries:
+
+    SharedServiceRegistry
+        owns compatible shared service lifetime
+
+    execution resource
+        arbitrates residency and active claims
+
+    Job
+        owns cancellation request and terminal outcome
+
+    provider adapter / driver
+        performs concrete execution and residency operations
+
+    telemetry
+        observes machine state
+
+    policy
+        decides preemption/priority only once such policy is actually defined
+
+The first arbitration slice should make contention safe and observable, not attempt to
+solve the eventual scheduler.
