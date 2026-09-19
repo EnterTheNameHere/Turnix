@@ -1,22 +1,35 @@
-# file: tests/backend/llm/test_cancellation.py ; version: 1
+# file: tests/backend/llm/test_cancellation.py ; version: 2
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
 
-from backend.llm.llmTypes import LlmExecutionProfile, LlmQuery, LlmStreamEvent
+from backend.llm.llmTypes import LlmCallRequest, LlmExecutionProfile, LlmQuery, LlmStreamEvent
 from backend.llm.streamingRuntime import LlmProcessingPipeline, LlmProviderRegistry
 from backend.orchestration import CancellationSignal, ExecutionCancelled
 from backend.processing.runtime import QueryItem
 from backend.registration import RegistrationScope
 from backend.values import CommittedValueLayer, MISSING
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 
 class _CancellingProvider:
     """Provider that requests cancellation after producing one partial delta."""
 
-    def getExecutionProfile(self, *, model, providerOptions) -> LlmExecutionProfile:
+    def getExecutionProfile(
+        self,
+        *,
+        model: str | None,
+        providerOptions: object,
+    ) -> LlmExecutionProfile:
         """Returns one deterministic execution profile."""
+        del model, providerOptions
         return LlmExecutionProfile(contextWindowTokens=4096)
 
-    def stream(self, request):
+    def stream(self, request: LlmCallRequest) -> Iterator[LlmStreamEvent]:
         """Requests cancellation between partial and later provider events."""
         yield LlmStreamEvent(eventType="delta", text="partial")
         assert request.cancellationSignal is not None
@@ -55,22 +68,37 @@ def test_direct_llm_execution_reports_intentional_cancellation() -> None:
 
 
 def test_cancelled_processing_run_discards_speculative_processing_state() -> None:
-    """Cancelled LLM work aborts its ProcessingRun transaction."""
+    """Cancelled LLM work aborts its ProcessingRun transaction and reports cancellation."""
     state = CommittedValueLayer()
     signal = CancellationSignal()
+    traceReasons: list[str] = []
 
-    def invoke(capabilityId, payload, memoryView):
+    def invoke(capabilityId: str, payload: object, memoryView: object) -> object:
         """Builds deterministic processing input around the cancellation provider."""
+        del memoryView
+        if not isinstance(payload, dict):
+            raise TypeError("Test pipeline payload must be an object.")
         if capabilityId == "build-items@1":
             return [QueryItem(itemId="one", kind="test", content="question")]
         if capabilityId == "build-query@1":
-            return {"formatId": "text/plain", "payload": payload["queryItems"][0]["content"]}
+            queryItems = payload["queryItems"]
+            if not isinstance(queryItems, list):
+                raise TypeError("Test queryItems must be a list.")
+            first = queryItems[0]
+            if not isinstance(first, dict):
+                raise TypeError("Test QueryItem snapshot must be an object.")
+            return {"formatId": "text/plain", "payload": first["content"]}
         raise AssertionError(capabilityId)
+
+    def trace(reason: str, _attributes: dict[str, object]) -> None:
+        """Captures processing lifecycle trace reasons."""
+        traceReasons.append(reason)
 
     pipeline = LlmProcessingPipeline(
         providers=_providers(),
         state=state,
         capabilityInvoker=invoke,
+        trace=trace,
     )
 
     with pytest.raises(ExecutionCancelled):
@@ -83,5 +111,7 @@ def test_cancelled_processing_run_discards_speculative_processing_state() -> Non
             cancellationSignal=signal,
         )
 
+    assert "processing-run-cancelled" in traceReasons
+    assert "processing-run-failed" not in traceReasons
     assert state.load("processing/cancelled/currentqueryitems") is MISSING
     assert state.revisionId("processing/cancelled/currentqueryitems") == 0
