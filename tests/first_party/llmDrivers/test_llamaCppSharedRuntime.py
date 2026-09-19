@@ -1,4 +1,4 @@
-# file: tests/first_party/llmDrivers/test_llamaCppSharedRuntime.py ; version: 3
+# file: tests/first_party/llmDrivers/test_llamaCppSharedRuntime.py ; version: 4
 from __future__ import annotations
 
 import importlib.util
@@ -41,7 +41,7 @@ class _FakeDriver:
         self.config = dict(config)
         self.startCalls = 0
         self.stopCalls = 0
-        _FakeDriver.instances.append(self)
+        _fakeDriverInstances.append(self)
 
     def start(self) -> None:
         """Records eager startup if the adapter incorrectly performs it."""
@@ -80,9 +80,9 @@ def _context(applicationRunId: str) -> SimpleNamespace:
     )
 
 
-def test_managed_driver_is_shared_and_lazy_across_application_runs(monkeypatch: MonkeyPatch) -> None:
+def test_managed_driver_is_shared_and_lazy_across_application_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     """Two application-local providers lease one host driver without eager model startup."""
-    _FakeDriver.instances.clear()
+    _fakeDriverInstances.clear()
     monkeypatch.setattr(llamaCpp, "LlamaCppDriver", _FakeDriver)
     registry = SharedServiceRegistry()
     firstContext = _context("run-a")
