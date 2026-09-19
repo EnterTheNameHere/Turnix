@@ -1,8 +1,10 @@
-# file: backend/llm/streamingRuntime.py ; version: 9
+# file: backend/llm/streamingRuntime.py ; version: 10
 from __future__ import annotations
 
+import base64
 import hashlib
 import time
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -195,7 +197,7 @@ class LlmProcessingPipeline:
         transaction = transactionBase.openTransaction()
         committed = False
         try:
-            registration, provider, options, profile = self._resolveExecution(
+            registration, _provider, options, profile = self._resolveExecution(
                 providerName=providerName,
                 model=model,
                 providerOptions=providerOptions,
@@ -284,10 +286,8 @@ class LlmProcessingPipeline:
             )
         finally:
             if not committed:
-                try:
+                with suppress(RuntimeError):
                     transaction.abort()
-                except RuntimeError:
-                    pass
 
     def runProcessing(
         self,
@@ -456,19 +456,15 @@ class LlmProcessingPipeline:
         except ExecutionCancelled:
             run.cancel()
             if not committed:
-                try:
+                with suppress(RuntimeError):
                     transaction.abort()
-                except RuntimeError:
-                    pass
             self._emitTrace("processing-run-cancelled", run, {})
             raise
         except Exception:
             run.fail()
             if not committed:
-                try:
+                with suppress(RuntimeError):
                     transaction.abort()
-                except RuntimeError:
-                    pass
             self._emitTrace("processing-run-failed", run, {})
             raise
 
@@ -490,8 +486,10 @@ class LlmProcessingPipeline:
         for itemId in currentIds:
             address = self._queryItemAddress(memoryKey, itemId)
             snapshot = transaction.load(address)
+            if snapshot is MISSING:
+                raise RuntimeError(f"Committed QueryItem {itemId!r} is missing.")
             if not isinstance(snapshot, dict):
-                raise RuntimeError(f"Committed QueryItem {itemId!r} is missing or invalid.")
+                raise TypeError(f"Committed QueryItem {itemId!r} must be an object.")
             if snapshot.get("itemId") != itemId:
                 raise RuntimeError(f"Committed QueryItem identity mismatch at {address!r}.")
             snapshots.append(snapshot)
@@ -539,8 +537,6 @@ class LlmProcessingPipeline:
             evidence["payloadBytes"] = len(encoded)
             evidence["payloadSha256"] = hashlib.sha256(encoded).hexdigest()
         elif type(query.payload) is bytes:
-            import base64
-
             evidence["payloadBase64"] = base64.b64encode(query.payload).decode("ascii")
             evidence["payloadBytes"] = len(query.payload)
             evidence["payloadSha256"] = hashlib.sha256(query.payload).hexdigest()
@@ -646,10 +642,7 @@ class LlmProcessingPipeline:
             stream = provider.stream(request)
             for index, event in enumerate(stream):
                 self._raiseIfCancelled(cancellationSignal)
-                if not isinstance(event, LlmStreamEvent):
-                    raise LlmProviderProtocolError(f"Provider yielded non-LlmStreamEvent at index {index}.")
-                if completed:
-                    raise LlmProviderProtocolError("Provider emitted an event after completion.")
+                self._validateStreamEvent(event=event, index=index, completed=completed)
                 if processingRun is not None:
                     processingRun.enterStage(ProcessingStage.STREAM_EVENT)
                 if event.eventType == "delta":
@@ -658,11 +651,11 @@ class LlmProcessingPipeline:
                     completed = True
                     finalMetadata = event.metadata
                 else:
-                    raise LlmProviderProtocolError(f"Unsupported provider event {event.eventType!r}.")
+                    self._raiseUnsupportedStreamEvent(event)
                 if streamObserver is not None:
                     try:
                         streamObserver(event)
-                    except Exception as err:
+                    except Exception as err:  # noqa: BLE001 - observer failure is non-authoritative evidence only.
                         observerErrors.append(f"{type(err).__qualname__}: {err}")
                         self._emitObserverFailure(processingRun, err)
         except ExecutionCancelled:
@@ -692,6 +685,28 @@ class LlmProcessingPipeline:
             durationNs=endedMonotonicNs - startedMonotonicNs,
             providerMetadata=finalMetadata,
             observerErrors=tuple(observerErrors),
+        )
+
+    @staticmethod
+    def _validateStreamEvent(
+        *,
+        event: object,
+        index: int,
+        completed: bool,
+    ) -> None:
+        """Validates one provider event before generic stream handling."""
+        if not isinstance(event, LlmStreamEvent):
+            raise LlmProviderProtocolError(
+                f"Provider yielded non-LlmStreamEvent at index {index}.",
+            )
+        if completed:
+            raise LlmProviderProtocolError("Provider emitted an event after completion.")
+
+    @staticmethod
+    def _raiseUnsupportedStreamEvent(event: LlmStreamEvent) -> None:
+        """Raises protocol failure for an unsupported provider event kind."""
+        raise LlmProviderProtocolError(
+            f"Unsupported provider event {event.eventType!r}.",
         )
 
     @staticmethod
@@ -747,7 +762,7 @@ class LlmProcessingPipeline:
             attributes["processingRunId"] = run.processingRunId
         try:
             self._trace("stream-observer-failed", attributes)
-        except Exception:
+        except Exception:  # noqa: BLE001 - tracing must never alter inference semantics.
             return
 
     def _emitTrace(self, reason: str, run: ProcessingRun, extra: dict[str, object]) -> None:
@@ -764,7 +779,7 @@ class LlmProcessingPipeline:
                     **extra,
                 },
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - tracing must never alter ProcessingRun semantics.
             return
 
 
