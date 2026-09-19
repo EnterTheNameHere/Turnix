@@ -1,15 +1,14 @@
-# file: backend/context/codeEntryContext.py ; version: 25
+# file: backend/context/codeEntryContext.py ; version: 26
 from __future__ import annotations
 
+from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from backend.core.immutableValue import ImmutableValueFreezer
 from backend.llm.errors import LlmProviderProtocolError
 from backend.llm.llmTypes import LlmExecutionProfile, LlmQuery
-from backend.orchestration.cancellation import CancellationSignal
 from backend.process.context import ProcessFacade
 from backend.process.runtime import ProcessRunner, ProcessToolRegistry
 from backend.values.committed import ValueState
@@ -18,6 +17,8 @@ from backend.workspace.runtime import EphemeralWorkspace
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+    from pathlib import Path
+
     from backend.capabilities.runtime import CapabilityHandler, CapabilityRegistry
     from backend.core.immutableValue import ImmutableValue
     from backend.io.managedIo import ManagedIo, ManagedIoTransaction
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
         LlmProviderRegistry,
         StreamingLlmResult,
     )
+    from backend.orchestration.cancellation import CancellationSignal
     from backend.registration import RegistrationScope
     from backend.values.committed import CommittedValueLayer, CommittedValueTransaction
 
@@ -43,50 +45,50 @@ class _IoFacade:
         self._io = io
         self._requireValid = requireValid
 
-    def observeFile(self, path, *, contentHash: bool = False) -> dict[str, object]:
+    def observeFile(self, path: str | Path, *, contentHash: bool = False) -> dict[str, object]:
         """Returns JSON-compatible Actant source-observation evidence."""
         self._requireValid()
         return self._io.observeFile(path, contentHash=contentHash).snapshot()
 
-    def readObservedText(self, path) -> dict[str, object]:
+    def readObservedText(self, path: str | Path) -> dict[str, object]:
         """Returns exact UTF-8 text together with its source observation."""
         self._requireValid()
         value, observation = self._io.readObservedText(path)
         return {"value": value, "observation": observation.snapshot()}
 
-    def readObservedLines(self, path) -> dict[str, object]:
+    def readObservedLines(self, path: str | Path) -> dict[str, object]:
         """Returns exact UTF-8 lines together with their source observation."""
         self._requireValid()
         value, observation = self._io.readObservedLines(path)
         return {"value": value, "observation": observation.snapshot()}
 
-    def readObservedJson(self, path) -> dict[str, object]:
+    def readObservedJson(self, path: str | Path) -> dict[str, object]:
         """Returns JSON together with its Actant source observation."""
         self._requireValid()
         value, observation = self._io.readObservedJson(path)
         return {"value": value, "observation": observation.snapshot()}
 
-    def readText(self, path):
+    def readText(self, path: str | Path) -> str:
         """Reads UTF-8 text through the invocation's managed-I/O view."""
         self._requireValid()
         return self._io.readText(path)
 
-    def readJson(self, path):
+    def readJson(self, path: str | Path) -> dict[str, object]:
         """Reads JSON through the invocation's managed-I/O view."""
         self._requireValid()
         return self._io.readJson(path)
 
-    def readLines(self, path):
+    def readLines(self, path: str | Path) -> tuple[str, ...]:
         """Reads UTF-8 lines through the invocation's managed-I/O view."""
         self._requireValid()
         return self._io.readLines(path)
 
-    def writeTextAtomic(self, path, text: str) -> None:
+    def writeTextAtomic(self, path: str | Path, text: str) -> None:
         """Requests an atomic text write through the managed-I/O view."""
         self._requireValid()
         self._io.writeTextAtomic(path, text)
 
-    def writeJsonAtomic(self, path, value: object) -> None:
+    def writeJsonAtomic(self, path: str | Path, value: object) -> None:
         """Requests an atomic JSON write through the managed-I/O view."""
         self._requireValid()
         self._io.writeJsonAtomic(path, value)
@@ -254,10 +256,8 @@ class _MemoryFacade:
     def close(self) -> None:
         """Best-effort aborts unresolved transactions owned by this invocation."""
         for transaction in reversed(self._openedTransactions):
-            try:
-                transaction._transaction.abort()
-            except RuntimeError:
-                pass
+            with suppress(RuntimeError):
+                transaction.abort()
         self._openedTransactions.clear()
 
 
