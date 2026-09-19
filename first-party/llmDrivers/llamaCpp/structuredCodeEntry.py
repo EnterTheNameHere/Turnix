@@ -1,16 +1,17 @@
-# file: first-party/llmDrivers/llamaCpp/structuredCodeEntry.py ; version: 2
+# file: first-party/llmDrivers/llamaCpp/structuredCodeEntry.py ; version: 3
+# ruff: noqa: INP001
 from __future__ import annotations
 
 import importlib.util
 import json
 import sys
 import urllib.request as urlRequest
-from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
+from typing import TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 
-from backend.core.immutableValue import ImmutableValue
 from backend.llm.errors import LlmProviderConnectionError
 from backend.llm.llmTypes import (
     LlmCallRequest,
@@ -22,10 +23,14 @@ from backend.llm.structuredMessages import (
     LLM_MESSAGES_FORMAT_ID,
     LlmMessages,
 )
-from backend.runtime.sharedServices import (
-    SharedServiceLease,
-    sharedServicesForApplicationRun,
-)
+from backend.runtime.sharedServices import sharedServicesForApplicationRun
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping
+
+    from backend.context.codeEntryContext import CodeEntryContext
+    from backend.core.immutableValue import ImmutableValue
+    from backend.runtime.sharedServices import SharedServiceLease
 
 
 _IMPLEMENTATION_NAME = "actantFirstPartyLlamaCppImplementation"
@@ -33,7 +38,7 @@ _IMPLEMENTATION_PATH = Path(__file__).with_name("codeEntry.py")
 _MANAGED_SERVICE_ID = "llm.driver.llama.cpp.managed"
 
 
-def _loadImplementation():
+def _loadImplementation() -> ModuleType:
     """Loads the existing llama.cpp driver implementation as this adapter's substrate."""
     existing = sys.modules.get(_IMPLEMENTATION_NAME)
     if existing is not None:
@@ -48,7 +53,7 @@ def _loadImplementation():
     sys.modules[_IMPLEMENTATION_NAME] = module
     try:
         spec.loader.exec_module(module)
-    except Exception:
+    except Exception:  # noqa: BLE001 - import failure must remove the partially loaded dynamic module.
         sys.modules.pop(_IMPLEMENTATION_NAME, None)
         raise
     return module
@@ -79,7 +84,7 @@ def _managedCompatibilityKey(config: Mapping[str, object]) -> str:
         )
     except (TypeError, ValueError) as err:
         raise ValueError(
-            "Managed llama.cpp configuration must be JSON-compatible for host sharing."
+            "Managed llama.cpp configuration must be JSON-compatible for host sharing.",
         ) from err
 
 
@@ -93,7 +98,7 @@ def _messagesForQuery(query: LlmQuery) -> list[dict[str, str]]:
         return LlmMessages.fromPayload(query.payload).snapshot()
     raise ValueError(
         "llama.cpp supports text/plain and actant.llm.messages@1, not "
-        f"{query.formatId!r}."
+        f"{query.formatId!r}.",
     )
 
 
@@ -116,7 +121,7 @@ class LlamaCppTokenEstimator:
         prompt = templated.get("prompt")
         if type(prompt) is not str:
             raise _impl.LlmProviderProtocolError(
-                "llama.cpp /apply-template response does not contain a string prompt."
+                "llama.cpp /apply-template response does not contain a string prompt.",
             )
         tokenized = self._driver.postJson(
             "/tokenize",
@@ -131,7 +136,7 @@ class LlamaCppTokenEstimator:
         tokens = tokenized.get("tokens")
         if not isinstance(tokens, list):
             raise _impl.LlmProviderProtocolError(
-                "llama.cpp /tokenize response does not contain a tokens list."
+                "llama.cpp /tokenize response does not contain a tokens list.",
             )
         return len(tokens)
 
@@ -150,7 +155,7 @@ class LlamaCppStreamProvider:
         providerOptions: Mapping[str, ImmutableValue],
     ) -> LlmExecutionProfile:
         """Returns execution evidence and a query-format-aware exact estimator."""
-        options = _impl._parseInferenceOptions(providerOptions)
+        options = _impl._parseInferenceOptions(providerOptions)  # noqa: SLF001 - adapter reuses substrate parser.
         selected = self.driver.ensureModel(model)
         metadata: dict[str, ImmutableValue] = {
             "baseUrl": self.driver.baseUrl,
@@ -176,14 +181,14 @@ class LlamaCppStreamProvider:
     def stream(self, request: LlmCallRequest) -> Iterator[LlmStreamEvent]:
         """Streams one query without flattening structured conversation turns."""
         selected = self.driver.ensureModel(request.model)
-        options = _impl._parseInferenceOptions(request.providerOptions)
+        options = _impl._parseInferenceOptions(request.providerOptions)  # noqa: SLF001 - adapter reuses substrate parser.
         payload = _buildPayload(
             request,
             options,
             includeRequestedModel=not self.driver.manageServer,
         )
         endpoint = f"{self.driver.baseUrl}/v1/chat/completions"
-        httpRequest = urlRequest.Request(
+        httpRequest = urlRequest.Request(  # noqa: S310 - driver configuration controls the explicit provider endpoint.
             endpoint,
             data=json.dumps(payload).encode("utf-8"),
             headers={
@@ -193,19 +198,19 @@ class LlamaCppStreamProvider:
             method="POST",
         )
         try:
-            with urlRequest.urlopen(
+            with urlRequest.urlopen(  # noqa: S310 - provider endpoint is explicitly configured by Actant.
                 httpRequest,
                 timeout=options.timeoutSeconds,
             ) as response:
-                yield from _impl._readEvents(response)
+                yield from _impl._readEvents(response)  # noqa: SLF001 - adapter reuses substrate SSE parser.
         except HTTPError as err:
             active = "" if selected is None else f" for model {selected.name!r}"
             raise LlmProviderConnectionError(
-                f"llama.cpp returned HTTP {err.code} for {endpoint}{active}."
+                f"llama.cpp returned HTTP {err.code} for {endpoint}{active}.",
             ) from err
         except (URLError, TimeoutError) as err:
             raise LlmProviderConnectionError(
-                f"Failed communicating with llama.cpp at {endpoint}."
+                f"Failed communicating with llama.cpp at {endpoint}.",
             ) from err
 
 
@@ -232,17 +237,15 @@ def _buildPayload(
         ("seed", options.seed),
         ("reasoning_effort", options.reasoningEffort),
     )
-    for key, value in mappings:
-        if value is not None:
-            payload[key] = value
+    payload.update({key: value for key, value in mappings if value is not None})
     return payload
 
 
-def onLoad(ctx):
+def onLoad(ctx: CodeEntryContext) -> _LlamaCppRuntimeState:
     """Publishes one application provider facade over local or host-shared driver state."""
     config = ctx.config.get("llamaCpp", {})
     if not isinstance(config, dict):
-        raise ValueError("llamaCpp configuration must be an object.")
+        raise TypeError("llamaCpp configuration must be an object.")
 
     manageServer = config.get("manageServer", False)
     if type(manageServer) is not bool:
@@ -266,7 +269,7 @@ def onLoad(ctx):
             "llama.cpp",
             LlamaCppStreamProvider(driver=driver),
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - registration may fail through arbitrary registry/Pack lifecycle code.
         if lease is None:
             driver.stop()
         else:
@@ -275,7 +278,7 @@ def onLoad(ctx):
     return _LlamaCppRuntimeState(driver=driver, sharedLease=lease)
 
 
-def onUnload(ctx, state):
+def onUnload(ctx: CodeEntryContext, state: object) -> None:
     """Releases this application's provider claim without owning another application's resource."""
     del ctx
     if not isinstance(state, _LlamaCppRuntimeState):
