@@ -1,6 +1,7 @@
-# file: backend/runtime/runtimeHost.py ; version: 5
+# file: backend/runtime/runtimeHost.py ; version: 6
 from __future__ import annotations
 
+from contextlib import suppress
 from enum import StrEnum
 from threading import RLock
 
@@ -14,7 +15,7 @@ from backend.runtime.sharedServices import (
     unbindApplicationRunSharedServices,
 )
 from backend.save import ApplicationStore
-from backend.tracing import TraceSinkDestination, Tracer
+from backend.tracing import Tracer, TraceSinkDestination
 
 __all__ = ["RuntimeHost", "RuntimeHostState"]
 
@@ -28,7 +29,8 @@ class RuntimeHostState(StrEnum):
 
 
 class RuntimeHost:
-    """Host-level Actant runtime boundary owning zero or more ApplicationRuntimes.
+    """
+    Host-level Actant runtime boundary owning zero or more ApplicationRuntimes.
 
     RuntimeHost is not an Application or ApplicationRun. It coordinates shared
     host-facing services and owns the lifetime registry for live
@@ -110,7 +112,7 @@ class RuntimeHost:
                     plan=plan,
                 )
                 self._register(runtime)
-            except Exception:
+            except Exception:  # noqa: BLE001 - lifecycle failure may originate from arbitrary Pack code.
                 self._cleanupFailedOperation(runtime=runtime)
                 unbindApplicationRunSharedServices(applicationRunId)
                 raise
@@ -154,7 +156,7 @@ class RuntimeHost:
                     plan=plan,
                 )
                 self._register(runtime)
-            except Exception:
+            except Exception:  # noqa: BLE001 - lifecycle failure may originate from arbitrary Pack code.
                 self._cleanupFailedOperation(runtime=runtime)
                 unbindApplicationRunSharedServices(applicationRunId)
                 raise
@@ -224,16 +226,14 @@ class RuntimeHost:
 
             try:
                 self.sharedServices.close()
-            except Exception as err:
+            except Exception as err:  # noqa: BLE001 - host shutdown aggregates arbitrary service failures.
                 errors.append(err)
 
             self.state = RuntimeHostState.STOPPED
             self.trace("runtime-host-stopped")
             if self._ownsTracer:
-                try:
+                with suppress(Exception):  # noqa: BLE001 - tracing must not alter host shutdown semantics.
                     self.tracer.close()
-                except Exception:
-                    pass
 
             if errors:
                 raise ExceptionGroup(
@@ -261,7 +261,7 @@ class RuntimeHost:
                     **({} if attributes is None else attributes),
                 },
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - observability failure is deliberately isolated.
             return False
         return True
 
@@ -298,7 +298,7 @@ class RuntimeHost:
         """Closes one ApplicationRuntime and returns cleanup errors as evidence."""
         try:
             runtime.close()
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001 - Pack/runtime cleanup may report arbitrary failures.
             return [err]
         return []
 
@@ -308,7 +308,5 @@ class RuntimeHost:
         runtime: ApplicationRuntime,
     ) -> None:
         """Best-effort closes a runtime whose create/load operation failed."""
-        try:
+        with suppress(Exception):  # noqa: BLE001 - preserve the original create/load failure.
             runtime.close()
-        except Exception:
-            pass
