@@ -1,17 +1,20 @@
-# file: tests/first_party/llmDrivers/test_llamaCppSharedRuntime.py ; version: 6
+# file: tests/first_party/llmDrivers/test_llamaCppSharedRuntime.py ; version: 7
 from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
-
-import pytest
+from typing import TYPE_CHECKING
 
 from backend.runtime.sharedServices import (
     SharedServiceRegistry,
     bindApplicationRunSharedServices,
     unbindApplicationRunSharedServices,
 )
+
+if TYPE_CHECKING:
+    import pytest
+
 
 _CODE_ENTRY = (
     Path(__file__).parents[3]
