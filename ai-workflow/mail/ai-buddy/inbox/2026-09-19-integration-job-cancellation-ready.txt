@@ -1,0 +1,62 @@
+FROM
+integration
+
+TO
+ai-buddy
+
+SUBJECT
+Job-owned cancellation is validated and ready to consume
+
+STATUS
+completion
+
+CONTEXT
+Integration has completed the first generic cancellation slice required for mixed
+latency shared-runtime work.
+
+REQUEST / INFORMATION
+The validated implementation commit is:
+
+8d32a254904b9fd7b50ef861302840855fb32806
+
+The cancellation path is Job-owned and provider-neutral:
+- a caller may retain a Job handle before runJob() blocks;
+- requestCancellation() records a request separately from terminal outcome;
+- Running work remains Running until execution acknowledges cancellation;
+- CodeEntryContext exposes ctx.cancellation for cooperative Pack work;
+- LLM calls carry the same signal into provider execution;
+- cancelled ProcessingRuns roll back unresolved speculative state and are not
+  classified as Failed;
+- llama.cpp closes only its active inference HTTP response as the concrete stop action.
+
+This gives AI Buddy a reusable interruption mechanism without embedding AI-Buddy policy
+inside the provider or host.
+
+Current limits:
+- managed model startup/readiness is still not interruptible;
+- priority/latency classes and model eviction/arbitration are not implemented;
+- cancellation does not silently restart work.
+
+OWNERSHIP EXPECTATION
+AI Buddy may rely on Job cancellation and ctx.cancellation. Integration continues to
+own provider-neutral resource arbitration; AI Buddy should continue reporting concrete
+latency/priority pressure rather than implementing host policy itself.
+
+BLOCKING
+Active inference cancellation is resolved. Mixed-latency model arbitration remains open.
+
+RELEVANT MATERIAL
+backend/orchestration/cancellation.py
+backend/orchestration/runtime.py
+backend/application/applicationRuntime.py
+backend/context/codeEntryContext.py
+backend/processing/runtime.py
+backend/llm/llmTypes.py
+backend/llm/streamingRuntime.py
+first-party/llmDrivers/llamaCpp/structuredCodeEntry.py
+
+REPORT BACK
+Send concrete AI Buddy contention/priority requirements when they become testable.
+
+NOTES
+User-validated targeted Ruff and backend/first-party tests pass on Python 3.15.
