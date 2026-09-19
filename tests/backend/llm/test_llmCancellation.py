@@ -1,4 +1,4 @@
-# file: tests/backend/llm/test_llmCancellation.py ; version: 2
+# file: tests/backend/llm/test_llmCancellation.py ; version: 3
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -10,7 +10,7 @@ from backend.llm.streamingRuntime import LlmProcessingPipeline, LlmProviderRegis
 from backend.orchestration import CancellationSignal, ExecutionCancelled
 from backend.processing.runtime import QueryItem
 from backend.registration import RegistrationScope
-from backend.values import CommittedValueLayer, MISSING
+from backend.values import MISSING, CommittedValueLayer
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
