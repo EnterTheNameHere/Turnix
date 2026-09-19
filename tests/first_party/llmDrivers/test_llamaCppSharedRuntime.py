@@ -1,10 +1,9 @@
-# file: tests/first_party/llmDrivers/test_llamaCppSharedRuntime.py ; version: 4
+# file: tests/first_party/llmDrivers/test_llamaCppSharedRuntime.py ; version: 5
 from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -13,9 +12,6 @@ from backend.runtime.sharedServices import (
     bindApplicationRunSharedServices,
     unbindApplicationRunSharedServices,
 )
-
-if TYPE_CHECKING:
-    from pytest import MonkeyPatch
 
 _CODE_ENTRY = (
     Path(__file__).parents[3]
@@ -30,11 +26,11 @@ assert _SPEC.loader is not None
 llamaCpp = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(llamaCpp)
 
+_fakeDriverInstances: list[object] = []
+
 
 class _FakeDriver:
     """Records construction/start/stop while avoiding a real llama.cpp process."""
-
-    instances: ClassVar[list[_FakeDriver]] = []
 
     def __init__(self, config: dict[str, object]) -> None:
         """Captures one effective driver configuration."""
@@ -80,7 +76,9 @@ def _context(applicationRunId: str) -> SimpleNamespace:
     )
 
 
-def test_managed_driver_is_shared_and_lazy_across_application_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_managed_driver_is_shared_and_lazy_across_application_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Two application-local providers lease one host driver without eager model startup."""
     _fakeDriverInstances.clear()
     monkeypatch.setattr(llamaCpp, "LlamaCppDriver", _FakeDriver)
@@ -93,8 +91,9 @@ def test_managed_driver_is_shared_and_lazy_across_application_runs(monkeypatch: 
         firstState = llamaCpp.onLoad(firstContext)
         secondState = llamaCpp.onLoad(secondContext)
 
-        assert len(_FakeDriver.instances) == 1
-        driver = _FakeDriver.instances[0]
+        assert len(_fakeDriverInstances) == 1
+        driver = _fakeDriverInstances[0]
+        assert isinstance(driver, _FakeDriver)
         assert driver.startCalls == 0
         assert firstState.driver is driver
         assert secondState.driver is driver
