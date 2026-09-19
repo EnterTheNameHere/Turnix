@@ -1,4 +1,4 @@
-# file: backend/processing/runtime.py ; version: 1
+# file: backend/processing/runtime.py ; version: 2
 from __future__ import annotations
 
 from collections.abc import Mapping as MappingABC
@@ -29,6 +29,8 @@ def plainImmutableValue(value: ImmutableValue) -> object:
 
 
 class ProcessingStage(StrEnum):
+    """Observable stages of the currently materialized processing pipeline."""
+
     PREPARE_INPUT = "prepare-input"
     RESOLVE_EXECUTION_PROFILE = "resolve-execution-profile"
     BUILD_QUERY_ITEMS = "build-query-items"
@@ -42,9 +44,12 @@ class ProcessingStage(StrEnum):
 
 
 class ProcessingRunOutcome(StrEnum):
+    """Observable lifecycle outcome for one ProcessingRun."""
+
     RUNNING = "Running"
     COMPLETED = "Completed"
     FAILED = "Failed"
+    CANCELLED = "Cancelled"
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +62,7 @@ class QueryItem:
     metadata: Mapping[str, ImmutableValue] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        """Validates identity/content and freezes generic QueryItem metadata."""
         if type(self.itemId) is not str or not self.itemId:
             raise ValueError("QueryItem.itemId must be a non-empty string.")
         if type(self.kind) is not str or not self.kind:
@@ -66,6 +72,7 @@ class QueryItem:
         object.__setattr__(self, "metadata", ImmutableValueFreezer().freezeMapping(self.metadata, "metadata"))
 
     def snapshot(self) -> dict[str, object]:
+        """Returns a detached plain representation of this QueryItem."""
         return {
             "itemId": self.itemId,
             "kind": self.kind,
@@ -74,7 +81,8 @@ class QueryItem:
         }
 
     @classmethod
-    def fromSnapshot(cls, value: object) -> "QueryItem":
+    def fromSnapshot(cls, value: object) -> QueryItem:
+        """Reconstructs one QueryItem from its snapshot representation."""
         if not isinstance(value, dict):
             raise TypeError("QueryItem snapshot must be an object.")
         metadata = value.get("metadata", {})
@@ -100,15 +108,23 @@ class ProcessingRun:
     queryItems: tuple[QueryItem, ...] = ()
 
     def enterStage(self, stage: ProcessingStage) -> None:
+        """Moves this running ProcessingRun to another observable stage."""
         if self.outcome is not ProcessingRunOutcome.RUNNING:
             raise RuntimeError("A terminal ProcessingRun cannot enter another stage.")
         self.stage = stage
 
     def complete(self) -> None:
+        """Records successful terminal completion."""
         if self.outcome is not ProcessingRunOutcome.RUNNING:
             raise RuntimeError("ProcessingRun is already terminal.")
         self.outcome = ProcessingRunOutcome.COMPLETED
 
     def fail(self) -> None:
+        """Records failure when the run is still active."""
         if self.outcome is ProcessingRunOutcome.RUNNING:
             self.outcome = ProcessingRunOutcome.FAILED
+
+    def cancel(self) -> None:
+        """Records intentional cancellation when the run is still active."""
+        if self.outcome is ProcessingRunOutcome.RUNNING:
+            self.outcome = ProcessingRunOutcome.CANCELLED
