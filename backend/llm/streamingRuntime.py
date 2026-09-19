@@ -1,4 +1,4 @@
-# file: backend/llm/streamingRuntime.py ; version: 8
+# file: backend/llm/streamingRuntime.py ; version: 9
 from __future__ import annotations
 
 import hashlib
@@ -325,6 +325,7 @@ class LlmProcessingPipeline:
                 providerOptions=providerOptions,
                 cancellationSignal=cancellationSignal,
             )
+            self._raiseIfCancelled(cancellationSignal)
             executionSnapshot = {
                 "providerName": providerName,
                 "providerOwnerId": registration.ownerId,
@@ -334,6 +335,7 @@ class LlmProcessingPipeline:
                 "metadata": plainImmutableValue(profile.metadata),
             }
 
+            self._raiseIfCancelled(cancellationSignal)
             previousSnapshots = self._loadCurrentQueryItems(
                 transaction=transaction,
                 memoryKey=memoryKey,
@@ -350,6 +352,7 @@ class LlmProcessingPipeline:
                 },
                 transaction,
             )
+            self._raiseIfCancelled(cancellationSignal)
             reusableItems = self._requireQueryItems(built, stage="BUILD_QUERY_ITEMS")
             self._stageReusableQueryItems(transaction, memoryKey=memoryKey, items=reusableItems)
 
@@ -365,6 +368,7 @@ class LlmProcessingPipeline:
                     },
                     transaction,
                 )
+                self._raiseIfCancelled(cancellationSignal)
                 acceptedItems = self._requireQueryItems(filtered, stage="FILTER_QUERY_ITEMS")
                 self._requireFilteredSubset(reusableItems, acceptedItems)
             run.queryItems = acceptedItems
@@ -379,6 +383,7 @@ class LlmProcessingPipeline:
                 },
                 transaction,
             )
+            self._raiseIfCancelled(cancellationSignal)
             query = self._requireQuery(builtQuery)
 
             run.enterStage(ProcessingStage.PREPARE_PROVIDER_CALL)
@@ -394,6 +399,7 @@ class LlmProcessingPipeline:
                 cancellationSignal=cancellationSignal,
             )
 
+            self._raiseIfCancelled(cancellationSignal)
             run.enterStage(ProcessingStage.UPDATE_QUERY_ITEMS)
             transaction.set(currentItemsAddress, [item.itemId for item in reusableItems])
             transaction.set(
@@ -420,6 +426,7 @@ class LlmProcessingPipeline:
             run.enterStage(ProcessingStage.COMPLETE)
             completionResult = None
             if completionCapabilityId is not None:
+                self._raiseIfCancelled(cancellationSignal)
                 completionResult = self._capabilityInvoker(
                     completionCapabilityId,
                     self._completionPayload(
@@ -432,7 +439,9 @@ class LlmProcessingPipeline:
                     ),
                     transaction,
                 )
+                self._raiseIfCancelled(cancellationSignal)
 
+            self._raiseIfCancelled(cancellationSignal)
             transaction.commit()
             committed = True
             run.complete()
