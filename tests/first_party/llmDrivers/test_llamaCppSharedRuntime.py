@@ -1,10 +1,10 @@
-# file: tests/first_party/llmDrivers/test_llamaCppSharedRuntime.py ; version: 2
+# file: tests/first_party/llmDrivers/test_llamaCppSharedRuntime.py ; version: 3
 from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 import pytest
 
