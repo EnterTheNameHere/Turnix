@@ -180,3 +180,35 @@ implementation. Unreferenced, incompatible, or superseded files are expected to
 exist after iterative development. Expand this state only after establishing a
 consumer/import/test path or after intentionally selecting a dormant subsystem
 for integration.
+
+
+Shared host services / model residency
+--------------------------------------
+RuntimeHost now owns a SharedServiceRegistry for cross-ApplicationRun runtime
+resources. ApplicationRun identities are bound to the owning host registry while
+hosted, allowing application-local CodeEntries/providers to lease compatible shared
+resources without moving application semantic registries to host scope.
+
+The first proving consumer is first-party llama.cpp. When manageServer=true, the
+structured llama.cpp CodeEntry now leases one host-owned managed LlamaCppDriver using
+a deterministic configuration compatibility key. Multiple ApplicationRuns with the
+same managed configuration receive application-local provider facades over the same
+driver. The final lease release stops the managed driver. Unmanaged/external llama.cpp
+configuration remains application-local.
+
+Managed llama.cpp Pack activation is now lazy with respect to server/model residency:
+onLoad publishes the provider facade without starting the configured default model.
+Provider execution/profile work continues to call ensureModel(), so the first
+operation that actually requires the model materializes residency.
+
+This slice establishes shared ownership and lifetime only. It does not yet provide
+resource arbitration, priority, concurrent incompatible-model scheduling, cancellation,
+or suspension/wake semantics.
+
+Verification
+------------
+User-validated on Python 3.15 after commit
+64c176860602bcf8c7f80607fd1b6c013b18e47b:
+- targeted Ruff checks passed;
+- tests/backend/runtime passed;
+- tests/first_party/llmDrivers passed.
