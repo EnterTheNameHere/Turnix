@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 13
+# file: backend/application/applicationRuntime.py ; version: 14
 from __future__ import annotations
 
 from copy import deepcopy
@@ -10,7 +10,8 @@ from backend.capabilities.runtime import CapabilityRegistry
 from backend.context.codeEntryContext import CodeEntryContext, CodeEntryIdentity
 from backend.io.managedIo import ManagedIo, ManagedIoTransaction
 from backend.llm.streamingRuntime import LlmProviderRegistry, LlmProcessingPipeline
-from backend.orchestration.runtime import Job, OrchestrationUnit, OrchestrationUnitOutcome
+from backend.orchestration.cancellation import CancellationSignal, ExecutionCancelled
+from backend.orchestration.runtime import Job, JobState, OrchestrationUnit, OrchestrationUnitOutcome
 from backend.packs.runtime import PackLoader, PackResolver
 from backend.process.configuration import processToolDefinitionsFromConfig
 from backend.process.context import ProcessFacade
@@ -371,6 +372,7 @@ class ApplicationRuntime:
         allowRegistration: bool = False,
         memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
         ioView: ManagedIo | ManagedIoTransaction | None = None,
+        cancellationSignal: CancellationSignal | None = None,
     ) -> CodeEntryContext:
         """Creates one fresh call-specific CodeEntryContext with explicit facilities."""
         self.requireOperational()
@@ -402,8 +404,10 @@ class ApplicationRuntime:
                 payload,
                 memoryView=self.applicationRun.application.committedState if memoryView is None else memoryView,
                 ioView=self.io if ioView is None else ioView,
+                cancellationSignal=cancellationSignal,
             ),
             allowRegistration=allowRegistration,
+            cancellationSignal=cancellationSignal,
         )
         contextReference = context
         return context
@@ -426,6 +430,7 @@ class ApplicationRuntime:
         *,
         memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
         ioView: ManagedIo | ManagedIoTransaction | None = None,
+        cancellationSignal: CancellationSignal | None = None,
     ) -> object:
         """Invokes one resolved capability with a fresh call-specific context."""
         with self._lane:
@@ -450,6 +455,7 @@ class ApplicationRuntime:
                 registrationScope=scope,
                 memoryView=memoryView,
                 ioView=ioView,
+                cancellationSignal=cancellationSignal,
             )
             try:
                 result = self.capabilities.invokeResolved(registration, context=context, payload=payload)
@@ -471,19 +477,47 @@ class ApplicationRuntime:
                 context.invalidate()
                 scope.withdraw()
 
-    def runJob(self, capabilityId: str, payload: object | None = None) -> Job:
-        """Runs one serialized mutating capability Job with memory and I/O boundaries."""
+    def runJob(
+        self,
+        capabilityId: str,
+        payload: object | None = None,
+        *,
+        job: Job | None = None,
+    ) -> Job:
+        """
+        Runs one serialized mutating capability Job with cancellation-aware boundaries.
+
+        Supplying a Pending Job lets the caller retain its stable handle before this
+        blocking execution begins and request cancellation from another thread.
+        Existing callers may omit job and receive the internally created handle after
+        execution as before.
+        """
         with self._lane:
             self.requireActive()
-            job = Job.new()
-            job.start()
+            activeJob = Job.new() if job is None else job
+            if not isinstance(activeJob, Job):
+                raise TypeError("job must be a Job or None.")
+            activeJob.start()
+            if activeJob.state is JobState.CANCELLED:
+                self.trace(
+                    "job-cancelled",
+                    attributes={
+                        "jobId": activeJob.jobId,
+                        "applicationId": self.applicationRun.application.applicationId,
+                        "applicationRunId": self.applicationRun.applicationRunId,
+                        "capabilityId": capabilityId,
+                        "phase": "before-start",
+                    },
+                )
+                return activeJob
+
             unit = OrchestrationUnit.mutation(
                 applicationRunId=self.applicationRun.applicationRunId,
                 transactionBase=self.applicationRun.application.committedState,
             )
             ioTransaction = self.io.openTransaction()
             orchestrationAttributes = {
-                "jobId": job.jobId,
+                "jobId": activeJob.jobId,
                 "orchestrationUnitId": unit.orchestrationUnitId,
                 "applicationId": self.applicationRun.application.applicationId,
                 "applicationRunId": unit.applicationRunId,
@@ -499,14 +533,17 @@ class ApplicationRuntime:
             self.trace("OrchestrationUnitStarted", attributes=orchestrationAttributes)
             self.trace("job-started", attributes=orchestrationAttributes)
             try:
+                activeJob.cancellationSignal.raiseIfRequested()
                 result = self.invokeCapability(
                     capabilityId,
                     payload,
                     memoryView=unit.memoryView,
                     ioView=ioTransaction,
+                    cancellationSignal=activeJob.cancellationSignal,
                 )
+                activeJob.cancellationSignal.raiseIfRequested()
                 unit.commitMutation()
-                job.authoritativeStateAccepted = True
+                activeJob.authoritativeStateAccepted = True
                 self.trace("OrchestrationUnitTransactionCommitted", attributes=orchestrationAttributes)
                 try:
                     ioTransaction.commit()
@@ -519,6 +556,20 @@ class ApplicationRuntime:
                     )
                     raise
                 self.trace("managed-io-transaction-committed", attributes=orchestrationAttributes)
+            except ExecutionCancelled:
+                mutationWasResolved = unit.mutationResolved
+                try:
+                    ioTransaction.abort()
+                except RuntimeError:
+                    pass
+                else:
+                    self.trace("managed-io-transaction-aborted", attributes=orchestrationAttributes)
+                unit.finish(OrchestrationUnitOutcome.CANCELLED)
+                if not mutationWasResolved:
+                    self.trace("OrchestrationUnitTransactionAborted", attributes=orchestrationAttributes)
+                self.trace("OrchestrationUnitCancelled", attributes=orchestrationAttributes)
+                activeJob.cancel()
+                self.trace("job-cancelled", attributes=orchestrationAttributes)
             except Exception as err:
                 mutationWasResolved = unit.mutationResolved
                 try:
@@ -536,7 +587,7 @@ class ApplicationRuntime:
                     attributes=orchestrationAttributes,
                     level="error",
                 )
-                job.fail(err)
+                activeJob.fail(err)
                 self.trace(
                     "job-failed",
                     message=str(err),
@@ -546,6 +597,6 @@ class ApplicationRuntime:
             else:
                 unit.finish(OrchestrationUnitOutcome.COMPLETED)
                 self.trace("OrchestrationUnitCompleted", attributes=orchestrationAttributes)
-                job.succeed(result)
+                activeJob.succeed(result)
                 self.trace("job-completed", attributes=orchestrationAttributes)
-            return job
+            return activeJob
