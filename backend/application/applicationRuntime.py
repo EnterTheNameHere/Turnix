@@ -1,15 +1,16 @@
-# file: backend/application/applicationRuntime.py ; version: 16
+# file: backend/application/applicationRuntime.py ; version: 17
 from __future__ import annotations
 
+from contextlib import suppress
 from copy import deepcopy
-from pathlib import Path
 from threading import RLock
+from typing import TYPE_CHECKING
 
 from backend.application.runtime import Application, ApplicationRun, ApplicationRunState
 from backend.capabilities.runtime import CapabilityRegistry
 from backend.context.codeEntryContext import CodeEntryContext, CodeEntryIdentity
 from backend.io.managedIo import ManagedIo, ManagedIoTransaction
-from backend.llm.streamingRuntime import LlmProviderRegistry, LlmProcessingPipeline
+from backend.llm.streamingRuntime import LlmProcessingPipeline, LlmProviderRegistry
 from backend.orchestration.cancellation import CancellationSignal, ExecutionCancelled
 from backend.orchestration.runtime import Job, JobState, OrchestrationUnit, OrchestrationUnitOutcome
 from backend.packs.runtime import PackLoader, PackResolver
@@ -18,14 +19,19 @@ from backend.process.context import ProcessFacade
 from backend.process.runtime import ProcessRunner, ProcessToolRegistry
 from backend.registration import RegistrationScope
 from backend.save import ApplicationStore, LoadedApplicationSave, SaveBundle
-from backend.tracing import TraceSinkDestination, Tracer
-from backend.values.committed import CommittedValueLayer, CommittedValueTransaction
+from backend.tracing import Tracer, TraceSinkDestination
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from backend.values.committed import CommittedValueLayer, CommittedValueTransaction
 
 __all__ = ["ApplicationRuntime"]
 
 
 class ApplicationRuntime:
-    """Live Actant execution environment for exactly one ApplicationRun.
+    """
+    Live Actant execution environment for exactly one ApplicationRun.
 
     Tracing is evidence only. Trace publication or tracer-close failures are
     deliberately isolated here so loss of observability cannot alter runtime
@@ -46,7 +52,8 @@ class ApplicationRuntime:
         config: dict[str, object] | None = None,
         tracer: Tracer | None = None,
     ) -> None:
-        """Creates one ApplicationRun and its mediated runtime services.
+        """
+        Creates one ApplicationRun and its mediated runtime services.
 
         Args:
             appPackId: Defining AppPack identity when creating a new Application.
@@ -62,6 +69,7 @@ class ApplicationRuntime:
                 are supplied, or a new Application has no valid AppPack ID.
             TypeError: If the supplied store or resolver has the wrong type, or
                 process-tool configuration is structurally invalid.
+
         """
         if application is not None and saveBundle is not None:
             raise ValueError("ApplicationRuntime accepts either application or saveBundle, not both.")
@@ -109,7 +117,11 @@ class ApplicationRuntime:
         self.llmPipeline = LlmProcessingPipeline(
             providers=self.llmProviders,
             state=self.applicationRun.application.committedState,
-            capabilityInvoker=lambda capabilityId, payload=None, memoryView=None: self.invokeCapability(capabilityId, payload, memoryView=memoryView),
+            capabilityInvoker=lambda capabilityId, payload=None, memoryView=None: self.invokeCapability(
+                capabilityId,
+                payload,
+                memoryView=memoryView,
+            ),
             trace=lambda reason, attributes: self.trace(reason, attributes=attributes),
         )
         self.packLoader = PackLoader(runtime=self, resolver=packResolver)
@@ -134,8 +146,9 @@ class ApplicationRuntime:
         packResolver: PackResolver,
         config: dict[str, object] | None = None,
         tracer: Tracer | None = None,
-    ) -> tuple["ApplicationRuntime", LoadedApplicationSave]:
-        """Creates a fresh ApplicationRuntime from one durable Application root snapshot.
+    ) -> tuple[ApplicationRuntime, LoadedApplicationSave]:
+        """
+        Creates a fresh ApplicationRuntime from one durable Application root snapshot.
 
         Loading restores only the SaveBundle's committed root. No transaction
         hierarchy exists in the new runtime. AppPack lifecycle hooks are a later
@@ -187,7 +200,8 @@ class ApplicationRuntime:
         application.durableGeneration = bundle.generation
 
     def saveApplication(self, applicationStore: ApplicationStore | None = None) -> SaveBundle:
-        """Persists exactly one snapshot of the current authoritative root.
+        """
+        Persists exactly one snapshot of the current authoritative root.
 
         Filesystem publication is attempted before the runtime accepts the new
         SaveBundle generation. A failed publication therefore leaves the
@@ -210,7 +224,8 @@ class ApplicationRuntime:
             return candidate
 
     def captureSaveBundle(self) -> SaveBundle:
-        """Captures the next in-memory SaveBundle generation for this Application.
+        """
+        Captures the next in-memory SaveBundle generation for this Application.
 
         The returned bundle protects committed state at the instant of capture.
         This method does not claim filesystem or persistent-I/O publication;
@@ -242,7 +257,7 @@ class ApplicationRuntime:
                 label=reason,
                 attributes={} if attributes is None else attributes,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - tracing failure must not alter runtime semantics.
             return False
         return True
 
@@ -299,7 +314,7 @@ class ApplicationRuntime:
             errors: list[Exception] = []
             try:
                 self.packLoader.close()
-            except Exception as err:
+            except Exception as err:  # noqa: BLE001 - Pack cleanup may execute arbitrary Pack code.
                 errors.append(err)
 
             self.trace(
@@ -327,23 +342,21 @@ class ApplicationRuntime:
             if self.applicationRun.active:
                 try:
                     self.stop()
-                except Exception as err:
+                except Exception as err:  # noqa: BLE001 - runtime cleanup may cross arbitrary Pack code.
                     errors.append(err)
             else:
                 try:
                     self.packLoader.close()
-                except Exception as err:
+                except Exception as err:  # noqa: BLE001 - Pack cleanup may execute arbitrary Pack code.
                     errors.append(err)
                 try:
                     self.abortInitialization()
-                except Exception as err:
+                except Exception as err:  # noqa: BLE001 - initialization cleanup is aggregated best-effort.
                     errors.append(err)
 
             if self._ownsTracer and not self._tracerClosed:
-                try:
+                with suppress(Exception):
                     self.tracer.close()
-                except Exception:
-                    pass
                 self._tracerClosed = True
 
             self._closed = True
@@ -577,7 +590,7 @@ class ApplicationRuntime:
                 self.trace("OrchestrationUnitCancelled", attributes=orchestrationAttributes)
                 activeJob.cancel()
                 self.trace("job-cancelled", attributes=orchestrationAttributes)
-            except Exception as err:
+            except Exception as err:  # noqa: BLE001 - capability failure may originate from arbitrary Pack code.
                 mutationWasResolved = unit.mutationResolved
                 try:
                     ioTransaction.abort()
