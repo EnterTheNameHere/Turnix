@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/structuredCodeEntry.py ; version: 3
+# file: first-party/llmDrivers/llamaCpp/structuredCodeEntry.py ; version: 4
 # ruff: noqa: INP001
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ def _loadImplementation() -> ModuleType:
     sys.modules[_IMPLEMENTATION_NAME] = module
     try:
         spec.loader.exec_module(module)
-    except Exception:  # noqa: BLE001 - import failure must remove the partially loaded dynamic module.
+    except Exception:
         sys.modules.pop(_IMPLEMENTATION_NAME, None)
         raise
     return module
@@ -269,7 +269,7 @@ def onLoad(ctx: CodeEntryContext) -> _LlamaCppRuntimeState:
             "llama.cpp",
             LlamaCppStreamProvider(driver=driver),
         )
-    except Exception:  # noqa: BLE001 - registration may fail through arbitrary registry/Pack lifecycle code.
+    except Exception:
         if lease is None:
             driver.stop()
         else:
