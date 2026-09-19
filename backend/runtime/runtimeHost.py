@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 7
+# file: backend/runtime/runtimeHost.py ; version: 8
 from __future__ import annotations
 
 from contextlib import suppress
@@ -112,7 +112,7 @@ class RuntimeHost:
                     plan=plan,
                 )
                 self._register(runtime)
-            except Exception:  # noqa: BLE001 - lifecycle failure may originate from arbitrary Pack code.
+            except Exception:
                 self._cleanupFailedOperation(runtime=runtime)
                 unbindApplicationRunSharedServices(applicationRunId)
                 raise
@@ -156,7 +156,7 @@ class RuntimeHost:
                     plan=plan,
                 )
                 self._register(runtime)
-            except Exception:  # noqa: BLE001 - lifecycle failure may originate from arbitrary Pack code.
+            except Exception:
                 self._cleanupFailedOperation(runtime=runtime)
                 unbindApplicationRunSharedServices(applicationRunId)
                 raise
