@@ -1,9 +1,9 @@
-# file: tests/backend/application/test_jobCancellation.py ; version: 1
+# file: tests/backend/application/test_jobCancellation.py ; version: 2
 from pathlib import Path
 from threading import Event, Thread
 
 from backend.application.applicationRuntime import ApplicationRuntime
-from backend.context import CodeEntryIdentity
+from backend.context import CodeEntryContext, CodeEntryIdentity
 from backend.orchestration import Job, JobState
 from backend.packs.runtime import PackResolver
 from backend.registration import RegistrationScope
@@ -33,7 +33,7 @@ def test_running_job_can_be_cancelled_from_another_thread_without_committing() -
     entered = Event()
     continueExecution = Event()
 
-    def handler(ctx, _payload):
+    def handler(ctx: CodeEntryContext, _payload: object | None) -> object:
         """Stages mutation, waits for cancellation, then cooperatively checks it."""
         transaction = ctx.memory.openTransaction()
         transaction.set("test/job/cancelled", "must-not-commit")
