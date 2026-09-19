@@ -1,15 +1,21 @@
-# file: tests/first_party/llmDrivers/test_llamaCppSharedRuntime.py ; version: 1
+# file: tests/first_party/llmDrivers/test_llamaCppSharedRuntime.py ; version: 2
 from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, ClassVar
+
+import pytest
 
 from backend.runtime.sharedServices import (
     SharedServiceRegistry,
     bindApplicationRunSharedServices,
     unbindApplicationRunSharedServices,
 )
+
+if TYPE_CHECKING:
+    from pytest import MonkeyPatch
 
 _CODE_ENTRY = (
     Path(__file__).parents[3]
@@ -19,7 +25,8 @@ _CODE_ENTRY = (
     / "structuredCodeEntry.py"
 )
 _SPEC = importlib.util.spec_from_file_location("llamaCppStructuredSharedTest", _CODE_ENTRY)
-assert _SPEC is not None and _SPEC.loader is not None
+assert _SPEC is not None
+assert _SPEC.loader is not None
 llamaCpp = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(llamaCpp)
 
@@ -27,7 +34,7 @@ _SPEC.loader.exec_module(llamaCpp)
 class _FakeDriver:
     """Records construction/start/stop while avoiding a real llama.cpp process."""
 
-    instances: list["_FakeDriver"] = []
+    instances: ClassVar[list[_FakeDriver]] = []
 
     def __init__(self, config: dict[str, object]) -> None:
         """Captures one effective driver configuration."""
@@ -66,14 +73,14 @@ def _context(applicationRunId: str) -> SimpleNamespace:
                 "port": 8080,
                 "models": {"model-a": {"modelPath": "model.gguf"}},
                 "defaultModel": "model-a",
-            }
+            },
         },
         identity=SimpleNamespace(applicationRunId=applicationRunId),
         llm=_FakeLlmFacade(),
     )
 
 
-def test_managed_driver_is_shared_and_lazy_across_application_runs(monkeypatch) -> None:
+def test_managed_driver_is_shared_and_lazy_across_application_runs(monkeypatch: MonkeyPatch) -> None:
     """Two application-local providers lease one host driver without eager model startup."""
     _FakeDriver.instances.clear()
     monkeypatch.setattr(llamaCpp, "LlamaCppDriver", _FakeDriver)
