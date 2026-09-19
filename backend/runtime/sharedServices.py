@@ -1,4 +1,4 @@
-# file: backend/runtime/sharedServices.py ; version: 2
+# file: backend/runtime/sharedServices.py ; version: 3
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -56,7 +56,8 @@ class SharedServiceLease[T]:
 
 
 class SharedServiceRegistry:
-    """Owns cross-ApplicationRun host services without exposing provider policy.
+    """
+    Owns cross-ApplicationRun host services without exposing provider policy.
 
     A service identity names one host-level resource. Multiple ApplicationRuns may
     lease the same resource only when they present the same compatibility key. The
@@ -106,7 +107,7 @@ class SharedServiceRegistry:
 
             if existing.compatibilityKey != compatibilityKey:
                 raise SharedServiceConflictError(
-                    f"Shared host service {serviceId!r} is already active with incompatible configuration."
+                    f"Shared host service {serviceId!r} is already active with incompatible configuration.",
                 )
             existing.leases += 1
             return SharedServiceLease(
@@ -162,7 +163,7 @@ def bindApplicationRunSharedServices(
         existing = _servicesByApplicationRunId.get(applicationRunId)
         if existing is not None and existing is not registry:
             raise RuntimeError(
-                f"ApplicationRun already belongs to another shared-service registry: {applicationRunId}."
+                f"ApplicationRun already belongs to another shared-service registry: {applicationRunId}.",
             )
         _servicesByApplicationRunId[applicationRunId] = registry
 
@@ -184,5 +185,5 @@ def sharedServicesForApplicationRun(applicationRunId: str) -> SharedServiceRegis
             return _servicesByApplicationRunId[applicationRunId]
         except KeyError as err:
             raise RuntimeError(
-                f"ApplicationRun is not bound to RuntimeHost shared services: {applicationRunId}."
+                f"ApplicationRun is not bound to RuntimeHost shared services: {applicationRunId}.",
             ) from err
