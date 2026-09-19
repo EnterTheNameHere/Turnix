@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 23
+# file: backend/context/codeEntryContext.py ; version: 24
 from __future__ import annotations
 
 from copy import deepcopy
@@ -338,15 +338,21 @@ class _LlmFacade:
         self._requireValid()
         if not isinstance(query, LlmQuery):
             raise TypeError("query must be an LlmQuery.")
+        if self._cancellationSignal is not None:
+            self._cancellationSignal.raiseIfRequested()
         registration = self._registry.requireRegistration(providerName)
         options = ImmutableValueFreezer().freezeMapping(providerOptions, "providerOptions")
         profile = registration.value.getExecutionProfile(model=model, providerOptions=options)
+        if self._cancellationSignal is not None:
+            self._cancellationSignal.raiseIfRequested()
         if not isinstance(profile, LlmExecutionProfile):
             raise LlmProviderProtocolError("Provider getExecutionProfile() returned an invalid value.")
         estimator = profile.tokenEstimator
         if estimator is None:
             raise RuntimeError(f"LLM provider {providerName!r} does not expose an input-token estimator.")
         result = estimator.estimateInputTokens(query)
+        if self._cancellationSignal is not None:
+            self._cancellationSignal.raiseIfRequested()
         if type(result) is not int or result < 0:
             raise LlmProviderProtocolError(f"LLM provider {providerName!r} token estimator returned an invalid value: {result!r}.")
         return result
