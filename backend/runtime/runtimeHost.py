@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 6
+# file: backend/runtime/runtimeHost.py ; version: 7
 from __future__ import annotations
 
 from contextlib import suppress
@@ -232,7 +232,7 @@ class RuntimeHost:
             self.state = RuntimeHostState.STOPPED
             self.trace("runtime-host-stopped")
             if self._ownsTracer:
-                with suppress(Exception):  # noqa: BLE001 - tracing must not alter host shutdown semantics.
+                with suppress(Exception):
                     self.tracer.close()
 
             if errors:
@@ -308,5 +308,5 @@ class RuntimeHost:
         runtime: ApplicationRuntime,
     ) -> None:
         """Best-effort closes a runtime whose create/load operation failed."""
-        with suppress(Exception):  # noqa: BLE001 - preserve the original create/load failure.
+        with suppress(Exception):
             runtime.close()
