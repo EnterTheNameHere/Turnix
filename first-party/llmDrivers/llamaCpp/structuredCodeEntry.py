@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/structuredCodeEntry.py ; version: 6
+# file: first-party/llmDrivers/llamaCpp/structuredCodeEntry.py ; version: 7
 # ruff: noqa: INP001
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import sys
 import urllib.request as urlRequest
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
 from typing import TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 
@@ -27,6 +26,7 @@ from backend.runtime.sharedServices import sharedServicesForApplicationRun
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
+    from types import ModuleType
 
     from backend.context.codeEntryContext import CodeEntryContext
     from backend.core.immutableValue import ImmutableValue
