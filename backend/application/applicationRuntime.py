@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 15
+# file: backend/application/applicationRuntime.py ; version: 16
 from __future__ import annotations
 
 from copy import deepcopy
@@ -503,7 +503,8 @@ class ApplicationRuntime:
             activeJob = Job.new() if job is None else job
             if not isinstance(activeJob, Job):
                 raise TypeError("job must be a Job or None.")
-            activeJob.start()
+            if activeJob.state is not JobState.CANCELLED:
+                activeJob.start()
             if activeJob.state is JobState.CANCELLED:
                 self.trace(
                     "job-cancelled",
