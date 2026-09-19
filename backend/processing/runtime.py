@@ -1,11 +1,9 @@
-# file: backend/processing/runtime.py ; version: 2
+# file: backend/processing/runtime.py ; version: 3
 from __future__ import annotations
 
-from collections.abc import Mapping as MappingABC
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Mapping
-
 from backend.core.immutableValue import ImmutableValue, ImmutableValueFreezer
 from backend.core.runtimeIds import newRuntimeId
 from backend.values.committed import CommittedValueTransaction
@@ -21,7 +19,7 @@ __all__ = [
 
 def plainImmutableValue(value: ImmutableValue) -> object:
     """Converts recursively immutable runtime metadata into plain JSON-compatible material."""
-    if isinstance(value, MappingABC):
+    if isinstance(value, Mapping):
         return {key: plainImmutableValue(item) for key, item in value.items()}
     if isinstance(value, tuple):
         return [plainImmutableValue(item) for item in value]
