@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 24
+# file: backend/context/codeEntryContext.py ; version: 25
 from __future__ import annotations
 
 from copy import deepcopy
@@ -315,7 +315,7 @@ class _CancellationFacade:
 class _LlmFacade:
     """Invocation-scoped gateway to registered LLM providers and processing."""
 
-    def __init__(self, *, ownerId: str, registry: LlmProviderRegistry, scope: RegistrationScope, pipeline: LlmProcessingPipeline, memory: CommittedValueLayer | CommittedValueTransaction, requireValid: Callable[[], None], allowRegistration: bool, cancellationSignal: CancellationSignal | None) -> None:
+    def __init__(self, *, ownerId: str, registry: LlmProviderRegistry, scope: RegistrationScope, pipeline: LlmProcessingPipeline, memory: CommittedValueLayer | CommittedValueTransaction, requireValid: Callable[[], None], allowRegistration: bool, cancellationSignal: CancellationSignal | None = None) -> None:
         """Binds LLM authority to one CodeEntry invocation and memory view."""
         self._ownerId = ownerId
         self._registry = registry
