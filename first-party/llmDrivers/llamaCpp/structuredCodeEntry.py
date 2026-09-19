@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/structuredCodeEntry.py ; version: 7
+# file: first-party/llmDrivers/llamaCpp/structuredCodeEntry.py ; version: 8
 # ruff: noqa: INP001
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import importlib.util
 import json
 import sys
 import urllib.request as urlRequest
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -179,8 +180,21 @@ class LlamaCppStreamProvider:
         )
 
     def stream(self, request: LlmCallRequest) -> Iterator[LlmStreamEvent]:
-        """Streams one query without flattening structured conversation turns."""
+        """
+        Streams one query and registers provider-specific execution-stop behavior.
+
+        The Job-owned cancellation signal remains provider-neutral. This adapter
+        realizes an active stop request by closing the current HTTP response,
+        while the generic pipeline owns cancellation lifecycle classification.
+        """
+        cancellationSignal = request.cancellationSignal
+        if cancellationSignal is not None:
+            cancellationSignal.raiseIfRequested()
+
         selected = self.driver.ensureModel(request.model)
+        if cancellationSignal is not None:
+            cancellationSignal.raiseIfRequested()
+
         options = _impl._parseInferenceOptions(request.providerOptions)  # noqa: SLF001 - adapter reuses substrate parser.
         payload = _buildPayload(
             request,
@@ -197,11 +211,23 @@ class LlamaCppStreamProvider:
             },
             method="POST",
         )
+        unregisterCancellation = None
         try:
-            with urlRequest.urlopen(  # noqa: S310 - provider endpoint is explicitly configured by Actant.
+            response = urlRequest.urlopen(  # noqa: S310 - provider endpoint is explicitly configured by Actant.
                 httpRequest,
                 timeout=options.timeoutSeconds,
-            ) as response:
+            )
+
+            def stopResponse() -> None:
+                """Best-effort closes the active provider response on cancellation."""
+                with suppress(Exception):
+                    response.close()
+
+            if cancellationSignal is not None:
+                unregisterCancellation = cancellationSignal.registerCallback(stopResponse)
+                cancellationSignal.raiseIfRequested()
+
+            with response:
                 yield from _impl._readEvents(response)  # noqa: SLF001 - adapter reuses substrate SSE parser.
         except HTTPError as err:
             active = "" if selected is None else f" for model {selected.name!r}"
@@ -212,6 +238,9 @@ class LlamaCppStreamProvider:
             raise LlmProviderConnectionError(
                 f"Failed communicating with llama.cpp at {endpoint}.",
             ) from err
+        finally:
+            if unregisterCancellation is not None:
+                unregisterCancellation()
 
 
 def _buildPayload(
