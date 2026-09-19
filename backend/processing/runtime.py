@@ -1,12 +1,15 @@
-# file: backend/processing/runtime.py ; version: 3
+# file: backend/processing/runtime.py ; version: 4
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import TYPE_CHECKING
+
 from backend.core.immutableValue import ImmutableValue, ImmutableValueFreezer
 from backend.core.runtimeIds import newRuntimeId
-from backend.values.committed import CommittedValueTransaction
+if TYPE_CHECKING:
+    from backend.values.committed import CommittedValueTransaction
 
 __all__ = [
     "ProcessingRun",
