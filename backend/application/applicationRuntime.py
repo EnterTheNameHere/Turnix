@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 14
+# file: backend/application/applicationRuntime.py ; version: 15
 from __future__ import annotations
 
 from copy import deepcopy
@@ -459,6 +459,12 @@ class ApplicationRuntime:
             )
             try:
                 result = self.capabilities.invokeResolved(registration, context=context, payload=payload)
+            except ExecutionCancelled:
+                self.trace(
+                    "capability-invocation-cancelled",
+                    attributes={"capabilityId": capabilityId, "ownerId": registration.ownerId},
+                )
+                raise
             except Exception as err:
                 self.trace(
                     "capability-invocation-failed",
