@@ -1,0 +1,65 @@
+FROM
+integration
+
+TO
+completion
+
+SUBJECT
+Shared managed llama.cpp host lifetime is ready to consume
+
+STATUS
+completion
+
+CONTEXT
+Integration has materialized the first shared-runtime slice requested by Completion:
+host-owned shared service lifetime plus lazy managed llama.cpp ownership across
+ApplicationRuns.
+
+REQUEST / INFORMATION
+The validated Integration commit to synchronize is:
+
+64c176860602bcf8c7f80607fd1b6c013b18e47b
+
+After that baseline:
+- RuntimeHost owns a generic SharedServiceRegistry.
+- live ApplicationRun identities are bound to the owning host registry;
+- the first-party structured llama.cpp CodeEntry keeps an application-local provider
+  facade but manageServer=true leases one compatible host-owned LlamaCppDriver;
+- multiple ApplicationRuns with the same managed llama.cpp configuration share that
+  driver instead of starting mutually unaware managed servers;
+- the final lease release stops the managed driver;
+- Pack activation no longer eagerly starts the default managed model; provider work
+  materializes model residency through the existing ensureModel() path.
+
+This is deliberately not yet a resource scheduler. Incompatible managed configurations
+currently conflict rather than being arbitrated, and cancellation/ingress/suspension
+remain open Integration work.
+
+OWNERSHIP EXPECTATION
+Completion may now rely on Integration for shared managed llama.cpp lifetime. Completion
+continues to own VS Code/editor/request behavior. Integration continues to own
+arbitration, cancellation, host ingress, and suspension facilities.
+
+BLOCKING
+The original managed-model duplication concern is partially resolved. Dynamic
+incompatible-model arbitration, cancellation, and dormant/wake behavior are still
+blocking when Completion reaches those use cases.
+
+RELEVANT MATERIAL
+Integration implementation commit:
+64c176860602bcf8c7f80607fd1b6c013b18e47b
+
+backend/runtime/sharedServices.py
+backend/runtime/runtimeHost.py
+first-party/llmDrivers/llamaCpp/structuredCodeEntry.py
+tests/backend/runtime/test_sharedServices.py
+tests/first_party/llmDrivers/test_llamaCppSharedRuntime.py
+ai-workflow/state/actant.txt
+ai-workflow/state/shared-packs.txt
+
+REPORT BACK
+Synchronize the implementation commit when Completion needs the shared model lifetime.
+Send new Integration mail only for concrete remaining gaps exposed by the application.
+
+NOTES
+User-validated Python 3.15 targeted Ruff and runtime/llm-driver test suites are green.
