@@ -1,0 +1,1772 @@
+MEMORY VALUE SYSTEM DESIGN CHECKPOINT #2
+========================================
+
+Branch:
+    actant-doc-memory-value-system
+
+Status:
+    NON-AUTHORITATIVE WORKING CHECKPOINT
+
+Supersedes for restart/handoff purposes:
+    temp/memory-value-system/checkpoint-01.txt
+
+Purpose:
+    This file captures the current MemoryValueSystem design after the second
+    checkpoint pass.
+
+    It is a handoff/restart artifact only. It does not supersede indexed DA
+    documents and must not be treated as authoritative specification text.
+
+    For ongoing design discussion, this checkpoint is the current working
+    snapshot and should be preferred over checkpoint #1 where the two differ.
+
+    Once the design pass is complete, this working material will be integrated
+    into new/revised authoritative documentation.
+
+
+1. CORE MEMORYVALUE CONCEPT
+===========================
+
+MemoryValueSystem is Actant's managed persistent-semantic-value subsystem.
+
+A MemoryValue is a semantically meaningful value whose identity and meaning
+can matter beyond the immediate runtime operation currently using it.
+
+MemoryValue is not synonymous with:
+- RAM-resident value
+- variable
+- object instance
+- host-language value
+- arbitrary runtime temporary
+
+Examples that fit MemoryValue semantics:
+- user/application persistent state
+- AI-produced or AI-consumed knowledge
+- configuration values
+- file names/paths whose identity matters later
+- game item/tabular data
+- database-like application data
+- rarely used cold data
+- values loaded only when needed and later released from runtime residency
+
+Examples that do not become MemoryValues merely because they are values:
+- file handles
+- socket descriptors
+- iterators
+- loop counters
+- stack-local helper values
+- scratch buffers
+- runtime pointers
+- ephemeral implementation mechanics
+
+The distinction is semantic, not based on primitive type.
+
+Example:
+
+    integer 1732 as a file descriptor:
+        ephemeral runtime machinery
+
+    integer 1732 as a world seed:
+        MemoryValue
+
+    integer 1732 as an item identifier:
+        likely MemoryValue
+
+    integer 1732 as a loop counter:
+        ephemeral runtime machinery
+
+Cold data remains valid MemoryValueSystem data.
+
+A MemoryValue may remain non-resident for a long time. A later read may
+materialize it, use it, and release the runtime representation again.
+
+MemoryValue identity is independent of runtime residency.
+
+
+2. LANGUAGE-INDEPENDENT MEMORYVALUE IDENTITY
+============================================
+
+A creator-provided MemoryValue identity is stable across adapters/languages.
+
+Example:
+
+    messagesPerPage
+
+means the same semantic MemoryValue when accessed from:
+- Python
+- JavaScript
+- a future adapter/runtime
+- local same-process execution
+- remote/cross-process execution
+
+Host-language representation does not define MemoryValue identity.
+
+The same semantic value:
+
+    messagesPerPage = 10
+
+may materialize as:
+
+    Python:
+        int(10)
+
+    JavaScript:
+        Number(10)
+
+    another adapter:
+        the representation required to implement Actant semantics correctly
+
+The adapter is responsible for mapping Actant value semantics into the
+correct host-language RuntimeValue.
+
+
+3. TERMINOLOGY DECISIONS
+========================
+
+Bare "Memory" is retired as the formal term for runtime value representation.
+
+Current vocabulary:
+
+    MemoryValueSystem
+        subsystem managing persistent semantic values
+
+    MemoryValue
+        one logical persistent semantic value
+
+    MemoryValueRevision
+        one immutable historical statement/revision of a MemoryValue
+
+    RuntimeValue
+        host-language live execution representation
+
+    RuntimeResidency
+        whether a relevant runtime/material representation is currently
+        resident
+
+    AuthoritativeRevision
+        revision currently authoritative for the relevant authoritative
+        scope/layer
+
+    AuthoritativeState
+        accepted authoritative semantic state formed from authoritative
+        MemoryValue relationships/revisions
+
+    ResolvedValue
+        value produced by current resolution semantics
+
+    LatestRevision
+        newest relevant revision only when the scope/lineage is explicit
+
+Do not equate:
+
+    LatestRevision
+    AuthoritativeRevision
+    ResolvedValue
+    RuntimeValue
+
+They may coincide in simple cases but are distinct concepts.
+
+
+4. MEMORYVALUEREVISION AND AUTHORITY
+====================================
+
+MemoryValue is the central logical identity.
+
+Revision existence and authority are separate.
+
+A MemoryValueRevision may exist for:
+- authoritative state
+- historical evidence
+- observation
+- derivation
+- audit
+- provenance
+- another retained semantic purpose
+
+A revision does not become authoritative merely because it exists or was
+created later than another revision.
+
+The exact classification model for observed/derived/proposed/rejected/etc.
+remains open and should not be collapsed prematurely into one status enum.
+
+
+5. CONCRETE REVISION CONTENT
+============================
+
+A concrete MemoryValueRevision may refer to immutable value material through
+a ValueRef.
+
+ValueRef is authority-neutral.
+
+Conceptually:
+
+    MemoryValue
+        -> MemoryValueRevision
+            -> ValueRef
+                -> immutable Actant-managed value material
+
+Authority belongs to the revision/root relationship, not ValueRef.
+
+The same ValueRef may be shared by revisions with different authority or
+provenance semantics.
+
+ValueRef does not identify a host-language RuntimeValue.
+
+ValueRef identifies immutable value material sufficient to reconstruct the
+Actant semantic value.
+
+Host-language materialization is performed by the adapter according to Actant
+semantics and the effective contract.
+
+
+6. VALUE REF / STORAGE / ADAPTER BOUNDARY
+=========================================
+
+Current boundary:
+
+    MemoryValue
+        stable language-independent semantic identity
+
+    MemoryValueRevision
+        historical semantic statement about that identity
+
+    ValueRef
+        stable reference to immutable Actant-managed value material
+
+    MemoryStorage
+        mechanism/location used to obtain/persist/manage that material
+
+    ExecutionAdapter
+        maps Actant semantic value into host-language RuntimeValue
+
+    RuntimeValue
+        language/runtime-specific execution representation
+
+Storage location is not semantic identity.
+
+Moving material between:
+- RAM
+- SSD
+- database
+- packfile
+- remote store
+- shared memory
+
+must not create a new MemoryValueRevision merely because physical placement
+changed.
+
+Likewise, authority changes do not require creation of a new ValueRef merely
+because authority changed.
+
+
+7. SLOW PATH AND OPTIMIZED PATH EQUIVALENCE
+===========================================
+
+The logical read path may be physically expensive:
+
+    language adapter
+        -> RPC
+        -> Actant backend
+        -> MemoryValueSystem
+        -> MemoryStorage
+        -> SSD
+        -> serialized payload
+        -> semantic reconstruction
+        -> adapter materialization
+        -> host-language RuntimeValue
+
+or highly optimized:
+
+    language adapter
+        -> valid local cache
+        -> RuntimeValue
+
+Both are valid if they are observationally equivalent under the same:
+- MemoryValue identity
+- effective contract
+- authoritative state
+- transaction/read context
+
+Caching, residency, serialization, RPC, and local materialization are
+implementation choices.
+
+A cache is not another semantic authority source.
+
+A cached value must not be exposed as current after the semantic state/context
+it represents is no longer valid.
+
+Revision identity, generation identity, transaction context, invalidation,
+leases, or another mechanism may be used by an adapter implementation to
+prove cache validity.
+
+
+8. TRANSACTIONS
+===============
+
+Transactions are hierarchical staged overlays.
+
+Read resolution inside a transaction:
+
+    1. local staged value
+    2. parent transaction staged value
+    3. next parent
+    4. authoritative root
+
+Example:
+
+    root:
+        apple = 10
+
+    T1:
+        no local apple
+        read -> 10
+
+    T1 writes:
+        apple = 20
+
+    T2 child of T1:
+        no local apple
+        read -> 20
+
+    T2 writes:
+        apple = 30
+
+Then:
+
+    T2 reads 30
+    T1 reads 20
+    root reads 10
+
+A transaction-local mutation does not inherently create a
+MemoryValueRevision.
+
+A child commit promotes staged state into its parent.
+
+Only commit into the authoritative root creates the next authoritative
+MemoryValueRevision.
+
+Intermediate transaction mutations are disposable unless deliberately
+retained for:
+- recovery
+- tracing
+- debugging
+- audit
+- another explicit purpose
+
+Persisted transaction state remains non-authoritative.
+
+ActiveWindow may persist staged transaction state for restart/resume without
+promoting it into authoritative history.
+
+Concurrency may later require transaction-local versioning/MVCC/conflict
+machinery. Do not introduce it prematurely.
+
+
+9. NO ITEM, EXPLICIT VALUE, AND DELETION ARE DISTINCT
+=====================================================
+
+Checkpoint #1's general ABSENT model is superseded.
+
+The current design distinguishes at least:
+
+    A. no MemoryValue item / no authoritative statement at this scope
+
+    B. concrete explicit value exists
+
+    C. an explicit value was removed/deleted
+
+"No item exists" is not itself automatically a revision.
+
+Deletion is a historical/semantic event and should not be confused with
+never having had an explicit value.
+
+
+10. VALUE RESOLUTION CASES
+==========================
+
+MemoryValue resolution must distinguish source/state.
+
+Important cases:
+
+CASE A:
+    no item
+    no definition
+    no default
+
+Result:
+    no value can be determined
+
+CASE B:
+    no item
+    definition exists
+    no definition default
+
+Result:
+    use the behavior defined by the effective contract and adapter/platform
+    semantics
+
+CASE C:
+    no item
+    definition default exists
+
+Result:
+    resolve the definition default
+
+CASE D:
+    explicit concrete value exists
+
+Result:
+    use the explicit value
+
+CASE E:
+    explicit value was removed
+
+Result:
+    depends on the operation/contract semantics:
+    - ordinary removal of an override may fall through to default resolution
+    - true missing/deleted state is only legal if the contract permits the
+      value to be missing
+
+The system must not infer these cases from host-language nullish values.
+
+
+11. REMOVE OVERRIDE VS TRUE DELETION
+====================================
+
+Two operations that were previously conflated must be separated.
+
+RemoveOverride:
+    removes an explicit concrete value at the current layer
+    allows normal fallback/default resolution
+
+Example:
+
+    definition default = 10
+    explicit value = 20
+
+    RemoveOverride
+
+    resolved value -> 10
+
+This operation does not mean that the semantic MemoryValue is now forbidden
+from resolving.
+
+True deletion:
+    intentionally leaves the value without a determinable value
+    only valid when the effective contract allows missingness
+
+If the effective contract requires a resolvable value, true deletion is
+invalid.
+
+Exact final operation names remain open.
+
+
+12. DELETION REVISION AND PREVIOUS VALUE RELATIONSHIP
+=====================================================
+
+When true deletion removes an existing explicit concrete value, a deletion
+revision/state may preserve which prior revision was deleted.
+
+Example:
+
+    R1 -> 20
+    R2 -> DELETED
+
+with a semantic relationship:
+
+    R2 -> R1
+    relationship type: deletedRevisionPrevious
+
+This relationship makes the deletion understandable as:
+
+    "the explicit value represented by R1 was deleted"
+
+rather than merely:
+
+    "something used to exist"
+
+The deletion marker/revision itself remains immutable.
+
+The relationship may be represented by a ManagedLink.
+
+While the relationship exists, tooling and RetentionCollector can inspect it
+and decide what consequences follow.
+
+The MemoryValueSystem itself does not declare collection eligibility.
+
+
+13. DELETION WITHOUT AN EXISTING EXPLICIT VALUE
+===============================================
+
+If no explicit concrete value exists and the resolved value comes only from a
+default, "delete" must not automatically create meaningless history.
+
+Example:
+
+    definition default = 10
+    no explicit value ever stored
+
+A request to delete requires contract/operation semantics to determine
+whether:
+- the operation is invalid
+- it is a no-op
+- it means true missingness/suppression because the contract explicitly
+  supports that state
+
+Do not create a deletion revision merely because a user invoked an operation
+named "delete" if no meaningful state transition occurred.
+
+
+14. MEMORYVALUE CONTRACT
+========================
+
+MemoryValue behavior is governed by a MemoryValueContract.
+
+The contract is composed from independently configurable semantic dimensions.
+
+"Facet" is the current preferred working term for one such dimension.
+
+Examples of possible facets:
+- value type/domain
+- missingness/presence rules
+- validation mode
+- coercion mode
+- default-resolution behavior
+- deletion behavior
+- retention-related behavior where appropriate
+
+Exact final facet names remain open.
+
+A MemoryValueContract need not store every facet explicitly.
+
+
+15. CONTRACT FACETS AND DEFAULT FACET VALUES
+============================================
+
+A contract facet may have:
+- an explicit value for a specific MemoryValue
+- an inherited/group/type/profile value
+- a platform/profile terminal default
+
+If a facet is not explicitly set, resolution follows the applicable default
+chain.
+
+The chain must eventually resolve to one concrete terminal facet value.
+
+Conceptually:
+
+    explicit MemoryValue facet
+        ->
+    applicable group/type facet
+        ->
+    contract-profile facet
+        ->
+    platform/profile terminal default
+
+Every facet must have deterministic effective semantics.
+
+"Unspecified" means:
+    inherit from the identified default/profile chain
+
+It does not mean:
+    behavior is undefined
+
+
+16. SHARED STATIC FACET VALUES
+==============================
+
+Default facet values should be shareable.
+
+Example:
+
+    validationMode = strict
+
+may be represented once as a concrete static facet value and referenced by
+many MemoryValues/contracts.
+
+1000 MemoryValues that inherit the same facet default do not need 1000 copies
+of the same setting.
+
+A simple implementation may use:
+
+    FacetDefinition
+        identifies the facet and allowed facet-value domain
+
+    FacetValue
+        one concrete immutable allowed value
+
+    FacetBinding
+        associates a MemoryValue/profile/group/type with a FacetValue
+
+Exact final object names remain open.
+
+A manually set facet for one MemoryValue creates/uses a binding to the
+appropriate concrete facet value.
+
+Grouping/type-based defaults may later reduce per-value storage further
+without changing semantics.
+
+
+17. VERSIONED CONTRACT PROFILES
+===============================
+
+Implicit/default contract behavior must be reproducible.
+
+Therefore default facet semantics belong to a versioned contract profile or
+equivalent versioned design identity.
+
+Example:
+
+    actant.memory-value.v1
+
+A sparse contract can conceptually store:
+
+    profile = actant.memory-value.v1
+    explicit facets:
+        valueType = integer
+
+All unspecified facets are resolved from the versioned profile/default chain.
+
+If Actant changes default behavior in a later version, old MemoryValues can
+still reproduce the previous effective contract by resolving through the old
+profile.
+
+Implicit behavior is therefore versioned behavior, not undocumented current
+implementation behavior.
+
+It must be possible in principle to materialize the complete effective
+contract as data (for example JSON-like structured data), even when the
+normal stored form is sparse.
+
+
+18. EFFECTIVE CONTRACT
+======================
+
+The EffectiveMemoryValueContract is the fully resolved contract used for
+behavior/validation.
+
+Conceptually:
+
+    explicit MemoryValue facets
+        over
+    applicable group/type/definition facets
+        over
+    versioned contract-profile defaults
+
+The exact hierarchy remains open, but the important invariant is:
+
+    every required facet resolves deterministically
+
+Tools should be able to inspect:
+- effective facet value
+- source of that facet value
+- whether it was explicit or inherited
+
+Example:
+
+    valueType:
+        integer
+        source: definition
+
+    validationMode:
+        strict
+        source: actant.memory-value.v1 profile
+
+    missingAllowed:
+        false
+        source: group/type default
+
+
+19. VALUE CONTRACT VS PRESENCE/MISSINGNESS
+==========================================
+
+Type validity and presence are distinct semantic dimensions.
+
+Example:
+
+    valueType = integer
+
+means:
+
+    when a concrete value is present, it must satisfy integer semantics
+
+It does not by itself mean:
+- the value must always exist
+- deletion is allowed
+- deletion is forbidden
+
+Missingness/presence is governed by its own contract facet(s).
+
+Important conceptual cases:
+
+    explicit value not required
+    resolved value required
+
+This supports defaults such as:
+
+    default = 10
+    explicit override = optional
+
+Removing explicit 20 is valid because resolution still produces 10.
+
+True missingness is only valid when the effective contract permits a
+non-determinable value.
+
+
+20. RESOLVED VALUE AND VIRTUAL VALUE CONCEPT
+============================================
+
+A value may be resolved without a stored MemoryValueRevision containing that
+value.
+
+Example:
+
+    definition default = 10
+    no explicit revision
+
+Result:
+
+    ResolvedValue = 10
+
+No authoritative revision containing 10 needs to exist.
+
+Informally this can be thought of as a virtual value:
+    a value produced by resolution semantics without a persisted revision
+
+"VirtualValue" is useful as a mental model but is not yet locked as formal
+terminology.
+
+Important invariant:
+
+    ResolvedValue does not imply MemoryValueRevision.
+
+If a creator later explicitly saves the resolved default:
+
+    ResolvedValue(10)
+        -> new authoritative MemoryValueRevision
+        -> ValueRef for 10
+
+then the previously resolution-derived value becomes explicit historical
+state.
+
+
+21. CONTRACT RESOLUTION VS VALUE RESOLUTION VS MATERIALIZATION
+==============================================================
+
+Do not collapse these into one operation.
+
+Conceptual pipeline:
+
+    sparse MemoryValueContract
+        ->
+    contract/profile resolution
+        ->
+    EffectiveMemoryValueContract
+        ->
+    value-source resolution
+        ->
+    ResolvedValue / missing/error
+        ->
+    adapter materialization
+        ->
+    RuntimeValue
+
+Contract resolution:
+    determines complete behavior/rules
+
+Value resolution:
+    determines the semantic value source/result
+
+Materialization:
+    produces the host-language runtime representation
+
+A malformed/unsatisfiable definition should ideally be caught during
+definition loading.
+
+Runtime resolution must still defend itself against impossible states in case
+of:
+- malformed custom definitions
+- corrupted data
+- failed migration
+- incomplete storage
+- missing capabilities
+- other runtime inconsistency
+
+
+22. PLATFORM-AGNOSTIC MISSING VALUE SEMANTICS
+=============================================
+
+Actant semantic missingness must not be defined by a particular host language.
+
+If the effective semantic result is "missing", the adapter determines the
+appropriate host-language realization according to the adapter design.
+
+Python, JavaScript, and future adapters may represent/surface the same Actant
+semantic condition differently.
+
+The host language does not redefine the MemoryValueSystem meaning.
+
+Exact cross-language mapping of null/None/nil/undefined/missing remains an
+open design item.
+
+
+23. SEMANTIC VALIDITY VS FACTUAL CORRECTNESS
+============================================
+
+Actant can guarantee:
+- representation integrity
+- contract validation
+- authority transitions
+- revision identity/history
+- provenance where retained
+- storage/recovery guarantees
+
+Those guarantees do not prove that the semantic claim represented by a value
+is factually true.
+
+Example:
+
+    MemoryValue:
+        user.name
+
+    contract:
+        string
+
+    value:
+        "Alice"
+
+The value can be structurally valid and correctly committed while the real
+name is Bob.
+
+This is particularly important for AI-generated values.
+
+MemoryValueSystem should make such values inspectable, traceable, versionable,
+correctable, and auditable without pretending to prove factual truth.
+
+
+24. MANAGED LINKS AND LINK REGISTRY
+===================================
+
+Relationships important to tracing, provenance, history, inspection, or other
+subsystems may become first-class ManagedLinks.
+
+Example:
+
+    L77:
+        First = T12
+        Second = R12
+        type = producedRevision
+        direction = T12 -> R12
+
+The LinkRegistry is the authoritative home for managed relationship records.
+
+Endpoint-side link lists are not a second authoritative source of truth.
+
+Conceptually:
+
+    T12 participates in L77
+    R12 participates in L77
+
+Implementation may expose endpoint lookup through:
+- registry query
+- index
+- lazy reverse lookup
+- database index
+- cache
+
+The registry should support traversal in either direction.
+
+
+25. LINK LIFECYCLE
+==================
+
+The basic link lifecycle should stay small.
+
+Preferred core operations:
+
+    CreateLink
+    DeleteLink
+
+Relationship becomes true:
+    create link
+
+Relationship remains true:
+    leave link unchanged
+
+Relationship ceases to be true:
+    delete link
+
+UpdateLink may exist only if a real use case requires a relationship to change
+without becoming a different relationship.
+
+Otherwise:
+    delete old link
+    create new link
+
+This keeps relationship meaning simple and auditable.
+
+
+26. LINKS DESCRIBE FACTS, NOT COLLECTION COMMANDS
+=================================================
+
+A link type describes the domain relationship.
+
+Good examples:
+
+    producedRevision
+    derivedFrom
+    deletedRevisionPrevious
+    observedValue
+    references
+
+Avoid using operational retention conclusions as the semantic relationship:
+
+    doNotCollectTarget
+    blockingLink
+    collectTogether
+
+The MemoryValueSystem and LinkRegistry do not conclude:
+
+    this subject can be collected
+
+or:
+
+    this subject must be retained
+
+They expose facts/relationships.
+
+RetentionCollector reads those facts, policies, contract facets, authority
+state, storage dependencies, and other context and makes the collection
+decision.
+
+
+27. LINK REGISTRY AUTHORITY AND CRASH SAFETY
+============================================
+
+ManagedLinks need authority guarantees equivalent in strength to Actant's
+other authoritative state.
+
+ActiveWindow may contain staged/incomplete link changes.
+
+Only complete validated links may enter SafeCheckpointWindow authoritative
+state.
+
+A complete link must have:
+- all required endpoints
+- valid endpoint identities
+- valid relationship type
+- required relationship metadata
+
+A partially persisted link is not authoritative merely because some bytes
+reached storage.
+
+Crash recovery may reconstruct incomplete ActiveWindow link state only when
+the result is deterministic from retained evidence.
+
+Ambiguous reconstruction is an error.
+
+Never guess missing authoritative endpoints.
+
+Link safety may use transaction-like mechanics without reusing
+MemoryValueSystem transactions verbatim.
+
+Equivalent guarantees do not imply identical implementation.
+
+
+28. RETENTION CORE PRINCIPLE
+============================
+
+Retention behavior is resolved by RetentionCollector using policies, facts,
+capabilities, links, authority state, storage dependencies, and context.
+
+MemoryValueSystem itself does not decide collection eligibility.
+
+Do not store simplistic intrinsic booleans such as:
+
+    purgeEligible = true
+
+on semantic subjects.
+
+Eligibility may change because:
+- time passes
+- storage pressure changes
+- links are created/deleted
+- authority changes
+- defaults/policies change
+- the user changes an override
+- related subjects disappear
+
+
+29. RETENTION CAPABILITIES AND FACTS
+====================================
+
+A capability means a fact/operation is valid to ask of an implementation.
+
+It does not require every subject to physically store every possible field.
+
+Example:
+
+    revisionCreatedAt capability
+
+means:
+    creation time can be queried
+
+not:
+    every stored revision must contain createdAt:null when unavailable
+
+Distinguish:
+- capability supported, value available
+- capability supported, fact unset
+- capability unsupported
+
+Facts may be:
+- stored
+- derived
+- dynamically resolved
+- lazily loaded
+- cached as optimization
+
+Possible sources include:
+- revision metadata
+- authority state
+- storage
+- runtime residency
+- link graph
+- provenance
+- environment/current system state
+
+
+30. RETENTION POLICY VS FACT/RELATIONSHIP
+=========================================
+
+Policies express discretionary retention behavior.
+
+Examples:
+- age expiry
+- capacity pressure
+- latest-only history
+- user pin
+- subject-specific override
+- inherited/default retention facet
+
+ManagedLinks and storage relationships provide facts.
+
+RetentionCollector interprets those facts.
+
+Example:
+
+    R2 = DELETED
+    L42:
+        R2 -> R1
+        type = deletedRevisionPrevious
+
+The link does not itself say:
+
+    R1 cannot be collected
+
+RetentionCollector may conclude that R1 must remain because the current
+relationship and active policies/semantic rules require it.
+
+The decision belongs to RetentionCollector.
+
+
+31. RETENTION DEFAULTS AND FACETS
+=================================
+
+Retention behavior may itself be controlled through contract/profile facets or
+other policy configuration.
+
+The same default-chain principle applies:
+
+    explicit subject facet
+        ->
+    group/type facet
+        ->
+    contract-profile/default facet
+        ->
+    terminal static default
+
+An explicit override stays explicit if global defaults later change.
+
+"Use default" means:
+    remove the override and inherit the current default chain
+
+It does not mean:
+    copy the current default into a new explicit value
+
+Increasing retention cannot resurrect already collected material.
+
+Decreasing retention may make surviving material collectable.
+
+
+32. RETENTION POLICY COMPOSITION
+================================
+
+Not every retention rule answers the same question.
+
+Examples:
+
+Hard expiry:
+    after a threshold, material becomes a candidate
+
+Capacity pressure:
+    below budget, no removal pressure
+    above budget, select candidates
+
+Latest-only:
+    older revisions become candidates
+
+User pin:
+    explicit protection
+
+Relationship-aware rule:
+    inspect current links/authority and protect or release subjects
+
+Therefore do not reduce all retention semantics to one keepUntil value.
+
+Formal composition remains open.
+
+
+33. RETENTION SUBJECTS
+======================
+
+Potential retention subjects include:
+- MemoryValueRevision
+- TraceRecord
+- JournalEntry
+- persisted transaction state
+- Window evidence
+- audit/export artifacts
+- other registered managed subjects
+
+Generalized retention does not make these objects semantically identical.
+
+Not every retention subject is a MemoryValue.
+
+
+34. RETENTIONCOLLECTOR
+======================
+
+RetentionCollector is the current working name for the component that makes
+collection decisions and coordinates collection.
+
+Emerging responsibilities:
+
+    1. discover/enumerate candidate subjects
+    2. resolve applicable policy/default/override facets
+    3. query capabilities/facts
+    4. inspect links/relationships
+    5. inspect authority/current-state facts
+    6. inspect storage dependencies
+    7. determine collectability
+    8. coordinate allowed semantic-subject removal
+    9. trigger/reconsider newly orphaned material
+    10. maintain SafeCheckpointWindow consistency during authoritative graph
+        changes
+
+Potential supporting abstraction:
+
+    RetentionSource
+        enumerates relevant subjects/candidates
+        exposes capabilities/facts
+        performs source-owned removal operations
+
+Exact interfaces/names remain open.
+
+
+35. TRACING AND MEMORYVALUE RELATIONSHIP
+========================================
+
+Tracing should record meaningful actions/participants/relationships without
+duplicating large value payloads merely to make trace logs self-contained.
+
+Trace records should link to exact MemoryValue revisions where appropriate.
+
+Example:
+
+    T12 --producedRevision--> R12
+
+Tools can resolve these relationships to build:
+- provenance views
+- DAGs
+- active-memory views
+- history inspection
+- relationship navigation
+
+A trace link does not automatically retain its target.
+
+RetentionCollector decides what surviving relationship/evidence implies under
+the active retention rules.
+
+A surviving reference may honestly resolve to:
+- available endpoint
+- known collected endpoint
+- known unavailable endpoint
+- unresolved/unknown endpoint
+
+where the semantic link type permits such survival.
+
+
+36. DELETION LINK EXAMPLE FOR RETENTION
+=======================================
+
+Example:
+
+    R1 -> 10
+    R2 -> DELETED
+
+    L1:
+        First = R2
+        Second = R1
+        type = deletedRevisionPrevious
+
+If R2 is the current latest authoritative deletion state, RetentionCollector
+may determine that R1 must remain so the current deletion can still be fully
+interpreted/reverted/audited.
+
+When later:
+
+    R3 -> 20
+
+becomes authoritative, the relationship protecting/connecting the old
+deletion may be removed or cease to matter according to the domain rules.
+
+Then R1/R2 may become ordinary historical candidates.
+
+The MemoryValueSystem only maintains correct semantic relationships.
+
+Retention consequences belong to RetentionCollector.
+
+
+37. SHARED VALUE MATERIAL AND CHUNKS
+====================================
+
+Semantic subject retention and physical material lifetime are separate.
+
+Multiple ValueRefs/revisions may share immutable material.
+
+Example:
+
+    R10 -> V10 -> Chunk X
+    R11 -> V10 -> Chunk X
+
+Collecting R10 must not remove Chunk X while R11 still requires it.
+
+Shared material survives while any retained dependency still requires it.
+
+Chunk remains a useful standard immutable content-addressed storage unit.
+
+The architecture should not require every MemoryStorage implementation to use
+Chunks internally.
+
+Other storage implementations may use different stable immutable material
+identities.
+
+
+38. SEMANTIC LINKS VS STORAGE DEPENDENCIES
+==========================================
+
+Do not conflate:
+
+    ManagedLink
+        semantic relationship between managed subjects
+
+with:
+
+    storage dependency
+        material required to reconstruct retained value material
+
+Both may eventually use common graph/index machinery internally, but their
+semantics differ.
+
+Storage dependencies are correctness requirements of the storage/material
+layer.
+
+ManagedLinks describe domain relationships.
+
+RetentionCollector and storage collection logic consume both kinds of facts.
+
+
+39. ORPHAN MATERIAL
+===================
+
+Interrupted or failed operations may leave physically stored value material
+without a retained semantic owner.
+
+Example:
+
+    Chunk Y persisted
+    ValueRef prepared
+    crash before authoritative revision commits
+
+Chunk Y is orphan material.
+
+This is acceptable.
+
+It may later be collected when reachability/storage analysis proves that no
+retained semantic subject requires it.
+
+This allows a safe ordering:
+
+    persist material first
+    publish/commit semantic reference later
+
+without requiring dangerous synchronous rollback deletion of every partial
+storage write.
+
+
+40. CONFIG DIRECTION
+====================
+
+ConfigValue remains a MemoryValue specialization with:
+- configuration resolution semantics
+- an effective contract
+- default resolution
+
+Current resolution direction still includes:
+
+    explicit concrete value
+        >
+    configured default
+        >
+    definition/built-in default
+        >
+    contract-defined missing/error/language-adapter behavior
+
+A resolved default does not automatically become an authoritative stored
+revision.
+
+Example:
+
+    definition default = 10
+    no explicit value
+
+read:
+    ResolvedValue = 10
+
+If the default later becomes 20:
+
+    future unresolved read -> 20
+
+unless 10 was explicitly saved/materialized as authoritative state.
+
+RemoveOverride:
+    removes explicit override and returns to fallback/default resolution
+
+SaveCurrentResolvedValue:
+    materializes the current resolved value as explicit authoritative state
+
+These operations are intentionally different.
+
+
+41. STRONGER PERMANENT DELETE / ERASURE
+=======================================
+
+A stronger erase/permanent-delete operation remains open.
+
+It is distinct from:
+- removing an override
+- true deletion/missingness
+- ordinary retention expiry
+- physical storage garbage collection
+
+Potential semantics may include:
+- removal of current explicit state
+- explicit removal/override of ordinary historical retention protection
+- allowing historical material to become collectable sooner
+
+It must not falsely promise:
+- immediate deletion of shared material
+- erasure from unrelated exports/backups
+- secure physical erasure
+- violation of active required relationships
+
+Final naming/scope remains open.
+
+
+42. REDUCED-CAPABILITY / CUSTOM IMPLEMENTATIONS
+===============================================
+
+MemoryValueSystem does not require every implementation to expose every
+management/observability capability.
+
+A custom/highly optimized implementation may intentionally omit:
+- retention support
+- provenance
+- historical reconstruction
+- durable trace evidence
+- some metadata/facts
+- some inspection capabilities
+
+Actant does not fabricate missing observability.
+
+Such implementations explicitly accept the corresponding loss of guarantees.
+
+The standard path remains designed for observability, recoverability,
+retention, provenance, management, and auditability.
+
+
+43. ACCEPTED DESIGN ITEMS THROUGH CHECKPOINT #2
+===============================================
+
+Accepted:
+
+01. Bare Memory is retired as runtime-value terminology.
+
+02. MemoryValue is the central language-independent persistent semantic
+    identity.
+
+03. MemoryValueRevision may be non-authoritative.
+
+04. Authority is separate from revision existence.
+
+05. Hierarchical transaction overlays do not inherently create revision
+    history for local mutations.
+
+06. Only promotion into authoritative root creates the next authoritative
+    revision in the current serialized model.
+
+07. ValueRef is authority-neutral.
+
+08. ValueRef identifies immutable Actant-managed value material, not a
+    host-language RuntimeValue.
+
+09. MemoryStorage location/mechanics are distinct from semantic identity.
+
+10. Adapter/runtime materialization is language-specific but must preserve
+    Actant semantics.
+
+11. Optimized/cached reads must be observationally equivalent to the full
+    logical read path.
+
+12. The checkpoint #1 ABSENT model is superseded by a richer distinction
+    between no item, explicit concrete state, removal of override, and true
+    deletion/missingness.
+
+13. RemoveOverride and true deletion are semantically distinct.
+
+14. True missingness/deletion is contractual; it is legal only when the
+    effective contract permits it.
+
+15. Type/domain validity and presence/missingness are distinct contract
+    dimensions.
+
+16. MemoryValueContract is composed from facets.
+
+17. Facets may be sparse locally.
+
+18. Unspecified facets resolve through deterministic defaults.
+
+19. Default facet values may be shared static concrete values.
+
+20. Group/type/profile default chains may reduce per-value storage while
+    retaining per-value override ability.
+
+21. Contract-profile/default semantics are versioned so old implicit behavior
+    remains reproducible.
+
+22. EffectiveMemoryValueContract is the complete resolved contract.
+
+23. ResolvedValue may exist without a persisted MemoryValueRevision.
+
+24. Contract resolution, value resolution, and runtime materialization are
+    distinct stages.
+
+25. LinkRegistry owns first-class semantic relationships.
+
+26. Endpoint-side lookup/indexing is derived, not another authoritative source.
+
+27. Core link lifecycle is create/delete; update is optional only for genuine
+    mutable-relationship use cases.
+
+28. Link types describe semantic facts, not collection commands.
+
+29. LinkRegistry/MemoryValueSystem do not decide collectability.
+
+30. RetentionCollector reads links, policies, facts, authority, contracts, and
+    storage dependencies and decides collectability.
+
+31. Link creation/recovery obeys ActiveWindow/SafeCheckpointWindow authority
+    discipline; ambiguous recovery must fail rather than guess.
+
+32. Semantic subject retention and physical material lifetime are separate.
+
+33. Shared immutable material survives while any retained dependency requires
+    it.
+
+34. Orphan storage material after failed/interrupted operations is acceptable
+    and later collectable.
+
+35. Similar safety guarantees across subsystems do not require immediate reuse
+    of the same transaction implementation.
+
+
+44. OPEN FOLLOW-UP ITEMS
+========================
+
+A. Revision classification
+
+Determine orthogonal axes for:
+- observed
+- derived
+- proposed
+- rejected
+- superseded
+- historical
+- authoritative
+- aborted
+
+Do not create one overloaded enum prematurely.
+
+B. Platform value domain
+
+Define exact Actant semantics/mapping for:
+- null
+- None
+- nil
+- undefined
+- missing
+- values without exact cross-language representation
+
+C. Contract facet taxonomy
+
+Define final facet names/domains, including:
+- type/domain
+- missingness/presence
+- validation
+- coercion
+- default resolution
+- deletion
+- retention-related facets if retained there
+
+D. Contract profile hierarchy
+
+Define exact precedence between:
+- per-MemoryValue facet
+- definition facet
+- group/type facet
+- Pack/app facet if any
+- Actant profile default
+
+E. Definition validation
+
+Define which impossible/inconsistent contracts must fail during definition
+loading and which may remain unresolved until runtime.
+
+F. Deletion semantics
+
+Finalize:
+- exact names for RemoveOverride vs true deletion
+- representation of deletion revision/state
+- whether deletion requires an existing explicit concrete revision
+- what happens when delete is requested against a default-only value
+- when the deletedRevisionPrevious relationship is created/deleted
+
+G. Retention composition
+
+Formalize interaction between:
+- age
+- latest-only
+- capacity pressure
+- explicit pins
+- contract retention facets
+- relationship-aware rules
+- storage correctness dependencies
+
+H. Retention capability taxonomy
+
+Define:
+- information capabilities
+- management capabilities
+- supported-but-unset facts
+- unsupported facts
+- behavior when a collector rule needs an unavailable capability
+
+I. RetentionCollector architecture
+
+Finalize:
+- name
+- RetentionSource
+- traversal
+- collection coordination
+- SafeCheckpointWindow atomicity/recovery
+- semantic collection vs storage GC
+
+J. Link taxonomy
+
+Define:
+- link identity
+- directionality
+- semantic link types
+- endpoint lifecycle
+- missing/collected endpoint representation
+- whether link metadata is immutable
+
+K. Stronger erase/permanent-delete
+
+Define:
+- scope
+- historical/provenance treatment
+- exact guarantees
+- interaction with links and shared storage
+
+L. Storage abstraction
+
+Define MemoryStorage relative to existing DA-07 IoManager/readers/writers.
+
+M. Durability-before-authority
+
+Formalize the rule that authoritative semantic references must not commit
+before required underlying material durability is satisfied.
+
+N. Concurrency
+
+Preserve room for:
+- concurrent transactions
+- conflict detection
+- MVCC-like visibility
+- rebase/merge
+without changing current serialized semantics prematurely.
+
+
+45. CORRECTIONS FROM CHECKPOINT #1
+=================================
+
+Checkpoint #2 intentionally corrects the following checkpoint #1 statements:
+
+1. "MemoryValueRevision represents concrete ValueRef OR ABSENT"
+   is no longer sufficient.
+
+   Current design distinguishes:
+   - no explicit item/state
+   - concrete explicit value
+   - override removal/fallback
+   - true deletion/missingness
+
+2. "LatestValue is the value represented by AuthoritativeRevision"
+   is too simple.
+
+   Current design distinguishes:
+   - authoritative explicit state
+   - ResolvedValue
+   - runtime materialization
+
+3. "ordinary deletion creates authoritative ABSENT"
+   is superseded.
+
+   RemoveOverride and true deletion are separate operations.
+
+4. "previous concrete revision does not remain protected merely because it
+   preceded deletion"
+   is no longer universally correct.
+
+   A deletion relationship may preserve a link to the deleted previous
+   revision, and RetentionCollector may decide that relationship requires the
+   previous revision to remain.
+
+5. "ordinary MemoryValues may have no ValueContract and Actant invents no
+   semantic rules"
+   is superseded by versioned contract-profile defaults.
+
+   A sparse or omitted local contract still resolves to defined platform
+   semantics.
+
+6. Link semantics no longer directly encode retention conclusions.
+
+   Links expose relationships.
+   RetentionCollector interprets them.
+
+7. ValueRef wording is tightened:
+   it identifies immutable Actant-managed value material, not a
+   language-specific representation.
+
+
+46. DOCUMENT-INTEGRATION IMPACT KNOWN SO FAR
+============================================
+
+DA-04 requires substantial revision:
+- old Memory runtime term
+- committed-only revision framing
+- State-centric hierarchy
+- transaction/revision distinction
+- deletion/absence semantics
+- explicit-state vs resolved-value distinction
+- retention-history assumptions
+
+DA-05 requires substantial revision:
+- ValueRef currently committed-only
+- ValueRef must be authority-neutral
+- ValueRef must be distinguished from RuntimeValue and storage location
+- shared immutable payload/reachability remains strongly useful
+- Chunk remains useful but should not be mandatory for every storage backend
+
+DA-06 requires substantial revision:
+- schema terminology must be split/refined
+- defaults now exist both for values and for contract facets
+- contract defaults are versioned semantic behavior
+- config resolution distinguishes explicit value, configured default,
+  definition default, and contract-defined missing/error behavior
+- RemoveOverride differs from true deletion
+- ResolvedValue may exist without stored revision
+
+DA-07 remains useful but narrower than MemoryStorage:
+- file I/O is one realization
+- broader material residency/storage/lookup must remain implementation-flexible
+
+DA-08 retention concepts remain useful precedent but are too
+subsystem-specific for generalized retention.
+
+Tracing docs remain strongly compatible with:
+- exact revision links
+- surviving references to unavailable/collected targets
+- non-authoritative evidence
+- LinkRegistry-based bidirectional relationship traversal
+
+
+47. RESTART / HANDOFF SUMMARY
+=============================
+
+If restarting from checkpoint #2:
+
+1. Prefer this checkpoint over checkpoint #1.
+
+2. Treat it as non-authoritative working design, not final DA specification.
+
+3. Continue the revised conflict/question list from the next unresolved item.
+
+4. Preserve accepted distinctions:
+   - semantic identity vs RuntimeValue
+   - revision vs authority
+   - ValueRef vs storage location
+   - explicit state vs ResolvedValue
+   - RemoveOverride vs true deletion
+   - contract facets vs value defaults
+   - sparse contract vs EffectiveContract
+   - links as facts vs RetentionCollector decisions
+   - semantic retention vs physical storage reachability
+
+5. Do not restore the checkpoint #1 ABSENT shortcut.
+
+6. Do not let host-language behavior redefine Actant semantics.
+
+7. Do not make local missing facet values mean undefined behavior; resolve them
+   through the versioned default chain.
+
+8. Do not make LinkRegistry decide collection eligibility.
+
+9. Do not make MemoryValueSystem decide collection eligibility.
+
+10. RetentionCollector owns collection reasoning using facts from all relevant
+    systems.
+
+11. Keep link safety transaction-like in guarantees, but do not force reuse
+    of MemoryValueSystem transactions unless later implementation pressure
+    proves the abstractions equivalent.
+
+12. Do not prematurely finalize concurrency, revision-status taxonomy, or
+    permanent-erasure guarantees.
+
+13. After all conflict items and follow-up passes are closed, materialize the
+    new authoritative documentation.
+
+END OF MEMORY VALUE SYSTEM DESIGN CHECKPOINT #2
