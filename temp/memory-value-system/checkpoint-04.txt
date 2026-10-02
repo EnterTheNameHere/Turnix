@@ -1,0 +1,2176 @@
+MEMORY VALUE SYSTEM DESIGN CHECKPOINT #4
+========================================
+
+Branch:
+    actant-doc-memory-value-system
+
+Status:
+    NON-AUTHORITATIVE WORKING CHECKPOINT
+
+Supersedes for restart/handoff purposes:
+    temp/memory-value-system/checkpoint-03.txt
+
+Purpose:
+    This file captures the current MemoryValueSystem design after the fourth
+    checkpoint pass.
+
+    It is a handoff/restart artifact only. It does not supersede indexed DA
+    documents and must not be treated as authoritative specification text.
+
+    For ongoing design discussion, this checkpoint is the current working
+    snapshot and should be preferred over checkpoints #1, #2, and #3 where
+    they differ.
+
+    Once the design pass is complete, this working material will be integrated
+    into new/revised authoritative documentation.
+
+
+1. CORE MEMORYVALUE CONCEPT
+===========================
+
+MemoryValueSystem is Actant's managed persistent-semantic-value subsystem.
+
+A MemoryValue is one logical semantic value whose identity and meaning can
+matter beyond the immediate runtime operation currently using it.
+
+MemoryValue is not synonymous with:
+- RAM-resident value
+- variable
+- object instance
+- host-language value
+- arbitrary runtime temporary
+
+Examples that may fit MemoryValue semantics:
+- user/application persistent state
+- AI-produced or AI-consumed knowledge
+- configuration values
+- file names/paths whose identity matters later
+- game state
+- tabular/static application data
+- database-like application data
+- rarely used cold data
+- values loaded only when needed and later released from runtime residency
+
+Examples that do not become MemoryValues merely because they are values:
+- file handles
+- socket descriptors
+- iterators
+- loop counters
+- stack-local helper values
+- scratch buffers
+- runtime pointers
+- ephemeral implementation mechanics
+
+The distinction is semantic, not based on primitive type.
+
+MemoryValue identity is independent of runtime residency.
+
+
+2. LANGUAGE-INDEPENDENT SEMANTIC IDENTITY
+=========================================
+
+A creator-provided MemoryValue identity is stable across adapters, runtimes,
+processes, applications, and machines.
+
+Host-language representation does not define MemoryValue identity.
+
+A semantic integer value remains the same Actant semantic value whether it is
+materialized through different runtime representations.
+
+Adapters and bridges are responsible for preserving Actant semantics across
+their respective boundaries.
+
+The design specification must remain language-neutral. Language-specific
+representations belong in adapter/implementation documentation.
+
+
+3. CORE TERMINOLOGY
+===================
+
+Current vocabulary:
+
+    MemoryValueSystem
+        subsystem managing persistent semantic values
+
+    MemoryValue
+        one logical persistent semantic value
+
+    MemoryValueDefinition
+        creator/platform definition for a MemoryValue, including optional
+        default-value information and sparse contract declarations
+
+    MemoryValueDefinition.contract
+        sparse declared contract-facet input
+
+    MemoryValueContract
+        fully resolved semantic contract used by MemoryValue operations
+
+    MemoryValueRevision
+        one immutable historical semantic statement/revision of a MemoryValue
+
+    ValueRef
+        authority-neutral immutable descriptor sufficient to reconstruct one
+        concrete Actant semantic value
+
+    MemoryStorage
+        abstraction for storing/retrieving/managing immutable Actant value
+        material
+
+    IoManager
+        Actant's central managed-I/O gateway
+
+    RuntimeValue
+        runtime-specific execution representation
+
+    RuntimeResidency
+        whether relevant runtime/material representation is currently resident
+
+    AuthoritativeRevision
+        revision currently authoritative for a MemoryValue in one authority
+        scope
+
+    AuthoritativeState
+        accepted semantic state formed from authoritative relationships
+
+    ResolvedValue
+        semantic value produced by value-resolution rules
+
+    LatestRevision
+        newest relevant revision only where scope/lineage is explicit
+
+Do not equate:
+
+    LatestRevision
+    AuthoritativeRevision
+    ResolvedValue
+    RuntimeValue
+
+The term EffectiveMemoryValueContract is retired for now.
+MemoryValueContract itself means the fully resolved result.
+
+
+4. REVISION AND AUTHORITY
+=========================
+
+Revision existence and authority are separate.
+
+A MemoryValueRevision may exist for:
+- authoritative state
+- historical evidence
+- observation
+- derivation
+- audit
+- provenance
+- another retained semantic purpose
+
+A revision does not become authoritative merely because it exists or was
+created later than another revision.
+
+Exact revision-classification dimensions remain open and should not be
+collapsed prematurely into one status enum.
+
+
+5. ONE LOGICAL AUTHORITY, MANY PHYSICAL COPIES
+==============================================
+
+For one authority scope and one MemoryValue, there is one current
+AuthoritativeRevision.
+
+This is a semantic invariant.
+
+It does not mean there is only one physical copy of the value material.
+
+The same immutable material may exist in:
+- RAM
+- local durable storage
+- replicated storage
+- remote storage
+- object storage
+- shared memory
+- caches
+- backups
+- other implementation-specific locations
+
+Replication, caching, migration, redundancy, backup, or multiple physical
+copies do not create additional semantic authority.
+
+Conceptual separation:
+
+    Authority
+        which revision is the accepted semantic fact?
+
+    Identity
+        which immutable value material does that revision reference?
+
+    Placement
+        where can that material currently be obtained?
+
+Reads resolve authority/visibility first and then obtain material from any
+valid storage location.
+
+Writes become authoritative only through the authority mechanism.
+
+Possessing or creating a local/remote copy does not make that copy
+authoritative.
+
+The authority mechanism may be implemented by:
+- one local backend/process
+- a database transaction
+- a leader/lease mechanism
+- a consensus-backed service
+- another implementation
+
+but Actant semantics still expose one logical authoritative relationship.
+
+Do not specify that the authoritative value "lives on the backend" as a
+semantic rule. That is only one implementation.
+
+
+6. CONCRETE REVISION CONTENT AND VALUEREF
+=========================================
+
+A concrete MemoryValueRevision may refer to immutable value material through
+a ValueRef.
+
+Conceptually:
+
+    MemoryValue
+        -> MemoryValueRevision
+            -> ValueRef
+                -> immutable Actant-managed value material
+
+Authority belongs to the revision/authority relationship, not ValueRef.
+
+Different concrete values require descriptors which reconstruct their
+respective values.
+
+Two revisions containing the same concrete value may share one ValueRef.
+
+ValueRef does not identify a RuntimeValue.
+
+
+7. VALUEREF AS RECONSTRUCTION DESCRIPTOR
+========================================
+
+ValueRef is an immutable descriptor sufficient to reconstruct one concrete
+Actant semantic value.
+
+A ValueRef may:
+- contain small material inline
+- depend on one immutable storage object
+- depend on multiple immutable storage objects
+
+ValueRef is not required to correspond one-to-one with one Chunk.
+
+Different ValueRefs may reconstruct semantically equivalent values if their
+representations differ.
+
+Actant is not required to solve universal canonical semantic serialization in
+order to identify every equal abstract value.
+
+
+8. STORAGE / ADAPTER / BRIDGE BOUNDARY
+======================================
+
+Current conceptual boundary:
+
+    MemoryValue
+        stable semantic identity
+
+    MemoryValueRevision
+        historical semantic statement
+
+    ValueRef
+        immutable reconstruction descriptor
+
+    storage dependencies
+        immutable material required by the ValueRef
+
+    MemoryStorage
+        obtains/persists/manages value material
+
+    IoManager
+        performs supported external I/O under Actant management
+
+    ExecutionAdapter
+        maps Actant semantics into a runtime environment
+
+    Bridge Pack
+        translates an existing external protocol/serialization/interface into
+        Actant semantics without requiring that external system to adopt an
+        Actant adapter
+
+    RuntimeValue
+        runtime-specific representation
+
+Storage location is not semantic identity.
+
+Moving material between physical locations does not create a revision.
+
+Authority change alone does not require a new ValueRef.
+
+
+9. EXISTING EXTERNAL PROTOCOLS MAY BE BRIDGED
+=============================================
+
+Actant must not require an external system to adopt Actant's transport,
+serialization, or adapter model when that system already exposes a usable
+interface.
+
+A Pack may act as a protocol/serialization bridge:
+
+    external representation/protocol
+        <->
+    bridge Pack
+        <->
+    Actant semantic values/operations/results/errors
+
+The external system may remain completely unaware of Actant.
+
+Examples may include:
+- request/response protocols
+- RPC/IDL systems
+- message queues
+- database protocols
+- custom binary protocols
+- shared-memory protocols
+- existing application APIs
+
+The bridge owns translation knowledge.
+
+Translation does not itself create semantic or behavioral authority.
+
+If the external system is the actual implementation of behavior or state,
+that authority remains with the relevant external implementation/authority
+mechanism.
+
+
+10. SLOW PATH AND OPTIMIZED PATH EQUIVALENCE
+============================================
+
+A value may be reconstructed through a long path involving:
+- adapter/bridge
+- transport
+- MemoryValueSystem
+- MemoryStorage
+- IoManager
+- external storage
+- serialization/deserialization
+- semantic reconstruction
+- runtime materialization
+
+or through a valid optimized cache/local path.
+
+Both are valid only if observationally equivalent under the same:
+- MemoryValue identity
+- MemoryValueContract
+- authoritative/visible state
+- transaction/read context
+
+Caching, serialization, RPC, residency, and local materialization are
+implementation choices.
+
+A cache is not another authority source.
+
+
+11. TRANSACTIONS AS HIERARCHICAL STAGED OVERLAYS
+================================================
+
+Transactions remain hierarchical staged overlays.
+
+A transaction may contain locally changed values.
+
+Conceptual read order:
+
+    1. local staged value
+    2. parent transaction-visible value
+    3. next parent-visible state
+    4. authoritative root visible through transaction visibility rules
+
+The phrase "read live parent/root" is intentionally avoided.
+
+A transaction-local mutation does not inherently create a
+MemoryValueRevision.
+
+A child commit promotes staged state into its parent.
+
+Only promotion into the authoritative root creates the next authoritative
+revision in the current serialized design.
+
+Persisted transaction state remains non-authoritative.
+
+
+12. CONCURRENCY FUTURE-PROOFING
+===============================
+
+Full concurrency remains deferred, but the current design must preserve room
+for it.
+
+Accepted requirements:
+
+- a transaction may retain identities of revisions/state from which reads were
+  resolved
+- immutable revisions remain stable after authority advances
+- commit may validate assumptions used by the transaction
+- conflicting concurrent authoritative commits must not silently overwrite
+  each other
+- disjoint state should be able to commit independently
+- notifications/subscriptions are not transactional correctness mechanisms
+- short commit-boundary synchronization may be used without locking Root for
+  a whole transaction
+
+Working placeholder:
+
+    TransactionVisibility
+
+means:
+
+    the parent/authoritative state against which unresolved reads are
+    interpreted
+
+Exact snapshot/MVCC/isolation design remains deferred.
+
+
+13. READ SETS, WRITE SETS, AND DELTAS
+=====================================
+
+Future concurrency may distinguish:
+- read/observation set
+- write set
+- structured delta set
+
+A transaction may depend on values it only read.
+
+A sufficiently strong future isolation mode may reject commit when such
+dependencies changed.
+
+Some types may support semantic deltas instead of whole-value replacement.
+
+Examples:
+- numeric increment/decrement
+- map set/remove by key
+- set add/remove by member identity
+- record field/path updates
+- array operations where stable element identity exists
+
+Disjoint deltas may commit independently.
+
+Conflicting deltas fail unless an explicit delta model defines safe merge or
+composition.
+
+Generic whole-value replacement remains the safe fallback.
+
+
+14. MEMORYVALUEDEFINITION AND MEMORYVALUECONTRACT
+=================================================
+
+MemoryValueDefinition is creator/platform declaration.
+
+It may include:
+- identity/declaration
+- documentation
+- default value
+- sparse contract facet declarations
+- grouping/category metadata
+- other definition metadata
+
+MemoryValueDefinition.contract is sparse input.
+
+MemoryValueContract is the fully resolved semantic contract Actant uses.
+
+Conceptual construction:
+
+    MemoryValueDefinition.contract
+        + applicable inherited facet bindings
+        + versioned profile/default bindings
+        ->
+    MemoryValueContract
+
+Exact precedence remains open.
+
+There is no separate EffectiveMemoryValueContract term unless later design
+pressure demonstrates the need.
+
+
+15. CONTRACT FACET BOUNDARY
+===========================
+
+A MemoryValueContract facet should define semantic rules of the value or legal
+operations on that value.
+
+It should not become a dumping ground for:
+- current storage location
+- current cache state
+- current authority
+- current durability state
+- current links
+- tracing state
+- runtime placement
+
+Tentative core facets/dimensions include:
+- valueType
+- validation mode
+- coercion mode
+- resolution/deletion behavior where genuinely needed
+- delta/concurrency capability where appropriate
+
+The earlier tentative resolvedValueRequired facet is retired for now because
+optional<T> directly expresses whether absence is legal.
+
+Retention should default to a separate retention-policy system rather than
+MemoryValueContract unless a later case proves a retention rule is genuinely
+part of value semantics.
+
+
+16. CONTRACT FACET DEFAULT RESOLUTION
+=====================================
+
+Sparse local declarations resolve through a deterministic versioned default
+chain.
+
+Conceptually:
+
+    explicit MemoryValueDefinition.contract facet
+        ->
+    applicable group/type binding
+        ->
+    Pack/application binding if such a layer is retained
+        ->
+    versioned Actant profile binding
+        ->
+    terminal static default
+
+Every required facet must resolve deterministically.
+
+"Unspecified" means inheritance through the defined chain.
+It does not mean undefined behavior.
+
+Default facet values may be shared static immutable values rather than copied
+onto every MemoryValue.
+
+
+17. VERSIONED CONTRACT PROFILES
+===============================
+
+Implicit/default behavior must be reproducible.
+
+Default facet semantics therefore belong to a versioned profile or equivalent
+stable semantic identity.
+
+Old values/saves must be able to resolve through the profile semantics under
+which they were defined unless explicitly migrated.
+
+The complete MemoryValueContract must be inspectable/materializable as data
+even when the declaration is sparse.
+
+
+18. TYPE SYSTEM: GENERAL MODEL
+==============================
+
+Actant defines a language-independent semantic type model.
+
+The type model includes:
+- built-in scalar types
+- structural/container type constructors
+- named/custom semantic types
+- enum-like types
+- room for references and specialized types
+
+Named/custom types have stable semantic identity independent of runtime
+representation or serialization format.
+
+Named/custom types are nominal by default:
+
+    same structure
+        !=
+    necessarily same semantic type
+
+Concrete declaration formats may differ between adapters, runtimes, Packs,
+bridges, or external protocols as implementation detail.
+
+They are valid only insofar as they can be mapped and automatically checked
+against the same Actant semantic understanding.
+
+The design specification does not prescribe one language-specific declaration
+syntax.
+
+
+19. TYPEEXPRESSION AND TYPEDEFINITION
+=====================================
+
+MemoryValueContract.valueType references an Actant semantic TypeExpression.
+
+A TypeExpression may be:
+- built-in semantic type
+- reference to a named TypeDefinition
+- constructed type such as array<T>, map<K,V>, set<T>, nullable<T>,
+  optional<T>, reference<T>, or future constructors
+
+A named TypeDefinition provides stable semantic identity.
+
+Anonymous constructed types do not require globally named definitions.
+
+A named type may specialize/wrap an underlying structural type while retaining
+distinct semantic identity.
+
+Example conceptually:
+
+    TypeDefinition:
+        NPCParty
+        underlyingType = array<CustomNPC>
+
+is semantically distinct from anonymous:
+
+    array<CustomNPC>
+
+Interfaces/operations are associated separately from valueType.
+
+
+20. BUILT-IN TYPE DIRECTION
+===========================
+
+Likely built-in semantic families include:
+- boolean
+- integer
+- floating-point forms
+- string
+- binary
+- structural constructors
+
+Exact numeric width/precision families remain to be finalized.
+
+Precise decimal arithmetic may later justify a distinct type family.
+
+Host-runtime primitive types do not define Actant semantics.
+
+
+21. RECURSIVE STRUCTURAL TYPES
+==============================
+
+Structural types are expressed recursively through TypeExpressions.
+
+Examples of constructors:
+
+    record {
+        field: TypeExpression
+    }
+
+    array<TypeExpression>
+
+    set<TypeExpression>
+
+    map<KeyTypeExpression, ValueTypeExpression>
+
+    nullable<TypeExpression>
+
+    optional<TypeExpression>
+
+    reference<TypeExpression>
+
+Field declaration order is not part of record structural identity by default.
+
+Records with the same field identities and compatible field types remain the
+same anonymous structural type regardless of declaration/serialization order.
+
+Record structure describes data shape and does not inherently imply object
+identity or behavior.
+
+Named recursive types are valid.
+
+Embedded recursive values and references to other semantic values are
+distinct concepts.
+
+Exact requirements for map key type K remain open.
+
+
+22. OPTIONAL AND NULLABLE ARE EXPLICIT TYPE SEMANTICS
+=====================================================
+
+Actant distinguishes:
+
+    T
+        concrete value must be T
+        absence is not legal
+        null is not legal unless T includes null
+
+    nullable<T>
+        concrete value may be T or null
+        absence is not legal
+
+    optional<T>
+        concrete value may be T
+        absence is legal
+
+    optional<nullable<T>>
+        concrete value may be T or null
+        absence is also legal
+
+optional<T> is explicit because structural/value absence must not depend on
+implicit field conventions.
+
+nullable<T> and optional<T> are type/presence semantics, not ordinary
+validation constraints.
+
+
+23. NULL, ABSENCE, MISSING, AND ERROR
+====================================
+
+Actant distinguishes at least:
+
+    concrete T value
+
+    concrete null
+        an actual value where nullable<T> permits it
+
+    absence
+        no concrete value exists at the relevant semantic position
+
+    Missing
+        a legal resolved outcome after fallback resolution is exhausted and
+        optional<T> permits absence
+
+    Error
+        resolution/validation/storage/etc. failed where no legal Missing
+        result applies
+
+null != absence
+Missing != null
+Error != Missing
+
+A structured field may be absent while the enclosing record still exists.
+
+MemoryValue-level absence means no concrete value exists for that MemoryValue
+at the relevant visible layer/source.
+
+Concrete host-language nullish values must not redefine these semantics.
+
+
+24. DEFAULT VALUE RESOLUTION
+============================
+
+Default/fallback resolution is consulted only when concrete state is absent.
+
+If a concrete value exists, it wins even when that value is null.
+
+Example:
+
+    valueType = nullable<integer>
+    explicit concrete value = null
+    default = 10
+
+read:
+    null
+
+The default is not used because concrete state exists.
+
+If concrete state is absent and a default exists:
+
+    resolve default
+
+This does not create authoritative concrete state.
+
+A later change to the default changes future unresolved reads unless a
+concrete value has since been set.
+
+A default itself may be null when the TypeExpression permits null.
+
+Example:
+
+    valueType = nullable<integer>
+    default = null
+
+with no concrete value:
+
+    ResolvedValue = null
+    source = default
+
+This is distinct from an explicitly stored concrete null.
+
+
+25. OPTIONAL + DEFAULT IS MEANINGFUL
+====================================
+
+optional<T> and a default value may coexist.
+
+Example:
+
+    valueType = optional<integer>
+    default = 10
+
+Semantics:
+
+    explicit concrete value exists
+        -> return it
+
+    no concrete value, default resolves
+        -> return default
+
+    no concrete value, no applicable default
+        -> Missing is legal because optional<T> permits absence
+
+The default does not erase the semantic meaning of optional<T>.
+
+Representation-level optimization may later collapse/deduplicate equivalent
+declaration data, but design semantics remain explicit.
+
+
+26. CONTRADICTORY DECLARATIONS FAIL
+===================================
+
+Do not interpret contradictory semantic declarations creatively.
+
+If two declarations impose incompatible requirements on the same semantic
+dimension, contract/type construction fails unless Actant explicitly defines
+their composition.
+
+Conceptual example:
+
+    absence must be legal
+    absence must not be legal
+
+is an invalid combination unless one construct is explicitly defined as a
+narrowing/composition rule.
+
+A future required<T> constructor may prove unnecessary because plain T already
+means absence is not legal.
+
+Do not add redundant semantic constructs without pressure.
+
+
+27. VALUE RESOLUTION OUTCOMES
+=============================
+
+Conceptually, value resolution may produce:
+
+    Resolved(value)
+
+    Missing
+
+    Error(error information)
+
+Exact API wrapper names are not locked.
+
+Rules:
+
+- concrete value wins over fallback
+- concrete null is a concrete value
+- absent concrete state triggers fallback/default lookup
+- successful fallback produces ResolvedValue without creating revision history
+- after fallback exhaustion:
+    - optional<T> may yield Missing
+    - non-optional T yields an error
+- storage corruption/unavailability is Error, not Missing
+
+These semantics apply recursively where structured members have defaults or
+presence rules.
+
+
+28. MEMORYVALUE WITH AND WITHOUT EXPLICIT DEFINITION
+====================================================
+
+A MemoryValue may have an explicit MemoryValueDefinition.
+
+Actant should also preserve room for simple/inline usage where a value is used
+without a large creator-authored definition.
+
+In such a case, applicable platform/profile semantics still govern the value;
+behavior is not undefined.
+
+Exact inference/creation rules for undeclared MemoryValues remain open.
+
+Do not conflate:
+- absence of a creator-authored MemoryValueDefinition
+- absence of concrete value
+- absence of MemoryValue identity
+
+
+29. CONSTRAINTS VS TYPE SEMANTICS
+================================
+
+Type semantics define the semantic value domain.
+
+Constraints narrow that domain.
+
+Examples:
+
+    integer
+        type semantics
+
+    minimum = 0
+    maximum = 120
+        constraints
+
+    array<Item>
+        type semantics
+
+    minLength = 1
+    maxLength = 100
+        constraints
+
+optional<T> and nullable<T> are type/presence semantics, not ordinary
+constraints.
+
+
+30. INTRINSIC VS USAGE-SPECIFIC CONSTRAINTS
+===========================================
+
+Constraints may be intrinsic to a named TypeDefinition or specific to one
+usage.
+
+Example:
+
+    TypeDefinition Percentage
+        underlyingType = floating-point
+        intrinsic range = 0..100
+
+A usage may narrow further:
+
+    valueType = Percentage
+    maximum = 80
+
+Usage-specific constraints may narrow but must not widen the admissible domain
+of the referenced type.
+
+The effective admissible domain is the referenced type's domain intersected
+with compatible usage-specific constraints.
+
+
+31. TYPE-AWARE CONSTRAINTS
+==========================
+
+Constraint kinds are type-aware.
+
+Examples:
+
+Numeric:
+- minimum
+- maximum
+- exclusive bounds
+
+String:
+- minimum/maximum length
+- pattern-like constraints
+
+Array:
+- minimum/maximum length
+- uniqueness where semantically defined
+
+Record:
+- simple field constraints
+- potentially relational constraints later
+
+Invalid constraint/type combinations must be detectable rather than silently
+ignored.
+
+
+32. REUSABLE CONSTRAINTDEFINITION
+=================================
+
+Actant may support reusable named ConstraintDefinitions whose semantics are
+defined independently and which can be attached to compatible types/usages.
+
+Conceptually:
+
+    ConstraintDefinition:
+        identity
+        semantic meaning
+        applicable type domains/capabilities
+        accepted parameter/value form
+        validation behavior
+        composition behavior
+        failure semantics
+        defining profile/version
+
+A future profile may introduce a constraint such as effectiveMax without
+requiring each compatible type implementation to hardcode a bespoke copy of
+that concept, provided the type exposes enough semantic capability for the
+constraint implementation to operate correctly.
+
+Every standard named constraint must be properly documented.
+
+The concrete declaration format remains open.
+
+A JSON-like structured representation is allowed as an implementation/data
+format but does not itself define Actant semantics.
+
+Cross-field/cross-value relational constraints remain conceptually allowed;
+their expression mechanism is deferred.
+
+
+33. TYPEDEFINITION VS INTERFACEDEFINITION
+========================================
+
+TypeDefinition answers:
+
+    what is this value?
+
+InterfaceDefinition answers:
+
+    what behavior is advertised as callable for this value/type/target?
+
+Behavior is not serialized into the value merely because an interface exists.
+
+A semantic type may have:
+- no interfaces
+- one interface
+- multiple interfaces
+
+The same TypeDefinition may be used by many MemoryValues.
+
+
+34. INTERFACEDEFINITION
+=======================
+
+InterfaceDefinition describes advertised callable behavior.
+
+It may describe:
+- operation identity/name
+- argument TypeExpressions
+- return TypeExpression
+- error/failure information
+- coarse mutation/read behavior where useful
+- version/compatibility identity
+- other capability metadata
+
+Exact declaration syntax is deferred.
+
+Interface descriptions may be:
+- generated at authoring time
+- generated at build/install/download time
+- produced when a CodeEntry is transcribed
+- produced at load time
+- produced on first registration
+- requested dynamically
+- derived from an external schema/IDL by a bridge
+
+They may be used by:
+- IDE tooling
+- static analysis
+- generated proxies
+- validation
+- documentation
+- runtime dispatch assistance
+
+Generated/copied interface metadata is informative.
+It is not the final runtime authority on behavior.
+
+
+35. IMPLEMENTATIONREGISTRATION AND BEHAVIOR AUTHORITY
+=====================================================
+
+ImplementationRegistration is the working concept identifying a currently
+loaded implementation that authoritatively provides behavior.
+
+Distinguish:
+
+    value-state authority
+        which MemoryValueRevision is authoritative
+
+    behavior implementation authority
+        which loaded implementation actually handles an operation
+
+They are related but not identical.
+
+A behavior implementation must still use normal MemoryValue/transaction
+authority mechanisms for state mutation unless another explicitly designed
+authority mechanism applies.
+
+A stale generated interface does not override the loaded implementation's
+actual capabilities.
+
+
+36. DYNAMIC DISPATCH IS ALLOWED
+===============================
+
+InterfaceDefinition is capability/typing information, not necessarily an
+exhaustive whitelist.
+
+A request may be dispatched even when:
+- the operation was not announced
+- exact argument shape does not perfectly match advertised metadata
+
+unless an applicable strictness facet/policy requires pre-dispatch matching.
+
+The implementation is the final authority on whether the request is
+understood and valid.
+
+This preserves dynamic systems.
+
+
+37. STRICT INTERFACE/DISPATCH FACETS
+====================================
+
+Strictness is explicit rather than globally mandatory.
+
+Future facets/policies may separately control:
+- unknown operation names
+- argument matching
+- return matching
+- other interface-conformance checks
+
+Do not force all strictness into one boolean if distinct dimensions prove
+useful.
+
+Permissive/advisory interface metadata is the general direction unless a
+stricter contract is explicitly requested.
+
+
+38. FALLBACK/DYNAMIC OPERATION HANDLING
+=======================================
+
+An implementation may optionally support fallback/default dispatch for unknown
+operations.
+
+Conceptually:
+
+    default(OperationRequest)
+
+Exact name and representation are not locked.
+
+Fallback dispatch may interpret the whole request dynamically.
+
+Unknown-operation handling may later distinguish:
+- reject
+- fallback
+- dynamic handling
+
+Exact enum/form is deferred.
+
+
+39. OPERATIONREQUEST / RESULT / ERROR
+=====================================
+
+Operation invocation across a boundary is represented semantically as data.
+
+Conceptual request information may include:
+- target identity
+- interface identity/version where available
+- operation identity/name
+- arguments
+- transaction/context information
+- relevant metadata
+
+Execution produces:
+- OperationResult
+- state/revision effects through normal authority mechanisms
+- or OperationError
+
+Exact object formats are deferred.
+
+
+40. OPERATION ERRORS ACROSS BOUNDARIES
+======================================
+
+Implementation failures are transported as Actant-level error information.
+
+A receiving adapter/bridge maps the error into the destination environment's
+native failure/exception mechanism.
+
+Conceptual error information may include:
+- error type/identity
+- message
+- structured details
+- source operation
+- optional cause chain
+- optional trace/provenance references
+
+An implementation rejecting a dynamically dispatched request is a valid
+runtime outcome.
+
+
+41. SERIALIZATION IS REPRESENTATION, NOT TYPE IDENTITY
+======================================================
+
+Actant should be serialization-forward without choosing one universal wire
+format.
+
+The important separation is:
+
+    semantic type
+        what the value is
+
+    representation/codec
+        how concrete material encodes that semantic value
+
+    ValueRef/material
+        immutable reconstruction material
+
+    adapter/bridge
+        how semantics cross a runtime/protocol boundary
+
+The same semantic value/type may use different valid representations.
+
+Both sides of a transfer need sufficient information to agree on the semantic
+meaning of the transferred material.
+
+A representation is insufficient if it collapses distinctions required by the
+Actant type semantics.
+
+
+42. REPRESENTATIONS MUST PRESERVE REQUIRED DISTINCTIONS
+=======================================================
+
+Example:
+
+    optional<nullable<T>>
+
+requires the ability to distinguish:
+- absent
+- present null
+- present T
+
+A serialization/protocol which collapses absent and null cannot represent that
+type correctly without additional bridge/codec machinery.
+
+Compatibility therefore means more than approximate field/value similarity.
+
+It must preserve the semantic distinctions required by the TypeExpression and
+constraints.
+
+
+43. MANAGED LINKS AND LINKREGISTRY
+==================================
+
+ManagedLinks represent first-class semantic relationships.
+
+LinkRegistry is the authoritative source of relationship truth.
+
+Endpoint-side incoming/outgoing indexes are derived.
+
+Preferred lifecycle:
+- CreateLink
+- DeleteLink
+
+UpdateLink is only needed if a genuine mutable-relationship use case appears.
+
+Link types describe semantic facts, not retention commands.
+
+Examples:
+- producedRevision
+- derivedFrom
+- deletedRevisionPrevious
+- observedValue
+- references
+
+
+44. LINK AUTHORITY AND CRASH SAFETY
+===================================
+
+ActiveWindow may contain incomplete/staged links.
+
+SafeCheckpointWindow may contain only complete validated links.
+
+A partially persisted link is not authoritative merely because some bytes
+exist.
+
+Recovery may reconstruct a staged/incomplete link only when uniquely
+determined by retained evidence.
+
+Ambiguous recovery fails rather than guessing.
+
+Transaction-like safety guarantees do not require reuse of the exact
+MemoryValueSystem transaction implementation.
+
+
+45. RETENTION CORE PRINCIPLE
+============================
+
+MemoryValueSystem does not decide collectability.
+
+LinkRegistry does not decide collectability.
+
+MemoryStorage exposes material/storage facts and dependencies but does not
+decide semantic retention policy.
+
+RetentionCollector makes collection decisions using:
+- policies
+- authority state
+- ManagedLinks
+- storage dependencies
+- capabilities/facts
+- environment/context
+- any applicable retention configuration
+
+Retention policy is not currently part of the core MemoryValueContract.
+
+
+46. RETENTION CAPABILITIES AND FACTS
+====================================
+
+A capability means a fact/operation is valid to ask of an implementation.
+
+It does not require every subject to store every possible field.
+
+Distinguish:
+- supported and value available
+- supported but unset
+- unsupported
+
+Facts may be:
+- stored
+- derived
+- dynamic
+- lazily loaded
+- cached as optimization
+
+
+47. RETENTIONCOLLECTOR
+======================
+
+RetentionCollector is the current working name for the component that:
+- discovers candidate subjects
+- resolves retention policy/defaults/overrides
+- queries capabilities/facts
+- inspects ManagedLinks
+- inspects authority/current state
+- inspects storage dependencies
+- determines collectability
+- coordinates semantic removal
+- triggers/reconsiders orphan material
+- preserves SafeCheckpointWindow consistency during authoritative graph
+  changes
+
+Potential supporting abstraction:
+
+    RetentionSource
+
+Exact interfaces remain open.
+
+
+48. SHARED IMMUTABLE MATERIAL AND DEDUPLICATION
+===============================================
+
+Semantic subject retention and physical material lifetime are separate.
+
+Multiple revisions may share one ValueRef.
+
+Multiple ValueRefs may share lower-level immutable storage material.
+
+Deduplication is derived from shared dependencies/reachability.
+
+Do not create a ManagedLink type such as deduplicated.
+
+Collecting one semantic subject must not remove shared material still required
+by another surviving dependency.
+
+
+49. CHUNK
+=========
+
+Chunk remains a standard optional Actant immutable storage-material
+abstraction.
+
+A Chunk is:
+- immutable
+- shareable
+- normally content-addressed
+- suitable for deduplication
+- collectable through storage reachability
+
+Chunk identity concerns immutable logical chunk bytes, not:
+- semantic value identity
+- runtime representation
+- current physical storage encoding
+
+Physical compression/encryption/packing/cache/location should not change
+Chunk identity when logical bytes remain unchanged.
+
+Not every MemoryStorage backend must use Chunk.
+
+
+50. MEMORYSTORAGE
+=================
+
+MemoryStorage is the MemoryValueSystem abstraction for storing/retrieving
+Actant-managed value material.
+
+It owns memory-specific storage semantics such as:
+- storing immutable value material
+- retrieving material by identity
+- exposing storage dependencies
+- exposing availability/durability facts
+- supporting collection/reachability operations where appropriate
+
+MemoryStorage is not defined purely in terms of files.
+
+
+51. IOMANAGER AS MANAGED-I/O GATEWAY
+====================================
+
+IoManager is Actant's central supported managed-I/O gateway.
+
+Actant-owned loaders, MemoryStorage implementations, persistence paths, and
+other platform subsystems should perform supported external I/O through it.
+
+IoManager centralizes:
+- baseline tracing
+- error capture/normalization
+- access policy/hooks
+- observability
+- recovery/reporting integration
+
+Loaders/drivers interpret source/format/protocol.
+
+Pack code may technically bypass IoManager unless sandboxing exists, but such
+access is outside Actant's supported managed-I/O guarantees.
+
+
+52. DURABILITY BEFORE AUTHORITY
+===============================
+
+Authoritative state may reference value material only after every required
+material dependency has satisfied the applicable durability guarantee.
+
+Safe ordering:
+
+    prepare material
+    persist material
+    establish required durability
+    publish/promote authoritative revision
+
+ActiveWindow may contain incomplete/not-yet-durable references.
+
+SafeCheckpointWindow may contain only authoritative references whose required
+material dependencies are durable enough.
+
+Durability is distinct from:
+- runtime residency
+- current availability
+- authority
+- cache presence
+
+A later storage failure does not retroactively invalidate the original commit.
+
+
+53. ORPHAN MATERIAL
+===================
+
+Interrupted/failed operations may leave physically stored material without a
+retained semantic owner.
+
+This is valid.
+
+Orphan detection is based on reachability/dependencies, not a permanent
+intrinsic orphan flag.
+
+Potential roots include:
+- authoritative revisions
+- retained historical revisions
+- retained trace/journal evidence
+- retained Window/recovery state
+- other registered retention roots
+
+Orphaned material may remain physically present until storage-GC policy allows
+collection.
+
+
+54. ORPHAN RECOVERY MUST FAIL CLOSED
+====================================
+
+Crash recovery must not reconstruct unpublished semantic state from orphaned
+material by inference.
+
+Forbidden reasoning includes:
+- matching payload value
+- timestamps
+- neighboring incomplete records
+- trace hints
+- likely intended ValueRef/revision connection
+
+Orphan material remains orphaned unless a later valid operation independently
+references it.
+
+A retry performs creation again.
+
+Storage may transparently deduplicate against already-existing complete
+material if the retry independently derives/proves the same material identity.
+
+General safety asymmetry:
+
+    creation uncertainty:
+        do not publish
+
+    collection uncertainty:
+        do not physically delete
+
+
+55. SEMANTIC REMOVAL VS PHYSICAL COLLECTION
+===========================================
+
+Creating authoritative state requires durable material first.
+
+Removing semantic state does not require immediate physical reclamation.
+
+Safe asymmetry:
+
+    create:
+        material first
+        authority second
+
+    remove:
+        semantic removal first
+        physical collection may lag
+
+Crash after semantic removal but before cleanup leaves orphan material which
+can be rediscovered later.
+
+
+56. REMOVEOVERRIDE VS TRUE DELETION
+===================================
+
+RemoveOverride:
+- removes explicit concrete value at the current layer
+- allows fallback/default resolution
+
+True deletion/missing-state operation:
+- intentionally produces/remains in a state where no concrete value exists
+- exact interaction with optional<T>, fallback suppression, and deletion
+  revision semantics remains to be finalized
+
+The old universal ABSENT revision model remains superseded.
+
+Exact operation names remain open.
+
+
+57. DELETION REVISION AND PREVIOUS-VALUE RELATIONSHIP
+=====================================================
+
+When true deletion removes an existing concrete revision, a deletion
+revision/state may preserve which revision was deleted.
+
+Conceptually:
+
+    R1 -> concrete value
+    R2 -> deletion state
+
+    R2 --deletedRevisionPrevious--> R1
+
+The semantic relationship may be a ManagedLink.
+
+MemoryValueSystem maintains the fact.
+RetentionCollector decides retention consequences.
+
+Exact deletion-state representation remains open.
+
+
+58. DELETION AGAINST DEFAULT-ONLY VALUE
+=======================================
+
+If no explicit concrete value exists and the value resolves only from a
+default, invoking an operation called "delete" must not automatically create
+meaningless history.
+
+Possible semantics remain:
+- invalid
+- no-op
+- explicit suppression/missing state if the final deletion model supports it
+
+Do not create deletion history unless a meaningful semantic state transition
+occurred.
+
+
+59. CONFIG DIRECTION
+====================
+
+ConfigValue remains a MemoryValue specialization.
+
+Current resolution direction includes:
+
+    visible explicit concrete value
+        >
+    configured default
+        >
+    MemoryValueDefinition.defaultValue
+        >
+    optional/Missing/error semantics
+
+A resolved default does not automatically become authoritative state.
+
+RemoveOverride returns to fallback resolution.
+
+SaveCurrentResolvedValue materializes the current resolved value as explicit
+authoritative state.
+
+
+60. STRONGER PERMANENT DELETE / ERASURE
+=======================================
+
+A stronger erase/permanent-delete operation remains open.
+
+It is distinct from:
+- RemoveOverride
+- true deletion/missingness
+- ordinary retention expiry
+- physical storage GC
+
+It must not falsely promise:
+- immediate deletion of shared material
+- erasure from unrelated exports/backups
+- secure physical erase
+- violation of active semantic/storage dependencies
+
+
+61. REDUCED-CAPABILITY / CUSTOM IMPLEMENTATIONS
+===============================================
+
+Custom implementations may intentionally omit:
+- retention support
+- provenance
+- historical reconstruction
+- durable trace evidence
+- some metadata/facts
+- some inspection capabilities
+
+Actant does not fabricate missing observability.
+
+Reduced-capability implementations explicitly accept the corresponding loss of
+guarantees.
+
+
+62. ACCEPTED DESIGN ITEMS THROUGH CHECKPOINT #4
+===============================================
+
+Accepted:
+
+01. MemoryValue is the central language-independent persistent semantic
+    identity.
+
+02. MemoryValueRevision existence is separate from authority.
+
+03. One authority scope/MemoryValue has one current authoritative revision.
+
+04. Multiple physical copies/replicas do not create multiple semantic
+    authorities.
+
+05. Reads resolve authority/visibility separately from material placement.
+
+06. ValueRef is authority-neutral and reconstructs one concrete semantic value.
+
+07. ValueRef may inline material or depend on multiple immutable storage
+    objects.
+
+08. Same concrete value may share ValueRef/material; deduplication is derived
+    from shared dependencies.
+
+09. Chunk is standard and optional, not universal.
+
+10. MemoryStorage and IoManager are separate abstractions.
+
+11. IoManager is Actant's managed-I/O gateway.
+
+12. Pack code may bridge existing external protocols/serialization without
+    requiring an Actant adapter on the other side.
+
+13. A bridge translates; it does not gain authority merely by translating.
+
+14. Transactions remain hierarchical staged overlays.
+
+15. Transaction visibility must remain future-compatible with snapshots/MVCC.
+
+16. Conflicting concurrent commits must not silently last-writer-win.
+
+17. Disjoint state should be able to commit independently.
+
+18. Delta-capable types may define finer semantic conflict granularity.
+
+19. MemoryValueDefinition.contract is sparse declaration input.
+
+20. MemoryValueContract is the fully resolved semantic contract.
+
+21. EffectiveMemoryValueContract is unnecessary for now.
+
+22. Contract defaults resolve through deterministic versioned chains.
+
+23. resolvedValueRequired is retired for now.
+
+24. optional<T> expresses legal absence.
+
+25. nullable<T> expresses legal concrete null.
+
+26. optional<nullable<T>> permits absent, concrete null, or concrete T.
+
+27. Defaults are consulted only when concrete state is absent.
+
+28. Explicit concrete null prevents fallback just like any other concrete
+    value.
+
+29. A default may itself resolve to null if the type permits it.
+
+30. optional<T> and default may coexist meaningfully.
+
+31. Contradictory semantic declarations fail unless explicit composition rules
+    exist.
+
+32. TypeExpression is the semantic type reference used by valueType.
+
+33. TypeDefinition provides stable identity for named semantic types.
+
+34. Named/custom types are nominal by default.
+
+35. Structural types recurse through TypeExpressions.
+
+36. Record field declaration/serialization order is not part of identity by
+    default.
+
+37. optional<T> is explicit and not inferred from record conventions.
+
+38. Exact map key K requirements remain open.
+
+39. Type semantics and constraints are distinct.
+
+40. Constraints may be intrinsic or usage-specific.
+
+41. Usage constraints may narrow but not widen the referenced type's domain.
+
+42. Constraint/type incompatibility must be detectable.
+
+43. Reusable named ConstraintDefinitions are an accepted open direction.
+
+44. Concrete definition/constraint declaration syntax is deferred.
+
+45. JSON-like representation is allowed but does not define semantics.
+
+46. TypeDefinition and InterfaceDefinition are separate.
+
+47. InterfaceDefinition advertises callable behavior.
+
+48. ImplementationRegistration identifies the loaded implementation
+    authoritatively providing behavior.
+
+49. Interface metadata may be generated/precomputed/transcribed/on-demand and
+    used by IDEs/static tooling/proxies.
+
+50. Interface metadata is informative, not necessarily exhaustive.
+
+51. Dynamic calls may be dispatched even when not advertised unless strict
+    matching is requested.
+
+52. Strict matching may later have separate operation/argument/return facets.
+
+53. Implementations may provide fallback/default dynamic dispatch.
+
+54. Operation requests/results/errors are semantic data crossing boundaries.
+
+55. Implementation errors are transported and mapped into the destination
+    environment's native failure mechanism.
+
+56. Serialization format is separate from semantic type identity.
+
+57. Different representations may encode the same semantic value/type.
+
+58. Representations must preserve distinctions required by the TypeExpression.
+
+59. Required material durability precedes authoritative publication.
+
+60. Orphan material is valid after interrupted creation.
+
+61. Orphan material must never be forensically reattached to incomplete
+    semantic state.
+
+62. Fresh retries may independently deduplicate against complete orphan
+    material.
+
+63. Semantic removal may precede physical cleanup.
+
+64. LinkRegistry owns semantic relationship truth.
+
+65. Links describe facts, not retention commands.
+
+66. RetentionCollector decides collectability.
+
+67. Retention is not currently a core MemoryValueContract facet.
+
+68. Semantic retention and physical material lifetime remain separate.
+
+
+63. OPEN FOLLOW-UP ITEMS
+========================
+
+A. Exact built-in scalar/numeric type set
+- integer width/range model
+- floating-point families
+- decimal
+- binary
+- any time/date/identifier built-ins
+
+B. Exact map<K,V> key requirements
+- equality
+- canonical identity
+- hashing
+- ordering if any
+- bridge/serialization implications
+
+C. Reference<T>
+- what identity is referenced
+- MemoryValue identity vs another semantic object identity
+- lifetime/retention/link interaction
+- cycles
+
+D. Open/closed record semantics
+- unknown fields
+- preservation/ignore/reject behavior
+- version compatibility
+
+E. Type compatibility
+- structural compatibility for anonymous types
+- nominal compatibility for named types
+- explicit aliases/subtyping
+- compatibility across versions
+
+F. Constraint model
+- final standard ConstraintDefinitions
+- relational/cross-field constraint mechanism
+- constraint implementation/capability interface
+- composition rules
+
+G. Contract facet taxonomy
+Finalize:
+- validation mode
+- coercion mode
+- resolution policy if needed
+- deletion semantics
+- delta/concurrency capability
+- strict interface/dispatch facets
+
+H. Contract profile hierarchy
+Finalize precedence among:
+- MemoryValueDefinition.contract
+- type/group bindings
+- Pack/application bindings
+- versioned Actant profile defaults
+
+I. Undeclared/simple MemoryValue creation
+Define how a MemoryValue with no explicit creator-authored definition obtains:
+- type
+- contract
+- default profile
+- validation behavior
+
+J. Validation/coercion
+- strict validation
+- compatibility validation
+- coercion rules
+- adapter/bridge responsibilities
+
+K. Default semantics
+- configured default vs definition default
+- field-level defaults
+- whether defaults may fail dynamically
+- provenance of resolved defaults
+
+L. ResolvedValue formal representation
+- value
+- source/provenance
+- contract/profile identity
+- Missing/Error representation
+
+M. RemoveOverride / true deletion
+Finalize:
+- names
+- optional<T> interaction
+- fallback suppression
+- deletion revision representation
+- deletion against default-only value
+- deletedRevisionPrevious lifecycle
+
+N. InterfaceDefinition
+Finalize:
+- identity/versioning
+- operation metadata
+- argument/return descriptions
+- mutation/read declarations
+- compatibility
+
+O. Dynamic dispatch policy
+Finalize:
+- unknown operation handling
+- strictness facets
+- fallback/default dispatcher semantics
+- stale interface metadata behavior
+
+P. OperationRequest / OperationResult / OperationError
+Finalize semantic fields and transport-independent behavior.
+
+Q. Behavior implementation authority
+- implementation registration lifecycle
+- multiple candidate implementations
+- failover
+- version matching
+- authority transfer
+
+R. Serialization/representation
+- representation identity
+- codec identity/versioning
+- capability negotiation
+- zero-copy/shared-memory representations
+- preserving semantic distinctions
+
+S. Bridge model
+- relationship to Packs/CodeEntries
+- protocol mappings
+- generated interface/type metadata
+- error translation
+- behavior/state authority boundaries
+
+T. Concurrency
+- TransactionVisibility
+- read/write observation sets
+- optimistic validation
+- snapshot semantics
+- MVCC
+- conflict/retry/rebase
+- delta models
+- cross-thread/process/application coordination
+
+U. Revision classification
+Determine orthogonal dimensions for observed/derived/proposed/rejected/
+superseded/historical/authoritative/aborted.
+
+V. LatestRevision under concurrency
+Define lineage/scope and avoid ambiguous global newest semantics.
+
+W. Link taxonomy
+- identity
+- endpoint lifecycle
+- directionality
+- surviving links to collected/unavailable endpoints
+- atomicity with related state
+
+X. Retention
+- subject/source abstractions
+- capability taxonomy
+- policy composition
+- pins/defaults/capacity/age
+- relationship-aware rules
+- semantic collection vs storage GC
+
+Y. MemoryStorage
+- driver interface
+- availability/durability reporting
+- storage dependency enumeration
+- collection hooks
+
+Z. IoManager
+- managed source categories
+- baseline trace information
+- normalized error model
+- access/security policy hooks
+
+AA. Durability classes
+- whether multiple levels exist
+- where required level is declared
+- how storage proves satisfaction
+
+AB. Strong erase
+- scope
+- history/provenance
+- shared material
+- backups/exports
+- guarantees
+
+AC. ActiveWindow / SafeCheckpointWindow integration
+- transactions
+- links
+- durability
+- recovery state
+- collection
+
+AD. Reduced-capability implementations
+Define how missing capabilities are declared and consumed safely.
+
+
+64. CORRECTIONS FROM CHECKPOINT #3
+==================================
+
+Checkpoint #4 intentionally corrects/refines checkpoint #3:
+
+1. Language-specific examples are removed from semantic type/value sections.
+   The design specification remains language-neutral.
+
+2. "Authority lives on backend" style wording is rejected.
+   Authority is one logical relationship per authority scope/MemoryValue;
+   physical placement is independent.
+
+3. Bridge Pack integration is added as a first-class path for external systems
+   that already have usable protocols/serialization.
+
+4. resolvedValueRequired is removed from the tentative core facet set.
+   optional<T> now expresses whether absence is legal.
+
+5. nullable<T> is clarified as concrete null permission, not absence.
+
+6. Defaults are only consulted when concrete state is absent.
+   Explicit null is concrete state and blocks fallback.
+
+7. Missing is separated from null and from Error.
+
+8. optional<T> + default is explicitly valid and semantically meaningful.
+
+9. Contradictory declarations now fail unless Actant defines composition.
+
+10. Retention is moved out of the default MemoryValueContract facet set.
+    It remains a separate policy system unless a genuinely semantic retention
+    rule is later demonstrated.
+
+11. valueType now points to TypeExpression rather than being treated as a
+    simple primitive validator.
+
+12. TypeDefinition, InterfaceDefinition, and ImplementationRegistration are
+    separated.
+
+13. Interface descriptions are advisory by default and need not be exhaustive.
+
+14. Dynamic dispatch and fallback handling are accepted directions.
+
+15. Strict interface matching becomes explicit/faceted rather than globally
+    mandatory.
+
+16. Serialization/representation is separated from semantic type identity.
+
+17. Constraints are separated from type semantics and may be reusable named
+    ConstraintDefinitions.
+
+18. Record field order is explicitly non-semantic by default.
+
+19. Exact map key K rules are deliberately left open.
+
+20. True-deletion wording is softened where checkpoint #3 assumed a separate
+    resolvedValueRequired facet; final deletion/optional/default interaction
+    remains open.
+
+
+65. DOCUMENT-INTEGRATION IMPACT KNOWN SO FAR
+============================================
+
+DA-04 requires substantial revision:
+- old Memory runtime term
+- committed-only revision framing
+- State-centric hierarchy
+- transaction/revision distinction
+- explicit state vs ResolvedValue
+- null/absence/Missing semantics
+- transaction visibility/concurrency future-proofing
+- authority placement language
+
+DA-05 requires substantial revision:
+- ValueRef currently committed-only
+- ValueRef must be authority-neutral
+- ValueRef is reconstruction descriptor
+- zero/one/multiple storage dependencies
+- shared immutable payload/reachability
+- optional Chunk
+- deduplication from dependency graph
+
+DA-06 requires substantial revision:
+- MemoryValueDefinition.contract vs MemoryValueContract
+- versioned facet profiles
+- TypeExpression/TypeDefinition
+- optional/nullable/default semantics
+- reusable constraints
+- explicit value vs default vs Missing
+- RemoveOverride vs true deletion
+
+DA-07 requires conceptual expansion:
+- IoManager as managed-I/O gateway
+- external protocols beyond files
+- bridge integration
+- loaders/drivers as interpretation mechanisms
+- MemoryStorage as separate memory-specific abstraction
+
+DA-08 retention concepts remain useful but subsystem-specific.
+
+Tracing docs remain compatible with:
+- exact revision links
+- unavailable/collected targets
+- non-authoritative evidence
+- LinkRegistry traversal
+- IoManager baseline managed-I/O tracing
+
+New authoritative documentation may also be needed for:
+- semantic type system
+- interface/operation model
+- bridge/protocol integration
+- constraints
+depending on final document partitioning.
+
+
+66. RESTART / HANDOFF SUMMARY
+=============================
+
+If restarting from checkpoint #4:
+
+1. Prefer checkpoint #4 over all earlier checkpoints.
+
+2. Treat it as non-authoritative working design.
+
+3. Preserve one logical authority per authority scope/MemoryValue while
+   allowing arbitrary physical replication.
+
+4. Keep semantic identity, ValueRef/material identity, storage placement, and
+   RuntimeValue representation separate.
+
+5. Preserve MemoryValueDefinition.contract as sparse input and
+   MemoryValueContract as fully resolved result.
+
+6. Do not reintroduce resolvedValueRequired unless a later case proves
+   optional<T> cannot express the required semantics.
+
+7. Preserve:
+       nullable<T> = concrete null permitted
+       optional<T> = absence permitted
+
+8. Defaults are consulted only when concrete state is absent.
+
+9. Explicit null prevents fallback.
+
+10. Missing, null, and Error are distinct.
+
+11. Do not optimize away semantic distinctions merely because combinations can
+    be represented more compactly.
+
+12. Contradictory semantic declarations fail unless composition is explicitly
+    defined.
+
+13. valueType points to TypeExpression.
+
+14. Named TypeDefinitions are nominal by default.
+
+15. Record field order is not semantic identity by default.
+
+16. Keep map key K requirements open until deliberately designed.
+
+17. Keep TypeDefinition and InterfaceDefinition separate.
+
+18. Treat interface metadata as advertised information, not necessarily an
+    exhaustive whitelist.
+
+19. Allow dynamic calls unless strict facets/policy prohibit them.
+
+20. The loaded implementation remains authoritative for actual behavior.
+
+21. Allow Pack-based protocol/serialization bridges for existing external
+    systems.
+
+22. Do not require one universal serialization format.
+
+23. Serialization/codec representations must preserve Actant semantic
+    distinctions.
+
+24. Keep reusable named ConstraintDefinition as an accepted extensibility
+    direction; concrete syntax remains open.
+
+25. Preserve transaction visibility/concurrency future-proofing without
+    prematurely designing full MVCC.
+
+26. Never publish authoritative state before required material durability.
+
+27. Never forensically reconstruct unpublished semantic state from orphaned
+    material.
+
+28. RetentionCollector, not MemoryValueSystem or LinkRegistry, decides
+    collectability.
+
+29. After remaining conflict/follow-up questions close, materialize revised
+    authoritative documentation.
+
+END OF MEMORY VALUE SYSTEM DESIGN CHECKPOINT #4
