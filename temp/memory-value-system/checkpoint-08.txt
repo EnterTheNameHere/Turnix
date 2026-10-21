@@ -2958,422 +2958,6 @@ revisions.
 
 
 
-101. CURRENT-STATE RECONCILIATION AND PRECEDENCE
-================================================
-
-This checkpoint is a coherent continuing design, not a literal historical transcript.
-Sections 1-95 preserve the detailed baseline, subject to the refinements below.
-Sections 102-119 express the latest accepted interpretation; where an older section
-uses broader, narrower, or tentative wording inconsistent with these decisions,
-the current-state interpretation in 102-119 prevails. In particular:
-- streaming is NOT an all-encompassing delivery/recovery/lifecycle protocol;
-- a Subscription is NOT the owner of generic callback/Invocation orchestration;
-- Flow is a shared semantic family, NOT a set of isolated implementations;
-- Actant, not a duplicated independent Flow framework, owns activation and
-  lifecycle context;
-- connection/participant absence is NOT automatically FlowError or termination;
-- a domain may be fully satisfied while lower layers repair disturbances;
-- persistence and permissions follow semantic ownership and contract boundaries;
-- older OPEN entries describing already-discussed topics as undesigned are superseded
-  by the revised open list in section 120.
-The following sections deliberately avoid prescribing implementation objects,
-inheritance, enums, special-purpose message envelopes, or universal mechanisms.
-
-
-102. MULTIPART, STREAMING, AND FRAGMENTATION
-============================================
-
-Multipart represents one logical semantic object/unit transferred in multiple
-parts. Define membership, completeness, required parts, meaningful ordering,
-recovery, cancellation, and whether truncation can ever be valid. Receipt of
-some parts is not semantic completion; an End marker cannot hide missing
-required parts. Recovery may request individual missing parts or restart/resync.
-Use established ValueRef/Chunk/MemoryStorage material retrieval when suitable,
-rather than duplicating it in Messaging.
-
-Streaming ONLY describes incremental production/availability and possible
-consumption before overall production finishes. Producer/consumer overlap does
-not require a network or even a known consumer. A stream may stop without an
-explicit terminal report, and its producer may not know listeners or their count.
-Streaming by itself promises NO delivery, ordering, acknowledgement, retention,
-recovery, completeness, flow control, consumer identity, or termination semantics.
-Those come from separately declared Flow/Invocation/Subscription contracts.
-Streaming != Subscription != multipart != Transport fragmentation.
-A weak Subscription can observe a stream, decline delivery guarantees, and
-infer observational end after listener-side inactivity, e.g. 60 seconds; this
-is not evidence of source termination, success, or no future data.
-
-
-103. THREE LAYERS, EVIDENCE, AND CONTRACT-RELATIVE HEALTH
-=========================================================
-
-Transport/Messaging realizes movement, connections, representations, and
-mechanism-specific repair. Flow orchestrates negotiated semantic guarantees:
-ordering, required delivery, gap recognition, acknowledgement, staleness,
-retries, resync, persistence, reconciliation, and valid teardown. Domain owns
-operations, results, jobs, and business meaning.
-
-Lower-layer errors may be entirely recovered without domain visibility.
-Transport reconnect failures may be normal while Flow awaits an absent
-participant. Flow recovery/rebinding remains visible in tracing/telemetry, but
-the domain observes contract-valid results or an unresolved FlowError/
-Indeterminate outcome, not each intermediate low-level anomaly.
-
-Flow-level Ack is evidence sufficient to advance/retire a SPECIFIC communication
-obligation at a stated scope. It does not mean the domain accepted, approved,
-used, or committed the delivered material. Missing Ack means the sender lacks
-evidence; delivery might actually have happened. Do not prescribe state-array
-representations such as toSend/pending/unAcknowledged.
-
-Presence of a participant, ability to reach it, logical existence of a Flow,
-current usability, recoverability, and contract satisfaction are DISTINCT and
-observer-relative. A connected Transport need not imply a satisfied Flow; a
-broken Transport need not imply an unsatisfied Domain contract. One universal
-isAlive()/healthy bool is insufficient. Conceptual 'Awaiting' denotes permitted
-absence, 'Recovering' active remedial effort, and 'Failed' an unmet contract;
-these are not mandated mutually exclusive enum states. The contract may allow
-indefinite waiting and need not induce busy retry/polling or an error storm.
-A connection-dependent contract that requires continuous usability remains
-a valid simple conventional choice; a recovery-tolerant contract may remain
-satisfactory through absence. Exact defaults arise from actual Pack pressure.
-
-
-104. CONTRACT NEGOTIATION, TIMEOUT, DEADLINE, AND CANCEL
-=========================================================
-
-Timeout triggers an ATTEMPT appropriate to its scope: reconnect, retry, resync,
-reconcile, query, or other repair. Timeout alone is not a terminal guarantee
-failure. Deadline triggers a DECLARATION when a required condition can no longer
-be satisfied within its contract; cleanup/compensation may still follow.
-Transport, Flow, caller, and domain deadlines are distinct. A caller deadline
-does not implicitly cancel an independently accepted Job. Timing contracts
-must name relevant anchors and clock semantics, especially across persisted
-Flow state; wall time vs active runtime time cannot be silently conflated.
-Retry policy may allow zero attempts, bounded attempts, deadlines, or indefinite
-waiting; 'retry until max retries' is not universal.
-
-Establishment must negotiate or verify compatible timeout/deadline, recovery,
-history-retention, and delivery horizons. A listener which delays detection
-longer than source recoverability cannot silently receive a promise of lossless
-restoration; reconfigure, negotiate a satisfiable profile, or refuse.
-Requirements are capability constraints, not a demand for literal equal values.
-
-Cancel request != acceptance != completed termination. Scope may be Invocation,
-Job, specific Flow, listener consumption, or producer execution. Unsubscribe,
-deadline, shutdown, or disconnect does not implicitly cancel unrelated domain
-work. Side effects already committed externally cannot be rolled back by
-renaming a cancellation. Pending cancellation may itself require persistent
-continuation and reconciliation.
-
-
-105. RETRY, IDEMPOTENCY, AND EVIDENCE RETENTION
-==============================================
-
-Stable InvocationId persists across attempts. Intrinsic idempotency, duplicate
-recognition, retained outcome retrieval, and domain-effect reconciliation are
-distinct. Non-idempotent actions may sometimes be retried safely using durable
-Invocation/domain-effect identity and evidence, but unknown effect state MUST
-NOT be resolved by blind re-execution. Record Indeterminate/FlowError and
-preserve evidence if safe reconciliation is impossible.
-
-Sufficient deduplication/recognition evidence must persist while a legitimate
-retry could otherwise be mistaken for new work. Compaction is permitted when
-equivalent evidence remains (e.g. a correctly scoped monotonic processed-through
-watermark); complete per-message logs are not inherently required.
-Different evidence may establish duplicate recognition, prior outcome, or
-external effect, and none substitutes automatically for the others.
-
-
-106. SUBSCRIPTION ESTABLISHMENT, TERMINATION, AND PARTICIPANT SIDES
-==================================================================
-
-Listener initiates continuing interest. One logical SubscriptionId persists
-through compatible establishment retry and restoration. Source and listener
-may have separate participant-side Flow state, Transport bindings, knowledge,
-and obligations, even when one process shares their physical implementation.
-Source registration may exist before listener receives establishment evidence.
-Same ID + compatible contract calls for reconciliation, not duplication;
-incompatible reused terms conflict. Establishment requires resolved compatible
-guarantees; provisional delivery, buffering, cleanup, and activation must be
-safe and defined rather than silently assumed. Historically established,
-persistently retained, and currently usable are different facts.
-
-Listener-side ownership of its interest is not unrestricted authority over
-source behavior. Source can knowingly end its participation under the
-contract even while listener absent. Normal finalization differs from
-exceptional participant-initiated end or Flow failure. Broken realization
-alone does not terminate the relationship. Ordered and recovery-required
-material cannot be silently discarded as part of terminal processing.
-
-CRITICAL DEFERRED TERMINAL DELIVERY:
-Source P2 may terminate S17 while listener P1 is inactive. Actant retains
-the terminal outcome and the required outstanding delivery/reconciliation
-obligations. On P1 restoration, listener-side Flow receives the terminal
-information, after U41/U42 if their required ordering demands it. P2 need not
-be reactivated simply to announce an already known end. Source participation
-ended, listener has not yet observed it, and final obligation settlement has
-not yet occurred: these are distinct conditions. Normal teardown must not
-claim completion until its promised obligations are met. Weak contracts may
-permit discarding intervening updates only if explicitly compatible.
-
-Multiple listeners to one source are ordinarily distinct logical Subscriptions
-S17/S18/S19 with independent owner, contract, and lifecycle, even if source
-uses common registration infrastructure and they share a connection. A
-multi-listener aggregate may be a future use-pressure-driven feature, not
-implicit merging of SubscriptionId.
-
-
-107. PERSISTENT SEMANTIC FLOW, ACTANT ORCHESTRATION, AND PLACEMENT
-=================================================================
-
-Actant manages persistent Flow semantic state, agreement, relevant positions,
-obligations, continuation evidence, and restoration context when the resolved
-lifetime crosses ApplicationRun. Current sockets, callbacks, adapter handles,
-runtime bindings, and Transport paths are disposable realizations. Actant
-rebinds participants, selects a realization, restores or negotiates capabilities,
-and reconciles safely. Packs should not reimplement lifecycle/reconnection.
-
-Flow is a first-class COMMON SEMANTIC FAMILY including Invocation and
-Subscription, with reusable mechanisms for applicable acknowledgement,
-identity, lifecycle, ordering, persistence, error/recovery, routing, and
-tracing. They preserve their distinct identity, contract and outcomes.
-Flow need not be a standalone deployed service, one class, one state machine,
-or a Message bus. It should avoid duplicate equivalent mechanisms among
-members, while instantiating only capabilities their contracts require.
-
-Actant has authoritative knowledge of Applications, Packs, activation,
-CodeEntries/adapters, Jobs, ownership hierarchy, identity resolution, and
-managed persistence. Flow should rely on those facilities rather than invent
-a parallel host/orchestrator; Actant can itself consume Flow semantics.
-Actant may quietly activate permitted participants, restore or rebind them,
-repair lower layers, and preserve obligations as required, WITHOUT replacing
-the creator's semantic intention or gaining ungranted authority.
-
-Realization/Placement Transparency is a foundational cross-cutting rule for
-the future DA-02 replacement, not a Communication-only trick. Same-runtime
-direct call, local queue/IPC, Bridge, and remote Messaging are realization
-options. No mandatory serialization through Messages for direct Python calls.
-Selection depends on participant placement/capability AND resolved contract,
-and may change as conditions change. Two Flow relationships between identical
-participants may appropriately use different realizations. One realization
-may serve several Flows, so destruction of one must not invalidate others.
-Sharing physical machinery/context does NOT merge Ack evidence, effects,
-completion, authorization, or semantic identity. An Invocation routed through
-S17 may reuse its connection/context without being logically owned by S17.
-
-Advanced semantic handover/migration of encapsulated Packs, ownership,
-relationships, jobs, persistent state, and placements is DEFERRED.
-Semantic identity and authority MUST NOT embed current machine, run, runtime,
-or connection. Transfer could move ownership, listener participation, and
-execution separately; avoid dual exclusive authorities and accidental
-capability transfer. Simple local Packs should work unchanged if appropriate
-advanced orchestration later becomes available; do not implement generalized
-migration machinery prematurely.
-
-
-108. SUBSCRIPTION, INVOCATION, AND DOMAIN ORCHESTRATION
-======================================================
-
-A Subscription is a logical relationship through which a listener expresses
-continuing interest in a source and may obtain eligibility, filtering,
-addressability, delivery, or participation per contract. SubscriptionId
-identifies that relationship, not necessarily the listener's semantic identity.
-The source/domain may resolve an eligible Subscription's listener as the target
-of an independent Invocation. The same listener may maintain several distinct
-Subscriptions.
-
-In IoManager: TypeScriptTranspiler subscribes as a handler for qualifying
-files. IoManager owns decisions about eligibility, selection, and order. It
-can Invoke one eligible listener at a time, passing each Result to the next.
-A CSS file need not be sent to a TypeScript handler. Filtering must preserve
-required order among remaining handlers. Parallelization only where it
-preserves dependency and mutation semantics. Subscription does NOT inherently
-own callback ordering, Result aggregation, work dependency, cancellation, or
-domain pipelines. Likewise unsubscribe does not automatically cancel
-independent initiated Invocations or accepted Jobs.
-
-There is opportunity for reusable ordered/concurrent scheduling, waits,
-result aggregation, coordination, and failure-propagation facilities, but no
-generic first-class orchestration engine or prescribed contract(lock/async)
-profiles until patterns emerge from actual use. If justified, make these
-capabilities composable, available beyond Subscription, and useful internally
-to Actant itself. Scheduling, completion dependency, and locking are distinct
-semantics; avoid conflating them. Simple sequential Invocation orchestration
-is a sensible initial IoManager behavior, NOT a generic Subscription promise.
-
-
-109. OWNERSHIP, HIERARCHY, PERSISTENCE, AND LIFETIME
-===================================================
-
-A Subscription is a composite logical relationship with listener and source
-participant sides and possible shared realization. Listener generally initiates
-and immediately owns its continuing interest, but does not own source,
-source-side data, or shared connection. Distinguish initiator, lifecycle
-authority, obligation keeper, participant, semantic entity owner, and domain
-data owner where necessary. These need not be separate fields everywhere.
-
-Actant manages semantic ownership hierarchy: Pack may belong to Application
-or another orchestration unit, Job or other longer-lived identity may govern
-an Invocation, and a parent may preserve a deactivated child's state without
-becoming the child's new semantic owner. Ownership identity persists through
-runtime deactivation. Semantic Flow lifetime, execution lifetime, ownership
-lifetime, and realization lifetime are different. Run-scoped and longer-lived
-relationships must not be silently interchanged.
-
-Stopping a Pack/Application need not terminate a persistent relationship.
-Normal shutdown should settle or durably preserve guarantees or explicitly
-report unresolved obligations; authorized forced shutdown may violate promises
-but must not counterfeit their completion. Detachable accepted work can
-continue; non-detachable work may block graceful shutdown. Permanent deletion
-of a semantic owner is NOT just a run stopping: handover, termination, or
-explicit unresolved preservation may be required. 'Persistent' is relative to
-a declared lifecycle scope and does not guarantee survival of owner deletion.
-Ownership propagation is not automatically ownership transfer.
-
-A shared connection is reclaimed or replaced based on all surviving users,
-not one owner. Participant-initiated termination can coexist with an absent
-owner/other participant; Actant retains notice when contract requires it.
-Listener replacement and ownership transfer are distinct future handover
-operations; persistent Flow ownership does not necessarily coincide with
-storage or machine placement.
-
-
-110. CREATOR INTENT, PERMISSIONS, AND SAFETY CLAIMS
-==================================================
-
-Actant should make common requirements seamless. Creators state semantic
-intention; Actant handles implementation and orchestration where suited.
-Framework defaults and optimizations may not override valid explicit Pack
-requirements; domain-specific orchestration remains legitimate where generic
-facilities are unsuitable. Repeated Pack workarounds are design pressure for
-composable first-class capabilities, not automatic grounds to force adoption.
-
-Identity, semantic ownership, authority, and placement MUST stay distinct.
-Begin with simple permissive cooperative access for trusted local Packs.
-Fine-grained permissions, capabilities, delegation, and negotiation are
-DEFERRED. Retain enough identity/action/target/context to introduce permission
-checks at semantic boundaries without rewriting all Flows/Packs. Hierarchical
-ownership does not imply unrestricted authorization. Future handover or
-shared Transport does not silently transfer credentials or capabilities.
-
-IMPORTANT LIMIT: Actant does NOT guarantee security or isolation against
-malicious/untrusted Packs, particularly arbitrary same-process Python code.
-Cooperative permissions and framework checks are not an adversarial security
-boundary. Aim for best-effort protective measures, correctness, transaction
-integrity, error handling, and accidental-misuse prevention; document trust
-assumptions and avoid false security claims. Do not undermine actual semantic
-invariants merely because adversarial sandboxing is out of scope.
-
-
-111. NON-DISCARDABLE STAGED FACTS AND ACTIVEWINDOW RECOVERY
-==========================================================
-
-Nested transaction T01 -> T01-01 -> T01-01-06 may record a real external
-effect E ('email sent') in staged state marked NON-DISCARDABLE. Cancelling a
-child discards ordinary staged changes but promotes E toward its parent.
-Cancelling ancestors continues E toward authoritative root commitment.
-Non-discardable != already authoritative, != permission to bypass validation,
-durability, conflicts, or invariants, != unconditional eventual success.
-If no safe commit exists, preserve/report an unresolved obligation and evidence.
-Do not shortcut by directly writing root from an arbitrarily nested child.
-
-ActiveWindow may durably contain nonauthoritative unfinished transactions,
-including context necessary to restore a non-discardable fact after a crash.
-Do not blindly flatten or discard speculative context. If sibling
-T01-01-07 stages E=Y while non-discardable E=X exists in T01-01-06, final
-resolution may depend on ordering, concurrency, merge, or parent context.
-A RECOVERY CLOSURE is sufficient context/dependencies to preserve the
-semantics of the originally pending resolution. Prune scaffolding only if
-semantic equivalence can be demonstrated. When safe closure cannot be proved,
-fail closed with a stable documented diagnostic/reference code and preserve
-the evidence. Do not pretend to solve an undefined merge rule.
-
-Where valid choices, consequences, and authority can be established, Actant
-may present bounded explicit choices to an authorized user/admin and record
-decision/provenance. An AI explanation does not confer independent decision
-authority. Without safe bounded alternatives, keep unresolved instead of
-inventing a result. This 'recognized ambiguity / explicit decision' direction
-is general Actant philosophy, not only a transaction trick.
-
-
-112. RESTORATION AND RECONCILIATION — NEXT OPEN BOUNDARY
-=======================================================
-
-Restore semantic and runtime relationships, reconnect a usable realization,
-reconcile unequal participant knowledge and obligations, and resume valid
-interaction: conceptually distinct but may be fused in optimized implementation.
-Reestablished Transport is insufficient evidence that history, acknowledgements,
-effects, results, and terminal notices are settled.
-
-Example: sender records U41 Ack; U42 sent but Ack lost; U43 pending.
-Receiver may have already applied U42. Do not assume U42 never arrived.
-Check required dedup/effect evidence, source retention, recipient positions,
-or contract-defined resync. Full-state snapshot is not automatically safe
-supersession of ordered deltas. Never infer domain idempotency.
-
-Actant owns Flow reconciliation and can consult transaction evidence or
-domain-supplied verification where needed; domain owns business-effect truth.
-The boundary and APIs for domain evidence are NOT YET ACCEPTED as a finished
-design. If outcome remains uncertain, retain evidence and surface defined
-Indeterminate/FlowError rather than manufacture success. This is the current
-next discussion item, not a locked new generic verification interface.
-
-
-113. IMPLEMENTATION TEST RECOMMENDATION — DEFERRED TERMINAL DELIVERY
-===================================================================
-
-STATUS: ACCEPTED TEST RECOMMENDATION; NOT IMPLEMENTED.
-
-Scenario:
-  S17 persistent; source P2; listener P1; contract permits listener absence
-  and promises ordered, recoverable updates and terminal information.
-Steps:
-  1. Establish S17.
-  2. P1 becomes inactive; S17 awaits without domain FlowError.
-  3. P2 produces updates U41 and U42.
-  4. P2 knowingly ends participation.
-  5. Actant retains terminal outcome and outstanding required updates.
-  6. P2 shuts down; Application/Host restarts.
-  7. P1 returns; Actant restores its Flow side, reconciles, delivers.
-Expected:
-  - S17 logical identity persists; not recreated as a new Subscription.
-  - U41, U42, terminal outcome observed in required contract order.
-  - Source need not reactivate to communicate an already retained end.
-  - Acknowledgement and finalization do not falsely settle early.
-  - No silent loss, duplicate domain effects, or artificial FlowError for
-    contract-permitted waiting.
-Variations:
-  lost terminal Ack; crash before durable terminal recording;
-  concurrent listener restoration/termination; weaker permitted drop policy;
-  recovery deadline expiration; repeated restoration; incomplete preceding
-  ordered units. Check correct unresolved diagnostics where needed.
-
-
-114. CURRENTLY ACCEPTED CROSS-CUTTING CONSEQUENCES
-==================================================
-
-1. Actant supports conventional connection-dependent Flow and more demanding
-   guarantee-dependent persistent Flow without making the latter mandatory.
-2. Semantic correctness and the domain's resolved contract are the external
-   success criteria; internal recoverable error is diagnostics, not automatic
-   domain failure.
-3. Participant-side knowledge may be asymmetric; do not force global instant
-   boolean agreement about establishment, termination, or receipt.
-4. Actant owns orchestration capabilities but is not licensed to invent
-   domain behavior or permissions.
-5. Common Flow mechanisms are reusable from the beginning; exact component
-   structure still follows use pressure.
-6. Multiple logical Flows can share one realization; lifecycle independent.
-7. Subscription is a relationship/endpoint, NOT a universal domain task
-   dispatcher or automatically owned Invocation.
-8. Persistent state follows promised lifetime and owner scope; it should not
-   be stored only in ephemeral runtime handles.
-9. Missing domain-effect evidence is a genuine semantic uncertainty, not an
-   invitation to retry an unsafe side effect.
-10. First-class reusable domain orchestration and fine-grained access control
-    remain deferred, although the architecture must not block their addition.
-
-
 96. ACCEPTED DESIGN ITEMS THROUGH CHECKPOINT #8
 ===============================================
 
@@ -4163,6 +3747,422 @@ Next communication topic:
     partial / multipart delivery
 
 END OF MEMORY VALUE SYSTEM DESIGN CHECKPOINT #7
+
+
+101. CURRENT-STATE RECONCILIATION AND PRECEDENCE
+================================================
+
+This checkpoint is a coherent continuing design, not a literal historical transcript.
+Sections 1-95 preserve the detailed baseline, subject to the refinements below.
+Sections 102-119 express the latest accepted interpretation; where an older section
+uses broader, narrower, or tentative wording inconsistent with these decisions,
+the current-state interpretation in 102-119 prevails. In particular:
+- streaming is NOT an all-encompassing delivery/recovery/lifecycle protocol;
+- a Subscription is NOT the owner of generic callback/Invocation orchestration;
+- Flow is a shared semantic family, NOT a set of isolated implementations;
+- Actant, not a duplicated independent Flow framework, owns activation and
+  lifecycle context;
+- connection/participant absence is NOT automatically FlowError or termination;
+- a domain may be fully satisfied while lower layers repair disturbances;
+- persistence and permissions follow semantic ownership and contract boundaries;
+- older OPEN entries describing already-discussed topics as undesigned are superseded
+  by the revised open list in section 120.
+The following sections deliberately avoid prescribing implementation objects,
+inheritance, enums, special-purpose message envelopes, or universal mechanisms.
+
+
+102. MULTIPART, STREAMING, AND FRAGMENTATION
+============================================
+
+Multipart represents one logical semantic object/unit transferred in multiple
+parts. Define membership, completeness, required parts, meaningful ordering,
+recovery, cancellation, and whether truncation can ever be valid. Receipt of
+some parts is not semantic completion; an End marker cannot hide missing
+required parts. Recovery may request individual missing parts or restart/resync.
+Use established ValueRef/Chunk/MemoryStorage material retrieval when suitable,
+rather than duplicating it in Messaging.
+
+Streaming ONLY describes incremental production/availability and possible
+consumption before overall production finishes. Producer/consumer overlap does
+not require a network or even a known consumer. A stream may stop without an
+explicit terminal report, and its producer may not know listeners or their count.
+Streaming by itself promises NO delivery, ordering, acknowledgement, retention,
+recovery, completeness, flow control, consumer identity, or termination semantics.
+Those come from separately declared Flow/Invocation/Subscription contracts.
+Streaming != Subscription != multipart != Transport fragmentation.
+A weak Subscription can observe a stream, decline delivery guarantees, and
+infer observational end after listener-side inactivity, e.g. 60 seconds; this
+is not evidence of source termination, success, or no future data.
+
+
+103. THREE LAYERS, EVIDENCE, AND CONTRACT-RELATIVE HEALTH
+=========================================================
+
+Transport/Messaging realizes movement, connections, representations, and
+mechanism-specific repair. Flow orchestrates negotiated semantic guarantees:
+ordering, required delivery, gap recognition, acknowledgement, staleness,
+retries, resync, persistence, reconciliation, and valid teardown. Domain owns
+operations, results, jobs, and business meaning.
+
+Lower-layer errors may be entirely recovered without domain visibility.
+Transport reconnect failures may be normal while Flow awaits an absent
+participant. Flow recovery/rebinding remains visible in tracing/telemetry, but
+the domain observes contract-valid results or an unresolved FlowError/
+Indeterminate outcome, not each intermediate low-level anomaly.
+
+Flow-level Ack is evidence sufficient to advance/retire a SPECIFIC communication
+obligation at a stated scope. It does not mean the domain accepted, approved,
+used, or committed the delivered material. Missing Ack means the sender lacks
+evidence; delivery might actually have happened. Do not prescribe state-array
+representations such as toSend/pending/unAcknowledged.
+
+Presence of a participant, ability to reach it, logical existence of a Flow,
+current usability, recoverability, and contract satisfaction are DISTINCT and
+observer-relative. A connected Transport need not imply a satisfied Flow; a
+broken Transport need not imply an unsatisfied Domain contract. One universal
+isAlive()/healthy bool is insufficient. Conceptual 'Awaiting' denotes permitted
+absence, 'Recovering' active remedial effort, and 'Failed' an unmet contract;
+these are not mandated mutually exclusive enum states. The contract may allow
+indefinite waiting and need not induce busy retry/polling or an error storm.
+A connection-dependent contract that requires continuous usability remains
+a valid simple conventional choice; a recovery-tolerant contract may remain
+satisfactory through absence. Exact defaults arise from actual Pack pressure.
+
+
+104. CONTRACT NEGOTIATION, TIMEOUT, DEADLINE, AND CANCEL
+=========================================================
+
+Timeout triggers an ATTEMPT appropriate to its scope: reconnect, retry, resync,
+reconcile, query, or other repair. Timeout alone is not a terminal guarantee
+failure. Deadline triggers a DECLARATION when a required condition can no longer
+be satisfied within its contract; cleanup/compensation may still follow.
+Transport, Flow, caller, and domain deadlines are distinct. A caller deadline
+does not implicitly cancel an independently accepted Job. Timing contracts
+must name relevant anchors and clock semantics, especially across persisted
+Flow state; wall time vs active runtime time cannot be silently conflated.
+Retry policy may allow zero attempts, bounded attempts, deadlines, or indefinite
+waiting; 'retry until max retries' is not universal.
+
+Establishment must negotiate or verify compatible timeout/deadline, recovery,
+history-retention, and delivery horizons. A listener which delays detection
+longer than source recoverability cannot silently receive a promise of lossless
+restoration; reconfigure, negotiate a satisfiable profile, or refuse.
+Requirements are capability constraints, not a demand for literal equal values.
+
+Cancel request != acceptance != completed termination. Scope may be Invocation,
+Job, specific Flow, listener consumption, or producer execution. Unsubscribe,
+deadline, shutdown, or disconnect does not implicitly cancel unrelated domain
+work. Side effects already committed externally cannot be rolled back by
+renaming a cancellation. Pending cancellation may itself require persistent
+continuation and reconciliation.
+
+
+105. RETRY, IDEMPOTENCY, AND EVIDENCE RETENTION
+==============================================
+
+Stable InvocationId persists across attempts. Intrinsic idempotency, duplicate
+recognition, retained outcome retrieval, and domain-effect reconciliation are
+distinct. Non-idempotent actions may sometimes be retried safely using durable
+Invocation/domain-effect identity and evidence, but unknown effect state MUST
+NOT be resolved by blind re-execution. Record Indeterminate/FlowError and
+preserve evidence if safe reconciliation is impossible.
+
+Sufficient deduplication/recognition evidence must persist while a legitimate
+retry could otherwise be mistaken for new work. Compaction is permitted when
+equivalent evidence remains (e.g. a correctly scoped monotonic processed-through
+watermark); complete per-message logs are not inherently required.
+Different evidence may establish duplicate recognition, prior outcome, or
+external effect, and none substitutes automatically for the others.
+
+
+106. SUBSCRIPTION ESTABLISHMENT, TERMINATION, AND PARTICIPANT SIDES
+==================================================================
+
+Listener initiates continuing interest. One logical SubscriptionId persists
+through compatible establishment retry and restoration. Source and listener
+may have separate participant-side Flow state, Transport bindings, knowledge,
+and obligations, even when one process shares their physical implementation.
+Source registration may exist before listener receives establishment evidence.
+Same ID + compatible contract calls for reconciliation, not duplication;
+incompatible reused terms conflict. Establishment requires resolved compatible
+guarantees; provisional delivery, buffering, cleanup, and activation must be
+safe and defined rather than silently assumed. Historically established,
+persistently retained, and currently usable are different facts.
+
+Listener-side ownership of its interest is not unrestricted authority over
+source behavior. Source can knowingly end its participation under the
+contract even while listener absent. Normal finalization differs from
+exceptional participant-initiated end or Flow failure. Broken realization
+alone does not terminate the relationship. Ordered and recovery-required
+material cannot be silently discarded as part of terminal processing.
+
+CRITICAL DEFERRED TERMINAL DELIVERY:
+Source P2 may terminate S17 while listener P1 is inactive. Actant retains
+the terminal outcome and the required outstanding delivery/reconciliation
+obligations. On P1 restoration, listener-side Flow receives the terminal
+information, after U41/U42 if their required ordering demands it. P2 need not
+be reactivated simply to announce an already known end. Source participation
+ended, listener has not yet observed it, and final obligation settlement has
+not yet occurred: these are distinct conditions. Normal teardown must not
+claim completion until its promised obligations are met. Weak contracts may
+permit discarding intervening updates only if explicitly compatible.
+
+Multiple listeners to one source are ordinarily distinct logical Subscriptions
+S17/S18/S19 with independent owner, contract, and lifecycle, even if source
+uses common registration infrastructure and they share a connection. A
+multi-listener aggregate may be a future use-pressure-driven feature, not
+implicit merging of SubscriptionId.
+
+
+107. PERSISTENT SEMANTIC FLOW, ACTANT ORCHESTRATION, AND PLACEMENT
+=================================================================
+
+Actant manages persistent Flow semantic state, agreement, relevant positions,
+obligations, continuation evidence, and restoration context when the resolved
+lifetime crosses ApplicationRun. Current sockets, callbacks, adapter handles,
+runtime bindings, and Transport paths are disposable realizations. Actant
+rebinds participants, selects a realization, restores or negotiates capabilities,
+and reconciles safely. Packs should not reimplement lifecycle/reconnection.
+
+Flow is a first-class COMMON SEMANTIC FAMILY including Invocation and
+Subscription, with reusable mechanisms for applicable acknowledgement,
+identity, lifecycle, ordering, persistence, error/recovery, routing, and
+tracing. They preserve their distinct identity, contract and outcomes.
+Flow need not be a standalone deployed service, one class, one state machine,
+or a Message bus. It should avoid duplicate equivalent mechanisms among
+members, while instantiating only capabilities their contracts require.
+
+Actant has authoritative knowledge of Applications, Packs, activation,
+CodeEntries/adapters, Jobs, ownership hierarchy, identity resolution, and
+managed persistence. Flow should rely on those facilities rather than invent
+a parallel host/orchestrator; Actant can itself consume Flow semantics.
+Actant may quietly activate permitted participants, restore or rebind them,
+repair lower layers, and preserve obligations as required, WITHOUT replacing
+the creator's semantic intention or gaining ungranted authority.
+
+Realization/Placement Transparency is a foundational cross-cutting rule for
+the future DA-02 replacement, not a Communication-only trick. Same-runtime
+direct call, local queue/IPC, Bridge, and remote Messaging are realization
+options. No mandatory serialization through Messages for direct Python calls.
+Selection depends on participant placement/capability AND resolved contract,
+and may change as conditions change. Two Flow relationships between identical
+participants may appropriately use different realizations. One realization
+may serve several Flows, so destruction of one must not invalidate others.
+Sharing physical machinery/context does NOT merge Ack evidence, effects,
+completion, authorization, or semantic identity. An Invocation routed through
+S17 may reuse its connection/context without being logically owned by S17.
+
+Advanced semantic handover/migration of encapsulated Packs, ownership,
+relationships, jobs, persistent state, and placements is DEFERRED.
+Semantic identity and authority MUST NOT embed current machine, run, runtime,
+or connection. Transfer could move ownership, listener participation, and
+execution separately; avoid dual exclusive authorities and accidental
+capability transfer. Simple local Packs should work unchanged if appropriate
+advanced orchestration later becomes available; do not implement generalized
+migration machinery prematurely.
+
+
+108. SUBSCRIPTION, INVOCATION, AND DOMAIN ORCHESTRATION
+======================================================
+
+A Subscription is a logical relationship through which a listener expresses
+continuing interest in a source and may obtain eligibility, filtering,
+addressability, delivery, or participation per contract. SubscriptionId
+identifies that relationship, not necessarily the listener's semantic identity.
+The source/domain may resolve an eligible Subscription's listener as the target
+of an independent Invocation. The same listener may maintain several distinct
+Subscriptions.
+
+In IoManager: TypeScriptTranspiler subscribes as a handler for qualifying
+files. IoManager owns decisions about eligibility, selection, and order. It
+can Invoke one eligible listener at a time, passing each Result to the next.
+A CSS file need not be sent to a TypeScript handler. Filtering must preserve
+required order among remaining handlers. Parallelization only where it
+preserves dependency and mutation semantics. Subscription does NOT inherently
+own callback ordering, Result aggregation, work dependency, cancellation, or
+domain pipelines. Likewise unsubscribe does not automatically cancel
+independent initiated Invocations or accepted Jobs.
+
+There is opportunity for reusable ordered/concurrent scheduling, waits,
+result aggregation, coordination, and failure-propagation facilities, but no
+generic first-class orchestration engine or prescribed contract(lock/async)
+profiles until patterns emerge from actual use. If justified, make these
+capabilities composable, available beyond Subscription, and useful internally
+to Actant itself. Scheduling, completion dependency, and locking are distinct
+semantics; avoid conflating them. Simple sequential Invocation orchestration
+is a sensible initial IoManager behavior, NOT a generic Subscription promise.
+
+
+109. OWNERSHIP, HIERARCHY, PERSISTENCE, AND LIFETIME
+===================================================
+
+A Subscription is a composite logical relationship with listener and source
+participant sides and possible shared realization. Listener generally initiates
+and immediately owns its continuing interest, but does not own source,
+source-side data, or shared connection. Distinguish initiator, lifecycle
+authority, obligation keeper, participant, semantic entity owner, and domain
+data owner where necessary. These need not be separate fields everywhere.
+
+Actant manages semantic ownership hierarchy: Pack may belong to Application
+or another orchestration unit, Job or other longer-lived identity may govern
+an Invocation, and a parent may preserve a deactivated child's state without
+becoming the child's new semantic owner. Ownership identity persists through
+runtime deactivation. Semantic Flow lifetime, execution lifetime, ownership
+lifetime, and realization lifetime are different. Run-scoped and longer-lived
+relationships must not be silently interchanged.
+
+Stopping a Pack/Application need not terminate a persistent relationship.
+Normal shutdown should settle or durably preserve guarantees or explicitly
+report unresolved obligations; authorized forced shutdown may violate promises
+but must not counterfeit their completion. Detachable accepted work can
+continue; non-detachable work may block graceful shutdown. Permanent deletion
+of a semantic owner is NOT just a run stopping: handover, termination, or
+explicit unresolved preservation may be required. 'Persistent' is relative to
+a declared lifecycle scope and does not guarantee survival of owner deletion.
+Ownership propagation is not automatically ownership transfer.
+
+A shared connection is reclaimed or replaced based on all surviving users,
+not one owner. Participant-initiated termination can coexist with an absent
+owner/other participant; Actant retains notice when contract requires it.
+Listener replacement and ownership transfer are distinct future handover
+operations; persistent Flow ownership does not necessarily coincide with
+storage or machine placement.
+
+
+110. CREATOR INTENT, PERMISSIONS, AND SAFETY CLAIMS
+==================================================
+
+Actant should make common requirements seamless. Creators state semantic
+intention; Actant handles implementation and orchestration where suited.
+Framework defaults and optimizations may not override valid explicit Pack
+requirements; domain-specific orchestration remains legitimate where generic
+facilities are unsuitable. Repeated Pack workarounds are design pressure for
+composable first-class capabilities, not automatic grounds to force adoption.
+
+Identity, semantic ownership, authority, and placement MUST stay distinct.
+Begin with simple permissive cooperative access for trusted local Packs.
+Fine-grained permissions, capabilities, delegation, and negotiation are
+DEFERRED. Retain enough identity/action/target/context to introduce permission
+checks at semantic boundaries without rewriting all Flows/Packs. Hierarchical
+ownership does not imply unrestricted authorization. Future handover or
+shared Transport does not silently transfer credentials or capabilities.
+
+IMPORTANT LIMIT: Actant does NOT guarantee security or isolation against
+malicious/untrusted Packs, particularly arbitrary same-process Python code.
+Cooperative permissions and framework checks are not an adversarial security
+boundary. Aim for best-effort protective measures, correctness, transaction
+integrity, error handling, and accidental-misuse prevention; document trust
+assumptions and avoid false security claims. Do not undermine actual semantic
+invariants merely because adversarial sandboxing is out of scope.
+
+
+111. NON-DISCARDABLE STAGED FACTS AND ACTIVEWINDOW RECOVERY
+==========================================================
+
+Nested transaction T01 -> T01-01 -> T01-01-06 may record a real external
+effect E ('email sent') in staged state marked NON-DISCARDABLE. Cancelling a
+child discards ordinary staged changes but promotes E toward its parent.
+Cancelling ancestors continues E toward authoritative root commitment.
+Non-discardable != already authoritative, != permission to bypass validation,
+durability, conflicts, or invariants, != unconditional eventual success.
+If no safe commit exists, preserve/report an unresolved obligation and evidence.
+Do not shortcut by directly writing root from an arbitrarily nested child.
+
+ActiveWindow may durably contain nonauthoritative unfinished transactions,
+including context necessary to restore a non-discardable fact after a crash.
+Do not blindly flatten or discard speculative context. If sibling
+T01-01-07 stages E=Y while non-discardable E=X exists in T01-01-06, final
+resolution may depend on ordering, concurrency, merge, or parent context.
+A RECOVERY CLOSURE is sufficient context/dependencies to preserve the
+semantics of the originally pending resolution. Prune scaffolding only if
+semantic equivalence can be demonstrated. When safe closure cannot be proved,
+fail closed with a stable documented diagnostic/reference code and preserve
+the evidence. Do not pretend to solve an undefined merge rule.
+
+Where valid choices, consequences, and authority can be established, Actant
+may present bounded explicit choices to an authorized user/admin and record
+decision/provenance. An AI explanation does not confer independent decision
+authority. Without safe bounded alternatives, keep unresolved instead of
+inventing a result. This 'recognized ambiguity / explicit decision' direction
+is general Actant philosophy, not only a transaction trick.
+
+
+112. RESTORATION AND RECONCILIATION — NEXT OPEN BOUNDARY
+=======================================================
+
+Restore semantic and runtime relationships, reconnect a usable realization,
+reconcile unequal participant knowledge and obligations, and resume valid
+interaction: conceptually distinct but may be fused in optimized implementation.
+Reestablished Transport is insufficient evidence that history, acknowledgements,
+effects, results, and terminal notices are settled.
+
+Example: sender records U41 Ack; U42 sent but Ack lost; U43 pending.
+Receiver may have already applied U42. Do not assume U42 never arrived.
+Check required dedup/effect evidence, source retention, recipient positions,
+or contract-defined resync. Full-state snapshot is not automatically safe
+supersession of ordered deltas. Never infer domain idempotency.
+
+Actant owns Flow reconciliation and can consult transaction evidence or
+domain-supplied verification where needed; domain owns business-effect truth.
+The boundary and APIs for domain evidence are NOT YET ACCEPTED as a finished
+design. If outcome remains uncertain, retain evidence and surface defined
+Indeterminate/FlowError rather than manufacture success. This is the current
+next discussion item, not a locked new generic verification interface.
+
+
+113. IMPLEMENTATION TEST RECOMMENDATION — DEFERRED TERMINAL DELIVERY
+===================================================================
+
+STATUS: ACCEPTED TEST RECOMMENDATION; NOT IMPLEMENTED.
+
+Scenario:
+  S17 persistent; source P2; listener P1; contract permits listener absence
+  and promises ordered, recoverable updates and terminal information.
+Steps:
+  1. Establish S17.
+  2. P1 becomes inactive; S17 awaits without domain FlowError.
+  3. P2 produces updates U41 and U42.
+  4. P2 knowingly ends participation.
+  5. Actant retains terminal outcome and outstanding required updates.
+  6. P2 shuts down; Application/Host restarts.
+  7. P1 returns; Actant restores its Flow side, reconciles, delivers.
+Expected:
+  - S17 logical identity persists; not recreated as a new Subscription.
+  - U41, U42, terminal outcome observed in required contract order.
+  - Source need not reactivate to communicate an already retained end.
+  - Acknowledgement and finalization do not falsely settle early.
+  - No silent loss, duplicate domain effects, or artificial FlowError for
+    contract-permitted waiting.
+Variations:
+  lost terminal Ack; crash before durable terminal recording;
+  concurrent listener restoration/termination; weaker permitted drop policy;
+  recovery deadline expiration; repeated restoration; incomplete preceding
+  ordered units. Check correct unresolved diagnostics where needed.
+
+
+114. CURRENTLY ACCEPTED CROSS-CUTTING CONSEQUENCES
+==================================================
+
+1. Actant supports conventional connection-dependent Flow and more demanding
+   guarantee-dependent persistent Flow without making the latter mandatory.
+2. Semantic correctness and the domain's resolved contract are the external
+   success criteria; internal recoverable error is diagnostics, not automatic
+   domain failure.
+3. Participant-side knowledge may be asymmetric; do not force global instant
+   boolean agreement about establishment, termination, or receipt.
+4. Actant owns orchestration capabilities but is not licensed to invent
+   domain behavior or permissions.
+5. Common Flow mechanisms are reusable from the beginning; exact component
+   structure still follows use pressure.
+6. Multiple logical Flows can share one realization; lifecycle independent.
+7. Subscription is a relationship/endpoint, NOT a universal domain task
+   dispatcher or automatically owned Invocation.
+8. Persistent state follows promised lifetime and owner scope; it should not
+   be stored only in ephemeral runtime handles.
+9. Missing domain-effect evidence is a genuine semantic uncertainty, not an
+   invitation to retry an unsafe side effect.
+10. First-class reusable domain orchestration and fine-grained access control
+    remain deferred, although the architecture must not block their addition.
 
 
 115. CURRENT OPEN ITEMS AFTER CHECKPOINT #8
