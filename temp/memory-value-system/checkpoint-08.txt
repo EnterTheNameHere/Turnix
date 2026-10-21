@@ -1,0 +1,4240 @@
+MEMORY VALUE SYSTEM DESIGN CHECKPOINT #8
+========================================
+
+Branch:
+    actant-doc-memory-value-system
+
+Status:
+    NON-AUTHORITATIVE WORKING CHECKPOINT
+
+Supersedes for restart/handoff purposes:
+    temp/memory-value-system/checkpoint-07.txt
+
+Purpose:
+    This file captures the integrated design after the eighth checkpoint pass.
+
+    It retains the MemoryValueSystem baseline from checkpoint #7 and reconciles
+    the later Flow, Subscription, Invocation, orchestration, lifecycle, ownership,
+    persistence, recovery, transaction, and foundational-principle decisions.
+    It is intentionally a coherent current-state snapshot rather than an
+    append-only discussion log.
+
+    It is a handoff/restart artifact only. It does not supersede indexed DA
+    documents and must not be treated as authoritative specification text.
+
+    For ongoing design discussion, this checkpoint is the current working
+    snapshot and should be preferred over checkpoints #1 through #7 where
+    they differ.
+
+    Once the design pass is complete, this working material will be integrated
+    into new/revised authoritative documentation.
+
+
+1. CORE MEMORYVALUE CONCEPT
+===========================
+
+MemoryValueSystem is Actant's managed persistent-semantic-value subsystem.
+
+A MemoryValue is one logical semantic value whose identity and meaning can
+matter beyond the immediate runtime operation currently using it.
+
+MemoryValue is not synonymous with:
+- RAM-resident value
+- variable
+- object instance
+- host-language value
+- arbitrary runtime temporary
+
+Examples that may fit MemoryValue semantics:
+- user/application persistent state
+- AI-produced or AI-consumed knowledge
+- configuration values
+- file names/paths whose identity matters later
+- game state
+- tabular/static application data
+- database-like application data
+- rarely used cold data
+- values loaded only when needed and later released from runtime residency
+
+Examples that do not become MemoryValues merely because they are values:
+- file handles
+- socket descriptors
+- iterators
+- loop counters
+- stack-local helper values
+- scratch buffers
+- runtime pointers
+- ephemeral implementation mechanics
+
+The distinction is semantic, not based on primitive type.
+
+MemoryValue identity is independent of runtime residency.
+
+
+2. LANGUAGE-INDEPENDENT SEMANTIC IDENTITY
+=========================================
+
+A creator-provided MemoryValue identity is stable across adapters, runtimes,
+processes, applications, and machines.
+
+Host-language representation does not define MemoryValue identity.
+
+A semantic integer value remains the same Actant semantic value whether it is
+materialized through different runtime representations.
+
+Adapters and bridges are responsible for preserving Actant semantics across
+their respective boundaries.
+
+The design specification must remain language-neutral. Language-specific
+representations belong in adapter/implementation documentation.
+
+
+3. CORE TERMINOLOGY
+===================
+
+Current MemoryValue vocabulary:
+
+    MemoryValueSystem
+        subsystem managing persistent semantic values
+
+    MemoryValue
+        one logical persistent semantic value
+
+    MemoryValueDefinition
+        creator/platform definition for a MemoryValue, including optional
+        default-value information and sparse contract declarations
+
+    MemoryValueDefinition.contract
+        sparse declared contract-facet input
+
+    MemoryValueContract
+        fully resolved semantic contract used by MemoryValue operations
+
+    MemoryValueRevision
+        one immutable historical semantic statement/revision of a MemoryValue
+
+    ValueRef
+        authority-neutral immutable descriptor sufficient to reconstruct one
+        concrete Actant semantic value
+
+    MemoryStorage
+        abstraction for storing/retrieving/managing immutable Actant value
+        material
+
+    IoManager
+        Actant's central managed-I/O gateway
+
+    RuntimeValue
+        runtime-specific execution representation
+
+    RuntimeResidency
+        whether relevant runtime/material representation is currently resident
+
+    AuthoritativeRevision
+        revision currently authoritative for a MemoryValue in one authority
+        scope
+
+    AuthoritativeState
+        accepted semantic state formed from authoritative relationships
+
+    ResolvedValue
+        semantic value produced by value-resolution rules
+
+    LatestRevision
+        newest relevant revision only where scope/lineage is explicit
+
+Do not equate:
+
+    LatestRevision
+    AuthoritativeRevision
+    ResolvedValue
+    RuntimeValue
+
+The term EffectiveMemoryValueContract is retired for now.
+MemoryValueContract itself means the fully resolved result.
+
+
+4. REVISION AND AUTHORITY
+=========================
+
+Revision existence and authority are separate.
+
+A MemoryValueRevision may exist for:
+- authoritative state
+- historical evidence
+- observation/evidence
+- derivation
+- audit
+- provenance
+- another retained semantic purpose
+
+A revision does not become authoritative merely because it exists or was
+created later than another revision.
+
+Exact revision-classification dimensions remain open and should not be
+collapsed prematurely into one status enum.
+
+
+5. ONE LOGICAL AUTHORITY, MANY PHYSICAL COPIES
+==============================================
+
+For one authority scope and one MemoryValue, there is one current
+AuthoritativeRevision.
+
+This is a semantic invariant.
+
+It does not mean there is only one physical copy of the value material.
+
+The same immutable material may exist in:
+- RAM
+- local durable storage
+- replicated storage
+- remote storage
+- object storage
+- shared memory
+- caches
+- backups
+- other implementation-specific locations
+
+Replication, caching, migration, redundancy, backup, or multiple physical
+copies do not create additional semantic authority.
+
+Conceptual separation:
+
+    Authority
+        which revision is the accepted semantic fact?
+
+    Identity
+        which immutable value material does that revision reference?
+
+    Placement
+        where can that material currently be obtained?
+
+Reads resolve authority/visibility first and then obtain material from any
+valid storage location.
+
+Writes become authoritative only through the authority mechanism.
+
+Possessing or creating a local/remote copy does not make that copy
+authoritative.
+
+The authority mechanism may be implemented by:
+- one local backend/process
+- a database transaction
+- a leader/lease mechanism
+- a consensus-backed service
+- another implementation
+
+but Actant semantics still expose one logical authoritative relationship.
+
+Do not specify that the authoritative value "lives on the backend" as a
+semantic rule. That is only one implementation.
+
+
+6. CONCRETE REVISION CONTENT AND VALUEREF
+=========================================
+
+A concrete MemoryValueRevision may refer to immutable value material through
+a ValueRef.
+
+Conceptually:
+
+    MemoryValue
+        -> MemoryValueRevision
+            -> ValueRef
+                -> immutable Actant-managed value material
+
+Authority belongs to the revision/authority relationship, not ValueRef.
+
+Different concrete values require descriptors which reconstruct their
+respective values.
+
+Two revisions containing the same concrete value may share one ValueRef.
+
+ValueRef does not identify a RuntimeValue.
+
+
+7. VALUEREF AS RECONSTRUCTION DESCRIPTOR
+========================================
+
+ValueRef is an immutable descriptor sufficient to reconstruct one concrete
+Actant semantic value.
+
+A ValueRef may:
+- contain small material inline
+- depend on one immutable storage object
+- depend on multiple immutable storage objects
+
+ValueRef is not required to correspond one-to-one with one Chunk.
+
+Different ValueRefs may reconstruct semantically equivalent values if their
+representations differ.
+
+Actant is not required to solve universal canonical semantic serialization in
+order to identify every equal abstract value.
+
+
+8. STORAGE / ADAPTER / BRIDGE BOUNDARY
+======================================
+
+Current conceptual boundary:
+
+    MemoryValue
+        stable semantic identity
+
+    MemoryValueRevision
+        historical semantic statement
+
+    ValueRef
+        immutable reconstruction descriptor
+
+    storage dependencies
+        immutable material required by the ValueRef
+
+    MemoryStorage
+        obtains/persists/manages value material
+
+    IoManager
+        performs supported external I/O under Actant management
+
+    ExecutionAdapter
+        maps Actant semantics into a runtime environment
+
+    Bridge Pack
+        translates between Actant semantics and an external system's
+        protocol/interface/representation
+
+    RuntimeValue
+        runtime-specific representation
+
+Storage location is not semantic identity.
+
+Moving material between physical locations does not create a revision.
+
+Authority change alone does not require a new ValueRef.
+
+
+9. BRIDGE PACKS AND EXTERNAL SYSTEMS
+====================================
+
+Actant must not require an external system to adopt Actant's transport,
+serialization, Messaging, or adapter model when that system already exposes a
+usable interface.
+
+A Bridge Pack translates between Actant semantics and the semantics/protocol
+of an external system.
+
+The external system may remain completely unaware of Actant.
+
+Examples may include:
+- request/response protocols
+- RPC/IDL systems
+- message queues
+- database protocols
+- custom binary protocols
+- shared-memory protocols
+- existing application APIs
+
+A Bridge may internally use:
+- direct calls
+- Actant Messaging
+- an ExecutionAdapter
+- an external client library
+- another appropriate mechanism
+
+Crossing a process/system boundary does not inherently imply RPC or Messaging.
+
+The bridge owns translation knowledge.
+
+Translation does not itself create semantic or behavioral authority.
+
+External protocol identities, transports, serialization formats, and errors
+remain external-system concepts unless explicitly mapped into Actant
+semantics.
+
+
+10. SLOW PATH AND OPTIMIZED PATH EQUIVALENCE
+============================================
+
+A value may be reconstructed through a long path involving:
+- adapter/bridge
+- Communication/Messaging where used
+- MemoryValueSystem
+- MemoryStorage
+- IoManager
+- external storage
+- representation/codec handling
+- semantic reconstruction
+- runtime materialization
+
+or through a valid optimized cache/local path.
+
+Both are valid only if observationally equivalent under the same:
+- MemoryValue identity
+- MemoryValueContract
+- authoritative/visible state
+- transaction/read context
+
+Caching, representation, Messaging, residency, and local materialization are
+implementation choices.
+
+A cache is not another authority source.
+
+
+11. TRANSACTIONS AS HIERARCHICAL STAGED OVERLAYS
+================================================
+
+Transactions remain hierarchical staged overlays.
+
+A transaction may contain locally changed values.
+
+Conceptual read order:
+
+    1. local staged value
+    2. parent transaction-visible value
+    3. next parent-visible state
+    4. authoritative root visible through transaction visibility rules
+
+The phrase "read live parent/root" is intentionally avoided.
+
+A transaction-local mutation does not inherently create a
+MemoryValueRevision.
+
+A child commit promotes staged state into its parent.
+
+Only promotion into the authoritative root creates the next authoritative
+revision in the current serialized design.
+
+Persisted transaction state remains non-authoritative.
+
+
+12. CONCURRENCY FUTURE-PROOFING
+===============================
+
+Full concurrency remains deferred, but the current design must preserve room
+for it.
+
+Accepted requirements:
+
+- a transaction may retain identities of revisions/state from which reads were
+  resolved
+- immutable revisions remain stable after authority advances
+- commit may validate assumptions used by the transaction
+- conflicting concurrent authoritative commits must not silently overwrite
+  each other
+- disjoint state should be able to commit independently
+- communication notifications/subscriptions are not transactional correctness
+  mechanisms
+- short commit-boundary synchronization may be used without locking Root for
+  a whole transaction
+
+Working placeholder:
+
+    TransactionVisibility
+
+means:
+
+    the parent/authoritative state against which unresolved reads are
+    interpreted
+
+Exact snapshot/MVCC/isolation design remains deferred.
+
+
+13. READ SETS, WRITE SETS, AND DELTAS
+=====================================
+
+Future concurrency may distinguish:
+- read/observation set
+- write set
+- structured delta set
+
+A transaction may depend on values it only read.
+
+A sufficiently strong future isolation mode may reject commit when such
+dependencies changed.
+
+Some types may support semantic deltas instead of whole-value replacement.
+
+Examples:
+- numeric increment/decrement
+- map set/remove by key
+- set add/remove by member identity
+- record field/path updates
+- array operations where stable element identity exists
+
+Disjoint deltas may commit independently.
+
+Conflicting deltas fail unless an explicit delta model defines safe merge or
+composition.
+
+Generic whole-value replacement remains the safe fallback.
+
+
+14. MEMORYVALUEDEFINITION AND MEMORYVALUECONTRACT
+=================================================
+
+MemoryValueDefinition is creator/platform declaration.
+
+It may include:
+- identity/declaration
+- documentation
+- default value
+- sparse contract facet declarations
+- grouping/category metadata
+- other definition metadata
+
+MemoryValueDefinition.contract is sparse input.
+
+MemoryValueContract is the fully resolved semantic contract Actant uses.
+
+Conceptual construction:
+
+    MemoryValueDefinition.contract
+        + applicable inherited facet bindings
+        + versioned profile/default bindings
+        ->
+    MemoryValueContract
+
+Exact precedence remains open.
+
+There is no separate EffectiveMemoryValueContract term unless later design
+pressure demonstrates the need.
+
+
+15. CONTRACT FACET BOUNDARY
+===========================
+
+A MemoryValueContract facet should define semantic rules of the value or legal
+operations on that value.
+
+It should not become a dumping ground for:
+- current storage location
+- current cache state
+- current authority
+- current durability state
+- current links
+- tracing state
+- runtime placement
+
+Tentative core facets/dimensions include:
+- valueType
+- validation mode
+- coercion mode
+- resolution/deletion behavior where genuinely needed
+- delta/concurrency capability where appropriate
+
+The earlier tentative resolvedValueRequired facet is retired for now because
+optional<T> directly expresses whether absence is legal.
+
+Retention should default to a separate retention-policy system rather than
+MemoryValueContract unless a later case proves a retention rule is genuinely
+part of value semantics.
+
+
+16. CONTRACT FACET DEFAULT RESOLUTION
+=====================================
+
+Sparse local declarations resolve through a deterministic versioned default
+chain.
+
+Conceptually:
+
+    explicit MemoryValueDefinition.contract facet
+        ->
+    applicable group/type binding
+        ->
+    Pack/application binding if such a layer is retained
+        ->
+    versioned Actant profile binding
+        ->
+    terminal static default
+
+Every required facet must resolve deterministically.
+
+"Unspecified" means inheritance through the defined chain.
+It does not mean undefined behavior.
+
+Default facet values may be shared static immutable values rather than copied
+onto every MemoryValue.
+
+
+17. VERSIONED CONTRACT PROFILES
+===============================
+
+Implicit/default behavior must be reproducible.
+
+Default facet semantics therefore belong to a versioned profile or equivalent
+stable semantic identity.
+
+Old values/saves must be able to resolve through the profile semantics under
+which they were defined unless explicitly migrated.
+
+The complete MemoryValueContract must be inspectable/materializable as data
+even when the declaration is sparse.
+
+
+18. TYPE SYSTEM: GENERAL MODEL
+==============================
+
+Actant defines a language-independent semantic type model.
+
+The type model includes:
+- built-in scalar types
+- structural/container type constructors
+- named/custom semantic types
+- enum-like types
+- room for references and specialized types
+
+Named/custom types have stable semantic identity independent of runtime
+representation or serialization format.
+
+Named/custom types are nominal by default:
+
+    same structure
+        !=
+    necessarily same semantic type
+
+Concrete declaration formats may differ between adapters, runtimes, Packs,
+bridges, or external protocols as implementation detail.
+
+They are valid only insofar as they can be mapped and automatically checked
+against the same Actant semantic understanding.
+
+The design specification does not prescribe one language-specific declaration
+syntax.
+
+
+19. TYPEEXPRESSION AND TYPEDEFINITION
+=====================================
+
+MemoryValueContract.valueType references an Actant semantic TypeExpression.
+
+A TypeExpression may be:
+- built-in semantic type
+- reference to a named TypeDefinition
+- constructed type such as array<T>, map<K,V>, set<T>, nullable<T>,
+  optional<T>, reference<T>, or future constructors
+
+A named TypeDefinition provides stable semantic identity.
+
+Anonymous constructed types do not require globally named definitions.
+
+A named type may specialize/wrap an underlying structural type while retaining
+distinct semantic identity.
+
+Interfaces/operations are associated separately from valueType.
+
+
+20. BUILT-IN TYPE DIRECTION
+===========================
+
+Likely built-in semantic families include:
+- boolean
+- integer
+- floating-point forms
+- string
+- binary
+- structural constructors
+
+Exact numeric width/precision families remain to be finalized.
+
+Precise decimal arithmetic may later justify a distinct type family.
+
+Host-runtime primitive types do not define Actant semantics.
+
+
+21. RECURSIVE STRUCTURAL TYPES
+==============================
+
+Structural types are expressed recursively through TypeExpressions.
+
+Examples of constructors:
+
+    record {
+        field: TypeExpression
+    }
+
+    array<TypeExpression>
+
+    set<TypeExpression>
+
+    map<KeyTypeExpression, ValueTypeExpression>
+
+    nullable<TypeExpression>
+
+    optional<TypeExpression>
+
+    reference<TypeExpression>
+
+Field declaration order is not part of record structural identity by default.
+
+Records with the same field identities and compatible field types remain the
+same anonymous structural type regardless of declaration/serialization order.
+
+Record structure describes data shape and does not inherently imply object
+identity or behavior.
+
+Named recursive types are valid.
+
+Embedded recursive values and references to other semantic values are
+distinct concepts.
+
+Exact requirements for map key type K remain open.
+
+
+22. OPTIONAL AND NULLABLE ARE EXPLICIT TYPE SEMANTICS
+=====================================================
+
+Actant distinguishes:
+
+    T
+        concrete value must be T
+        absence is not legal
+        null is not legal unless T includes null
+
+    nullable<T>
+        concrete value may be T or null
+        absence is not legal
+
+    optional<T>
+        concrete value may be T
+        absence is legal
+
+    optional<nullable<T>>
+        concrete value may be T or null
+        absence is also legal
+
+optional<T> is explicit because structural/value absence must not depend on
+implicit field conventions.
+
+nullable<T> and optional<T> are type/presence semantics, not ordinary
+validation constraints.
+
+
+23. NULL, ABSENCE, MISSING, AND ERROR
+====================================
+
+Actant distinguishes at least:
+
+    concrete T value
+
+    concrete null
+        an actual value where nullable<T> permits it
+
+    absence
+        no concrete value exists at the relevant semantic position
+
+    Missing
+        a legal resolved outcome after fallback resolution is exhausted and
+        optional<T> permits absence
+
+    Error
+        resolution/validation/storage/etc. failed where no legal Missing
+        result applies
+
+null != absence
+Missing != null
+Error != Missing
+
+A structured field may be absent while the enclosing record still exists.
+
+MemoryValue-level absence means no concrete value exists for that MemoryValue
+at the relevant visible layer/source.
+
+Concrete host-language nullish values must not redefine these semantics.
+
+
+24. DEFAULT VALUE RESOLUTION
+============================
+
+Default/fallback resolution is consulted only when concrete state is absent.
+
+If a concrete value exists, it wins even when that value is null.
+
+A resolved default does not create authoritative concrete state.
+
+A later change to the default changes future unresolved reads unless a
+concrete value has since been set.
+
+A default itself may be null when the TypeExpression permits null.
+
+
+25. OPTIONAL + DEFAULT IS MEANINGFUL
+====================================
+
+optional<T> and a default value may coexist.
+
+Semantics:
+
+    explicit concrete value exists
+        -> return it
+
+    no concrete value, default resolves
+        -> return default
+
+    no concrete value, no applicable default
+        -> Missing is legal because optional<T> permits absence
+
+The default does not erase the semantic meaning of optional<T>.
+
+
+26. CONTRADICTORY DECLARATIONS FAIL
+===================================
+
+Do not interpret contradictory semantic declarations creatively.
+
+If two declarations impose incompatible requirements on the same semantic
+dimension, contract/type construction fails unless Actant explicitly defines
+their composition.
+
+Do not add redundant semantic constructs without pressure.
+
+
+27. VALUE RESOLUTION OUTCOMES
+=============================
+
+Conceptually, value resolution may produce:
+
+    Resolved(value)
+
+    Missing
+
+    Error(error information)
+
+Exact API wrapper names are not locked.
+
+Rules:
+
+- concrete value wins over fallback
+- concrete null is a concrete value
+- absent concrete state triggers fallback/default lookup
+- successful fallback produces ResolvedValue without creating revision history
+- after fallback exhaustion:
+    - optional<T> may yield Missing
+    - non-optional T yields an error
+- storage corruption/unavailability is Error, not Missing
+
+These semantics apply recursively where structured members have defaults or
+presence rules.
+
+
+28. MEMORYVALUE WITH AND WITHOUT EXPLICIT DEFINITION
+====================================================
+
+A MemoryValue may have an explicit MemoryValueDefinition.
+
+Actant should also preserve room for simple/inline usage where a value is used
+without a large creator-authored definition.
+
+In such a case, applicable platform/profile semantics still govern the value;
+behavior is not undefined.
+
+Exact inference/creation rules for undeclared MemoryValues remain open.
+
+Do not conflate:
+- absence of a creator-authored MemoryValueDefinition
+- absence of concrete value
+- absence of MemoryValue identity
+
+
+29. CONSTRAINTS VS TYPE SEMANTICS
+=================================
+
+Type semantics define the semantic value domain.
+
+Constraints narrow that domain.
+
+optional<T> and nullable<T> are type/presence semantics, not ordinary
+constraints.
+
+
+30. INTRINSIC VS USAGE-SPECIFIC CONSTRAINTS
+===========================================
+
+Constraints may be intrinsic to a named TypeDefinition or specific to one
+usage.
+
+Usage-specific constraints may narrow but must not widen the admissible domain
+of the referenced type.
+
+The effective admissible domain is the referenced type's domain intersected
+with compatible usage-specific constraints.
+
+
+31. TYPE-AWARE CONSTRAINTS
+==========================
+
+Constraint kinds are type-aware.
+
+Invalid constraint/type combinations must be detectable rather than silently
+ignored.
+
+Relational/cross-field constraints remain conceptually allowed; exact
+expression is deferred.
+
+
+32. REUSABLE CONSTRAINTDEFINITION
+=================================
+
+Actant may support reusable named ConstraintDefinitions whose semantics are
+defined independently and which can be attached to compatible types/usages.
+
+Conceptually a ConstraintDefinition may define:
+- identity
+- semantic meaning
+- applicable type domains/capabilities
+- accepted parameter/value form
+- validation behavior
+- composition behavior
+- failure semantics
+- defining profile/version
+
+Every standard named constraint must be properly documented.
+
+The concrete declaration format remains open.
+
+A JSON-like structured representation is allowed as an implementation/data
+format but does not itself define Actant semantics.
+
+
+33. TYPEDEFINITION VS INTERFACEDEFINITION
+========================================
+
+TypeDefinition answers:
+
+    what is this value?
+
+InterfaceDefinition answers:
+
+    what behavior is advertised as callable for this value/type/target?
+
+Behavior is not serialized into the value merely because an interface exists.
+
+A semantic type may have:
+- no interfaces
+- one interface
+- multiple interfaces
+
+The same TypeDefinition may be used by many MemoryValues.
+
+
+34. INTERFACEDEFINITION
+=======================
+
+InterfaceDefinition describes advertised callable behavior.
+
+It may describe:
+- operation identity/name
+- argument TypeExpressions
+- return TypeExpression
+- error/failure information
+- coarse mutation/read behavior where useful
+- version/compatibility identity
+- other capability metadata
+
+Exact declaration syntax is deferred.
+
+Interface descriptions may be generated/precomputed/transcribed/on-demand.
+
+They may be used by:
+- IDE tooling
+- static analysis
+- generated proxies
+- validation
+- documentation
+- runtime dispatch assistance
+
+Generated/copied interface metadata is informative.
+It is not the final runtime authority on behavior.
+
+
+35. IMPLEMENTATIONREGISTRATION AND BEHAVIOR AUTHORITY
+=====================================================
+
+ImplementationRegistration is the working concept identifying a currently
+loaded implementation that authoritatively provides behavior.
+
+Distinguish:
+
+    value-state authority
+        which MemoryValueRevision is authoritative
+
+    behavior implementation authority
+        which loaded implementation actually handles an operation
+
+They are related but not identical.
+
+A behavior implementation must still use normal MemoryValue/transaction
+authority mechanisms for state mutation unless another explicitly designed
+authority mechanism applies.
+
+A stale generated interface does not override the loaded implementation's
+actual capabilities.
+
+
+36. DYNAMIC DISPATCH IS ALLOWED
+===============================
+
+InterfaceDefinition is capability/typing information, not necessarily an
+exhaustive whitelist.
+
+A request may be dispatched even when:
+- the operation was not announced
+- exact argument shape does not perfectly match advertised metadata
+
+unless an applicable strictness facet/policy requires pre-dispatch matching.
+
+The implementation is the final authority on whether the request is
+understood and valid.
+
+
+37. STRICT INTERFACE/DISPATCH FACETS
+====================================
+
+Strictness is explicit rather than globally mandatory.
+
+Future facets/policies may separately control:
+- unknown operation names
+- argument matching
+- return matching
+- other interface-conformance checks
+
+Do not force all strictness into one boolean if distinct dimensions prove
+useful.
+
+
+38. FALLBACK/DYNAMIC OPERATION HANDLING
+=======================================
+
+An implementation may optionally support fallback/default dispatch for unknown
+operations.
+
+Fallback dispatch may interpret the whole Invocation/operation request
+dynamically.
+
+Unknown-operation handling may later distinguish:
+- reject
+- fallback
+- dynamic handling
+
+Exact representation is deferred.
+
+
+
+
+39. COMMUNICATION AND INTERACTION
+=================================
+
+Communication is Actant's broad concept for interaction across execution
+boundaries or abstractions.
+
+Interaction is semantic and realization-independent.
+
+A semantic interaction may be realized through:
+- a direct function call
+- a member/object call
+- a local proxy
+- a queue
+- Messaging
+- transported Messaging
+- a Bridge-specific mechanism
+- another suitable realization
+
+The general communication model grew from the need to connect different
+languages/runtimes, but language incompatibility is not its semantic
+foundation.
+
+Execution boundaries may arise from:
+- different languages or runtimes
+- different processes
+- different threads or execution contexts
+- different machines
+- isolation/security boundaries
+- external systems
+- deliberate architectural abstraction even where direct invocation is
+  technically possible
+
+Not every function call becomes a Message.
+
+The unifying abstraction is Interaction. Messaging is one realization.
+
+A compatible/direct realization may remove transport, serialization, Message
+objects, or other machinery while preserving all semantics required by the
+Interaction.
+
+
+40. MESSAGING, MESSAGECHANNEL, TRANSPORT, AND REPRESENTATION
+============================================================
+
+Messaging is explicit message-based Communication.
+
+MessageChannel is a transport-neutral Messaging surface.
+
+Transport is the concrete carrier/mechanism used to move communicated
+material.
+
+Representation/Codec defines concrete encoding/decoding.
+
+These are semantically distinct even when one implementation object/module
+performs several roles.
+
+A concrete Message representation may be reused across multiple Transports.
+That does not make that representation the generic Messaging model.
+
+Generic Messaging does not require:
+- one universal Message envelope
+- one universal Message struct
+- one universal field set
+- one universal serialization format
+- one universal transport
+
+A Message is a communication unit where a Messaging realization needs such a
+unit.
+
+Transport or MessageChannel counterpart/session context is communication-local
+information only.
+
+It does not establish:
+- semantic identity
+- authorization
+- permissions
+- trust
+- capability possession
+- ownership
+- domain authority
+
+Security and permission decisions remain owned by the subsystem defining those
+semantics and use identities/evidence recognized by that subsystem.
+
+Do not introduce a generic first-class Peer identity merely because a
+Transport can describe its remote/local counterpart.
+
+
+41. INVOCATION AND STABLE INVOCATION IDENTITY
+=============================================
+
+Invocation is the semantic interaction asking a target to perform an
+operation.
+
+Invocation is not itself a Message.
+
+Conceptually, an Invocation contains or resolves:
+- stable Invocation identity
+- target
+- operation
+- input
+- applicable interaction context
+
+Target identifies the intended participant/service/object/capability
+sufficiently for routing/resolution.
+
+Operation identifies the requested behavior.
+
+Input is defined by the operation contract. Generic Invocation does not require
+separate args/payload fields.
+
+Context may include typed routing, causal, tracing, security, participant, or
+other context where applicable.
+
+Invocation may be realized through:
+- direct call
+- member call
+- proxy
+- Messaging
+- transported Messaging
+- Bridge
+- another suitable mechanism
+
+Invocation has stable semantic identity.
+
+Creating a new Invocation means requesting a new logical performance of the
+operation.
+
+Retrying or retransmitting an existing Invocation means attempting to complete
+the same logical Invocation and does not create a new Invocation merely because
+a new Message, Transport attempt, connection, or runtime realization is used.
+
+Invocation identity is distinct from:
+- Message identity
+- retry/attempt identity
+- Subscription identity
+- domain work/object identity
+- Result identity where a domain defines one separately
+
+A realization optimization may remove machinery but not semantics required by
+the Invocation, such as validation, authorization, transaction context,
+correlation, cancellation meaning, error mapping, or lifecycle rules where
+applicable.
+
+
+42. FLOW-SPECIFIC MESSAGE ROLES
+===============================
+
+There is no flat universal Message-kind taxonomy.
+
+Message/flow roles are defined by the flow that uses them.
+
+Invocation-flow concepts may include:
+- Request
+- Accepted
+- Result
+- FlowError
+- intermediate information/stream items when the Invocation contract defines
+  them
+
+One-way Messaging may use an Emit-like flow shape.
+
+Ack is a communication-receipt/recognition concept where needed.
+
+These names do not require one universal concrete Message hierarchy.
+
+A concrete realization may distinguish flow roles through:
+- separate structures
+- explicit role/kind discriminators
+- flow/channel context
+- operation-specific framing
+- another unambiguous mechanism
+
+Generic Messaging does not require a universal type field.
+
+
+43. ACKNOWLEDGEMENT, ACCEPTANCE, AND RESULT
+==========================================
+
+Ack, Accepted, and Result are distinct.
+
+Ack:
+    communication evidence that material was received/recognized to the degree
+    defined by the applicable acknowledgement contract
+
+Accepted:
+    target/domain acceptance of responsibility for continuing a correlated
+    Invocation or flow
+
+Result:
+    successful completion result of a correlated Invocation where that flow
+    defines Result
+
+Ack does not imply:
+- Invocation acceptance
+- domain work creation
+- domain success
+- final completion
+
+Accepted does not imply final success unless the operation contract explicitly
+defines acceptance itself as the completed result.
+
+Acknowledgement always has a scope/level.
+
+Possible evidence may concern:
+- local Transport acceptance
+- MessageChannel acceptance
+- remote Messaging recognition
+- flow-step recognition
+- domain acceptance
+
+Those are not interchangeable.
+
+Dedicated Ack messages are not required when later flow progress already
+proves the earlier communication was received and recognized to the required
+degree.
+
+Examples:
+
+    Invocation I17
+        -> Result(I17)
+
+    Result may implicitly acknowledge the Request.
+
+    Invocation I17
+        -> Accepted(I17)
+        -> Result(I17)
+
+    Accepted may implicitly acknowledge the Request.
+
+A dedicated Ack is useful when the flow otherwise provides no timely or
+unambiguous evidence of receipt/recognition.
+
+Ack is evidence, not magical certainty.
+
+If an Ack itself is lost, the sender may still be uncertain even when the
+acknowledged action occurred.
+
+Flows requiring stronger distributed certainty may therefore need
+reconciliation rather than redundant generic Ack traffic.
+
+
+44. INVOCATION, MESSAGE, DOMAIN-WORK, AND ATTEMPT IDENTITY
+=========================================================
+
+Invocation identity, Message identity, retry/attempt identity, and domain
+work/object identity remain distinct.
+
+Example:
+
+    Invocation I17
+        Attempt A -> Message M1
+        Attempt B -> Message M2
+        Accepted -> Job J42
+
+    M1 != M2
+    I17 != M1
+    I17 != J42
+
+Both attempts can still be attempts to complete the same I17.
+
+Correlation connects identities; it does not merge them.
+
+Communication may correlate directly to Invocation or another flow identity
+rather than forcing every relationship through parent-Message correlation.
+
+A Message identity identifies the communication unit where Message identity is
+used. It is not automatically an idempotency, retry, domain-operation, or
+Invocation identity.
+
+
+45. NOTIFICATION, EMIT, AND UNCONFIRMED DELIVERY
+================================================
+
+Notification is semantic one-way information/interaction where no correlated
+domain Result is requested.
+
+An Emit-like Message flow is one possible Messaging realization.
+
+A fire-and-forget/unconfirmed Emit may promise no evidence that the recipient
+observed the emitted information.
+
+In such a contract:
+
+    not known delivered
+        !=
+    delivery failure
+
+because recipient observation was never promised.
+
+An Emit may instead require acknowledgement or another delivery assurance when
+its contract promises recipient recognition.
+
+Ack of one-way communication does not imply downstream domain success.
+
+
+46. ERROR LAYERS
+================
+
+At least three error layers remain distinct:
+
+1. Transport/Messaging error
+   The communication mechanism failed.
+
+2. Flow error
+   The communication flow/protocol could not proceed according to its rules.
+
+3. Domain error/rejection
+   Communication and flow may have succeeded, but the owning domain rejected
+   or failed the requested operation.
+
+A higher-level flow may report failure together with a lower-layer cause.
+
+Example:
+
+    Subscription establishment failed
+        caused by Transport unavailable
+
+Do not flatten these layers into one generic ErrorMessage taxonomy.
+
+
+47. COMMUNICATION-FLOW GUARANTEES
+=================================
+
+The semantic contract states promised behavior.
+
+Implementation fields/mechanisms are not themselves the contract.
+
+Depending on the flow and environment, relevant concerns may include:
+- correlation
+- duplicate recognition
+- stale-material applicability
+- ordering
+- retry
+- acknowledgement/evidence
+- recipient-observation/delivery assurance
+- gap detection
+- supersession
+- recoverability/resynchronization
+- partial/multipart delivery
+- streaming
+- completion/finalization recognition
+- timeout/deadline
+- disconnect
+- continuity across replacement/reconnect/restart
+- cancellation
+- capacity/overload behavior
+- buffering
+- idempotency
+- delivery uncertainty
+
+Do not use plain "loss" as a sufficient contract description.
+
+Whether an absent observation is a failure depends on what the source/initiator
+promised, what the listener/recipient was entitled to observe, whether the
+material may still be pending/late/out-of-order, whether it was superseded,
+and what recovery remains available.
+
+Likewise, "backpressure" is not a complete guarantee. Capacity/overload
+behavior asks what occurs when downstream cannot currently accept or process
+work at the upstream production rate.
+
+Possible responses include:
+- producer waits
+- production pauses
+- bounded buffering
+- rejection
+- explicit flow failure
+- permitted coalescing/supersession
+- permitted shedding/drop
+- another contract-defined response
+
+Backpressure is one mechanism/policy for regulating that mismatch.
+
+A realization chooses identities, counters, epochs, keys, metadata, queues,
+credit systems, pending ledgers, or other mechanisms sufficient to satisfy its
+promised behavior unless the semantic contract explicitly standardizes a
+mechanism.
+
+Do not require a universal messageId, generation, sequence, correlatesTo,
+idempotencyKey, lane, or similar field merely because one implementation once
+used it.
+
+Concrete implementations should guide which recurring guarantees or
+capabilities are worth promoting into common contracts.
+
+
+48. DUPLICATES AND LOGICAL SAMENESS
+===================================
+
+Duplicate Message delivery, repeated flow steps, repeated Invocation execution,
+and repeated domain effects are different concerns.
+
+A flow first identifies the logical unit whose repetition matters.
+
+That unit may be:
+- Message
+- Invocation
+- Subscription establishment
+- Occurrence
+- domain operation
+- domain object creation
+- another flow-specific semantic unit
+
+Recognizing a duplicate does not prescribe one universal response.
+
+A recognized duplicate may be:
+- ignored
+- answered with a retained prior outcome
+- safely reprocessed
+- rejected
+- reconciled with current state
+- treated as a flow error
+
+If retry is permitted while repeated execution would be unsafe or externally
+observable, the flow requires a stable logical sameness identity or equivalent
+mechanism.
+
+InvocationId and SubscriptionId are natural examples for their respective
+flows.
+
+Duplicate-recognition lifetime is part of the applicable flow/operation
+guarantee. It is not universally infinite.
+
+Stateful flows such as Subscription establishment may require reconciliation
+rather than simple duplicate suppression.
+
+
+49. RETRY AND TRANSPARENT LOWER-LAYER RETRY
+===========================================
+
+Retry is another attempt to complete the same logical operation or flow step.
+
+Retry preserves the identity of that logical operation.
+
+A retry may create new:
+- Messages
+- Transport attempts
+- connections/sessions
+- lower-level execution attempts
+
+without creating a new logical Invocation, Subscription, or flow operation.
+
+Failure to observe success does not imply that remote execution did not occur.
+
+For example:
+
+    remote operation succeeds
+    Result is lost
+
+Blindly repeating execution may duplicate domain effects.
+
+Retry ownership belongs to the layer whose guarantee failed.
+
+A layer may retry its own mechanism transparently only when doing so preserves
+the guarantees owned by the layer above it.
+
+"Transparent" means:
+- the higher layer observes the same valid semantic outcome it would have
+  observed if the first lower-layer attempt had succeeded
+- state/relationship expectations remain consistent with that higher-level
+  contract
+- the retry does not become invisible to tracing; tracing may record all
+  attempts and recovery
+
+If uncertainty means duplicate execution, divergent state, or another
+higher-level semantic difference is possible, recovery is no longer a
+transparent lower-layer retry and must be handled by the appropriate higher
+layer.
+
+Whether an error is retryable depends on the applicable flow/domain contract,
+not merely on the existence of an error.
+
+Retry policy details such as delay, backoff, attempt count, or scheduling are
+implementation/policy matters unless a semantic contract requires them.
+
+
+50. REPLAY, RESUME, RETAINED OUTCOME, AND RECONCILIATION
+========================================================
+
+Actant Replay keeps its existing historical meaning.
+
+Replay:
+    reproduce/play a completed recorded history from a defined historical
+    source such as completed SafeWindow/SafeCheckpoint/audit material
+
+Replay is not generic terminology for resending a Message, retrying an
+Invocation, or returning a retained Result.
+
+An incompletely executed flow/work unit is not suitable for Replay merely
+because some trace/history exists.
+
+Resume:
+    continue or recover an incompletely finished execution/flow from retained
+    partial state/evidence, while accepting that some already-performed effects
+    may be unreconstructable and some work may need to be repeated, discarded,
+    compensated, or reconciled
+
+Retrieve retained outcome:
+    obtain a Result/outcome which is already known to exist without
+    re-executing the original operation
+
+Reconciliation:
+    compare/restore enough shared understanding after uncertainty so the
+    participants can safely continue or conclude a relationship/flow
+
+Therefore:
+
+    Retry != Resume != Replay != retained-outcome retrieval != reconciliation
+
+
+51. STALE MATERIAL AND APPLICABILITY
+====================================
+
+Stale material is otherwise interpretable communication material whose
+applicable logical context has advanced, ended, been replaced, or otherwise
+made that material no longer applicable for current processing.
+
+Invalid material is not the same as stale material.
+
+Old material is not automatically stale.
+
+Possible applicability contexts include:
+- communication/session incarnation
+- Subscription state
+- Invocation state
+- target incarnation
+- authority revision
+- negotiated capability state
+- routing binding
+- another flow-specific context
+
+A flow which can receive material after the assumptions under which that
+material was produced may have changed must define how applicability is
+determined.
+
+Any generation, epoch, revision, state version, or other stale-recognition
+mechanism belongs to the context whose applicability it represents.
+
+Actant does not define one universal communication generation/epoch identity.
+
+If multiple independent realizations later require equivalent generation/epoch
+semantics, especially where a centrally issued identity would improve
+coordination/consistency, reconsider promotion into common architecture.
+
+Duplicate and stale may overlap but are not equivalent.
+
+
+52. ORDERING: SCOPE, RECEIVE ORDER, AND APPLICATION ORDER
+=========================================================
+
+"Ordered" is meaningless without scope.
+
+Possible scopes include:
+- one Invocation stream
+- one Subscription
+- one Subscription track
+- one partition/key within a track
+- one source
+- one target
+- one MessageChannel
+- another flow-defined scope
+
+If ordering is promised, the contract defines:
+- which logical units are ordered
+- the ordering scope
+- what establishes logical order
+- whether the guarantee concerns production, sending, receiving, visibility,
+  application, or completion
+- whether gaps are permitted
+- whether out-of-order receipt is permitted
+- what happens when required order cannot currently be satisfied
+
+Receive order and semantic application order are distinct.
+
+A listener may receive a later ordered unit early and retain it as pending
+without semantically applying it.
+
+Example:
+
+    source:
+        #41 D1
+        #42 D2
+        #43 D3
+        #44 normal termination
+
+    listener receives:
+        #41
+        #42
+        #44
+
+The listener knows #43 is unresolved and must not finalize #44 as though the
+history were complete.
+
+If #43 arrives later, the listener may apply #43 and then finalize #44.
+
+For an ordered state-transition flow, every unit whose interpretation depends
+on the ordered history participates in that logical ordering.
+
+This may include:
+- deltas/state transitions
+- snapshots/resynchronization boundaries
+- normal terminal/finalization units
+- flow-specific recovery markers
+
+It does not require unrelated Transport control traffic to consume the same
+ordering space.
+
+A normal terminal indication must not hide an unresolved required gap.
+
+Message creation order, timestamps, UUIDv7 ordering, or current Transport frame
+order do not create semantic ordering unless the applicable contract says so.
+
+
+53. SUPERSESSION, GAPS, LATE MATERIAL, AND RESYNCHRONIZATION
+===========================================================
+
+Supersession means newer information deliberately makes older information
+unnecessary according to the contract.
+
+Supersession is not equivalent to accidental delivery failure.
+
+Example latest-state progress:
+
+    source:
+        21%
+        37%
+        52%
+
+    listener:
+        receives 21%
+        receives 52%
+        later receives 37%
+
+If each progress update is a complete current progress state and intermediate
+updates are explicitly supersedable, 37% may be discarded as late obsolete
+information after 52%.
+
+By contrast, an ordered delta stream:
+
+    D1
+    D2
+    D3
+
+may require every logical transition.
+
+Receiving D1 and D3 exposes a gap when the ordering model shows D2 should
+exist.
+
+A gap need not immediately imply permanent delivery failure. D2 may still be
+pending, late, recoverable, or replaced by an explicit resynchronization state.
+
+A resynchronization state which subsumes prior history must identify, directly
+or semantically, what logical history it incorporates sufficiently for the
+listener to avoid double-applying pending/late material.
+
+Conceptually:
+
+    listener applied through #42
+    listener has pending #44
+    resync state represents state through #43
+
+After applying the resync state:
+    logical state is through #43
+    #44 may become applicable
+    later arrival of #43 must not be applied again
+
+Exact sequence/version/resync representations remain flow/implementation
+specific.
+
+
+54. SUBSCRIPTION CORE MODEL
+===========================
+
+Subscription is an identifiable logical relationship between a source/producer
+and a listener/consumer for continuing eligible interaction/information.
+
+Every registration creates a distinct logical Subscription even when source,
+listener, selector, filter, and all other registration information are
+structurally identical.
+
+There is no implicit structural deduplication.
+
+Example:
+
+    Subscription S1
+    Subscription S2
+
+    same source
+    same listener
+    same selector/filter
+
+    S1 != S2
+
+    unsubscribe(S1)
+
+    S2 remains active.
+
+A stable SubscriptionId is semantically useful and is the natural identity for
+establishment retry/reconciliation.
+
+Subscription is logical and is not inherently bound to:
+- a Transport
+- a MessageChannel
+- one connection/session
+- one adapter process
+- one ApplicationRun unless explicitly scoped that way
+
+A higher-level domain may use Subscription internally or use another Actant
+mechanism instead. Subscription is not forced on every continuing interaction.
+
+
+55. SUBSCRIPTION SIDE REPRESENTATIONS AND RESPONSIBILITIES
+==========================================================
+
+There is one logical Subscription, but participating sides may hold different
+local representations/handles appropriate to their roles.
+
+Conceptually:
+
+    listener side
+        local Subscription handle/view
+        may request unsubscribe
+        receives deliveries/interactions
+        tracks local knowledge of establishment/liveness/reconciliation
+
+    source side
+        local active registration/view
+        evaluates selector/filter where applicable
+        produces deliveries/interactions
+        removes/deactivates source registration where required
+
+These are not two independent Subscriptions.
+
+The listener initiates or maintains continued interest.
+
+The source side owns the source-side registration that actually causes
+delivery.
+
+Neither side should be described as owning the entire logical Subscription
+without qualification.
+
+Each side owns its local state/responsibilities.
+
+The communication/flow realization may additionally hold operational state:
+- establishment progress
+- retries
+- pending teardown
+- last confirmed remote state
+- reconciliation state
+- delivery correlation
+- pending required delivery/recovery obligations
+
+That machinery coordinates the relationship without becoming owner of the
+domain meaning carried through it.
+
+
+56. SUBSCRIPTION SELECTOR, FILTER, AND TRACKS
+=============================================
+
+A Subscription may carry selector/filter or equivalent targeting information.
+
+Selector identifies which class/aspect of source information is eligible.
+
+Filter narrows/qualifies that eligibility.
+
+Selector/filter are preserved registration information.
+
+The source/domain which understands their semantics normally interprets them.
+
+Generic Communication does not require one universal filter evaluator.
+
+A Subscription may additionally contain one or more independently contracted
+information tracks when multiple information flows benefit from one shared
+establishment/lifecycle relationship.
+
+"SubscriptionTrack" is a working semantic term, not a required implementation
+class or Transport lane.
+
+A track may define, where applicable:
+- information meaning/scope
+- ordering scope
+- partition/key scope
+- supersession behavior
+- whether every update is required or some are disposable
+- acknowledgement/evidence requirements
+- recovery strategy
+- recoverability horizon
+- terminal/finalization requirements
+- durable pending-delivery requirements
+
+One Subscription may therefore carry progress, state, delta/history, result
+information, or other domain-defined tracks with different guarantees.
+
+A creator may instead choose multiple Subscriptions.
+
+The framework does not infer one correct partition automatically.
+
+Convenience profiles such as latest-state, ordered-deltas, reliable-history,
+or progress may later be provided as compositions of guarantees.
+
+They are not separate architectural Subscription species.
+
+
+57. INFORMATION MEANING IS DISTINCT FROM DELIVERY GUARANTEE
+===========================================================
+
+The semantic shape of information does not determine its delivery/recovery
+contract.
+
+In particular:
+
+    full-state payload
+        !=
+    latest-state delivery semantics
+
+Example:
+
+    R=32
+    G=32
+    B=32
+    G=24
+    B=31
+    R=10
+
+Each update may be a complete current value for one gumball-color partition.
+
+A creator may choose:
+
+    current-state semantics
+        only the latest value per partition matters
+
+or:
+
+    reliable transition/history semantics
+        every emitted update is significant and must remain recoverable
+
+Both are valid even though each payload is a full state value for its
+partition.
+
+Likewise, a delta need not always require strict serial application if its
+operation is explicitly commutative or another domain rule permits reordering.
+
+Contracts describe the required semantics rather than infer them from payload
+shape alone.
+
+
+58. SUBSCRIPTION ESTABLISHMENT FLOW
+===================================
+
+Subscription establishment is stronger than Message receipt.
+
+A Message Ack alone is insufficient to claim that a Subscription is
+established.
+
+Conceptually:
+
+    listener requests establish S17
+        ->
+    cross-boundary Subscription flow coordinates registration
+        ->
+    source/domain accepts and creates/binds the required source-side
+    registration
+        ->
+    establishment success is reported
+        ->
+    listener can treat S17 as established according to the Subscription
+    contract
+
+A successful establishment outcome means all work required by the Subscription
+contract has succeeded at responsible participants.
+
+Communication may coordinate domain work necessary to satisfy that guarantee
+without owning the meaning of the domain work.
+
+If the domain/source rejects registration, establishment fails with the
+domain rejection/error preserved as the cause.
+
+If Transport/Messaging prevents progress, establishment fails or becomes
+indeterminate according to the flow contract, with the lower-layer cause
+preserved.
+
+Do not expose an attempted/rejected registration as an established routing
+target merely because the registration Message was received.
+
+
+59. SUBSCRIPTION ESTABLISHMENT UNCERTAINTY AND RECONCILIATION
+=============================================================
+
+Distributed establishment can become uncertain.
+
+Example:
+
+    source successfully creates S17
+    success response is lost
+
+The initiating side must not falsely report:
+- definite success when it lacks confirmation
+- definite non-establishment when remote establishment may have succeeded
+
+The flow must reconcile, retry safely, or expose uncertainty according to its
+contract.
+
+Stable Subscription identity allows retries/reconciliation to refer to the same
+logical registration rather than creating a structurally identical new
+Subscription.
+
+A source receiving a retry for S17 may recognize existing compatible state and
+report/reconcile it rather than creating S18.
+
+Provisional/active source-side states may be useful so delivery does not begin
+before establishment has reached the point promised by the contract.
+
+Exact establishment protocol remains open and should be guided by real
+implementation pressure.
+
+
+60. ACKNOWLEDGEMENT AND FINALIZATION BARRIERS IN SUBSCRIPTIONS
+=============================================================
+
+A Subscription may contain information whose intermediate updates are
+supersedable while its terminal/final information is required.
+
+Example progress track:
+
+    Start
+    21%
+    37%
+    52%
+    76%
+    Finished
+
+Intermediate progress may be unacknowledged/latest-state information.
+
+Finished may instead be required if it is the only information proving normal
+completion to that listener.
+
+If the listener independently receives a Job Result whose semantics imply the
+same completed state, that Result may satisfy/subsume the terminal progress
+obligation when the contract explicitly defines that relationship.
+
+If no such independent Result is part of the listener's contract, Finished may
+itself be the terminal information which must become confirmed/reconciled
+before normal Subscription finalization.
+
+Generic design does not require a concrete "CheckEveryoneAgrees" Message.
+
+Instead:
+
+    normal Subscription teardown/finalization cannot complete while required
+    delivery, recovery, gap-resolution, or terminal obligations remain
+    unresolved
+
+This is the semantic finalization barrier.
+
+A concrete implementation may satisfy it through:
+- Ack
+- reconciliation/query
+- terminal-state comparison
+- result receipt
+- two-phase close
+- another mechanism preserving the guarantee
+
+
+61. SUBSCRIPTION TEARDOWN
+=========================
+
+Listener-side unsubscribe does not simply delete local state and assume the
+source stopped delivering.
+
+unsubscribe(S17) initiates a logical teardown/unregistration operation.
+
+The source side removes/deactivates the source registration according to the
+Subscription contract.
+
+Teardown has the same distributed-uncertainty problem as establishment:
+confirmation can be lost after remote state changed.
+
+Therefore teardown may require safe retry/reconciliation.
+
+Normal teardown must respect applicable finalization barriers.
+
+Unsubscribe is distinct from cancellation of underlying work unless a
+higher-level domain explicitly connects them.
+
+Source-side termination may also occur when the source/domain relationship can
+no longer continue.
+
+If the contract promises notification of source-side termination, that
+termination must be surfaced according to the flow semantics.
+
+
+62. RECOVERY STRATEGIES AND RECOVERABILITY HORIZON
+==================================================
+
+At least two different recovery families are useful.
+
+Current-state resynchronization:
+
+    missing intermediate material need not be reproduced
+    source provides current state sufficient to restore the listener's
+    semantic understanding
+
+Missing-unit/history recovery:
+
+    specific required logical units must be recovered/retransmitted because
+    later state cannot safely replace them
+
+A flow may support:
+- current-state resync only
+- missing-unit/history recovery only
+- both, with one as fallback
+- neither, when its contract permits that
+
+For ordered deltas/history, the source may need to retain required sent units
+until they are acknowledged, otherwise made safely recoverable, or no longer
+required according to the contract.
+
+For current-state semantics, a source may instead be able to regenerate a
+sufficient latest state without retaining every intermediate communication
+unit.
+
+Recovery timing assumptions on both sides must be compatible.
+
+Example:
+
+    listener detects a gap
+    waits up to 30 seconds for late arrival
+    then initiates recovery
+
+A source promising missing-unit recovery cannot discard the only recoverable
+copy after 10 seconds while still claiming compatibility with that listener
+strategy.
+
+The exact timing model may be negotiated/resolved as capabilities during
+establishment rather than hardcoded globally.
+
+If the parties cannot satisfy the required recoverability contract,
+establishment should fail rather than silently create a relationship whose
+guarantee cannot be met.
+
+
+63. DURABLE PENDING DELIVERY OBLIGATIONS
+========================================
+
+A source may need to preserve a required delivery obligation even while the
+listener is temporarily unreachable.
+
+This does not inherently require the source/domain operation itself to block
+until network acknowledgement arrives.
+
+Actant may persist the outstanding obligation transactionally or through
+another durable mechanism so that:
+- the source can continue safely where its domain permits
+- the obligation survives process/ApplicationRun/Transport interruption
+- later communication can retry/reconcile delivery
+- the obligation is cleared only when the applicable guarantee is satisfied
+
+A persistent-outbox style implementation is one possible realization, not a
+required architectural object/name.
+
+The semantic rule is that required information must not be forgotten merely
+because the current listener realization is unavailable when the contract
+promises eventual recoverability/delivery.
+
+
+64. SUBSCRIPTION, OCCURRENCE, AND DOMAIN STATE
+==============================================
+
+Occurrence is a communication/listener information unit.
+
+It is not:
+- authoritative domain state
+- a MemoryValueRevision
+- a Job result
+- a TraceRecord
+- a persistent history object
+- a universal domain Event
+
+An Occurrence communicates one self-contained semantic unit of information in
+the applicable delivery context.
+
+Every present field contributes asserted information.
+
+Absent fields make no assertion unless the concrete Occurrence type defines
+absence semantics.
+
+Occurrence need not duplicate context already unambiguously established by the
+Subscription/track/flow/listener context.
+
+A listener may cache observed information non-authoritatively or query the
+source for current authoritative state.
+
+Occurrence identity is optional and may be ephemeral where useful for:
+- temporary deduplication
+- correlation
+- stale detection
+- diagnostics
+- temporary delivery ledgers
+
+Persistent trace/history owns its own identity.
+
+No global Event/Update/Progress/ResultItem taxonomy is defined.
+
+A missed notification about durable domain state does not inherently mean the
+domain state was lost.
+
+For example:
+
+    Occurrence("Job J1 completed")
+
+may be missed while:
+
+    J1.state = Completed
+    J1.result = R55
+
+remains queryable/recoverable.
+
+
+65. SUBSCRIPTION MAY DRIVE INVOCATIONS
+======================================
+
+A Subscription is not limited to fire-and-forget notification.
+
+A domain may define that an eligible Subscription interaction initiates an
+Invocation and awaits a Result.
+
+Example pressure:
+
+    IoManager source
+        loads TypeScript file
+        -> established Subscription selects a transpiler handler
+        -> handler Invocation receives file content
+        -> handler Result returns transpiled JavaScript
+        -> IoManager continues with the transformed result
+
+The Subscription owns the continuing relationship/selection.
+
+Invocation owns each request/result interaction.
+
+The IoManager domain owns:
+- when interception occurs
+- what input is provided
+- whether results are required
+- how multiple handlers compose
+- what transformed output means
+- domain-specific failure behavior
+
+This prevents Subscription from acquiring universal "listener returns a value"
+semantics.
+
+
+66. LONG-RUNNING INVOCATION, ACCEPTED WORK, AND PERSISTENT CONTINUATION
+======================================================================
+
+A long-running Invocation may remain one continuing Invocation flow:
+
+    I17
+        -> Accepted
+        -> intermediate information*
+        -> Result
+
+Alternatively, Accepted may hand continuation to an independently identifiable
+domain work object:
+
+    I17
+        -> Accepted(Job J42)
+
+After that handoff, J42 rather than the transient I17 flow may become the
+stable anchor for:
+- progress/status
+- result retrieval
+- cancellation
+- retention
+- reconciliation
+- later ApplicationRuns
+
+I17 != J42.
+
+When the contract permits detachment, accepted asynchronous work may outlive:
+- the ApplicationRun that initiated it
+- the initiating process/runtime
+- the current Transport/MessageChannel
+- the initiating machine
+
+Actant may persist the initiating Application/Pack's continuing semantic
+interest in J42 transactionally.
+
+A later ApplicationRun can restore that longer-lived relationship and
+reconcile J42 without manually rediscovering every outstanding request.
+
+This is not implicit inheritance merely because R2 happens to follow R1.
+
+The relationship survives because it was explicitly scoped to a longer-lived
+semantic identity/state than ApplicationRun.
+
+Possible lifetime scopes may include:
+- ApplicationRun
+- Application
+- persistent Pack/application state
+- persistent Subscription
+- domain work continuation
+- another explicit semantic owner
+
+Execution location, result-material location, and current communication path
+remain placement/realization concerns.
+
+A Job may execute on one machine, be coordinated by another, store its result
+elsewhere, and later be queried from a new runtime without exposing those
+placements to the Pack unless the relevant contract intentionally does so.
+
+
+67. COMMUNICATION CONTINUITY VS EXECUTION RESUME
+================================================
+
+Communication continuity and execution resumability are different problems.
+
+Communication continuity:
+
+    domain work continues while a listener/runtime/Transport is unavailable
+    later communication restores/reconciles access to the same logical work
+
+Execution Resume:
+
+    the work/execution itself stopped incompletely
+    Actant attempts to continue/recover it from retained partial state/evidence
+
+Example:
+
+    R1 receives Accepted(Job J42)
+    R1 shuts down
+    J42 continues running
+    R2 later starts and queries/reconciles J42
+
+This is communication/lifecycle continuity, not Resume of J42.
+
+By contrast:
+
+    J42 execution crashes midway
+    later execution continues from retained incomplete state
+
+is Resume.
+
+Progress while a participant is unreachable may be handled according to its
+track contract:
+- discard superseded intermediate progress
+- retain required history
+- retain only current state
+- accumulate durable pending obligations
+- reconcile on return
+
+A higher-level relationship may survive lower-level realization loss only when
+its semantic contract/lifetime says so.
+
+
+68. LIVENESS IS LAYER-RELATIVE
+==============================
+
+"Alive" is not one universal boolean.
+
+Relevant layers may include:
+
+    domain relationship liveness
+        can the logical relationship currently perform what its contract
+        promises?
+
+    flow liveness
+        can this flow continue, resume, or reconcile?
+
+    Messaging liveness
+        can Messages currently be exchanged according to the promised
+        Messaging guarantee?
+
+    Transport liveness
+        is this particular transport/session/path currently usable?
+
+Transport dead does not inherently mean the domain relationship is dead.
+
+Transport alive does not prove a Subscription is established/usable.
+
+A higher-level realization may repair, renew, replace, rediscover, reconcile,
+or recreate lower-layer state while preserving the same higher-level
+relationship if its contract permits that.
+
+A liveness/usability check may itself perform reconciliation or connection
+renewal before reporting an outcome.
+
+Where truth cannot be determined, an Indeterminate/unknown outcome is preferable
+to a false boolean.
+
+Heartbeat is only one possible lower-layer implementation mechanism, not a
+generic Subscription requirement.
+
+
+69. FLOW STATE VS LOWER-LEVEL REALIZATION STATE
+===============================================
+
+State required to preserve a higher-level communication guarantee must not be
+owned solely by a lower-level realization whose loss is allowed without ending
+the higher-level interaction.
+
+Examples may include:
+- active Subscription relationship/reconciliation state
+- pending Invocation/result state
+- persistent continuation state
+- retry recognition
+- deduplication state
+- flow progress/correlation
+- required pending-delivery obligations
+
+This does not require all flow state to be globally durable.
+
+If a flow explicitly ends when its Transport/session ends, transport-local
+state may be sufficient.
+
+The flow contract determines required lifetime.
+
+Do not bind higher-level relationship state accidentally to one WebSocket,
+socket, connection, ApplicationRun, or other disposable carrier/runtime object.
+
+
+70. CAPACITY, OVERLOAD, BUFFERING, AND BACKPRESSURE
+===================================================
+
+Capacity/overload behavior asks what happens when a producer can currently
+produce/submit work faster than the next stage can accept/process it.
+
+Backpressure is one mechanism/policy for regulating that mismatch.
+
+Buffering is distinct:
+    "I cannot process this now, but I can retain it temporarily."
+
+Backpressure is distinct:
+    "upstream must adapt because downstream capacity is constrained."
+
+Possible contract responses include:
+- upstream operation waits
+- source production pauses
+- bounded buffering
+- explicit rejection
+- flow failure
+- permitted supersession/coalescing
+- permitted shedding/drop
+
+An unbounded queue merely postpones the capacity problem and may convert it
+into memory/latency failure.
+
+Generic Messaging must not silently discard, merge, replace, reorder, or
+coalesce when doing so would violate the promised semantic guarantee.
+
+Concrete queue sizes, credit systems, counters, lanes, rate limits, windows,
+or "too many messages" errors remain implementation/policy details unless
+repeated use demonstrates a shared semantic abstraction.
+
+
+71. DELIVERY ASSURANCE, OBSERVATION, AND UNCERTAINTY
+====================================================
+
+Delivery assurance is described through source/initiator promises and
+listener/recipient observations rather than one overloaded "loss" flag.
+
+A flow should make clear, where applicable:
+- what successful send/emission means for the initiator/source
+- what the recipient/listener is promised to eventually observe
+- whether the sender receives evidence of that observation
+- whether intermediate units may be superseded
+- how gaps are detected
+- how late/out-of-order material is handled
+- what recovery remains available
+- when an unresolved item becomes a reportable failure/uncertainty rather than
+  merely pending
+
+A missing observation is not automatically permanent loss.
+
+It may be:
+- untracked by contract
+- pending
+- late
+- out of order
+- superseded
+- recoverable
+- genuinely failed according to the flow guarantee
+
+Required semantic information must not be silently forgotten when the contract
+requires it for correctness.
+
+Physical communication units need not all be preserved when the contract
+allows newer state or explicit recovery to provide equivalent required
+information.
+
+
+72. SHUTDOWN, DETACHABILITY, AND FORCE
+======================================
+
+Application shutdown does not inherently cancel accepted asynchronous work or
+destroy longer-lived communication/continuation relationships.
+
+A Pack/work contract may declare that outstanding work is safely detachable.
+
+When required continuation state has been durably committed, normal shutdown
+may proceed and a later ApplicationRun can restore/reconcile that work.
+
+A Pack may also have work which cannot safely detach yet.
+
+That work may participate in graceful-shutdown policy by reporting that normal
+shutdown is currently unsafe or blocked.
+
+The host/user may still force shutdown according to applicable lifecycle
+policy.
+
+On forced shutdown, the Pack receives the relevant forced-lifecycle condition
+and performs whatever best-effort persistence, cancellation, detachment, or
+uncertainty recording its contract permits.
+
+The exact user-interface wording and shutdown orchestration belong outside
+Communication semantics.
+
+
+73. REPRESENTATION INTEGRITY
+============================
+
+Malformed, incomplete, truncated, or otherwise invalid representation material
+must be handled safely according to the concrete implementation's guarantees.
+
+The mechanism is implementation-specific.
+
+Examples may include framing, parser guarantees, length prefixes, checksums,
+authenticated framing, schema validation, atomic message delivery, or
+implementation-specific completion sentinels.
+
+Representation integrity is distinct from:
+- semantic Message validity
+- flow validity
+- authorization
+- domain success
+
+No specific historical completion-marker mechanism belongs in generic design.
+
+
+74. COMMUNICATION TRACING
+=========================
+
+New Communication/Messaging implementations use the current Actant tracing
+substrate.
+
+Do not carry historical RPC/WebSocket trace-reason taxonomies, logging
+pipelines, or metadata layouts into the generic design.
+
+Communication implementations emit/record the communication evidence required
+by the current tracing architecture and their actual semantics.
+
+Transparent lower-layer retries may remain semantically invisible to the layer
+above while tracing still records failed attempts, retries, and recovery.
+
+Tracing does not redefine Communication semantics and Communication does not
+replace domain-owned trace evidence.
+
+
+75. DOCUMENT AND IMPLEMENTATION BOUNDARY
+========================================
+
+Current semantic design should use semantic filenames rather than preserving
+legacy DA/IS number identity.
+
+Likely communication-area documents include:
+- design/area/communication.txt
+- design/area/messaging.txt
+- design/area/subscriptions.txt
+
+Additional splits should be introduced only when semantic cohesion/retrieval
+benefit justifies them.
+
+Documents should normally provide a preamble stating:
+- what the document defines
+- what it does NOT define, including references to the owning document where
+  useful
+
+That preamble is a retrieval/ownership map, not duplicate normative
+specification.
+
+A separate LOCKED summary is unnecessary.
+
+If something is defined normatively, that definition is the current rule.
+
+OPEN QUESTIONS record consciously identified unresolved areas worth returning
+to. They are not an exhaustive list of every detail not yet designed.
+
+Implementation documents may define concrete:
+- representations
+- fields
+- codecs
+- framing
+- handshake
+- transport behavior
+- queueing
+- implementation-specific reason identifiers
+- source-code locations
+
+Implementation does not redefine semantic design.
+
+If implementation work reveals a missing semantic requirement, update/promote
+the applicable design rather than leaving the semantic rule only in one
+implementation.
+
+Do not promote one implementation mechanism into generic architecture merely
+because one implementation needs it.
+
+Legacy DA-21, IS-01, and IS-02 are migration/historical sources only.
+
+Their current reconciliation is complete.
+
+They should remain available until replacement current semantic documents
+materialize and are checked against the drained source material. After that,
+they can leave the active design set and remain only as historical/archive
+material.
+
+
+92. MANAGED LINKS AND LINKREGISTRY
+==================================
+
+ManagedLinks represent first-class semantic relationships.
+
+LinkRegistry is the authoritative source of relationship truth.
+
+Endpoint-side incoming/outgoing indexes are derived.
+
+Preferred lifecycle:
+- CreateLink
+- DeleteLink
+
+UpdateLink is only needed if a genuine mutable-relationship use case appears.
+
+Link types describe semantic facts, not retention commands.
+
+Examples:
+- producedRevision
+- derivedFrom
+- deletedRevisionPrevious
+- observedValue
+- references
+
+
+93. LINK AUTHORITY AND CRASH SAFETY
+===================================
+
+ActiveWindow may contain incomplete/staged links.
+
+SafeCheckpointWindow may contain only complete validated links.
+
+A partially persisted link is not authoritative merely because some bytes
+exist.
+
+Recovery may reconstruct a staged/incomplete link only when uniquely
+determined by retained evidence.
+
+Ambiguous recovery fails rather than guessing.
+
+Transaction-like safety guarantees do not require reuse of the exact
+MemoryValueSystem transaction implementation.
+
+
+94. RETENTION CORE PRINCIPLE
+============================
+
+MemoryValueSystem does not decide collectability.
+
+LinkRegistry does not decide collectability.
+
+MemoryStorage exposes material/storage facts and dependencies but does not
+decide semantic retention policy.
+
+RetentionCollector makes collection decisions using:
+- policies
+- authority state
+- ManagedLinks
+- storage dependencies
+- capabilities/facts
+- environment/context
+- any applicable retention configuration
+
+Retention policy is not currently part of the core MemoryValueContract.
+
+
+95. RETENTION CAPABILITIES AND FACTS
+====================================
+
+A capability means a fact/operation is valid to ask of an implementation.
+
+It does not require every subject to store every possible field.
+
+Distinguish:
+- supported and value available
+- supported but unset
+- unsupported
+
+Facts may be:
+- stored
+- derived
+- dynamic
+- lazily loaded
+- cached as optimization
+
+
+88. RETENTIONCOLLECTOR
+======================
+
+RetentionCollector is the current working name for the component that:
+- discovers candidate subjects
+- resolves retention policy/defaults/overrides
+- queries capabilities/facts
+- inspects ManagedLinks
+- inspects authority/current state
+- inspects storage dependencies
+- determines collectability
+- coordinates semantic removal
+- triggers/reconsiders orphan material
+- preserves SafeCheckpointWindow consistency during authoritative graph
+  changes
+
+Potential supporting abstraction:
+
+    RetentionSource
+
+Exact interfaces remain open.
+
+
+89. SHARED IMMUTABLE MATERIAL AND DEDUPLICATION
+===============================================
+
+Semantic subject retention and physical material lifetime are separate.
+
+Multiple revisions may share one ValueRef.
+
+Multiple ValueRefs may share lower-level immutable storage material.
+
+Deduplication is derived from shared dependencies/reachability.
+
+Do not create a ManagedLink type such as deduplicated.
+
+Collecting one semantic subject must not remove shared material still required
+by another surviving dependency.
+
+
+90. CHUNK
+=========
+
+Chunk remains a standard optional Actant immutable storage-material
+abstraction.
+
+A Chunk is:
+- immutable
+- shareable
+- normally content-addressed
+- suitable for deduplication
+- collectable through storage reachability
+
+Chunk identity concerns immutable logical chunk bytes, not:
+- semantic value identity
+- runtime representation
+- current physical storage encoding
+
+Physical compression/encryption/packing/cache/location should not change
+Chunk identity when logical bytes remain unchanged.
+
+Not every MemoryStorage backend must use Chunk.
+
+Exact global-vs-storage-domain ChunkId scope remains open.
+
+
+91. MEMORYSTORAGE
+=================
+
+MemoryStorage is the MemoryValueSystem abstraction for storing/retrieving
+Actant-managed value material.
+
+It owns memory-specific storage semantics such as:
+- storing immutable value material
+- retrieving material by identity
+- exposing storage dependencies
+- exposing availability/durability facts
+- supporting collection/reachability operations where appropriate
+
+MemoryStorage is not defined purely in terms of files.
+
+
+92. IOMANAGER AS MANAGED-I/O GATEWAY
+====================================
+
+IoManager is Actant's central supported managed-I/O gateway.
+
+Actant-owned loaders, MemoryStorage implementations, persistence paths, and
+other platform subsystems should perform supported external I/O through it.
+
+IoManager centralizes:
+- baseline tracing
+- error capture/normalization
+- access policy/hooks
+- observability
+- recovery/reporting integration
+
+Loaders/drivers interpret source/format/protocol.
+
+Pack code may technically bypass IoManager unless sandboxing exists, but such
+access is outside Actant's supported managed-I/O guarantees.
+
+
+93. DURABILITY BEFORE AUTHORITY
+===============================
+
+Authoritative state may reference value material only after every required
+material dependency has satisfied the applicable durability guarantee.
+
+Safe ordering:
+
+    prepare material
+    persist material
+    establish required durability
+    publish/promote authoritative revision
+
+ActiveWindow may contain incomplete/not-yet-durable references.
+
+SafeCheckpointWindow may contain only authoritative references whose required
+material dependencies are durable enough.
+
+Durability is distinct from:
+- runtime residency
+- current availability
+- authority
+- cache presence
+
+A later storage failure does not retroactively invalidate the original commit.
+
+
+94. ORPHAN MATERIAL
+===================
+
+Interrupted/failed operations may leave physically stored material without a
+retained semantic owner.
+
+This is valid.
+
+Orphan detection is based on reachability/dependencies, not a permanent
+intrinsic orphan flag.
+
+Potential roots include:
+- authoritative revisions
+- retained historical revisions
+- retained trace/journal evidence
+- retained Window/recovery state
+- other registered retention roots
+
+Orphaned material may remain physically present until storage-GC policy allows
+collection.
+
+
+95. ORPHAN RECOVERY MUST FAIL CLOSED
+====================================
+
+Crash recovery must not reconstruct unpublished semantic state from orphaned
+material by inference.
+
+Forbidden reasoning includes:
+- matching payload value
+- timestamps
+- neighboring incomplete records
+- trace hints
+- likely intended ValueRef/revision connection
+
+Orphan material remains orphaned unless a later valid operation independently
+references it.
+
+A retry performs creation again.
+
+Storage may transparently deduplicate against already-existing complete
+material if the retry independently derives/proves the same material identity.
+
+General safety asymmetry:
+
+    creation uncertainty:
+        do not publish
+
+    collection uncertainty:
+        do not physically delete
+
+
+88. SEMANTIC REMOVAL VS PHYSICAL COLLECTION
+===========================================
+
+Creating authoritative state requires durable material first.
+
+Removing semantic state does not require immediate physical reclamation.
+
+Safe asymmetry:
+
+    create:
+        material first
+        authority second
+
+    remove:
+        semantic removal first
+        physical collection may lag
+
+Crash after semantic removal but before cleanup leaves orphan material which
+can be rediscovered later.
+
+
+89. REMOVEOVERRIDE VS TRUE DELETION
+===================================
+
+RemoveOverride:
+- removes explicit concrete value at the current layer
+- allows fallback/default resolution
+
+True deletion/missing-state operation:
+- intentionally produces/remains in a state where no concrete value exists
+- exact interaction with optional<T>, fallback suppression, and deletion
+  revision semantics remains to be finalized
+
+The old universal ABSENT revision model remains superseded.
+
+Exact operation names remain open.
+
+
+90. DELETION REVISION AND PREVIOUS-VALUE RELATIONSHIP
+=====================================================
+
+When true deletion removes an existing concrete revision, a deletion
+revision/state may preserve which revision was deleted.
+
+Conceptually:
+
+    R1 -> concrete value
+    R2 -> deletion state
+
+    R2 --deletedRevisionPrevious--> R1
+
+The semantic relationship may be a ManagedLink.
+
+MemoryValueSystem maintains the fact.
+RetentionCollector decides retention consequences.
+
+Exact deletion-state representation remains open.
+
+
+91. DELETION AGAINST DEFAULT-ONLY VALUE
+=======================================
+
+If no explicit concrete value exists and the value resolves only from a
+default, invoking an operation called "delete" must not automatically create
+meaningless history.
+
+Possible semantics remain:
+- invalid
+- no-op
+- explicit suppression/missing state if the final deletion model supports it
+
+Do not create deletion history unless a meaningful semantic state transition
+occurred.
+
+
+92. CONFIG DIRECTION
+====================
+
+ConfigValue remains a MemoryValue specialization.
+
+Current resolution direction includes:
+
+    visible explicit concrete value
+        >
+    configured default
+        >
+    MemoryValueDefinition.defaultValue
+        >
+    optional/Missing/error semantics
+
+A resolved default does not automatically become authoritative state.
+
+RemoveOverride returns to fallback resolution.
+
+SaveCurrentResolvedValue materializes the current resolved value as explicit
+authoritative state.
+
+
+93. STRONGER PERMANENT DELETE / ERASURE
+=======================================
+
+A stronger erase/permanent-delete operation remains open.
+
+It is distinct from:
+- RemoveOverride
+- true deletion/missingness
+- ordinary retention expiry
+- physical storage GC
+
+It must not falsely promise:
+- immediate deletion of shared material
+- erasure from unrelated exports/backups
+- secure physical erase
+- violation of active semantic/storage dependencies
+
+
+94. REDUCED-CAPABILITY / CUSTOM IMPLEMENTATIONS
+===============================================
+
+Custom implementations may intentionally omit:
+- retention support
+- provenance
+- historical reconstruction
+- durable trace evidence
+- some facts/inspection capabilities
+
+Actant does not fabricate missing observability.
+
+Reduced-capability implementations explicitly accept the corresponding loss of
+guarantees.
+
+
+95. DOCUMENTATION-HISTORY RULE
+==============================
+
+Discarded concepts should not be reintroduced into clean new documentation
+merely to explain that they once existed.
+
+When revising an existing document which already mentions a discarded concept,
+the revision should explicitly reconcile/remove it so historical text is not
+silently contradictory.
+
+When a new document never used that concept, describe only the current design.
+
+This applies to historical communication terms as well as future design
+revisions.
+
+
+
+
+
+101. CURRENT-STATE RECONCILIATION AND PRECEDENCE
+================================================
+
+This checkpoint is a coherent continuing design, not a literal historical transcript.
+Sections 1-95 preserve the detailed baseline, subject to the refinements below.
+Sections 102-119 express the latest accepted interpretation; where an older section
+uses broader, narrower, or tentative wording inconsistent with these decisions,
+the current-state interpretation in 102-119 prevails. In particular:
+- streaming is NOT an all-encompassing delivery/recovery/lifecycle protocol;
+- a Subscription is NOT the owner of generic callback/Invocation orchestration;
+- Flow is a shared semantic family, NOT a set of isolated implementations;
+- Actant, not a duplicated independent Flow framework, owns activation and
+  lifecycle context;
+- connection/participant absence is NOT automatically FlowError or termination;
+- a domain may be fully satisfied while lower layers repair disturbances;
+- persistence and permissions follow semantic ownership and contract boundaries;
+- older OPEN entries describing already-discussed topics as undesigned are superseded
+  by the revised open list in section 120.
+The following sections deliberately avoid prescribing implementation objects,
+inheritance, enums, special-purpose message envelopes, or universal mechanisms.
+
+
+102. MULTIPART, STREAMING, AND FRAGMENTATION
+============================================
+
+Multipart represents one logical semantic object/unit transferred in multiple
+parts. Define membership, completeness, required parts, meaningful ordering,
+recovery, cancellation, and whether truncation can ever be valid. Receipt of
+some parts is not semantic completion; an End marker cannot hide missing
+required parts. Recovery may request individual missing parts or restart/resync.
+Use established ValueRef/Chunk/MemoryStorage material retrieval when suitable,
+rather than duplicating it in Messaging.
+
+Streaming ONLY describes incremental production/availability and possible
+consumption before overall production finishes. Producer/consumer overlap does
+not require a network or even a known consumer. A stream may stop without an
+explicit terminal report, and its producer may not know listeners or their count.
+Streaming by itself promises NO delivery, ordering, acknowledgement, retention,
+recovery, completeness, flow control, consumer identity, or termination semantics.
+Those come from separately declared Flow/Invocation/Subscription contracts.
+Streaming != Subscription != multipart != Transport fragmentation.
+A weak Subscription can observe a stream, decline delivery guarantees, and
+infer observational end after listener-side inactivity, e.g. 60 seconds; this
+is not evidence of source termination, success, or no future data.
+
+
+103. THREE LAYERS, EVIDENCE, AND CONTRACT-RELATIVE HEALTH
+=========================================================
+
+Transport/Messaging realizes movement, connections, representations, and
+mechanism-specific repair. Flow orchestrates negotiated semantic guarantees:
+ordering, required delivery, gap recognition, acknowledgement, staleness,
+retries, resync, persistence, reconciliation, and valid teardown. Domain owns
+operations, results, jobs, and business meaning.
+
+Lower-layer errors may be entirely recovered without domain visibility.
+Transport reconnect failures may be normal while Flow awaits an absent
+participant. Flow recovery/rebinding remains visible in tracing/telemetry, but
+the domain observes contract-valid results or an unresolved FlowError/
+Indeterminate outcome, not each intermediate low-level anomaly.
+
+Flow-level Ack is evidence sufficient to advance/retire a SPECIFIC communication
+obligation at a stated scope. It does not mean the domain accepted, approved,
+used, or committed the delivered material. Missing Ack means the sender lacks
+evidence; delivery might actually have happened. Do not prescribe state-array
+representations such as toSend/pending/unAcknowledged.
+
+Presence of a participant, ability to reach it, logical existence of a Flow,
+current usability, recoverability, and contract satisfaction are DISTINCT and
+observer-relative. A connected Transport need not imply a satisfied Flow; a
+broken Transport need not imply an unsatisfied Domain contract. One universal
+isAlive()/healthy bool is insufficient. Conceptual 'Awaiting' denotes permitted
+absence, 'Recovering' active remedial effort, and 'Failed' an unmet contract;
+these are not mandated mutually exclusive enum states. The contract may allow
+indefinite waiting and need not induce busy retry/polling or an error storm.
+A connection-dependent contract that requires continuous usability remains
+a valid simple conventional choice; a recovery-tolerant contract may remain
+satisfactory through absence. Exact defaults arise from actual Pack pressure.
+
+
+104. CONTRACT NEGOTIATION, TIMEOUT, DEADLINE, AND CANCEL
+=========================================================
+
+Timeout triggers an ATTEMPT appropriate to its scope: reconnect, retry, resync,
+reconcile, query, or other repair. Timeout alone is not a terminal guarantee
+failure. Deadline triggers a DECLARATION when a required condition can no longer
+be satisfied within its contract; cleanup/compensation may still follow.
+Transport, Flow, caller, and domain deadlines are distinct. A caller deadline
+does not implicitly cancel an independently accepted Job. Timing contracts
+must name relevant anchors and clock semantics, especially across persisted
+Flow state; wall time vs active runtime time cannot be silently conflated.
+Retry policy may allow zero attempts, bounded attempts, deadlines, or indefinite
+waiting; 'retry until max retries' is not universal.
+
+Establishment must negotiate or verify compatible timeout/deadline, recovery,
+history-retention, and delivery horizons. A listener which delays detection
+longer than source recoverability cannot silently receive a promise of lossless
+restoration; reconfigure, negotiate a satisfiable profile, or refuse.
+Requirements are capability constraints, not a demand for literal equal values.
+
+Cancel request != acceptance != completed termination. Scope may be Invocation,
+Job, specific Flow, listener consumption, or producer execution. Unsubscribe,
+deadline, shutdown, or disconnect does not implicitly cancel unrelated domain
+work. Side effects already committed externally cannot be rolled back by
+renaming a cancellation. Pending cancellation may itself require persistent
+continuation and reconciliation.
+
+
+105. RETRY, IDEMPOTENCY, AND EVIDENCE RETENTION
+==============================================
+
+Stable InvocationId persists across attempts. Intrinsic idempotency, duplicate
+recognition, retained outcome retrieval, and domain-effect reconciliation are
+distinct. Non-idempotent actions may sometimes be retried safely using durable
+Invocation/domain-effect identity and evidence, but unknown effect state MUST
+NOT be resolved by blind re-execution. Record Indeterminate/FlowError and
+preserve evidence if safe reconciliation is impossible.
+
+Sufficient deduplication/recognition evidence must persist while a legitimate
+retry could otherwise be mistaken for new work. Compaction is permitted when
+equivalent evidence remains (e.g. a correctly scoped monotonic processed-through
+watermark); complete per-message logs are not inherently required.
+Different evidence may establish duplicate recognition, prior outcome, or
+external effect, and none substitutes automatically for the others.
+
+
+106. SUBSCRIPTION ESTABLISHMENT, TERMINATION, AND PARTICIPANT SIDES
+==================================================================
+
+Listener initiates continuing interest. One logical SubscriptionId persists
+through compatible establishment retry and restoration. Source and listener
+may have separate participant-side Flow state, Transport bindings, knowledge,
+and obligations, even when one process shares their physical implementation.
+Source registration may exist before listener receives establishment evidence.
+Same ID + compatible contract calls for reconciliation, not duplication;
+incompatible reused terms conflict. Establishment requires resolved compatible
+guarantees; provisional delivery, buffering, cleanup, and activation must be
+safe and defined rather than silently assumed. Historically established,
+persistently retained, and currently usable are different facts.
+
+Listener-side ownership of its interest is not unrestricted authority over
+source behavior. Source can knowingly end its participation under the
+contract even while listener absent. Normal finalization differs from
+exceptional participant-initiated end or Flow failure. Broken realization
+alone does not terminate the relationship. Ordered and recovery-required
+material cannot be silently discarded as part of terminal processing.
+
+CRITICAL DEFERRED TERMINAL DELIVERY:
+Source P2 may terminate S17 while listener P1 is inactive. Actant retains
+the terminal outcome and the required outstanding delivery/reconciliation
+obligations. On P1 restoration, listener-side Flow receives the terminal
+information, after U41/U42 if their required ordering demands it. P2 need not
+be reactivated simply to announce an already known end. Source participation
+ended, listener has not yet observed it, and final obligation settlement has
+not yet occurred: these are distinct conditions. Normal teardown must not
+claim completion until its promised obligations are met. Weak contracts may
+permit discarding intervening updates only if explicitly compatible.
+
+Multiple listeners to one source are ordinarily distinct logical Subscriptions
+S17/S18/S19 with independent owner, contract, and lifecycle, even if source
+uses common registration infrastructure and they share a connection. A
+multi-listener aggregate may be a future use-pressure-driven feature, not
+implicit merging of SubscriptionId.
+
+
+107. PERSISTENT SEMANTIC FLOW, ACTANT ORCHESTRATION, AND PLACEMENT
+=================================================================
+
+Actant manages persistent Flow semantic state, agreement, relevant positions,
+obligations, continuation evidence, and restoration context when the resolved
+lifetime crosses ApplicationRun. Current sockets, callbacks, adapter handles,
+runtime bindings, and Transport paths are disposable realizations. Actant
+rebinds participants, selects a realization, restores or negotiates capabilities,
+and reconciles safely. Packs should not reimplement lifecycle/reconnection.
+
+Flow is a first-class COMMON SEMANTIC FAMILY including Invocation and
+Subscription, with reusable mechanisms for applicable acknowledgement,
+identity, lifecycle, ordering, persistence, error/recovery, routing, and
+tracing. They preserve their distinct identity, contract and outcomes.
+Flow need not be a standalone deployed service, one class, one state machine,
+or a Message bus. It should avoid duplicate equivalent mechanisms among
+members, while instantiating only capabilities their contracts require.
+
+Actant has authoritative knowledge of Applications, Packs, activation,
+CodeEntries/adapters, Jobs, ownership hierarchy, identity resolution, and
+managed persistence. Flow should rely on those facilities rather than invent
+a parallel host/orchestrator; Actant can itself consume Flow semantics.
+Actant may quietly activate permitted participants, restore or rebind them,
+repair lower layers, and preserve obligations as required, WITHOUT replacing
+the creator's semantic intention or gaining ungranted authority.
+
+Realization/Placement Transparency is a foundational cross-cutting rule for
+the future DA-02 replacement, not a Communication-only trick. Same-runtime
+direct call, local queue/IPC, Bridge, and remote Messaging are realization
+options. No mandatory serialization through Messages for direct Python calls.
+Selection depends on participant placement/capability AND resolved contract,
+and may change as conditions change. Two Flow relationships between identical
+participants may appropriately use different realizations. One realization
+may serve several Flows, so destruction of one must not invalidate others.
+Sharing physical machinery/context does NOT merge Ack evidence, effects,
+completion, authorization, or semantic identity. An Invocation routed through
+S17 may reuse its connection/context without being logically owned by S17.
+
+Advanced semantic handover/migration of encapsulated Packs, ownership,
+relationships, jobs, persistent state, and placements is DEFERRED.
+Semantic identity and authority MUST NOT embed current machine, run, runtime,
+or connection. Transfer could move ownership, listener participation, and
+execution separately; avoid dual exclusive authorities and accidental
+capability transfer. Simple local Packs should work unchanged if appropriate
+advanced orchestration later becomes available; do not implement generalized
+migration machinery prematurely.
+
+
+108. SUBSCRIPTION, INVOCATION, AND DOMAIN ORCHESTRATION
+======================================================
+
+A Subscription is a logical relationship through which a listener expresses
+continuing interest in a source and may obtain eligibility, filtering,
+addressability, delivery, or participation per contract. SubscriptionId
+identifies that relationship, not necessarily the listener's semantic identity.
+The source/domain may resolve an eligible Subscription's listener as the target
+of an independent Invocation. The same listener may maintain several distinct
+Subscriptions.
+
+In IoManager: TypeScriptTranspiler subscribes as a handler for qualifying
+files. IoManager owns decisions about eligibility, selection, and order. It
+can Invoke one eligible listener at a time, passing each Result to the next.
+A CSS file need not be sent to a TypeScript handler. Filtering must preserve
+required order among remaining handlers. Parallelization only where it
+preserves dependency and mutation semantics. Subscription does NOT inherently
+own callback ordering, Result aggregation, work dependency, cancellation, or
+domain pipelines. Likewise unsubscribe does not automatically cancel
+independent initiated Invocations or accepted Jobs.
+
+There is opportunity for reusable ordered/concurrent scheduling, waits,
+result aggregation, coordination, and failure-propagation facilities, but no
+generic first-class orchestration engine or prescribed contract(lock/async)
+profiles until patterns emerge from actual use. If justified, make these
+capabilities composable, available beyond Subscription, and useful internally
+to Actant itself. Scheduling, completion dependency, and locking are distinct
+semantics; avoid conflating them. Simple sequential Invocation orchestration
+is a sensible initial IoManager behavior, NOT a generic Subscription promise.
+
+
+109. OWNERSHIP, HIERARCHY, PERSISTENCE, AND LIFETIME
+===================================================
+
+A Subscription is a composite logical relationship with listener and source
+participant sides and possible shared realization. Listener generally initiates
+and immediately owns its continuing interest, but does not own source,
+source-side data, or shared connection. Distinguish initiator, lifecycle
+authority, obligation keeper, participant, semantic entity owner, and domain
+data owner where necessary. These need not be separate fields everywhere.
+
+Actant manages semantic ownership hierarchy: Pack may belong to Application
+or another orchestration unit, Job or other longer-lived identity may govern
+an Invocation, and a parent may preserve a deactivated child's state without
+becoming the child's new semantic owner. Ownership identity persists through
+runtime deactivation. Semantic Flow lifetime, execution lifetime, ownership
+lifetime, and realization lifetime are different. Run-scoped and longer-lived
+relationships must not be silently interchanged.
+
+Stopping a Pack/Application need not terminate a persistent relationship.
+Normal shutdown should settle or durably preserve guarantees or explicitly
+report unresolved obligations; authorized forced shutdown may violate promises
+but must not counterfeit their completion. Detachable accepted work can
+continue; non-detachable work may block graceful shutdown. Permanent deletion
+of a semantic owner is NOT just a run stopping: handover, termination, or
+explicit unresolved preservation may be required. 'Persistent' is relative to
+a declared lifecycle scope and does not guarantee survival of owner deletion.
+Ownership propagation is not automatically ownership transfer.
+
+A shared connection is reclaimed or replaced based on all surviving users,
+not one owner. Participant-initiated termination can coexist with an absent
+owner/other participant; Actant retains notice when contract requires it.
+Listener replacement and ownership transfer are distinct future handover
+operations; persistent Flow ownership does not necessarily coincide with
+storage or machine placement.
+
+
+110. CREATOR INTENT, PERMISSIONS, AND SAFETY CLAIMS
+==================================================
+
+Actant should make common requirements seamless. Creators state semantic
+intention; Actant handles implementation and orchestration where suited.
+Framework defaults and optimizations may not override valid explicit Pack
+requirements; domain-specific orchestration remains legitimate where generic
+facilities are unsuitable. Repeated Pack workarounds are design pressure for
+composable first-class capabilities, not automatic grounds to force adoption.
+
+Identity, semantic ownership, authority, and placement MUST stay distinct.
+Begin with simple permissive cooperative access for trusted local Packs.
+Fine-grained permissions, capabilities, delegation, and negotiation are
+DEFERRED. Retain enough identity/action/target/context to introduce permission
+checks at semantic boundaries without rewriting all Flows/Packs. Hierarchical
+ownership does not imply unrestricted authorization. Future handover or
+shared Transport does not silently transfer credentials or capabilities.
+
+IMPORTANT LIMIT: Actant does NOT guarantee security or isolation against
+malicious/untrusted Packs, particularly arbitrary same-process Python code.
+Cooperative permissions and framework checks are not an adversarial security
+boundary. Aim for best-effort protective measures, correctness, transaction
+integrity, error handling, and accidental-misuse prevention; document trust
+assumptions and avoid false security claims. Do not undermine actual semantic
+invariants merely because adversarial sandboxing is out of scope.
+
+
+111. NON-DISCARDABLE STAGED FACTS AND ACTIVEWINDOW RECOVERY
+==========================================================
+
+Nested transaction T01 -> T01-01 -> T01-01-06 may record a real external
+effect E ('email sent') in staged state marked NON-DISCARDABLE. Cancelling a
+child discards ordinary staged changes but promotes E toward its parent.
+Cancelling ancestors continues E toward authoritative root commitment.
+Non-discardable != already authoritative, != permission to bypass validation,
+durability, conflicts, or invariants, != unconditional eventual success.
+If no safe commit exists, preserve/report an unresolved obligation and evidence.
+Do not shortcut by directly writing root from an arbitrarily nested child.
+
+ActiveWindow may durably contain nonauthoritative unfinished transactions,
+including context necessary to restore a non-discardable fact after a crash.
+Do not blindly flatten or discard speculative context. If sibling
+T01-01-07 stages E=Y while non-discardable E=X exists in T01-01-06, final
+resolution may depend on ordering, concurrency, merge, or parent context.
+A RECOVERY CLOSURE is sufficient context/dependencies to preserve the
+semantics of the originally pending resolution. Prune scaffolding only if
+semantic equivalence can be demonstrated. When safe closure cannot be proved,
+fail closed with a stable documented diagnostic/reference code and preserve
+the evidence. Do not pretend to solve an undefined merge rule.
+
+Where valid choices, consequences, and authority can be established, Actant
+may present bounded explicit choices to an authorized user/admin and record
+decision/provenance. An AI explanation does not confer independent decision
+authority. Without safe bounded alternatives, keep unresolved instead of
+inventing a result. This 'recognized ambiguity / explicit decision' direction
+is general Actant philosophy, not only a transaction trick.
+
+
+112. RESTORATION AND RECONCILIATION — NEXT OPEN BOUNDARY
+=======================================================
+
+Restore semantic and runtime relationships, reconnect a usable realization,
+reconcile unequal participant knowledge and obligations, and resume valid
+interaction: conceptually distinct but may be fused in optimized implementation.
+Reestablished Transport is insufficient evidence that history, acknowledgements,
+effects, results, and terminal notices are settled.
+
+Example: sender records U41 Ack; U42 sent but Ack lost; U43 pending.
+Receiver may have already applied U42. Do not assume U42 never arrived.
+Check required dedup/effect evidence, source retention, recipient positions,
+or contract-defined resync. Full-state snapshot is not automatically safe
+supersession of ordered deltas. Never infer domain idempotency.
+
+Actant owns Flow reconciliation and can consult transaction evidence or
+domain-supplied verification where needed; domain owns business-effect truth.
+The boundary and APIs for domain evidence are NOT YET ACCEPTED as a finished
+design. If outcome remains uncertain, retain evidence and surface defined
+Indeterminate/FlowError rather than manufacture success. This is the current
+next discussion item, not a locked new generic verification interface.
+
+
+113. IMPLEMENTATION TEST RECOMMENDATION — DEFERRED TERMINAL DELIVERY
+===================================================================
+
+STATUS: ACCEPTED TEST RECOMMENDATION; NOT IMPLEMENTED.
+
+Scenario:
+  S17 persistent; source P2; listener P1; contract permits listener absence
+  and promises ordered, recoverable updates and terminal information.
+Steps:
+  1. Establish S17.
+  2. P1 becomes inactive; S17 awaits without domain FlowError.
+  3. P2 produces updates U41 and U42.
+  4. P2 knowingly ends participation.
+  5. Actant retains terminal outcome and outstanding required updates.
+  6. P2 shuts down; Application/Host restarts.
+  7. P1 returns; Actant restores its Flow side, reconciles, delivers.
+Expected:
+  - S17 logical identity persists; not recreated as a new Subscription.
+  - U41, U42, terminal outcome observed in required contract order.
+  - Source need not reactivate to communicate an already retained end.
+  - Acknowledgement and finalization do not falsely settle early.
+  - No silent loss, duplicate domain effects, or artificial FlowError for
+    contract-permitted waiting.
+Variations:
+  lost terminal Ack; crash before durable terminal recording;
+  concurrent listener restoration/termination; weaker permitted drop policy;
+  recovery deadline expiration; repeated restoration; incomplete preceding
+  ordered units. Check correct unresolved diagnostics where needed.
+
+
+114. CURRENTLY ACCEPTED CROSS-CUTTING CONSEQUENCES
+==================================================
+
+1. Actant supports conventional connection-dependent Flow and more demanding
+   guarantee-dependent persistent Flow without making the latter mandatory.
+2. Semantic correctness and the domain's resolved contract are the external
+   success criteria; internal recoverable error is diagnostics, not automatic
+   domain failure.
+3. Participant-side knowledge may be asymmetric; do not force global instant
+   boolean agreement about establishment, termination, or receipt.
+4. Actant owns orchestration capabilities but is not licensed to invent
+   domain behavior or permissions.
+5. Common Flow mechanisms are reusable from the beginning; exact component
+   structure still follows use pressure.
+6. Multiple logical Flows can share one realization; lifecycle independent.
+7. Subscription is a relationship/endpoint, NOT a universal domain task
+   dispatcher or automatically owned Invocation.
+8. Persistent state follows promised lifetime and owner scope; it should not
+   be stored only in ephemeral runtime handles.
+9. Missing domain-effect evidence is a genuine semantic uncertainty, not an
+   invitation to retry an unsafe side effect.
+10. First-class reusable domain orchestration and fine-grained access control
+    remain deferred, although the architecture must not block their addition.
+
+
+96. ACCEPTED DESIGN ITEMS THROUGH CHECKPOINT #8
+===============================================
+
+MemoryValue / storage / authority:
+
+1. MemoryValue is the central language-independent persistent semantic value.
+2. MemoryValueRevision existence is separate from authority.
+3. One authority scope/MemoryValue has one current authoritative revision.
+4. Multiple physical copies/replicas do not create multiple semantic authority.
+5. Reads resolve authority/visibility separately from material placement.
+6. ValueRef is authority-neutral and reconstructs one concrete semantic value.
+7. ValueRef may inline material or depend on zero/one/multiple immutable storage dependencies.
+8. Same concrete value may share ValueRef/material; deduplication is derived from shared dependencies.
+9. Chunk is a standard optional immutable storage-material abstraction, not universal.
+10. MemoryStorage and IoManager are separate abstractions.
+11. IoManager is Actant's managed-I/O gateway.
+12. Durability-before-authority is a hard invariant.
+13. Orphan material may exist after interrupted creation.
+14. Orphan material must never be forensically reattached to unpublished semantic state.
+15. Semantic removal may precede physical cleanup.
+
+Transactions / contracts / types:
+
+16. Transactions remain hierarchical staged overlays.
+17. Transaction visibility remains future-compatible with snapshots/MVCC.
+18. Conflicting concurrent commits must not silently last-writer-win.
+19. Disjoint state should be able to commit independently.
+20. Delta-capable types may define finer semantic conflict granularity.
+21. MemoryValueDefinition.contract is sparse declaration input.
+22. MemoryValueContract is the fully resolved semantic contract.
+23. EffectiveMemoryValueContract is unnecessary for now.
+24. Contract defaults resolve through deterministic versioned chains.
+25. Retention is outside MemoryValueContract unless later proven semantic.
+26. T, nullable<T>, optional<T>, and optional<nullable<T>> have distinct presence/null semantics.
+27. Defaults are consulted only when concrete state is absent.
+28. Explicit concrete null blocks fallback.
+29. Missing, null, absence, and Error are distinct.
+30. TypeExpression is the semantic type reference used by valueType.
+31. TypeDefinition provides stable identity for named semantic types.
+32. Named/custom types are nominal by default.
+33. Structural types recurse through TypeExpressions.
+34. Record field order is not semantic identity by default.
+35. Exact map key K requirements remain open.
+36. Type semantics and constraints are distinct.
+37. Constraints may be intrinsic or usage-specific.
+38. Usage constraints may narrow but not widen a referenced type's domain.
+39. Reusable named ConstraintDefinitions remain an accepted extensibility direction.
+
+Interfaces / behavior:
+
+40. TypeDefinition and InterfaceDefinition are separate.
+41. InterfaceDefinition advertises callable behavior.
+42. ImplementationRegistration identifies the loaded implementation authoritatively providing behavior.
+43. Interface metadata is informative and need not be exhaustive.
+44. Dynamic calls may be dispatched when not advertised unless strict matching applies.
+45. Strict matching may later be faceted.
+46. Implementations may provide fallback/default dynamic dispatch.
+
+Communication / Invocation / retry:
+
+47. Communication is broader than Messaging; Interaction is semantic and realization-independent.
+48. Direct/member calls, proxies, queues, Messaging, transported Messaging, and Bridges may realize the same Interaction.
+49. MessageChannel, Transport, and Representation/Codec are separate concepts.
+50. Invocation has stable semantic identity.
+51. A retry of Invocation I17 remains I17 even when it creates new Messages or lower-level attempts.
+52. Creating a new Invocation means requesting a new logical performance.
+53. Invocation identity, Message identity, attempt identity, Subscription identity, and domain-work identity are distinct.
+54. Ack, Accepted, and Result are distinct.
+55. Ack always has a defined level/scope of recognition.
+56. Later flow progress may implicitly satisfy acknowledgement when it proves the required earlier receipt/recognition.
+57. Dedicated Ack traffic should not be required redundantly.
+58. Ack loss may still leave uncertainty; stronger certainty may require reconciliation.
+59. Retry ownership belongs to the layer whose guarantee failed.
+60. Transparent lower-layer retry is valid only when the higher layer observes the same promised semantic outcome as if the first attempt succeeded.
+61. Transparent retry may still be visible to tracing.
+62. Retry, Resume, Replay, retained-outcome retrieval, and reconciliation are distinct.
+63. Replay retains its Actant meaning of reproducing completed recorded history, not generic message resend or result recovery.
+64. Resume concerns recovery/continuation of incomplete execution/flow.
+
+Flow guarantees / ordering / assurance:
+
+65. Contracts describe promised behavior; implementation mechanisms satisfy those guarantees.
+66. Plain "loss" is not a sufficient generic contract dimension.
+67. Delivery assurance is expressed through source/initiator promises and listener/recipient observations.
+68. Fire-and-forget/unconfirmed Emit may promise no recipient-observation evidence; not-known-delivered is then not automatically delivery failure.
+69. A missing observation may be pending, late, out of order, superseded, recoverable, untracked by contract, or failed according to the guarantee.
+70. Required semantic information must not be silently forgotten.
+71. Ordering requires an explicit logical scope.
+72. Receive order and semantic application order are distinct.
+73. An ordered receiver may retain later units as pending while waiting for an unresolved earlier unit.
+74. Terminal/finalization units whose meaning depends on ordered history participate in that ordering.
+75. Normal terminal indication must not hide an unresolved required gap.
+76. Supersession is contract-defined and is not the same as accidental delivery failure.
+77. Resynchronization may subsume prior ordered history and must allow pending/late units to be recognized as already represented rather than applied twice.
+78. Full-state payload semantics do not imply latest-state delivery semantics.
+79. Capacity/overload behavior is the broader concern; backpressure is one mechanism/policy for handling rate/capacity mismatch.
+80. Buffering and backpressure are distinct.
+81. Generic Messaging must not silently discard/coalesce/reorder contrary to the promised guarantee.
+
+Subscriptions / tracks / recovery:
+
+82. Subscription is one identifiable logical continuing relationship between source/producer and listener/consumer.
+83. Distinct registrations remain distinct even when structurally identical.
+84. Stable SubscriptionId anchors establishment/retry/reconciliation.
+85. One Subscription may contain multiple independently contracted semantic tracks when shared lifecycle/establishment is useful.
+86. Tracks are not Transport lanes and need not be implementation classes.
+87. Track guarantees may independently define ordering, partition scope, supersession, required/disposable updates, acknowledgement/evidence, recovery, recoverability horizon, terminal/finalization, and durable pending-delivery behavior.
+88. Convenience profiles such as latest-state, ordered-deltas, reliable-history, and progress may be compositions of guarantees, not separate architectural Subscription species.
+89. Information meaning and delivery/recovery guarantees are orthogonal.
+90. Subscription establishment success is stronger than Message receipt/Ack.
+91. Uncertain establishment/teardown may require reconciliation/safe retry.
+92. Normal teardown cannot complete while required delivery, recovery, gap-resolution, or terminal obligations remain unresolved.
+93. Current-state resynchronization and missing-unit/history recovery are distinct recovery families.
+94. A source promising missing-unit recovery must retain or otherwise preserve recoverability long enough to satisfy the listener's compatible recovery strategy.
+95. Incompatible required recovery capabilities/timing should fail establishment rather than silently weaken guarantees.
+96. Required pending-delivery obligations may be made durable so listener unavailability does not force source execution to block or forget them.
+97. A persistent-outbox style implementation is one possible mechanism, not a required architecture object.
+98. Occurrence remains communication information, not authoritative domain state or universal Event.
+99. A missed notification about durable domain state need not imply state or information loss when reconciliation/query can recover the required fact.
+100. Subscription may drive per-occurrence Invocation/result interactions when a domain defines that behavior.
+
+Persistent continuation / lifecycle:
+
+101. Accepted long-running work may either continue as the same Invocation flow or hand continuation to an independently identified domain object such as Job J42.
+102. I17 != J42; Accepted(Job J42) can transfer the stable continuation anchor from transient Invocation flow to domain work.
+103. Detachable accepted work may outlive ApplicationRun, process/runtime, Transport, and initiating machine.
+104. Actant may transactionally persist an Application/Pack's continuing interest in accepted work so later ApplicationRuns can restore and reconcile it without manually rediscovering all requests.
+105. A later ApplicationRun does not inherit an earlier run's traffic merely because it is later; continuity exists only because the relationship was scoped to longer-lived semantic identity/state.
+106. Execution placement, result-material placement, and communication path remain implementation/placement concerns.
+107. Communication continuity while work keeps running is distinct from Resume of execution which itself stopped incompletely.
+108. Application shutdown does not inherently cancel detachable accepted work.
+109. Packs may declare outstanding work non-detachable and participate in graceful/forced shutdown policy.
+
+Identity / context / routing / documentation:
+
+110. Semantic identities use distinct types where their meanings differ and doing so gives useful correctness/DX.
+111. Uuid7Id-based semantic identities preserve UUIDv7 and ID-domain type distinctions.
+112. Routing, source/participant, causal, trace, security, and domain-reference context remain distinct.
+113. Propagated descriptive context does not automatically propagate authority, permission, trust, ownership, transaction state, or live execution context.
+114. Routing locates; it does not authorize.
+115. Routing should reuse existing identities/combinations before inventing routing-specific identities.
+116. Canonical URI-like addressing remains suspended.
+117. New design uses semantic filenames/retrieval-oriented splits rather than preserving legacy DA/IS number identity.
+118. Implementation mechanisms remain implementation-local unless repeated pressure demonstrates a semantic abstraction worth promoting.
+119. DA-21, IS-01, and IS-02 remain fully drained/reconciled historical migration sources.
+
+Links / retention:
+
+120. LinkRegistry owns semantic relationship truth.
+121. Links describe facts, not retention commands.
+122. RetentionCollector decides collectability.
+123. Retention is not currently a core MemoryValueContract facet.
+124. Semantic retention and physical material lifetime remain separate.
+
+
+97. HISTORICAL FOLLOW-UP INVENTORY FROM CHECKPOINT #7
+====================================================
+
+This retained inventory is NOT the current open-list authority. Items may
+now be resolved by sections 101-114. Use section 115 for current open items.
+
+
+MemoryValue/type system:
+
+A. Exact built-in scalar/numeric type set
+- integer width/range model
+- floating-point families
+- decimal
+- binary
+- time/date/identifier built-ins if needed
+
+B. Exact map<K,V> key requirements
+- equality
+- canonical identity
+- hashing
+- ordering if any
+- bridge/representation implications
+
+C. reference<T>
+- referenced identity
+- MemoryValue vs other semantic object identity
+- lifetime/retention/link interaction
+- cycles
+
+D. Open/closed record semantics
+- unknown fields
+- preservation/ignore/reject
+- version compatibility
+
+E. Type compatibility
+- structural anonymous compatibility
+- named nominal compatibility
+- aliases/subtyping
+- compatibility across versions
+
+F. Constraint model
+- standard ConstraintDefinitions
+- cross-field/relational constraints
+- capability interface
+- composition rules
+
+G. Contract facet taxonomy
+- validation mode
+- coercion mode
+- resolution policy if needed
+- deletion semantics
+- delta/concurrency capability
+- strict dispatch facets
+
+H. Contract profile hierarchy
+- MemoryValueDefinition.contract
+- type/group bindings
+- Pack/application bindings
+- versioned Actant profile defaults
+
+I. Undeclared/simple MemoryValue creation
+- type
+- contract
+- default profile
+- validation behavior
+
+J. Validation/coercion
+- strict validation
+- compatibility validation
+- coercion
+- adapter/bridge responsibility
+
+K. Default semantics
+- configured default vs definition default
+- field defaults
+- dynamic default failure
+- resolved-default provenance
+
+L. ResolvedValue formal representation
+- value
+- source/provenance
+- contract/profile identity
+- Missing/Error representation
+
+M. RemoveOverride / true deletion
+- names
+- optional<T> interaction
+- fallback suppression
+- deletion revision representation
+- default-only deletion
+- deletedRevisionPrevious lifecycle
+
+Interfaces / behavior:
+
+N. InterfaceDefinition
+- identity/versioning
+- operation metadata
+- input/result description
+- mutation/read declaration
+- compatibility
+
+O. Dynamic dispatch policy
+- unknown operation handling
+- strictness facets
+- fallback/default dispatcher
+- stale interface metadata
+
+P. Invocation semantic structure
+- final target/operation/input/context representation
+- exact InvocationId type/lifetime
+- result/domain-error representation
+- relationship to InterfaceDefinition
+- transaction/context propagation rules
+
+Q. Behavior implementation authority
+- registration lifecycle
+- multiple candidates
+- failover
+- version matching
+- authority transfer
+
+Communication / Messaging / Subscription:
+
+R. Contract composition
+Determine how reusable guarantees are represented:
+- flow-specific contracts
+- Subscription track contracts
+- MessageChannel/Transport capability contracts
+- smaller composable guarantee/capability facets
+- resolved profiles
+- some combination
+
+Avoid one monolithic CommunicationContract unless real implementation pressure
+demonstrates it is useful.
+
+S. Exact smallest useful Message structures
+- derive from real implementation/flow requirements
+- avoid universal MessageKind/envelope taxonomy
+- decide when Message identity is required
+- decide which flow steps need their own identity beyond InvocationId /
+  SubscriptionId
+
+T. Invocation-flow projection
+- concrete Messaging projection when Messaging realizes Invocation
+- Accepted/Result/FlowError/intermediate-flow representation
+- long-lived Invocation vs Accepted handoff to domain work
+- cancellation and retained-outcome lookup
+
+U. Partial / multipart delivery
+- membership in one logical series/object
+- ordering where required
+- partial availability
+- completion/finalization
+- missing-part recovery
+- truncation/cancellation
+- relation to track guarantees and finalization barriers
+
+V. Streaming
+- stream identity/scope
+- item guarantees
+- ordering/application
+- capacity behavior
+- completion
+- resume/reconciliation
+- interaction with Invocation and Subscription tracks
+
+W. Delivery assurance / acknowledgement evidence
+- reusable vocabulary for unconfirmed, acknowledged, reconciled, and other actual guarantees
+- acknowledgement levels/scopes
+- implicit evidence from later flow steps
+- uncertainty when acknowledgement itself is lost
+- avoid pretending that one boolean "delivered" covers all layers
+
+X. Ordering / gap / resynchronization
+- standard reusable ordering scopes if real usage repeats
+- representation of logical position
+- pending out-of-order material
+- terminal units within ordering
+- resync boundaries/subsumed-history declaration
+- duplicate/late material after resync
+- commutative/reorder-safe domain operations
+
+Y. Recovery capability and recoverability horizon
+- current-state vs missing-unit/history recovery
+- capability negotiation/resolution during establishment
+- compatible timeout/horizon rules
+- durable retention requirements
+- fallback among recovery methods
+- source restart behavior
+
+Z. Durable pending-delivery obligations
+- exact semantic owner
+- persistence representation
+- transaction integration
+- cleanup/ack/reconciliation rules
+- crash/restart behavior
+- whether a reusable outbox/inbox abstraction emerges from implementation
+
+AA. Persistent continuation
+- exact representation of Application/Pack interest in accepted domain work
+- owner/lifetime scope
+- transaction used when Accepted work becomes known
+- restoration on later ApplicationRun
+- completion/consumption cleanup
+- cancellation
+- result retention/material acquisition
+- relationship to Subscription
+- whether a named first-class Continuation abstraction is justified
+
+AB. Shutdown/detachability
+- how Packs declare safe detach vs shutdown blocker
+- relationship to pending Transactions and durable continuation
+- graceful vs forced shutdown lifecycle
+- what uncertainty/evidence must be persisted on forced shutdown
+
+AC. Stale-context / generation semantics
+- identify real implementations needing stale-context recognition
+- keep local mechanisms local by default
+- revisit centrally orchestrated/shared generation identity only if multiple independent realizations demonstrate recurring value
+
+AD. Routing identity inventory
+- enumerate existing identities
+- scope/lifetime/availability
+- identify sufficient combinations
+- revisit common locator only afterward
+
+AE. Typed communication context
+- exact context classes actually needed
+- source/participant vs causal vs trace vs routing vs security
+- propagation/lifetime/revalidation rules
+- representation in different languages/tooling without overengineering
+
+AF. Deadlines/timeouts
+- Interaction/flow deadline representation
+- gap wait vs recovery initiation timing
+- propagation
+- relationship to Transport timeout and domain timeout
+- cancellation/policy behavior on expiry
+- compatibility with recoverability horizon
+
+AG. Capacity / overload / buffering / backpressure
+- which flows wait, queue, reject, pause, supersede, coalesce, shed, or fail
+- queue ownership/configuration
+- semantic behavior when capacity is exhausted
+- relationship to durable pending-delivery obligations
+- determine which common capabilities deserve standardized profiles
+
+AH. Idempotency / duplicate retention
+- domain-operation idempotency vs communication duplicate suppression
+- identity used for sameness
+- how long duplicate/outcome knowledge is retained
+- behavior across reconnect/restart
+- interaction with transparent retry and reconciliation
+
+AI. Subscription establishment consistency
+- duplicate establishment attempts
+- remote receipt without successful registration
+- successful remote registration with lost result
+- result received with lost confirmation
+- provisional vs active state
+- whether delivery may begin before confirmed establishment
+- uncertain outcome reconciliation
+- reconnect/replacement behavior
+- cleanup of abandoned/provisional registrations
+- source/listener/owner termination
+
+AJ. Subscription side representation/lifetime
+- exact listener-side handle
+- exact source-side registration
+- flow-coordinator operational state
+- source-side termination behavior
+- who may inspect/change which state
+
+AK. Subscription liveness
+- logical usability query
+- reconciliation behavior
+- lease/expiry if real usage needs it
+- failure discovered on attempted delivery
+- relationship to Transport/Messaging/flow liveness
+- Alive / NotAlive / Indeterminate or another outcome model
+
+AL. Subscription tracks/profiles
+- exact track identity if needed
+- track addition/removal over Subscription lifetime
+- whether guarantees are immutable after establishment
+- partition/key semantics
+- progress/latest-state/ordered-delta/reliable-history convenience profiles
+- finalization across multiple tracks
+
+AM. Subscription + Invocation composition
+- domains where Subscription delivery initiates Invocation
+- result aggregation/composition
+- cancellation/deadline interaction
+- avoid baking domain-specific handler-return semantics into Subscription
+
+AN. Communication implementation architecture
+- first concrete current Actant communication boundary/implementation
+- determine Transport/MessageChannel/Representation choices from current needs
+- old RPC/WebSocket code/docs are historical examples only
+- if WebSocket/RPC is independently chosen again, apply current generic design rather than reviving old design as authority
+
+Storage / concurrency / retention:
+
+AO. Representation/codec model
+- representation identity
+- codec identity/versioning
+- capability negotiation
+- zero-copy/shared-memory
+- preserving type distinctions
+
+AP. Bridge model details
+- Pack/CodeEntry relationship
+- generated interface/type metadata
+- external protocol mappings
+- error translation
+- state/behavior authority boundaries
+
+AQ. Concurrency
+- TransactionVisibility
+- read/write sets
+- optimistic validation
+- snapshot/MVCC
+- conflict/retry/rebase
+- delta models
+- cross-thread/process/application coordination
+
+AR. Revision classification
+- observed/derived/proposed/rejected/superseded/historical/authoritative/aborted as orthogonal dimensions where appropriate
+
+AS. LatestRevision under concurrency
+- lineage/scope
+
+AT. Link taxonomy
+- identity
+- endpoint lifecycle
+- directionality
+- surviving links to unavailable/collected endpoints
+- atomicity
+
+AU. Retention
+- subject/source abstractions
+- capability taxonomy
+- policy composition
+- pins/defaults/capacity/age
+- relationship-aware rules
+- semantic collection vs storage GC
+
+AV. MemoryStorage
+- driver interface
+- availability/durability reporting
+- dependency enumeration
+- collection hooks
+
+AW. IoManager
+- source categories
+- trace baseline
+- normalized errors
+- access/security hooks
+
+AX. Durability classes
+- levels
+- declaration
+- proof/satisfaction
+
+AY. Strong erase
+- scope
+- history/provenance
+- shared material
+- backups/exports
+- guarantees
+
+AZ. ActiveWindow / SafeCheckpointWindow integration
+- transactions
+- links
+- durability
+- recovery state
+- collection
+
+BA. Reduced-capability implementations
+- declaration and safe consumption of missing capabilities
+
+
+98. DOCUMENT-INTEGRATION IMPACT KNOWN SO FAR
+============================================
+
+DA-04 requires substantial revision:
+- old Memory runtime term
+- committed-only revision framing
+- State-centric hierarchy
+- transaction/revision distinction
+- explicit state vs ResolvedValue
+- null/absence/Missing semantics
+- transaction visibility/concurrency future-proofing
+- authority placement language
+
+DA-05 requires substantial revision:
+- ValueRef currently committed-only
+- ValueRef must be authority-neutral
+- reconstruction descriptor semantics
+- zero/one/multiple storage dependencies
+- shared immutable payload/reachability
+- optional Chunk
+- deduplication from dependency graph
+
+DA-06 requires substantial revision:
+- MemoryValueDefinition.contract vs MemoryValueContract
+- versioned facet profiles
+- TypeExpression/TypeDefinition
+- optional/nullable/default semantics
+- reusable constraints
+- explicit value vs default vs Missing
+- RemoveOverride vs true deletion
+
+DA-07 requires conceptual expansion:
+- IoManager as managed-I/O gateway
+- external protocols beyond files
+- Bridge integration
+- loaders/drivers as interpretation mechanisms
+- MemoryStorage as separate memory-specific abstraction
+
+DA-08 retention concepts remain useful but subsystem-specific.
+
+Communication documentation:
+- do not create a replacement numbered DA-21
+- new active design should use semantic filenames
+- likely:
+    design/area/communication.txt
+    design/area/messaging.txt
+    design/area/subscriptions.txt
+- split further only if semantic/retrieval pressure justifies it
+- preambles should describe defines / does NOT define
+- no separate LOCKED summary pattern
+- current normative definitions stand on their own
+- OPEN QUESTIONS track consciously identified unresolved design areas
+
+New communication docs must now incorporate:
+- stable Invocation identity
+- distinct retry/attempt/Message/domain-work identities
+- Ack level/scope and implicit acknowledgement
+- transparent lower-layer retry
+- Retry vs Resume vs Replay vs retained outcome vs reconciliation
+- contextual staleness rather than universal generation
+- receive order vs application order
+- terminal/recovery units participating in ordered histories
+- supersession/gaps/resync boundaries
+- source/listener delivery-assurance framing rather than generic "loss"
+- capacity/overload framing with backpressure as one response
+- Subscription tracks and composable guarantees
+- finalization barriers
+- recovery capabilities and recoverability horizon
+- durable pending-delivery obligations
+- persistent continuation across ApplicationRuns
+- shutdown detachability vs blockers
+
+DA-21 / IS-01 / IS-02 reconciliation remains complete.
+
+Legacy DA-21 / IS-01 / IS-02 remain until replacement semantic documents are materialized and checked against the drained sources; then they can leave the active design set and remain historical/archive only.
+
+Tracing docs remain the current tracing authority. New Communication/Messaging implementations use that substrate rather than carrying historical RPC tracing rules.
+
+New authoritative documentation may also be needed for:
+- semantic type system
+- interface/operation model
+- Bridge/protocol integration
+- constraints
+depending on final partitioning.
+
+
+99. HISTORICAL CHECKPOINT #7 CONSISTENCY PASS (RETAINED)
+====================================================
+
+Checkpoint #7 was used as the base and re-read after integrating the accepted
+flow-guarantee, retry, persistent-continuation, and Subscription-track work.
+
+Stale, incompatible, or overloaded assumptions corrected:
+
+1. Invocation identity was previously only indirectly implied by correlation.
+   Invocation now always has stable semantic identity.
+
+2. Retry now explicitly preserves logical Invocation/flow identity while lower
+   attempts/Messages may receive new identities.
+
+3. "Transparent retry" is defined as semantic transparency to the higher layer,
+   not invisibility to tracing.
+
+4. Replay had been used too loosely in one open retry/recovery phrasing.
+   Replay is restored to Actant's completed-history meaning.
+
+5. Resume is explicitly separated as recovery/continuation of incomplete work.
+
+6. Returning a retained prior Result is not called Replay.
+
+7. Generic "loss" terminology was too overloaded and is removed as a primary
+   contract dimension.
+
+8. Delivery assurance is instead framed through source/initiator promises,
+   listener/recipient observations, gaps, supersession, recoverability, and
+   uncertainty.
+
+9. Fire-and-forget/unconfirmed Emit does not manufacture a delivery failure
+   merely because recipient observation is unknown.
+
+10. Ordering now distinguishes receipt from semantic application.
+
+11. Ordered terminal/finalization material participates in the same logical
+    history where its correctness depends on that history.
+
+12. Normal termination cannot hide an unresolved required gap.
+
+13. Resynchronization can subsume missing/pending ordered material and must
+    avoid later double application.
+
+14. Full-state payload was too easy to conflate with latest-state delivery
+    semantics. They are now explicitly orthogonal.
+
+15. "Backpressure" was narrower than the real concern. Capacity/overload is the
+    broader design dimension; backpressure is one possible mechanism/policy.
+
+16. Subscription is no longer treated as having one uniform delivery behavior.
+    One logical Subscription may contain independently contracted semantic
+    tracks.
+
+17. Track is explicitly not a Transport lane.
+
+18. Fixed Subscription species are avoided; progress/latest-state/
+    ordered-delta/reliable-history are candidate profiles composed from
+    guarantees.
+
+19. Subscription finalization now has an explicit semantic barrier: teardown
+    cannot complete while required delivery/recovery/gap/terminal obligations
+    remain unresolved.
+
+20. Current-state resync and missing-unit/history recovery are separated.
+
+21. Source recoverability lifetime and listener recovery timing must be
+    compatible; incompatible contracts should fail establishment rather than
+    silently weaken guarantees.
+
+22. Required delivery obligations may persist durably rather than forcing the
+    source to block on current listener reachability.
+
+23. Accepted long-running work may hand continuation from transient Invocation
+    to a stable domain object such as Job J42.
+
+24. Longer-lived persistent continuation is explicitly scoped above
+    ApplicationRun when required; a later run does not inherit earlier traffic
+    accidentally.
+
+25. Communication continuity while domain work keeps running is distinct from
+    Resume of domain execution itself.
+
+26. Shutdown no longer implicitly threatens detachable accepted work; Packs may
+    also declare non-detachable work and participate in graceful/forced
+    shutdown policy.
+
+27. Execution/result placement across machines remains hidden implementation/
+    placement detail unless intentionally exposed.
+
+Incomplete/underdefined areas surfaced and kept OPEN:
+
+28. Exact composition/representation of flow and track guarantees.
+29. Partial/multipart delivery semantics have not yet been designed.
+30. Streaming remains underdefined beyond ordering/capacity/finalization pressure.
+31. Reusable delivery-assurance/acknowledgement vocabulary is not yet locked.
+32. Concrete logical-position/resync-boundary representation remains open.
+33. Exact durable pending-delivery owner/persistence model remains open.
+34. Persistent continuation does not yet have a locked first-class object/type.
+35. Exact shutdown detachability API/lifecycle is open.
+36. Track identity/mutation/finalization across multiple tracks remains open.
+37. Retryability policy, idempotency, duplicate-retention windows, and retained outcome behavior remain flow/domain dependent and need implementation pressure.
+
+No known checkpoint #6 Communication/Subscription statement was intentionally left in checkpoint #7 where it contradicts the accepted current design.
+
+
+100. RESTART / HANDOFF SUMMARY
+==============================
+
+If restarting from checkpoint #7:
+
+1. Prefer checkpoint #8 over all earlier checkpoints.
+2. Treat it as a non-authoritative working design snapshot.
+3. Preserve one logical authority per authority scope/MemoryValue while allowing arbitrary physical replication.
+4. Keep semantic identity, ValueRef/material identity, storage placement, and RuntimeValue representation separate.
+5. Preserve MemoryValueDefinition.contract as sparse input and MemoryValueContract as fully resolved result.
+6. Preserve nullable<T> as allowing concrete null and optional<T> as allowing absence.
+7. Defaults are consulted only when concrete state is absent.
+8. Explicit null prevents fallback.
+9. Missing, null, absence, and Error are distinct.
+10. Keep TypeDefinition and InterfaceDefinition separate.
+11. Interface metadata is informative and may be non-exhaustive.
+12. Communication is broader than Messaging; Interaction is semantic and realization-independent.
+13. Invocation always has stable semantic identity.
+14. A retry of I17 remains I17; new Message/Transport attempts do not create a new logical Invocation.
+15. Invocation, Message, attempt, Subscription, and domain-work identities are distinct.
+16. Ack != Accepted != Result, and Ack always has a defined recognition scope.
+17. Later flow progress may implicitly acknowledge earlier communication when it proves the required recognition.
+18. Transparent lower-layer retry preserves higher-layer semantics but may still appear in tracing.
+19. Retry != Resume != Replay != retained-outcome retrieval != reconciliation.
+20. Replay means reproduction of completed recorded history.
+21. Do not use plain "loss" as a sufficient contract dimension.
+22. Describe source/initiator promises and listener/recipient observation/assurance requirements explicitly.
+23. Ordering always has a logical scope.
+24. Receive order and application order are distinct.
+25. Terminal/finalization units cannot bypass unresolved required ordered gaps.
+26. Resync may subsume prior history; later old material must not be applied twice.
+27. Full-state payload != latest-state delivery semantics.
+28. Capacity/overload is broader than backpressure.
+29. Subscription may contain independently contracted semantic tracks.
+30. Track is not a Transport lane; convenience Subscription profiles are compositions of guarantees rather than architectural species.
+31. Normal Subscription teardown cannot complete while required delivery, recovery, gap-resolution, or terminal obligations remain unresolved.
+32. Distinguish current-state resync from missing-unit/history recovery.
+33. Recovery timing and source recoverability horizon must be compatible.
+34. Required pending-delivery obligations may be made durable.
+35. Accepted asynchronous work may hand continuation from Invocation I17 to a stable domain object such as Job J42.
+36. Persistent Application/Pack interest in J42 may survive ApplicationRun and be transactionally restored/reconciled by a later run.
+37. Later runs inherit only explicitly longer-lived relationships, not earlier run communication by accident.
+38. Communication continuity while work continues != execution Resume.
+39. Detachable outstanding work does not inherently block shutdown; explicitly non-detachable work may participate in shutdown-blocker/force policy.
+40. Execution machine, coordinator machine, result-storage machine, and current communication path are placement details unless a contract exposes them.
+41. Occurrence remains communication information, not authoritative domain truth.
+42. Required semantic information must not be silently forgotten merely because the listener is temporarily unreachable.
+43. Representation-integrity techniques remain implementation-specific.
+44. New communication implementations use the current tracing substrate.
+45. DA-21, IS-01, and IS-02 remain drained historical migration sources.
+46. Likely new communication documents remain design/area/communication.txt, design/area/messaging.txt, and design/area/subscriptions.txt.
+47. Preserve transaction visibility/concurrency future-proofing without prematurely designing full MVCC.
+48. Never publish authoritative state before required material durability.
+49. Never forensically reconstruct unpublished semantic state from orphaned material.
+50. RetentionCollector, not MemoryValueSystem or LinkRegistry, decides collectability.
+
+Next communication topic:
+    partial / multipart delivery
+
+END OF MEMORY VALUE SYSTEM DESIGN CHECKPOINT #7
+
+
+115. CURRENT OPEN ITEMS AFTER CHECKPOINT #8
+==========================================
+
+- First concrete Flow component boundaries and capability reuse mechanics.
+- Reconciliation boundary: Actant-managed procedures vs domain-owned
+  effect/commit verification evidence, including unresolved recovery.
+- Concrete Flow contracts, timer anchoring, persistence/retention policies,
+  realization selection, participant bindings, and settlement evidence.
+- Meaningful use-pressure-driven simple default Subscription profile(s).
+- Exact shape of negotiated guarantee composition and multi-track lifecycle.
+- Persistent nested transaction recovery closure and conflict-resolution rules;
+  intentional diagnostic when safe equivalent recovery is unprovable.
+- Semantically justified reusable orchestration facilities and their
+  composable contract profiles (not preselected classes).
+- Practical safe handover/migration protocols, postponed until demanded.
+- Fine-grained cooperative permissions and stronger isolation, deferred.
+- Flow/MemoryValue integration APIs and test harness, implementation pressure.
+- Older MemoryValue type, constraints, retention, concurrency, storage and
+  document-integration topics in section 97 remain open WHERE not superseded
+  by the updated current-state decisions.
+
+
+116. CHECKPOINT #8 DRIFT, STALENESS, AND OMISSION REVIEW
+=======================================================
+
+RECONCILED:
+- Old 'streaming underdefined' statement is superseded by minimal producer/
+  consumer-overlap definition; no invented reliable streaming contract.
+- Multipart meaning now defined separately from streaming and fragmentation.
+- Subscription-specific callback orchestration ideas refined: IoManager owns
+  selection/pipeline; Subscription gives continuing relation and target access.
+- Older isolated Flow implementation direction replaced by shared Flow family
+  integrated with Actant's real authority, activation, and persistent ownership.
+- Runtime/connection failure is now assessed at Transport, Flow, and Domain
+  separately; expecting absent participants is normal when contract permits.
+- Listener-initiated ownership clarified as hierarchical continuing interest,
+  not permission to control source or universal single physical owner.
+- 'Persistent' scoped to owner/lifetime; ordinary deactivation is not handover.
+- Deferred terminal information while listener absent now mandatory where
+  negotiated contract requires it, with explicit unimplemented test.
+- Future permissions distinguished from security guarantees; same-process
+  Python does not isolate malicious code.
+- Timeout/deadline, cancellation, idempotency evidence, and non-discardable
+  staged transaction recovery explicitly reconciled.
+- Future migration readiness distinguished from prematurely building migration.
+- Restoration/reconciliation domain evidence question remains OPEN: do not
+  mistake exploratory next-item discussion for acceptance of a concrete API.
+
+INHERITED STRUCTURE:
+- Sections 1-95 remain the detailed baseline for MemoryValue, revisions,
+  types/contracts, tracing, links, retention, storage, IoManager, durability,
+  and older Communication; newer semantics in 101-114 have explicit precedence.
+- Historical section 97 and section 99 were retained for audit context but
+  are not current open/conclusion authorities. Sections 115-116 are current.
+- Avoid renumbering inherited non-contiguous section labels: their original
+  groupings may reference earlier working material; editorial numbering can
+  be normalized during authoritative-document integration.
+- This checkpoint remains NON-AUTHORITATIVE; no implementation or normative
+  DA files were modified.
+
+
+117. CHECKPOINT #8 RESTART INSTRUCTIONS
+=======================================
+
+Use checkpoint #8 rather than #7 or older checkpoints. Apply the newer
+current-state reconciliations in sections 101-114 whenever earlier wording
+drifts. Consult section 115 for live open questions and section 113 for
+the accepted future deferred-termination test. Continue discussion at the
+Actant-managed Flow reconciliation versus domain-owned semantic evidence
+boundary, unless redirected. Do not treat an agreement to discuss as an
+implemented API or completed guarantee. Maintain semantic filenames and
+future DA-02 foundational-principle integration. Save changes to authoritative
+specifications only when explicitly requested.
