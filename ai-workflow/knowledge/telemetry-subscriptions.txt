@@ -1,0 +1,134 @@
+ACTANT - PM-01 TELEMETRY SUBSCRIPTION CONTRACT AND EVIDENCE
+=========================================================
+
+STATUS / AUTHORITY
+------------------
+PM-01 is locally implemented and verified on published branch
+pm01-shared-telemetry, commit 40700152b664d223cbb530beae1ca9b0c05522b6; it is NOT integrated or
+accepted as a platform capability. Implementation baseline was
+918ca07f0a2aeec69c8b5c5a3904d8c60aa1ceb7, synchronized with coordination-only
+parent d949c0cc38f1ccefbb26592eae2526916b0d97cf before commit. The worker is
+Codex PM-01, using isolated pm01-telemetry; existing/user/application checkouts
+were not changed. PM-02 and PM-03 remain prepared and unimplemented.
+
+Accepted semantics remain the local-process working design recorded in
+llm-performance-observation-and-optimization.txt at 4e69a57630f5dcd57b059140439772587ec17b81.
+This evidence does not promote working knowledge into canonical DA/IS design.
+No Application adoption, RuntimeHost composition or real GPU exercise is claimed.
+
+PUBLIC PM-03 CONSUMER CONTRACT
+-----------------------------
+Imports: backend.telemetry exports TelemetryConfiguration, TelemetryService,
+TelemetryOwner, TelemetrySubscription, TelemetrySnapshot and SignalUnavailable.
+
+- service.owner() -> TelemetryOwner: inactive revocable lifetime scope.
+- owner.subscribe(configuration=None) -> TelemetrySubscription: acquire a session;
+  raises RuntimeError after owner revocation. Retains no CodeEntryContext.
+- owner.release(): idempotent atomic teardown of its remaining sessions only.
+- service.subscribe(configuration=None): independently releasable direct claim.
+- subscription.current: immutable latest delivered snapshot, initially collected or
+  reused shared evidence, None after release. Reads do not collect hardware.
+- subscription.history: bounded immutable tuple; only HISTORY groups retained.
+  CURRENT groups are masked from history and DISABLED groups from every view.
+- subscription.release(): idempotent; clears its current/history and collection
+  claim. subscription.released reports revocation. Both scopes support with.
+- service.collectionIntervalSeconds: fastest active polling cadence, None when
+  no polling is needed. Existing start/sample/current/history/stop remain usable.
+
+Configuration defaults are CURRENT for memory/CPU/GPU, interval 1 second and
+historySamples=300. PM-03 must explicitly select HISTORY to retain observations.
+Cadence must be positive finite and representable as at least one nanosecond;
+historySamples must be a positive exact integer. Groups describe signals, not
+hardware vendors. Service configuration governs the legacy claim; each subscription
+has its own configuration. This is not an application facade or authorization API.
+PM-03 must validate invocation authority and explicitly own/tear down session scopes.
+
+TIMING / DELIVERY
+-----------------
+- collectionStartNs / collectionEndNs: host-process monotonic interval around all
+  sequential reads and any first-use provider preparation. Reads are not simultaneous.
+- sampledTimeNs: separate wall time captured immediately after collectionStartNs;
+  retained for display, never alignment, rate calculation or ordering.
+- sampleIntervalSeconds: negotiated shared polling target at collection time.
+- actualIntervalSeconds: spacing since previous shared collection start; None for
+  first collection. Use timestamps for actual gaps, including downsampled delivery.
+- All timing survives current/history projection unchanged. Optional timing fields
+  default to None for externally constructed older snapshots, never fabricated zero.
+- A joining subscriber reuses existing evidence without another physical read and
+  receives the next shared collection before beginning its requested delivery cadence.
+  Newly requested groups may initially be explicitly unavailable in reused evidence.
+- Fastest enabled claim drives one service worker. Slower views downsample the
+  shared collection, with no intermediate per-consumer queue. Delayed reads expose
+  longer intervals/gaps; polling does not replay missed samples in a catch-up burst.
+
+OWNERSHIP / PROVIDERS
+---------------------
+One lifecycle lock serializes provider reads, publication, release and cleanup.
+Release waits for an in-flight read; providers must complete promptly. Once release
+returns, that session cannot receive additional publication. No hard timeout or
+interruption of a hung native hardware call is implemented.
+
+Legacy start is a separate claim. Legacy stop removes only that claim, allowing
+monitoring to continue. Monitoring release leaves legacy polling/history intact.
+Explicit manual sample still reads and retains according to legacy configuration;
+background delivery preserves the legacy history cadence when monitoring is faster.
+Last monitoring release clears its data and stops only unneeded monitoring polling.
+Previously returned immutable snapshots remain in caller ownership.
+
+Injected providers are borrowed by monitoring and never closed by monitoring alone.
+Legacy stop preserves its original provider-cleanup responsibility, deferring borrowed
+GPU close until monitoring claims end. A closed borrowed provider is not resurrected;
+hosts needing recreation should supply a factory. Factory-created GPU providers are
+service-owned: close when the last enabled GPU requirement ends and recreate for a
+later lifetime. Failed factory attempts retry after the relevant group's lifetime ends.
+CPU preparation happens only when enabled and resets when no claim needs CPU.
+
+createDefaultTelemetryService now binds explicit host-selected provider factories
+without vendor imports or initialization. Only enabled groups use those factories.
+No Pack discovery, installation, activation policy or automatic Pack activation was
+added. Missing/failed providers and sensors yield SignalUnavailable, never zero load.
+Factories and optional provider reads/cleanup isolate ordinary Exception failures.
+No-consumer construction and all-disabled monitoring perform no polling or provider
+work; CURRENT-only subscriptions retain only their latest snapshot.
+
+VERIFICATION AT IMPLEMENTATION COMMIT
+-------------------------------------
+Runtime: Python 3.15.0b4 in isolated checkout's own copied embedded runtime.
+
+Focused command:
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/telemetry
+Result: 27 passed in 0.22s (4 existing telemetry tests plus 23 new parametrized cases).
+
+Complete command:
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib
+Result: 1031 passed, 10 skipped in 2.84s.
+
+The initial restricted complete-suite attempt encountered temporary-directory setup
+errors and was interrupted. A diagnostic -x run confirmed pytest could not create its
+numbered temporary directory (55 passed, 10 skipped, 1 setup error). Approved normal
+filesystem/child-process execution passed; no repository behavior was weakened.
+A prior complete run before final lifetime fixes passed 1027 tests, 10 skipped.
+
+Architectural coverage: one mixed-cadence collector; independent bounded histories;
+both release orders and duplicate release; owner revocation; legacy/monitoring survival
+in either teardown order; final owned provider closure and group-specific retry;
+missing/failing providers; no consumers/enabled groups; fresh-interpreter import
+isolation; wall-clock jumps and fake-clock collection intervals; real polling stop/
+reacquisition; concurrent sample/release; and finite nanosecond cadence validation.
+Path/version headers and class/function docstrings audited for all five changed
+Python files. git diff --check passed. Ruff is not installed in this runtime and was
+not run. No real GPU, external server or consumer Application was exercised.
+
+INTEGRATION / CONTINUATION
+--------------------------
+Read current canonical actant-integration coordination before adoption. Fetch the
+published pm01-shared-telemetry branch. Review and cherry-pick implementation commit
+40700152b664d223cbb530beae1ca9b0c05522b6 onto the latest Integration line (or merge the bounded
+branch after review). The parent coordination commit is already on Integration;
+only the implementation commit is needed. Run focused telemetry and complete suite
+again after combining concurrent work. Do not call this accepted merely after merge.
+
+Next: Integration reviews PM-01; PM-02 proceeds independently under its assignment;
+PM-03 consumes these exact interfaces and owns authorization/host composition and
+Application teardown. No stream measurement, timeline composition, optimization,
+tuning, persistence, UI or application-branch changes are part of PM-01.
