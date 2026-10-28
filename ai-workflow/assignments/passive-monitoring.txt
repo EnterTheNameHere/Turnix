@@ -1,0 +1,167 @@
+ACTANT - BOUNDED PASSIVE MONITORING WORK PACKAGES
+================================================
+
+OWNER / STATUS
+--------------
+Accountable implementation and acceptance owner: integration (this conversation).
+Prepared work packages; no delegated worker or separate chat has been dispatched.
+No implementation, new observation capability, or verification result is claimed.
+Integration may implement these sequentially or explicitly delegate a package later.
+
+Repository: EnterTheNameHere/Turnix
+Working/integration/coordination branch: actant-integration
+Prepared against: 4c659609ebc3a1f0ed78d714505a702db396dca6.
+Accepted boundary decision: commit 4e69a57630f5dcd57b059140439772587ec17b81,
+recorded in
+ai-workflow/knowledge/llm-performance-observation-and-optimization.txt.
+The accepted direction is working design for this local-process slice; it does not
+supersede unrelated canonical DA/IS design. Follow coordination protocol sections
+11-12, including a fresh inbox and synchronization check before implementation.
+
+COMMON CONTRACT
+---------------
+Applications request needed observations through a provider-neutral authorized
+facade. They do not select hardware vendors, construct telemetry collectors or
+manage sharing. Sessions outliving an invocation require independent valid owner
+authority and must not retain an expired CodeEntryContext. Explicit release and
+owner teardown must both revoke that session's collection claim.
+
+Observations are optional, non-authoritative and disposable. Bound retained data;
+represent unavailable hardware explicitly. Backend/Pack placement is replaceable.
+Do not create automatic Pack activation authority as a shortcut. Reuse already
+available providers or report unavailability until activation policy is established.
+
+Host-process monotonic time governs rates/alignment; wall time is display evidence.
+Sampling takes time: represent its interval/gaps rather than claiming simultaneous
+hardware reads. Cross-process/host clock correlation is excluded.
+
+Do not add automatic optimization, model/server restarts, tuning, speculative/MTP
+experiments, long-term persistence, graphical UI, resource policy or a scheduler.
+Do not modify consumer application branches. Engine-native metrics remain optional
+and engine-owned; character counts must never be relabeled as model tokens.
+
+PM-01 - OPTIONAL SHARED TELEMETRY LIFECYCLE
+------------------------------------------
+Implementation owner: integration. State: prepared, not dispatched or implemented.
+Prerequisite: accepted common contract; no dependency on PM-02.
+
+Primary source ownership:
+- backend/telemetry/service.py, model.py, providers.py and __init__.py;
+- tests/backend/telemetry/;
+- new telemetry subscription/session modules within backend/telemetry/ as needed.
+
+Provide independently releasable bounded subscriptions around the existing service.
+Inspect current service users before selecting the mechanism. Preserve existing
+start/sample/history/stop consumers or migrate all actual callers deliberately;
+do not silently treat monitoring as sole owner of a pre-existing service.
+Negotiate different requested cadences through one collector; slower subscriptions
+must not trigger duplicate reads or accumulate unbounded history. Releasing one
+subscription must not stop another or close its provider. Final monitoring release
+stops only monitoring-owned work and clears monitoring-owned retained history.
+Keep disabled groups/providers inactive. Avoid hardware-vendor imports or provider
+initialization from the generic observation request path when unused.
+
+Provide to PM-03: request/subscribe, explicit unavailable observations, independent
+session release/owner teardown, bounded snapshots, actual sampling cadence and
+monotonic collection start/end timestamps with separate wall-clock display time.
+Keep timing fields in existing telemetry model/service owned by PM-01 to avoid
+concurrent changes by the correlation implementer.
+
+Architectural tests: mixed-cadence consumers share one collector; release order and
+duplicate release; existing consumer survives monitoring release; last-owned-claim
+cleanup; missing/failing providers; no-consumer/no-enabled-group behavior; bounded
+history; shutdown/reacquisition and concurrent release/sample behavior; fake-clock
+collection intervals preserved through history projection. No real GPU required.
+
+PM-02 - PROVIDER-NEUTRAL STREAM OBSERVATION
+-----------------------------------------
+Implementation owner: integration. State: prepared, not dispatched or implemented.
+Prerequisite: common timing/ownership contract; independent of hardware collection.
+
+Primary source ownership:
+- backend/llm/streamingRuntime.py and new LLM observation types/helpers;
+- tests/backend/llm/;
+- provider files only if an actual engine-specific instrumentation need is proven.
+
+Provide an opt-in run-scoped observation seam at the existing stream delivery
+boundary, after inspecting observer/error/cancellation behavior. Timestamp non-empty
+delivered text, count characters without retaining content, expose first-text
+latency and bounded windowed delivery rates/variation. Define the measurement origin
+and observed delivery point explicitly; do not claim engine compute latency.
+Optional words/sec can be deferred. Keep reliable native-token evidence separate.
+
+Disabled runs install no monitoring observer, retain no monitoring history and do
+no monitoring-specific clock/count work per event. An unavailable/failing optional
+observer must not change provider execution, Job outcomes, transaction semantics or
+existing observer behavior. All exits release run claims, including provider errors,
+consumer errors, cancellation and early stream termination/closure.
+
+Provide to PM-03: bounded immutable time-window observations, monotonic start/end,
+first-text latency, separate completion/failure/cancellation evidence and no retained
+text payload. No dependency on concrete telemetry providers or TelemetryService.
+
+Architectural tests: fake monotonic clocks; empty/bursty/non-ASCII chunks; first-text
+origin; window boundaries and gaps; bounded retention; character/token separation;
+disabled observer does no added work; success/failure/cancellation/early close and
+observer failure preserve inference outcomes and release claims. Run existing LLM
+and Job cancellation regressions in addition to new focused tests.
+
+PM-03 - AUTHORIZED FACADE AND TIMELINE CORRELATION
+------------------------------------------------
+Implementation owner: integration. State: prepared, depends on PM-01 and PM-02.
+
+Primary source ownership:
+- new observation composition/correlation module;
+- backend/context/codeEntryContext.py;
+- backend/runtime/runtimeHost.py and backend/application/applicationRuntime.py
+  only for verified host composition, application owner lifetime and facade wiring;
+- tests/backend/context/, runtime/, application/ and correlation tests as needed.
+
+Use PM-01/PM-02 contracts; agree their actual interface names before coding the
+composition. PM-03 does not duplicate their collectors or independently change
+their timing/stream contracts. RuntimeHost currently does not construct a
+TelemetryService; introduce composition deliberately rather than assuming one exists.
+
+Expose requests in terms of observation needs and bounded retention/cadence, with
+provider selection/sharing internal. Validate invocation authority when requesting
+a session; valid sessions may continue under explicit independent ownership.
+Define the concrete owner and revocation path before implementation; if current
+lifecycle machinery cannot support the accepted contract, report the gap rather
+than extending invocation authority. Application/host shutdown releases owned
+sessions without invalidating unrelated consumers. No automatic optional Pack
+activation is part of this package.
+
+Align hardware collection intervals and stream windows using host monotonic time.
+Expose missing samples and non-simultaneous collection. Wall-clock jumps do not
+change rates or temporal ordering. Hardware unavailability still permits generic
+stream measurements and must never fabricate zero utilization.
+
+Architectural tests: no hardware-specific knowledge in application requests; expired
+context rejects new requests; retained session does not retain invocation context;
+explicit session/owner teardown and multi-application isolation; unavailable hardware
+with useful text observations; common-clock correlation, delayed sampling and wall
+clock jumps; optional monitoring errors preserve existing application/Job behavior.
+
+INTEGRATION AND REPORTING
+-------------------------
+Implementation starts only after rereading current accepted knowledge and inbox;
+record the actual synchronized full commit SHA for each package when it starts.
+If delegated later, name the actual worker/task ID and working ref in this document
+before claiming dispatch. Report interface changes/dependencies before crossing
+another package's source boundary. Escalate architectural contradictions with
+concrete evidence; do not weaken correct tests or broaden activation authority.
+
+Each result reports exact commits, changed public contracts, verification commands,
+results, gaps and consumer adoption status. Follow Python path/version/docstring
+rules. Integration independently reviews compatibility before acceptance.
+Known baseline evidence: 1008 passed, 10 skipped on Python 3.15.0b4 at b7f3d5f;
+this is historical evidence, not verification of future monitoring implementation.
+
+Repository-wide verification command from this checkout root:
+    .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib
+
+Run focused architectural tests while implementing, then relevant cross-boundary
+regressions and the complete suite at integration acceptance. Update knowledge,
+STATE, HANDOFF and actual package status with evidence. Do not claim adoption by
+Completion, AI Buddy, Materialization Test or Evil Analysis without named consumer
+refs and separate exercise.
