@@ -1,4 +1,4 @@
-# file: backend/telemetry/model.py ; version: 1
+# file: backend/telemetry/model.py ; version: 2
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -93,7 +93,15 @@ class GpuObservation:
 
 @dataclass(frozen=True, slots=True)
 class TelemetrySnapshot:
-    """Represents one immutable, non-authoritative host observation point."""
+    """Represents sequential host reads, including lazy setup, over a monotonic interval.
+
+    sampledTimeNs is wall-clock evidence captured immediately after collectionStartNs;
+    it is never the clock for alignment or rates. sampleIntervalSeconds is the
+    negotiated polling target; actualIntervalSeconds is spacing from the preceding
+    shared collection start (None for the first). Reads are not simultaneous, and
+    delayed collection/gaps remain visible in start/end and actual spacing.
+    Missing timing on externally constructed snapshots is explicitly None.
+    """
 
     sampledTimeNs: int
     systemMemory: SystemMemoryObservation | SignalUnavailable
@@ -101,3 +109,9 @@ class TelemetrySnapshot:
     cpuStatic: CpuStaticObservation | SignalUnavailable
     cpuUtilization: CpuUtilizationObservation | SignalUnavailable
     gpu: GpuObservation | SignalUnavailable
+
+    # sampledTimeNs remains wall-clock display evidence, never a rate/alignment clock.
+    collectionStartNs: int | None = None
+    collectionEndNs: int | None = None
+    sampleIntervalSeconds: float | None = None
+    actualIntervalSeconds: float | None = None

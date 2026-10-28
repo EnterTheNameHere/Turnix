@@ -1,7 +1,5 @@
-# file: backend/telemetry/__init__.py ; version: 2
+# file: backend/telemetry/__init__.py ; version: 3
 from __future__ import annotations
-
-import pynvml
 
 from backend.telemetry.model import (
     CpuStaticObservation,
@@ -14,7 +12,7 @@ from backend.telemetry.model import (
     TelemetrySnapshot,
 )
 from backend.telemetry.providers import NvmlGpuTelemetryProvider, PsutilMachineTelemetryProvider
-from backend.telemetry.service import TelemetryConfiguration, TelemetryService
+from backend.telemetry.service import TelemetryConfiguration, TelemetryOwner, TelemetryService, TelemetrySubscription
 
 __all__ = [
     "CpuStaticObservation",
@@ -25,6 +23,8 @@ __all__ = [
     "SystemMemoryObservation",
     "TelemetryConfiguration",
     "TelemetryMode",
+    "TelemetryOwner",
+    "TelemetrySubscription",
     "TelemetryService",
     "TelemetrySnapshot",
     "createDefaultTelemetryService",
@@ -34,17 +34,15 @@ __all__ = [
 def createDefaultTelemetryService(
     configuration: TelemetryConfiguration | None = None,
 ) -> TelemetryService:
-    """Creates Windows-first host telemetry while treating unavailable providers as optional."""
-    try:
-        machineProvider = PsutilMachineTelemetryProvider()
-    except (ImportError, OSError, RuntimeError):
-        machineProvider = None
-    try:
-        gpuProvider = NvmlGpuTelemetryProvider()
-    except (ImportError, OSError, RuntimeError, ValueError, pynvml.NVMLError):
-        gpuProvider = None
+    """Creates inactive host telemetry; enabled requests lazily use installed providers.
+
+    No vendor import, device initialization or Pack activation occurs here. Failed
+    providers remain unavailable for the active lifetime and can retry after release.
+    """
     return TelemetryService(
-        machineProvider=machineProvider,
-        gpuProvider=gpuProvider,
+        machineProvider=None,
+        gpuProvider=None,
+        machineProviderFactory=PsutilMachineTelemetryProvider,
+        gpuProviderFactory=NvmlGpuTelemetryProvider,
         configuration=configuration,
     )

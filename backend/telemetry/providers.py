@@ -1,10 +1,8 @@
-# file: backend/telemetry/providers.py ; version: 3
+# file: backend/telemetry/providers.py ; version: 4
 from __future__ import annotations
 
+from importlib import import_module
 from typing import TYPE_CHECKING, Protocol
-
-import psutil
-import pynvml
 
 from backend.telemetry.model import (
     CpuStaticObservation,
@@ -60,7 +58,7 @@ class PsutilMachineTelemetryProvider:
 
     def __init__(self, psutilModule: object | None = None) -> None:
         """Binds to psutil, permitting an injected module seam for deterministic tests."""
-        self._psutil = psutil if psutilModule is None else psutilModule
+        self._psutil = import_module("psutil") if psutilModule is None else psutilModule
 
     def primeCpu(self) -> None:
         """Primes both aggregate and per-core psutil CPU percentage counters."""
@@ -115,11 +113,11 @@ class NvmlGpuTelemetryProvider:
         """Initializes NVML and selects one device by index."""
         if type(deviceIndex) is not int or deviceIndex < 0:
             raise ValueError("deviceIndex must be a non-negative exact integer.")
-        self._nvml = pynvml if nvmlModule is None else nvmlModule
+        self._nvml = import_module("pynvml") if nvmlModule is None else nvmlModule
         self._nvml.nvmlInit()
         try:
             self._handle = self._nvml.nvmlDeviceGetHandleByIndex(deviceIndex)
-        except (OSError, RuntimeError, ValueError):
+        except Exception:
             self._nvml.nvmlShutdown()
             raise
         self.deviceIndex = deviceIndex
@@ -134,7 +132,7 @@ class NvmlGpuTelemetryProvider:
         """Reads one optional sensor and converts unsupported/failing reads to unavailable."""
         try:
             return transform(read())
-        except (OSError, RuntimeError, ValueError, pynvml.NVMLError) as err:
+        except Exception as err:
             return SignalUnavailable(f"{label} unavailable: {type(err).__name__}")
 
     def gpu(self) -> GpuObservation:
