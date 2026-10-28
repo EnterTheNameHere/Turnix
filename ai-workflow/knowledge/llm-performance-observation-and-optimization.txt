@@ -46,14 +46,61 @@ optional words/second, first-text latency and variations/recovery; preserve
 actual token rates separately if the engine provides reliable metrics.
 Keep collection disabled/no meaningful overhead without consumers.
 
-Prerequisite: Integration must reconcile claimed shared llama.cpp leases and
-cancellation against the inspected Pack source and tests, and determine the
-current active provider boundary before delegating modifications. The backend
-SharedServiceRegistry exists; observed driver on integration/completion/
-ai-buddy/materialization-test branches still constructs a local driver, and
-Evil Analysis has an older version. Do not assume adoption merely from STATE.
+Prerequisite reconciliation: Integration's manifest selects structuredCodeEntry.py,
+which implements managed host leases and the active response cancellation callback;
+codeEntry.py is its underlying driver implementation. Source and fake-based tests
+were inspected at a4a51450a7abfe87ddece284cb3ca2aa334bf8b4, without executing
+tests. Consumer branches are older and have not adopted those provider changes;
+see ai-workflow/state/shared-packs.txt for named heads and limits.
 
 Out of initial scope: automatic tuning, model/server restarts, MTP experiments,
 persistent long-term storage and a full graph UI. Integration should choose
 bounded assignments, owners, tests and safe synchronization; this knowledge
 record does not authorize an implementer to start independently.
+
+INTEGRATION SCOPING - PROPOSED, NOT ASSIGNED
+--------------------------------------------
+Integration owns implementation and acceptance on actant-integration; no worker
+or consumer branch has been assigned. Baseline inspected:
+a4a51450a7abfe87ddece284cb3ca2aa334bf8b4. This is a proposed decomposition,
+not a design decision that backend or Pack is the final home of monitoring.
+
+1. Establish an optional shared observation lifecycle around the existing
+   TelemetryService, reusing its machine/GPU providers. Verify actual composition
+   before assuming RuntimeHost currently constructs it: RuntimeHost source at the
+   baseline has SharedServiceRegistry but no TelemetryService reference. Existing
+   TelemetryConfiguration is fixed per service, and history sampling starts a
+   thread when configured; there is no inspected per-consumer subscription API.
+   Define independent consumer ownership and bounded retention so ending one
+   consumer does not stop another, and the last monitoring consumer releases
+   monitoring-owned polling/history without stopping unrelated consumers.
+2. Add an opt-in provider-neutral observer at the existing LLM stream boundary
+   (LlmProcessingPipeline._streamResolved is a candidate, subject to accepted
+   placement). Timestamp non-empty delivered text using monotonic time, count
+   characters without retaining content, calculate first-text latency and bounded
+   time-window throughput/variation, and expose bounded samples for a consumer.
+   Words/sec may be deferred. Preserve native token metrics separately if made
+   available; never label delivery counts as tokens. Disabled runs must install no
+   observer, retain no monitoring history and do no monitoring-specific per-event
+   clock/count work. Cancellation, exceptions and normal completion must release
+   each run's monitoring claim without changing Job or provider outcomes.
+3. Correlate hardware and stream observations on an explicitly defined common
+   timeline. Current TelemetrySnapshot.sampledTimeNs uses time.time_ns(), while
+   stream duration uses monotonic_ns(); directly comparing those values is wrong.
+   Choose a monotonic timestamp or an explicit clock-correlation contract, with
+   clear semantics for clock jumps. No second hardware collector is justified.
+
+Architectural verification for an eventual implementation: fake clocks and
+providers cover first text, empty/bursty chunks, window boundaries, variation,
+bounded retention and no content storage; no-consumer mode performs no added
+monitoring polling or event work; two consumers release independently; hardware
+unavailability is explicit; time alignment survives wall-clock changes; token
+and text rates remain distinct; normal, failure and cancellation paths clean up
+without changing inference/Job outcomes. Verify multiple providers and existing
+telemetry consumers. Runtime tests and exact refs/results must be reported before
+acceptance. No optimizer, restart, tuning, storage or UI is included.
+
+Open design decisions: final placement and access authority for observation;
+consumer lifecycle and sharing with pre-existing telemetry consumers; and the
+common-clock contract. Escalate material choices to the design owner before
+locking them in. This scope does not authorize consumer-branch changes.
