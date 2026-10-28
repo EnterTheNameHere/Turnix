@@ -23,6 +23,23 @@ Monitoring never authorizes server restarts or optimizer experiments.
 Backend versus Pack placement remains open to actual implementation pressure.
 Optimization should consider speed, latency, memory headroom and variability.
 
+APPLICATION OBSERVATION BOUNDARY (TELEMETRY NOTE, 2026-10-29)
+------------------------------------------------------------
+The user relayed the telemetry conversation's architectural clarification:
+ordinary inference observation must not require an Application to know which
+hardware telemetry provider is available or how that provider is shared.
+An Application requests observations appropriate to its needs. Implementation
+resolves whether these come from an existing service, an optionally activated
+provider, or no available provider. Provider discovery, activation mechanics and
+sharing remain behind that application-facing boundary. Hardware unavailability
+must be explicit and must not be represented as a zero-valued measurement.
+
+Preserve this contract if implementation later moves between backend and Packs.
+Reusing TelemetryService is a candidate implementation mechanism, not a required
+Application dependency. The note does not establish new Pack activation authority,
+require automatic provider activation, or resolve the three scoping decisions
+below. This remains working coordination knowledge, not canonical DA/IS design.
+
 STREAMED-TEXT MEASUREMENT (ACCEPTED)
 ------------------------------------
 Normal inference monitoring must remain useful without engine-native token
@@ -104,3 +121,33 @@ Open design decisions: final placement and access authority for observation;
 consumer lifecycle and sharing with pre-existing telemetry consumers; and the
 common-clock contract. Escalate material choices to the design owner before
 locking them in. This scope does not authorize consumer-branch changes.
+
+BOUNDARY DECISIONS - INTEGRATION PROPOSALS FOR DESIGN REVIEW
+------------------------------------------------------------
+These proposals incorporate the telemetry note; they are not accepted decisions
+or implementation assignments.
+
+1. Access authority and placement: expose provider-neutral observation requests
+   through an invocation-authorized Application facade. A returned observation
+   session needs explicit lifetime authority if it can outlive that invocation;
+   it must not retain an invalid CodeEntryContext. Host composition resolves
+   shared infrastructure behind the facade. Do not require Applications to select
+   hardware providers or construct/share TelemetryService. Optional activation
+   must use the applicable existing activation authority; its availability and
+   policy still need agreement. Physical backend/Pack placement stays replaceable.
+2. Consumer lifecycle: use independently releasable subscriptions with bounded
+   retention. Run-scoped monitoring releases its own claim on completion, failure
+   or cancellation. Ending the last monitoring subscription stops only work owned
+   by monitoring; pre-existing telemetry consumers retain their own claims. Agree
+   how existing service ownership participates before modifying its lifecycle.
+3. Clock alignment: use host-process monotonic sample timestamps for hardware and
+   stream correlation, retaining wall-clock time separately for display. Define
+   the timestamp as observation time and expose sampling gaps rather than implying
+   simultaneous collection. Wall-clock changes must not alter rates or ordering.
+   Monotonic values from different processes/hosts require an explicit correlation
+   contract and are outside the first local-process slice.
+
+Continuation: obtain design-owner resolution of these three contracts, then turn
+the existing three implementation scopes into bounded assignments with named
+owners, exact baseline refs, interface ownership and architectural verification.
+No worker has been assigned and no monitoring capability is newly implemented.
