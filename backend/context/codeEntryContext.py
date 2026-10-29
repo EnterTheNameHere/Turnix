@@ -1,4 +1,4 @@
-# file: backend/context/codeEntryContext.py ; version: 26
+# file: backend/context/codeEntryContext.py ; version: 27
 from __future__ import annotations
 
 from contextlib import suppress
@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from backend.core.immutableValue import ImmutableValueFreezer
 from backend.llm.errors import LlmProviderProtocolError
 from backend.llm.llmTypes import LlmExecutionProfile, LlmQuery
+from backend.observation import ObservationFacade, ObservationOwner, ObservationSession
 from backend.process.context import ProcessFacade
 from backend.process.runtime import ProcessRunner, ProcessToolRegistry
 from backend.values.committed import ValueState
@@ -315,7 +316,7 @@ class _CancellationFacade:
 class _LlmFacade:
     """Invocation-scoped gateway to registered LLM providers and processing."""
 
-    def __init__(self, *, ownerId: str, registry: LlmProviderRegistry, scope: RegistrationScope, pipeline: LlmProcessingPipeline, memory: CommittedValueLayer | CommittedValueTransaction, requireValid: Callable[[], None], allowRegistration: bool, cancellationSignal: CancellationSignal | None = None) -> None:
+    def __init__(self, *, ownerId: str, registry: LlmProviderRegistry, scope: RegistrationScope, pipeline: LlmProcessingPipeline, memory: CommittedValueLayer | CommittedValueTransaction, requireValid: Callable[[], None], allowRegistration: bool, cancellationSignal: CancellationSignal | None = None, observationOwner: ObservationOwner | None = None) -> None:
         """Binds LLM authority to one CodeEntry invocation and memory view."""
         self._ownerId = ownerId
         self._registry = registry
@@ -325,6 +326,7 @@ class _LlmFacade:
         self._requireValid = requireValid
         self._allowRegistration = allowRegistration
         self._cancellationSignal = cancellationSignal
+        self._observationOwner = observationOwner
 
     def registerProvider(self, name: str, provider: LlmStreamProvider) -> None:
         """Registers an LLM provider when this invocation permits registration."""
@@ -357,20 +359,40 @@ class _LlmFacade:
             raise LlmProviderProtocolError(f"LLM provider {providerName!r} token estimator returned an invalid value: {result!r}.")
         return result
 
-    def run(self, *, providerName: str, query: LlmQuery, model: str | None = None, providerOptions: Mapping[str, ImmutableValue] | None = None, streamObserver: Callable[[LlmStreamEvent], None] | None = None) -> StreamingLlmResult:
-        """Runs one provider-neutral query through the registered provider."""
+    def run(self, *, providerName: str, query: LlmQuery, model: str | None = None, providerOptions: Mapping[str, ImmutableValue] | None = None, streamObserver: Callable[[LlmStreamEvent], None] | None = None, observation: ObservationSession | None = None) -> StreamingLlmResult:
+        """Runs a query with an optional same-application, single-use observation.
+
+        Invocation authority is required even for independently owned sessions.
+        Every pipeline exit stops RUN collection; explicit APPLICATION ownership
+        survives. Optional observation never supplies execution authority.
+        """
         self._requireValid()
-        return self._pipeline.run(providerName=providerName, query=query, model=model, providerOptions=providerOptions, streamObserver=streamObserver, cancellationSignal=self._cancellationSignal)
+        streamObservation = None if observation is None else observation.forExecution(self._observationOwner)
+        try:
+            return self._pipeline.run(providerName=providerName, query=query, model=model, providerOptions=providerOptions, streamObserver=streamObserver, cancellationSignal=self._cancellationSignal, streamObservation=streamObservation)
+        finally:
+            if observation is not None:
+                observation.finishExecution()
 
     def prepareProcessing(self, *, memoryKey: str, inputValue: object, buildQueryItemsCapabilityId: str, buildQueryCapabilityId: str, providerName: str, model: str | None = None, providerOptions: Mapping[str, ImmutableValue] | None = None, filterQueryItemsCapabilityId: str | None = None) -> LlmProcessingPreview:
         """Prepares the exact model-facing query without provider inference."""
         self._requireValid()
         return self._pipeline.prepareProcessing(memoryKey=memoryKey, inputValue=inputValue, buildQueryItemsCapabilityId=buildQueryItemsCapabilityId, buildQueryCapabilityId=buildQueryCapabilityId, filterQueryItemsCapabilityId=filterQueryItemsCapabilityId, providerName=providerName, model=model, providerOptions=providerOptions, memoryView=self._memory, cancellationSignal=self._cancellationSignal)
 
-    def runProcessing(self, *, memoryKey: str, inputValue: object, buildQueryItemsCapabilityId: str, buildQueryCapabilityId: str, providerName: str, model: str | None = None, providerOptions: Mapping[str, ImmutableValue] | None = None, filterQueryItemsCapabilityId: str | None = None, completionCapabilityId: str | None = None, completionInput: object | None = None, streamObserver: Callable[[LlmStreamEvent], None] | None = None) -> LlmProcessingResult:
-        """Runs one transactional LLM ProcessingRun against this memory view."""
+    def runProcessing(self, *, memoryKey: str, inputValue: object, buildQueryItemsCapabilityId: str, buildQueryCapabilityId: str, providerName: str, model: str | None = None, providerOptions: Mapping[str, ImmutableValue] | None = None, filterQueryItemsCapabilityId: str | None = None, completionCapabilityId: str | None = None, completionInput: object | None = None, streamObserver: Callable[[LlmStreamEvent], None] | None = None, observation: ObservationSession | None = None) -> LlmProcessingResult:
+        """Runs transactional processing with optional same-application observation.
+
+        RUN collection ends after completion/transaction work, on every exit.
+        The recorded stream outcome describes only the provider span and may
+        differ from the eventual ProcessingRun or Job outcome.
+        """
         self._requireValid()
-        return self._pipeline.runProcessing(memoryKey=memoryKey, inputValue=inputValue, buildQueryItemsCapabilityId=buildQueryItemsCapabilityId, buildQueryCapabilityId=buildQueryCapabilityId, filterQueryItemsCapabilityId=filterQueryItemsCapabilityId, completionCapabilityId=completionCapabilityId, completionInput=completionInput, providerName=providerName, model=model, providerOptions=providerOptions, streamObserver=streamObserver, memoryView=self._memory, cancellationSignal=self._cancellationSignal)
+        streamObservation = None if observation is None else observation.forExecution(self._observationOwner)
+        try:
+            return self._pipeline.runProcessing(memoryKey=memoryKey, inputValue=inputValue, buildQueryItemsCapabilityId=buildQueryItemsCapabilityId, buildQueryCapabilityId=buildQueryCapabilityId, filterQueryItemsCapabilityId=filterQueryItemsCapabilityId, completionCapabilityId=completionCapabilityId, completionInput=completionInput, providerName=providerName, model=model, providerOptions=providerOptions, streamObserver=streamObserver, memoryView=self._memory, cancellationSignal=self._cancellationSignal, streamObservation=streamObservation)
+        finally:
+            if observation is not None:
+                observation.finishExecution()
 
 
 @dataclass(frozen=True, slots=True)
@@ -395,7 +417,7 @@ class CodeEntryIdentity:
 class CodeEntryContext:
     """Fresh invocation-scoped gateway supplied to Pack CodeEntry code."""
 
-    def __init__(self, *, identity: CodeEntryIdentity, packRoot: Path, io: ManagedIo | ManagedIoTransaction, capabilities: CapabilityRegistry, llmProviders: LlmProviderRegistry, llmPipeline: LlmProcessingPipeline, memory: CommittedValueLayer | CommittedValueTransaction, registrationScope: RegistrationScope, config: dict[str, object], capabilityInvoker: Callable[[str, object | None], object], process: ProcessFacade | None = None, workspace: EphemeralWorkspace | None = None, allowRegistration: bool = False, cancellationSignal: CancellationSignal | None = None) -> None:
+    def __init__(self, *, identity: CodeEntryIdentity, packRoot: Path, io: ManagedIo | ManagedIoTransaction, capabilities: CapabilityRegistry, llmProviders: LlmProviderRegistry, llmPipeline: LlmProcessingPipeline, memory: CommittedValueLayer | CommittedValueTransaction, registrationScope: RegistrationScope, config: dict[str, object], capabilityInvoker: Callable[[str, object | None], object], process: ProcessFacade | None = None, workspace: EphemeralWorkspace | None = None, allowRegistration: bool = False, cancellationSignal: CancellationSignal | None = None, observationOwner: ObservationOwner | None = None) -> None:
         """Creates one call-specific authority context from runtime-owned facilities.
 
         Production ApplicationRuntime construction supplies process authority and
@@ -414,7 +436,8 @@ class CodeEntryContext:
         self.memory = _MemoryFacade(state=memory, requireValid=self.requireValid, producer=identity.producerSnapshot())
         self.cancellation = _CancellationFacade(signal=cancellationSignal, requireValid=self.requireValid)
         self.capabilities = _CapabilityFacade(ownerId=identity.codeEntryInstanceId, registry=capabilities, scope=registrationScope, invoker=capabilityInvoker, requireValid=self.requireValid, allowRegistration=allowRegistration)
-        self.llm = _LlmFacade(ownerId=identity.codeEntryInstanceId, registry=llmProviders, scope=registrationScope, pipeline=llmPipeline, memory=memory, requireValid=self.requireValid, allowRegistration=allowRegistration, cancellationSignal=cancellationSignal)
+        self.observations = ObservationFacade(observationOwner, self.requireValid)
+        self.llm = _LlmFacade(ownerId=identity.codeEntryInstanceId, registry=llmProviders, scope=registrationScope, pipeline=llmPipeline, memory=memory, requireValid=self.requireValid, allowRegistration=allowRegistration, cancellationSignal=cancellationSignal, observationOwner=observationOwner)
 
     def requireValid(self) -> None:
         """Rejects use after Actant has ended this invocation turn."""
@@ -425,6 +448,7 @@ class CodeEntryContext:
         """Ends invocation authority and releases invocation-owned resources."""
         if not self._valid:
             return
+        self.observations.close()
         self.memory.close()
         self._workspace.close()
         self._valid = False

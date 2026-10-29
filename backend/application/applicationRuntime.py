@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 17
+# file: backend/application/applicationRuntime.py ; version: 18
 from __future__ import annotations
 
 from contextlib import suppress
@@ -11,6 +11,7 @@ from backend.capabilities.runtime import CapabilityRegistry
 from backend.context.codeEntryContext import CodeEntryContext, CodeEntryIdentity
 from backend.io.managedIo import ManagedIo, ManagedIoTransaction
 from backend.llm.streamingRuntime import LlmProcessingPipeline, LlmProviderRegistry
+from backend.observation import ObservationService
 from backend.orchestration.cancellation import CancellationSignal, ExecutionCancelled
 from backend.orchestration.runtime import Job, JobState, OrchestrationUnit, OrchestrationUnitOutcome
 from backend.packs.runtime import PackLoader, PackResolver
@@ -51,6 +52,7 @@ class ApplicationRuntime:
         packResolver: PackResolver,
         config: dict[str, object] | None = None,
         tracer: Tracer | None = None,
+        observationService: ObservationService | None = None,
     ) -> None:
         """
         Creates one ApplicationRun and its mediated runtime services.
@@ -63,6 +65,8 @@ class ApplicationRuntime:
             packResolver: Resolver used by this run's PackLoader.
             config: Detached host/application runtime configuration.
             tracer: Optional externally owned tracer.
+            observationService: Host-owned shared observation composition. When
+                omitted, a standalone runtime composes inactive local observation.
 
         Raises:
             ValueError: If mutually exclusive or inconsistent Application inputs
@@ -124,6 +128,8 @@ class ApplicationRuntime:
             ),
             trace=lambda reason, attributes: self.trace(reason, attributes=attributes),
         )
+        self._observationService = observationService if observationService is not None else ObservationService()
+        self._observationOwner = self._observationService.owner()
         self.packLoader = PackLoader(runtime=self, resolver=packResolver)
 
     @property
@@ -146,6 +152,7 @@ class ApplicationRuntime:
         packResolver: PackResolver,
         config: dict[str, object] | None = None,
         tracer: Tracer | None = None,
+        observationService: ObservationService | None = None,
     ) -> tuple[ApplicationRuntime, LoadedApplicationSave]:
         """
         Creates a fresh ApplicationRuntime from one durable Application root snapshot.
@@ -163,6 +170,7 @@ class ApplicationRuntime:
             packResolver=packResolver,
             config=config,
             tracer=tracer,
+            observationService=observationService,
         )
         runtime.applicationRun.application.durableGeneration = loaded.durableGeneration
         return runtime, loaded
@@ -311,6 +319,7 @@ class ApplicationRuntime:
             if not self.applicationRun.active:
                 return
 
+            self._observationOwner.release()
             errors: list[Exception] = []
             try:
                 self.packLoader.close()
@@ -338,6 +347,7 @@ class ApplicationRuntime:
             if self._closed:
                 return
 
+            self._observationOwner.release()
             errors: list[Exception] = []
             if self.applicationRun.active:
                 try:
@@ -408,6 +418,7 @@ class ApplicationRuntime:
             capabilities=self.capabilities,
             llmProviders=self.llmProviders,
             llmPipeline=self.llmPipeline,
+            observationOwner=self._observationOwner,
             process=process,
             memory=self.applicationRun.application.committedState if memoryView is None else memoryView,
             registrationScope=registrationScope,

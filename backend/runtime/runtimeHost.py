@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 8
+# file: backend/runtime/runtimeHost.py ; version: 9
 from __future__ import annotations
 
 from contextlib import suppress
@@ -8,6 +8,7 @@ from threading import RLock
 from backend.application.applicationRuntime import ApplicationRuntime
 from backend.application.lifecycle import ApplicationLifecycle
 from backend.core.runtimeIds import newRuntimeId
+from backend.observation import ObservationService
 from backend.packs.runtime import ManualActivationPlan, PackResolver
 from backend.runtime.sharedServices import (
     SharedServiceRegistry,
@@ -15,6 +16,7 @@ from backend.runtime.sharedServices import (
     unbindApplicationRunSharedServices,
 )
 from backend.save import ApplicationStore
+from backend.telemetry import TelemetryService
 from backend.tracing import Tracer, TraceSinkDestination
 
 __all__ = ["RuntimeHost", "RuntimeHostState"]
@@ -44,8 +46,14 @@ class RuntimeHost:
         applicationStore: ApplicationStore,
         packResolver: PackResolver,
         tracer: Tracer | None = None,
+        telemetryService: TelemetryService | None = None,
     ) -> None:
-        """Creates one RuntimeHost around shared storage, Pack resolution, and services."""
+        """Creates a host with inactive shared observation infrastructure.
+
+        telemetryService is a host-selected borrowed collector; unrelated direct
+        claims survive host teardown. Omission selects lazy installed providers
+        without activating optional Packs or touching hardware at construction.
+        """
         if not isinstance(applicationStore, ApplicationStore):
             raise TypeError("applicationStore must be an ApplicationStore.")
         if not isinstance(packResolver, PackResolver):
@@ -59,6 +67,7 @@ class RuntimeHost:
         self._runtimesByRunId: dict[str, ApplicationRuntime] = {}
         self._runIdByApplicationId: dict[str, str] = {}
         self.sharedServices = SharedServiceRegistry()
+        self._observations = ObservationService(telemetryService)
         self._ownsTracer = tracer is None
         self.tracer = tracer or Tracer(
             origin="actant.runtime-host",
@@ -103,6 +112,7 @@ class RuntimeHost:
                 packResolver=self._packResolver,
                 config=config,
                 tracer=tracer,
+                observationService=self._observations,
             )
             applicationRunId = runtime.applicationRun.applicationRunId
             bindApplicationRunSharedServices(applicationRunId, self.sharedServices)
@@ -147,6 +157,7 @@ class RuntimeHost:
                 packResolver=self._packResolver,
                 config=config,
                 tracer=tracer,
+                observationService=self._observations,
             )
             applicationRunId = runtime.applicationRun.applicationRunId
             bindApplicationRunSharedServices(applicationRunId, self.sharedServices)
@@ -224,6 +235,7 @@ class RuntimeHost:
                 errors.extend(self._closeRuntime(runtime))
                 unbindApplicationRunSharedServices(applicationRunId)
 
+            self._observations.close()
             try:
                 self.sharedServices.close()
             except Exception as err:  # noqa: BLE001 - host shutdown aggregates arbitrary service failures.
