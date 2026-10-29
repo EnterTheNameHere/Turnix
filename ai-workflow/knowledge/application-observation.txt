@@ -1,0 +1,188 @@
+ACTANT - PM-03 APPLICATION OBSERVATION FACADE / CORRELATION
+=========================================================
+
+STATUS / EXACT REFS
+-------------------
+Owner: Integration; implementation: user-authorized Codex PM-03 worker.
+Implemented, tested and published for independent Integration review.
+NOT integrated or accepted. No consumer Application branch adoption.
+Repository: EnterTheNameHere/Turnix
+Branch: pm03-authorized-observation
+Implementation: 96322615aec82561e0294f0b677be7f72f59037e
+Exact starting Integration commit: 86c1f83fcb5d358d0e4e138e77c7c56830b6b757
+Implementation parent: 568fdc0244970e1143b79ab9a5404af83906dfe2 (coordination
+proposal, fast-forwarded before coding). PM-01 and PM-02 were already integrated;
+their original worker commits were not reapplied and their source was not changed.
+Semantics consume knowledge/telemetry-subscriptions.txt and stream-observation.txt.
+This is accepted local-process working-design materialization pending compatibility
+review, not promotion into canonical DA/IS design. No scope expansion was needed.
+
+PUBLIC APPLICATION CONTRACT
+----------------------------
+Import from backend.observation:
+- ObservationRequest(memory=True, cpu=True, gpu=True, stream=True,
+  sampleIntervalSeconds=1.0, historySamples=300,
+  windowSeconds=1.0, historyWindows=120): frozen provider-neutral needs. Boolean
+  needs are exact bools; cadence and retention use accepted PM-01/02 validation.
+- ObservationLifetime.RUN (default) and APPLICATION (explicit independent lifetime).
+- ObservationSession and frozen ObservationSnapshot / CorrelatedWindow.
+
+Within a valid CodeEntryContext:
+    session = ctx.observations.request(ObservationRequest())
+    result = ctx.llm.run(providerName=..., query=..., observation=session)
+    evidence = session.snapshot()
+
+ctx.llm.runProcessing(..., observation=session) follows the same seam, preserving
+all existing processing, observer, cancellation, memory and transaction arguments.
+No automatic monitoring is enabled. Applications choose signal needs and finite
+retention/cadence, never vendors, collectors, provider factories or sharing policy.
+Hardware values describe whole-host activity, not per-application attribution.
+Native engine evidence remains separately in result.providerMetadata (or the
+existing nested streaming result for processing); characters are Unicode code
+points, never converted to tokens. Observation retains no additional generated text.
+
+Session.snapshot() returns bounded immutable hardware history, optional PM-02
+stream snapshot, correlated windows, hardwareHistoryMayBeTruncated,
+hardwareUnavailableReason, streamUnavailableReason, released, collectionStopped.
+Sensor-level missing/failing hardware remains SignalUnavailable in raw samples;
+facility acquisition/read failure reports error type only, with useful stream
+evidence retained. Ordinary optional failures do not replace inference errors.
+Session.release() is idempotent and clears owned evidence/claims, never cancels
+inference. Previously returned immutable evidence remains caller-owned.
+
+AUTHORITY / LIFETIMES / REVOCATION
+---------------------------------
+ctx.observations.request validates invocation authority before acquiring anything.
+Low-level contexts with no runtime owner reject requests. Runtime-owned scopes must
+also remain valid. Every LLM facade invocation still validates CodeEntryContext;
+a session cannot execute inference or extend invocation authority. A session can
+attach once, to a call in the same ApplicationRun owner; foreign/released/reused
+attachments are rejected. A later valid invocation in the same application can
+attach a still-unused APPLICATION session.
+
+Concrete independent owner: ObservationOwner allocated to each ApplicationRuntime
+by ObservationService. Owners/sessions retain no context, validation callback,
+transaction or runtime reference. A weak-reference architectural test proves an
+APPLICATION session does not keep the expired invocation context alive.
+
+RUN sessions stop their hardware collection in facade finally on every execution
+exit (including preparation, completion/transaction failures and GeneratorExit).
+Bounded evidence is readable until explicit release or context invalidation. The
+context also disposes unused RUN sessions; a RUN session does not silently outlive
+the invocation. To retain evidence longer, copy an immutable snapshot or explicitly
+request lifetime=ObservationLifetime.APPLICATION while invocation authority is valid.
+APPLICATION sessions continue hardware observation under independent ApplicationRun
+ownership until release or owner teardown. The PM-02 stream claim always finalizes
+at provider-span exit; stream completion is distinct from ProcessingRun/Job success.
+
+ApplicationRuntime.stop/close revoke the owner before arbitrary Pack cleanup. Host
+create/load failure cleanup calls runtime.close and revokes acquired sessions.
+RuntimeHost.stop closes every runtime plus its observation scopes. Owner release is
+serialized with session acquisition/reads/disposal. Context facade acquisition and
+closure are serialized too, avoiding a request racing invocation disposal.
+One owner/session cannot revoke another application's or an external consumer's
+claims. Ordinary optional stream construction/read/release failures are isolated.
+
+HOST COMPOSITION / SOURCE BOUNDARIES
+-----------------------------------
+RuntimeHost previously had no telemetry construction. It now composes one inactive
+ObservationService around one default lazy TelemetryService. Host constructor
+telemetryService=... can borrow an already shared collector; its legacy/direct
+claims survive host shutdown. Default installed provider factories remain internal;
+no hardware initialization/polling occurs without enabled requests. No automatic
+optional-Pack activation, discovery or installation was added.
+
+Both createApplication and loadApplication pass the same host observation service
+before application lifecycle initialization. ApplicationRuntime constructor and
+loadApplication also accept observationService=... for host composition. Standalone
+runtimes default to their own inactive service. ObservationService.owner()/close()
+and ObservationOwner.request()/release() are runtime composition/lifecycle seams,
+not application invocation APIs. The service closes only scopes it created, never
+TelemetryService.stop() or unrelated telemetry subscriptions.
+
+Changed source: new backend/observation.py, context/codeEntryContext.py,
+application/applicationRuntime.py, runtime/runtimeHost.py and new
+tests/backend/application/test_observation.py. Existing PM-01 telemetry and PM-02
+stream measurement implementations/contracts were consumed unchanged. No collector
+or stream-measurement mechanism was duplicated. All five Python files passed
+path/version and class/function docstring audit; changed existing versions advance
+26->27, 17->18 and 8->9 respectively. New source/test version is 1.
+
+CORRELATION / HONEST LIMITS
+---------------------------
+correlate(windows, hardware) associates retained collection intervals with retained
+stream windows using only collectionStartNs/collectionEndNs and PM-02 start/endNs
+in the same host-process monotonic_ns domain. Raw sampledTimeNs is wall display
+evidence only. Rates, ordering and overlap survive backwards/forwards wall jumps.
+Injected host clocks must share that domain; cross-process/host alignment is excluded.
+
+CorrelatedWindow.stream is the unchanged stream window. hardware contains each
+overlapping raw sample, possibly in multiple windows when a slow collection spans
+them. Positive intervals are half-open; point hardware reads belong to the
+containing window. Zero-duration stream windows match containing read intervals or
+an equal point. Unknown/invalid legacy sample timing stays in raw hardware evidence
+and is excluded from alignment. No fabricated timestamp or nearest-sample match.
+
+uncoveredIntervals is the complement of retained collection intervals inside each
+window. It shows absence of retained collection activity, NOT proof of missed polls
+or continuous utilization coverage. Normal polling cadence, delayed reads, eviction
+and hardware unavailability must be distinguished using raw evidence. Sequential
+sensor reads are never claimed simultaneous or interpolated into window averages.
+Collection durations, sampleIntervalSeconds, actualIntervalSeconds and timestamp
+spacing remain unchanged. PM-02 empty windows and gap summaries show stream silence.
+
+PM-02 droppedWindowCount exposes exact stream truncation. PM-01 exposes no history
+eviction counter: hardwareHistoryMayBeTruncated conservatively becomes true when
+the buffer reaches request.historySamples. Exact lost-sample count is UNKNOWN;
+fullness does not assert an eviction actually occurred. Earliest retained evidence
+is visible in hardware. No second history/counter collector was invented.
+
+Passive collection retains PM-01's limitation: release waits for a native read to
+return and cannot interrupt hung hardware. Stream observation cannot interrupt a
+blocked provider. One session attaches to one stream; create a fresh session for
+another run. Application lifetime can continue hardware between calls. No tuning,
+restart, model scheduling, persistent history, graphical UI, cross-host clocks or
+consumer-branch changes. No real server, real GPU or consumer application validation.
+
+VERIFICATION (WORKER, NOT INTEGRATION ACCEPTANCE)
+------------------------------------------------
+Isolated checkout: C:\Users\Enter\Documents\ChatGPT\Actant\pm03-observation
+setup.ps1 installed its own embedded Python 3.15.0b4 and requirements.
+Existing/user/application checkouts were preserved; canonical coordination alone
+was deliberately updated on actant-integration. Native git worktree was used after
+the app worktree tool rejected the nested repository path as a workspace root.
+
+Focused:
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/application/test_observation.py
+Result: 40 passed in 0.23s.
+
+Relevant application/context/runtime/telemetry/LLM/orchestration/cancellation:
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/application tests/backend/context tests/backend/runtime tests/backend/telemetry tests/backend/llm tests/backend/orchestration tests/first_party/llmDrivers
+Result: 213 passed in 0.89s.
+
+Complete Actant directory (excludes embedded dependency tests):
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests
+Result: 1066 passed, zero skips, in 2.19s (1026 baseline + 40 new cases).
+git diff --check and staged diff --check passed. Ruff was not run.
+An initial test fixture used unversioned capability IDs and an incorrect Job enum;
+these test-only mistakes were corrected against actual runtime contracts. Existing
+observer exceptions are isolated into observerErrors; tests preserve that behavior.
+
+Coverage includes real Job processing success/failure/cancellation/preparation/
+completion failures; transaction commit/rollback; optional clock/facility failures;
+disabled Jobs/direct calls; active independent revocation; direct GeneratorExit and
+existing observer errors; explicit/application/host/failed-lifecycle teardown;
+multiple applications and borrowed consumers; actual bounded history eviction and
+shared downsampling; unavailable hardware; monotonic intervals, wall jumps, silence,
+truncation, point/interval/unknown timestamps and immutable no-content evidence.
+
+INTEGRATION REVIEW / CONTINUATION
+---------------------------------
+Read current actant-integration index, STATE/HANDOFF and inbox; synchronize safely.
+Inspect commit 96322615aec82561e0294f0b677be7f72f59037e independently and validate
+the concrete ownership/authority, optional-failure and correlation contracts above.
+If compatible, cherry-pick that single implementation commit onto current Integration
+(its parent 568fdc0 is coordination only), rerun focused/regression/full tests and
+record independent acceptance. Do not reapply original PM-01/02 worker commits.
+No application adoption is authorized by availability; coordinate it separately.
+Completion mail is ai-workflow/mail/integration/inbox/2026-10-29-pm03-complete.txt.
