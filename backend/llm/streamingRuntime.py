@@ -1,4 +1,4 @@
-# file: backend/llm/streamingRuntime.py ; version: 10
+# file: backend/llm/streamingRuntime.py ; version: 11
 from __future__ import annotations
 
 import base64
@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from backend.core.immutableValue import ImmutableValue, ImmutableValueFreezer
 from backend.llm.errors import LlmProviderProtocolError
 from backend.llm.llmTypes import LlmCallRequest, LlmExecutionProfile, LlmQuery, LlmStreamEvent, LlmStreamProvider
+from backend.llm.streamObservation import StreamObservation, StreamOutcome
 from backend.orchestration.cancellation import CancellationSignal, ExecutionCancelled
 from backend.processing.runtime import ProcessingRun, ProcessingStage, QueryItem, plainImmutableValue
 from backend.registration import Registration, RegistrationRegistry, RegistrationScope
@@ -147,9 +148,14 @@ class LlmProcessingPipeline:
         model: str | None = None,
         providerOptions: Mapping[str, ImmutableValue] | None = None,
         streamObserver: Callable[[LlmStreamEvent], None] | None = None,
+        streamObservation: StreamObservation | None = None,
         cancellationSignal: CancellationSignal | None = None,
     ) -> StreamingLlmResult:
-        """Runs one provider call without creating persistent ProcessingRun state."""
+        """Runs one provider call, optionally collecting disposable streamObservation evidence.
+
+        Observation begins only at provider entry, after profile resolution, and does
+        not replace streamObserver or change persistent ProcessingRun semantics.
+        """
         registration, provider, options, profile = self._resolveExecution(
             providerName=providerName,
             model=model,
@@ -164,6 +170,7 @@ class LlmProcessingPipeline:
             query=query,
             model=model,
             streamObserver=streamObserver,
+            streamObservation=streamObservation,
             cancellationSignal=cancellationSignal,
         )
 
@@ -303,10 +310,15 @@ class LlmProcessingPipeline:
         completionCapabilityId: str | None = None,
         completionInput: object | None = None,
         streamObserver: Callable[[LlmStreamEvent], None] | None = None,
+        streamObservation: StreamObservation | None = None,
         memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
         cancellationSignal: CancellationSignal | None = None,
     ) -> LlmProcessingResult:
-        """Runs and transactionally persists one complete LLM ProcessingRun."""
+        """Runs and transactionally persists one complete LLM ProcessingRun.
+
+        Optional streamObservation covers only the provider stream, not preparation,
+        completion capabilities or transaction success. Its evidence is not persisted.
+        """
         if self._state is None or self._capabilityInvoker is None:
             raise RuntimeError("runProcessing() requires committed state and a capability invoker.")
         if type(memoryKey) is not str or not memoryKey or not memoryKey.replace("-", "").replace("_", "").isalnum() or not memoryKey.islower():
@@ -395,6 +407,7 @@ class LlmProcessingPipeline:
                 query=query,
                 model=model,
                 streamObserver=streamObserver,
+                streamObservation=streamObservation,
                 processingRun=run,
                 cancellationSignal=cancellationSignal,
             )
@@ -614,6 +627,7 @@ class LlmProcessingPipeline:
         query: LlmQuery,
         model: str | None,
         streamObserver: Callable[[LlmStreamEvent], None] | None,
+        streamObservation: StreamObservation | None = None,
         processingRun: ProcessingRun | None = None,
         cancellationSignal: CancellationSignal | None = None,
     ) -> StreamingLlmResult:
@@ -638,54 +652,78 @@ class LlmProcessingPipeline:
         observerErrors: list[str] = []
         startedTimeNs = time.time_ns()
         startedMonotonicNs = time.monotonic_ns()
+        observationClaim = None
+        outcome = StreamOutcome.CLOSED
+        if streamObservation is not None:
+            with suppress(Exception):
+                observationClaim = streamObservation.begin()
         try:
-            stream = provider.stream(request)
-            for index, event in enumerate(stream):
-                self._raiseIfCancelled(cancellationSignal)
-                self._validateStreamEvent(event=event, index=index, completed=completed)
-                if processingRun is not None:
-                    processingRun.enterStage(ProcessingStage.STREAM_EVENT)
-                if event.eventType == "delta":
-                    parts.append(event.text)
-                elif event.eventType == "completed":
-                    completed = True
-                    finalMetadata = event.metadata
-                else:
-                    self._raiseUnsupportedStreamEvent(event)
-                if streamObserver is not None:
-                    try:
-                        streamObserver(event)
-                    except Exception as err:  # noqa: BLE001 - observer failure is non-authoritative evidence only.
-                        observerErrors.append(f"{type(err).__qualname__}: {err}")
-                        self._emitObserverFailure(processingRun, err)
-        except ExecutionCancelled:
-            raise
-        except Exception as err:
-            if cancellationSignal is not None and cancellationSignal.requested:
-                raise ExecutionCancelled("Provider execution stopped after cancellation request.") from err
-            raise
+            try:
+                stream = provider.stream(request)
+                for index, event in enumerate(stream):
+                    self._raiseIfCancelled(cancellationSignal)
+                    self._validateStreamEvent(event=event, index=index, completed=completed)
+                    if processingRun is not None:
+                        processingRun.enterStage(ProcessingStage.STREAM_EVENT)
+                    if event.eventType == "delta":
+                        parts.append(event.text)
+                        if observationClaim is not None and event.text:
+                            try:
+                                observationClaim.recordText(event.text)
+                            except Exception as err:  # noqa: BLE001 - optional measurement never changes delivery.
+                                with suppress(Exception):
+                                    observationClaim.fail(err)
+                    elif event.eventType == "completed":
+                        completed = True
+                        finalMetadata = event.metadata
+                    else:
+                        self._raiseUnsupportedStreamEvent(event)
+                    if streamObserver is not None:
+                        try:
+                            streamObserver(event)
+                        except Exception as err:  # noqa: BLE001 - observer failure is non-authoritative evidence only.
+                            observerErrors.append(f"{type(err).__qualname__}: {err}")
+                            self._emitObserverFailure(processingRun, err)
+            except ExecutionCancelled:
+                raise
+            except Exception as err:
+                if cancellationSignal is not None and cancellationSignal.requested:
+                    raise ExecutionCancelled("Provider execution stopped after cancellation request.") from err
+                raise
 
-        self._raiseIfCancelled(cancellationSignal)
-        if not completed:
-            raise LlmProviderProtocolError("Provider stream ended without a completed event.")
-        endedMonotonicNs = time.monotonic_ns()
-        endedTimeNs = time.time_ns()
-        if processingRun is not None:
-            processingRun.enterStage(ProcessingStage.PARSE_RESPONSE)
-        return StreamingLlmResult(
-            query=request.query,
-            model=request.model,
-            providerName=registration.name,
-            providerOwnerId=registration.ownerId,
-            providerOptions=request.providerOptions,
-            executionProfile=profile,
-            rawText="".join(parts),
-            startedTimeNs=startedTimeNs,
-            endedTimeNs=endedTimeNs,
-            durationNs=endedMonotonicNs - startedMonotonicNs,
-            providerMetadata=finalMetadata,
-            observerErrors=tuple(observerErrors),
-        )
+            self._raiseIfCancelled(cancellationSignal)
+            if not completed:
+                raise LlmProviderProtocolError("Provider stream ended without a completed event.")
+            endedMonotonicNs = time.monotonic_ns()
+            endedTimeNs = time.time_ns()
+            if processingRun is not None:
+                processingRun.enterStage(ProcessingStage.PARSE_RESPONSE)
+            result = StreamingLlmResult(
+                query=request.query,
+                model=request.model,
+                providerName=registration.name,
+                providerOwnerId=registration.ownerId,
+                providerOptions=request.providerOptions,
+                executionProfile=profile,
+                rawText="".join(parts),
+                startedTimeNs=startedTimeNs,
+                endedTimeNs=endedTimeNs,
+                durationNs=endedMonotonicNs - startedMonotonicNs,
+                providerMetadata=finalMetadata,
+                observerErrors=tuple(observerErrors),
+            )
+            outcome = StreamOutcome.COMPLETED
+            return result
+        except ExecutionCancelled:
+            outcome = StreamOutcome.CANCELLED
+            raise
+        except Exception:
+            outcome = StreamOutcome.FAILED
+            raise
+        finally:
+            if observationClaim is not None:
+                with suppress(Exception):
+                    observationClaim.finish(outcome)
 
     @staticmethod
     def _validateStreamEvent(
