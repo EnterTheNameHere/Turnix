@@ -1,0 +1,160 @@
+ACTANT - PM-02 PASSIVE STREAM OBSERVATION CONTRACT AND EVIDENCE
+============================================================
+
+STATUS / AUTHORITY
+------------------
+Published implementation candidate, not integrated or accepted by Integration.
+Worker: Codex PM-02 implementer (same user-authorized implementer as PM-01).
+Branch: pm02-passive-stream
+Implementation commit: 2be412b008a526c98d90eb9538364699bab8612f
+Exact starting Integration baseline: 65dfcb269fc1159b8394787643e5ea5b73a7aced
+Implementation parent: 149f8cca58288ec2b72ef1f2c85ff02f1675e98f (coordination-only dispatch).
+Accepted PM-01 154dcd96c2b122d52af17fdbb756ecb4ecbf9983 was already included.
+The original PM-01 branch was neither merged nor reapplied. Reused the clean isolated
+pm01-telemetry checkout on the new bounded branch; existing/user/application checkouts
+were not modified. No architectural contradiction or required scope expansion found.
+Semantics follow passive-monitoring.txt and the accepted local-process working design;
+this evidence does not promote working knowledge into canonical DA/IS specification.
+
+PUBLIC PM-03 INTERFACES
+----------------------
+Module: backend.llm.streamObservation (independent of TelemetryService/hardware).
+
+- StreamObservationConfiguration(windowSeconds=1.0, historyWindows=120): frozen
+  configuration; finite positive windows of at least one nanosecond and positive
+  exact integer retention. Returned snapshots contain at most historyWindows windows.
+- StreamObservation(configuration=None, monotonicNs=time.monotonic_ns): inactive
+  single-run handle; construction reads no clock and installs no observer/task.
+- pipeline.run(..., streamObservation=None) and
+  pipeline.runProcessing(..., streamObservation=None): opt-in per-call handle.
+  Existing streamObserver remains independent and receives unchanged events.
+- observation.snapshot() -> frozen StreamObservationSnapshot. Live reads advance
+  observation time/windows without polling; terminal reads perform no clock work.
+- observation.release(): idempotent disposal, clears owned window/count summaries,
+  revokes further observation, and never requests inference cancellation.
+- observation.configuration: read-only frozen lifetime configuration.
+- observation.begin() -> StreamObservationClaim | None: pipeline acquisition seam,
+  single use. Already used/disposed handles are inert rather than mixing runs.
+- claim.recordText(text), claim.fail(exception), claim.finish(StreamOutcome): run
+  recording/finalization seam. Ordinary optional failures are isolated. finish is
+  idempotent and releases the active claim in finally, keeping bounded evidence.
+
+StreamObservationSnapshot fields:
+ originNs, observedThroughNs, endNs, firstTextNs, lastTextNs,
+ characterCount, deliveryCount, windows, droppedWindowCount,
+ outcome, active, released, unavailableReason.
+Properties: firstTextLatencyNs, silenceNs.
+active indicates a live run claim; released indicates explicit handle disposal.
+An inactive terminal handle can still contain bounded evidence until disposal.
+
+StreamObservationWindow fields:
+ startNs, endNs, characterCount, deliveryCount, firstTextNs, lastTextNs,
+ gapCount, gapSumNs, minGapNs, maxGapNs, partial.
+Properties: charactersPerSecond, meanGapNs.
+No generated content, query, request, provider metadata, exception object/message or
+traceback is stored by observation. Existing pipeline response/result persistence is
+unchanged; observation does not make an additional copy or persist its measurements.
+
+MEASUREMENT SEMANTICS
+---------------------
+Origin: clock read immediately before provider.stream(), after profile resolution,
+query preparation and request construction. It excludes model/profile preparation,
+completion capabilities and transaction commit. This is not engine compute latency.
+Delivery: validated/accepted non-empty delta text, after ordinary pipeline staging
+and before the existing streamObserver callback. Iteration/pipeline time and prior
+callback delays affect observed delivery. Text is counted with len(str): Unicode code
+points, not bytes, graphemes, words or model tokens. Empty deltas and completed events
+do no monitoring clock/count work. Every non-empty arrival is timestamped; bounded
+windows retain first/last arrival times plus aggregated spacing, not an event log.
+Terminal end: final observation clock in pipeline finally, after stream validation and
+result assembly but before returning to caller completion/transaction work.
+
+Fixed windows are half-open [start,end), anchored to origin, with exact-boundary
+arrivals in the next window. Live/terminal partial windows use elapsed time, and
+zero-duration bursts have charactersPerSecond=None. Completed empty windows have
+zero delivery rate: observed silence, not missing hardware or fabricated token load.
+Inter-arrival gap min/max/mean belong to arrivals in a window, including a predecessor
+from an earlier window. First arrival has no preceding gap. Silence since last text
+(or origin before first text) and empty windows expose gaps. Long gaps materialize
+only bounded retained windows in O(retention), with droppedWindowCount exposing
+retention truncation. Cumulative counts survive eviction. Internally one bounded
+completed-window deque and one current accumulator are retained.
+
+All interval/rate clocks are host-process monotonic; the default is the same
+monotonic_ns domain used by accepted PM-01. No wall time or cross-process correlation
+is used. Non-integer, negative or regressing clock values disable observation rather
+than fabricate latency. unavailableReason records error type only; partial evidence
+must be treated as unavailable/incomplete. endNs can remain None on clock failure.
+
+Native-token evidence stays engine-owned and separate in the unchanged
+StreamingLlmResult.providerMetadata (including existing native usage/timings). No
+universal metadata schema, character-to-token conversion or generic native-token
+rate is invented. PM-03 may consume reliable native evidence through the applicable
+engine contract alongside these character observations. Words/sec is deferred.
+
+LIFETIME / FAILURE GUARANTEES
+----------------------------
+Pipeline acquires a claim only at provider entry. Pre-stream preparation/authority/
+cancellation failures acquire none. Every provider-span exit finalizes its claim:
+COMPLETED, FAILED (including invalid/incomplete streams), CANCELLED after existing
+ExecutionCancelled normalization, or CLOSED for early GeneratorExit/control-flow
+closure. An early explicit handle release ends only monitoring and clears summaries.
+A stream COMPLETED outcome does not assert ProcessingRun or Job success: subsequent
+completion/transaction work may fail or be cancelled normally.
+
+Recording, clock and finalization failures are optional evidence unavailability and
+do not replace provider exceptions, change execution/Job/transaction classification,
+or change existing observer callback order/errors. Original transport-cancellation
+normalization remains confined to the original provider iteration boundary. Snapshot,
+recording and revocation serialize under a lock. The handle retains no invocation
+context or authorization. PM-03 owns invocation authority, host composition, session
+ownership and correlation. No other package source was changed.
+
+DISABLED PATH
+-------------
+No handle is constructed or acquired by the pipeline when streamObservation=None.
+No monitoring observer is installed, no history exists, and no monitoring clock or
+len/count work occurs per event. Existing wall/monotonic execution endpoint clocks
+and response assembly remain unchanged. No thread, provider activation or telemetry
+dependency is introduced by enabling or disabling stream observation.
+
+VERIFICATION
+------------
+Python 3.15.0b4 in the isolated checkout's own embedded runtime.
+
+Regression command (includes all 40 new architectural cases):
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/llm tests/backend/orchestration/test_jobCancellation.py tests/backend/application/test_jobCancellation.py tests/first_party/llmDrivers/test_llamaCppCancellation.py
+Result: 73 passed in 0.17s.
+
+Complete repository command:
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib
+Result: 1071 passed, 10 skipped in 2.50s.
+
+Coverage: fake clocks; first-text origin/preparation exclusion; empty, bursty and
+non-ASCII chunks; exact boundaries/zero-duration partial windows; varied inter-arrival
+gaps; live silence/huge gaps; bounded immutable retention/no content; native token
+separation; disabled-path allocation/clock/count/observer traps; observer failures;
+acquire/record/finalize clock failures; original provider error preservation;
+success/failure/protocol failure/cancellation/early provider or consumer close;
+explicit and concurrent revocation; no pre-stream claim and no handle reuse;
+processing commit/rollback and completion-failure distinction.
+All three changed Python files passed path/version and class/function docstring
+audit. streamingRuntime version 10 -> 11; new module/test version 1.
+git diff --check passed. Ruff was not run. No real inference server, engine-native
+instrumentation, consumer Application adoption or PM-03 composition was exercised.
+
+INTEGRATION / LIMITATIONS
+------------------------
+Read current canonical actant-integration coordination, fetch pm02-passive-stream,
+review and cherry-pick only 2be412b008a526c98d90eb9538364699bab8612f onto latest Integration
+(or merge the bounded branch after review). Parent dispatch is already canonical;
+never reapply original PM-01. Rerun the regression command and full suite against
+the combined result before deciding acceptance. This worker report is review evidence.
+
+No standardized native-token interpretation or words/sec; no per-chunk event log.
+Passive observation cannot interrupt a blocked provider; it releases once control
+returns/exits and can be explicitly revoked independently. Returned immutable
+snapshots belong to callers and survive later disposal. No PM-03 facade/host/owner/
+correlation work, automatic provider activation, optimizer/tuning/restarts, persistence
+or UI. Next: Integration reviews PM-02; PM-03 consumes accepted PM-01 plus the reviewed
+PM-02 contract and supplies application-facing authorization and timeline composition.
