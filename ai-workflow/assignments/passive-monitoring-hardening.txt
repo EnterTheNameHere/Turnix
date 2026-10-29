@@ -1,0 +1,118 @@
+ACTANT - PASSIVE MONITORING FAULT-PATH HARDENING
+==============================================
+
+OWNER / STATUS / AUTHORITY
+--------------------------
+Accountable scope, review and acceptance owner: integration.
+Prepared bounded implementer assignment; no worker dispatched and no fix claimed.
+Implementer: to be recorded when the user starts the task.
+Repository: EnterTheNameHere/Turnix
+Integration and canonical coordination branch: actant-integration
+Preparation baseline: 22e3d3ae18d22346fb6eea663b2950af2cdbd663
+Accepted combined PM-01/02/03 source: bde9778614194fc1a01f65f5be568efe94f8d8fe
+Originating request, still open pending investigation and acceptance:
+ai-workflow/mail/integration/inbox/2026-10-29-passive-monitoring-hardening-review.txt
+
+The independent audit supplied source-derived concerns, not reproduced bugs.
+Reproduce each finding before changing behavior. A disproven finding may be closed
+with concrete source/test evidence. Keep H-01 and H-02 in one bounded task because
+acquisition, worker publication and recovery share lifecycle state and locking.
+
+START / BRANCH RULES
+--------------------
+Read the canonical index, protocol, Integration STATE/HANDOFF and current inbox.
+Read telemetry-subscriptions.txt and application-observation.txt under knowledge/.
+Check the accepted observation working design; these instructions do not supersede
+unrelated DA/IS design. Synchronize safely to current Integration, record the actual
+full starting commit, worker identity and branch, then publish start/proposal state.
+Use an isolated checkout and bounded implementation branch. Do not reapply original
+PM worker commits or modify the user's checkout or consumer application branches.
+
+SOURCE OWNERSHIP
+----------------
+Primary implementation: backend/telemetry/service.py.
+Primary regression tests: tests/backend/telemetry/ (new focused test module allowed).
+Only extend observation/application tests when needed to prove optional failures
+cannot leak claims or change inference/Job outcomes. Preserve accepted PM-01/02/03
+interfaces, cadence, observation semantics and independent ownership.
+Report any necessary cross-package contract change before implementing that change.
+
+H-01 - FAILED SUBSCRIPTION ACQUISITION
+------------------------------------
+Source hypothesis: subscribe() inserts into _subscriptions before initial _collect()
+and _ensureWorker(). An escaping exception can deprive the caller of a handle while
+leaving the new collection claim active.
+
+Reproduce with separate deterministic faults:
+- initial collection fails before normal completion;
+- worker setup fails, including failure in Thread.start() after a worker reference
+  has been published;
+- joining a service with existing consumers fails during acquisition.
+
+Test first-consumer and existing-consumer cases as applicable. Inspect partial
+setup, owned-provider initialization and retained data, not just the exception.
+If reproduced, make acquisition atomic from the caller's perspective or reliably
+revoke the failed acquisition, clear its retained monitoring data and release only
+resources no longer needed. Do not revoke or reset pre-existing claims/histories,
+close their providers, or leave a phantom cadence/polling requirement. Legitimately
+collected shared evidence need not be erased merely because a new claim failed.
+Preserve the original failure evidence even if rollback encounters a cleanup error.
+Normal handled hardware unavailability remains nonfatal and explicit.
+Prove that a later valid subscription succeeds after removing the injected fault.
+
+H-02 - UNEXPECTED POLLING-WORKER TERMINATION
+-------------------------------------------
+Source hypothesis: _samplingLoop() clears _thread only on normal exit. An escaping
+collector/scheduler/clock exception can leave a dead worker reference that prevents
+_ensureWorker() from starting replacement polling.
+
+Reproduce using deterministic one-shot failures in actual background collection and
+clock/deadline handling. Distinguish these from sensor exceptions already converted
+to SignalUnavailable. Check the startup fault shared with H-01 too.
+
+If reproduced, restore truthful lifecycle bookkeeping on all relevant exits. A
+stale worker must not prevent later legitimate requests from recovering collection
+once the injected fault is removed. Document which explicit subscription/sampling
+operations request recovery and test their behavior. Preserve at most one shared
+collector and ensure a terminating worker cannot clear a newer worker's identity.
+Avoid races among failure, new acquisition, revocation and final shutdown.
+
+Do not add an unbounded automatic restart/retry loop or suppress platform failure
+evidence. Preserve the existing exception-reporting path or supply explicit bounded
+failure visibility, with the choice explained. Never label stale samples as fresh;
+monotonic collection intervals and gaps remain honest. End all test workers and
+claims deterministically, using events/barriers and bounded joins rather than
+sleep-based races. Recovery must not duplicate collectors or invalidate consumers.
+
+VERIFICATION / REPORTING
+------------------------
+Follow Python 3.15, source path/version and class/function docstring rules.
+Report the reproducer result before the fix and the protected invariant afterward;
+do not merely replace a function with a failure and test the mock itself.
+Cover both release orders, repeated release, owner teardown, bounded retention,
+borrowed versus service-owned provider cleanup and successful reacquisition where
+affected. Check the application optional-failure boundary if the reproduction
+escapes through observation session acquisition.
+
+Use this checkout's own setup.ps1 environment. Exact regression commands:
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/telemetry tests/backend/application/test_observation.py
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/application tests/backend/context tests/backend/runtime tests/backend/telemetry tests/backend/llm tests/backend/orchestration tests/first_party/llmDrivers
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests
+
+Historical combined Actant baseline: 1066 passed, zero skipped at bde9778614194fc1a01f65f5be568efe94f8d8fe.
+Use explicit tests/ discovery; root discovery also includes embedded dependencies.
+Record actual commands/results, any unavailable checks and exact commits. Publish
+the implementation branch, public-contract impact (if any), remaining cleanup/
+recovery limitations and adoption instructions. Update canonical coordination
+safely, preserving concurrent changes. Report for independent Integration review;
+worker completion is not Integration acceptance. Leave the originating findings
+open until Integration decides acceptance or closes them with contrary evidence.
+
+EXCLUSIONS / NEXT GATE
+----------------------
+No PM redesign, performance UI, automatic optimization/tuning, model/server restart,
+provider activation authority, application-branch changes, persistent history,
+scheduler or real hardware/provider experimentation. Existing limits on a hung
+native read are not expanded into a new interruption mechanism by this assignment.
+Escalate genuinely new architecture with concrete evidence. Real hardware and
+inference-provider validation remains a separately scoped task after hardening.
