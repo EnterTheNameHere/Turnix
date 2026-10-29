@@ -1,0 +1,163 @@
+ACTANT - PASSIVE MONITORING H-01/H-02 WORKER EVIDENCE
+===================================================
+
+STATUS / REFS / AUTHORITY
+-------------------------
+User-authorized Codex bounded hardening task. Integration owns independent review
+and acceptance. Implemented, tested and published; NOT integrated or accepted.
+Repository: EnterTheNameHere/Turnix
+Branch: passive-monitoring-hardening
+Implementation: 518fc94bfe4e671fad3adf000f5fb7de7df0843a
+Exact starting Integration commit: 27d483cc51285e919387af9826979f05f0bb2944
+Implementation parent: ee5ee476f7c86bcc6122b55a50a9a65b9c18885d (canonical start
+proposal, fast-forwarded before implementation). Accepted PM-01/02/03 source was
+already present; original worker commits were not reapplied.
+Assignment: ai-workflow/assignments/passive-monitoring-hardening.txt.
+The originating hardening-review inbox message remains OPEN pending Integration.
+No source behavior below is yet claimed as an accepted shared capability.
+
+REPRODUCTIONS BEFORE SOURCE CHANGES
+----------------------------------
+Against unchanged backend/telemetry/service.py version 6, the first focused module
+contained 20 deterministic cases. Command:
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --tb=short --import-mode=importlib tests/backend/telemetry/test_faultRecovery.py
+Result: 20 failed in 10.26s, at the hypothesized invariants, before changing backend
+behavior. Fixture cleanup released leaked claims and joined all started workers.
+The production source was changed only after this run. Both findings are confirmed,
+not disproven. The final module adds seven further protection cases (27 total).
+
+H-01: a real injected monotonic clock failure on initial collection start or end
+left service._subscriptions nonempty after owner.subscribe raised; the owner had no
+handle to release it. Tests cover borrowed and factory-owned GPU resources. End-time
+failure occurs after actual lazy preparation/sensor reads, exposing partial setup.
+Real Thread construction and Thread.start failures also left an unreachable claim.
+Post-start setup failures left a live polling worker driven by that leaked claim.
+The initial ten acquisition cases cover first consumer and existing CURRENT legacy
+consumer, including preservation of that consumer's actual current observation.
+
+H-02: real background threads were stopped by clock/deadline failure, collection
+start/end-clock failure, wall-clock failure within collection, and scheduler wait
+failure. Each reported the exact injected exception via threading.excepthook, then
+left service._thread pointing to the dead thread. Ten cases exercise the five fault
+points with subscribe/sample recovery requests. These are actual loop/collector
+executions; subscribe or the whole polling loop was not replaced by a mock failure.
+
+The tests use events, the service's lifecycle condition lock and bounded joins,
+never sleep-based timing. Fake time advances explicitly. All native providers are
+deterministic fakes; ordinary missing sensor evidence remains SignalUnavailable.
+
+BOUNDED FIX / PROTECTED INVARIANTS
+---------------------------------
+Production change only: backend/telemetry/service.py, version 6 -> 7.
+
+subscribe() now treats publication, initial collection/reused delivery and worker
+setup as one acquisition under the existing lifecycle lock. Any escaping
+BaseException revokes the new subscription using the existing release path, clearing
+its current/history and removing its cadence/collection claim. Remaining consumers
+retain their claims, histories, providers and legitimately collected evidence.
+Service-owned providers close only when no remaining claim needs them; borrowed
+providers retain their existing cleanup contract. Original failure is re-raised.
+If rollback itself raises, an exception note records the cleanup exception type;
+the cleanup error does not replace the original. No generated content is captured.
+
+_ensureWorker() clears only the just-published worker when Thread.start raises.
+Construction failure publishes nothing. If the OS thread actually started before
+start raised, its identity has been revoked; when it enters the loop it cannot
+collect or clear a replacement worker. Worker startup and publication remain under
+the existing condition lock, with one shared collector.
+
+_samplingLoop() has an identity-checked loop and finally under the lifecycle lock.
+Normal exit, unexpected exceptions and control-flow exceptions relinquish only that
+worker's identity and notify waiters. An old thread cannot clear a newer identity.
+Unexpected exceptions continue to threading.excepthook unchanged; there is no
+automatic retry/restart loop and no new retained exception/traceback history.
+
+EXPLICIT RECOVERY / EVIDENCE
+----------------------------
+Public signatures/types are unchanged. subscribe() requests one polling worker
+when needed, including after unexpected worker exit. Successful explicit sample()
+now also invokes the same worker-ensure path after collecting once; it restarts
+polling only when active claims require it. A valid legacy start() still uses that
+same worker-ensure seam; repeated start remains rejected as before. Passive current/
+history reads, release and owner teardown do not autonomously restart collection.
+
+If manual collection fails, it raises normally and does not request worker startup.
+If collection succeeds but worker startup fails, the startup error propagates while
+the legitimately collected snapshot remains retained. Recovery is caller-initiated,
+with no backoff manager, retry queue or scheduling-policy change.
+
+Samples retain actual original monotonic/wall timestamps throughout interruption.
+A joining recovery request may reuse old evidence; it is never restamped as fresh.
+Once collection resumes, the actualIntervalSeconds and start/end timestamps expose
+the full elapsed gap. Tests verify a deterministic 5000-second recovery gap,
+unchanged pre-fault history, bounded two-sample retention and exactly one replacement.
+
+ADDITIONAL COVERAGE / APPLICATION BOUNDARY
+-----------------------------------------
+Final telemetry fault module: 27 cases, including the original twenty plus:
+- failed joins while real legacy HISTORY and two independent subscribers survive;
+  both release orders, repeated release and owner teardown preserve provider cleanup;
+- original ordinary/control-flow acquisition error survives a rollback error, and
+  the unreachable claim's retained data is demonstrably cleared;
+- a real partially started old thread delayed until after replacement publication
+  cannot collect, stop or clear that replacement;
+- collection failure while a disabled subscriber survives the previous GPU lifetime
+  revokes only the failed new claim and allows successful subsequent acquisition.
+
+tests/backend/application/test_observation.py version 1 -> 2 adds two cases using
+real subscribe()/partial initial collection or worker setup failure. No subscribe
+mock is substituted. The real application capability/Job path reports optional
+hardwareUnavailableReason=OSError, leaves no collection claim, still records five
+delivered Unicode characters and finishes the Job Succeeded. Observation/runtime/
+context/LLM production code and accepted interfaces are unchanged.
+Existing tests cover missing/failing sensors, mixed cadences, cancellation, context
+authority, host/application teardown, provider ownership and disabled-path behavior.
+
+VERIFICATION / ENVIRONMENT
+--------------------------
+Isolated native Git worktree:
+ C:\Users\Enter\Documents\ChatGPT\Actant\monitoring-hardening
+Its own setup.ps1 installed Python 3.15.0b4 and requirements. The sandbox initially
+blocked Git LFS subprocesses and pip temporary files; approved reruns completed.
+No user's/application checkout or consumer branch was modified. Canonical
+coordination was deliberately updated on actant-integration.
+
+Final focused fault command:
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/telemetry/test_faultRecovery.py
+Result: 27 passed in 0.06s.
+
+Assignment telemetry/application observation regression:
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/telemetry tests/backend/application/test_observation.py
+Result: 96 passed in 0.39s.
+An earlier sandboxed attempt had 91 passed and 3 temporary-directory setup errors;
+approved normal temporary-file execution passed (94 before the final two cases).
+
+Assignment cross-boundary regressions:
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/application tests/backend/context tests/backend/runtime tests/backend/telemetry tests/backend/llm tests/backend/orchestration tests/first_party/llmDrivers
+Result: 242 passed in 0.99s.
+
+Requested complete Actant directory:
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests
+Result: 1095 passed, zero skipped, in 2.53s (1066 baseline + 29 new cases).
+No unrestricted root collection was used. git diff --check and staged diff --check
+passed for implementation. All three changed Python files passed path/version and
+class/function docstring audit. Ruff was not run. No real hardware, real inference
+server or consumer-application validation was performed.
+
+LIMITS / INDEPENDENT REVIEW INSTRUCTIONS
+----------------------------------------
+This is subscription/worker fault-path hardening, with no PM redesign, new provider
+activation authority, model/server restart, optimization/tuning, UI, persistence or
+consumer branch adoption. Existing inability to interrupt hung native reads remains.
+Unexpected background faults are visible through the existing platform thread
+exception channel; snapshots do not acquire a new background-health/error schema.
+Recovery requires an explicit operation after fault removal. A cleanup mechanism
+that itself fails cannot guarantee resource disposal; its failure is attached to the
+original exception without leaving the failed subscription registered.
+
+Integration should refresh index/STATE/HANDOFF/current inbox and synchronize safely,
+then independently inspect 518fc94bfe4e671fad3adf000f5fb7de7df0843a. If compatible,
+cherry-pick that single implementation commit onto current Integration and rerun
+the documented regressions/full tests before recording acceptance. Leave the
+originating H-01/H-02 findings open until that decision. No original PM worker
+commit needs reapplication. Real hardware/provider validation is a separate scope.
