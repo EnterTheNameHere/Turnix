@@ -1,11 +1,11 @@
-# file: backend/telemetry/service.py ; version: 6
+# file: backend/telemetry/service.py ; version: 7
 from __future__ import annotations
 
 import math
 import time
 from collections import deque
 from dataclasses import dataclass, replace
-from threading import Condition, RLock, Thread
+from threading import Condition, RLock, Thread, current_thread
 from typing import TYPE_CHECKING
 
 from backend.telemetry.model import (
@@ -245,16 +245,25 @@ class TelemetryService:
         A joining claim receives the latest collected evidence when available; newly
         requested groups can remain unavailable until the next shared read. This does
         not trigger a duplicate hardware read just to initialize another consumer.
+        Escaping setup failures revoke only the new claim and preserve the original
+        exception. A later explicit acquisition can recover a failed polling worker.
         """
         with self._condition:
             subscription = TelemetrySubscription(self, configuration or TelemetryConfiguration())
             self._subscriptions.add(subscription)
-            if self._latest is None:
-                self._collect()
-            else:
-                subscription._deliver(self._latest, force=True)
-                subscription._nextDeliveryNs = 0
-            self._ensureWorker()
+            try:
+                if self._latest is None:
+                    self._collect()
+                else:
+                    subscription._deliver(self._latest, force=True)
+                    subscription._nextDeliveryNs = 0
+                self._ensureWorker()
+            except BaseException as failure:
+                try:
+                    self._release(subscription)
+                except BaseException as cleanupError:
+                    failure.add_note(f"Telemetry acquisition rollback failed: {type(cleanupError).__name__}")
+                raise
             return subscription
 
     def start(self) -> None:
@@ -268,9 +277,15 @@ class TelemetryService:
             self._ensureWorker()
 
     def sample(self) -> TelemetrySnapshot:
-        """Explicitly reads once, preserving legacy manual sampling and sharing the result."""
+        """Reads once and explicitly requests polling recovery for remaining active claims.
+
+        Successful collection is retained even if worker setup subsequently fails.
+        Passive current/history reads never restart polling or restamp old evidence.
+        """
         with self._condition:
-            return self._collect(manual=True)
+            snapshot = self._collect(manual=True)
+            self._ensureWorker()
+            return snapshot
 
     def stop(self) -> None:
         """Releases legacy polling; provider closure waits until remaining monitoring is done."""
@@ -327,27 +342,48 @@ class TelemetryService:
             self._latest = None
 
     def _ensureWorker(self) -> None:
-        """Creates one polling worker or wakes it to renegotiate cadence after claim changes."""
+        """Publishes one worker under the lifecycle lock and rolls back failed startup.
+
+        A worker that starts before start() raises sees its revoked identity and
+        exits without collecting. Existing workers remain the sole collector.
+        """
         if self.collectionIntervalSeconds is not None and self._thread is None:
-            self._thread = Thread(target=self._samplingLoop, name="actant-telemetry", daemon=True)
-            self._thread.start()
+            worker = Thread(target=self._samplingLoop, name="actant-telemetry", daemon=True)
+            self._thread = worker
+            try:
+                worker.start()
+            except BaseException:
+                if self._thread is worker:
+                    self._thread = None
+                self._condition.notify_all()
+                raise
         self._condition.notify_all()
 
     def _samplingLoop(self) -> None:
-        """Polls from monotonic deadlines, exposing slow reads as intervals instead of catch-up bursts."""
+        """Polls monotonic deadlines and relinquishes only this worker's identity on every exit.
+
+        Unexpected failures propagate to threading.excepthook, without automatic
+        retries. A later subscribe/start/sample operation may request one worker.
+        Stale samples retain their original timestamps throughout interruption.
+        """
+        worker = current_thread()
         with self._condition:
-            while (interval := self.collectionIntervalSeconds) is not None:
-                deadline = 0
-                if self._latest is not None:
-                    deadline = self._latest.collectionStartNs + int(interval * 1e9)
-                    if deadline <= self._latest.collectionEndNs:
-                        deadline = self._latest.collectionEndNs + int(interval * 1e9)
-                delay = (deadline - self._monotonicNs()) / 1e9
-                if delay > 0:
-                    self._condition.wait(timeout=min(delay, 86400.0))
-                    continue
-                self._collect()
-            self._thread = None
+            try:
+                while self._thread is worker and (interval := self.collectionIntervalSeconds) is not None:
+                    deadline = 0
+                    if self._latest is not None:
+                        deadline = self._latest.collectionStartNs + int(interval * 1e9)
+                        if deadline <= self._latest.collectionEndNs:
+                            deadline = self._latest.collectionEndNs + int(interval * 1e9)
+                    delay = (deadline - self._monotonicNs()) / 1e9
+                    if delay > 0:
+                        self._condition.wait(timeout=min(delay, 86400.0))
+                        continue
+                    self._collect()
+            finally:
+                if self._thread is worker:
+                    self._thread = None
+                self._condition.notify_all()
 
     def _prepareProviders(self, *, machine: bool, cpu: bool, gpu: bool) -> None:
         """Lazily binds only requested groups and primes CPU once per active CPU lifetime."""

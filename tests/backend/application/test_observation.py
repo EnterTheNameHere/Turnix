@@ -1,4 +1,4 @@
-# file: tests/backend/application/test_observation.py ; version: 1
+# file: tests/backend/application/test_observation.py ; version: 2
 """Architectural observation tests through real contexts, Jobs, runtimes and hosts."""
 from __future__ import annotations
 
@@ -615,5 +615,53 @@ def test_disabled_monitoring_preserves_real_job_outcomes(environment, monkeypatc
         assert job.state is expected
         assert not telemetry._subscriptions
         assert telemetry.collectionIntervalSeconds is None
+    finally:
+        runtime.close()
+
+
+@pytest.mark.parametrize("fault", ["collection-end", "worker-setup"])
+def test_real_subscription_failure_does_not_leak_or_change_job(environment, monkeypatch, fault):
+    """Actual partially acquired telemetry failure stays optional at the application boundary."""
+    clock, _hardware, telemetry, service = environment
+    runtime, initial, scope = runtimeWithContext(service)
+    initial.invalidate()
+    registerProvider(runtime, scope, Provider(clock, telemetry))
+    evidence = []
+    realClock, realEnsure = telemetry._monotonicNs, telemetry._ensureWorker
+    calls = 0
+    def faultyClock():
+        """Fails the actual initial collection end after hardware preparation/reads."""
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("collection end failed")
+        return realClock()
+    def faultySetup():
+        """Fails real subscription setup once, allowing subsequent ordinary execution."""
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("worker setup failed")
+        return realEnsure()
+    if fault == "collection-end":
+        monkeypatch.setattr(telemetry, "_monotonicNs", faultyClock)
+    else:
+        monkeypatch.setattr(telemetry, "_ensureWorker", faultySetup)
+    def handler(ctx, _payload):
+        """Uses the real request/Job spine without replacing subscribe itself."""
+        session = ctx.observations.request()
+        assert not telemetry._subscriptions
+        assert telemetry.collectionIntervalSeconds is None
+        result = ctx.llm.run(providerName="test", query=QUERY, observation=session)
+        evidence.append(session.snapshot())
+        return result.rawText
+    runtime.capabilities.register(scope, ownerId="test-entry", capabilityId="fault@1", handler=handler)
+    scope.publish()
+    try:
+        job = runtime.runJob("fault@1")
+        assert job.state is JobState.SUCCEEDED
+        assert evidence[0].hardwareUnavailableReason == "OSError"
+        assert evidence[0].stream.characterCount == 5
+        assert not telemetry._subscriptions
     finally:
         runtime.close()
