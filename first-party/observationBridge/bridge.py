@@ -1,4 +1,4 @@
-# file: first-party/observationBridge/bridge.py ; version: 1
+# file: first-party/observationBridge/bridge.py ; version: 2
 """Bounded selected-publication registry with a replaceable loopback HTTP adapter."""
 from __future__ import annotations
 
@@ -232,6 +232,10 @@ class _Handler(BaseHTTPRequestHandler):
 
     def log_message(self, format, *args) -> None:
         """Suppresses access/error logging so headers, paths and credentials are never emitted."""
+
+    def send_error(self, code, message=None, explain=None) -> None:
+        """Keeps parser/unsupported-method errors fixed, non-reflective JSON with no-store headers."""
+        self._reply(int(code), b'{"error":"http-request-rejected"}')
 
     def _origin(self) -> str | None:
         """Returns a validated explicit Origin, with absence allowed for authenticated local tools."""
