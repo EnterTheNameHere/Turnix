@@ -1,4 +1,4 @@
-# file: tests/first_party/llmDrivers/test_llamaCpp.py ; version: 1
+# file: tests/first_party/llmDrivers/test_llamaCpp.py ; version: 2
 from __future__ import annotations
 
 import importlib.util
@@ -187,6 +187,10 @@ def test_execution_profile_exposes_launch_profile_and_exact_token_estimator(monk
     assert launch["gpuLayers"] == 999
     assert launch["cpuMoeLayers"] == 31
     assert launch["loadMode"] == "mlock"
+    assert launch["semantics"] == "requested-not-effective"
+    assert "modelPath" not in launch and "extraArgs" not in launch
+    assert profile.metadata["configurationEvidence"]["mode"] == "external"
+    assert profile.metadata["configurationEvidence"]["launchStatus"] == "external-unapplied"
     assert profile.tokenEstimator is not None
     assert profile.tokenEstimator.estimateInputTokens(
         LlmQuery(formatId="text/plain", payload="hello")

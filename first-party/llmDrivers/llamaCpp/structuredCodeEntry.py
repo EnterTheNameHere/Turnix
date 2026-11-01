@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/structuredCodeEntry.py ; version: 8
+# file: first-party/llmDrivers/llamaCpp/structuredCodeEntry.py ; version: 9
 # ruff: noqa: INP001
 from __future__ import annotations
 
@@ -75,18 +75,8 @@ class _LlamaCppRuntimeState:
 
 
 def _managedCompatibilityKey(config: Mapping[str, object]) -> str:
-    """Returns deterministic configuration identity for one managed host driver."""
-    try:
-        return json.dumps(
-            dict(config),
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        )
-    except (TypeError, ValueError) as err:
-        raise ValueError(
-            "Managed llama.cpp configuration must be JSON-compatible for host sharing.",
-        ) from err
+    """Bind configuration and the same frozen relevant inputs used by construction."""
+    return _impl._configuration.prepare(config).compatibilityKey()
 
 
 def _messagesForQuery(query: LlmQuery) -> list[dict[str, str]]:
@@ -159,12 +149,11 @@ class LlamaCppStreamProvider:
         options = _impl._parseInferenceOptions(providerOptions)  # noqa: SLF001 - adapter reuses substrate parser.
         selected = self.driver.ensureModel(model)
         metadata: dict[str, ImmutableValue] = {
-            "baseUrl": self.driver.baseUrl,
             "timeoutSeconds": options.timeoutSeconds,
             "managedServer": self.driver.manageServer,
+            "configurationEvidence": self.driver.configurationSummary(model),
         }
         if selected is not None:
-            metadata["activeModel"] = selected.name
             metadata["launchProfile"] = selected.launchProfile()
         return LlmExecutionProfile(
             contextWindowTokens=(
@@ -191,7 +180,7 @@ class LlamaCppStreamProvider:
         if cancellationSignal is not None:
             cancellationSignal.raiseIfRequested()
 
-        selected = self.driver.ensureModel(request.model)
+        self.driver.ensureModel(request.model)
         if cancellationSignal is not None:
             cancellationSignal.raiseIfRequested()
 
@@ -230,14 +219,13 @@ class LlamaCppStreamProvider:
             with response:
                 yield from _impl._readEvents(response)  # noqa: SLF001 - adapter reuses substrate SSE parser.
         except HTTPError as err:
-            active = "" if selected is None else f" for model {selected.name!r}"
             raise LlmProviderConnectionError(
-                f"llama.cpp returned HTTP {err.code} for {endpoint}{active}.",
-            ) from err
-        except (URLError, TimeoutError) as err:
+                f"llama.cpp returned HTTP {err.code} for chat completions.",
+            ) from None
+        except (URLError, TimeoutError):
             raise LlmProviderConnectionError(
-                f"Failed communicating with llama.cpp at {endpoint}.",
-            ) from err
+                "Failed communicating with llama.cpp for chat completions.",
+            ) from None
         finally:
             if unregisterCancellation is not None:
                 unregisterCancellation()
@@ -282,6 +270,7 @@ def onLoad(ctx: CodeEntryContext) -> _LlamaCppRuntimeState:
 
     lease: SharedServiceLease[object] | None = None
     if manageServer:
+        config = _impl._configuration.prepare(config)
         registry = sharedServicesForApplicationRun(ctx.identity.applicationRunId)
         lease = registry.acquire(
             serviceId=_MANAGED_SERVICE_ID,
