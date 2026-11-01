@@ -1,4 +1,4 @@
-# file: tests/first_party/observationBridge/test_bridge.py ; version: 1
+# file: tests/first_party/observationBridge/test_bridge.py ; version: 2
 """G-01 architectural tests using actual Pack activation and ephemeral authenticated HTTP."""
 from __future__ import annotations
 
@@ -331,6 +331,8 @@ def test_http_authorization_rejects_ambient_or_ambiguous_access(environment, cap
     }[case]
     status, headers, body = http(connection, publication, **kwargs)
     assert status == expected
+    assert headers["Cache-Control"] == "no-store" and headers["Content-Type"] == "application/json"
+    assert set(json.loads(body)) == {"error"}
     assert b"hardware" not in body and connection["readCredential"].encode() not in body
     assert headers.get("Access-Control-Allow-Origin") != "*"
     captured = capsys.readouterr()
