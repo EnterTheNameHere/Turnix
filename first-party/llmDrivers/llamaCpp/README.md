@@ -3,7 +3,8 @@
 The manifest loads `structuredCodeEntry.py`; `codeEntry.py` supplies its driver.
 Managed registration leases a host driver and leaves startup lazy. The final
 lease releases its server. These controls do not add a restart, scheduling or
-resource arbitration policy. This document covers LC-01 only.
+resource arbitration policy. Startup is LC-01; the request and reasoning-evidence
+contract below is LC-02. Speculative decoding remains a separate package.
 
 Settings below may appear in `llamaCpp` or `llamaCpp.models[name]`. A model value
 replaces the corresponding driver default; explicit `null` suppresses that
@@ -37,8 +38,8 @@ In particular, `off` with effort and a positive budget is valid; values can be
 dormant defaults for a later request override. Startup defaults are not a policy
 that prevents per-request overrides. Existing request `reasoningEffort` is unchanged;
 the server interprets request `none` as disabling thinking, whereas server effort
-`none` is a template string. No new request options, estimator behavior or reasoning
-output retention are provided here. `--no-jinja` conflicts with template controls.
+`none` is a template string. Request controls and output retention are described
+below. `--no-jinja` conflicts with startup template controls.
 
 Example configuration for a separately supplied local executable/model:
 
@@ -150,3 +151,111 @@ kwargs/argv, paths, arbitrary cache/effort/message strings, URL and model title.
 This deliberately narrows the previous automatic metadata shape; private evidence
 is the retrieval path for full requested configuration. Cancellation, lazy shared
 leases and optional observation are preserved.
+
+## Request controls and matching estimation (LC-02)
+
+`providerOptions` accepts `chatTemplateKwargs` (optional finite JSON object) and
+`reasoningFormat` (`none`, `auto`, `deepseek`, `deepseek-legacy`), retaining the
+existing optional nonblank `reasoningEffort`. Omission/`None` omits a control;
+an explicit empty kwargs object is sent as `{}`. Nested caller-owned values are
+copied into immutable mappings/tuples before later payload creation. Every payload
+receives fresh JSON containers. Server startup controls remain invalid per-call
+options; no request budgets or real-time reasoning-control endpoints are added.
+
+Known kwargs `enable_thinking` and `preserve_reasoning` require exact booleans,
+and `reasoning_effort` requires nonblank text. Other template keys are preserved
+without inventing a universal template compatibility table. Effort strings are
+template-defined, not limited to an invented high/medium/low enum.
+
+Precedence follows pinned source: request kwargs override corresponding startup
+kwargs, then request `reasoningEffort` overrides startup template effort. Within
+one request, supplying both `reasoningEffort` and kwargs `reasoning_effort` fails
+even if equal. `reasoningEffort="none"` disables thinking and clears template
+effort upstream; it conflicts with kwargs `enable_thinking=true`, and may coexist
+with explicit false. Other effort strings with `enable_thinking=false` are valid
+independent/dormant controls. A kwargs effort of `"none"` is just a template
+string; request effort `"default"` is also passed through, unlike the special
+server startup effort `"default"`. Formatting never implicitly enables/disables
+thinking. Request overrides leave LC-01 startup identity, argv and leases intact.
+
+The profile-created token estimator uses the same messages, `chat_template_kwargs`,
+`reasoning_effort` and `reasoning_format` as inference. Explicit external `model`
+routing reaches both `/apply-template` and `/tokenize`; managed requests use the
+already-selected resident target. This corrects older estimation that omitted
+request controls and explicit external model selection. `/tokenize` must return
+nonnegative exact integer token IDs; an invalid template/tokenizer response or
+endpoint error raises, with no fallback count for a different prompt/settings.
+
+Pinned `tools/server/server-context.cpp` routes `/apply-template` through the same
+`oaicompat_chat_params_parse` used by chat inference; `server-common.cpp` performs
+the request merge/effort/template rendering. This establishes source equivalence
+for the supported surface, not a real binary/template attestation. Safe automatic
+profile metadata `tokenEstimation` records the method, matched-request forwarding,
+source pin, `effectiveHonor="unverified-binary-and-template"`, and failure policy.
+Returned counts describe the server-returned rendered prompt; correctness still
+requires the deployed endpoints/template to honor the pinned semantics. No raw
+request kwargs/body are copied into automatic profile metadata.
+
+## Separate private reasoning evidence
+
+When the provider exposes `delta.reasoning_content`, the adapter retains it as
+auxiliary provider evidence using the existing immutable event metadata contract.
+It introduces no generic event/query/history schema. A reasoning-only delta has
+empty `event.text`; mixed deltas retain only `delta.content` as ordinary text.
+The fragment is in:
+
+```python
+event.metadata["llamaCppReasoning"] == {
+    "schemaId": "actant.llamaCpp.reasoning@1",
+    "content": "exact provider reasoning fragment",
+    "source": "delta.reasoning_content",
+}
+```
+
+At `[DONE]`, the completed event's same namespace holds all reasoning fragments
+concatenated in order. Final native `usage` (including any reasoning-token details),
+`timings`, `model`, `system_fingerprint`, reported `reasoning_format` when present,
+and choice `finish_reason` remain available separately. Finish reason does not
+prematurely terminate the stream: trailing native usage/timings still survive.
+An exposed empty reasoning string is retained; an absent namespace means reasoning
+was not separately exposed, and is not proof thinking was disabled.
+
+Retrieve it through the existing complete processing result:
+
+```python
+result = pipeline.runProcessing(
+    memoryKey="example", inputValue={}, providerName="llama.cpp",
+    buildQueryItemsCapabilityId="build-items@1",
+    buildQueryCapabilityId="build-query@1",
+    providerOptions={
+        "reasoningFormat": "deepseek",
+        "chatTemplateKwargs": {"enable_thinking": True},
+    },
+)
+answer = result.llm.rawText
+evidence = result.llm.providerMetadata.get("llamaCppReasoning")
+reasoning = None if evidence is None else evidence["content"]
+```
+
+The same final evidence reaches the existing completion capability at
+`payload["llm"]["providerMetadata"]["llamaCppReasoning"]` and successful persisted
+`processing/example/runs/{result.processingRunId}` under `providerMetadata`.
+Direct `pipeline.run(...)` returns it in `StreamingLlmResult.providerMetadata`.
+An explicitly selected stream observer can consume fragments. This is private
+provider output, retained through the existing processing/result boundaries like
+other provider evidence; it is not automatically inserted into future chat history.
+Processing already retains provider options/query/response privately. Treat these
+as private artifacts, not an indiscriminate diagnostic or telemetry payload.
+
+The adapter never concatenates separate reasoning into ordinary answer text.
+Formats `none` and `deepseek-legacy` can make the provider itself include thoughts
+in `content`; those bytes are preserved as returned, without heuristic stripping
+or pretending separately recoverable reasoning was exposed. Real-time controls,
+history re-injection and consumer adoption are outside LC-02.
+
+Malformed reasoning/content/choice shapes, invalid UTF-8/JSON/metadata and missing
+`[DONE]` fail as protocol errors without reflecting raw private provider errors.
+Response contexts close on success/failure/consumer close; ordinary Job cancellation
+still closes the active HTTP response and rolls back incomplete processing. Passive
+observation counts nonempty answer text only; reasoning and raw request bodies are
+not added to observation, telemetry or G-01. No backend API/export change is made.

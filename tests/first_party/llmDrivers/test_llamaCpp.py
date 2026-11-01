@@ -1,4 +1,4 @@
-# file: tests/first_party/llmDrivers/test_llamaCpp.py ; version: 2
+# file: tests/first_party/llmDrivers/test_llamaCpp.py ; version: 3
 from __future__ import annotations
 
 import importlib.util
@@ -198,7 +198,7 @@ def test_execution_profile_exposes_launch_profile_and_exact_token_estimator(monk
     assert calls == [
         (
             "/apply-template",
-            {"messages": [{"role": "user", "content": "hello"}]},
+            {"messages": [{"role": "user", "content": "hello"}], "model": "model-a"},
             7.5,
         ),
         (
@@ -208,6 +208,7 @@ def test_execution_profile_exposes_launch_profile_and_exact_token_estimator(monk
                 "add_special": False,
                 "parse_special": True,
                 "with_pieces": False,
+                "model": "model-a",
             },
             7.5,
         ),
