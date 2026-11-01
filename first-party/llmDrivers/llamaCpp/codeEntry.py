@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 9
+# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 10
 from __future__ import annotations
 
 import importlib.util
@@ -163,6 +163,7 @@ class LlamaCppModel:
     startup: Mapping[str, ImmutableValue]
     requested: Mapping[str, ImmutableValue]
     inputs: tuple[ImmutableValue, ...]
+    speculation: Mapping[str, ImmutableValue]
 
     def launchProfile(self) -> dict[str, ImmutableValue]:
         """Project only allowlisted requested scalars for automatic metadata.
@@ -189,7 +190,9 @@ class LlamaCppModel:
         }
         profile.update({key: value for key, value in optional.items() if value is not None})
         for key in ("moeCacheMiB", "cpuMoe", "serverReasoning", "serverReasoningBudget",
-                    "serverReasoningFormat", "serverReasoningPreserve"):
+                    "serverReasoningFormat", "serverReasoningPreserve", "specMethods",
+                    "draftMaxTokens", "draftMinTokens", "draftUbatchSize", "draftGpuLayers",
+                    "draftSampling", "draftBackendSampling", "draftPMin", "draftPSplit"):
             if self.startup[key] is not None:
                 profile[key] = self.startup[key]
         return profile
@@ -632,6 +635,7 @@ class LlamaCppDriver:
             self.defaultModel = None
         self.process: subprocess.Popen[bytes] | None = None
         self.activeModelName: str | None = None
+        self._automaticConfigEvidence = self._prepared.automaticConfig
         self._launches: dict[str, object] = {}
         self._launchGeneration = 0
         self._buildEvidence = _configuration.freeze({"status": "unverified" if self.manageServer else "external-unverified",
@@ -699,7 +703,9 @@ class LlamaCppDriver:
             startup = _configuration.parseStartup(resolved)
             if self.manageServer:
                 _configuration.validateEnvironment(self._prepared.environment, resolved, extra)
+                speculation = _configuration.validateSpeculation(resolved, self._prepared, extra)
             else:
+                speculation = _configuration.freeze({"status": "external-unverified", "effectiveHonor": "unverified"})
                 selectedExtra, _unknown = _configuration.inspectExtraArgs(extra)
                 if selectedExtra.get("--jinja") == "--no-jinja" and any(startup.values()):
                     raise ValueError("Template controls require enabled Jinja.")
@@ -711,6 +717,16 @@ class LlamaCppDriver:
             if mmprojPath is not None:
                 inputs.append({"role": "mmproj", "configuredPath": mmprojValue,
                                "resolvedPath": str(mmprojPath), "contentSha256": None})
+            effectiveSpeculation = speculation.get("resolvedInputs", {})
+            draftPath = effectiveSpeculation.get("draftModelPath")
+            if draftPath is not None:
+                resolvedDraft = self._prepared.resolvePath(draftPath)
+                if not resolvedDraft.is_file():
+                    raise FileNotFoundError("Speculative auxiliary model does not exist as a local file.")
+                inputs.append({"role": "draft", "configuredPath": draftPath,
+                               "resolvedPath": str(resolvedDraft), "contentSha256": None})
+                if startup["draftModelPath"] is not None:
+                    startup = _configuration.freeze(dict(startup) | {"draftModelPath": str(resolvedDraft)})
             selectedExtra, _unknown = _configuration.inspectExtraArgs(extra)
             template = selectedExtra.get("--chat-template-file")
             if template is None and self.manageServer:
@@ -767,6 +783,7 @@ class LlamaCppDriver:
                 startup=startup,
                 requested=_configuration.freeze(provenance),
                 inputs=_configuration.freeze(inputs),
+                speculation=speculation,
             )
             if models[name].cpuMoeLayers is not None and models[name].cpuMoeLayers > 2147483647:
                 raise ValueError("cpuMoeLayers must fit a signed 32-bit integer.")
@@ -850,7 +867,11 @@ class LlamaCppDriver:
         if not self.manageServer or self.executable is None:
             raise ValueError("A local probe cannot certify an external server.")
         selected = self._selectedModel(model)
-        result = dict(_configuration.probeCapabilities(self.executable, refresh=refresh))
+        if selected is not None:
+            self._checkSpeculationConfig(selected)
+        result = dict(_configuration.probeCapabilities(self.executable, refresh=refresh,
+                      environment=self._prepared.launchEnvironment(),
+                      workingDirectory=self._prepared.workingDirectory))
         required = []
         if selected is not None:
             args = self._serverArgs(selected)
@@ -883,6 +904,13 @@ class LlamaCppDriver:
         self._buildEvidence = _configuration.freeze(result)
         return self._buildEvidence
 
+    def _checkSpeculationConfig(self, model: LlamaCppModel) -> None:
+        """Recheck hidden config absence immediately before probe/launch, without restart policy."""
+        self._automaticConfigEvidence = _configuration.freeze(
+            _configuration.automaticConfig(self._prepared.environment, self._prepared.workingDirectory))
+        if model.speculation["status"] not in {"omitted-unverified", "external-unverified"}:
+            _configuration.validateAutomaticConfig(self._prepared)
+
     def configurationEvidence(self, model: str | None = None) -> Mapping[str, ImmutableValue]:
         """Return a private immutable configuration snapshot without probing or startup.
 
@@ -900,7 +928,8 @@ class LlamaCppDriver:
             "environment": self._prepared.environment if self.manageServer else {},
             "managed": self.manageServer, "baseUrl": self.baseUrl,
             "capabilityCheck": self.capabilityCheck,
-            "workingDirectory": self._prepared.workingDirectory if self.manageServer else None})
+            "workingDirectory": self._prepared.workingDirectory if self.manageServer else None,
+            "automaticConfigAtAcquisition": self._prepared.automaticConfig if self.manageServer else ()})
         launch = {"status": "not-launched" if self.manageServer else "external-unapplied",
                   "actualArgv": None, "generation": None}
         if selected is not None:
@@ -910,6 +939,8 @@ class LlamaCppDriver:
             "mode": "managed" if self.manageServer else "external",
             "requested": requested, "inputs": inputs, "launch": launch,
             "relevantEnvironment": self._prepared.environment if self.manageServer else {},
+            "automaticConfig": self._automaticConfigEvidence if self.manageServer else (),
+            "speculation": {"status": "external-unverified"} if selected is None else selected.speculation,
             "build": self._buildEvidence, "configuredExecutable": None if self.executable is None else str(self.executable),
             "userReportedBuild": {"version": "0.8.0-dev", "build": 12031, "commit": "060b2fea4",
                 "provenance": "assignment-user-report-not-binary-verification"},
@@ -922,11 +953,13 @@ class LlamaCppDriver:
         return _configuration.freeze({key: evidence[key] for key in ("schemaId", "profileId", "mode")} | {
             "buildStatus": evidence["build"]["status"],
             "launchStatus": evidence["launch"]["status"],
+            "speculationStatus": evidence["speculation"]["status"],
             "effectiveBehavior": "unverified", "extraArgsCertification": evidence["extraArgsCertification"]})
 
     def _startModel(self, model: LlamaCppModel) -> None:
         """Starts one managed llama-server and waits until its health endpoint is ready."""
         args = self._serverArgs(model)
+        self._checkSpeculationConfig(model)
         if self.capabilityCheck == "required":
             result = self.checkCapabilities(model.name)
             if result["status"] != "advertised-pinned-surface":
@@ -941,6 +974,7 @@ class LlamaCppDriver:
         self._launchGeneration += 1
         launch = {"generation": self._launchGeneration, "status": "launch-failed", "actualArgv": None,
                   "environment": self._prepared.environment, "build": self._buildEvidence,
+                  "automaticConfig": self._automaticConfigEvidence,
                   "workingDirectory": self._prepared.workingDirectory}
         self._launches[model.name] = _configuration.freeze(launch)
         try:
