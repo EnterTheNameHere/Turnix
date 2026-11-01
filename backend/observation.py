@@ -1,4 +1,4 @@
-# file: backend/observation.py ; version: 1
+# file: backend/observation.py ; version: 2
 """Authorized application observation composition over the accepted PM-01/02 seams."""
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from threading import RLock
+from uuid import uuid4
+from weakref import WeakSet
 
 from backend.llm.streamObservation import (
     StreamObservation, StreamObservationConfiguration, StreamObservationSnapshot,
@@ -136,18 +138,104 @@ class ObservationSnapshot:
     collectionStopped: bool
 
 
+class ObservationGrantRevoked(RuntimeError):
+    """Reports loss of selected read authority without returning stale evidence."""
+
+
+@dataclass(frozen=True, slots=True)
+class ObservationPublicationSnapshot:
+    """Selected immutable evidence with opaque source/clock identities, never invocation state."""
+
+    sessionId: str
+    clockEpochId: str
+    lifetime: ObservationLifetime
+    request: ObservationRequest
+    observation: ObservationSnapshot
+
+
+class ObservationReadGrant:
+    """Revocable snapshot authority only; construction belongs to the observation facade.
+
+    Grants add no source lifetime/collection claim. Parent withdrawal invalidates
+    derived readers; revoking a derived reader affects neither its parent nor peers.
+    Python Pack code is trusted in-process code, not a Python introspection sandbox.
+    No source/context/registry access is part of this object's public interface.
+    """
+
+    __slots__ = ("__source", "__parent", "__lock", "__revoked", "__weakref__")
+
+    def __init__(self, source: ObservationSession, parent: ObservationReadGrant | None = None) -> None:
+        """Creates a mediated read scope under the owning service's lifecycle lock."""
+        self.__source = source
+        self.__parent = parent
+        self.__lock = source._owner._service._lock
+        self.__revoked = False
+        source._readGrants.add(self)
+
+    def _validSource(self) -> ObservationSession:
+        """Checks the entire delegation chain while the shared lifecycle lock is held."""
+        cursor = self
+        while cursor is not None:
+            source = cursor.__source
+            if cursor.__revoked or source is None or source._released or source._owner._released:
+                raise ObservationGrantRevoked("Observation read authority is revoked.")
+            cursor = cursor.__parent
+        return self.__source
+
+    @property
+    def revoked(self) -> bool:
+        """Reports effective revocation without reading hardware or stream clocks."""
+        with self.__lock:
+            try:
+                self._validSource()
+            except ObservationGrantRevoked:
+                return True
+            return False
+
+    def snapshot(self) -> ObservationPublicationSnapshot:
+        """Reads once under source authority; previously returned evidence stays caller-owned."""
+        with self.__lock:
+            source = self._validSource()
+            return ObservationPublicationSnapshot(
+                source._sessionId, source._owner._service._clockEpochId,
+                source.lifetime, source.request, source.snapshot(),
+            )
+
+    def revoke(self) -> None:
+        """Relinquishes only this read scope, without releasing or cancelling its source."""
+        with self.__lock:
+            if self.__source is not None:
+                self.__source._readGrants.discard(self)
+            self.__revoked = True
+            self.__source = None
+            self.__parent = None
+
+    def _bind(self, owner: ObservationOwner) -> ObservationReadGrant:
+        """Derives an independently revocable reader only for the same ApplicationRun."""
+        if owner is None or owner._service._lock is not self.__lock:
+            raise PermissionError("Observation grant belongs to another application.")
+        with self.__lock:
+            source = self._validSource()
+            if source._owner is not owner or source not in owner._sessions:
+                raise PermissionError("Observation grant belongs to another application.")
+            return ObservationReadGrant(source, self)
+
+
 class ObservationService:
     """Host composition boundary; owns scopes, borrows the shared telemetry service.
 
     Closing revokes only scopes created here. Legacy and independently acquired
     telemetry subscriptions survive. Construction starts no provider or polling.
     Injected clocks must share the telemetry service's host monotonic domain.
+    A random composition epoch prevents publication readers from joining evidence
+    across reconstructed services or differently injected monotonic clock domains.
     """
 
     def __init__(self, telemetry: TelemetryService | None = None, *, monotonicNs: Callable[[], int] = time.monotonic_ns) -> None:
         """Selects host infrastructure without exposing providers to applications."""
         self._telemetry = telemetry if telemetry is not None else createDefaultTelemetryService()
         self._clock = monotonicNs
+        self._clockEpochId = uuid4().hex
         self._lock = RLock()
         self._owners: set[ObservationOwner] = set()
         self._closed = False
@@ -210,6 +298,8 @@ class ObservationSession:
     def __init__(self, owner: ObservationOwner, request: ObservationRequest, lifetime: ObservationLifetime) -> None:
         """Acquires optional facilities, recording ordinary failures as unavailability."""
         self._owner = owner
+        self._sessionId = uuid4().hex
+        self._readGrants: WeakSet[ObservationReadGrant] = WeakSet()
         self.request = request
         self.lifetime = lifetime
         self._subscription: TelemetrySubscription | None = None
@@ -285,6 +375,8 @@ class ObservationSession:
         with self._owner._service._lock:
             if self._released:
                 return
+            for grant in tuple(self._readGrants):
+                grant.revoke()
             self._stopCollection()
             if self._stream is not None:
                 try:
@@ -328,3 +420,28 @@ class ObservationFacade:
             for session in self._sessions:
                 session.release()
             self._sessions.clear()
+
+    def export(self, session: ObservationSession) -> ObservationReadGrant:
+        """Exports only an explicitly selected same-ApplicationRun live session.
+
+        This checks invocation authority but never extends RUN lifetime. The grant
+        retains no context/callback and delegates only read/revocation of itself.
+        """
+        with self._lock:
+            self._requireValid()
+            if self._closed or self._owner is None:
+                raise RuntimeError("Observation invocation is closed or unbound.")
+            with self._owner._service._lock:
+                if type(session) is not ObservationSession or session not in self._owner._sessions or self._owner._released:
+                    raise PermissionError("Observation session is foreign or revoked.")
+                return ObservationReadGrant(session)
+
+    def bindReadGrant(self, grant: ObservationReadGrant) -> ObservationReadGrant:
+        """Validates same-app authority and acquires a separately revocable publication reader."""
+        with self._lock:
+            self._requireValid()
+            if self._closed or self._owner is None:
+                raise RuntimeError("Observation invocation is closed or unbound.")
+            if type(grant) is not ObservationReadGrant:
+                raise TypeError("An ObservationReadGrant is required.")
+            return grant._bind(self._owner)
