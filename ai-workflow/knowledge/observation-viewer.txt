@@ -1,0 +1,157 @@
+ACTANT - G-02 STANDALONE OBSERVATION VIEWER
+===========================================
+
+OWNER / STATUS / REFS
+---------------------
+Owner and independent acceptance gate: Integration.
+Implementer: user-authorized Codex G-02 task.
+Published branch: g02-observation-viewer.
+Single implementation commit: bacc589e877b2e762310f7a0f4694ac9a6d0de47.
+Not integrated or accepted. No consumer branch changed.
+Exact starting Integration: 4cf1ebd57d2d2a5de507ac4b818d4dee91fd0959.
+Implementation parent/concrete proposal: 88277401abaf16ffe3469a07b8dd2032739b6d8e.
+Accepted G-01 consumed as-is: 8c4df3578b7789e8da9e6412c1fed1256835a46c.
+No original G-01/PM/hardening worker commits were reapplied or merged.
+Source boundaries: only tools/observationViewer and tests/tools/observationViewer.
+No required backend/schema change or architectural expansion was identified.
+This records worker implementation/evidence, not independent acceptance or design
+specification promotion. G-01 contract: knowledge/observation-bridge.txt.
+
+LAUNCH / EXPLICIT AUTHORIZATION FLOW
+-----------------------------------
+From the isolated implementation checkout (or an approved Integration cherry-pick):
+ .\python-embedded\python.exe -X frozen_modules=off tools/observationViewer/server.py --port 7777
+Open http://127.0.0.1:7777. Before observation.bridge activation configure exactly
+ {"observationBridge":{"port":0,"allowedOrigins":["http://127.0.0.1:7777"]}}
+Use existing explicit PackResolver/ManualActivationPlan and selected source/grant
+application flow; viewer launch itself activates/observes nothing. Application
+supplies connection@1 endpoint/readCredential and publish@1 selected publication ID
+or matching snapshotUrl privately/out of band. Paste into the three form inputs.
+No enumeration/discovery, permanent frontend or consumer application change.
+
+The Python launcher serves only fixed HTML/CSS/ES-module assets, bound to literal
+IPv4 loopback, with exact Host checks, no-store, no-referrer, restrictive CSP, finite
+socket reads, fixed errors and no access logs. No observation proxy or generic
+hosting service. Static assets have no runtime dependencies, build step or CDN.
+Only HTTP GET snapshot polling (plus browser preflight) reaches the bridge. Bearer
+header carries the credential; fetch omits cookies/referrers/redirects. Credential
+input is immediately cleared on submit and on page exit; retained only in module
+memory for this explicit connection. No URL, console, storage, service worker,
+recording/history file or cookie writes. Form autocomplete disabled. Disconnect/
+page exit clears local credential/evidence; pause retains them for resume. These
+actions cancel only local transport, never inference, source/grants or peers.
+Browser extensions/password managers/developer tools remain outside client control.
+Literal loopback and explicit non-default ports preserve accepted Host/Origin rules.
+Port 80 is rejected: browser canonicalization drops :80, incompatible with G-01's
+literal Host-with-port check. Use the default ephemeral bridge + viewer 7777; no
+backend security checks were changed. Origin mismatch may be opaque browser Fetch
+failure; fix the pre-activation exact allowlist instead of bypassing it.
+
+PUBLIC MODULE CONTRACTS / SEMANTICS
+----------------------------------
+model.mjs (independent of HTTP/DOM):
+- parseSnapshot(raw): supports only actant.observation-publication@1, validates
+  units/bounds/IDs/order/clock kind and selected schema structure. All integer
+  evidence uses BigInt from bounded decimal strings; no Number timestamp parsing.
+  Frozen allowlisted normalized objects discard private/unknown incoming fields.
+- secondsFrom(ns, origin): subtract common BigInt origin before Number conversion.
+  timeRange(model,lastSeconds) shares retained/last-10/30/60-second x ranges.
+  graphSeries(model,kind) returns interval marks; unknown hardware time is not placed.
+- ObservationStore: one latest bounded model; identity/epoch changes reset prior
+  association and UI selection. Revision regression in same identity is invalid.
+  Freshness uses client monotonic elapsed unchanged-hardware time, not display wall
+  time or cross-host/browser-server monotonic subtraction. Initial prior age unknown.
+
+polling.mjs (independent of DOM/graphs):
+- connectionConfig(endpoint, publication, credential): explicit literal-loopback
+  HTTP endpoint and selected 32-hex ID or matching snapshot URL; reject queries,
+  fragments, URL-userinfo, external hosts, default port and foreign selection.
+- readPublication(config,signal,fetcher): Bearer GET, maximum body 2 MiB including
+  chunked/no-length responses; bounded UTF-8 JSON parse; validate selected publication.
+  Fixed status errors never reflect server bodies/exception messages.
+- Poller with injectable read/scheduler/cancel: defaults 1 s after completion, 5 s
+  abort deadline, minimum interval 250 ms, one pending request including reconnect.
+  Generation checks reject obsolete late results; reconnect waits for abort
+  settlement. An abort-ignoring injected transport blocks progress rather than
+  starting another request. Multiple instances share no cancellation/claims.
+  Auth/Origin/withdrawn/revoked/schema errors stop automatic polls; transient
+  network/503 retries stay bounded and visibly historical.
+
+UI uses native SVG/textContent, no raw HTML interpretation. Synchronized stream
+Unicode characters/second, host CPU/GPU percent, host RAM/VRAM GiB. Exact bytes and
+monotonic Ns, stream windows/counts/gaps, collection spans, target/actual cadence,
+uncovered intervals and separate display Unix wall time are inspectable. No token
+conversion, provider metadata or prompt/response content. Hardware is whole-host,
+not application attribution. Bars depict collection intervals; no interpolation or
+simultaneity claim. Silence is a measured zero stream window, unavailable is hatched,
+blank space has no retained collection. Missing timing is counted, not positioned.
+Unrequested/unavailable/no-retained readings are labelled separately. Exact dropped
+stream windows and conservative hardware truncation are explicit. At most 512
+hardware samples/windows with bounded correlation/per-core input; no accumulated
+local history. Scalar decimal evidence is capped at 80 digits; relative plotting is
+approximate while inspection preserves exact original counts/bytes/time.
+
+Repeated HTTP success is not freshness. Stale hardware means its newest interval
+is unchanged for max(5 s,3 target cadences) since this viewer saw it. Earlier age
+unknown; stopped collection is final. Paused state labels retained evidence paused.
+401/403/404/410/invalid-schema clear plots and stop polls. Network/503 state may
+retain visibly historical last evidence. Explicit reconnect clears prior identity.
+Different epochs/session/publication are never combined; wall jumps only display.
+
+VERIFICATION / VISUAL EVIDENCE
+-----------------------------
+Own setup.ps1 Python 3.15.0b4 environment; Node v23.11.0. Node 20+ required for tests
+only (ACTANT_NODE executable override); wrapper fails clearly if absent, no skip.
+From worker checkout:
+ node --test tests/tools/observationViewer/viewer.test.mjs
+ 41 passed, zero skips (125 ms final direct run).
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/tools/observationViewer
+ 12 passed in 0.60 s; includes 41 nested Node tests, not 41 additional pytest items.
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/tools/observationViewer tests/first_party/observationBridge tests/backend/telemetry tests/backend/application tests/backend/context tests/backend/runtime tests/backend/packs tests/backend/llm tests/first_party/llmDrivers
+ 304 passed in 6.06 s, zero skips.
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests
+ 1156 passed in 6.87 s final run, zero skips. Explicit Actant directory only.
+ git diff --check and staged diff check passed; Python AST docstring/path/version
+ audit passed for all three new Python files. Ruff not run.
+
+Actual browser command:
+ .\python-embedded\python.exe -X frozen_modules=off tests/tools/observationViewer/smoke.py --playwright C:\Users\Enter\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules\playwright --browser "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --output tools/observationViewer/verification
+Passed with Playwright 1.62.1, headless installed Edge/Chromium 156.0.4314.50,
+1440x1100 viewport/full-page screenshots. Real accepted RuntimeHost/G-01 Pack
+activation and HTTP auth/CORS; deterministic synthetic hardware/stream source.
+Explicit ephemeral viewer origin configured BEFORE activation. Synthetic evidence:
+>2^60 Ns, delayed 200 ms collections, missing GPU/VRAM, silence, dropped history,
+display wall-clock jump. Two real reader pages, pause/resume, unchanged/stale data,
+wrong credential 401, parent revocation 410, withdrawal 404, bridge unload disconnect.
+Maximum outstanding GETs per viewer 1. Browser reads left one source claim and
+41 synthetic provider reads unchanged; cleanup explicitly closed browser/server/
+host workers. Private credentials pass only over process stdin, not files/argv/logs.
+Test-only mutation controls go to in-process owner; no HTTP mutation route added.
+Browser smoke found/corrected timer binding TypeError not exposed by Node's fake
+scheduler; default timers now wrap globalThis calls.
+
+Worker tools/observationViewer/verification contains result.json and visually
+inspected connected.png, paused.png, stale.png, unauthorized.png, revoked.png and
+disconnected.png. Inspection covered aligned plots/intervals/units, hatch versus
+silence/gaps, retention, exact inspection, credential clearing and error states.
+The adjacent README records commands/runtime/limits; tools/observationViewer/README.md
+is the launch/user/module guide. PNGs contain synthetic data only and no credential.
+
+One later sandboxed focused rerun hit WinError 10013 for eleven loopback tests
+(Node wrapper passed). Exact command rerun with approved socket permissions passed
+12/12; no code change or skip bypassed it. Final full/browser runs used approved
+temporary-process/loopback access. Embedded Python emits its existing platform
+standard-library warning; test commands still exit 0.
+
+LIMITS / INDEPENDENT REVIEW AND INTEGRATION
+-----------------------------------------
+Only this Edge runtime/desktop viewport browser-exercised; no Safari/Firefox,
+real GPU/native provider, inference server, consumer app or persistent recording.
+Default-port/CORS diagnostic limitations are above. No optimizer/tuning/restart,
+auto activation, general networking, cross-epoch alignment or consumer adoption.
+Review worker source/tests/security/visual semantics against accepted G-01. Fetch
+branch and inspect 8827740..bacc589; if approved cherry-pick ONLY bacc589 onto current
+Integration, not the original worker branch or G-01 commits. Run relevant/full
+tests and actual smoke in Integration's own environment (substitute explicit local
+Node/Playwright/browser paths). Then separately record acceptance and archive the
+completion mail. Implementer publication does not authorize self-acceptance.
