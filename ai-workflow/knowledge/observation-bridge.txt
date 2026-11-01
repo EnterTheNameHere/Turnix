@@ -1,0 +1,217 @@
+ACTANT - G-01 OPTIONAL OBSERVATION BRIDGE / READ GRANTS
+=====================================================
+
+STATUS / EXACT REFS
+-------------------
+Owner: Integration; implementer: user-authorized Codex G-01 task.
+Implemented, tested and published for INDEPENDENT REVIEW; NOT integrated/accepted.
+Repository: EnterTheNameHere/Turnix
+Branch: g01-observation-bridge
+Implementation head: fd127d740be70acaee8a7b76921c394f13a1c72f
+Apply these TWO commits in order:
+1. 3db6135d44768981cea7c15ef0202f1af3ff5404 (grant/Pack/schema/tests)
+2. fd127d740be70acaee8a7b76921c394f13a1c72f (fixed JSON/no-store parser/method errors)
+Exact starting Integration commit / accepted B decision:
+c87907b7d1a4a7748f5795d640f429622ab50f3f
+First implementation parent / series base: 2dbfd8ec2a8b3b8473e984ededa328b54b308959 (canonical concrete
+proposal, synchronized before coding). Accepted PM-01/02/03 and hardening were
+already included. No original worker commit was reapplied; no consumer branch changed.
+Assignment: ai-workflow/assignments/observation-graphing.txt, G-01 only. G-02 remains
+unimplemented/unassigned pending accepted G-01 schema/authorization.
+No architectural contradiction or scope expansion was required. This materializes
+the accepted B working boundary and does not promote it into canonical DA/IS design.
+
+PUBLIC GRANT CONTRACT / BACKEND BOUNDARY
+---------------------------------------
+Only backend production change: backend/observation.py version 1 -> 2. Collectors,
+stream measurement/execution, contexts, runtime/host and PackLoader are unchanged.
+New types: ObservationReadGrant, frozen ObservationPublicationSnapshot and
+ObservationGrantRevoked. The existing context already supplies ObservationFacade;
+no separate context/module change was necessary.
+
+- ctx.observations.export(session): requires a valid invocation and the actual
+  selected same-ApplicationRun session owner. Rejects expired/foreign/released
+  authority; no caller-supplied application identity is trusted.
+- grant.snapshot(): selected immutable session/clock identity, source request and
+  lifetime plus the existing ObservationSnapshot. This reads no new hardware and
+  retains no invocation context/validation callback. It may advance existing PM-02
+  live window summaries according to the accepted snapshot contract.
+- grant.revoke()/grant.revoked: revoke/check only this read scope. There is no source
+  release, inference execution, subscription creation or session-discovery API.
+- ctx.observations.bindReadGrant(grant): validates same-app invocation authority and
+  acquires a separately revocable derived publication reader. Revoking its parent
+  ends derived reading; revoking the derived reader leaves its parent/peers intact.
+
+Grants acquire NO collection or source-lifetime claim. RUN sessions still release
+on source invocation invalidation. Explicit APPLICATION ownership is required for
+source lifetime beyond the invocation. Session release revokes its weakly registered
+readers; ApplicationRun/host teardown revokes source ownership as before. No expired
+context is retained. Already copied immutable evidence remains caller-owned.
+Grant construction/binding/reading/revocation is serialized under the source service
+lock. Cross-service/foreign binding cannot substitute an ID for owner identity.
+These are mediated public API guarantees for trusted in-process Python Pack code,
+not a Python introspection sandbox. No object internals cross the JSON boundary.
+
+PACK / APPLICATION PUBLICATION
+------------------------------
+Pack ID: observation.bridge, modPack version 0.1.0.
+Source bundle: first-party/observationBridge/{manifest.json,codeEntry.py,bridge.py,
+schema.py,__init__.py,README.md}. Helpers load relative to the resolved Pack root,
+including when copied outside first-party; the process cache holds code only.
+ManualActivationPlan must explicitly select it in the publishing application.
+Activation creates one endpoint and zero observation sessions, collectors or
+automatic inference attachments. Each activated instance owns its endpoint/state.
+
+Capabilities (all same-ApplicationRun through existing capability mediation):
+- observation.bridge.publish@1, exactly {grant}: the fresh bridge invocation binds
+  its own reader through the facade, then returns publicationId/snapshotUrl/schemaId/
+  sessionId/clockEpochId. Raw sessions, fabricated payload shapes and foreign grants
+  are rejected. Multiple publications can derive independently from one parent.
+- observation.bridge.withdraw@1, exactly {publicationId}: idempotent publication
+  withdrawal; clears its cache and derived reader, leaving source/parent/other
+  publications/readers/consumers unchanged.
+- observation.bridge.connection@1, no payload: private descriptor containing
+  endpoint, readCredential, authorization=Bearer, schemaId and allowedOrigins.
+
+At most 8 publication entries, each retaining only its latest bounded response and
+fixed fingerprint/revision; no accumulating or persistent history. Source retention
+must be <=512 hardware samples and <=512 stream windows. Larger configured sources
+are rejected, not silently clipped. Per-core CPU output caps at 256 and reports exact
+droppedCoreCount. Encoded responses cap at 2 MiB. A source/parent-revoked publication
+returns 410 and clears cached bytes; its bounded entry remains until withdrawn.
+
+AUTHORIZATION / ENDPOINT / LATER VIEWER HANDOFF
+----------------------------------------------
+Initial adapter: replaceable standard-library read-only loopback HTTP polling.
+Bind is always literal IPv4 127.0.0.1; default port 0 is collision-safe ephemeral.
+No external bind, host-wide session registry/discovery or cross-app aggregation.
+One request worker, backlog 8, finite socket I/O timeout, one response per connection;
+shutdown actively interrupts accepted sockets, including partial HTTP headers.
+No reader thread fanout or new collector. The adapter never invokes runtime
+capabilities from HTTP threads and never captures onLoad/cleanup contexts.
+
+GET /publications/<opaque-128-bit-id> requires Authorization: Bearer <credential>.
+Credential is random 256-bit per activated instance, not a query parameter/cookie.
+Host must equal 127.0.0.1:<actual-port> exactly. Present Origin must match an explicit
+configured local HTTP-origin allowlist (including port); default list is empty.
+Origin-free authenticated nonbrowser tools work. Wildcards, null/file origins,
+external origins, paths and credential-bearing origins are rejected.
+Browser OPTIONS preflight checks Host, allowlisted Origin, GET and requested
+Authorization header; it returns no observations and needs no read credential.
+No credentialed wildcard CORS, logs, HTTP credential/discovery route or mutation API.
+Responses, including parser/unsupported-method errors, use fixed non-reflective
+JSON and no-store headers; request/error handling never emits credentials or raw source
+diagnostics. Browser credentials are not inferred from loopback proximity.
+
+The intended later G-02 viewer obtains the connection descriptor and selected
+publication URL explicitly from the application/user out of band (for example,
+copy/paste into its future connection form), keeps credentials in memory, and sends
+the Authorization header. No token in URLs/share links/logs or default persistence.
+The application's observationBridge.allowedOrigins names that viewer's local HTTP
+origin before activation. G-01 serves no HTML/browser viewer and installs no discovery
+or general hosting infrastructure. Concrete G-02 UI/browser smoke test remains later.
+
+REVOCATION / SHUTDOWN ORDERING
+------------------------------
+The publication lock covers validation, serialization/cache and response sending.
+Withdrawal waits preceding sends, removes cached evidence and revokes only its
+derived reader before returning. Source grant reads linearize under the observation
+service lock; source/parent revocation stops later reads. An already copied in-flight
+response may finish after source revocation as caller-owned evidence. No source-lock
+callback enters the bridge, avoiding reverse lock ordering. Every read revalidates
+before using cache; 410/503 never serve cached fallback. Bounded bytes may remain
+until next validation/withdrawal/unload but cannot bypass the validation check.
+
+Unload first rejects new work and interrupts accepted clients, then withdraws
+readers/caches, stops/closes/joins the endpoint and erases its credential. Teardown
+uses no invocation observation authority. onLoad failure self-cleans even if
+PackLoader subsequently calls onUnload with None. Failure after onLoad returned
+state uses ordinary PackLoader cleanup. Cleanup errors remain reported; resource
+revocation happens before a final socket-close error can escape. Source observation
+sessions and independent grants/consumers survive bridge-only unload.
+
+VERSIONED SCHEMA / G-02 CONSUMER CONTRACT
+----------------------------------------
+Schema ID: actant.observation-publication@1. Transport-independent serializer:
+first-party/observationBridge/schema.py:serialize(). Exact field/unit/HTTP contracts
+and application examples are documented in the Pack README at the implementation ref.
+
+- Opaque publication/session identities and evidence-change revision.
+- clock.kind=host-process-monotonic, random ObservationService composition epochId;
+  all its application owners share it. Reconstructed/injected services get new
+  epochs. A later viewer must reject unsupported schema and reset association on
+  epoch change; bridge restart also creates new publication IDs/credentials.
+- All exact integer evidence uses decimal JSON STRINGS: nanosecond timestamps/gaps,
+  counts, bytes, revision and retention limits. Null means unknown; bounded
+  hardwareIndices are ordinary array indices. A later JS viewer should parse Ns as
+  BigInt, subtract a common origin, then convert relative deltas for plotting.
+- Explicit units/encodings, whole-host hardware scope, source lifetime and needs.
+- Original sequential collection start/end, separate display Unix wall Ns,
+  target/actual cadence, RAM/swap/CPU/GPU/VRAM and optional numerical sensor evidence.
+  Tagged scalar availability/unit/value distinguish missing values from real zeros.
+- PM-02 origin/observed-through/end/first/last text, first-text latency, silence,
+  Unicode character/delivery counts, state/outcome, bounded half-open windows,
+  gap count/sum/min/max, partial flags and character delivery rates. No token inference.
+- Exact stream droppedWindowCount, source retention bounds, conservative hardware
+  truncation and hardwareDroppedCount=null (PM-01 has no exact eviction counter).
+- Correlation references overlapping hardware intervals and uncovered Ns spans,
+  never simultaneous-read claims, interpolation or assumed missing poll counts.
+- Fixed availability markers replace raw reasons. No prompts, responses, generated
+  text, native-token metadata, arbitrary provider metadata, Python internals,
+  exceptions/tracebacks, GPU names/performance-state strings or unrelated app data.
+
+VERIFICATION / ACCESS / LIMITS
+------------------------------
+Reused isolated checkout C:\Users\Enter\Documents\ChatGPT\Actant\monitoring-hardening
+on a NEW bounded branch. Its own setup.ps1-installed Python 3.15.0b4 was verified.
+Sandbox execution needed approved temporary-file/subprocess/ephemeral loopback access.
+Existing/user checkout and consumer application branches were preserved. Canonical
+coordination alone was updated explicitly on actant-integration.
+
+Focused architectural tests:
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/first_party/observationBridge
+Result: 49 passed in 4.27s.
+
+PM/Pack/application/context/runtime/LLM/cancellation regressions:
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/first_party/observationBridge tests/backend/application tests/backend/context tests/backend/runtime tests/backend/telemetry tests/backend/llm tests/backend/packs tests/backend/orchestration tests/first_party/llmDrivers
+Result: 306 passed in 5.15s.
+
+Complete explicit Actant directory:
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests
+Result: 1144 passed, zero skips, in 6.30s (1095 baseline + 49 new cases).
+git diff --check and staged diff --check passed. All six changed Python files passed
+path/version and class/function docstring audit; backend observation 1->2,
+bridge/test source 1->2 in the follow-up, other new Python files version 1.
+Ruff was not run. Actual standard-library HTTP and Pack/application lifecycle paths
+were exercised with deterministic observations, not real GPU/inference/consumer apps.
+
+Coverage includes failed activation/registration/publication/start/bind/unload,
+copied-Pack-root loading, no retained contexts, no implicit inference attachment,
+expired/foreign/revoked authority, source/application teardown, independent grants/
+readers/consumers, authenticated loopback/Origin/preflight, no credential logging,
+withdrawal/source-read/close races, partial-header shutdown, retention/response bounds,
+no stale cached fallback, lossless >2^53 integers, unavailable/nonfinite versus zero,
+gaps/truncation/epoch distinctions and strict no-content allowlisting.
+Real raw-socket duplicate Host requests were observed arriving normalized to one
+Host in this environment; duplicate Host/Origin/Authorization rejection is additionally
+tested directly at the parsed adapter boundary. Wrong Host/credential/Origin and
+other request authorization cases use real ephemeral loopback sockets. No claim of
+on-wire duplicate-Host rejection independent of that local normalization is made.
+
+Known limits: hung native hardware/service-lock acquisition can delay grant reads,
+source revocation and bridge shutdown (existing PM limit, no interruption mechanism).
+One endpoint/read credential authorizes its explicitly selected publications; no
+per-browser policy/account system. Code helper modules are cached per resolved Pack
+location; arbitrary live source-code hot reload is not implemented. No G-02 viewer,
+browser visual/smoke validation, persistent history, optimization/tuning/model/server
+restart, automatic Pack activation, external exposure or consumer adoption.
+
+INTEGRATION NEXT ACTION
+-----------------------
+Refresh canonical coordination/inbox and synchronize safely. Independently inspect
+both commits listed above (series 2dbfd8e..fd127d7), especially grant/owner checks, lock ordering,
+credential/Origin boundaries, cache revocation and allowlisted schema. If compatible,
+cherry-pick BOTH commits listed above in order onto current Integration, rerun the
+documented commands and record independent acceptance. Do not reapply original PM
+or hardening worker commits. Only then dispatch G-02 against a named accepted G-01
+schema/bridge ref. Consumer adoption and real hardware/provider tests remain separate.
