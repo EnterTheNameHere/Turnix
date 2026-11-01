@@ -1,0 +1,118 @@
+LLAMA.CPP CONFIGURATION EXPANSION - PINNED SOURCE FINDINGS
+=======================================================
+
+Owner: Integration.
+Status: implementation-scoping evidence, not a canonical design specification.
+Inspected Actant baseline: actant-integration,
+5e51d628f06e4a6f18cfbf1d13276fb0a935a439 (2026-11-01).
+Requirement: mail/integration/inbox/
+2026-11-01-llamacpp-moe-reasoning-drafting-expansion.txt.
+Assignments: ai-workflow/assignments/llamacpp-configuration-expansion.txt.
+
+Version boundary
+----------------
+User reports version 0.8.0-dev, build 12031, commit 060b2fea4.
+Official ggml-org/llama.cpp commit resolves to
+060b2fea4ed528810ddc91d48fb22b3e4d63eb85, titled
+"opencl: add initial iq3 support (#31338)".
+The version/build number and a running executable have NOT been independently
+probed. Source support at this commit is not proof a configured binary has it,
+nor that a particular model/backend/template honors an accepted option.
+
+Pinned primary sources (all findings below use these, not moving master):
+- https://github.com/ggml-org/llama.cpp/blob/060b2fea4ed528810ddc91d48fb22b3e4d63eb85/common/arg.cpp
+- https://github.com/ggml-org/llama.cpp/blob/060b2fea4ed528810ddc91d48fb22b3e4d63eb85/common/speculative.cpp
+- https://github.com/ggml-org/llama.cpp/blob/060b2fea4ed528810ddc91d48fb22b3e4d63eb85/tools/server/README.md
+- https://github.com/ggml-org/llama.cpp/blob/060b2fea4ed528810ddc91d48fb22b3e4d63eb85/tools/server/server-common.cpp
+- https://github.com/ggml-org/llama.cpp/blob/060b2fea4ed528810ddc91d48fb22b3e4d63eb85/tools/server/server-context.cpp
+
+MoE and startup reasoning
+-------------------------
+arg.cpp around 2711-2740 exposes --cpu-moe (-cmoe), --n-cpu-moe
+(-ncmoe), and --moe-cache-mib. The latter is nonnegative MiB for a GPU
+cache of CPU-resident MoE experts; zero disables it. It is not KV caching.
+Do not infer model compatibility from valid argument spelling.
+
+Server startup options include --chat-template-kwargs (JSON object),
+--reasoning on/off/auto, --reasoning-effort, --reasoning-budget,
+--reasoning-budget-message, --reasoning-format, --reasoning-preserve and
+--no-reasoning-preserve (arg.cpp around 3522 and 3674-3740).
+Budget accepts -1 (unrestricted), 0 and positive integers. Effort is passed
+to the template; help examples are not a universal exhaustive enum.
+Preservation is template-dependent; server-context.cpp explicitly warns when
+the template does not support the requested control. Avoid unconditional claims
+about preservation defaults or effective thinking behavior.
+
+Request reasoning and template fidelity
+--------------------------------------
+server-common.cpp around 1469-1531 accepts request reasoning_format and merges
+chat_template_kwargs over server kwargs. enable_thinking is a JSON boolean,
+not a string. Request reasoning_effort "none" then disables thinking and removes
+the template effort key; other nonempty effort strings pass into that key.
+Actant must define and test duplicate/contradictory inputs rather than accidentally
+depend on dictionary ordering. Output formatting is not generation suppression.
+
+The source also accepts reasoning_budget_tokens (thinking_budget_tokens fallback)
+and reasoning_budget_message, but these are not required for the initial request
+surface. Budget/control forwarding depends on recognized thinking end tags.
+Optional reasoning_control concerns upstream real-time reasoning control; it is
+not Actant Job cancellation. Defer its control endpoint/lifecycle in this scope.
+
+The active Actant token estimator currently sends only messages to /apply-template.
+server-context.cpp around 6341-6353 routes that endpoint through the same
+oaicompat_chat_params_parse used for chat completions, providing the source basis
+for matching template controls. Request-dependent controls must also reach the
+corresponding estimation path; otherwise exact-token claims can become false.
+Do not silently accept a count for a different rendered prompt.
+The active SSE substrate currently retains delta.content but drops
+delta.reasoning_content. Preserve provider-exposed reasoning separately from
+ordinary answer text using an explicitly documented existing metadata contract
+where possible; escalate a required generic stream/query contract change.
+Reasoning or request payloads must not be added to passive observation or G-01's
+allowlisted export as a side effect of recording configuration evidence.
+
+Speculation and baseline hazards
+--------------------------------
+Pinned method names: none, draft-simple, draft-eagle3, draft-mtp, draft-dflash,
+draft-dspark, ngram-simple, ngram-map-k, ngram-map-k4v, ngram-mod, ngram-cache.
+--spec-type accepts a comma-separated list; decide a validated representation
+that preserves ordering and rejects combinations silently discarded upstream.
+
+Canonical options include --spec-draft-model, --spec-draft-n-max,
+--spec-draft-n-min, --spec-draft-n-ubatch, --spec-draft-device,
+--spec-draft-ngl, --spec-draft-p-min, --spec-draft-p-split,
+--spec-draft-sampling (greedy/probabilistic), and paired
+--spec-draft-backend-sampling/--no-spec-draft-backend-sampling.
+Draft GPU layers accepts integers and auto/all upstream. Validate against exact
+parser semantics rather than treating every field as a nonnegative integer.
+Method-specific ngram options exist; not every flag is required as a first-class
+field. Preserve extraArgs with explicit validation/evidence limitations.
+Old --draft/--draft-n/--draft-max, --draft-min/--draft-n-min and generic
+--spec-ngram-size-n/size-m/min-hits are removed options, not valid aliases.
+
+IMPORTANT: arg.cpp's spec_types_is_default checks equality to {NONE}; its model
+handler can infer a draft method from sidecar/draft GGUF metadata in that state
+(around 333, 530-555). Do not assume spelling --spec-type none alone prevents
+inference while draft inputs remain present. A proven explicit no-speculation
+baseline must exclude/reject conflicting draft inputs, including extraArgs and
+relevant inherited LLAMA_ARG_* environment inputs; record the actual launch
+environment policy. Never silently enable speculative inference or download
+auxiliary weights. DSpark thresholds can additionally depend on model metadata.
+
+Actant boundary and evidence
+----------------------------
+Manifest selects structuredCodeEntry.py; codeEntry.py is its substrate, not an
+alternative active provider. Existing config parsing, model launchProfile(),
+_serverArgs(), _parseInferenceOptions(), active payload/estimator, SSE parser and
+shared config compatibility identity all need coordinated coverage.
+Managed host-service leases, lazy activation, last-lease teardown, cancellation
+and optional observation remain the accepted contracts. Existing ensureModel()
+stop/start mechanics do not authorize a new automatic restart/arbitration policy.
+
+Separate requested structured config, concrete argv/request, configured/probed
+build identity, and provider-reported effective evidence with provenance and
+unknown/unverified states. HTTP success alone proves neither effective settings
+nor model behavior. An external server has no Actant-controlled launch argv.
+No real binary/help probe, model run, inference benchmark or new runtime test was
+performed during this source/scoping pass. Existing accepted platform test evidence
+remains unchanged. The Experiment Runner is a future independent application.
