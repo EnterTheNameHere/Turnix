@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 8
+# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 9
 from __future__ import annotations
 
 import importlib.util
@@ -60,6 +60,82 @@ class LlamaCppOptions:
     seed: int | None = None
     timeoutSeconds: float = 120.0
     reasoningEffort: str | None = None
+    chatTemplateKwargs: Mapping[str, ImmutableValue] | None = None
+    reasoningFormat: str | None = None
+
+    def __post_init__(self) -> None:
+        """Freeze request template controls and reject competing request authorities.
+
+        Request effort overrides startup effort upstream. Within this request it
+        cannot also be supplied as a template kwarg. Effort 'none' disables
+        thinking and therefore conflicts with explicit enable_thinking=true.
+        Other effort strings and enable_thinking=false remain independent.
+        """
+        if self.reasoningEffort is not None and (
+            type(self.reasoningEffort) is not str or not self.reasoningEffort.strip()
+        ):
+            raise ValueError("llama.cpp provider option 'reasoningEffort' must be non-empty text.")
+        if self.reasoningFormat is not None and (
+            type(self.reasoningFormat) is not str
+            or self.reasoningFormat not in {"none", "auto", "deepseek", "deepseek-legacy"}
+        ):
+            raise ValueError("reasoningFormat must be none, auto, deepseek or deepseek-legacy.")
+        if self.chatTemplateKwargs is None:
+            return
+        try:
+            _configuration.validateKwargs(self.chatTemplateKwargs)
+            kwargs = ImmutableValueFreezer().freezeMapping(self.chatTemplateKwargs)
+        except (TypeError, ValueError):
+            raise ValueError("chatTemplateKwargs must be a finite JSON object with valid reasoning keys.") from None
+        if self.reasoningEffort is not None and "reasoning_effort" in kwargs:
+            raise ValueError("reasoningEffort and template reasoning_effort duplicate request authority.")
+        if self.reasoningEffort == "none" and kwargs.get("enable_thinking") is True:
+            raise ValueError("reasoningEffort=none conflicts with enable_thinking=true.")
+        object.__setattr__(self, "chatTemplateKwargs", kwargs)
+
+
+def _templateControls(options: LlamaCppOptions) -> dict[str, object]:
+    """Materialize fresh identical template controls for inference and estimation.
+
+    No server-only fields or full request bodies enter automatic profile metadata.
+    Returned mutable JSON containers have no aliases to the parsed immutable options.
+    """
+    result: dict[str, object] = {}
+    if options.reasoningEffort is not None:
+        result["reasoning_effort"] = options.reasoningEffort
+    if options.reasoningFormat is not None:
+        result["reasoning_format"] = options.reasoningFormat
+    if options.chatTemplateKwargs is not None:
+        result["chat_template_kwargs"] = _configuration.jsonValue(options.chatTemplateKwargs)
+    return result
+
+
+def _estimationMetadata() -> dict[str, ImmutableValue]:
+    """Describe the estimation method and its source/binary verification boundary."""
+    return {
+        "method": "apply-template/tokenize", "templateControls": "matched-request",
+        "sourceCommit": _configuration.SOURCE_COMMIT,
+        "effectiveHonor": "unverified-binary-and-template",
+        "failurePolicy": "raise-without-fallback-count",
+    }
+
+
+def _tokenizePayload(prompt: str, controls: Mapping[str, ImmutableValue]) -> dict[str, object]:
+    """Tokenize the rendered prompt with the same external model selection, when explicit."""
+    result: dict[str, object] = {
+        "content": prompt, "add_special": False, "parse_special": True, "with_pieces": False,
+    }
+    if "model" in controls:
+        result["model"] = controls["model"]
+    return result
+
+
+def _tokenCount(response: Mapping[str, object]) -> int:
+    """Require a real token-ID list before claiming a rendered-prompt token count."""
+    tokens = response.get("tokens")
+    if type(tokens) is not list or any(type(token) is not int or token < 0 for token in tokens):
+        raise LlmProviderProtocolError("llama.cpp /tokenize response must contain a token-ID list.")
+    return len(tokens)
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,22 +196,28 @@ class LlamaCppModel:
 
 
 class LlamaCppTokenEstimator:
-    """Exact text/plain query estimator backed by the active llama.cpp model."""
+    """Count the server-rendered text/plain prompt; pinned endpoint honor is required."""
 
-    def __init__(self, *, driver: "LlamaCppDriver", timeoutSeconds: float) -> None:
-        """Binds estimation to one driver and request timeout."""
+    def __init__(self, *, driver: "LlamaCppDriver", timeoutSeconds: float,
+                 options: LlamaCppOptions | None = None, model: str | None = None) -> None:
+        """Bind immutable request template controls and external model routing to estimation."""
         self._driver = driver
         self._timeoutSeconds = timeoutSeconds
+        controls = _templateControls(LlamaCppOptions() if options is None else options)
+        if not driver.manageServer and model is not None:
+            controls["model"] = model
+        self._controls = ImmutableValueFreezer().freezeMapping(controls)
 
     def estimateInputTokens(self, query: LlmQuery) -> int:
-        """Returns the exact token count after llama.cpp chat-template expansion."""
+        """Count the returned rendered prompt or raise; never substitute a different template."""
         if query.formatId != "text/plain" or type(query.payload) is not str:
             raise ValueError(
                 "llama.cpp token estimation supports exact-string text/plain queries only."
             )
         templated = self._driver.postJson(
             "/apply-template",
-            {"messages": [{"role": "user", "content": query.payload}]},
+            {"messages": [{"role": "user", "content": query.payload}],
+             **_configuration.jsonValue(self._controls)},
             timeoutSeconds=self._timeoutSeconds,
         )
         prompt = templated.get("prompt")
@@ -145,20 +227,10 @@ class LlamaCppTokenEstimator:
             )
         tokenized = self._driver.postJson(
             "/tokenize",
-            {
-                "content": prompt,
-                "add_special": False,
-                "parse_special": True,
-                "with_pieces": False,
-            },
+            _tokenizePayload(prompt, self._controls),
             timeoutSeconds=self._timeoutSeconds,
         )
-        tokens = tokenized.get("tokens")
-        if not isinstance(tokens, list):
-            raise LlmProviderProtocolError(
-                "llama.cpp /tokenize response does not contain a tokens list."
-            )
-        return len(tokens)
+        return _tokenCount(tokenized)
 
 
 class LlamaCppStreamProvider:
@@ -181,6 +253,7 @@ class LlamaCppStreamProvider:
             "timeoutSeconds": options.timeoutSeconds,
             "managedServer": self.driver.manageServer,
             "configurationEvidence": self.driver.configurationSummary(model),
+            "tokenEstimation": _estimationMetadata(),
         }
         if selected is not None:
             metadata["launchProfile"] = selected.launchProfile()
@@ -193,14 +266,16 @@ class LlamaCppStreamProvider:
             tokenEstimator=LlamaCppTokenEstimator(
                 driver=self.driver,
                 timeoutSeconds=options.timeoutSeconds,
+                options=options,
+                model=model,
             ),
             metadata=metadata,
         )
 
     def stream(self, request: LlmCallRequest) -> Iterator[LlmStreamEvent]:
         """Streams one OpenAI-compatible chat-completions request from llama.cpp."""
-        self.driver.ensureModel(request.model)
         options = _parseInferenceOptions(request.providerOptions)
+        self.driver.ensureModel(request.model)
         payload = _buildPayload(
             request,
             options,
@@ -273,7 +348,7 @@ def _parseInferenceOptions(source: Mapping[str, ImmutableValue]) -> LlamaCppOpti
     """Parses the complete supported request-level llama.cpp option set."""
     allowed = {
         "temperature", "maxTokens", "topP", "topK", "minP", "repeatPenalty",
-        "seed", "timeoutSeconds", "reasoningEffort",
+        "seed", "timeoutSeconds", "reasoningEffort", "chatTemplateKwargs", "reasoningFormat",
     }
     unknown = set(source) - allowed
     if unknown:
@@ -293,6 +368,8 @@ def _parseInferenceOptions(source: Mapping[str, ImmutableValue]) -> LlamaCppOpti
         seed=_optionalInt(source, "seed"),
         timeoutSeconds=120.0 if timeout is None else timeout,
         reasoningEffort=reasoning,
+        chatTemplateKwargs=source.get("chatTemplateKwargs"),
+        reasoningFormat=source.get("reasoningFormat"),
     )
 
 
@@ -321,58 +398,78 @@ def _buildPayload(
         ("max_tokens", options.maxTokens), ("top_p", options.topP),
         ("top_k", options.topK), ("min_p", options.minP),
         ("repeat_penalty", options.repeatPenalty), ("seed", options.seed),
-        ("reasoning_effort", options.reasoningEffort),
     )
     for key, value in mappings:
         if value is not None:
             payload[key] = value
+    payload.update(_templateControls(options))
     return payload
 
 
+def _reasoningMetadata(content: str) -> dict[str, ImmutableValue]:
+    """Identify private provider-reported reasoning text, separate from ordinary answer text."""
+    return {"schemaId": "actant.llamaCpp.reasoning@1", "content": content,
+            "source": "delta.reasoning_content"}
+
+
 def _readEvents(response) -> Iterator[LlmStreamEvent]:
-    """Parses llama.cpp SSE bytes into provider-neutral stream events."""
+    """Preserve single-choice answer deltas and separate private reasoning evidence.
+
+    Reasoning-only chunks yield metadata deltas with empty text. Completed metadata
+    holds the concatenated reasoning for pipeline result/completion/persistence
+    retrieval; no backend event/schema change or passive observation export occurs.
+    A finish reason does not terminate early: trailing usage/timings before [DONE]
+    still belong to the completed evidence. Malformed/truncated streams fail closed.
+    """
     finalMetadata: dict[str, ImmutableValue] = {}
+    reasoningParts: list[str] = []
+    reasoningSeen = False
     for rawLine in response:
         if not isinstance(rawLine, bytes):
             raise LlmProviderProtocolError("llama.cpp stream produced a non-bytes line.")
         try:
             line = rawLine.decode("utf-8", errors="strict").rstrip("\r\n")
-        except UnicodeDecodeError as err:
-            raise LlmProviderProtocolError("llama.cpp stream contained invalid UTF-8.") from err
+        except UnicodeDecodeError:
+            raise LlmProviderProtocolError("llama.cpp stream contained invalid UTF-8.") from None
         if not line or not line.startswith("data:"):
             continue
         data = line[5:].strip()
         if data == "[DONE]":
+            if reasoningSeen:
+                finalMetadata["llamaCppReasoning"] = _reasoningMetadata("".join(reasoningParts))
             yield LlmStreamEvent(eventType="completed", metadata=finalMetadata)
             return
         try:
             chunk = json.loads(data)
-        except json.JSONDecodeError as err:
-            raise LlmProviderProtocolError("llama.cpp stream contained invalid JSON.") from err
+        except json.JSONDecodeError:
+            raise LlmProviderProtocolError("llama.cpp stream contained invalid JSON.") from None
         if not isinstance(chunk, dict):
             raise LlmProviderProtocolError("llama.cpp stream chunk must be a JSON object.")
         if "error" in chunk:
-            raise LlmProviderProtocolError(
-                f"llama.cpp stream reported an error: {chunk['error']!r}."
-            )
+            raise LlmProviderProtocolError("llama.cpp stream reported a provider error.")
         metadataSource = {
             key: chunk[key]
-            for key in ("model", "usage", "timings", "system_fingerprint")
+            for key in ("model", "usage", "timings", "system_fingerprint", "reasoning_format")
             if key in chunk
         }
-        metadata = ImmutableValueFreezer().freezeMapping(
-            metadataSource,
-            "llamaCppStreamMetadata",
-        )
-        finalMetadata.update(metadata)
         choices = chunk.get("choices", [])
         if not isinstance(choices, list):
             raise LlmProviderProtocolError("llama.cpp stream choices must be a list.")
         text = ""
+        reasoning = None
         if choices:
+            if len(choices) != 1:
+                raise LlmProviderProtocolError("llama.cpp stream must contain a single choice.")
             choice = choices[0]
             if not isinstance(choice, dict):
                 raise LlmProviderProtocolError("llama.cpp stream choice must be an object.")
+            if "index" in choice and (type(choice["index"]) is not int or choice["index"] != 0):
+                raise LlmProviderProtocolError("llama.cpp stream choice index must be zero.")
+            finish = choice.get("finish_reason")
+            if finish is not None:
+                if type(finish) is not str:
+                    raise LlmProviderProtocolError("llama.cpp finish_reason must be text or null.")
+                metadataSource["finish_reason"] = finish
             delta = choice.get("delta")
             if delta is not None:
                 if not isinstance(delta, dict):
@@ -382,8 +479,23 @@ def _readEvents(response) -> Iterator[LlmStreamEvent]:
                     if not isinstance(content, str):
                         raise LlmProviderProtocolError("llama.cpp stream content must be text.")
                     text = content
-        if text or metadata:
-            yield LlmStreamEvent(eventType="delta", text=text, metadata=metadata)
+                reasoning = delta.get("reasoning_content")
+                if reasoning is not None:
+                    if type(reasoning) is not str:
+                        raise LlmProviderProtocolError("llama.cpp reasoning_content must be text or null.")
+                    reasoningSeen = True
+                    reasoningParts.append(reasoning)
+        try:
+            metadata = ImmutableValueFreezer().freezeMapping(metadataSource, "llamaCppStreamMetadata")
+        except (TypeError, ValueError):
+            raise LlmProviderProtocolError("llama.cpp stream contained invalid metadata.") from None
+        finalMetadata.update(metadata)
+        eventMetadata = dict(metadata)
+        if reasoning is not None:
+            eventMetadata["llamaCppReasoning"] = _reasoningMetadata(reasoning)
+        if text or eventMetadata:
+            yield LlmStreamEvent(eventType="delta", text=text, metadata=eventMetadata)
+    raise LlmProviderProtocolError("llama.cpp stream ended without [DONE].")
 
 
 def _positiveInt(value: object, name: str) -> int:

@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/structuredCodeEntry.py ; version: 9
+# file: first-party/llmDrivers/llamaCpp/structuredCodeEntry.py ; version: 10
 # ruff: noqa: INP001
 from __future__ import annotations
 
@@ -94,19 +94,24 @@ def _messagesForQuery(query: LlmQuery) -> list[dict[str, str]]:
 
 
 class LlamaCppTokenEstimator:
-    """Exact token estimator for plain and structured Actant chat queries."""
+    """Count server-rendered structured prompts with inference-equivalent template controls."""
 
-    def __init__(self, *, driver: LlamaCppDriver, timeoutSeconds: float) -> None:
-        """Binds estimation to one driver and request timeout."""
+    def __init__(self, *, driver: LlamaCppDriver, timeoutSeconds: float,
+                 options: LlamaCppOptions | None = None, model: str | None = None) -> None:
+        """Bind immutable template controls, timeout and external model routing."""
         self._driver = driver
         self._timeoutSeconds = timeoutSeconds
+        controls = _impl._templateControls(LlamaCppOptions() if options is None else options)
+        if not driver.manageServer and model is not None:
+            controls["model"] = model
+        self._controls = _impl.ImmutableValueFreezer().freezeMapping(controls)
 
     def estimateInputTokens(self, query: LlmQuery) -> int:
-        """Counts tokens after templating the same exact messages used for inference."""
+        """Count the returned prompt under matching controls; endpoint failure has no fallback."""
         messages = _messagesForQuery(query)
         templated = self._driver.postJson(
             "/apply-template",
-            {"messages": messages},
+            {"messages": messages, **_impl._configuration.jsonValue(self._controls)},
             timeoutSeconds=self._timeoutSeconds,
         )
         prompt = templated.get("prompt")
@@ -116,20 +121,10 @@ class LlamaCppTokenEstimator:
             )
         tokenized = self._driver.postJson(
             "/tokenize",
-            {
-                "content": prompt,
-                "add_special": False,
-                "parse_special": True,
-                "with_pieces": False,
-            },
+            _impl._tokenizePayload(prompt, self._controls),
             timeoutSeconds=self._timeoutSeconds,
         )
-        tokens = tokenized.get("tokens")
-        if not isinstance(tokens, list):
-            raise _impl.LlmProviderProtocolError(
-                "llama.cpp /tokenize response does not contain a tokens list.",
-            )
-        return len(tokens)
+        return _impl._tokenCount(tokenized)
 
 
 class LlamaCppStreamProvider:
@@ -152,6 +147,7 @@ class LlamaCppStreamProvider:
             "timeoutSeconds": options.timeoutSeconds,
             "managedServer": self.driver.manageServer,
             "configurationEvidence": self.driver.configurationSummary(model),
+            "tokenEstimation": _impl._estimationMetadata(),
         }
         if selected is not None:
             metadata["launchProfile"] = selected.launchProfile()
@@ -164,6 +160,8 @@ class LlamaCppStreamProvider:
             tokenEstimator=LlamaCppTokenEstimator(
                 driver=self.driver,
                 timeoutSeconds=options.timeoutSeconds,
+                options=options,
+                model=model,
             ),
             metadata=metadata,
         )
@@ -180,11 +178,11 @@ class LlamaCppStreamProvider:
         if cancellationSignal is not None:
             cancellationSignal.raiseIfRequested()
 
+        options = _impl._parseInferenceOptions(request.providerOptions)
         self.driver.ensureModel(request.model)
         if cancellationSignal is not None:
             cancellationSignal.raiseIfRequested()
 
-        options = _impl._parseInferenceOptions(request.providerOptions)  # noqa: SLF001 - adapter reuses substrate parser.
         payload = _buildPayload(
             request,
             options,
@@ -252,9 +250,9 @@ def _buildPayload(
         ("min_p", options.minP),
         ("repeat_penalty", options.repeatPenalty),
         ("seed", options.seed),
-        ("reasoning_effort", options.reasoningEffort),
     )
     payload.update({key: value for key, value in mappings if value is not None})
+    payload.update(_impl._templateControls(options))
     return payload
 
 
