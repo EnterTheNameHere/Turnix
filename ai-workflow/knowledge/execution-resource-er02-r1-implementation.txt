@@ -1,0 +1,82 @@
+ER-02-R1 CORRECTION / VERIFICATION EVIDENCE
+==========================================
+Owner: Codex ER-02 worker. Acceptance owner: Integration. Date: 2026-11-02.
+Status: corrected source published for independent review, NOT integrated/accepted.
+Worker branch: execution-resource-sessions.
+Corrected head: c101c8ca66654600a9c5788c65e08e65de78e1f2.
+Correction parent: b5d0712061bd945dd209c928111a66088c03d133.
+Canonical review/synchronization: 0e901c901fdfad860c980b8ce502481e47c85b5b.
+Original worker implementation: 0b334c8d44741aa2e91abf2fb402b90a74963553,
+from approved implementation parent 18c601da43e7dc0bd41ada8b958968f23e3b31eb.
+The b5d0712 merge preserves both published histories; no accepted source/proposal/
+review commits replayed, no rewrite/force push, no other checkout changed.
+
+Corrected protocol
+--------------------
+Only backend/llm/executionSessions.py (version 2), streamingRuntime.py (version 13)
+and new tests/backend/llm/test_executionBindingPublication.py (version 1) change.
+Bind installs an exact-registration pending ticket before callback construction.
+Host, registry, owner and provider-registration revocation invalidate pending
+tickets. Exact registration tombstones also cover revocation before any binding
+exists. Old owner/registration incarnations never authorize new admission.
+An LlmProviderRegistry.executionPublication guard shares the actual registration
+publication/withdrawal lane. Final commit holds registry then broker lanes, checks
+exact registration identity, exact live ticket, admission and live owner grants.
+Construction, participant cleanup and provider/lease callbacks run outside both
+lanes. RevokeAll releases its broker lane before acquiring registry lanes.
+
+Assignment into the published binding table is the lease-transfer point. Before
+that point the composition caller owns its lease, including failed bind. Every
+issued unpublished participant is disposed on rejection or partial construction;
+remaining disposals are attempted if one close fails, preserving the primary error.
+Failed participant rollback is retained/reported by finishClose as typed cleanup
+failure, with no hidden retry/recovery and no takeover of the caller's lease.
+Pending construction likewise prevents finishClose from falsely reporting drained.
+After publication the normal binding lifetime owns/finalizes the lease exactly once.
+A post-commit exception is marked llmBindingPublished=True; published participants
+are not rolled back as unpublished and normal revocation still disposes them.
+Rollback failure marks the primary error with safe llmPublicationCleanup detail.
+Controlled binding intent remains fail-closed during/after rejected publication;
+it cannot silently fall back to legacy execution. Exact replacement registration
+requires explicit trusted rebinding; a new live owner incarnation can be granted.
+
+Durable verification
+----------------------
+28 added deterministic cases use real ER-01 participants, fake provider callbacks,
+Events/Futures and explicit lock probes; no sleep-based interleavings. Assert
+issued, attempted-close, retired-participant and lease-disposal counts.
+Includes all four Integration reproductions; revoke-before-construction; temporary
+registry/provider-only/withdrawal races; publication winning; guarded withdrawal;
+duplicate publication; owner and registration reincarnation; partial construction;
+rollback callback failure; callbacks outside lanes; pending/failed no-legacy gate;
+pending close reporting; caller-owned retry; post-commit exception; empty grants.
+Before the fix the four race cases plus partial construction failed: 5 failed,
+14 deselected in 0.19s. Four published after revoke; partial construction leaked
+both issued participants. These tests then passed against the corrected source.
+
+Actual final commands from the isolated worker checkout, Python 3.15.0b4:
+  .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/llm/test_executionBindingPublication.py
+    28 passed in 0.07s.
+  .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/llm tests/backend/context
+    143 passed in 0.16s.
+  .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/runtime tests/backend/application tests/backend/orchestration tests/backend/telemetry tests/first_party/llmDrivers tests/backend/packs
+    589 passed in 2.19s.
+  .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests
+    1631 passed in 8.47s.
+Zero skips in all runs. Tested source is exactly c101c8c; no later source changes.
+AST/header/docstring audit passed for all three changed Python files. git diff
+--check passed. ER-01, SharedServiceRegistry, generic registration source and
+first-party driver source are unchanged by this correction. Original ER-02 suite
+and implementation evidence remains in execution-resource-er02-implementation.txt.
+
+Limitations / continuation
+----------------------------
+Existing embedded-home warning remains. Ruff was unavailable in the original
+delivery and was not run for this correction. Tests use fake callbacks and do not
+establish actual provider quiescence, hardware isolation or retained cache effects.
+No model, inference, downloads, monitoring activation or consumer adoption.
+Unknown quiescence remains blocked; no preemption, scheduler or automatic recovery.
+ER-03/04 and Runner remain unassigned. Current llama.cpp is unbound; ER-02/03 must
+be adopted together before managed switching protection can be advertised.
+Integration must independently review/reproduce/retest and decide acceptance;
+canonical publication contains coordination only, never worker production source.
