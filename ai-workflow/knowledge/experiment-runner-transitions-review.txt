@@ -197,6 +197,39 @@ crash recovery is a later gate, not claimed solved by an in-memory finally block
 
 Consequential choices requiring design-owner/user decision
 ---------------------------------------------------------
+Additional user requirement: fresh versus retained context (2026-11-02)
+---------------------------------------------------------------------
+Packs need explicit fresh inference context versus required reuse of retained
+context, independently of model residency. This clarification is design input,
+NOT approval of A/B/C or an implemented API. Current providerOptions exposes no
+slot/cache/context-handle controls.
+Pinned primary documentation exposes id_slot, cache_prompt (prefix KV reuse),
+/slots/{id}?action=erase and slot save/restore; chat completions accepts completion
+controls. It also warns caching may change numerical results through batch shapes:
+https://github.com/ggml-org/llama.cpp/blob/060b2fea4ed528810ddc91d48fb22b3e4d63eb85/tools/server/README.md
+Actual binary/slot/reset/reuse behavior remains untested here.
+
+Extend the proposal with owner-scoped context handles bound to residency and
+context generations, separate from transcript, model weights and capacity:
+- Fresh: new logical context or reset of an owned idle context, excluding applicable
+  prompt-cache reuse and recording reset evidence; keep compatible weights resident.
+- Required reuse: same owned retained context and compatible rendered prefix/settings;
+  fail explicitly if state was evicted/lost/invalidated. Never silently rebuild when
+  physical reuse is required. Optional prefer-reuse/rebuild is a different policy.
+- Retained contexts pin residency/capacity even between calls; incompatible transitions
+  must respect them. Reject concurrent/foreign/stale handle use. Do not clear another
+  owner's slot. Cancellation may invalidate uncertain context state.
+- Conversation history remains authoritative in the Pack/Application; KV state is a
+  derived execution artifact. Ordinary chat calls still supply required history;
+  retaining a slot does not establish a server-side append-only conversation API.
+- Fresh state does not mean resizing contextWindowTokens, unloading weights, clearing
+  MoE weight caches, or a GPU-wide cold run. GPU retention depends on backend/placement.
+  Fresh context alone does not ensure deterministic output: prompt/template, RNG/
+  sampling, backend/build and execution/cache policy also need controlled validation.
+Tests/gates must prove reset/reuse evidence, no reload for same-model fresh runs,
+loss failure, owner isolation, generation invalidation and retained pins blocking
+transitions. Flag forwarding or repeated output alone is not sufficient proof.
+
 A. Recommend explicit exclusive reservation per experiment conversation, denying
    unrelated same-profile calls too. Alternative: only prohibit incompatible
    transitions; compatible calls may interfere with timing measurements.
