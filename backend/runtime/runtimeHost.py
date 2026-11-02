@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 9
+# file: backend/runtime/runtimeHost.py ; version: 10
 from __future__ import annotations
 
 from contextlib import suppress
@@ -10,6 +10,7 @@ from backend.application.lifecycle import ApplicationLifecycle
 from backend.core.runtimeIds import newRuntimeId
 from backend.observation import ObservationService
 from backend.packs.runtime import ManualActivationPlan, PackResolver
+from backend.runtime.executionResources import ExecutionResourceService
 from backend.runtime.sharedServices import (
     SharedServiceRegistry,
     bindApplicationRunSharedServices,
@@ -67,6 +68,7 @@ class RuntimeHost:
         self._runtimesByRunId: dict[str, ApplicationRuntime] = {}
         self._runIdByApplicationId: dict[str, str] = {}
         self.sharedServices = SharedServiceRegistry()
+        self.executionResources = ExecutionResourceService()
         self._observations = ObservationService(telemetryService)
         self._ownsTracer = tracer is None
         self.tracer = tracer or Tracer(
@@ -222,36 +224,43 @@ class RuntimeHost:
                 )
 
     def stop(self) -> None:
-        """Closes all ApplicationRuntimes, shared host services, and owned tracing."""
+        """Closes host admission and reports unresolved resource cleanup honestly.
+
+        Legacy application/shared-service teardown retains its existing host-lock
+        behavior. New execution-resource callbacks run after leaving that lock.
+        Repeated stop still attempts deferred drain and reports unknown/failure.
+        """
+        errors: list[Exception] = []
         with self._lane:
-            if self.state is RuntimeHostState.STOPPED:
-                return
+            self.executionResources.close()
+            if self.state is not RuntimeHostState.STOPPED:
+                try:
+                    for applicationRunId in tuple(self._runtimesByRunId):
+                        runtime = self._runtimesByRunId.pop(applicationRunId)
+                        applicationId = runtime.applicationRun.application.applicationId
+                        self._runIdByApplicationId.pop(applicationId, None)
+                        errors.extend(self._closeRuntime(runtime))
+                        unbindApplicationRunSharedServices(applicationRunId)
 
-            errors: list[Exception] = []
-            for applicationRunId in tuple(self._runtimesByRunId):
-                runtime = self._runtimesByRunId.pop(applicationRunId)
-                applicationId = runtime.applicationRun.application.applicationId
-                self._runIdByApplicationId.pop(applicationId, None)
-                errors.extend(self._closeRuntime(runtime))
-                unbindApplicationRunSharedServices(applicationRunId)
+                    self._observations.close()
+                    try:
+                        self.sharedServices.close()
+                    except Exception as err:  # noqa: BLE001 - preserve aggregate legacy cleanup.
+                        errors.append(err)
+                    self.state = RuntimeHostState.STOPPED
+                    self.trace("runtime-host-stopped")
+                    if self._ownsTracer:
+                        with suppress(Exception):
+                            self.tracer.close()
+                except Exception as err:  # noqa: BLE001 - new cleanup must also run on legacy failure.
+                    errors.append(err)
 
-            self._observations.close()
-            try:
-                self.sharedServices.close()
-            except Exception as err:  # noqa: BLE001 - host shutdown aggregates arbitrary service failures.
-                errors.append(err)
-
-            self.state = RuntimeHostState.STOPPED
-            self.trace("runtime-host-stopped")
-            if self._ownsTracer:
-                with suppress(Exception):
-                    self.tracer.close()
-
-            if errors:
-                raise ExceptionGroup(
-                    "RuntimeHost shutdown reported cleanup errors.",
-                    errors,
-                )
+        try:
+            self.executionResources.finishClose()
+        except Exception as err:  # noqa: BLE001 - include pending/failed/unknown resource evidence.
+            errors.append(err)
+        if errors:
+            raise ExceptionGroup("RuntimeHost shutdown reported cleanup errors.", errors)
 
     def trace(
         self,
