@@ -1,4 +1,4 @@
-# file: backend/runtime/executionResources.py ; version: 1
+# file: backend/runtime/executionResources.py ; version: 2
 """Host-owned admission and cleanup for one provider-neutral residency per domain.
 
 Composition and adapter hooks are trusted backend APIs, not Pack authority. The
@@ -313,7 +313,11 @@ class OperationClaim:
 
     def retain(self, providerPayload: object, disposer: Callable[[object], ProviderEffect]
                ) -> RetainedContextPin | ResourceConflict:
-        """Registers an adapter-owned context and concrete deferred disposer."""
+        """Registers an adapter-owned context and concrete deferred disposer.
+
+        Ownership transfers only when a pin is returned. A conflict leaves the
+        adapter responsible for the unaccepted provider object and its disposal.
+        """
         return self._domain._retain(self, providerPayload, disposer)
 
 
@@ -794,7 +798,9 @@ class ExecutionResourceDomain:
             if self._ticket is ticket:
                 self._ticket = None
                 self._token, self._payload = None, None
-                if effect == _CONFIRMED and (result.present or cancelled):
+                if (result.present and effect == _CONFIRMED) or (
+                    not result.present and cancelled and effect.quiescence is Quiescence.CONFIRMED
+                ):
                     self._phase = ResourceState.EMPTY
                 elif effect.quiescence is Quiescence.CONFIRMED:
                     self._phase = ResourceState.FAILED
