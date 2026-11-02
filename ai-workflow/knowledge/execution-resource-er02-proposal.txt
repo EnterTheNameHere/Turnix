@@ -1,0 +1,315 @@
+ER-02 CONCRETE SESSION / OWNER / CONTEXT PROPOSAL
+================================================
+Owner: Codex ER-02 worker. Reviewer/acceptance owner: Integration. 2026-11-02.
+Status: PROPOSED; production changes paused at the requested API review checkpoint.
+Repository: EnterTheNameHere/Turnix; canonical coordination: actant-integration.
+Worker branch: execution-resource-sessions, same isolated checkout
+C:/Users/Enter/Documents/ChatGPT/Actant/llamacpp-configuration-expansion.
+Exact ER-02 starting parent: 178df7b103ee54fcc57513887c3882bc527e6a0f.
+Clean previous worker head 2e6c56b preserved on execution-resource-domain.
+git diff --quiet HEAD origin/actant-integration -- backend first-party tests
+returned 0 before branch creation. git cherry marks b3ddcb2 and 2e6c56b equivalent
+to accepted Integration e2dbba6 and 2ab64eb. New ER-02 branch starts directly at
+canonical head; no source/proposal/review/sync commit replay or other checkout edit.
+User dispatch supersedes ER-02-unassigned text. ER-03/04 and Runner unassigned.
+A/B/C and ER-01 are accepted inputs, not reopened architectural questions.
+
+1. Source findings and proposed files
+--------------------------------------
+streamingRuntime._resolveExecution calls getExecutionProfile before preparation,
+then _streamResolved separately calls stream. prepareProcessing returns a profile
+that can retain a live estimator. _LlmFacade.estimateInputTokens independently
+resolves profiles, bypassing the pipeline. The ApplicationRuntime pipeline's
+capabilityInvoker currently omits the parent cancellation signal. These all need
+the same session path; a stream-only lock would leave both investigated races.
+
+Proposed source changes:
+- New backend/llm/executionSessions.py: ER-01-backed binding/owner/session broker,
+  invocation access, profile references, context requests/handles and safe evidence.
+- backend/llm/llmTypes.py: provider-session/adapter Protocols and narrow typed
+  context/cleanup records, using type-only imports to avoid runtime cycles.
+- backend/llm/streamingRuntime.py: scoped admission around run/preparation/estimate/
+  processing; preview validation; estimator-free controlled result snapshots.
+- backend/llm/errors.py and __init__.py: typed errors and public request/handle types.
+- backend/context/codeEntryContext.py: fresh invocation access, new facade methods,
+  session/context forwarding and invalidation. No public trusted evidence hooks.
+- backend/application/applicationRuntime.py: runtime-issued owners, CodeEntry and
+  registration lifetime, scoped helper cancellation/estimation propagation.
+- backend/runtime/runtimeHost.py: inert binding composition and outside-lock owner
+  finalization on application close/host shutdown/failed create/load paths.
+- backend/packs/runtime.py: callback-free binding revocation before provider scope
+  withdrawal/unload, including activation failure. Preserve legacy unload behavior.
+- New focused tests/backend/llm/test_executionSessions.py and
+  tests/backend/llm/test_executionSessionRaces.py; extend relevant context/runtime/
+  application/Job/observation tests where integration contracts need coverage.
+No ER-01 source change proposed, no first-party provider change, no consumer adoption.
+Host/Pack changes are lifecycle plumbing for these new handles, not teardown redesign.
+
+2. Authority and binding before provider IO
+--------------------------------------------
+RuntimeHost composes inert LlmExecutionBindings alongside executionResources.
+Trusted host/provider composition installs a LlmExecutionBinding for one exact
+published provider Registration in one ApplicationRun registry. It supplies the
+ER-01 domain, immutable authorized selector -> ProfileReference mapping, adapter,
+owner grants and an owned adapter-lifetime lease. Binding registration is absent
+from ctx.llm.registerProvider; registering a Pack provider never grants domain,
+catalog, idle-transition or arbitrary-profile authority. No providerOptions key
+may introduce a participant, raw profile payload, context slot or evidence reporter.
+
+Before any getExecutionProfile/tokenizer/provider IO, select a profile using the
+host-installed map (model/default selector plus explicitly bound immutable policy).
+Selection must be pure and host-authorized, never ensureModel or provider probing.
+Unknown selectors reject. Startup identity belongs to ER-03; per-call options
+stay frozen and are not silently reinterpreted as authorized residency changes.
+
+ApplicationRuntime creates LlmExecutionOwner objects per live
+(applicationRunId, codeEntryInstanceId), deriving both from runtime identity.
+Each binding grants that owner an ER-01 ResourceParticipant; owner IDs supplied by
+a Pack are never accepted. No parallel claims/reservations/pin manager: all resource
+admission and protection uses the accepted ER-01 objects. Broker objects only bind
+LLM registration, lifetime and authority to those objects.
+Normal invokeCapability creates LlmInvocationAccess with an independently allocated
+validity token, owning runtime/CodeEntry issuer, and current CancellationSignal.
+CodeEntryContext.invalidate revokes this token. It does not keep a bound method,
+closure or reference to CodeEntryContext, memory/IO views or a transaction alive.
+Creation/registration/unload contexts do not acquire new controlled execution
+authority; legacy provider behavior there remains unchanged. Directly constructed
+contexts/pipelines need explicit trusted access injection for controlled calls.
+
+Every facade call first validates its current invocation, runtime owner, exact
+provider registration and any issued session/profile/context handles. Run/CodeEntry
+close and provider withdrawal revoke admission even if a Python handle remains.
+Re-registering the same provider name cannot reuse handles from an old registration.
+Only safe opaque identities/counts/effects enter evidence; no provider payload or
+private launch data enters repr, query-builder payloads or contention diagnostics.
+
+3. One admitted call through preparation and stream
+----------------------------------------------------
+The pipeline opens internal LlmCallSession before profile resolution:
+  resolve exact registration + freeze options + authorized profile
+  -> participant.acquire(profile, reservation=..., retained=..., cancellation=...)
+  -> trusted adapter.openExecution(admission, model, options)
+  -> providerSession.getExecutionProfile()
+  -> BUILD_QUERY_ITEMS / FILTER_QUERY_ITEMS / BUILD_QUERY / estimation
+  -> providerSession.prepareContext(query, contextRequest) [inference calls only]
+  -> providerSession.stream(LlmCallRequest)
+  -> close iterator/transport + adapter.closeExecution(...) + claim.finish(effect).
+The same registration, frozen options, profile and ResidencyToken bind every step.
+No second unadmitted getExecutionProfile/stream call in the controlled branch.
+Generation/lifetime checks precede provider entry and every scoped estimator use.
+
+Concrete trusted adapter contract:
+  openExecution(admission: LlmAdapterAdmission, model, options)
+      -> LlmProviderExecutionSession
+  closeExecution(admission, providerSessionOrNone, reason: LlmSessionExit)
+      -> LlmSessionCleanup
+LlmAdapterAdmission contains immutable residency evidence, private exact ticket,
+optional owned context reference and bindStop capability, not a Pack-facing claim.
+closeExecution runs exactly once even if open/profile/estimation/preparation fails;
+the exact ticket lets the adapter clean partially opened resources. It reports
+ER-01 ProviderEffect and context intact/lost/none plus any newly retained resource/
+registered disposer. Only the broker finalizes the claim. Cleanup exceptions or
+missing evidence mean failed/unknown, never inferred quiescence from local close,
+EOF/completed event, Job terminal status or cancellation. Adapter callbacks and
+iterator.close run outside broker/domain/host/registry locks; no hidden retry.
+
+Scoped profile estimators require the still-valid admitted call. Controlled
+StreamingLlmResult/LlmProcessingPreview contain a frozen profile snapshot with
+tokenEstimator=None and separate LlmExecutionEvidence (registration/profile/
+residency generation and context disposition). No callable survives call closure.
+Existing result/profile behavior stays unchanged for legacy unbound providers.
+Release the operation after provider cleanup, before completion capability and
+transaction commit. Conversation reservation and retained pins remain protected.
+
+4. Facade and conversation lifetime
+-------------------------------------
+Proposed additions to ctx.llm (methods always require fresh invocation access):
+  profile(providerName, model=None) -> LlmProfileReference [authorized lookup only]
+  transitionProfile(profile) -> TransitionOutcome [ER-01 grant checked]
+  reserveConversation(profile) -> LlmConversationSession [exclusive only initially]
+  run / runProcessing(..., session=None, context=None)
+  estimateInputTokens / prepareProcessing(..., session=None)
+  runPreview(preview, *, session=None, context=None) -> StreamingLlmResult
+Ordinary controlled calls omit session and acquire one compatible claim. No implicit
+initial load/replacement: NotResident remains typed until transitionProfile succeeds.
+Transition and reservation are separate immediate requests; a competing admission
+between them can win, with no retry or preemption hidden in reserveConversation.
+
+LlmConversationSession wraps the exact ER-01 exclusive OwnerReservation and profile/
+registration/owner identity. It is run/CodeEntry-owned across sequential invocations,
+contains no invocation Context/transaction, and has no independent run method.
+Each turn enters through a fresh ctx.llm facade with the same owner; foreign owner,
+stale registration/profile, closed session or overlapping call rejects before IO.
+When session is supplied its profile is inherited if model is omitted; an explicit
+model/provider/profile mismatch rejects instead of silently changing the session.
+ER-01 enforces non-reentrancy/exclusion. No silent reservation sharing/delegation.
+session.close() and contextHandle.close() are idempotent revocation/cleanup only,
+accept no evidence and cannot start new work. Cleanup remains possible after use
+authority closes. Owner close cannot release protection under active child work.
+
+5. Fresh versus retained inference state
+------------------------------------------
+context=None on controlled inference means FreshContext() (best-effort fresh
+logical scope; no retention). Legacy context=None preserves existing behavior and
+claims no reset. FreshContext(retain=True, required=False) requests a fresh context
+whose derived state will be retained; required=True requires the adapter's specific
+supported owned-context freshness promise. Unsupported explicit requests reject
+before execution. This small request is not a generic guarantee negotiator.
+retain=True requires retention support; lack of support is never a successful
+call with the requested retained handle silently omitted.
+Fresh is separate from weights, context-window capacity, GPU warmth or determinism.
+
+FreshContext is a request value, not authority or a provider resource. The admitted
+provider session owns its fresh context scope. If retention succeeds, the broker
+wraps claim.retain(payload, disposer) as LlmRetainedContextHandle, returned in
+StreamingLlmResult.retainedContext (also result.llm for processing). Only that
+issued handle can request ReuseContext(handle), always REQUIRED retained reuse.
+No prefer-reuse/rebuild policy in this slice. Handle binds exact owner, provider
+registration, residency and context generation; underlying ER-01 pin protects
+residency/capacity between calls. Public handles expose no payload/disposer/finish.
+
+Before streaming, prepareContext receives the complete current query and frozen
+settings. The adapter validates retained-state/prefix compatibility and reports
+its concrete reset/reuse action; ER-02 does not invent slot/cache checks. Missing,
+evicted, invalidated, foreign, concurrently used or incompatible required state
+fails explicitly, never replay/rebuild. Trusted adapter invalidation targets the
+exact issued context generation. Unknown context/operation cleanup retains the
+ER-01 blocker. Error, cancellation or transaction abort after possible mutation
+revokes affected retained state; no provider-state rollback guarantee is inferred.
+Pre-admission rejection cannot invalidate another owner's handle.
+Transcript/history and overflow decisions stay with the Pack. Context references
+are ephemeral derived artifacts and never committed/persisted or passed as a
+completion capability payload; only immutable safe context/residency evidence is.
+
+6. Preview and helper/nested calls
+------------------------------------
+Standalone prepareProcessing/estimateInputTokens acquire one scoped call, use the
+same generation for profile/build/estimation, then close. They do not allocate/reset
+an inference context or leave an operation claim behind. A supplied conversation
+reservation still pins residency between calls. Returned preview carries an opaque
+owner/registration/options/profile/generation binding plus immutable query evidence,
+not a live estimator or durable pin.
+runPreview reacquires and validates that exact binding before using its stored
+query; mismatch is LlmStalePreviewError, with no automatic rebuild. Callers may
+explicitly prepare again. runProcessing continues rebuilding inside its own fresh
+scope; it never executes a previously prepared query without revalidation.
+An ordinary run(query=...) treats caller-supplied input as a fresh direct query;
+it does not infer or promise hidden preview provenance. Callers requiring preview
+continuity use runPreview, not extraction of preview.query into an unrelated call.
+
+During pipeline-invoked build/filter/query callbacks, a narrowly scoped ContextVar
+borrows the active call for matching read-only estimateInputTokens and carries
+parent cancellation. ApplicationRuntime's callback bridge passes that signal to
+the helper's fresh context. Borrowing checks the actual runtime issuer and exact
+provider/profile/options, and ends in finally; copied/stale scope cannot reuse a
+closed call. It grants neither conversation/context ownership nor transition rights
+to another CodeEntry. Inference never piggybacks on a parent's operation claim.
+Nested inference requires independent admission; same exclusive session/domain
+returns Busy immediately. Different controlled domains remain independent.
+Completion callbacks run after operation release; any new inference obtains a
+new claim, preserving existing transactional completion semantics.
+
+7. Close, teardown, cancellation and transaction boundaries
+------------------------------------------------------------
+CancellationSignal remains Job-owned. Forward it from profile/open through helper
+capabilities, estimation and stream cleanup. Late stop binding uses ER-01 rules;
+cancelling a call never silently closes its whole conversation or changes Job
+terminal semantics. Consumer stop/protocol failure closes the iterator explicitly
+and always reaches the adapter cleanup hook. Unknown quiescence cannot be cleared
+by a finally block. Cleanup failure accompanies the primary error as typed safe
+evidence; it does not replace cancellation with a misleading success.
+
+No Value commit because a resource operation finishes. Preparation retains its
+existing reusable-QueryItem transaction semantics. Processing completion and outer
+Job mutation/IO transactions retain their existing commit/abort ordering. A handle
+created/updated by a failed processing transaction is revoked/disposed rather than
+published as if its transcript committed; physical side effects are not rolled back.
+For an enclosing Job abort after an inner pipeline return, runtime tracks touched
+handles in that Job scope and invalidates them on abort. No transaction or Context
+is retained in a conversation/context handle to achieve this.
+Implement this as a finally-reset runJob touched-handle scope, not a new transaction
+engine. Existing committed authoritative state survives late IO/Job failure;
+resource cleanup must never pretend that such committed state was rolled back.
+
+LlmExecutionBindings supplies callback-free revokeOwner/revokeRegistration and
+outside-lock finishClose. Pack scope withdrawal revokes bindings before onUnload;
+adapter lifetime remains owned until actual outstanding claims/pins drain. Adopted
+providers must detach facades on unload, not independently destroy bound residency;
+ER-03 must move its final driver lease to this owned lifetime before rollout.
+ApplicationRuntime.stop/close/unregisterCodeEntry marks owners closed and queues
+cleanup under existing locks. Direct runtime close finalizes after its own lane;
+host-invoked teardown explicitly defers to a host post-lock drain. closeApplicationRun,
+host stop and failed create/load paths all drain the queued owner cleanup after
+leaving the host lane, aggregating errors/pending state even on repeated close.
+No new callback under host/registry/domain/broker locks, no orphaned cleanup queue
+after runtime removal, and no broad change to legacy Pack/shared-service teardown.
+Review these lifecycle-only runtime/host/Pack edits explicitly before production.
+
+8. Caller examples (proposed API, not executable existing functionality)
+------------------------------------------------------------------------
+Trusted host composition binds existing published registration to an ER-01 domain,
+approved profiles/owner grants and a trusted session adapter. Pack code cannot do
+that through ctx.llm.registerProvider. Within an authorized active capability:
+
+  profile = ctx.llm.profile(providerName="controlled", model="approved-name")
+  ctx.llm.transitionProfile(profile)  # only if host granted; Busy stays explicit
+  state.conversation = ctx.llm.reserveConversation(profile)
+  first = ctx.llm.run(providerName="controlled", query=fullHistoryQuery,
+      session=state.conversation, context=FreshContext(retain=True))
+  state.context = first.retainedContext
+  # Later capability invocation receives a different fresh ctx:
+  later = ctx.llm.run(providerName="controlled", query=updatedFullHistoryQuery,
+      session=state.conversation, context=ReuseContext(state.context))
+  state.context.close()
+  state.conversation.close()
+
+  preview = ctx.llm.prepareProcessing(..., providerName="controlled")
+  result = ctx.llm.runPreview(preview)  # typed stale error after generation change
+  # Existing ctx.llm.run/providerOptions callers remain valid on legacy providers.
+
+9. Fallback, rollout gate and deterministic verification
+----------------------------------------------------------
+Unbound providers keep their current getExecutionProfile/stream path and consumers.
+They are explicitly uncontrolled: no residency/exclusive/retained/reset guarantee.
+Requests for the new session/context/transition features reject UnsupportedExecution
+instead of silently using legacy behavior. A controlled binding is mandatory once
+installed; binding revocation/error cannot fall back to unadmitted methods. Exact
+registration identity is checked, not dynamic optional-method duck typing alone.
+Current llama.cpp remains unbound during ER-02. ER-03 must migrate all ensureModel,
+profile/estimate/tokenize/template, both entry paths, stream/start/stop and final
+lease cleanup before advertising protection. ER-02 alone does not fix those paths.
+
+Typed LlmExecutionConflictError wraps ER-01 ResourceConflict; ContextLost,
+UnsupportedExecution and StalePreview have dedicated bounded typed errors. Never
+expose provider payloads or use generic requirement/attestation/negotiation engines.
+No scheduler, preemption, automatic recovery, snapshots, cache audit, Runner, ER-04
+or consumer adoption. ER-01 needs no parallel/replayed ownership implementation.
+
+Deterministic tests use events/barriers and trusted fake adapters, bounded joins
+only as deadlock guards; no sleeps or real model/provider execution:
+- Hold A stream, request B transition: typed conflict, unchanged A token/object.
+- Pause between A profile and estimator/build/stream: B cannot switch; every
+  callback uses the same generation. Preserve both investigation races as lasting
+  Architectural Tests through this contract; actual driver bypass is an ER-03 gate.
+- Expired estimators, stale previews/replaced registrations and exact owner/context
+  isolation; same-profile generation change rejects runPreview without executing.
+- Context fresh action evidence/no weight reload, required loss without rebuild,
+  retained pin between turns, concurrent/foreign/stale context use and disposal.
+- Exclusive sequential turns across fresh contexts, nested/overlapping Busy, retained
+  pins during closing reservation; no CodeEntryContext/memory/transaction retention.
+- Cancel before open/during helper estimation/stream, late partial-open cleanup,
+  consumer close/protocol error, unknown quiescence, owner/provider withdrawal and
+  repeated host/app cleanup. Second-thread reads prove callback lock boundaries.
+- Build/estimator/completion errors and outer Job abort: state/IO rollback intact,
+  touched handles invalidated; observation RUN cleanup/outcomes preserved.
+- Unbound provider behavior/regressions unchanged; unsupported explicit features
+  rejected and controlled failure never invokes the legacy fallback.
+
+After review, Python 3.15/source-version/header/docstring rules apply. Planned:
+  .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/llm tests/backend/context
+  .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/runtime tests/backend/application tests/backend/orchestration tests/backend/telemetry tests/first_party/llmDrivers
+  .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests
+Proposal-only checks: source-equivalence diff exit 0; own Python probe 3.15.0b4
+with existing embedded-home warning; git diff --check before publication. No
+pytest or new runtime capability claimed at this checkpoint. Review is requested
+for these concrete interfaces/ownership/lifecycle edits, not renewed A/B/C approval.
