@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 10
+# file: backend/runtime/runtimeHost.py ; version: 11
 from __future__ import annotations
 
 from contextlib import suppress
@@ -8,6 +8,8 @@ from threading import RLock
 from backend.application.applicationRuntime import ApplicationRuntime
 from backend.application.lifecycle import ApplicationLifecycle
 from backend.core.runtimeIds import newRuntimeId
+from backend.llm.errors import LlmExecutionCleanupError
+from backend.llm.executionSessions import LlmExecutionBindings, lifetimeBoundary, hostClosePreflight
 from backend.observation import ObservationService
 from backend.packs.runtime import ManualActivationPlan, PackResolver
 from backend.runtime.executionResources import ExecutionResourceService
@@ -69,6 +71,9 @@ class RuntimeHost:
         self._runIdByApplicationId: dict[str, str] = {}
         self.sharedServices = SharedServiceRegistry()
         self.executionResources = ExecutionResourceService()
+        self.llmExecutions = LlmExecutionBindings()
+        self.lastLlmCleanup = ()
+        self._stopping = False
         self._observations = ObservationService(telemetryService)
         self._ownsTracer = tracer is None
         self.tracer = tracer or Tracer(
@@ -94,9 +99,10 @@ class RuntimeHost:
 
     def requireActive(self) -> None:
         """Requires this RuntimeHost to be active before host operations proceed."""
-        if self.state is not RuntimeHostState.ACTIVE:
+        if self.state is not RuntimeHostState.ACTIVE or self._stopping:
             raise RuntimeError("RuntimeHost is not active.")
 
+    @lifetimeBoundary
     def createApplication(
         self,
         *,
@@ -114,7 +120,7 @@ class RuntimeHost:
                 packResolver=self._packResolver,
                 config=config,
                 tracer=tracer,
-                observationService=self._observations,
+                observationService=self._observations, llmExecutionBindings=self.llmExecutions,
             )
             applicationRunId = runtime.applicationRun.applicationRunId
             bindApplicationRunSharedServices(applicationRunId, self.sharedServices)
@@ -135,6 +141,7 @@ class RuntimeHost:
             )
             return runtime
 
+    @lifetimeBoundary
     def loadApplication(
         self,
         *,
@@ -159,7 +166,7 @@ class RuntimeHost:
                 packResolver=self._packResolver,
                 config=config,
                 tracer=tracer,
-                observationService=self._observations,
+                observationService=self._observations, llmExecutionBindings=self.llmExecutions,
             )
             applicationRunId = runtime.applicationRun.applicationRunId
             bindApplicationRunSharedServices(applicationRunId, self.sharedServices)
@@ -196,6 +203,8 @@ class RuntimeHost:
                     f"ApplicationRun is not active in this RuntimeHost: {applicationRunId}.",
                 ) from err
 
+    @lifetimeBoundary
+    @hostClosePreflight
     def closeApplicationRun(self, applicationRunId: str) -> None:
         """Closes and unregisters one active ApplicationRun from this RuntimeHost."""
         if type(applicationRunId) is not str or not applicationRunId:
@@ -223,6 +232,8 @@ class RuntimeHost:
                     errors,
                 )
 
+    @lifetimeBoundary
+    @hostClosePreflight
     def stop(self) -> None:
         """Closes host admission and reports unresolved resource cleanup honestly.
 
@@ -255,6 +266,10 @@ class RuntimeHost:
                 except Exception as err:  # noqa: BLE001 - new cleanup must also run on legacy failure.
                     errors.append(err)
 
+        # Queue revocation may have completed operations during legacy teardown.
+        # First stage can remain pending until ER-01 drains its registered pins.
+        with suppress(LlmExecutionCleanupError, ExceptionGroup):
+            self.llmExecutions.finishClose()
         try:
             self.executionResources.finishClose()
         except Exception as err:  # noqa: BLE001 - include pending/failed/unknown resource evidence.
@@ -318,7 +333,7 @@ class RuntimeHost:
     def _closeRuntime(runtime: ApplicationRuntime) -> list[Exception]:
         """Closes one ApplicationRuntime and returns cleanup errors as evidence."""
         try:
-            runtime.close()
+            runtime.close(_deferLlmClose=True)
         except Exception as err:  # noqa: BLE001 - Pack/runtime cleanup may report arbitrary failures.
             return [err]
         return []
@@ -330,4 +345,4 @@ class RuntimeHost:
     ) -> None:
         """Best-effort closes a runtime whose create/load operation failed."""
         with suppress(Exception):
-            runtime.close()
+            runtime.close(_deferLlmClose=True)
