@@ -1,4 +1,4 @@
-# file: tests/backend/runtime/test_executionResources.py ; version: 1
+# file: tests/backend/runtime/test_executionResources.py ; version: 2
 """Deterministic neutral admission/lifetime contracts using only fake callbacks."""
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from backend.runtime.executionResources import (
     ConflictReason, EffectStatus, ExecutionResourceDomain, ExecutionResourceService,
     Materialization, OperationClaim, OwnerReservation, ProfileReference, ProviderEffect,
     Quiescence, ResidencyDescriptor, ResourceCleanupError, ResourceConflict,
-    ResourceParticipant, ResourceState, RetainedContextPin,
+    ResourceParticipant, ResourceState,
 )
 
 OK = ProviderEffect(EffectStatus.ACKNOWLEDGED, Quiescence.CONFIRMED)
@@ -784,3 +784,63 @@ def test_unknown_peer_work_revokes_validity_for_new_provider_entry():
     waiting.finish(OK)
     assert domain.snapshot.state is ResourceState.UNKNOWN
     assert domain.snapshot.operations == 1
+
+
+@pytest.mark.parametrize("closeKind", ("cancel", "owner", "domain"))
+def test_cancelled_failed_load_with_confirmed_absence_does_not_strand_blocker(closeKind):
+    """Known-empty late failure closes cleanly while preserving the failed load evidence."""
+    _, domain, adapter, first, _, owner, _ = _fixture(loaded=False)
+    entered, proceed = Event(), Event()
+    cancellation = CancellationSignal()
+
+    def load(descriptor, token):
+        """Confirms that startup failed without leaving any provider object."""
+        entered.set()
+        assert proceed.wait(5)
+        return Materialization(FAILED_EMPTY, False)
+
+    adapter.onLoad = load
+    pending = _background(lambda: owner.transitionIdle(first, cancellation=cancellation))
+    try:
+        assert entered.wait(5)
+        if closeKind == "cancel":
+            cancellation.request()
+        elif closeKind == "owner":
+            owner.close()
+        else:
+            domain.close()
+    finally:
+        proceed.set()
+    result = pending.result(5)
+    assert result.cancelled and result.materializationEffect is FAILED_EMPTY
+    expected = ResourceState.CLOSED if closeKind == "domain" else ResourceState.EMPTY
+    assert result.snapshot.state is expected
+    assert adapter.releases == []
+    if closeKind == "domain":
+        assert domain.finishClose().snapshot.state is ResourceState.CLOSED
+
+
+def test_cancellation_registration_and_unregistration_allow_second_thread_domain_entry():
+    """Both signal callbacks run outside the domain lock, beyond RLock reentry."""
+    _, domain, _, first, _, owner, _ = _fixture()
+    observed = []
+
+    class ProbeSignal(CancellationSignal):
+        """Requires another thread to enter the domain during both signal hooks."""
+
+        def registerCallback(self, callback):
+            """Reads the domain from a different thread before installing the stop hook."""
+            observed.append(_background(lambda: domain.snapshot).result(5))
+            unregister = super().registerCallback(callback)
+
+            def withdraw():
+                """Requires the lane again while withdrawing a completed operation."""
+                observed.append(_background(lambda: domain.snapshot).result(5))
+                unregister()
+
+            return withdraw
+
+    claim = owner.acquire(first, cancellation=ProbeSignal())
+    claim.finish(OK)
+    assert len(observed) == 2
+    assert domain.snapshot.operations == 0
