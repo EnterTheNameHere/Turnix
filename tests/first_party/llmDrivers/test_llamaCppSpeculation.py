@@ -1,6 +1,8 @@
-# file: tests/first_party/llmDrivers/test_llamaCppSpeculation.py ; version: 1
+# file: tests/first_party/llmDrivers/test_llamaCppSpeculation.py ; version: 2
 """LC-03 explicit method/auxiliary baseline, frozen lease inputs and combined gate."""
 from __future__ import annotations
+
+from tests.first_party.llmDrivers.controlledLlama import launchOwnedDriver, stopOwnedDriver, profileOwnedDriver, SharedComposition
 
 import importlib.util
 import json
@@ -326,16 +328,16 @@ def test_acquisition_snapshot_excludes_later_ambient_draft_inputs_at_launch(conf
     monkeypatch.setenv("LLAMA_ARG_SPEC_TYPE", "draft-simple")
     monkeypatch.setenv("LLAMA_ARG_SPEC_DRAFT_MODEL", auxiliary(config))
     monkeypatch.setenv("LLAMA_ARG_SPEC_FUTURE", "unsafe")
-    value.ensureModel(None)
+    launchOwnedDriver(value)
     assert len(calls) == 1
     assert calls[0][0][-2:] == ("--spec-type", "none")
     assert not any(configuration.isSpeculationEnv(name) for name in calls[0][1]["env"])
     evidence = value.configurationEvidence()
     assert evidence["launch"]["actualArgv"] == calls[0][0]
     assert evidence["launch"]["automaticConfig"] == value._prepared.automaticConfig
-    value.ensureModel(None)
+    launchOwnedDriver(value)
     assert len(calls) == 1
-    value.stop()
+    stopOwnedDriver(value)
     assert calls[0][2].stops == 1
 
 
@@ -347,7 +349,7 @@ def test_automatic_config_blocks_hidden_draft_defaults_and_is_rechecked_before_l
     path.parent.mkdir(parents=True)
     path.write_text("[default]\nspec-draft-model=private.gguf\n", encoding="utf-8")
     with pytest.raises(ValueError, match="config.ini"):
-        value.ensureModel(None)
+        launchOwnedDriver(value)
     assert not calls
     assert value.configurationEvidence()["automaticConfig"][0]["state"] == "present"
     with pytest.raises(ValueError, match="config.ini"):
@@ -360,44 +362,27 @@ def test_automatic_config_blocks_hidden_draft_defaults_and_is_rechecked_before_l
 
 
 def test_shared_lease_identity_covers_draft_environment_and_absence_without_leaks(config, monkeypatch):
-    """New Applications with changed relevant inputs get typed conflict; existing ones keep frozen inputs."""
+    """Auxiliary environment belongs to immutable residency, not whole-service identity."""
     calls = launch(monkeypatch)
     config["models"]["target"].update(specMethods=["draft-simple"], draftModelPath=auxiliary(config))
     monkeypatch.setenv("LLAMA_ARG_SPEC_DRAFT_P_MIN", "0.1")
-    registry = SharedServiceRegistry()
-    states = []
-
-    def context(run):
-        """Bind independent ApplicationRuns to the real shared registry."""
-        bindApplicationRunSharedServices(run, registry)
-        return SimpleNamespace(config={"llamaCpp": config}, identity=SimpleNamespace(applicationRunId=run),
-                               llm=SimpleNamespace(registerProvider=lambda *args: None))
-
-    firstContext, secondContext = context("spec-a"), context("spec-b")
+    shared = SharedComposition()
+    first = shared.bind(config)
+    monkeypatch.setenv("LLAMA_ARG_SPEC_DRAFT_P_MIN", "0.2")
+    second = shared.bind(config)
     try:
-        first = adapter.onLoad(firstContext)
-        states.append((firstContext, first))
-        assert not calls
-        monkeypatch.setenv("LLAMA_ARG_SPEC_DRAFT_P_MIN", "0.2")
-        with pytest.raises(SharedServiceConflictError):
-            adapter.onLoad(secondContext)
-        monkeypatch.setenv("LLAMA_ARG_SPEC_DRAFT_P_MIN", "0.1")
-        second = adapter.onLoad(secondContext)
-        states.append((secondContext, second))
-        assert first.driver is second.driver
+        assert first.binding.domain is second.binding.domain and not calls
+        assert first.binding.profiles[None] is not second.binding.profiles[None]
         monkeypatch.delenv("LLAMA_ARG_SPEC_DRAFT_P_MIN")
-        first.driver.ensureModel(None)
+        first.transition()
         assert calls[0][1]["env"]["LLAMA_ARG_SPEC_DRAFT_P_MIN"] == "0.1"
-        adapter.onUnload(firstContext, first)
+        first.close()
         assert calls[0][2].stops == 0
-        adapter.onUnload(secondContext, second)
+        second.close()
         assert calls[0][2].stops == 1 and len(calls) == 1
     finally:
-        for ctx, state in states:
-            adapter.onUnload(ctx, state)
-        for run in ("spec-a", "spec-b"):
-            unbindApplicationRunSharedServices(run)
-        registry.close()
+        first.close()
+        second.close()
 
 
 def advertised(monkeypatch, missing=()):
@@ -424,11 +409,9 @@ def test_combined_required_gate_privacy_and_lc02_reasoning_still_work(config, mo
                    draftDevices=["PRIVATE_DEVICE_SENTINEL"], draftMaxTokens=4, draftSampling="probabilistic",
                    moeCacheMiB=0, serverReasoning="off", extraArgs=["--experimental=uncertified"])
     assert not calls and not probes
-    active = adapter.LlamaCppStreamProvider(driver=value)
-    registry = LlmProviderRegistry()
-    scope = RegistrationScope()
-    registry.register(scope, ownerId="spec-test", name="llama.cpp", provider=active)
-    scope.publish()
+    binding = SharedComposition().bind(value._prepared)
+    binding.transition()
+    value = binding.driver
     requests = []
 
     class Response:
@@ -449,16 +432,26 @@ def test_combined_required_gate_privacy_and_lc02_reasoning_still_work(config, mo
         def __iter__(self):
             """Emit separate reasoning and answer, followed by real protocol completion."""
             for delta in ({"reasoning_content": "private reason"}, {"content": "answer"}):
-                yield b"data: " + json.dumps({"choices": [{"delta": delta}]}).encode() + b"\n"
+                yield b"data: " + json.dumps({"id": "lc-combined", "choices": [{"delta": delta}]}).encode() + b"\n"
+            yield b'data: {"id":"lc-combined","choices":[{"delta":{},"finish_reason":"stop"}]}\n'
             yield b"data: [DONE]\n"
+
+    class SlotsResponse(Response):
+        """A post-terminal idle observation for the configured owned slot."""
+
+        def read(self):
+            """Return one validated idle slot; this fixture has default parallelism one."""
+            return b'[{"id":0,"is_processing":false}]'
 
     def openResponse(request, **kwargs):
         """Capture inference request controls while leaving parser/result processing intact."""
+        if request.full_url.endswith("/slots"):
+            return SlotsResponse()
         requests.append(json.loads(request.data))
         return Response()
 
     monkeypatch.setattr(adapter.urlRequest, "urlopen", openResponse)
-    result = LlmProcessingPipeline(providers=registry).run(providerName="llama.cpp",
+    result = binding.run(
         query=LlmQuery(formatId="text/plain", payload="question"),
         providerOptions={"reasoningFormat": "deepseek", "chatTemplateKwargs": {"enable_thinking": True}})
     assert result.rawText == "answer" and result.providerMetadata["llamaCppReasoning"]["content"] == "private reason"
@@ -470,7 +463,7 @@ def test_combined_required_gate_privacy_and_lc02_reasoning_still_work(config, mo
     public = repr(result.executionProfile.metadata)
     assert "PRIVATE_DRAFT_SENTINEL" not in public and "PRIVATE_DEVICE_SENTINEL" not in public
     assert "PRIVATE_DRAFT_SENTINEL" in repr(value.configurationEvidence())
-    value.stop()
+    binding.close()
 
 
 def test_missing_draft_flag_blocks_required_launch_without_certifying_model_honor(config, monkeypatch):
@@ -480,7 +473,7 @@ def test_missing_draft_flag_blocks_required_launch_without_certifying_model_hono
     config["capabilityCheck"] = "required"
     value = driver(config, specMethods=["draft-mtp"], draftSampling="greedy")
     with pytest.raises(ValueError, match="capability check"):
-        value.ensureModel(None)
+        launchOwnedDriver(value)
     assert not calls
     assert value.configurationEvidence()["build"]["missingFlags"] == ("--spec-draft-sampling",)
 
@@ -496,36 +489,25 @@ def test_relative_config_discovery_is_bound_to_acquisition_directory(config, mon
     expected.write_text("[default]\nspec-type=draft-mtp\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path.parent)
     with pytest.raises(ValueError, match="config.ini"):
-        value.ensureModel(None)
+        launchOwnedDriver(value)
     assert value.configurationEvidence()["automaticConfig"][0]["path"] == str(expected)
 
 
 def test_changed_automatic_config_presence_cannot_reuse_a_shared_lease(config, monkeypatch):
-    """File absence/presence is part of acquisition identity before the factory can launch anything."""
+    """New trusted catalogs reject hidden config before acquiring a binding ticket."""
     calls = launch(monkeypatch)
     config["models"]["target"]["specMethods"] = ["none"]
-    registry = SharedServiceRegistry()
-    states = []
-    contexts = []
+    shared = SharedComposition()
+    first = shared.bind(config)
     try:
-        for run in ("config-a", "config-b"):
-            bindApplicationRunSharedServices(run, registry)
-            contexts.append(SimpleNamespace(config={"llamaCpp": config}, identity=SimpleNamespace(applicationRunId=run),
-                llm=SimpleNamespace(registerProvider=lambda *args: None)))
-        first = adapter.onLoad(contexts[0])
-        states.append(first)
-        path = Path(first.driver._prepared.automaticConfig[0]["path"])
+        path = Path(first.composer.catalog.prepared.automaticConfig[0]["path"])
         path.parent.mkdir(parents=True)
         path.write_text("[default]\n", encoding="utf-8")
-        with pytest.raises(SharedServiceConflictError):
-            adapter.onLoad(contexts[1])
-        assert not calls
+        with pytest.raises(ValueError, match="config.ini"):
+            shared.bind(config)
+        assert not calls and len(first.binding.adapter.owner.leases) == 1
     finally:
-        for ctx, state in zip(contexts, states):
-            adapter.onUnload(ctx, state)
-        for run in ("config-a", "config-b"):
-            unbindApplicationRunSharedServices(run)
-        registry.close()
+        first.close()
 
 
 @pytest.mark.parametrize("field,sample", [

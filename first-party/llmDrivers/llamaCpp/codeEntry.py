@@ -1,5 +1,9 @@
-# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 10
+# file: first-party/llmDrivers/llamaCpp/codeEntry.py ; version: 11
 from __future__ import annotations
+
+from contextvars import ContextVar
+from contextlib import contextmanager
+from backend.llm.errors import LlmExecutionOwnershipError
 
 import importlib.util
 import json
@@ -561,11 +565,46 @@ def _rejectFirstClassArgs(extraArgs: tuple[str, ...], name: str) -> None:
     _configuration.inspectExtraArgs(extraArgs, name)
 
 
+_driverAccess = ContextVar("actant.llama.driver-access", default=None)
+
+
+@contextmanager
+def _driverScope(driver):
+    """Adapter-only scope for an owned driver; ordinary managed consumers reject."""
+    if driver._authority is None:
+        raise LlmExecutionOwnershipError("Managed llama.cpp requires an admitted adapter ticket.")
+    token = _driverAccess.set(driver._authority)
+    try:
+        yield
+    finally:
+        _driverAccess.reset(token)
+
+
+class _ManagedFacade:
+    """Fail-closed managed registration pending an exact trusted host binding."""
+
+    requiresControlledComposition = True
+
+    def __init__(self, config, *, structured=False):
+        """Freeze requested JSON only; host catalog owns environment and launch inputs."""
+        self.requestedConfiguration = _configuration.freeze(config)
+        self.structured = structured
+
+    def getExecutionProfile(self, **kwargs):
+        """Direct managed profile resolution never falls back to unbound execution."""
+        raise LlmExecutionOwnershipError("Managed llama.cpp requires trusted host composition and admission.")
+
+    def stream(self, request):
+        """Only the installed execution adapter may enter managed transport."""
+        raise LlmExecutionOwnershipError("Managed llama.cpp requires trusted host composition and admission.")
+
+
 class LlamaCppDriver:
     """Long-lived CodeEntry-owned llama-server and model-residency manager."""
 
-    def __init__(self, config: Mapping[str, object]) -> None:
-        """Validates driver configuration without starting a managed server."""
+    def __init__(self, config: Mapping[str, object], *, _authority=None) -> None:
+        """Validate inputs; only adapter-issued drivers can perform managed IO."""
+        self._authority = _authority
         self._prepared = _configuration.prepare(config)
         self.config = self._prepared.values
         manageValue = self.config.get("manageServer", False)
@@ -634,6 +673,7 @@ class LlamaCppDriver:
         else:
             self.defaultModel = None
         self.process: subprocess.Popen[bytes] | None = None
+        self._stopAttempted = False
         self.activeModelName: str | None = None
         self._automaticConfigEvidence = self._prepared.automaticConfig
         self._launches: dict[str, object] = {}
@@ -789,13 +829,20 @@ class LlamaCppDriver:
                 raise ValueError("cpuMoeLayers must fit a signed 32-bit integer.")
         return models
 
+    def _requireManagedAccess(self):
+        """Reject raw managed IO, including saved estimators and substrate callers."""
+        if self.manageServer and (self._authority is None or _driverAccess.get() is not self._authority):
+            raise LlmExecutionOwnershipError("Managed llama.cpp requires an admitted adapter ticket.")
+
     def start(self) -> None:
         """Starts the configured default model when Actant owns the server."""
+        self._requireManagedAccess()
         if self.manageServer:
             self.ensureModel(self.defaultModel)
 
     def ensureModel(self, model: str | None) -> LlamaCppModel | None:
         """Ensures the requested managed model is resident and returns its profile."""
+        self._requireManagedAccess()
         if not self.models:
             return None
         selectedName = self.defaultModel if model is None else model
@@ -813,9 +860,7 @@ class LlamaCppDriver:
             and self.process.poll() is None
         ):
             return selected
-        self.stop()
-        self._startModel(selected)
-        return selected
+        raise LlmExecutionOwnershipError("Managed residency requires an explicit authorized transition.")
 
     def _serverArgs(self, model: LlamaCppModel) -> list[str]:
         """Materializes the exact llama-server argv for one effective model profile."""
@@ -958,6 +1003,7 @@ class LlamaCppDriver:
 
     def _startModel(self, model: LlamaCppModel) -> None:
         """Starts one managed llama-server and waits until its health endpoint is ready."""
+        self._requireManagedAccess()
         args = self._serverArgs(model)
         self._checkSpeculationConfig(model)
         if self.capabilityCheck == "required":
@@ -994,6 +1040,7 @@ class LlamaCppDriver:
 
     def _waitReady(self, timeoutSeconds: float) -> None:
         """Waits for managed-server health or raises on timeout/early process exit."""
+        self._requireManagedAccess()
         if not math.isfinite(timeoutSeconds) or timeoutSeconds <= 0:
             raise ValueError(
                 "llamaCpp.startupTimeoutSeconds must be a positive finite number."
@@ -1025,6 +1072,7 @@ class LlamaCppDriver:
         timeoutSeconds: float,
     ) -> dict[str, object]:
         """Posts one JSON request to llama.cpp and requires an object response."""
+        self._requireManagedAccess()
         if type(endpoint) is not str or not endpoint.startswith("/"):
             raise ValueError("llama.cpp endpoint must be an absolute HTTP path.")
         if not math.isfinite(timeoutSeconds) or timeoutSeconds <= 0:
@@ -1059,22 +1107,45 @@ class LlamaCppDriver:
         return decoded
 
     def stop(self) -> None:
-        """Stops the managed server, escalating to kill after the grace period."""
-        process, self.process = self.process, None
+        """Stop only the owned child, retaining ownership until exit is confirmed."""
+        self._requireManagedAccess()
+        process = self.process
+        if process is not None and process.poll() is None:
+            if self._stopAttempted:
+                raise LlmProviderConnectionError("Managed llama.cpp stop disposition is unknown.")
+            self._stopAttempted = True
+            process.terminate()
+            try:
+                process.wait(timeout=10.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5.0)
+        if process is not None and process.poll() is None:
+            raise LlmProviderConnectionError("Managed llama.cpp process exit is unconfirmed.")
+        self.process = None
+        self._stopAttempted = False
         if self.activeModelName is not None and self.activeModelName in self._launches:
             launch = dict(self._launches[self.activeModelName])
             if launch["status"] == "ready":
                 launch["status"] = "stopped"
                 self._launches[self.activeModelName] = _configuration.freeze(launch)
         self.activeModelName = None
-        if process is None or process.poll() is not None:
-            return
-        process.terminate()
+
+
+def _managedFacade(config):
+    """Canonicalize facade identity when the substrate itself is the CodeEntry."""
+    name = "actantFirstPartyLlamaCppImplementation"
+    module = sys.modules.get(name)
+    if module is None:
+        spec = importlib.util.spec_from_file_location(name, Path(__file__))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
         try:
-            process.wait(timeout=10.0)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5.0)
+            spec.loader.exec_module(module)
+        except BaseException:
+            sys.modules.pop(name, None)
+            raise
+    return module._ManagedFacade(config)
 
 
 def onLoad(ctx):
@@ -1082,6 +1153,13 @@ def onLoad(ctx):
     config = ctx.config.get("llamaCpp", {})
     if not isinstance(config, dict):
         raise ValueError("llamaCpp configuration must be an object.")
+    manage = config.get("manageServer", False)
+    if type(manage) is not bool:
+        raise TypeError("llamaCpp.manageServer must be a boolean.")
+    if manage:
+        facade = _managedFacade(config)
+        ctx.llm.registerProvider("llama.cpp", facade)
+        return facade
     driver = LlamaCppDriver(config)
     try:
         driver.start()

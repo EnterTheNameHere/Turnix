@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 11
+# file: backend/runtime/runtimeHost.py ; version: 12
 from __future__ import annotations
 
 from contextlib import suppress
@@ -50,6 +50,7 @@ class RuntimeHost:
         packResolver: PackResolver,
         tracer: Tracer | None = None,
         telemetryService: TelemetryService | None = None,
+        providerComposers=(),
     ) -> None:
         """Creates a host with inactive shared observation infrastructure.
 
@@ -69,6 +70,9 @@ class RuntimeHost:
         self._lane = RLock()
         self._runtimesByRunId: dict[str, ApplicationRuntime] = {}
         self._runIdByApplicationId: dict[str, str] = {}
+        self.providerComposers = tuple(providerComposers)
+        self._pendingInitializations = {}
+        self._initializingApplicationIds = set()
         self.sharedServices = SharedServiceRegistry()
         self.executionResources = ExecutionResourceService()
         self.llmExecutions = LlmExecutionBindings()
@@ -112,34 +116,7 @@ class RuntimeHost:
         tracer: Tracer | None = None,
     ) -> ApplicationRuntime:
         """Creates, initializes, starts, and registers one new ApplicationRuntime."""
-        with self._lane:
-            self.requireActive()
-            runtime = ApplicationRuntime(
-                appPackId=appPackId,
-                applicationStore=self._applicationStore,
-                packResolver=self._packResolver,
-                config=config,
-                tracer=tracer,
-                observationService=self._observations, llmExecutionBindings=self.llmExecutions,
-            )
-            applicationRunId = runtime.applicationRun.applicationRunId
-            bindApplicationRunSharedServices(applicationRunId, self.sharedServices)
-            try:
-                ApplicationLifecycle.create(
-                    runtime=runtime,
-                    plan=plan,
-                )
-                self._register(runtime)
-            except Exception:
-                self._cleanupFailedOperation(runtime=runtime)
-                unbindApplicationRunSharedServices(applicationRunId)
-                raise
-
-            self.trace(
-                "application-runtime-created",
-                attributes=self._runtimeIdentity(runtime),
-            )
-            return runtime
+        return self._initialize(appPackId=appPackId, plan=plan, config=config, tracer=tracer)
 
     @lifetimeBoundary
     def loadApplication(
@@ -152,44 +129,59 @@ class RuntimeHost:
         tracer: Tracer | None = None,
     ) -> ApplicationRuntime:
         """Loads, initializes, starts, and registers one durable ApplicationRuntime."""
-        with self._lane:
-            self.requireActive()
-            if applicationId in self._runIdByApplicationId:
-                raise RuntimeError(
-                    f"Application is already active in this RuntimeHost: {applicationId}.",
-                )
+        return self._initialize(appPackId=appPackId, plan=plan, config=config,
+                                tracer=tracer, applicationId=applicationId)
 
-            runtime, loaded = ApplicationRuntime.loadApplication(
-                applicationStore=self._applicationStore,
-                appPackId=appPackId,
-                applicationId=applicationId,
-                packResolver=self._packResolver,
-                config=config,
-                tracer=tracer,
-                observationService=self._observations, llmExecutionBindings=self.llmExecutions,
-            )
-            applicationRunId = runtime.applicationRun.applicationRunId
-            bindApplicationRunSharedServices(applicationRunId, self.sharedServices)
-            try:
-                ApplicationLifecycle.load(
-                    runtime=runtime,
-                    plan=plan,
-                )
+    def _initialize(self, *, appPackId, plan, config, tracer, applicationId=None):
+        """Compose a private initialization outside lanes before hooks or publication."""
+        runtime = None
+        loaded = None
+        try:
+            with self._lane:
+                self.requireActive()
+                if applicationId is not None and (applicationId in self._runIdByApplicationId
+                        or applicationId in self._initializingApplicationIds):
+                    raise RuntimeError("Application is already active or initializing.")
+                options = dict(applicationStore=self._applicationStore, packResolver=self._packResolver,
+                    config=config, tracer=tracer, observationService=self._observations,
+                    llmExecutionBindings=self.llmExecutions, providerComposers=self.providerComposers,
+                    executionResourceService=self.executionResources)
+                if applicationId is None:
+                    runtime = ApplicationRuntime(appPackId=appPackId, **options)
+                else:
+                    runtime, loaded = ApplicationRuntime.loadApplication(appPackId=appPackId,
+                        applicationId=applicationId, **options)
+                runId = runtime.applicationRun.applicationRunId
+                appId = runtime.applicationRun.application.applicationId
+                self._initializingApplicationIds.add(appId)
+                self._pendingInitializations[runId] = runtime
+                bindApplicationRunSharedServices(runId, self.sharedServices)
+                attempt = ApplicationLifecycle.prepare(runtime=runtime, plan=plan,
+                    mode="create" if applicationId is None else "load")
+            attempt.compose()
+            with self._lane:
+                self.requireActive()
+                attempt.requireCurrent()
+                ApplicationLifecycle.resume(attempt)
                 self._register(runtime)
-            except Exception:
-                self._cleanupFailedOperation(runtime=runtime)
-                unbindApplicationRunSharedServices(applicationRunId)
-                raise
-
-            self.trace(
-                "application-runtime-loaded",
-                attributes={
-                    **self._runtimeIdentity(runtime),
-                    "loadedGeneration": loaded.bundle.generation,
-                    "durableGeneration": loaded.durableGeneration,
-                },
-            )
-            return runtime
+                self._pendingInitializations.pop(runId, None)
+                self._initializingApplicationIds.discard(appId)
+                attributes = self._runtimeIdentity(runtime)
+                if loaded is not None:
+                    attributes.update(loadedGeneration=loaded.bundle.generation, durableGeneration=loaded.durableGeneration)
+                self.trace("application-runtime-created" if loaded is None else "application-runtime-loaded", attributes=attributes)
+                return runtime
+        except Exception as primary:
+            if runtime is not None:
+                try:
+                    ApplicationLifecycle.abort(runtime, primary)
+                finally:
+                    with self._lane:
+                        if runtime._compositionAttempt is None:
+                            self._pendingInitializations.pop(runtime.applicationRun.applicationRunId, None)
+                            self._initializingApplicationIds.discard(runtime.applicationRun.application.applicationId)
+                            unbindApplicationRunSharedServices(runtime.applicationRun.applicationRunId)
+            raise
 
     def applicationRuntime(self, applicationRunId: str) -> ApplicationRuntime:
         """Returns one active ApplicationRuntime by its ApplicationRun identity."""
