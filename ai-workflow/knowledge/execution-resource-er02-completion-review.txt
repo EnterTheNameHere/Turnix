@@ -1,0 +1,85 @@
+ER-02 COMPLETION REVIEW - CORRECTION REQUIRED
+============================================
+Owner: Integration. Date: 2026-11-02.
+Reviewed worker: 0b334c8d44741aa2e91abf2fb402b90a74963553.
+Source parent: 18c601da43e7dc0bd41ada8b958968f23e3b31eb.
+Canonical completion report: 9c44a9e. No worker production code integrated.
+Status: not accepted; one independently reproduced publication/lifetime defect.
+This corrects implementation of approved ownership semantics, not A/B/C scope.
+
+Finding ER-02-R1: publication can miss a winning revocation
+----------------------------------------------------------
+In backend/llm/executionSessions.py, LlmExecutionBindings.bind validates service/
+registry/owners under its lane, releases it to construct LlmExecutionBinding and
+ER-01 participants, then reacquires the lane checking only duplicate publication.
+It does not revalidate revocation or preserve a pending publication ticket that
+close/withdraw can revoke. Host/registry/owner/provider revocation can finish in
+that gap; bind then publishes a new binding with revoked=False. Registration
+withdrawal before final publication is also not rechecked there.
+
+Consequences: new lifetime ownership can appear after shutdown/unload has already
+selected/revoked its bindings. In the host case owners are closed, but the newly
+published binding is not marked revoked, so its leaseCloser does not enter normal
+binding finalization. This misses the promised structural lifetime invariant even
+when later access validation prevents inference. Registration reuse must not make
+that late binding an authority source or an unreported lifetime leak.
+
+Deterministic reproduction
+--------------------------
+See execution-resource-er02-publication-reproducer.txt for a complete runnable test.
+Pause bind in the real domain.openParticipant after issuance, before publication,
+using Events and a background Future. In the main thread respectively:
+1. service.revokeAll();
+2. service.revokeRegistry(registry);
+3. service.revokeOwner(owner);
+4. service.revokeRegistration(registry, providerOwnerId), then scope.withdraw().
+Resume construction and require LlmExecutionOwnershipError with no live binding.
+Observed: all four cases returned a binding instead; 4 failed in 0.14s. No sleeps,
+real providers, model/server processes or hardware. Worker/user checkouts untouched.
+
+Required correction and regression coverage
+--------------------------------------------
+Make publication and lifecycle revocation one coherent protocol. For example,
+install a pending ticket before releasing the broker lane for construction; include
+pending tickets in relevant close/revoke events and commit only if the exact ticket,
+registration, live owner grants and admission remain valid. A narrow version/epoch
+solution is also acceptable if it covers every scope, including revocation events
+before any binding exists. Rechecking only the duplicate key is insufficient.
+No callback/participant cleanup under broker/host/registry locks. Dispose all issued
+but unpublished participants on losing/partial construction. Keep the documented
+lease ownership transfer precise: before successful publication composition owns
+the lease; rejected publication must neither orphan ownership nor close it twice.
+Do not reopen a revoked registration or fall back to legacy execution.
+
+Add the four deterministic cases as enduring worker tests, plus publication winning
+before revoke (normal exactly-once cleanup), re-registration/owner incarnation and
+partial-construction rollback coverage. Assert actual disposition/participant/lease
+counts, not only a thrown error. Re-run targeted/regression/full suites. Preserve
+ER-01 source and the approved provider-neutral scope; no new recovery/scheduler.
+Continue on the same worker branch, adding a correction commit; do not replay or
+rewrite published source history. Update completion with exact tested head.
+
+Independent existing-suite verification
+----------------------------------------
+Integration reviewed all nine source files, two test modules and approved lifecycle
+boundaries. Used an ignored archive of exact worker 0b334c8 under
+python-embedded/er02-review and Integration's own Python 3.15.0b4. Explicitly inserted
+that snapshot root first on sys.path and printed executionSessions.__file__ to
+confirm worker source. An initial direct embedded pytest invocation collected the
+accepted checkout instead and failed import; it was corrected before evidence below.
+No source modification or integration of the worker commit was performed.
+
+Independent runs against the correctly selected snapshot:
+- Existing focused LLM/context: 115 passed in 0.13s, zero skips.
+- Existing runtime/app/Job/telemetry/driver/Pack regressions: 589 passed in 2.29s,
+  zero skips.
+- Existing complete tests directory: 1603 passed in 8.47s, zero skips.
+- Additional independent publication regression: 4 failed in 0.14s, no collection
+  errors after the explicit path correction. These failures are additional to the
+  existing suite, not a contradiction of the worker's counts.
+Each snapshot pytest command used Integration's embedded Python with
+  -X frozen_modules=off -c "import sys; sys.path.insert(0, '.'); import pytest; raise SystemExit(pytest.main([...]))"
+and the worker report's exact test-directory arguments. Ruff not run. Existing
+embedded-home warning remains. Diff checks apply to this coordination-only review.
+No real provider quiescence/context realization, monitoring or consumer adoption.
+Acceptance remains pending correction; ER-03/04 and Runner remain unassigned.
