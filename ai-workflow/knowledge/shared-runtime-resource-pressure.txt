@@ -38,10 +38,11 @@ semantics cross applications. Each ApplicationRuntime currently owns its own
 LlmProviderRegistry, PackLoader, process-tool registry, capability registry, and loaded
 CodeEntries.
 
-01.03. The current first-party llama.cpp CodeEntry creates and owns a LlamaCppDriver,
-which in managed mode owns one llama-server subprocess and its resident model. Loading
-the same provider in multiple applications therefore creates mutually unaware server
-and model lifetime authorities.
+01.03. The original first-party llama.cpp CodeEntry owned a driver per application.
+Managed lifetime is now shared through RuntimeHost SharedServiceRegistry leases;
+application-local provider facades reuse a compatible driver. This resolves duplicate
+lifetime ownership, not residency/execution arbitration. Different named profiles in
+one shared catalog can still invoke unguarded stop/start while other work is active.
 
 01.04. Completion, AI Buddy, and Materialization Test create concrete coexistence
 pressure:
@@ -301,3 +302,14 @@ The next implementation should preserve these boundaries:
 
 The first arbitration slice should make contention safe and observable, not attempt to
 solve the eventual scheduler.
+
+09. EXPERIMENT CONFIGURATION TRANSITION REVIEW (2026-11-02)
+---------------------------------------------------------
+See knowledge/experiment-runner-transitions-review.txt for full inspected ref,
+source/test findings and two deterministic fake-IO reproductions. The new pressure
+requires full startup profile/auxiliary identity, an optional exclusive experiment
+reservation, and a claim spanning profile resolution, token estimation and streaming.
+The earlier automatic-idle-replacement direction is not approval of a concrete
+transition API or catalog authority. Review choices A/B/C are pending; proposed
+ER-01/02/03/04 packages are unassigned. Existing shared registry/driver do not satisfy
+these constraints unchanged. No runtime arbitration implementation is claimed.
