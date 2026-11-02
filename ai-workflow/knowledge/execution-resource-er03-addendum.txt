@@ -1,0 +1,284 @@
+ER-03 BOUNDED COMPOSITION / GRANT / MIGRATION ADDENDUM
+====================================================
+Owner: execution-resource-llamacpp worker. Date: 2026-11-02.
+Status: proposed correction, awaiting Integration production authorization.
+Review addressed: execution-resource-er03-review.txt at canonical
+3d61e4bfe2718509f0c012ba982e7a844b1d5db6.
+Original proposal: 646d8a66b9dbda57df3a22c9763a522f8bfa4f17.
+Exact dispatch parent: 897e491ec2015b55a86843dc58dbc1308eae24ef.
+Worker branch fast-forwarded cleanly to 3d61e4b; source diff remains empty.
+This replaces proposal sections 3 and its illustrative host API. Other reviewed
+adapter/unknown/process-ownership rules remain. No new grant-extension API.
+
+1. Concrete generic composition API (proposed source, not available yet)
+-----------------------------------------------------------------------
+RuntimeHost(..., providerComposers=()) and ApplicationRuntime(...,
+providerComposers=(), executionResourceService=None) accept a frozen tuple of
+host-trusted ProviderComposer objects, not JSON Pack configuration. Hosted runtimes
+receive the host's resources/bindings; standalone runtimes own resources when not
+explicitly supplied. No llama-specific type/option is added to generic constructors.
+
+ProviderComposer.compose(snapshot: ActivationCompositionSnapshot) -> None is the
+only new composition callback. Its return grants no invocation authority. Snapshot
+contains the exact resource service, LlmExecutionBindings, provider registry,
+immutable published Registration tuple, and (CodeEntryIdentity, issued owner)
+records for the activation's live owner set. It includes a backend-issued activation
+ticket with requireCurrent(), no Context, transaction, memory/IO view or hook.
+The issuer validates the ticket before/after callbacks and immediately before
+resuming lifecycle. Publication still uses accepted bind and its R1 checks.
+Closing a ticket revokes admission callback-free; no withdrawn ticket may compose.
+Composers are trusted Python host composition, not a hostile-code sandbox.
+
+New backend/llm/providerComposition.py holds only the protocol, immutable snapshot
+and activation-ticket state. Runtime/host own ticket gates and cleanup. The
+provider-specific LlamaCppComposition in llamaCpp/executionAdapter.py implements
+compose and owns the stable catalogs/adapters keyed by exact resource service.
+It does not receive authority from a provider object's optional methods.
+
+2. Pre-hook phase barrier and narrow locking split
+---------------------------------------------------
+Split ApplicationLifecycle.create/load into internal prepare(runtime, plan,
+mode) -> attempt, resume(attempt) -> SaveBundle and abort(attempt, primary).
+Existing public create/load orchestrate all phases for standalone use. No public
+phase flag or caller string substitutes for an issued attempt. prepare performs
+beginInitialization plus the complete ordered activation plan, but no application
+create/load/run hook, creation transaction commit, save, start or host registration.
+Pack onLoad still stages registrations only; managed execution there rejects.
+
+Hosted create/load order:
+A. Under host._lane reserve a private initialization ticket and loaded application
+   ID (including duplicate-load exclusion). Construct/restore runtime, bind its
+   existing shared-service routing, place it in a private pending-initialization
+   table, then prepare the entire plan. Publish all required owners/registrations.
+   Runtime stays absent from activeApplicationRuntimes/applicationRuntime lookup.
+B. Exit host._lane and runtime lanes; seal the activation snapshot. Call every
+   configured composer synchronously on the initializing thread, outside host,
+   runtime, registry, broker and domain lanes. No outer lifetime-boundary drain
+   is used as this pre-hook composition barrier. bind completes now, before C.
+C. Re-enter host._lane, revalidate exact current attempt, host active/not-stopping
+   and live registration/owner snapshot. Resume the original serialized lifecycle:
+   creation transaction/hook/commit, save, load hook/save, start, run hook, then
+   public host registration. Preserve existing ordering and transaction behavior.
+   Stop cannot interleave within C. An exception here follows existing lifecycle
+   semantics; no promise to undo an already committed hook or save is introduced.
+
+Only B drops enclosing lanes. Do not release serialized Job/transaction protection
+around arbitrary Pack code or move existing hooks to a background thread. New
+composition/rollback/provider finalizers run outside lanes. Ordinary granted
+capability execution retains the accepted ER-02 runtime serialization contract.
+
+Each initializing/activating runtime has a callback-free phase gate. Public
+invokeCapability/runJob and nested activate/activatePack cannot enter while it is
+preparing/composing, including attempts from leaked references or a composer.
+Only the exact lifecycle continuation can enter hooks after composition. Hooks
+keep their non-executing lifecycle Context; LLM work is performed through an
+ordinary registered capability (ctx.capabilities.call), which issues its actual
+owner's fresh execution access. No lifecycle-wide or provider-owned inference grant.
+
+Concurrent stop: under host._lane set _stopping, abandon pending attempts, revoke
+their registries/owners and all existing broker/domain admission callback-free.
+Do not unload a pending runtime while its composer may still be running. If a
+prepare/compose attempt is outstanding, stop returns typed incomplete-cleanup
+evidence rather than waiting, running hooks, or declaring STOPPED/drained. Existing
+hostClosePreflight must check these attempts as well as pendingCalls before legacy
+teardown; do not close shared services underneath the pending initializer.
+The initialization thread observes revocation when B returns, cannot enter C,
+and performs its owned abort. Pending table/tickets remain host-rooted until
+composition and cleanup finish; repeated stop reports/drains them. A stop winning
+before bind uses ER-02/R1 rejection; bind winning first is revoked normally. No
+late binding can authorize a hook. No timeout changes ownership or releases work.
+Direct runtime.close/stop applies the same pending-attempt gate: revoke without
+callbacks and report incomplete while composition is outstanding, leaving abort
+to its exact attempt owner. It must not race standalone Pack unload against compose.
+
+Abort after B failure/abandonment:
+- Under serialization lanes close the activation gate, revoke exact owners and
+  registrations, withdraw all scopes and unload ALL Packs prepared by this initial
+  lifecycle attempt in reverse order, including earlier successful composers'
+  Packs. Unregister owners and remove loaded modules; abort initialization. Their
+  managed onUnload is callback-free revocation, never raw process stop/wait.
+- After exiting lanes, explicitly drain broker cleanup for this registry now,
+  rather than relying on an enclosing lifetimeBoundary. Published binding tickets
+  are broker-owned; unpublished tickets remain composer-owned, with R1's exact
+  llmBindingPublished transfer distinction. Attempt all cleanups and preserve the
+  composition exception as primary, plus bounded cleanup disposition/aggregation.
+- Release private host/application-ID reservation and routing only after structural
+  rollback. Unknown/pending owned cleanup remains rooted in host resources/broker
+  and pending-attempt records for reporting/repeated close; do not silently suppress
+  it through today's _cleanupFailedOperation. Standalone runtime retains its own
+  pending record until disposed. No hook/save occurred on a composition failure.
+No provider callback runs under the above withdrawal/legacy onUnload lanes.
+
+3. Standalone/direct activation and immutable grants
+-----------------------------------------------------
+PackLoader.activate(plan) orchestrates one activation batch and composes once after
+the FULL plan's owners/registrations are published. Its internal per-Pack staging
+does not call composition. Lifecycle.prepare uses that internal batch staging,
+then the lifecycle orchestrator establishes B outside enclosing host/runtime lanes.
+Direct standalone activate/activatePack establishes its own issued activation batch,
+releases its own staging lanes before compose, and commits the activation barrier
+only after compose succeeds. Single-Pack activation uses the same batch protocol.
+Reject an attempted direct public activation inside an existing capability/Job/
+lifecycle callback if that would carry an enclosing lane across composition; do
+not secretly defer it beyond hooks or recursively drop an RLock. Ordinary plan
+staging uses the explicit internal continuation, not recursive public entry calls.
+
+For direct activation failure, reverse only that batch's new Packs/owners/modules
+and new bindings; leave pre-existing Packs/bindings/operations untouched. Failure
+does not set the application-wide closed-registry tombstone unless this was full
+initialization/host shutdown. Revoke newly introduced owners/provider registrations
+individually using accepted APIs. A later retry has fresh identities/ticket.
+
+bind profiles/grants are one immutable snapshot. A composer skips an already bound
+exact registration; it never mutates participants/grants or calls bind twice.
+Later CodeEntries receive NO grant on it, even if a policy selector would match.
+Return a diagnostic explaining that initial-plan composition did not include that
+incarnation. Existing owners/claims remain unchanged. Removal revokes that exact
+owner; reactivation creates a new ungranted owner, not an alias for the old one.
+To grant a new caller for an existing provider requires explicitly rebuilding a
+drained activation set with a new provider Registration. ER-03 supplies no live
+rebinding/grant-extension operation; reject the request instead of inventing one.
+Later activation of a wholly new provider Registration can bind its own initial
+snapshot after its batch, with explicit host policy and fresh lifetime ticket.
+
+4. Exact trusted llama.cpp inputs and full example
+--------------------------------------------------
+Proposed provider API:
+  LlamaCppComposition(domainId, catalog, providerEntries, grants)
+  LlamaCppCatalog.fromConfig(config) -> immutable catalog
+  EntrySelector.fromSource(packId, packVersion, codeEntryId, sourcePath)
+  LlamaCppGrant(entry, selectors: tuple[str | None, ...], allowTransition: bool)
+The script supplies catalog/config as trusted host input, prepared once with LC
+environment/cwd/config discovery. Runtime config cannot register/add a profile.
+For legacy managed config, its frozen JSON values must equal catalog's approved
+source values; mismatch rejects before binding. The catalog's captured environment
+is used, not re-snapshotted from ambient state during onLoad. No legacy driver lease
+is acquired by either managed onLoad path.
+
+EntrySelector matches exact actual packId/version/codeEntryId/sourceSha256 against
+the loaded identity; fromSource hashes explicitly host-selected local source. It
+does not certify transitive imports. providerEntries must identify exactly one
+published llama.cpp Registration owned by a matching provider CodeEntry, with the
+expected controlled facade/adapter implementation. Reject zero/ambiguous/replaced
+matches. grants resolve each matching actual owner to accepted LlmOwnerGrant;
+required missing/ambiguous policy entries fail this initial composition, rather
+than silently weakening the grant set. Selectors must exist in the trusted catalog.
+No all-future-owner wildcard or applicationRunId-based identity impersonation.
+
+Complete illustrative setup (proposed APIs; no real assets executed here):
+Create C:/actant/example-packs/example/manifest.json:
+  {"packId":"example","kind":"appPack","version":"1",
+   "codeEntries":[{"id":"main","source":"entry.py"}]}
+Its entry.py registers the initial-transition capability and calls it at creation:
+  from backend.llm.llmTypes import LlmQuery
+  def first(ctx, payload):
+      """Explicitly select an authorized idle profile before the first inference."""
+      profile = ctx.llm.profile(providerName="llama.cpp", model="A")
+      ctx.llm.transitionProfile(profile)
+      return ctx.llm.run(providerName="llama.cpp", model="A",
+          query=LlmQuery(formatId="text/plain", payload="Hello")).rawText
+  def onLoad(ctx):
+      """Stage the capability; no controlled work before composition."""
+      ctx.capabilities.register("example.first@1", first)
+  def onApplicationCreate(ctx, state):
+      """Enter the normal invocation bridge after the composition barrier."""
+      ctx.capabilities.call("example.first@1")
+
+Trusted host script, run from the repository with separately supplied local assets:
+  import importlib.util, sys
+  from pathlib import Path
+  from backend.runtime import RuntimeHost
+  from backend.save import ApplicationStore
+  from backend.packs.runtime import PackResolver, ManualActivationPlan
+  repo = Path.cwd()
+  path = repo / "first-party/llmDrivers/llamaCpp/executionAdapter.py"
+  spec = importlib.util.spec_from_file_location("hostLlamaComposition", path)
+  adapter = importlib.util.module_from_spec(spec)
+  sys.modules[spec.name] = adapter
+  spec.loader.exec_module(adapter)
+  appRoot = Path("C:/actant/example-packs/example")
+  config = {"manageServer": True, "executable": "C:/llama/llama-server.exe",
+      "defaultModel": "A", "models": {"A": {
+          "modelPath": "C:/models/target.gguf", "specMethods": ["none"]}}}
+  caller = adapter.EntrySelector.fromSource("example", "1", "main", appRoot / "entry.py")
+  provider = adapter.EntrySelector.fromSource("llmDrivers.llamaCpp", "0.3.0", "driver",
+      repo / "first-party/llmDrivers/llamaCpp/structuredCodeEntry.py")
+  composer = adapter.LlamaCppComposition(domainId="primary-llama",
+      catalog=adapter.LlamaCppCatalog.fromConfig(config), providerEntries=(provider,),
+      grants=(adapter.LlamaCppGrant(caller, (None, "A"), True),))
+  host = RuntimeHost(applicationStore=ApplicationStore("C:/actant/example-saves"),
+      packResolver=PackResolver(roots=(repo / "first-party", appRoot.parent)),
+      providerComposers=(composer,))
+  host.start()
+  try:
+      runtime = host.createApplication(appPackId="example", config={"llamaCpp": config},
+          plan=ManualActivationPlan(packIds=("llmDrivers.llamaCpp", "example")))
+  finally:
+      host.stop()
+The example's onApplicationCreate first call proves binding preceded that hook.
+Add helpers to the INITIAL plan with their own exact selector and
+LlamaCppGrant(helper, (None, "A"), False); helper estimation gets no transition right.
+Standalone uses identical providerComposers on ApplicationRuntime and public
+ApplicationLifecycle.create/load or direct PackLoader activation as specified above.
+
+Unmigrated managed provider: activation fails before application hooks/save with
+bounded LlmExecutionOwnershipError: managed llama.cpp requires trusted host
+composition. A later ungranted caller fails ownership before IO. A caller with a
+grant but no initial transition receives ER-01 NOT_RESIDENT contention;
+no auto-load in admit/ensureModel. Existing live old-style shared driver leases
+block conversion with explicit conflict; neither steal nor stop their process.
+
+Repository migration inventory (source inspection, no consumer edit authorized):
+- tests/first_party/llmDrivers/test_llamaCppSharedRuntime.py: replace raw shared
+  driver lease fixtures with real composition/binding tickets; keep lazy sharing,
+  peer-unload isolation and final-drained-release assertions.
+- test_llamaCppConfiguration.py / test_llamaCppSpeculation.py: migrate managed
+  onLoad/environment/identity/startup/failure fixtures to trusted catalogs/tickets.
+- test_llamaCpp.py / test_llamaCppStructuredMessages.py / test_llamaCppReasoning.py
+  / test_llamaCppCancellation.py: managed direct profile/estimator/stream fixtures
+  use admitted sessions. External direct tests retain their existing behavior.
+- tests/backend/runtime/test_runtimeHost.py, tests/backend/application lifecycle/
+  test_executionSessionLifecycle.py and tests/backend/packs activation suites:
+  add phase/rollback/lock probes without weakening existing lifecycle invariants.
+- first-party/applications/evilBirthdayAnalysis/run.py constructs RuntimeHost
+  without a composer; its config.json, config.example.json and
+  config.managed-multi-model.example.json select managed mode. Record explicit
+  adoption dependency: its owner must add trusted composition/caller-helper grants
+  and authorized initial transition before managed execution on the new provider.
+  Do not silently edit that consumer/its branch under ER-03. Completion, AI Buddy
+  and Materialization Test adoption likewise remain consumer-owned follow-ons.
+
+5. Completion evidence, tests and precise source boundary
+---------------------------------------------------------
+Normal stream correlation: internal ticket owns the exact Popen object, residency
+generation and allocated slot. Adapter injects id_slot; no other controlled call
+can use it until cleanup. Consume the existing _readEvents strict protocol through
+valid [DONE] and a completed event, retaining one consistent native completion ID
+privately from SSE frames (validate differing/missing IDs as protocol uncertainty).
+Then issue one bounded GET /slots AFTER the terminal was consumed; require valid
+slot ID/range, exact matching owned slot idle, same still-live process object and
+generation before/after observation. No accepted request alone certifies slot honor;
+this rule relies on pinned provider semantics and stays unverified on real assets.
+Malformed/disabled/busy/wrong-process observations return unknown. No generic
+schema change; safe outcome metadata excludes completion IDs/raw responses.
+Cancellation/early close/errors never use a later idle snapshot as proof that an
+unseen queued request ceased. No poll-until-idle recovery or automatic kill.
+
+Add deterministic tests for hook capability work after binding; compose failure
+before any create/load/run hook or save; partial binding rollback/module and scope
+cleanup; stopped/withdrawn attempt cannot publish; stop-vs-compose both winners;
+lookup/invoke exclusion; later-owner rejection with existing claims unchanged;
+standalone/direct activation and rejection under enclosing invocation locks; second-
+thread entry into each lane during composition and cleanup. Preserve exact primary
+errors with pending disposition. Normal successful SSE then matching post-terminal
+idle observation MUST release claims and allow a subsequent explicit transition.
+No sleeps as race proof; no production/runtime verification claimed by this text.
+
+Revised smallest production source list adds backend/application/lifecycle.py and
+backend/llm/providerComposition.py to proposal's explicit host/runtime/Pack/driver
+files. executionSessions.py changes only hostClosePreflight pending-initialization
+handling if needed; bind/grant/claim contracts stay unchanged. No generic lifecycle
+framework, live grant mutation, scheduler/recovery, consumer code or ER-04 work.
+Stock supportsRetention=False/supportsRequiredFresh=False is now accepted by the
+review: reject before IO; physical retained-provider adoption remains unmet.
+All actual production edits still await Integration authorization of this addendum.
