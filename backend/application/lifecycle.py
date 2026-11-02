@@ -1,9 +1,10 @@
-# file: backend/application/lifecycle.py ; version: 6
+# file: backend/application/lifecycle.py ; version: 7
 from __future__ import annotations
 
 from backend.packs.runtime import ManualActivationPlan
 from backend.application.applicationRuntime import ApplicationRuntime
 from backend.save import SaveBundle
+from backend.llm.providerComposition import ActivationAttempt, _lifecycle
 
 __all__ = ["ApplicationLifecycle"]
 
@@ -28,40 +29,33 @@ class ApplicationLifecycle:
         if runtime.acceptedSaveBundle is not None:
             raise RuntimeError("Application creation requires an ApplicationRuntime with no accepted SaveBundle.")
 
-        runtime.beginInitialization()
+        return cls._execute(runtime=runtime, plan=plan, mode="create")
+
+    @classmethod
+    def _resumeCreate(cls, *, runtime):
+        """Preserve create/load/run and authoritative save ordering after composition."""
+        root = runtime.applicationRun.application.committedState
+        creationTransaction = root.openTransaction()
         try:
-            runtime.packLoader.activate(plan)
-
-            root = runtime.applicationRun.application.committedState
-            creationTransaction = root.openTransaction()
+            runtime.packLoader.invokeApplicationCreate(memoryView=creationTransaction)
+            creationTransaction.commit()
+        except Exception:
             try:
-                runtime.packLoader.invokeApplicationCreate(memoryView=creationTransaction)
-                creationTransaction.commit()
-            except Exception:
-                try:
-                    creationTransaction.abort()
-                except RuntimeError:
-                    pass
-                raise
+                creationTransaction.abort()
+            except RuntimeError:
+                pass
+            raise
 
+        accepted = runtime.saveApplication()
+
+        beforeLoad = root.snapshot()
+        runtime.packLoader.invokeApplicationLoad()
+        if root.snapshot() != beforeLoad:
             accepted = runtime.saveApplication()
 
-            beforeLoad = root.snapshot()
-            runtime.packLoader.invokeApplicationLoad()
-            if root.snapshot() != beforeLoad:
-                accepted = runtime.saveApplication()
-
-            runtime.start()
-            runtime.packLoader.invokeApplicationRun()
-            return accepted
-        except Exception as lifecycleError:
-            cleanupErrors = cls._cleanupFailedStart(runtime=runtime)
-            if cleanupErrors:
-                raise ExceptionGroup(
-                    "Application creation failed and runtime cleanup also reported errors.",
-                    [lifecycleError, *cleanupErrors],
-                ) from None
-            raise
+        runtime.start()
+        runtime.packLoader.invokeApplicationRun()
+        return accepted
 
     @classmethod
     def load(
@@ -75,26 +69,75 @@ class ApplicationLifecycle:
         if accepted is None:
             raise RuntimeError("Application loading requires an ApplicationRuntime restored from an accepted SaveBundle.")
 
+        return cls._execute(runtime=runtime, plan=plan, mode="load")
+
+    @classmethod
+    def _resumeLoad(cls, *, runtime):
+        """Preserve create/load/run and authoritative save ordering after composition."""
+        accepted = runtime.acceptedSaveBundle
+        root = runtime.applicationRun.application.committedState
+        beforeLoad = root.snapshot()
+        runtime.packLoader.invokeApplicationLoad()
+        if root.snapshot() != beforeLoad:
+            accepted = runtime.saveApplication()
+
+        runtime.start()
+        runtime.packLoader.invokeApplicationRun()
+        return accepted
+
+    @classmethod
+    def prepare(cls, *, runtime, plan, mode):
+        """Stage the complete activation before hooks, commits, save or start."""
+        attempt = ActivationAttempt(runtime, initial=True, mode=mode)
         runtime.beginInitialization()
+        runtime.packLoader._activatePlan(plan)
+        attempt.seal()
+        return attempt
+
+    @classmethod
+    def resume(cls, attempt):
+        """Only a live issued continuation can enter serialized application hooks."""
+        with attempt._gate:
+            attempt.requireCurrent()
+            if attempt.phase != "ready":
+                raise RuntimeError("Provider composition is not ready.")
+            attempt.phase = "running"
+        token = _lifecycle.set(True)
         try:
-            runtime.packLoader.activate(plan)
+            result = (cls._resumeCreate(runtime=attempt.runtime) if attempt.mode == "create"
+                      else cls._resumeLoad(runtime=attempt.runtime))
+            attempt.complete()
+            return result
+        finally:
+            _lifecycle.reset(token)
 
-            root = runtime.applicationRun.application.committedState
-            beforeLoad = root.snapshot()
-            runtime.packLoader.invokeApplicationLoad()
-            if root.snapshot() != beforeLoad:
-                accepted = runtime.saveApplication()
+    @classmethod
+    def abort(cls, runtime, primary):
+        """Unwind partial initialization outside host lanes and preserve failures."""
+        errors = []
+        attempt = runtime._compositionAttempt
+        if attempt is not None:
+            try:
+                attempt.abort()
+            except Exception as error:
+                errors.append(error)
+        if runtime._compositionAttempt is None:
+            errors.extend(cls._cleanupFailedStart(runtime=runtime))
+        if errors:
+            primary.llmCompositionCleanup = tuple(errors)
+            raise ExceptionGroup("Initialization and cleanup failed.", [primary, *errors]) from None
 
-            runtime.start()
-            runtime.packLoader.invokeApplicationRun()
-            return accepted
-        except Exception as lifecycleError:
-            cleanupErrors = cls._cleanupFailedStart(runtime=runtime)
-            if cleanupErrors:
-                raise ExceptionGroup(
-                    "Application load failed and runtime cleanup also reported errors.",
-                    [lifecycleError, *cleanupErrors],
-                ) from None
+    @classmethod
+    def _execute(cls, *, runtime, plan, mode):
+        """Standalone create/load uses the identical pre-hook composition barrier."""
+        try:
+            with runtime._lane:
+                attempt = cls.prepare(runtime=runtime, plan=plan, mode=mode)
+            attempt.compose()
+            with runtime._lane:
+                return cls.resume(attempt)
+        except Exception as primary:
+            cls.abort(runtime, primary)
             raise
 
     @staticmethod
@@ -102,6 +145,7 @@ class ApplicationLifecycle:
         *,
         runtime: ApplicationRuntime,
     ) -> list[Exception]:
+        """Close failed initialization after composition rollback, preserving errors."""
         try:
             runtime.close()
         except Exception as err:

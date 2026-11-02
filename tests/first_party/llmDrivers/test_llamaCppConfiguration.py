@@ -1,6 +1,8 @@
-# file: tests/first_party/llmDrivers/test_llamaCppConfiguration.py ; version: 1
+# file: tests/first_party/llmDrivers/test_llamaCppConfiguration.py ; version: 2
 """LC-01 startup authority and evidence tests without models, GPUs or inference."""
 from __future__ import annotations
+
+from tests.first_party.llmDrivers.controlledLlama import launchOwnedDriver, stopOwnedDriver, profileOwnedDriver, SharedComposition
 
 import importlib.util
 import json
@@ -246,7 +248,7 @@ def test_environment_frozen_at_acquisition_and_nonowned_inherited_at_launch(conf
     monkeypatch.setenv("LLAMA_ARG_REASONING", "on")
     monkeypatch.setenv("LLAMA_ARG_THINK_BUDGET", "999")
     monkeypatch.setenv("LC01_NONOWNED", "fresh")
-    value.ensureModel(None)
+    launchOwnedDriver(value)
     assert len(calls) == 1
     environment = calls[0][1]["env"]
     assert environment["LLAMA_ARG_REASONING"] == "off"
@@ -259,52 +261,34 @@ def test_environment_frozen_at_acquisition_and_nonowned_inherited_at_launch(conf
     assert evidence["build"]["status"] == "unverified"
     assert evidence["build"]["executable"]["sha256"] is not None
     assert evidence["inputs"][0]["contentSha256"] is None
-    value.ensureModel(None)
+    launchOwnedDriver(value)
     assert len(calls) == 1
-    value.stop()
+    stopOwnedDriver(value)
     assert calls[0][2].stops == 1
     assert evidence["launch"]["status"] == "ready"
     assert value.configurationEvidence()["launch"]["status"] == "stopped"
 
 
 def test_shared_lease_environment_identity_and_no_leaks(config, monkeypatch):
-    """Changed owned inputs cause typed contention, unchanged inputs share one lazy driver."""
+    """Different frozen catalogs share a stable domain, without implicit replacement."""
     calls = fakeLaunch(monkeypatch)
-    registry = SharedServiceRegistry()
-
-    def context(run):
-        """Bind a minimal application-local facade to the real host registry."""
-        bindApplicationRunSharedServices(run, registry)
-        return SimpleNamespace(config={"llamaCpp": config}, identity=SimpleNamespace(applicationRunId=run),
-                               llm=SimpleNamespace(registerProvider=lambda *args: None))
-
-    firstContext, secondContext = context("lc01-a"), context("lc01-b")
-    states = []
+    shared = SharedComposition()
+    first = shared.bind(config)
+    monkeypatch.setenv("LLAMA_ARG_REASONING", "off")
+    second = shared.bind(config)
     try:
-        first = adapter.onLoad(firstContext)
-        states.append((firstContext, first))
-        assert not calls
-        monkeypatch.setenv("LLAMA_ARG_REASONING", "off")
-        with pytest.raises(SharedServiceConflictError):
-            adapter.onLoad(secondContext)
-        monkeypatch.delenv("LLAMA_ARG_REASONING")
-        second = adapter.onLoad(secondContext)
-        states.append((secondContext, second))
-        assert first.driver is second.driver
+        assert first.binding.domain is second.binding.domain and not calls
+        assert first.binding.profiles[None] is not second.binding.profiles[None]
         monkeypatch.setenv("LLAMA_ARG_REASONING", "on")
-        first.driver.ensureModel(None)
+        first.transition()
         assert "LLAMA_ARG_REASONING" not in calls[0][1]["env"]
-        adapter.onUnload(firstContext, first)
+        first.close()
         assert calls[0][2].stops == 0
-        adapter.onUnload(secondContext, second)
-        assert calls[0][2].stops == 1
-        assert len(calls) == 1
+        second.close()
+        assert calls[0][2].stops == 1 and len(calls) == 1
     finally:
-        for ctx, state in states:
-            adapter.onUnload(ctx, state)
-        unbindApplicationRunSharedServices("lc01-a")
-        unbindApplicationRunSharedServices("lc01-b")
-        registry.close()
+        first.close()
+        second.close()
 
 
 @pytest.mark.parametrize("module", [adapter, impl])
@@ -315,7 +299,7 @@ def test_entire_automatic_metadata_is_sanitized_private_evidence_lossless(config
     value = driver(config, serverReasoningEffort=sentinel,
                    serverReasoningBudgetMessage=sentinel, cacheTypeK=sentinel,
                    chatTemplateKwargs={"nested": [sentinel]}, extraArgs=["--secret=" + sentinel])
-    profile = module.LlamaCppStreamProvider(driver=value).getExecutionProfile(model=None, providerOptions={})
+    profile = profileOwnedDriver(module.LlamaCppStreamProvider(driver=value), model=None, providerOptions={})
     encoded = json.dumps(configuration.jsonValue(profile.metadata))
     assert sentinel not in encoded
     assert "private-server" not in encoded and "private-model" not in encoded
@@ -431,7 +415,7 @@ def test_required_probe_rejects_missing_or_different_surface_before_launch(confi
     config["capabilityCheck"] = "required"
     value = driver(config, serverReasoning="off")
     with pytest.raises(ValueError, match="capability check"):
-        value.ensureModel(None)
+        launchOwnedDriver(value)
     assert not calls
     assert value.configurationEvidence()["build"]["status"] == expected
 
@@ -443,10 +427,10 @@ def test_missing_executable_probe_and_required_success(config, monkeypatch):
     probeResponses(monkeypatch)
     config["capabilityCheck"] = "required"
     value = driver(config, serverReasoning="off")
-    value.ensureModel(None)
+    launchOwnedDriver(value)
     assert len(calls) == 1
     assert value.configurationSummary()["buildStatus"] == "advertised-pinned-surface"
-    value.stop()
+    stopOwnedDriver(value)
 
 
 def test_failed_launch_and_health_have_honest_argv_and_safe_diagnostics(config, monkeypatch):
@@ -458,14 +442,14 @@ def test_failed_launch_and_health_have_honest_argv_and_safe_diagnostics(config, 
     value = driver(config, serverReasoningBudgetMessage="PRIVATE_SENTINEL")
     monkeypatch.setattr(impl.subprocess, "Popen", fail)
     with pytest.raises(impl.LlmProviderConnectionError) as caught:
-        value.ensureModel(None)
+        launchOwnedDriver(value)
     assert "PRIVATE_SENTINEL" not in "".join(traceback.format_exception(caught.value))
     assert value.configurationEvidence()["launch"]["actualArgv"] is None
     assert value.configurationEvidence()["launch"]["status"] == "launch-failed"
     calls = fakeLaunch(monkeypatch)
     monkeypatch.setattr(impl.LlamaCppDriver, "_waitReady", fail)
     with pytest.raises(impl.LlmProviderConnectionError):
-        value.ensureModel(None)
+        launchOwnedDriver(value)
     evidence = value.configurationEvidence()
     assert evidence["launch"]["actualArgv"] == calls[0][0]
     assert evidence["launch"]["status"] == "startup-failed"
@@ -527,9 +511,9 @@ def test_template_file_and_auxiliary_inputs_are_frozen_as_paths_not_content_hash
     assert all(item["contentSha256"] is None for item in before["inputs"])
     assert before["inputs"][-1]["configuredPath"] == "relative.jinja"
     calls = fakeLaunch(monkeypatch)
-    value.ensureModel(None)
+    launchOwnedDriver(value)
     assert calls[0][1]["cwd"] == str(Path(before["inputs"][-1]["resolvedPath"]).parent)
-    value.stop()
+    stopOwnedDriver(value)
 
 
 def test_profile_identity_distinguishes_explicit_defaults_and_ordered_experimental_arguments(config):
@@ -547,7 +531,7 @@ def test_old_launch_build_is_retained_after_probe_of_replaced_executable(config,
     fakeLaunch(monkeypatch)
     probeResponses(monkeypatch)
     value = driver(config)
-    value.ensureModel(None)
+    launchOwnedDriver(value)
     old = value.configurationEvidence()
     Path(config["executable"]).write_bytes(b"replacement")
     value.checkCapabilities()
@@ -555,7 +539,7 @@ def test_old_launch_build_is_retained_after_probe_of_replaced_executable(config,
     assert old["launch"]["build"] == new["launch"]["build"]
     assert old["launch"]["build"]["executable"]["sha256"] != new["build"]["executable"]["sha256"]
     assert old["profileId"] == new["profileId"]
-    value.stop()
+    stopOwnedDriver(value)
 
 
 def test_direct_probe_after_executable_disappears_and_successful_probe_with_unknown_args(config, monkeypatch):

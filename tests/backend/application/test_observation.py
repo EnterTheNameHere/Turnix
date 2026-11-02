@@ -1,4 +1,4 @@
-# file: tests/backend/application/test_observation.py ; version: 2
+# file: tests/backend/application/test_observation.py ; version: 3
 """Architectural observation tests through real contexts, Jobs, runtimes and hosts."""
 from __future__ import annotations
 
@@ -424,11 +424,11 @@ def test_host_failed_initialization_revokes_application_observations(environment
         appId = runtime.saveApplication().applicationId
         host.closeApplicationRun(runtime.applicationRun.applicationRunId)
     sessions = []
-    def failLifecycle(*, runtime, plan):
+    def failLifecycle(*, runtime, plan, mode):
         """Emulates a lifecycle hook failure after independently owned acquisition."""
         sessions.append(runtime._observationOwner.request(ObservationRequest(), ObservationLifetime.APPLICATION))
         raise ValueError("initialization failed")
-    monkeypatch.setattr(f"backend.runtime.runtimeHost.ApplicationLifecycle.{phase}", failLifecycle)
+    monkeypatch.setattr("backend.runtime.runtimeHost.ApplicationLifecycle.prepare", failLifecycle)
     with pytest.raises(ValueError, match="initialization failed"):
         if phase == "create":
             host.createApplication(appPackId="test.app", plan=plan)

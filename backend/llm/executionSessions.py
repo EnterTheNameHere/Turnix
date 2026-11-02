@@ -1,4 +1,4 @@
-# file: backend/llm/executionSessions.py ; version: 2
+# file: backend/llm/executionSessions.py ; version: 3
 """Trusted LLM composition over ER-01, with no provider-specific realization.
 
 Binding/owner creation and adapter evidence are backend hooks, never Pack grants.
@@ -376,8 +376,23 @@ def lifetimeBoundary(method):
                 scope[0] = False
                 errors = []
                 seen = set()
+                pending = tuple(getattr(self, "_pendingInitializations", {}).values())
+                pending += tuple(getattr(self, "_runtimesByRunId", {}).values())
+                ownAttempt = getattr(runtime, "_compositionAttempt", None)
+                compositionRunning = any(r._compositionAttempt is not None and r._compositionAttempt.phase
+                    not in ("cleanup", "aborted", "complete") for r in pending)
+                compositionRunning = compositionRunning or (ownAttempt is not None and ownAttempt.phase
+                    not in ("cleanup", "aborted", "complete"))
+                if (not compositionRunning and getattr(runtime, "_closed", False)
+                        and getattr(runtime, "_ownsExecutionResources", False)):
+                    try:
+                        runtime.executionResources.finishClose()
+                    except Exception as error:
+                        errors.append(error)
                 completeServices = {id(s) for s, r in scope[1] if r is None}
                 for service, target in scope[1]:
+                    if compositionRunning:
+                        continue  # Pending attempts retain callback ownership until unwind.
                     if target is not None and id(service) in completeServices:
                         continue
                     key = (id(service), id(target))
@@ -429,8 +444,34 @@ def hostClosePreflight(method):
         if method.__name__ == "stop":
             with host._lane:
                 host._stopping = True
+                pending = tuple(dict.fromkeys((*getattr(host, "_pendingInitializations", {}).values(),
+                    *(r for r in host._runtimesByRunId.values() if r._compositionAttempt is not None))))
+                for runtime in pending:
+                    attempt = runtime._compositionAttempt
+                    if attempt is not None:
+                        attempt.abandon()
                 host.llmExecutions.revokeAll()
                 host.executionResources.close()
+            if pending:
+                if any(runtime._compositionAttempt is not None and runtime._compositionAttempt.phase
+                       not in ("cleanup", "aborted", "complete") for runtime in pending):
+                    raise LlmExecutionCleanupError()
+                with _ignoreIncompleteCleanup():
+                    host.executionResources.finishClose()
+                for runtime in pending:
+                    attempt = runtime._compositionAttempt
+                    if attempt is not None and attempt.phase == "cleanup":
+                        with _ignoreIncompleteCleanup():
+                            attempt.finishCleanup()
+                    if runtime._compositionAttempt is None:
+                        runtime.close(_deferLlmClose=True)
+                        from backend.runtime.sharedServices import unbindApplicationRunSharedServices
+                        unbindApplicationRunSharedServices(runtime.applicationRun.applicationRunId)
+                        with host._lane:
+                            host._pendingInitializations.pop(runtime.applicationRun.applicationRunId, None)
+                            host._initializingApplicationIds.discard(runtime.applicationRun.application.applicationId)
+                if host._pendingInitializations:
+                    raise LlmExecutionCleanupError()
             with _ignoreIncompleteCleanup():
                 host.llmExecutions.finishClose()
             with _ignoreIncompleteCleanup():
@@ -447,6 +488,8 @@ def hostClosePreflight(method):
                 host.requireActive()
                 runtime = host._runtimesByRunId[applicationRunId]
                 host.llmExecutions.revokeRegistry(runtime.llmProviders)
+            from backend.llm.providerComposition import requireNoPendingComposition
+            requireNoPendingComposition(runtime)
             with _ignoreIncompleteCleanup():
                 host.llmExecutions.finishClose(runtime.llmProviders)
             if host.llmExecutions.pendingCalls(runtime.llmProviders):

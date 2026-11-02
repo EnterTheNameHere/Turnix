@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 19
+# file: backend/application/applicationRuntime.py ; version: 20
 from __future__ import annotations
 
 from contextlib import suppress
@@ -11,6 +11,8 @@ from backend.capabilities.runtime import CapabilityRegistry
 from backend.context.codeEntryContext import CodeEntryContext, CodeEntryIdentity
 from backend.io.managedIo import ManagedIo, ManagedIoTransaction
 from backend.llm.executionSessions import helperCancellation, lifetimeBoundary, jobExecutionBoundary
+from backend.llm.providerComposition import invocationBoundary, requireNoPendingComposition
+from backend.runtime.executionResources import ExecutionResourceService
 from backend.llm.streamingRuntime import LlmProcessingPipeline, LlmProviderRegistry
 from backend.observation import ObservationService
 from backend.orchestration.cancellation import CancellationSignal, ExecutionCancelled
@@ -55,6 +57,8 @@ class ApplicationRuntime:
         tracer: Tracer | None = None,
         observationService: ObservationService | None = None,
         llmExecutionBindings=None,
+        providerComposers=(),
+        executionResourceService=None,
     ) -> None:
         """
         Creates one ApplicationRun and its mediated runtime services.
@@ -112,6 +116,10 @@ class ApplicationRuntime:
         self.llmProviders = LlmProviderRegistry()
         self.llmExecutions = llmExecutionBindings if llmExecutionBindings is not None else self.llmProviders.executions
         self.llmProviders.executions = self.llmExecutions
+        self.providerComposers = tuple(providerComposers)
+        self._ownsExecutionResources = executionResourceService is None
+        self.executionResources = executionResourceService or ExecutionResourceService()
+        self._compositionAttempt = None
         self._llmOwners = {}
         self.lastLlmCleanup = ()
         self._llmClosePrepared = False
@@ -161,6 +169,8 @@ class ApplicationRuntime:
         tracer: Tracer | None = None,
         observationService: ObservationService | None = None,
         llmExecutionBindings=None,
+        providerComposers=(),
+        executionResourceService=None,
     ) -> tuple[ApplicationRuntime, LoadedApplicationSave]:
         """
         Creates a fresh ApplicationRuntime from one durable Application root snapshot.
@@ -179,6 +189,7 @@ class ApplicationRuntime:
             config=config,
             tracer=tracer,
             observationService=observationService, llmExecutionBindings=llmExecutionBindings,
+            providerComposers=providerComposers, executionResourceService=executionResourceService,
         )
         runtime.applicationRun.application.durableGeneration = loaded.durableGeneration
         return runtime, loaded
@@ -404,6 +415,7 @@ class ApplicationRuntime:
         Pending calls keep the runtime intact for explicit retry; this does not
         wait, recover unknown provider state, or change Job cancellation outcomes.
         """
+        requireNoPendingComposition(self)
         self.llmExecutions.revokeRegistry(self.llmProviders, permanent=permanent)
         try:
             self.llmExecutions.finishClose(self.llmProviders)
@@ -413,6 +425,13 @@ class ApplicationRuntime:
             from backend.llm.errors import LlmExecutionCleanupError
             raise LlmExecutionCleanupError()
         self._llmClosePrepared = True
+
+    def requireCompositionReady(self):
+        """Exclude invocation through leaked references before trusted composition."""
+        with self._lane:
+            attempt = self._compositionAttempt
+            if attempt is not None and (attempt.revoked or attempt.phase != "running"):
+                raise RuntimeError("Application activation has not completed provider composition.")
 
     def requireActive(self) -> None:
         """Requires this runtime to own an active ApplicationRun."""
@@ -497,6 +516,7 @@ class ApplicationRuntime:
             owner.revoke()
         self.llmExecutions.revokeRegistration(self.llmProviders, codeEntryInstanceId)
 
+    @invocationBoundary
     @lifetimeBoundary
     def invokeCapability(
         self,
@@ -559,6 +579,7 @@ class ApplicationRuntime:
                 scope.withdraw()
 
     @lifetimeBoundary
+    @invocationBoundary
     @jobExecutionBoundary
     def runJob(
         self,

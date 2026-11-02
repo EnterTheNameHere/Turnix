@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/structuredCodeEntry.py ; version: 10
+# file: first-party/llmDrivers/llamaCpp/structuredCodeEntry.py ; version: 11
 # ruff: noqa: INP001
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ from backend.llm.structuredMessages import (
     LLM_MESSAGES_FORMAT_ID,
     LlmMessages,
 )
-from backend.runtime.sharedServices import sharedServicesForApplicationRun
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -31,12 +30,10 @@ if TYPE_CHECKING:
 
     from backend.context.codeEntryContext import CodeEntryContext
     from backend.core.immutableValue import ImmutableValue
-    from backend.runtime.sharedServices import SharedServiceLease
 
 
 _IMPLEMENTATION_NAME = "actantFirstPartyLlamaCppImplementation"
 _IMPLEMENTATION_PATH = Path(__file__).with_name("codeEntry.py")
-_MANAGED_SERVICE_ID = "llm.driver.llama.cpp.managed"
 
 
 def _loadImplementation() -> ModuleType:
@@ -68,15 +65,9 @@ LlamaCppOptions = _impl.LlamaCppOptions
 
 @dataclass(slots=True)
 class _LlamaCppRuntimeState:
-    """Tracks one application provider facade and its host/shared driver claim."""
+    """Own the local external facade only; managed bindings own their own lifetime."""
 
     driver: object
-    sharedLease: SharedServiceLease[object] | None
-
-
-def _managedCompatibilityKey(config: Mapping[str, object]) -> str:
-    """Bind configuration and the same frozen relevant inputs used by construction."""
-    return _impl._configuration.prepare(config).compatibilityKey()
 
 
 def _messagesForQuery(query: LlmQuery) -> list[dict[str, str]]:
@@ -256,7 +247,7 @@ def _buildPayload(
     return payload
 
 
-def onLoad(ctx: CodeEntryContext) -> _LlamaCppRuntimeState:
+def onLoad(ctx: CodeEntryContext) -> object:
     """Publishes one application provider facade over local or host-shared driver state."""
     config = ctx.config.get("llamaCpp", {})
     if not isinstance(config, dict):
@@ -266,19 +257,11 @@ def onLoad(ctx: CodeEntryContext) -> _LlamaCppRuntimeState:
     if type(manageServer) is not bool:
         raise TypeError("llamaCpp.manageServer must be a boolean.")
 
-    lease: SharedServiceLease[object] | None = None
     if manageServer:
-        config = _impl._configuration.prepare(config)
-        registry = sharedServicesForApplicationRun(ctx.identity.applicationRunId)
-        lease = registry.acquire(
-            serviceId=_MANAGED_SERVICE_ID,
-            compatibilityKey=_managedCompatibilityKey(config),
-            factory=lambda: LlamaCppDriver(config),
-            closer=lambda resource: resource.stop(),
-        )
-        driver = lease.resource
-    else:
-        driver = LlamaCppDriver(config)
+        facade = _impl._ManagedFacade(config, structured=True)
+        ctx.llm.registerProvider("llama.cpp", facade)
+        return facade
+    driver = LlamaCppDriver(config)
 
     try:
         ctx.llm.registerProvider(
@@ -286,21 +269,15 @@ def onLoad(ctx: CodeEntryContext) -> _LlamaCppRuntimeState:
             LlamaCppStreamProvider(driver=driver),
         )
     except Exception:
-        if lease is None:
-            driver.stop()
-        else:
-            lease.release()
+        driver.stop()
         raise
-    return _LlamaCppRuntimeState(driver=driver, sharedLease=lease)
+    return _LlamaCppRuntimeState(driver=driver)
 
 
 def onUnload(ctx: CodeEntryContext, state: object) -> None:
     """Releases this application's provider claim without owning another application's resource."""
     del ctx
     if not isinstance(state, _LlamaCppRuntimeState):
-        return
-    if state.sharedLease is not None:
-        state.sharedLease.release()
         return
     if isinstance(state.driver, LlamaCppDriver):
         state.driver.stop()

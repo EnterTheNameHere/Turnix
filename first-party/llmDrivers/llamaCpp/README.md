@@ -1,10 +1,138 @@
 # llama.cpp startup controls and configuration evidence
 
 The manifest loads `structuredCodeEntry.py`; `codeEntry.py` supplies its driver.
-Managed registration leases a host driver and leaves startup lazy. The final
-lease releases its server. These controls do not add a restart, scheduling or
-resource arbitration policy. Startup controls are LC-01, request/reasoning evidence
-is LC-02, and speculative startup configuration below is LC-03.
+Managed registration is a controlled-only facade: a trusted host composer installs
+ER-01/02 bindings before application hooks/save/start. Both source entry paths
+require the same admission. Loading stays lazy; initial loading and idle profile
+switches require explicit authorized transitions. Final drained binding release
+unloads the owned residency. There is no scheduler, automatic restart or recovery.
+Startup controls are LC-01, request/reasoning evidence is LC-02, speculation is
+LC-03, and controlled host composition/lifetime is ER-03 as described below.
+
+## Controlled managed composition and migration (ER-03)
+
+Managed JSON alone no longer authorizes a process. Construct
+`executionAdapter.LlamaCppComposition` in trusted host code and pass it in
+`RuntimeHost(providerComposers=(composer,))`. The generic host sees only the
+composition protocol. `ApplicationRuntime` also accepts `providerComposers` for
+standalone `ApplicationLifecycle.create/load` and direct PackLoader activation.
+Without approved composition, managed activation fails **before** application
+hooks, creation commit/save/start or public host registration with
+`Managed llama.cpp requires trusted host composition.` External mode is unchanged.
+Existing live old-style shared-driver leases reject migration; they are not stolen
+or stopped. Consumer owners must migrate their host setup and initial transition.
+
+Host setup, with an existing AppPack `example@1` whose `main` entry is `entry.py`:
+
+```python
+import importlib.util
+import sys
+from pathlib import Path
+from backend.runtime import RuntimeHost
+from backend.save import ApplicationStore
+from backend.packs.runtime import PackResolver, ManualActivationPlan
+
+repo = Path.cwd()
+app = Path("C:/actant/example-packs/example")
+path = repo / "first-party/llmDrivers/llamaCpp/executionAdapter.py"
+spec = importlib.util.spec_from_file_location("hostLlamaComposition", path)
+adapter = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = adapter
+spec.loader.exec_module(adapter)
+config = {
+    "manageServer": True, "executable": "C:/llama/llama-server.exe",
+    "defaultModel": "A", "models": {"A": {"modelPath": "C:/models/target.gguf"}},
+}
+caller = adapter.EntrySelector.fromSource("example", "1", "main", app / "entry.py")
+provider = adapter.EntrySelector.fromSource("llmDrivers.llamaCpp", "0.3.0", "driver",
+    repo / "first-party/llmDrivers/llamaCpp/structuredCodeEntry.py")
+composer = adapter.LlamaCppComposition(domainId="primary-llama",
+    catalog=adapter.LlamaCppCatalog.fromConfig(config), providerEntries=(provider,),
+    grants=(adapter.LlamaCppGrant(caller, (None, "A"), True),))
+host = RuntimeHost(applicationStore=ApplicationStore("C:/actant/example-saves"),
+    packResolver=PackResolver(roots=(repo / "first-party", app.parent)),
+    providerComposers=(composer,))
+host.start()
+try:
+    runtime = host.createApplication(appPackId="example", config={"llamaCpp": config},
+        plan=ManualActivationPlan(packIds=("llmDrivers.llamaCpp", "example")))
+    runtime.invokeCapability("example.first@1")
+    private = composer.configurationEvidence(host.executionResources, "A")
+finally:
+    host.stop()
+```
+
+The AppPack's capability uses the existing neutral facade:
+
+```python
+from backend.llm.llmTypes import LlmQuery
+from backend.llm.executionSessions import FreshContext
+
+def first(ctx, payload):
+    """Explicitly materialize an approved idle profile before the first call."""
+    profile = ctx.llm.profile(providerName="llama.cpp", model="A")
+    ctx.llm.transitionProfile(profile)
+    session = ctx.llm.reserveConversation(profile)
+    try:
+        return ctx.llm.run(providerName="llama.cpp", session=session,
+            query=LlmQuery(formatId="text/plain", payload="Hello"),
+            context=FreshContext()).rawText
+    finally:
+        session.close()
+
+def onLoad(ctx):
+    """Stage registration; lifecycle/onLoad Contexts cannot execute controlled LLMs."""
+    ctx.capabilities.register("example.first@1", first)
+```
+
+A creation/load/run hook can call `ctx.capabilities.call("example.first@1")`
+after composition. No LLM execution access is granted directly to that lifecycle
+Context. Helper CodeEntries must be present in the initial plan with their own
+exact `EntrySelector` and `LlamaCppGrant(..., allowTransition=False)` as appropriate.
+Entry selection checks actual loaded Pack/version/entry/source SHA-256; it does
+not certify transitive imports. Runtime JSON must match the approved catalog.
+Bindings copy initial grants. Later entries/reactivated incarnations receive no
+implicit grant, live extension or rebinding. Unsafe activation inside a Job or
+lifecycle callback rejects. Partial later-batch failure preserves older bindings.
+
+Changing sampling/request controls reuses loaded weights. Different startup flags,
+context capacity, template defaults or auxiliary speculative weights are a new
+residency, requiring an explicit authorized idle transition. Busy, exclusive or
+unknown resources reject immediately; there is no hidden wait or preemption.
+`profileId` is configuration evidence, not the ER-01 residency generation.
+
+Stock adapter support is `supportsFresh=True`, `supportsRequiredFresh=False`,
+`supportsRetention=False`. Best-effort fresh inference owns an explicit slot and
+sends `cache_prompt=false`, reporting **attempted** logical freshness. It neither
+resizes context nor reloads weights. Required fresh reset, `retain=True` and required
+reuse cannot obtain a provider promise: requests reject before inference/provider
+mutation, with no fake handle or silent replay. Physical retained-context adoption
+remains unmet despite backend ER-01/02 handles/pins. No slot erase/save/restore,
+all-cache reset, GPU-cold or determinism promise is implemented. Packs own their
+authoritative conversation history and overflow policy.
+
+Normal cleanup requires native terminal `finish_reason`, a consistent nonempty
+completion ID, valid `[DONE]`, then a bounded **post-terminal** `/slots` observation
+of the exact owned slot idle in the same live residency/process. Bare `[DONE]`,
+local HTTP closure, EOF, cancellation, or an idle observation preceding a queued
+request does not establish quiescence. Malformed/disabled slot observations and
+ambiguous failures quarantine through ER-01; host close reports pending/unknown
+without automatic kill/restart/recovery. Normal completion releases claims and
+permits later explicit transitions. This is source-backed policy for the pin,
+not actual binary/model validation. Configure the server's slots endpoint for this
+policy; `--no-slots` cannot provide its normal-completion evidence.
+
+Private `composer.configurationEvidence(resources, model)` explicitly retrieves
+matching actual launch evidence or planned/unlaunched catalog evidence, with the
+existing LC immutable schema. It conveys no execution/control authority. Do not
+publish it indiscriminately; automatic profiles/PM/G-01 retain safe projections.
+Owned process references survive failed stop/wait; a final lease never detaches an
+unreaped child or shuts down a peer call. Shutdown during pending composition
+revokes admission and reports incomplete until the callback unwinds and cleanup
+can be explicitly retried. No real binary, model or consumer compatibility is
+established by synthetic tests; ER-04 remains a separate gate.
+
+## Startup configuration (LC-01/03)
 
 Settings below may appear in `llamaCpp` or `llamaCpp.models[name]`. A model value
 replaces the corresponding driver default; explicit `null` suppresses that
@@ -85,19 +213,18 @@ including after successful capability checking. Extra arguments that encode
 tensor overrides, grammars or other experimental semantics are not an independent
 model/template compatibility guarantee.
 
-Before managed lease acquisition, the adapter freezes config and pinned relevant
-environment values **including absence**. Their identity is shared across application
-leases. A new application under different relevant inputs gets the existing typed
-`SharedServiceConflictError`; it cannot share a mismatched driver. Existing leases
-keep their snapshot through ambient mutations. At launch, ordinary non-owned
-variables inherit normally and frozen owned values/absences overwrite ambient ones.
-Explicit structured settings collide with corresponding environment authorities;
-template kwargs and legacy paired-switch `LLAMA_ARG_NO_*` aliases are included.
-The launch working directory is captured in the same identity and passed to Popen,
-so relative input/experimental paths cannot change when the ambient directory does.
-No raw environment dump is retained. The owned set is in `ENV_NAMES`; LC-03 adds
-speculative inputs and automatic-config discovery as described below. Arbitrary
-other environment effects remain uncertified.
+The trusted catalog freezes config and pinned relevant environment values
+**including absence**, plus cwd and automatic-config discovery. Each selected
+profile has its own immutable residency identity. Different inputs can be approved
+profiles in the same stable host domain; selecting one never changes a resident
+process without an explicit authorized idle transition. Stable executable/endpoint
+policy conflicts reject rather than create a second authority for that domain.
+Existing profiles retain their captured inputs through ambient mutation. At launch,
+ordinary non-owned variables inherit normally and frozen owned values/absences
+overwrite ambient ones. No raw environment dump is retained. The owned set is in
+`ENV_NAMES`; LC-03 adds speculative inputs and automatic-config discovery. Arbitrary
+other environment effects remain uncertified. Unknown extraArgs are conservative
+ordered startup identity, not certified semantics.
 
 `manageServer=false` remains usable with just `baseUrl` and optional context size.
 It rejects all non-null new startup controls, even false/zero/empty kwargs, and
@@ -374,14 +501,15 @@ Known and future `LLAMA_ARG_SPEC_*`, `LLAMA_ARG_NO_SPEC_*`, `LLAMA_ARG_DRAFT_*` 
 `LLAMA_ARG_*_DRAFT` values/absences bind to shared identity before acquisition.
 New ambient speculative variables are removed at launch if absent in the frozen
 snapshot. Typed inherited inputs get the same validation; unknown/deferred inputs
-require an explicit active method and remain uncertified. A new application under
-changed inputs gets typed lease conflict; existing leases keep their old inputs.
+require an explicit active method and remain uncertified. A new trusted catalog under
+changed inputs produces different immutable profile references; existing profiles
+keep their captured inputs. Binding alone does not transition resident weights.
 
 The pinned parser also loads system/user `config.ini` automatically. Explicit
 speculation profiles reject present or unreadable automatic files, including benign
 files, rather than parsing private defaults or trusting a CLI `none` to erase them.
 Discovery roots (`PROGRAMDATA`/`APPDATA` on Windows; `XDG_CONFIG_HOME`/`HOME` on Unix)
-and observed file absence/presence bind to lease identity. Relative discovery paths
+and observed file absence/presence bind to each residency identity. Relative discovery paths
 resolve against the captured launch directory. Absence is rechecked before probes
 and launch; later changes do not restart a resident process. Omitted legacy profiles
 may retain upstream defaults, with status `omitted-unverified`. Files are never
@@ -417,4 +545,5 @@ status; draft paths/device names and arbitrary experimental values remain privat
 Required capability checking covers emitted and recognized inherited speculative
 flags together with LC-01 controls, still meaning advertised pinned surface only.
 LC-02 request/estimation/separate reasoning semantics and optional answer-only
-observation remain unchanged; no restart, arbitration or consumer adoption is added.
+observation remain unchanged. ER-03 adds the controlled adoption below; no automatic
+restart or consumer adoption is provided.

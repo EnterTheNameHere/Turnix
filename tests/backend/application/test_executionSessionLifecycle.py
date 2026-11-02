@@ -1,4 +1,4 @@
-# file: tests/backend/application/test_executionSessionLifecycle.py ; version: 1
+# file: tests/backend/application/test_executionSessionLifecycle.py ; version: 2
 """Real facade/runtime/Job/host lifetime with synthetic controlled provider effects."""
 import gc
 import json
@@ -263,7 +263,7 @@ def test_failed_host_creation_retains_and_drains_new_lifetimes_outside_host_lock
     observed = []
     holders = []
 
-    def failCreate(*, runtime, plan):
+    def failCreate(*, runtime, plan, mode):
         """Installs a trusted fake after registration, then fails before host publication."""
         runtime, values = setupRuntime(runtime)
         holders.append(values)
@@ -284,7 +284,7 @@ def test_failed_host_creation_retains_and_drains_new_lifetimes_outside_host_lock
             executionAccess=runtime._llmOwners["caller"].invocation(), context=FreshContext(retain=True))
         raise ValueError("creation failure")
 
-    monkeypatch.setattr(ApplicationLifecycle, "create", failCreate)
+    monkeypatch.setattr(ApplicationLifecycle, "prepare", failCreate)
     with pytest.raises(ValueError, match="creation failure"):
         host.createApplication(appPackId="test", plan=ManualActivationPlan(packIds=()))
     assert host.activeApplicationRuntimes == () and observed == [()]

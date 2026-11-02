@@ -1,4 +1,4 @@
-# file: backend/packs/runtime.py ; version: 14
+# file: backend/packs/runtime.py ; version: 15
 from __future__ import annotations
 
 import hashlib
@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from backend.context.codeEntryContext import CodeEntryIdentity
 from backend.llm.executionSessions import lifetimeBoundary
+from backend.llm.providerComposition import activateBatch
 from backend.core.runtimeIds import newRuntimeId
 from backend.registration import RegistrationScope
 from backend.values.committed import CommittedValueLayer, CommittedValueTransaction
@@ -184,6 +185,10 @@ class PackLoader:
 
     @lifetimeBoundary
     def activate(self, plan: ManualActivationPlan) -> None:
+        """Stage the full plan and compose outside lanes before its barrier."""
+        return activateBatch(self, lambda: self._activatePlan(plan))
+
+    def _activatePlan(self, plan: ManualActivationPlan) -> None:
         """Activates the ordered plan and rolls back only entries prepared by this attempt."""
         self._runtime.requireOperational()
         checkpoint = len(self._loadedPacks)
@@ -192,7 +197,7 @@ class PackLoader:
         self._runtime.trace("activation-plan-started", attributes={"packIds": list(plan.packIds)})
         try:
             for packId in plan.packIds:
-                self.activatePack(self._resolver.requireSingle(packId))
+                self._activatePack(self._resolver.requireSingle(packId))
         except Exception as activationError:
             cleanupErrors = self._closeLoadedPacks(self._loadedPacks[checkpoint:])
             del self._loadedPacks[checkpoint:]
@@ -214,6 +219,10 @@ class PackLoader:
 
     @lifetimeBoundary
     def activatePack(self, pack: PackDefinition) -> None:
+        """Compose one new Pack batch without enlarging existing binding grants."""
+        return activateBatch(self, lambda: self._activatePack(pack))
+
+    def _activatePack(self, pack: PackDefinition) -> None:
         """Executes source entries provisionally, then atomically publishes their registrations."""
         self._runtime.requireOperational()
         self._activationBarrierReached = False
@@ -338,6 +347,7 @@ class PackLoader:
         memoryView: CommittedValueLayer | CommittedValueTransaction | None = None,
     ) -> None:
         """Dispatches only the defining AppPack hook and always invalidates its fresh Context."""
+        self._runtime.requireCompositionReady()
         self._runtime.requireOperational()
         if not self._activationBarrierReached:
             raise RuntimeError("Application lifecycle cannot run before the activation-plan barrier.")
