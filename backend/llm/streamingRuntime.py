@@ -1,11 +1,11 @@
-# file: backend/llm/streamingRuntime.py ; version: 12
+# file: backend/llm/streamingRuntime.py ; version: 13
 from __future__ import annotations
 
 import base64
 import hashlib
 import time
 import sys
-from contextlib import suppress
+from contextlib import suppress, contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -52,6 +52,18 @@ class LlmProviderRegistry:
     def requireRegistration(self, name: str) -> Registration[LlmStreamProvider]:
         """Returns the published provider registration for a logical name."""
         return self._registry.require(name)
+
+    @contextmanager
+    def executionPublication(self):
+        """Serializes callback-free binding commits/revocations with scope withdrawal.
+
+        The trusted broker may only inspect exact registrations and mutate its
+        own tables inside this guard. Provider hooks, construction, participant
+        cleanup and lease callbacks must run after it exits. Lock order is this
+        registry lane before the broker lane, never the reverse.
+        """
+        with self._registry._lock:
+            yield tuple(self._registry._published.values())
 
     def require(self, name: str) -> LlmStreamProvider:
         """Returns the published provider implementation for a logical name."""

@@ -1,4 +1,4 @@
-# file: backend/llm/executionSessions.py ; version: 1
+# file: backend/llm/executionSessions.py ; version: 2
 """Trusted LLM composition over ER-01, with no provider-specific realization.
 
 Binding/owner creation and adapter evidence are backend hooks, never Pack grants.
@@ -801,11 +801,21 @@ class LlmCallSession:
             raise LlmExecutionCleanupError(cleanup.effect, iteratorCloseFailed=iteratorFailed)
 
 
+@dataclass(eq=False, slots=True)
+class _BindingPublication:
+    """Reserves one construction attempt that every relevant revocation can defeat."""
+
+    registry: object
+    registration: object
+    owners: tuple
+    revoked: bool = False
+
+
 class LlmExecutionBinding:
     """Exact-registration trusted adapter binding and its owned lifetime lease."""
 
     def __init__(self, service, registry, registration, domain, profiles, adapter, grants, leaseCloser):
-        """Builds participants outside broker locks before atomic publication."""
+        """Creates inert private state; bind's ticket owns unpublished participants."""
         self.service, self.registry, self.registration = service, registry, registration
         self.domain, self.profiles, self.adapter = domain, dict(profiles), adapter
         self.grants, self.participants = dict(grants), {}
@@ -816,10 +826,6 @@ class LlmExecutionBinding:
         self.calls = set()
         self.handles = set()
         self.conversations = set()
-        for owner, grant in grants.items():
-            self.participants[owner] = _require(domain.openParticipant(
-                allowedProfiles=tuple(self.profiles[s] for s in grant.selectors),
-                allowIdleTransition=grant.allowTransition))
 
     def requireLive(self):
         """Withdrawal/name reuse cannot turn an already-resolved controlled call legacy."""
@@ -860,6 +866,10 @@ class LlmExecutionBindings:
         """Creates inactive composition; no hardware/provider callback runs here."""
         self._lane = RLock()
         self._bindings = {}
+        self._pendingPublications = {}
+        self._controlledRegistrations = {}
+        self._revokedRegistrations = {}
+        self._failedPublicationCleanup = []
         self._owners = WeakSet()
         self._accesses = WeakSet()
         self._profiles = {}
@@ -898,8 +908,6 @@ class LlmExecutionBindings:
         Composition owns the lease until successful publication. Core never
         invokes an adapter or lease closer under broker/registry/domain locks.
         """
-        if registry.requireRegistration(registration.name) is not registration:
-            raise LlmExecutionOwnershipError("Binding requires the exact published registration.")
         if not all(callable(getattr(adapter, n, None)) for n in ("openExecution", "closeExecution")) or not callable(leaseCloser):
             raise TypeError("Controlled binding requires open/close adapter and owned lease closer.")
         if any(type(getattr(adapter, n, None)) is not bool for n in ("supportsFresh", "supportsRequiredFresh", "supportsRetention")):
@@ -907,34 +915,79 @@ class LlmExecutionBindings:
         profiles, grants = dict(profiles), dict(grants)
         if not profiles or any(s is not None and (type(s) is not str or not s) for s in profiles):
             raise ValueError("Profile selectors must be nonempty exact strings or None.")
-        with self._lane:
-            if self._closed or id(registry) in self._closedRegistries:
-                raise LlmExecutionOwnershipError("LLM binding admission is closed.")
+        key = (id(registry), id(registration))
+        ticket = _BindingPublication(registry, registration, tuple(grants))
+        with registry.executionPublication() as registrations:
+            with self._lane:
+                if not any(item is registration for item in registrations):
+                    raise LlmExecutionOwnershipError("Binding requires the exact published registration.")
+                self._controlledRegistrations[key] = (registry, registration)
+                self._validatePublication(registry, registration, profiles, grants)
+                if key in self._bindings or key in self._pendingPublications:
+                    raise LlmExecutionOwnershipError("Registration already has a binding or publication ticket.")
+                self._pendingPublications[key] = ticket
+        binding = None
+        try:
+            binding = LlmExecutionBinding(self, registry, registration, domain, profiles, adapter, grants, leaseCloser)
             for owner, grant in grants.items():
-                if type(owner) is not LlmExecutionOwner or owner not in self._owners or owner._registry is not registry or owner._closed:
-                    raise LlmExecutionOwnershipError("Binding grant requires an issued live registry owner.")
-                if type(grant) is not LlmOwnerGrant or type(grant.allowTransition) is not bool or any(s not in profiles for s in grant.selectors):
-                    raise ValueError("Invalid host profile grant.")
-            key = (id(registry), id(registration))
-            if key in self._bindings:
-                raise LlmExecutionOwnershipError("Registration already has a controlled binding/tombstone.")
-        binding = LlmExecutionBinding(self, registry, registration, domain, profiles, adapter, grants, leaseCloser)
-        with self._lane:
-            duplicate = key in self._bindings
-            if not duplicate:
-                self._bindings[key] = binding
-        if duplicate:
-            for participant in binding.participants.values():
-                participant.close()
-            raise LlmExecutionOwnershipError("Concurrent controlled binding publication conflict.")
-        return binding
+                with self._lane:
+                    if ticket.revoked:
+                        raise LlmExecutionOwnershipError("Binding publication was revoked during construction.")
+                participant = _require(domain.openParticipant(
+                    allowedProfiles=tuple(profiles[s] for s in grant.selectors),
+                    allowIdleTransition=grant.allowTransition))
+                binding.participants[owner] = participant
+            # Scope withdrawal/name replacement takes the same registry lane.
+            # All revocation scopes take the broker lane or revoke this ticket.
+            with registry.executionPublication() as registrations:
+                with self._lane:
+                    if self._pendingPublications.get(key) is not ticket or ticket.revoked:
+                        raise LlmExecutionOwnershipError("Binding publication ticket is revoked or stale.")
+                    if not any(item is registration for item in registrations):
+                        raise LlmExecutionOwnershipError("Binding registration was withdrawn or replaced.")
+                    self._validatePublication(registry, registration, profiles, grants)
+                    self._bindings[key] = binding  # The lease transfers exactly here.
+                    del self._pendingPublications[key]
+            return binding
+        except BaseException as primary:
+            with self._lane:
+                published = binding is not None and self._bindings.get(key) is binding
+            if published:
+                primary.llmBindingPublished = True
+            elif binding is not None:
+                failures = []
+                for participant in reversed(tuple(binding.participants.values())):
+                    try:
+                        _require(participant.close())
+                    except Exception:  # noqa: BLE001 - attempt every owned rollback without masking the primary.
+                        failures.append(participant)
+                if failures:
+                    with self._lane:
+                        self._failedPublicationCleanup.append((registry, tuple(failures)))
+                    primary.llmPublicationCleanup = LlmExecutionCleanupError()
+            raise
+        finally:
+            with self._lane:
+                if self._pendingPublications.get(key) is ticket:
+                    del self._pendingPublications[key]
+
+    def _validatePublication(self, registry, registration, profiles, grants):
+        """Rechecks all admission/grant gates while the broker lane is held."""
+        key = (id(registry), id(registration))
+        if self._closed or id(registry) in self._closedRegistries or key in self._revokedRegistrations:
+            raise LlmExecutionOwnershipError("LLM binding admission or registration is revoked.")
+        for owner, grant in grants.items():
+            if type(owner) is not LlmExecutionOwner or owner not in self._owners or owner._registry is not registry or owner._closed:
+                raise LlmExecutionOwnershipError("Binding grant requires an issued live registry owner.")
+            if type(grant) is not LlmOwnerGrant or type(grant.allowTransition) is not bool or any(s not in profiles for s in grant.selectors):
+                raise ValueError("Invalid host profile grant.")
 
     def binding(self, registry, registration):
         """Returns a retained exact tombstone, never a heuristic optional-method fallback."""
         with self._lane:
             binding = self._bindings.get((id(registry), id(registration)))
-            replaced = binding is None and any(b.registry is registry and b.registration.name == registration.name
-                                               for b in self._bindings.values())
+            replaced = binding is None and any(r is registry and item.name == registration.name
+                                               for r, item in self._controlledRegistrations.values())
         if replaced:
             raise LlmExecutionOwnershipError("Controlled provider registration requires explicit host rebinding.")
         return binding
@@ -1084,23 +1137,32 @@ class LlmExecutionBindings:
 
     def revokeRegistry(self, registry, *, permanent=True):
         """Marks a removed/closing runtime without needing its possibly busy mutation lane."""
-        with self._lane:
-            if permanent:
-                self._closedRegistries.add(id(registry))
-            owners = tuple(o for o in self._owners if o._registry is registry)
-            providerOwners = tuple(b.registration.ownerId for b in self._bindings.values() if b.registry is registry)
-            for owner in owners:
-                self.revokeOwner(owner)
-            for ownerId in providerOwners:
-                self.revokeRegistration(registry, ownerId)
+        with registry.executionPublication() as registrations:
+            with self._lane:
+                if permanent:
+                    self._closedRegistries.add(id(registry))
+                for registration in registrations:
+                    self._revokedRegistrations[(id(registry), id(registration))] = (registry, registration)
+                for ticket in self._pendingPublications.values():
+                    if ticket.registry is registry:
+                        ticket.revoked = True
+                for owner in tuple(o for o in self._owners if o._registry is registry):
+                    self.revokeOwner(owner)
+                for binding in self._bindings.values():
+                    if binding.registry is registry:
+                        self.revokeBinding(binding)
 
     def revokeAll(self):
         """Host shutdown revokes all new controlled admission without invoking callbacks."""
         with self._lane:
             self._closed = True
-            registries = tuple({o._registry for o in self._owners})
-            for registry in registries:
-                self.revokeRegistry(registry)
+            for ticket in self._pendingPublications.values():
+                ticket.revoked = True
+            registries = tuple({o._registry for o in self._owners}
+                               | {b.registry for b in self._bindings.values()}
+                               | {t.registry for t in self._pendingPublications.values()})
+        for registry in registries:
+            self.revokeRegistry(registry)
 
     def _invalidateUnlocked(self, handle):
         """Queues exact owned pin cleanup; no provider callback under a broker lock."""
@@ -1119,6 +1181,9 @@ class LlmExecutionBindings:
         with self._lane:
             owner._closed = True
             self._pendingOwners.add(owner)
+            for ticket in self._pendingPublications.values():
+                if any(issued is owner for issued in ticket.owners):
+                    ticket.revoked = True
             for binding in self._bindings.values():
                 for handle in binding.handles:
                     if handle._owner is owner:
@@ -1130,10 +1195,17 @@ class LlmExecutionBindings:
 
     def revokeRegistration(self, registry, ownerId):
         """Callback-free exact-provider withdrawal; tombstones never become legacy."""
-        with self._lane:
-            bindings = tuple(b for b in self._bindings.values() if b.registry is registry and b.registration.ownerId == ownerId)
-            for binding in bindings:
-                self.revokeBinding(binding)
+        with registry.executionPublication() as registrations:
+            with self._lane:
+                for registration in registrations:
+                    if registration.ownerId == ownerId:
+                        self._revokedRegistrations[(id(registry), id(registration))] = (registry, registration)
+                for ticket in self._pendingPublications.values():
+                    if ticket.registry is registry and ticket.registration.ownerId == ownerId:
+                        ticket.revoked = True
+                for binding in self._bindings.values():
+                    if binding.registry is registry and binding.registration.ownerId == ownerId:
+                        self.revokeBinding(binding)
 
     def revokeBinding(self, binding):
         """Revokes only one exact issued registration, leaving any replacement untouched."""
@@ -1157,6 +1229,8 @@ class LlmExecutionBindings:
             calls = tuple(c for c in self._pendingCalls if registry is None or c.binding.registry is registry)
             accesses = tuple(a for a in self._pendingAccesses if registry is None or a.owner._registry is registry)
             expiredCalls = tuple(c for b in bindings for c in b.calls if c.access in accesses and not c._closed)
+            publicationPending = any(registry is None or t.registry is registry for t in self._pendingPublications.values())
+            publicationFailed = any(registry is None or r is registry for r, _ in self._failedPublicationCleanup)
         for call in expiredCalls:
             call.claim.requestStop()
         for call in calls:
@@ -1187,6 +1261,8 @@ class LlmExecutionBindings:
                     self._pendingPins.discard(handle)
         errors = [LlmExecutionCleanupError() for result in dispositions
                   if result.snapshot.state in (ResourceState.DRAINING, ResourceState.UNKNOWN, ResourceState.FAILED)]
+        if publicationPending or publicationFailed:
+            errors.append(LlmExecutionCleanupError())
         if any(not c._closed for c in expiredCalls):
             errors.append(LlmExecutionCleanupError())
         for binding in bindings:
