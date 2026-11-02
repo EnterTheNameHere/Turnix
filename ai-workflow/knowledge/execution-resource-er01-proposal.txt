@@ -1,0 +1,227 @@
+ER-01 CONCRETE API / OWNERSHIP PROPOSAL
+======================================
+Owner: Codex ER-01 worker; review/acceptance: Integration. Date: 2026-11-02.
+Status: PROPOSED; production implementation paused for Integration API review.
+Canonical publication target: actant-integration. Working branch:
+execution-resource-domain, existing isolated checkout llamacpp-configuration-expansion.
+Exact starting parent: 5d30e6a0b5510d225473cbeb81689d26a38fe3bb.
+Previous worker head 49aa3345f842dd27cacca5663d6c94393e94cdb1 preserved on
+llamacpp-configuration-expansion. Its backend/first-party/tests trees match this
+parent (git diff --quiet exit 0). Accepted LC-01/02/03 and earlier synchronization/
+proposal commits were not replayed. New branch starts directly at canonical parent.
+User dispatch supersedes prior unassigned ER-01 labels; ER-02/03/04 remain unassigned.
+A/B/C are approved under the review's decision addendum; no renewed principle vote.
+
+1. Files and composition
+-------------------------
+New backend/runtime/executionResources.py: focused neutral types, domain, owner,
+claims, reservation, pins and adapter Protocol. New
+tests/backend/runtime/test_executionResources.py: deterministic contract/race tests.
+Optional focused test_executionResourcesLifetime.py if lifetime cases merit a split.
+No sharedServices.py changes. No LLM/provider/Application facade adoption in ER-01.
+New ExecutionResourceService owns the host's domain table, including failed/unknown
+tombstones; closing the final participant never removes a domain or permits a new
+one to bypass its blockers. Stable domain ID plus immutable adapter/security-envelope
+key is checked on registration; incompatible re-registration rejects. Proposed
+runtimeHost.py change is composition/lifetime only: construct an inert service,
+close its admission in stop under the host lock, then finishClose outside that lock
+and aggregate its cleanup outcomes/errors. No adapter factory/closer under
+SharedServiceRegistry: acquire/releaseLease may run those under its registry lock.
+Existing shared-service consumers and lease semantics remain unchanged. No hidden
+worker is introduced. Service/domain close() closes admission without callbacks;
+finishClose() attempts cleanup outside host/registry locks and reports pending
+work. Outstanding references and the service table retain cleanup ownership;
+domain registration cannot replace an unresolved tombstone. Review this two-stage
+composition seam, including surfacing incomplete shutdown as a typed error.
+
+2. Concrete types and trusted authority
+----------------------------------------
+ExecutionResourceDomain(domainId, adapter) is one controlled host resource, not
+physical GPU exclusivity. Host-selected adapter is trusted; unrelated processes
+and other hosts remain outside this domain. No model titles infer compatibility.
+ResidencyDescriptor(identity: bytes, providerPayload: object): frozen record;
+host/provider must supply complete immutable identity and immutable payload.
+Core compares exact identity bytes, never interprets/hashes payload or provider
+flags; payload is private, excluded from repr/equality/contention snapshots.
+Only host registration produces opaque ProfileReference objects bound to this
+domain and descriptor; conflicting registration of an identity is rejected.
+ResidencyToken(domain nonce, generation: int, descriptor identity) is immutable;
+generation increases on every materialization attempt, including same-profile
+reload after failure. Tokens are evidence, never bearer authority by themselves.
+No persisted token/claim is valid after domain reconstruction.
+
+Trusted composition opens ResourceParticipant via
+domain.openParticipant(ownerLabel, allowedProfiles, allowIdleTransition=False).
+ownerLabel is bounded diagnostic text, not authentication. Only the trusted host
+boundary may construct participants/profile grants; future ER-02 derives owner
+from actual runtime/invocation authority, never user-supplied IDs. In-process
+Python object privacy is not a hostile-code sandbox. Methods validate exact
+issued object identity, domain membership, grant, live owner and generation;
+foreign/forged handles or textual IDs cannot release/admit another owner's work.
+Participant is a service participant, not an operation or a residency pin.
+No implicit permission from having a lease, selected profile or idle residency.
+
+3. API sketch and atomic admission
+-----------------------------------
+participant.acquire(profile, *, reservation=None, retained=None,
+                    cancellation=None) -> OperationClaim | ResourceConflict
+participant.reserveExclusive(profile) -> OwnerReservation | ResourceConflict
+participant.transitionIdle(profile, *, cancellation=None) -> TransitionOutcome
+participant.unloadIdle() -> TransitionOutcome
+participant.close() -> CloseOutcome
+domain.close() -> CloseOutcome; domain.finishClose() -> CloseOutcome
+claim.finish(effect: ProviderEffect) -> ReleaseOutcome
+claim.retain(providerContextPayload) -> RetainedContextPin
+claim.requestStop() -> StopOutcome
+claim.bindStop(callback) -> unregister  [trusted adapter hook, one per claim]
+pin.close(effect: ProviderEffect) -> ReleaseOutcome
+reservation.close() -> CloseOutcome
+
+acquire/reserveExclusive never implicitly materialize or replace: EMPTY or a
+different descriptor returns typed NotResident. Explicit transitionIdle requires
+both the participant's host grant and authorized registered profile. This also
+applies to initial load; there is no caller-controlled authorization boolean.
+Admission is immediate, with no policy queue/wait/retry. Reserve only a READY
+residency with no active claims, reservation or foreign retained pins. Own idle
+pins may remain on that same generation. It excludes every unrelated operation,
+even compatible calls by another participant. Calls under a reservation must
+present that exact live object; only one active operation inside it, rejecting
+overlap/reentrancy with typed Busy. It pins generation between calls.
+Normal compatible operations may coexist (provider capacity remains provider-owned).
+An operation atomically acquires exclusive use of an optional own retained pin;
+foreign/stale/lost/concurrent pin use fails explicitly before provider execution.
+Closed reservations reject new work immediately, but continue protecting child
+claims/pins until cleanup finishes; close cannot punch a hole through active work.
+
+4. State and effects
+----------------------
+Domain states: EMPTY, TRANSITIONING, READY, DRAINING, FAILED, UNKNOWN, CLOSED.
+Owner closed/admission closed are independent lifetime gates. READY can contain
+active operations, exclusive reservation or retained pins; idle means none of
+these, not merely zero current calls. TRANSITIONING owns a unique transition
+ticket; no new claims or second transition can enter. DRAINING denies admission
+while stop/cleanup is pending. FAILED/UNKNOWN are unavailable, never fresh EMPTY.
+ResourceConflict uses bounded enum reason plus safe descriptor identities,
+generation and counts: Busy, Transitioning, Draining, NotResident,
+UnknownQuiescence, Failed, Closed, Unauthorized, InvalidHandle, ContextLost,
+UnsupportedRequirement. No prompts, raw payload, argv or private owner details.
+Caller programming/shape errors raise TypeError/ValueError; operational conflicts
+are typed values, not string matching. No generic requirement negotiator.
+
+ProviderEffect records attempted/acknowledged/failed/unknown and separately
+quiescence=confirmed/unknown, with bounded safe code. Acknowledged means only
+the named adapter action, not all hidden provider effects or determinism.
+Operation error with confirmed quiescence can release the active claim; unknown
+quiescence leaves an internal blocker even after public disposal. Exceptions from
+adapter callbacks conservatively become failed effect + unknown quiescence.
+Finish with no provider evidence cannot claim quiescence. Duplicate identical
+finish/close is idempotent; conflicting duplicate completion cannot alter state.
+Unknown never permits compatible reuse or incompatible transition. No TTL,
+Job-terminal outcome, local transport close or cancellation request clears it.
+No automatic recovery/preemption/attach/restart; an unknown domain remains closed
+to work pending a separately reviewed recovery mechanism, outside this slice.
+
+transitionIdle: under domain lock validate authority/idle and reserve ticket;
+outside locks adapter.release(old token/payload), then adapter.materialize(new
+descriptor, new token). Revalidate ticket and close/cancel gates before each
+step and before publishing READY. Release must confirm old quiescence before
+materialize. Readiness acknowledgment binds only the new token. Release/load
+failure reports FAILED or UNKNOWN as evidence permits; never restores old READY
+or silently retries. Even proven-empty failed startup requires explicit authorized
+retry; no automatic request retry. Failed with confirmed-empty evidence may be
+explicitly transitioned again; UNKNOWN cannot. unloadIdle follows the same rules.
+Adapter Protocol callbacks return narrow typed MaterializeResult/ReleaseResult;
+no transport/slot/snapshot API and no hidden cache introspection in the core.
+
+5. Retained state separate from residency
+------------------------------------------
+claim.retain transfers a provider-owned opaque context reference into a pin only
+while a valid operation protects that generation; creating a pin itself makes
+no provider freshness/reuse guarantee. Pin binds domain, participant, residency
+generation and its own monotonically allocated context generation. It survives
+between calls, blocks incompatible transition/exclusive foreign reservation and
+keeps cleanup ownership. Same-model fresh calls need no weight reload; fresh/
+required-reuse realization and evidence remain ER-02/03 responsibilities.
+Retained pin carries no transcript or invocation context. Required reuse of a
+lost/invalidated generation returns ContextLost; never silently rebuild/replay.
+Provider invalidation of the exact context ticket makes it unusable; a stale
+invalidation cannot invalidate a replacement. Unknown context cleanup keeps the
+residency blocked. Closing an in-use pin revokes new use and defers disposal until
+its active operation confirms quiescence; it cannot release underneath execution.
+Payload disposal is performed by its trusted owner outside locks; ER-01 accepts
+typed disposal evidence, not slot controls. Unsupported explicit stronger reuse/
+isolation requirements must reject at the responsible adapter/session boundary;
+ER-01 does not advertise guarantees it cannot enforce.
+
+6. Locks, cancellation and outstanding lifetime
+------------------------------------------------
+One per-domain RLock protects state/handle tables. No adapter/stop/provider-payload
+callback, cancellation registration/unregistration or user callback runs under
+it, host locks or SharedServiceRegistry locks. Pure identity comparisons and
+prevalidated built-in byte keys only under lock. Reserve tickets and cleanup
+work under lock, execute outside, publish only for exact ticket/nonce/generation.
+Stale/duplicate callbacks return ignored/invalid disposition without clearing new
+claims or publishing READY. Late acquired provider objects still require disposal
+on their owning ticket; rejection must not leak them or touch a newer residency.
+
+Use existing orchestration.CancellationSignal, never new Job outcome machinery.
+Check cancellation before admission, register outside lock with an operation
+ticket already installed, then recheck before returning claim. Handle synchronous
+registration callback and cancel/admit races: no claim returned usable after its
+revocation wins. Stop callback is wrapped no-fail/idempotent, records exception as
+typed failure, and only requests stop; finish evidence decides quiescence.
+Unregister on terminal cleanup outside lock. Cancellation during transition
+revokes caller admission; any late successful materialization is retained under
+the closing transition ticket for explicit cleanup, never handed to cancelled work.
+
+participant.close atomically rejects new work and invalidates its handles, requests
+stop for its own outstanding operations outside lock, defers reservation/pin release
+and returns pending/failed/unknown cleanup status. It does not stop another owner
+or unload shared residency. Strong domain references held by operations/pins/
+transition tickets and the service table keep adapter/cleanup state alive after
+the final participant closes; existing shared-service leases are separate.
+close on domain stops admission globally and marks cleanup pending without callbacks;
+finishClose, called outside host/registry locks, requests stops and unloads only
+after confirmed drain. It is repeatable/idempotent without repeated provider calls.
+Provider cleanup failure remains visible and unavailable. Host process exit/crash
+recovery and cross-host enforcement are not established by these references.
+
+7. Deterministic implementation verification plan
+---------------------------------------------------
+Events/barriers in fake materialize/release/stop callbacks, bounded joins only as
+deadlock guards, no sleep-based race proof. Each test asserts callback counts,
+tokens, state, ownership and exact typed outcome, including the losing thread.
+- Race compatible admission vs idle transition: exactly one wins; loser Busy,
+  no provider stop while any claim protects residency.
+- Two exclusive requests, exclusive vs compatible, overlapping own calls;
+  correct winner, no waiting, foreign grants/handles rejected.
+- Idle retained pin blocks transition; own required-reuse use, concurrent/foreign/
+  stale/lost pin; pin close during active call, no premature release/rebuild.
+- Same identity new generation; same-model fresh admission avoids materialize;
+  old transition/operation/context completions cannot affect newer generation.
+- Load/release throws, failed acknowledged effect, unknown quiescence, failed
+  startup known empty explicit retry; no silent restore/retry/unsafe reuse.
+- Cancel before/during admission, immediate registration callback, cancel during
+  load, owner close vs active operations, reservation close vs child operations,
+  final participant vs outstanding cleanup; other owner remains protected.
+- Duplicate/foreign releases, repeated domain close/finishClose, deferred late
+  object disposal exactly once, callbacks reenter domain without lock deadlock.
+- Existing SharedServiceRegistry tests must remain unchanged and pass; add host
+  stop composition tests proving callback lock boundaries, error aggregation and
+  no second domain after final participant close with unknown work.
+
+Implementation commands planned (not yet executed):
+  .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/runtime
+  .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/llm tests/first_party/llmDrivers tests/backend/orchestration tests/backend/telemetry tests/backend/application/test_observation.py
+  .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests
+Resolve actual regression paths before execution. All Python changes require path/
+source-version headers and production docstrings, including tests/private/magic
+methods; target Python 3.15. Own runtime probe reports 3.15.0b4, with embedded-home
+warning; no pytest execution claimed at this proposal checkpoint. git diff --check
+is the applicable documentation check. No models/downloads/inference/monitoring.
+
+Review request: accept/correct these concrete API, authority, two-stage close and
+evidence rules before production implementation. ER-01 availability alone will not
+make managed llama.cpp switching safe: ER-02/03 must later be adopted together.
+No scheduler, global exclusivity, determinism, hidden-cache audit, negotiator,
+attestation engine, snapshot framework, Experiment Runner or ER-04 is included.
