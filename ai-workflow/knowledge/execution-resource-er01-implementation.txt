@@ -1,0 +1,128 @@
+ER-01 WORKER IMPLEMENTATION / REVIEW EVIDENCE
+============================================
+Owner: Codex ER-01 worker; acceptance owner: Integration. Date: 2026-11-02.
+Status: worker implemented, tested and published; NOT integrated or accepted.
+Repository: EnterTheNameHere/Turnix. Branch: execution-resource-domain.
+Exact implementation parent: cff735c2841f8e9730a160b5e94ea636502887f6.
+Dispatch parent: 5d30e6a0b5510d225473cbeb81689d26a38fe3bb.
+Proposal: 6920227; binding review: knowledge/execution-resource-er01-review.txt.
+Published implementation commits, in order:
+  b3ddcb2a9d1817bf44e8b0127d71af852d85b3e6
+    Implement ER-01 neutral execution resource ownership and residency claims
+  2e6c56bad85574d0de9dac6db67c275a59555eab
+    Keep cancelled confirmed-empty startup failures free of residency blockers
+Only coordination is published canonically. No LC/earlier proposal/sync replay,
+production merge into Integration, self-acceptance or changes to other checkouts.
+
+Source / contracts
+--------------------
+backend/runtime/executionResources.py (version 2): provider-neutral service/domain,
+descriptors/profile references, generations, grants, operations, reservations,
+retained pins, adapter Protocol and typed effects/conflict/cleanup outcomes.
+backend/runtime/runtimeHost.py (9 -> 10): inert composition and two-stage shutdown.
+tests/backend/runtime/test_executionResources.py (version 2) and
+tests/backend/runtime/test_executionResourceHost.py (version 1): 63 new test cases.
+SharedServiceRegistry, its tests/consumers, LLM/providers, Application facade, Jobs,
+observation and configuration examples are unchanged. No consumer adoption.
+
+RuntimeHost.executionResources is an ExecutionResourceService. Trusted composition
+registers stable domain ID, immutable envelope key and exact adapter. Only identical
+adapter/key registration reuses a domain; failed/unknown tombstones persist after
+the final participant closes. No replacement can bypass outstanding cleanup.
+ResidencyDescriptor is frozen. Complete immutable identity bytes must be safe
+opaque fingerprints; the adapter owns completeness/payload immutability. Core
+never compares/hashes/renders payloads. Repeated profile registration requires the
+same issued descriptor, without certifying equivalence of opaque provider objects.
+Generation increases on every materialization attempt, including failed attempts.
+
+domain.openParticipant(allowedProfiles=..., allowIdleTransition=...) is a trusted
+host grant API, not a public Pack assertion. Exact issued participant identity is
+authority; future ER-02 derives it from actual runtime/invocation ownership. There
+is no hostile-Python sandbox. participant.acquire(profile, reservation=...,
+retained=..., cancellation=...) admits ready compatible work only; no implicit load.
+Explicit transitionIdle/unloadIdle requires the host grant, approved profile and
+no operations/reservations/pins. Ordinary compatible claims can coexist; capacity
+scheduling is not provided. reserveExclusive pins a generation, denies unrelated
+compatible calls and requires the exact reservation for its own operations.
+Overlapping/reentrant reservation calls fail Busy. Own idle pins may stay;
+foreign pins block exclusive acquisition. Participant lifetime alone is not a pin.
+
+OperationClaim.finish/retain/bindStop and pin.invalidate are trusted adapter hooks.
+Future Pack facades must never let an owner assert provider quiescence. Revoked
+objects retain exact cleanup authority; duplicate equal finish is idempotent,
+foreign/conflicting finish cannot alter state. Stop binding is once-only;
+unregister withdraws without allowing replacement. Pending stop survives late
+binding. Running stop callbacks keep claims installed even after confirmed finish.
+claim.retain(payload, disposer) transfers ownership only when a pin is returned;
+otherwise the adapter remains responsible. Pin context generation is distinct
+from residency generation and survives between calls. Reuse checks owner, issued
+identity, generation, loss, revocation and concurrent use. Loss is ContextLost,
+never implicit rebuild. Closing a used pin defers its registered disposer until
+confirmed operation drain. Disposer runs once outside locks; exceptions/unknown
+effects retain its exact blocker. Closing reservations cannot release exclusion
+while child operations/pins remain. No provider slot/cache/reset mechanism exists.
+
+ProviderEffect has attempted/acknowledged/failed/unknown plus independent confirmed/
+unknown quiescence. Local close, cancellation and Job terminal state do not prove
+quiescence. Callback exceptions/malformed results fail closed without private text.
+Unknown state blocks new admissions/transitions and invalidates outstanding claims
+for new provider entry, preserving their cleanup rights. No automatic recovery.
+TransitionOutcome separates materializationEffect from later disposal effect.
+Known-empty failed startup needs explicit retry; no silent old-model restoration.
+Late cancelled/closed materialization cannot reach its owner; its ticket disposes
+any returned object once. Known absence/successful disposal leaves empty/closed,
+including a failed late load that left no object. Unknown cleanup stays protected.
+
+Service/domain close only revokes admission and defers callbacks. finishClose must
+be called outside host/registry locks. Late completion during legacy host teardown
+cannot dispatch stop/unregister/disposer callbacks through the first close stage.
+Registered callbacks, outstanding objects and the service table own deferred cleanup;
+no implicit drain thread. RuntimeHost.stop keeps legacy cleanup under its existing
+lock and invokes new finishClose after leaving it. STOPPED does not imply drain;
+repeat stop reports pending/failed/unknown work and can finish late-confirmed work
+without repeating provider release. Legacy errors and resource disposition aggregate.
+
+Actual verification at final worker tree 2e6c56b
+------------------------------------------------
+Own Windows embedded Python 3.15.0b4 (MSC 1951 / AMD64). Existing embedded-home/
+standard-library-discovery warning is emitted; all commands below completed.
+
+  .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/runtime
+  73 passed in 0.26s, zero skips.
+
+  .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/llm tests/first_party/llmDrivers tests/backend/orchestration tests/backend/telemetry tests/backend/application/test_observation.py
+  524 passed in 1.33s, zero skips.
+
+  .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests
+  1551 passed in 7.76s, zero skips.
+
+Ad hoc Python AST audit passed on all four changed Python files: repository-path/
+source-version first-line headers and docstrings on every class/function including
+private/magic/test helpers; neutral-module imports exclude provider/LLM/telemetry.
+git diff --check and staged diff checks passed. Ruff probe:
+  .\python-embedded\python.exe -X frozen_modules=off -m ruff --version
+reported No module named ruff. No lint run, installation or lint claim.
+
+Barriers/events and fake callbacks cover admission vs transition, two exclusives,
+compatible/foreign/reentrant work, retained loss/pins, stale/forged/duplicate cleanup,
+load/unload exceptions, cancelled admission/load, deferred pin disposal/reentry/
+failure, sticky unknown evidence, late stop binding, finish vs running stop,
+owner/reservation/domain close and no duplicate domain after final owner close.
+Same-model operation admission avoids reload; it does not prove provider freshness.
+Second-thread domain/host/service reads prove lock boundaries beyond same-thread
+RLock reentry. Host tests include completion inside legacy teardown, late drain,
+repeat pending/unknown stop and legacy-error aggregation. Bounded waits are only
+deadlock guards; no sleeps as race proof. All provider callbacks are fake.
+
+Limits / next action
+----------------------
+Backend infrastructure only: no actual fresh/reset/reuse realization, retained
+physical-state guarantee, provider quiescence proof, scheduler, preemption, global
+hardware isolation, determinism, attestation, snapshot or crash/orphan recovery.
+Future session/adapter boundaries must reject unsupported explicit stronger reuse/
+isolation promises; no generic contract negotiator was added. Trusted callers must
+drive cleanup hooks outside host/registry locks. No models, inference, downloads,
+monitoring activation or consumer testing. Current managed llama.cpp switching is
+not made safe: ER-02/03 must be adopted together later. ER-02/03/04 and Experiment
+Runner remain unassigned. Integration independently reviews both worker commits,
+runs the commands and decides acceptance before any platform/consumer claim.
