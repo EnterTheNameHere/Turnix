@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/definition.py ; version: 1
+# file: first-party/applications/experimentRunner/definition.py ; version: 2
 """Strict bootstrap experiment schema and immutable canonical JSON snapshots."""
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import math
 from dataclasses import dataclass
 
 MAX_BYTES = 1024 * 1024
+MAX_RESULT_BYTES = 64 * 1024 * 1024
 OPTIONS = frozenset(('temperature', 'maxTokens', 'timeoutSeconds', 'topP', 'minP',
                      'topK', 'repeatPenalty', 'seed', 'reasoningFormat', 'reasoningEffort', 'chatTemplateKwargs'))
 
@@ -117,34 +118,40 @@ class Snapshot:
 
 
 def validate(value, policy):
-    """Copy and validate the entire v1 definition against independently trusted caps."""
+    """Freeze a v2 suite only after every configuration and expansion budget validates."""
     try:
         value = decode(canonical(value))
     except (TypeError, ValueError, UnicodeError, RecursionError, OverflowError) as error:
         raise ValidationError('Invalid definition JSON.') from error
     fields(value, ('schemaId', 'experimentId', 'configurations', 'conversation', 'repetitions', 'errorPolicy', 'contextPolicy'))
-    require(value['schemaId'] == 'actant.experiment.definition@1', 'Unsupported definition schema.')
+    require(value['schemaId'] == 'actant.experiment.definition@2', 'Unsupported definition schema; use version 2.')
     name(value['experimentId'])
-    require(type(value['repetitions']) is int and value['repetitions'] == 1, 'Only one repetition is supported.')
+    number(value['repetitions'], 1, min(10, policy['maxRepetitions']), integer=True)
     require(value['errorPolicy'] == 'stop' and value['contextPolicy'] == 'fresh-best-effort', 'Unsupported run policy.')
     configurations = value['configurations']
-    require(type(configurations) is list and len(configurations) == 1, 'Exactly one configuration is supported.')
-    config = configurations[0]
-    fields(config, ('name', 'profile', 'defaults', 'allowedOverrides'))
-    name(config['name'])
-    name(config['profile'])
-    require(config['profile'] in policy['aliases'], 'Profile alias is not host approved.')
-    options(config['defaults'], complete=True)
-    config['defaults'].setdefault('temperature', 0.7)
-    allowed = config['allowedOverrides']
-    require(type(allowed) is list and all(type(key) is str for key in allowed), 'Invalid override allowlist.')
-    require(len(set(allowed)) == len(allowed) and set(allowed) <= OPTIONS, 'Invalid override allowlist.')
+    require(type(configurations) is list and 1 <= len(configurations) <= min(8, policy['maxConfigurations']), 'Invalid configuration count.')
+    executions = len(configurations) * value['repetitions']
+    require(executions <= min(32, policy['maxExecutions']), 'Too many conversation executions.')
+    names = set()
+    for config in configurations:
+        fields(config, ('name', 'profile', 'defaults', 'allowedOverrides'))
+        name(config['name'])
+        name(config['profile'])
+        require(config['name'] not in names, 'Duplicate configuration name.')
+        names.add(config['name'])
+        require(config['profile'] in policy['aliases'], 'Profile alias is not host approved.')
+        options(config['defaults'], complete=True)
+        config['defaults'].setdefault('temperature', 0.7)
+        allowed = config['allowedOverrides']
+        require(type(allowed) is list and all(type(key) is str for key in allowed), 'Invalid override allowlist.')
+        require(len(set(allowed)) == len(allowed) and set(allowed) <= OPTIONS, 'Invalid override allowlist.')
     conversation = value['conversation']
     fields(conversation, ('id', 'historyPolicy', 'turns'))
     name(conversation['id'])
     require(conversation['historyPolicy'] == 'replay-answers', 'Unsupported history policy.')
     turns = conversation['turns']
     require(type(turns) is list and 2 <= len(turns) <= min(16, policy['maxTurns']), 'Invalid turn count.')
+    require(executions * len(turns) <= min(256, policy['maxTurnCalls']), 'Too many requested turn calls.')
     ids = set()
     for turn in turns:
         fields(turn, ('id', 'role', 'content'), ('overrides',))
@@ -155,9 +162,27 @@ def validate(value, policy):
         require(type(turn['content']) is str and 1 <= len(turn['content']) <= 16384, 'Invalid turn content.')
         overrides = turn.get('overrides', {})
         options(overrides)
-        require(set(overrides) <= set(allowed), 'Turn override is not allowed.')
-        merged = config['defaults'] | overrides
-        options(merged, complete=True)
-        require(merged['maxTokens'] <= policy['maxTokens'] and merged['timeoutSeconds'] <= policy['timeoutSeconds'],
-                'Request exceeds host limits.')
+        for config in configurations:
+            require(set(overrides) <= set(config['allowedOverrides']), 'Turn override is not allowed.')
+            merged = config['defaults'] | overrides
+            options(merged, complete=True)
+            require(merged['maxTokens'] <= policy['maxTokens'] and merged['timeoutSeconds'] <= policy['timeoutSeconds'],
+                    'Request exceeds host limits.')
+    # Bound retained JSON before allocating units, including worst-case escaped
+    # provider output repeated through history, metadata and private host evidence.
+    prefixBytes, conversationBudget = 0, 0
+    for index, turn in enumerate(turns):
+        prefixBytes += len(canonical(turn['content']))
+        conversationBudget += prefixBytes + (index + 3) * 6 * policy['maxOutputCharacters'] + 65536
+    definitionBytes = len(canonical(value))
+    require(definitionBytes + executions * (definitionBytes + conversationBudget + 262144) <= MAX_RESULT_BYTES,
+            'Expanded private result exceeds retained-data budget.')
+    return Snapshot(canonical(value))
+
+
+def unitDefinition(definition, configurationIndex):
+    """Derive a detached single-unit definition without changing the suite snapshot."""
+    value = definition.value()
+    value['configurations'] = [value['configurations'][configurationIndex]]
+    value['repetitions'] = 1
     return Snapshot(canonical(value))

@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/run.py ; version: 1
+# file: first-party/applications/experimentRunner/run.py ; version: 2
 """Terminal entry point; only explicit inspect displays private experiment content."""
 from __future__ import annotations
 
@@ -41,10 +41,10 @@ def main(argv=None):
             return 0
         snapshot, path = launcher.execute(prepared, args.results)
         value = snapshot.value()
-        run = value['run']
-        print(json.dumps({'runId': None if run is None else run['runId'],
-                          'status': None if run is None else run['status'], 'jobOutcome': value['jobOutcome'],
-                          'turnsSucceeded': 0 if run is None else sum(turn['status'] == 'succeeded' for turn in run['turns']),
+        suite = value['suite']
+        print(json.dumps({'suiteId': suite['suiteId'], 'status': suite['status'],
+                          'unitsSucceeded': sum(unit['status'] == 'succeeded' for unit in suite['units']),
+                          'turnsSucceeded': sum(turn['status'] == 'succeeded' for unit in suite['units'] for turn in unit['run']['turns']),
                           'path': None if path is None else str(path), 'launcherFailure': value['launcherFailure'],
                           'resultWriteFailure': value['resultWriteFailure'], 'hostCleanup': value['hostCleanup']}))
         return launcher.exitCode(value)

@@ -1,11 +1,12 @@
-# file: tests/first_party/experimentRunner/test_experimentRunner.py ; version: 2
-"""EX-01/02 architectural tests: actual Application/provider composition, synthetic IO."""
+# file: tests/first_party/experimentRunner/test_experimentRunner.py ; version: 3
+"""EX-01/02/R1/03 architectural tests: actual runtime/provider, synthetic process/HTTP IO."""
 import importlib
 import json
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 
 import pytest
+from uuid import uuid4
 
 from backend.orchestration import Job
 
@@ -19,17 +20,23 @@ def definition():
     return launcher.readJson(launcher.APP / 'example.definition.json')
 
 
+def unitPayload(value):
+    """Build the versioned unit invocation seam without modifying declarative definitions."""
+    return {'unitId': uuid4().hex, 'definition': value}
+
+
 def hostValue(tmp_path):
     """Select only fake local assets and explicit host caps for synthetic verification."""
     executable, model = tmp_path / 'server.exe', tmp_path / 'model.gguf'
     executable.touch()
     model.touch()
-    return {'schemaId': 'actant.experiment.host@1',
+    return {'schemaId': 'actant.experiment.host@2',
             'llamaCpp': {'manageServer': True, 'executable': str(executable), 'defaultModel': 'Q',
                          'models': {'Q': {'modelPath': str(model), 'contextWindowTokens': 1024,
                                           'serverReasoning': 'off', 'parallelSlots': 1}}},
             'aliases': {'qwen-demo': 'Q'}, 'limits': {'maxTokens': 24, 'timeoutSeconds': 30,
-                                                   'maxTurns': 4, 'maxOutputCharacters': 4096},
+                                                   'maxTurns': 4, 'maxOutputCharacters': 4096, 'maxConfigurations': 8,
+                                                   'maxRepetitions': 10, 'maxExecutions': 32, 'maxTurnCalls': 256},
             'persistConfigurationEvidence': True}
 
 
@@ -187,8 +194,8 @@ def test_ordered_history_reasoning_cleanup_and_private_result(rig):
     value, path = execute(rig)
     state, _, _ = rig
     assert launcher.exitCode(value) == 0, value
-    run = value['run']
-    assert run['status'] == 'succeeded' and value['jobOutcome'] == 'Succeeded'
+    run = value['suite']['units'][0]['run']
+    assert run['status'] == 'succeeded' and value['suite']['units'][0]['jobOutcome'] == 'Succeeded'
     assert [turn['status'] for turn in run['turns']] == ['succeeded', 'succeeded']
     turns = definition()['conversation']['turns']
     expected = [[{'role': 'user', 'content': turns[0]['content']}],
@@ -202,17 +209,17 @@ def test_ordered_history_reasoning_cleanup_and_private_result(rig):
     assert all(body['cache_prompt'] is False and body['id_slot'] == 0 for body in wire)
     assert len(state['processes']) == 1 and state['processes'][0].returncode == 0
     assert json.loads(path.read_text(encoding='utf-8')) == value
-    assert value['configurationEvidence'] is not None
+    assert value['suite']['units'][0]['configurationEvidence'] is not None
     assert 'id_task' not in path.read_text(encoding='utf-8')
     state['streams'].extend([stream('new first'), stream('new second')])
     again, other = execute(rig)
     # A second invocation uses the same declarative identity but a fresh opaque run identity.
-    assert again['run']['experimentId'] == run['experimentId'] and other != path
-    assert again['run']['status'] == 'succeeded'
+    assert again['suite']['units'][0]['run']['experimentId'] == run['experimentId'] and other != path
+    assert again['suite']['units'][0]['run']['status'] == 'succeeded'
 
 
 @pytest.mark.parametrize('path,new', [
-    (('unknown',), 1), (('configurations',), []), (('repetitions',), True), (('repetitions',), 2),
+    (('unknown',), 1), (('configurations',), []), (('repetitions',), True), (('repetitions',), 0),
     (('contextPolicy',), 'required-fresh'), (('errorPolicy',), 'continue'),
     (('configurations', 0, 'profile'), 'Q'), (('configurations', 0, 'defaults', 'maxTokens'), True),
     (('configurations', 0, 'defaults', 'maxTokens'), 25), (('configurations', 0, 'defaults', 'timeoutSeconds'), None),
@@ -257,9 +264,9 @@ def test_frozen_definition_host_aliases_and_queries(rig):
     assert prepared[0].data == before
     snapshot, _ = launcher.execute(prepared, results, handleInterrupt=False)
     value = snapshot.value()
-    assert value['run']['status'] == 'succeeded'
-    value['run']['turns'][0]['answer'] = 'mutated'
-    assert snapshot.value()['run']['turns'][0]['answer'] == ' amber '
+    assert value['suite']['units'][0]['run']['status'] == 'succeeded'
+    value['suite']['units'][0]['run']['turns'][0]['answer'] = 'mutated'
+    assert snapshot.value()['suite']['units'][0]['run']['turns'][0]['answer'] == ' amber '
 
 
 def test_merged_conflicts_and_host_alias_missing_never_launch(rig):
@@ -282,8 +289,8 @@ def test_failure_second_turn_preserves_first_and_unknown_cleanup(rig):
     state, _, _ = rig
     state['streams'][1] = stream('partial answer', done=False)
     value, path = execute(rig)
-    assert value['jobOutcome'] == 'Failed' and value['run']['status'] == 'failed'
-    first, second = value['run']['turns']
+    assert value['suite']['units'][0]['jobOutcome'] == 'Failed' and value['suite']['units'][0]['run']['status'] == 'failed'
+    first, second = value['suite']['units'][0]['run']['turns']
     assert first['answer'] == ' amber ' and first['status'] == 'succeeded'
     assert second['status'] == 'failed' and second['answer'] is None
     assert second['partial']['answer'] == 'partial answer'
@@ -298,8 +305,8 @@ def test_cancel_before_job_has_diagnostics_without_transition(rig):
     job = Job.new()
     job.requestCancellation()
     value, _ = execute(rig, job=job)
-    assert value['jobOutcome'] == 'Cancelled' and value['run']['status'] == 'cancelled'
-    assert all(turn['status'] == 'not-started' for turn in value['run']['turns'])
+    assert value['suite']['status'] == 'cancelled' and value['suite']['units'][0]['jobOutcome'] is None
+    assert all(turn['status'] == 'not-started' for turn in value['suite']['units'][0]['run']['turns'])
     assert rig[0]['processes'] == []
 
 
@@ -323,11 +330,11 @@ def test_cancel_during_stream_preserves_partial_and_separate_unknown(rig):
         assert entered.wait(5)
         job.requestCancellation()
         value, _ = future.result(timeout=10)
-    assert value['jobOutcome'] == 'Cancelled' and value['run']['status'] == 'cancelled'
-    assert value['run']['turns'][0]['status'] == 'cancelled'
-    assert value['run']['turns'][1]['status'] == 'not-started'
-    assert value['run']['turns'][0]['partial']['answer'] == 'partial'
-    assert value['run']['turns'][0]['cleanup']['quiescence'] == 'unknown'
+    assert value['suite']['units'][0]['jobOutcome'] == 'Cancelled' and value['suite']['units'][0]['run']['status'] == 'cancelled'
+    assert value['suite']['units'][0]['run']['turns'][0]['status'] == 'cancelled'
+    assert value['suite']['units'][0]['run']['turns'][1]['status'] == 'not-started'
+    assert value['suite']['units'][0]['run']['turns'][0]['partial']['answer'] == 'partial'
+    assert value['suite']['units'][0]['run']['turns'][0]['cleanup']['quiescence'] == 'unknown'
     assert state['calls'] == 1 and len(state['processes']) == 1
 
 
@@ -338,7 +345,7 @@ def test_result_write_failure_preserves_successful_job(rig, monkeypatch):
         raise OSError('private path detail')
     monkeypatch.setattr(launcher, 'persist', fail)
     value, path = execute(rig)
-    assert path is None and value['jobOutcome'] == 'Succeeded' and value['run']['status'] == 'succeeded'
+    assert path is None and value['suite']['units'][0]['jobOutcome'] == 'Succeeded' and value['suite']['units'][0]['run']['status'] == 'succeeded'
     assert value['resultWriteFailure']['stage'] == 'before-teardown'
     assert launcher.exitCode(value) == 1 and value['hostCleanup'] == 'completed'
 
@@ -359,10 +366,10 @@ def test_recorder_overlap_inspection_and_application_isolation(rig, tmp_path):
     """Only one prepared invocation exists per app; foreign apps have independent recorders."""
     host, runtime, plan, config = runtimeFor(launcher.prepare(definition(), rig[1]), tmp_path)
     try:
-        runId = runtime.invokeCapability('experimentRunner.prepare@1', definition())
+        runId = runtime.invokeCapability('experimentRunner.prepare@1', unitPayload(definition()))
         before = runtime.invokeCapability('experimentRunner.inspect@1')
         with pytest.raises(RuntimeError):
-            runtime.invokeCapability('experimentRunner.prepare@1', definition())
+            runtime.invokeCapability('experimentRunner.prepare@1', unitPayload(definition()))
         peer = host.createApplication(appPackId='applications.experimentRunner', plan=plan, config=config)
         assert peer.invokeCapability('experimentRunner.inspect@1') is None
         result = runtime.runJob('experimentRunner.run@1', runId)
@@ -372,7 +379,7 @@ def test_recorder_overlap_inspection_and_application_isolation(rig, tmp_path):
         with pytest.raises(RuntimeError):
             runtime.invokeCapability('experimentRunner.run@1', runId)
         runtime.invokeCapability('experimentRunner.finish@1', {'runId': runId, 'jobOutcome': result.state.value})
-        assert runtime.invokeCapability('experimentRunner.prepare@1', definition()) != runId
+        assert runtime.invokeCapability('experimentRunner.prepare@1', unitPayload(definition())) != runId
         assert peer.invokeCapability('experimentRunner.inspect@1') is None
     finally:
         host.stop()
@@ -392,10 +399,10 @@ def test_cancel_between_turns_keeps_completed_answer(rig, monkeypatch):
 
     monkeypatch.setattr(_LlmFacade, 'run', cancelAfterFirst)
     value, _ = execute(rig, job=job)
-    assert value['jobOutcome'] == 'Cancelled' and value['run']['status'] == 'cancelled'
-    assert value['run']['turns'][0]['status'] == 'succeeded'
-    assert value['run']['turns'][0]['cleanup']['quiescence'] == 'confirmed'
-    assert value['run']['turns'][1]['status'] == 'not-started'
+    assert value['suite']['units'][0]['jobOutcome'] == 'Cancelled' and value['suite']['units'][0]['run']['status'] == 'cancelled'
+    assert value['suite']['units'][0]['run']['turns'][0]['status'] == 'succeeded'
+    assert value['suite']['units'][0]['run']['turns'][0]['cleanup']['quiescence'] == 'confirmed'
+    assert value['suite']['units'][0]['run']['turns'][1]['status'] == 'not-started'
     assert rig[0]['calls'] == 1 and value['hostCleanup'] == 'completed'
 
 
@@ -406,7 +413,7 @@ def test_unknown_cleanup_stops_remaining_turns_without_repair(rig):
     value['conversation']['turns'].append({'id': 't3', 'role': 'user', 'content': 'Never sent'})
     state['streams'][1] = stream('incomplete', done=False)
     snapshot, _ = launcher.execute(launcher.prepare(value, host), resultsDirectory, handleInterrupt=False)
-    run = snapshot.value()['run']
+    run = snapshot.value()['suite']['units'][0]['run']
     assert [turn['status'] for turn in run['turns']] == ['succeeded', 'failed', 'not-started']
     assert state['calls'] == 2 and len(state['processes']) == 1
 
@@ -416,9 +423,9 @@ def test_empty_answer_is_valid_and_replayed_exactly(rig):
     state, _, _ = rig
     state['streams'][0] = stream('', reasoning='separate only')
     value, _ = execute(rig)
-    assert value['run']['status'] == 'succeeded'
-    assert value['run']['turns'][0]['answer'] == ''
-    assert value['run']['turns'][1]['query']['messages'][1] == {'role': 'assistant', 'content': ''}
+    assert value['suite']['units'][0]['run']['status'] == 'succeeded'
+    assert value['suite']['units'][0]['run']['turns'][0]['answer'] == ''
+    assert value['suite']['units'][0]['run']['turns'][1]['query']['messages'][1] == {'role': 'assistant', 'content': ''}
 
 
 def test_restricted_transition_grant_cannot_be_invented_by_alias(rig):
@@ -432,7 +439,7 @@ def test_restricted_transition_grant_cannot_be_invented_by_alias(rig):
         providerEntries=old.providerEntries, grants=(adapter.LlamaCppGrant(grant.entry, grant.selectors, False),))
     snapshot, _ = launcher.execute((prepared[0], prepared[1], composer), resultsDirectory, handleInterrupt=False)
     value = snapshot.value()
-    assert value['jobOutcome'] == 'Failed' and value['run']['status'] == 'failed'
+    assert value['suite']['units'][0]['jobOutcome'] == 'Failed' and value['suite']['units'][0]['run']['status'] == 'failed'
     assert state['processes'] == [] and state['calls'] == 0
 
 
@@ -447,9 +454,9 @@ def test_wrong_provider_source_identity_fails_before_launch(rig):
                                          providerEntries=(wrong,), grants=old.grants)
     snapshot, path = launcher.execute((prepared[0], prepared[1], composer), resultsDirectory, handleInterrupt=False)
     value = snapshot.value()
-    assert value['launcherFailure'] is not None and value['jobOutcome'] == 'Pending'
-    assert value['run']['status'] == 'failed' and path.is_file()
-    assert all(turn['status'] == 'not-started' for turn in value['run']['turns'])
+    assert value['launcherFailure'] is not None and value['suite']['units'][0]['jobOutcome'] is None
+    assert value['suite']['status'] == 'failed' and path.is_file()
+    assert all(turn['status'] == 'not-started' for turn in value['suite']['units'][0]['run']['turns'])
     assert state['processes'] == []
 
 
@@ -459,11 +466,11 @@ def test_output_bound_keeps_only_bounded_partial_diagnostics(rig):
     host['limits']['maxOutputCharacters'] = 4
     state['streams'][0] = stream('too long', reasoning='also long')
     value, _ = execute(rig)
-    turn = value['run']['turns'][0]
-    assert value['jobOutcome'] == 'Failed' and turn['answer'] is None
+    turn = value['suite']['units'][0]['run']['turns'][0]
+    assert value['suite']['units'][0]['jobOutcome'] == 'Failed' and turn['answer'] is None
     assert turn['partial']['truncated'] and len(turn['partial']['answer']) + len(turn['partial']['reasoning']) <= 4
     assert turn['cleanup']['quiescence'] == 'confirmed'
-    assert value['run']['turns'][1]['status'] == 'not-started'
+    assert value['suite']['units'][0]['run']['turns'][1]['status'] == 'not-started'
 
 
 def test_launcher_inspection_failure_preserves_recorded_turns(rig, monkeypatch):
@@ -485,10 +492,10 @@ def test_launcher_inspection_failure_preserves_recorded_turns(rig, monkeypatch):
 
     monkeypatch.setattr(launcher.RuntimeHost, 'createApplication', create)
     value, path = execute(rig)
-    assert value['jobOutcome'] == 'Succeeded' and value['launcherFailure'] is not None
-    assert value['run']['status'] == 'succeeded'
-    assert all(turn['status'] == 'succeeded' for turn in value['run']['turns'])
-    assert value['run']['applicationOutcome'] == 'completed' and path.is_file()
+    assert value['suite']['units'][0]['jobOutcome'] == 'Succeeded' and value['launcherFailure'] is not None
+    assert value['suite']['units'][0]['run']['status'] == 'succeeded'
+    assert all(turn['status'] == 'succeeded' for turn in value['suite']['units'][0]['run']['turns'])
+    assert value['suite']['units'][0]['run']['applicationOutcome'] == 'completed' and path.is_file()
     assert launcher.exitCode(value) == 1
 
 
@@ -508,17 +515,20 @@ def test_supported_option_bounds_reject_before_launch(rig, key, bad):
 
 
 def test_unknown_domain_rejects_next_invocation_without_restoration(rig, tmp_path):
-    """A new run cannot use a later idle observation to repair an UNKNOWN residency."""
+    """A different prepared peer cannot repair UNKNOWN through a later transition."""
     state, hostValue, _ = rig
     state['streams'][0] = stream('unproven', done=False)
-    host, runtime, _, _ = runtimeFor(launcher.prepare(definition(), hostValue), tmp_path)
-    firstId = runtime.invokeCapability('experimentRunner.prepare@1', definition())
+    host, runtime, plan, config = runtimeFor(launcher.prepare(definition(), hostValue), tmp_path)
+    peer = host.createApplication(appPackId='applications.experimentRunner', plan=plan, config=config)
+    firstReader = runtime.invokeCapability('experimentRunner.reader@1')
+    secondReader = peer.invokeCapability('experimentRunner.reader@1')
+    firstId = runtime.invokeCapability('experimentRunner.prepare@1', unitPayload(definition()))
+    secondId = peer.invokeCapability('experimentRunner.prepare@1', unitPayload(definition()))
     first = runtime.runJob('experimentRunner.run@1', firstId)
-    runtime.invokeCapability('experimentRunner.finish@1', {'runId': firstId, 'jobOutcome': first.state.value})
-    secondId = runtime.invokeCapability('experimentRunner.prepare@1', definition())
-    second = runtime.runJob('experimentRunner.run@1', secondId)
-    snapshot = runtime.invokeCapability('experimentRunner.finish@1', {'runId': secondId, 'jobOutcome': second.state.value})
+    second = peer.runJob('experimentRunner.run@1', secondId)
     assert first.state.value == second.state.value == 'Failed'
+    assert firstReader.read().value()['turns'][0]['cleanup']['quiescence'] == 'unknown'
+    snapshot = secondReader.read()
     assert snapshot.value()['error']['category'] == 'execution-conflict'
     assert snapshot.value()['error']['stage'] == 'transition'
     assert all(turn['status'] == 'not-started' for turn in snapshot.value()['turns'])
@@ -567,7 +577,7 @@ def test_busy_peer_reservation_denies_runner_without_takeover(rig, tmp_path):
     scope.publish()
     try:
         peer.invokeCapability('test.reserve@1')
-        runId = runtime.invokeCapability('experimentRunner.prepare@1', definition())
+        runId = runtime.invokeCapability('experimentRunner.prepare@1', unitPayload(definition()))
         job = runtime.runJob('experimentRunner.run@1', runId)
         snapshot = runtime.invokeCapability('experimentRunner.finish@1', {'runId': runId, 'jobOutcome': job.state.value})
         assert job.state.value == 'Failed'
@@ -589,9 +599,9 @@ def test_host_cleanup_failure_does_not_relabel_completed_job(rig, monkeypatch):
 
     monkeypatch.setattr(launcher.RuntimeHost, 'stop', failAfterClose)
     value, path = execute(rig)
-    assert value['run']['status'] == 'succeeded' and value['jobOutcome'] == 'Succeeded'
+    assert value['suite']['units'][0]['run']['status'] == 'succeeded' and value['suite']['units'][0]['jobOutcome'] == 'Succeeded'
     assert value['hostCleanup'] == 'failed-or-unknown' and launcher.exitCode(value) == 1
-    assert all(turn['cleanup']['quiescence'] == 'confirmed' for turn in value['run']['turns'])
+    assert all(turn['cleanup']['quiescence'] == 'confirmed' for turn in value['suite']['units'][0]['run']['turns'])
     assert json.loads(path.read_text(encoding='utf-8'))['hostCleanup'] == 'failed-or-unknown'
 
 
@@ -609,7 +619,7 @@ def test_second_write_failure_preserves_initial_private_file(rig, monkeypatch):
 
     monkeypatch.setattr(launcher, 'persist', failSecond)
     value, path = execute(rig)
-    assert value['run']['status'] == 'succeeded' and value['jobOutcome'] == 'Succeeded'
+    assert value['suite']['units'][0]['run']['status'] == 'succeeded' and value['suite']['units'][0]['jobOutcome'] == 'Succeeded'
     assert value['resultWriteFailure']['stage'] == 'after-teardown'
     assert value['hostCleanup'] == 'completed' and launcher.exitCode(value) == 1
     assert json.loads(path.read_text(encoding='utf-8'))['hostCleanup'] == 'not-started'
@@ -666,9 +676,9 @@ def test_post_job_interrupt_reaps_child_and_preserves_primary_outcomes(rig, monk
         execute(rig)
     assert caught.value is interruption
     value = caught.value.experimentExecution.value()
-    assert value['jobOutcome'] == 'Succeeded' and value['run']['status'] == 'succeeded'
-    assert [turn['status'] for turn in value['run']['turns']] == ['succeeded', 'succeeded']
-    assert all(turn['cleanup']['quiescence'] == 'confirmed' for turn in value['run']['turns'])
+    assert value['suite']['units'][0]['jobOutcome'] == 'Succeeded' and value['suite']['units'][0]['run']['status'] == 'succeeded'
+    assert [turn['status'] for turn in value['suite']['units'][0]['run']['turns']] == ['succeeded', 'succeeded']
+    assert all(turn['cleanup']['quiescence'] == 'confirmed' for turn in value['suite']['units'][0]['run']['turns'])
     assert value['hostCleanup'] == 'completed' and launcher.exitCode(value) == 1
     assert value['launcherFailure']['category'] == 'launcher-interrupted'
     assert 'private interrupt detail' not in json.dumps(value)
@@ -691,9 +701,9 @@ def test_persist_interrupt_keeps_failed_job_and_unknown_cleanup(rig, monkeypatch
     with pytest.raises(KeyboardInterrupt) as caught:
         execute(rig)
     value = caught.value.experimentExecution.value()
-    assert value['jobOutcome'] == 'Failed' and value['run']['status'] == 'failed'
-    assert [turn['status'] for turn in value['run']['turns']] == ['succeeded', 'failed']
-    assert value['run']['turns'][1]['cleanup']['quiescence'] == 'unknown'
+    assert value['suite']['units'][0]['jobOutcome'] == 'Failed' and value['suite']['units'][0]['run']['status'] == 'failed'
+    assert [turn['status'] for turn in value['suite']['units'][0]['run']['turns']] == ['succeeded', 'failed']
+    assert value['suite']['units'][0]['run']['turns'][1]['cleanup']['quiescence'] == 'unknown'
     assert value['hostCleanup'] == 'failed-or-unknown'
     assert rig[0]['calls'] == 2 and len(rig[0]['processes']) == 1
     assert rig[0]['processes'][0].returncode is None  # No unauthorized UNKNOWN disposal or repair.
@@ -711,8 +721,8 @@ def test_persist_interrupt_keeps_cancelled_job(rig, monkeypatch):
     with pytest.raises(KeyboardInterrupt) as caught:
         execute(rig, job=job)
     value = caught.value.experimentExecution.value()
-    assert value['jobOutcome'] == 'Cancelled' and value['run']['status'] == 'cancelled'
-    assert all(turn['status'] == 'not-started' for turn in value['run']['turns'])
+    assert value['suite']['status'] == 'cancelled' and value['suite']['units'][0]['jobOutcome'] is None
+    assert all(turn['status'] == 'not-started' for turn in value['suite']['units'][0]['run']['turns'])
     assert value['hostCleanup'] == 'completed' and rig[0]['processes'] == []
 
 
@@ -736,7 +746,7 @@ def test_cleanup_interrupt_cannot_replace_earlier_persist_interrupt(rig, monkeyp
     assert caught.value is first
     value = caught.value.experimentExecution.value()
     assert value['hostCleanup'] == 'failed-or-unknown'
-    assert value['jobOutcome'] == 'Succeeded' and value['run']['status'] == 'succeeded'
+    assert value['suite']['units'][0]['jobOutcome'] == 'Succeeded' and value['suite']['units'][0]['run']['status'] == 'succeeded'
     assert len(rig[0]['processes']) == 1 and rig[0]['processes'][0].returncode == 0
 
 
@@ -755,3 +765,509 @@ def test_actual_post_job_sigint_restores_handler_and_reaps_child(rig, monkeypatc
     assert signal.getsignal(signal.SIGINT) is before
     assert caught.value.experimentExecution.value()['hostCleanup'] == 'completed'
     assert len(rig[0]['processes']) == 1 and rig[0]['processes'][0].returncode == 0
+
+
+def suiteDefinition(rig, *, differentStartup=True):
+    """Configure a synthetic two-profile/two-repetition suite within the authorized ceiling."""
+    state, host, _ = rig
+    value = definition()
+    second = json.loads(json.dumps(value['configurations'][0]))
+    second.update(name='second', profile='qwen-three' if differentStartup else 'qwen-demo')
+    second['defaults']['temperature'] = 0.2
+    value['configurations'].append(second)
+    value['repetitions'] = 2
+    host['llamaCpp']['models']['Q']['threads'] = 4
+    host['llamaCpp']['models']['Q3'] = dict(host['llamaCpp']['models']['Q'], threads=3)
+    host['aliases']['qwen-three'] = 'Q3'
+    state['streams'] = [stream('answer-' + str(index), 'separate-' + str(index)) for index in range(8)]
+    return value
+
+
+def executeSuite(rig, value, **kwargs):
+    """Run a validated expanded suite through the production launcher and actual runtime."""
+    snapshot, path = launcher.execute(launcher.prepare(value, rig[1]), rig[2], handleInterrupt=False, **kwargs)
+    return snapshot.value(), path
+
+
+def test_ex03_order_history_sessions_generations_and_job_boundaries(rig, monkeypatch):
+    """Config-major 2x2x2 execution uses independent histories and exact per-unit sessions."""
+    from backend.context.codeEntryContext import _LlmFacade
+    value = suiteDefinition(rig)
+    sessions, jobs, boundaries = [], [], []
+    originalRun, originalJob, originalTransition = _LlmFacade.run, launcher.RuntimeHost.createApplication, _LlmFacade.transitionProfile
+
+    def run(self, **kwargs):
+        """Observe exact session identity while exercising every actual admitted call."""
+        sessions.append(kwargs['session'])
+        return originalRun(self, **kwargs)
+
+    def transition(self, profile):
+        """Verify a prior Job is terminal and neutral exclusion drained before next transition."""
+        if jobs:
+            assert jobs[-1].terminal
+            assert boundaries[-1].exclusive is False and boundaries[-1].operations == 0
+        return originalTransition(self, profile)
+
+    def create(self, **kwargs):
+        """Record returned actual Jobs and the public resource snapshot at each boundary."""
+        runtime = originalJob(self, **kwargs)
+        runJob = runtime.runJob
+
+        def wrapped(*args, **options):
+            """Observe only after runtime lifetime finalization has returned."""
+            result = runJob(*args, **options)
+            jobs.append(result)
+            boundaries.append(self.executionResources.snapshots[0])
+            return result
+        runtime.runJob = wrapped
+        return runtime
+
+    monkeypatch.setattr(_LlmFacade, 'run', run)
+    monkeypatch.setattr(_LlmFacade, 'transitionProfile', transition)
+    monkeypatch.setattr(launcher.RuntimeHost, 'createApplication', create)
+    result, path = executeSuite(rig, value)
+    assert launcher.exitCode(result) == 0, result
+    units = result['suite']['units']
+    assert [(unit['configurationName'], unit['repetition']) for unit in units] == [('baseline', 1), ('baseline', 2), ('second', 1), ('second', 2)]
+    assert len({unit['unitId'] for unit in units}) == 4 and len({job.jobId for job in jobs}) == 4
+    assert all(unit['run']['runId'] == unit['unitId'] for unit in units)
+    assert len(sessions) == 8 and len({id(session) for session in sessions}) == 4
+    for index, unit in enumerate(units):
+        assert sessions[index * 2] is sessions[index * 2 + 1]
+        first, second = unit['run']['turns']
+        assert first['query']['messages'] == [{'role': 'user', 'content': value['conversation']['turns'][0]['content']}]
+        assert second['query']['messages'][1] == {'role': 'assistant', 'content': 'answer-' + str(index * 2)}
+        assert unit['run']['reservation'] == {'acquisition': 'acquired', 'close': 'queued', 'releaseReceipt': 'unavailable'}
+        assert unit['lifetimeBoundary'] == 'completed' and unit['jobOutcome'] == 'Succeeded'
+        assert all(turn['reasoning'].startswith('separate-') for turn in unit['run']['turns'])
+    generations = [unit['run']['turns'][0]['executionEvidence']['residencyGeneration'] for unit in units]
+    assert generations[0] == generations[1] and generations[2] == generations[3] and generations[0] != generations[2]
+    assert len(rig[0]['processes']) == 2 and all(process.returncode == 0 for process in rig[0]['processes'])
+    assert rig[0]['calls'] == 8 and json.loads(path.read_text(encoding='utf-8')) == result
+    wire = [body['messages'] for url, body in rig[0]['requests'] if url.endswith('/completions')]
+    assert wire == [turn['query']['messages'] for unit in units for turn in unit['run']['turns']]
+
+
+def test_ex03_sampling_only_configurations_reuse_same_residency(rig):
+    """Names and sampling controls cannot force reloads of compatible startup profiles."""
+    result, _ = executeSuite(rig, suiteDefinition(rig, differentStartup=False))
+    assert result['suite']['status'] == 'succeeded'
+    assert len(rig[0]['processes']) == 1
+    assert len({unit['run']['turns'][0]['executionEvidence']['residencyIdentity'] for unit in result['suite']['units']}) == 1
+
+
+@pytest.mark.parametrize('bad', ['later-alias', 'later-options', 'duplicate-name', 'bool', 'zero', 'negative',
+                                'config-cap', 'repetition-cap', 'execution-cap', 'turn-call-cap', 'memory-cap', 'version'])
+def test_ex03_all_preflight_errors_precede_first_launch(rig, bad):
+    """Invalid later configurations and every expansion/memory ceiling reject the entire suite."""
+    value = suiteDefinition(rig)
+    if bad == 'later-alias':
+        value['configurations'][1]['profile'] = 'unapproved'
+    elif bad == 'later-options':
+        value['configurations'][1]['defaults']['maxTokens'] = 25
+    elif bad == 'duplicate-name':
+        value['configurations'][1]['name'] = 'baseline'
+    elif bad in ('bool', 'zero', 'negative'):
+        value['repetitions'] = {'bool': True, 'zero': 0, 'negative': -1}[bad]
+    elif bad == 'version':
+        value['schemaId'] = 'actant.experiment.definition@1'
+    elif bad == 'memory-cap':
+        rig[1]['limits']['maxOutputCharacters'] = 65536
+        value['repetitions'] = 10
+        value['conversation']['turns'] *= 2
+        for index, turn in enumerate(value['conversation']['turns']):
+            value['conversation']['turns'][index] = dict(turn, id=str(index))
+    else:
+        key = {'config-cap': 'maxConfigurations', 'repetition-cap': 'maxRepetitions', 'execution-cap': 'maxExecutions', 'turn-call-cap': 'maxTurnCalls'}[bad]
+        rig[1]['limits'][key] = 1
+    with pytest.raises(schema.ValidationError):
+        launcher.prepare(value, rig[1])
+    assert rig[0]['processes'] == [] and rig[0]['requests'] == []
+
+
+def test_ex03_only_selected_deduplicated_grants_and_hash(rig):
+    """Aliases do not broaden grants; canonical frozen suite hashes include ordered configs."""
+    value = suiteDefinition(rig, differentStartup=False)
+    prepared = launcher.prepare(value, rig[1])
+    assert prepared[2].grants[0].selectors == ('Q',)
+    before = prepared[0].sha256
+    value['configurations'][1]['name'] = 'mutated'
+    assert prepared[0].sha256 == before
+    assert prepared[0].value()['configurations'][1]['name'] == 'second'
+    reversedValue = prepared[0].value()
+    reversedValue['configurations'].reverse()
+    assert launcher.prepare(reversedValue, rig[1])[0].sha256 != before
+
+
+def test_ex03_cancellation_between_units_prevents_next_job(rig, monkeypatch):
+    """A suite flag survives the absence of a Running Job and keeps completed Jobs intact."""
+    value = suiteDefinition(rig)
+    control = launcher.SuiteControl()
+    original = control.end
+
+    def end(job):
+        """Cancel in the actual gap after dropping the first terminal Job handle."""
+        original(job)
+        assert job.state.value == 'Succeeded'
+        control.cancel()
+    monkeypatch.setattr(control, 'end', end)
+    result, _ = executeSuite(rig, value, control=control)
+    assert result['suite']['status'] == 'cancelled'
+    assert [unit['status'] for unit in result['suite']['units']] == ['succeeded', 'not-started', 'not-started', 'not-started']
+    assert result['suite']['units'][0]['jobOutcome'] == 'Succeeded'
+    assert all(unit['jobOutcome'] is None for unit in result['suite']['units'][1:])
+    assert rig[0]['calls'] == 2 and result['hostCleanup'] == 'completed'
+
+
+def test_ex03_later_unit_unknown_preserves_earlier_units_and_stops(rig):
+    """No later configuration is loaded after a failed reserved conversation quarantines cleanup."""
+    value = suiteDefinition(rig)
+    rig[0]['streams'][3] = stream('unproven partial', done=False)
+    result, _ = executeSuite(rig, value)
+    assert [unit['status'] for unit in result['suite']['units']] == ['succeeded', 'failed', 'not-started', 'not-started']
+    failed = result['suite']['units'][1]
+    assert failed['jobOutcome'] == 'Failed' and failed['lifetimeBoundary'] == 'failed-or-unknown'
+    assert failed['run']['reservation']['close'] == 'queued'
+    assert failed['run']['turns'][1]['partial']['answer'] == 'unproven partial'
+    assert failed['run']['turns'][1]['cleanup']['quiescence'] == 'unknown'
+    assert rig[0]['calls'] == 4 and len(rig[0]['processes']) == 1
+    assert result['hostCleanup'] == 'failed-or-unknown'
+
+
+@pytest.mark.parametrize('cancelled', [False, True])
+def test_ex03_close_failure_keeps_primary_outcomes_and_no_next_unit(rig, monkeypatch, cancelled):
+    """Reservation-close failure is separate from successful turns or primary cancellation."""
+    from backend.llm.executionSessions import LlmConversationSession
+    from backend.context.codeEntryContext import _LlmFacade
+    value = suiteDefinition(rig)
+    originalClose, originalRun = LlmConversationSession.close, _LlmFacade.run
+    control = launcher.SuiteControl()
+
+    def close(self):
+        """Queue actual release, then inject an independent close-reporting failure."""
+        originalClose(self)
+        raise RuntimeError('Synthetic close failure')
+
+    def run(self, **kwargs):
+        """Cancel only after an actual complete first call when this variant requires it."""
+        result = originalRun(self, **kwargs)
+        if cancelled:
+            control.cancel()
+        return result
+    monkeypatch.setattr(LlmConversationSession, 'close', close)
+    monkeypatch.setattr(_LlmFacade, 'run', run)
+    result, _ = executeSuite(rig, value, control=control)
+    first = result['suite']['units'][0]
+    assert first['jobOutcome'] == ('Cancelled' if cancelled else 'Failed')
+    assert first['run']['reservation']['close'] == 'failed' and first['lifetimeBoundary'] == 'completed'
+    assert first['run']['turns'][0]['status'] == 'succeeded'
+    assert all(unit['status'] == 'not-started' for unit in result['suite']['units'][1:])
+
+
+def publishTestCapability(runtime, capability, handler):
+    """Grant test-only operations to the real initially composed Application caller."""
+    from backend.registration import RegistrationScope
+    identity = next(identity for identity, _ in runtime._codeEntries.values() if identity.codeEntryId == 'main')
+    scope = RegistrationScope()
+    runtime.capabilities.register(scope, ownerId=identity.codeEntryInstanceId, capabilityId=capability, handler=handler)
+    scope.publish()
+    return scope
+
+
+def test_ex03_peer_exclusion_between_turns_and_release_after_job(rig, tmp_path, monkeypatch):
+    """Even same-profile peer calls are denied through the idle gap between reserved turns."""
+    from backend.context.codeEntryContext import _LlmFacade
+    from backend.llm.errors import LlmExecutionConflictError, LlmExecutionOwnershipError
+    value = suiteDefinition(rig)
+    prepared = launcher.prepare(value, rig[1])
+    host, runtime, plan, config = runtimeFor(prepared, tmp_path)
+    peer = host.createApplication(appPackId='applications.experimentRunner', plan=plan, config=config)
+    entered, release = Event(), Event()
+    original = _LlmFacade.run
+    held = {}
+
+    def pause(self, **kwargs):
+        """Pause after complete provider cleanup while the actual conversation remains reserved."""
+        response = original(self, **kwargs)
+        if rig[0]['calls'] == 1:
+            held['session'] = kwargs['session']
+            entered.set()
+            assert release.wait(5)
+        return response
+
+    def infer(ctx, payload):
+        """Use only the normal admitted peer facade, optionally with a foreign issued session."""
+        return ctx.llm.run(providerName='llama.cpp', model='Q',
+            query=entry.LlmMessages((entry.LlmMessage('user', 'peer'),)).toQuery(),
+            session=held['session'] if payload else None)
+
+    def switch(ctx, payload):
+        """Request an actual incompatible transition using independently granted authority."""
+        return ctx.llm.transitionProfile(ctx.llm.profile(providerName='llama.cpp', model='Q3'))
+
+    publishTestCapability(peer, 'test.infer@1', infer)
+    publishTestCapability(peer, 'test.switch@1', switch)
+    publishTestCapability(runtime, 'test.stale@1', infer)
+    monkeypatch.setattr(_LlmFacade, 'run', pause)
+    single = schema.unitDefinition(prepared[0], 0)
+    runId = runtime.invokeCapability('experimentRunner.prepare@1', unitPayload(single.value()))
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(runtime.runJob, 'experimentRunner.run@1', runId)
+        assert entered.wait(5)
+        try:
+            assert host.executionResources.snapshots[0].exclusive is True
+            with pytest.raises(LlmExecutionConflictError):
+                peer.invokeCapability('test.infer@1', False)
+            with pytest.raises(LlmExecutionConflictError):
+                peer.invokeCapability('test.switch@1')
+            with pytest.raises(LlmExecutionOwnershipError):
+                peer.invokeCapability('test.infer@1', True)
+            assert len(rig[0]['processes']) == 1 and not rig[0]['processes'][0].terminated
+        finally:
+            release.set()
+        assert future.result(timeout=10).state.value == 'Succeeded'
+    assert host.executionResources.snapshots[0].exclusive is False
+    with pytest.raises(LlmExecutionOwnershipError):
+        runtime.invokeCapability('test.stale@1', True)
+    assert peer.invokeCapability('test.infer@1', False).rawText == 'answer-2'
+    peer.invokeCapability('test.switch@1')
+    assert len(rig[0]['processes']) == 2
+    host.stop()
+
+
+def test_ex03_transition_reservation_race_preserves_winner(rig, tmp_path, monkeypatch):
+    """Another owner winning after transition causes one denial without takeover or retry."""
+    from backend.context.codeEntryContext import _LlmFacade
+    value = suiteDefinition(rig)
+    prepared = launcher.prepare(value, rig[1])
+    host, runtime, plan, config = runtimeFor(prepared, tmp_path)
+    peer = host.createApplication(appPackId='applications.experimentRunner', plan=plan, config=config)
+    reader = runtime.invokeCapability('experimentRunner.reader@1')
+    original = _LlmFacade.reserveConversation
+    winner, racing = {}, [False]
+
+    def reserve(ctx, payload):
+        """Install the actual peer reservation in the explicit transition/reserve gap."""
+        profile = ctx.llm.profile(providerName='llama.cpp', model='Q')
+        winner['session'] = original(ctx.llm, profile)
+
+    def race(self, profile):
+        """Let the peer win exactly once before admitting the runner's reservation."""
+        if not racing[0]:
+            racing[0] = True
+            peer.invokeCapability('test.reserve@1')
+        return original(self, profile)
+
+    publishTestCapability(peer, 'test.reserve@1', reserve)
+    monkeypatch.setattr(_LlmFacade, 'reserveConversation', race)
+    runId = runtime.invokeCapability('experimentRunner.prepare@1', unitPayload(schema.unitDefinition(prepared[0], 0).value()))
+    job = runtime.runJob('experimentRunner.run@1', runId)
+    assert job.state.value == 'Failed'
+    run = reader.read().value()
+    assert run['error']['category'] == 'execution-conflict' and run['error']['stage'] == 'reservation'
+    assert run['reservation']['acquisition'] == 'failed' and run['reservation']['close'] == 'not-attempted'
+    assert host.executionResources.snapshots[0].exclusive is True
+    assert rig[0]['calls'] == 0 and len(rig[0]['processes']) == 1 and not rig[0]['processes'][0].terminated
+    winner['session'].close()
+    host.stop()
+
+
+def test_ex03_lifetime_boundary_failure_stops_after_successful_job(rig, monkeypatch):
+    """A failed returned-boundary report cannot certify a unit merely because its Job succeeded."""
+    value = suiteDefinition(rig)
+    create = launcher.RuntimeHost.createApplication
+
+    def wrappedCreate(self, **kwargs):
+        """Keep actual runtime execution and inject a separate lifetime-boundary failure."""
+        runtime = create(self, **kwargs)
+        original = runtime.runJob
+
+        def wrapped(*args, **options):
+            """Return no success receipt after the actual Job has terminally completed."""
+            original(*args, **options)
+            raise RuntimeError('Synthetic lifetime boundary failure')
+        runtime.runJob = wrapped
+        return runtime
+    monkeypatch.setattr(launcher.RuntimeHost, 'createApplication', wrappedCreate)
+    result, _ = executeSuite(rig, value)
+    first = result['suite']['units'][0]
+    assert first['jobOutcome'] == 'Succeeded' and first['run']['status'] == 'succeeded'
+    assert first['status'] == 'failed' and first['lifetimeBoundary'] == 'failed-or-unknown'
+    assert result['suite']['status'] == 'failed' and rig[0]['calls'] == 2
+    assert all(unit['status'] == 'not-started' for unit in result['suite']['units'][1:])
+
+
+def test_ex03_cancellation_before_first_unit_has_no_job_admission(rig):
+    """Already cancelled suites retain bounded planned units without any transition or Job."""
+    value = suiteDefinition(rig)
+    control = launcher.SuiteControl()
+    control.cancel()
+    result, _ = executeSuite(rig, value, control=control)
+    assert result['suite']['status'] == 'cancelled'
+    assert all(unit['status'] == 'not-started' and unit['jobOutcome'] is None for unit in result['suite']['units'])
+    assert rig[0]['calls'] == 0 and rig[0]['processes'] == []
+
+
+def test_ex03_cancellation_in_later_reserved_stream_keeps_earlier_job(rig):
+    """Suite cancellation targets the exact active Job and leaves earlier terminal Jobs unchanged."""
+    value = suiteDefinition(rig)
+    entered, stopped = Event(), Event()
+    control = launcher.SuiteControl()
+
+    def blocked():
+        """Pause the second unit's first provider stream until its exact stop callback fires."""
+        yield stream('later partial')[0]
+        entered.set()
+        assert stopped.wait(5)
+        raise OSError('Synthetic cancelled read')
+    rig[0]['streams'][2] = blocked()
+    rig[0]['onStop'] = stopped.set
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(executeSuite, rig, value, control=control)
+        assert entered.wait(5)
+        control.cancel()
+        result, _ = future.result(timeout=10)
+    units = result['suite']['units']
+    assert [unit['status'] for unit in units] == ['succeeded', 'cancelled', 'not-started', 'not-started']
+    assert units[0]['jobOutcome'] == 'Succeeded' and units[1]['jobOutcome'] == 'Cancelled'
+    assert units[1]['run']['turns'][0]['partial']['answer'] == 'later partial'
+    assert units[1]['run']['turns'][0]['cleanup']['quiescence'] == 'unknown'
+    assert units[1]['run']['reservation']['close'] == 'queued'
+    assert rig[0]['calls'] == 3 and result['suite']['status'] == 'cancelled'
+
+
+@pytest.mark.parametrize('boundary', ['aggregate-write', 'unit-evidence'])
+def test_ex03_suite_interrupt_preserves_unit_outcomes_and_owned_teardown(rig, monkeypatch, boundary):
+    """R1 interruption protection applies to aggregate persistence and between-unit evidence."""
+    value = suiteDefinition(rig)
+    interrupt = KeyboardInterrupt('private suite interruption')
+    if boundary == 'aggregate-write':
+        def persist(*args):
+            """Interrupt only the final aggregate first write after all actual Jobs complete."""
+            raise interrupt
+        monkeypatch.setattr(launcher, 'persist', persist)
+    else:
+        original = launcher.loadAdapter().LlamaCppComposition.configurationEvidence
+        captured = []
+
+        def evidence(self, *args):
+            """Interrupt evidence for the second completed unit without changing provider execution."""
+            captured.append(True)
+            if len(captured) == 2:
+                raise interrupt
+            return original(self, *args)
+        monkeypatch.setattr(launcher.loadAdapter().LlamaCppComposition, 'configurationEvidence', evidence)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        executeSuite(rig, value)
+    assert caught.value is interrupt
+    result = caught.value.experimentExecution.value()
+    units = result['suite']['units']
+    assert all(unit['status'] == 'succeeded' for unit in units[:2])
+    assert all(unit['jobOutcome'] == 'Succeeded' for unit in units[:2])
+    assert result['hostCleanup'] == 'completed' and all(process.returncode == 0 for process in rig[0]['processes'])
+    if boundary == 'aggregate-write':
+        assert result['suite']['status'] == 'succeeded' and rig[0]['calls'] == 8
+    else:
+        assert result['suite']['status'] == 'failed' and rig[0]['calls'] == 4
+        assert all(unit['status'] == 'not-started' for unit in units[2:])
+    assert launcher.exitCode(result) == 1
+
+
+def test_ex03_cli_aggregate_counts_and_explicit_private_inspection(rig, tmp_path, capsys):
+    """The versioned terminal suite surface emits counts without raw unit content."""
+    cli = importlib.import_module('first-party.applications.experimentRunner.run')
+    value = suiteDefinition(rig)
+    definitionFile, hostFile = tmp_path / 'suite.json', tmp_path / 'host.json'
+    definitionFile.write_bytes(schema.canonical(value))
+    hostFile.write_bytes(schema.canonical(rig[1]))
+    args = ['--definition', str(definitionFile), '--host-config', str(hostFile)]
+    assert cli.main(['validate', *args]) == 0 and rig[0]['processes'] == []
+    capsys.readouterr()
+    assert cli.main(['run', *args, '--results', str(rig[2])]) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary['status'] == 'succeeded' and summary['unitsSucceeded'] == 4 and summary['turnsSucceeded'] == 8
+    assert 'answer-' not in json.dumps(summary) and 'separate-' not in json.dumps(summary)
+    assert cli.main(['inspect', '--result', summary['path']]) == 0
+    assert 'answer-7' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('ceiling', ['configurations', 'repetitions', 'executions', 'turn-calls'])
+def test_ex03_schema_product_ceilings_are_independent_of_host_caps(rig, ceiling):
+    """The definition cannot exceed schema expansion maxima even under maximum valid host caps."""
+    value = suiteDefinition(rig)
+    if ceiling == 'repetitions':
+        value['repetitions'] = 11
+    else:
+        count = {'configurations': 9, 'executions': 4, 'turn-calls': 8}[ceiling]
+        config = value['configurations'][0]
+        value['configurations'] = [dict(config, name=str(index)) for index in range(count)]
+        value['repetitions'] = 9 if ceiling == 'executions' else 3 if ceiling == 'turn-calls' else 1
+        if ceiling == 'turn-calls':
+            rig[1]['limits']['maxTurns'] = 16
+            turn = value['conversation']['turns'][0]
+            value['conversation']['turns'] = [dict(turn, id=str(index)) for index in range(12)]
+    with pytest.raises(schema.ValidationError):
+        launcher.prepare(value, rig[1])
+    assert rig[0]['processes'] == [] and rig[0]['requests'] == []
+
+
+def test_ex03_unused_catalog_selector_is_not_actual_authority(rig, tmp_path):
+    """A configured but unselected profile cannot be resolved by the actual Application owner."""
+    from backend.llm.errors import LlmExecutionOwnershipError
+    value = suiteDefinition(rig, differentStartup=False)
+    host, runtime, _, _ = runtimeFor(launcher.prepare(value, rig[1]), tmp_path)
+
+    def resolve(ctx, payload):
+        """Attempt only public profile resolution for an ungranted catalog selector."""
+        return ctx.llm.profile(providerName='llama.cpp', model='Q3')
+    publishTestCapability(runtime, 'test.unused@1', resolve)
+    try:
+        with pytest.raises(LlmExecutionOwnershipError):
+            runtime.invokeCapability('test.unused@1')
+        assert rig[0]['calls'] == 0 and rig[0]['processes'] == []
+    finally:
+        host.stop()
+
+
+def test_ex03_close_failure_before_queue_does_not_continue(rig, monkeypatch):
+    """An unqueued reservation-close failure stops the suite and delegates only normal owner teardown."""
+    from backend.llm.executionSessions import LlmConversationSession
+    value = suiteDefinition(rig)
+
+    def close(self):
+        """Fail before queueing release; never assert that this reservation was released."""
+        raise RuntimeError('Synthetic unqueued close failure')
+    monkeypatch.setattr(LlmConversationSession, 'close', close)
+    result, _ = executeSuite(rig, value)
+    first = result['suite']['units'][0]
+    assert first['jobOutcome'] == 'Failed' and first['run']['reservation']['close'] == 'failed'
+    assert first['run']['reservation']['releaseReceipt'] == 'unavailable'
+    assert all(unit['status'] == 'not-started' for unit in result['suite']['units'][1:])
+    assert rig[0]['calls'] == 2 and len(rig[0]['processes']) == 1
+    assert result['hostCleanup'] == 'completed' and rig[0]['processes'][0].returncode == 0
+
+
+def test_ex03_private_configuration_evidence_has_a_recorded_size_limit(rig, monkeypatch):
+    """Oversized explicit private evidence is unavailable rather than defeating result preflight bounds."""
+    value = suiteDefinition(rig)
+
+    def oversized(*args):
+        """Return a deliberately oversized JSON-only private composition snapshot."""
+        return {'private': 'x' * 262145}
+    monkeypatch.setattr(launcher.loadAdapter().LlamaCppComposition, 'configurationEvidence', oversized)
+    result, _ = executeSuite(rig, value)
+    assert result['suite']['status'] == 'succeeded'
+    assert all(unit['configurationEvidence'] == {'status': 'unavailable-over-limit'} for unit in result['suite']['units'])
+
+
+def test_ex03_checked_in_templates_validate_without_probing_assets(rig):
+    """The exact documented examples validate with explicit local substitutions and zero launches."""
+    host = launcher.readJson(launcher.APP / 'host.example.json')
+    host['llamaCpp']['executable'] = rig[1]['llamaCpp']['executable']
+    for model in host['llamaCpp']['models'].values():
+        model['modelPath'] = rig[1]['llamaCpp']['models']['Q']['modelPath']
+    for filename in ('example.definition.json', 'example.suite.definition.json'):
+        definitionValue = launcher.readJson(launcher.APP / filename)
+        prepared = launcher.prepare(definitionValue, host)
+        assert prepared[0].value()['schemaId'] == 'actant.experiment.definition@2'
+    assert rig[0]['processes'] == [] and rig[0]['requests'] == []

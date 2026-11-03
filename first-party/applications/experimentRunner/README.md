@@ -1,162 +1,185 @@
-# Experiment Runner (EX-01/EX-02)
+# Experiment Runner (EX-01/02/R1 and EX-03)
 
-This first-party AppPack runs one ordered conversation as one Actant Job through
-the managed llama.cpp provider. The v1 bootstrap supports one configuration, one
-conversation of 2–16 user turns, one repetition, replayed successful answers,
-stop-on-error, and best-effort fresh per-call context. These are bootstrap limits;
-EX-03/04/05, exclusive conversations, crash durability and comparison are unassigned.
+This Application runs ordered configurations and repetitions through the managed
+Actant llama.cpp provider. Each conversation execution is one actual Job with its
+own exclusive conversation session. Histories start empty for every execution.
+The complete imported platform remains colocated with this AppPackage; Application
+source/tests belong on `actant-experiment-runner`, not the platform branch.
 
-From the repository root, using this checkout's Python 3.15 runtime:
+From this checkout root, with its own Python 3.15 runtime:
 
 ```powershell
-.\python-embedded\python.exe -X frozen_modules=off first-party/applications/experimentRunner/run.py validate --definition first-party/applications/experimentRunner/example.definition.json --host-config python-embedded/experiment-runner-local/host.json
-.\python-embedded\python.exe -X frozen_modules=off first-party/applications/experimentRunner/run.py run --definition first-party/applications/experimentRunner/example.definition.json --host-config python-embedded/experiment-runner-local/host.json --results python-embedded/experiment-runner-local/results
+.\python-embedded\python.exe -X frozen_modules=off first-party/applications/experimentRunner/run.py validate --definition first-party/applications/experimentRunner/example.suite.definition.json --host-config python-embedded/experiment-runner-local/host.json
+.\python-embedded\python.exe -X frozen_modules=off first-party/applications/experimentRunner/run.py run --definition first-party/applications/experimentRunner/example.suite.definition.json --host-config python-embedded/experiment-runner-local/host.json --results python-embedded/experiment-runner-local/results
 .\python-embedded\python.exe -X frozen_modules=off first-party/applications/experimentRunner/run.py inspect --result PRIVATE_RESULT_FILE
 ```
 
-`validate` parses the entire definition and host catalog without activation,
-model loading or binary probes. `run` prints only outcome/count/path summaries.
-`inspect` explicitly prints private prompts, answers, reasoning and selected host
-evidence. Exit 0 requires successful run **and** Job, successful result persistence
-and completed host cleanup. Ctrl+C requests cancellation on the retained Job and
-waits for ordinary provider cleanup. There is no abort probe, process takeover,
-automatic retry, transition restoration, tombstone repair or unmanaged fallback.
+Copy `host.example.json` to a private ignored location and replace its placeholders
+with explicitly authorized assets. Both startup profiles use the SAME Qwen3-4B
+GGUF; the only startup difference is threads4 versus threads3. Reducing threads
+below the existing ceiling supplies a distinct startup identity without increasing
+CPU/context1024/token24/threads<=4 limits. Choose an unused port; never displace a
+listener. The template does not identify or download assets. Real execution needs
+the supplied executable/model hashes/build independently verified. The suite example
+requests 2 configs x 2 repetitions x 2 turns = 8 calls. `example.definition.json`
+remains the single-config/single-repetition example under the new schema.
 
-The separately supplied **trusted host** JSON has this shape (replace placeholders
-with authorized local assets; never put startup settings in the definition):
+`validate` performs full definition/catalog preflight without activation, binary
+probes or model launch. `run` prints only suite identity/status/counts/path and
+separate launcher/write/host diagnostics. `inspect` explicitly displays private
+content. Exit 0 requires complete suite success, successful persistence and completed
+host cleanup. Ctrl+C cancels the active exact Job or prevents the next unit when
+between Jobs. A post-loop interruption is re-raised after owned teardown.
 
-```json
-{
-  "schemaId": "actant.experiment.host@1",
-  "aliases": {"qwen-demo": "Qoff"},
-  "limits": {"maxTokens": 24, "timeoutSeconds": 30, "maxTurns": 4, "maxOutputCharacters": 4096},
-  "persistConfigurationEvidence": true,
-  "llamaCpp": {
-    "manageServer": true,
-    "executable": "ABSOLUTE_AUTHORIZED_SERVER_PATH",
-    "host": "127.0.0.1",
-    "port": 18761,
-    "defaultModel": "Qoff",
-    "startupTimeoutSeconds": 90,
-    "capabilityCheck": "required",
-    "extraArgs": ["--slots", "--no-webui", "--no-op-offload"],
-    "models": {"Qoff": {
-      "modelPath": "ABSOLUTE_AUTHORIZED_QWEN3_4B_PATH",
-      "contextWindowTokens": 1024,
-      "threads": 4,
-      "threadsBatch": 4,
-      "gpuLayers": 0,
-      "batchSize": 128,
-      "ubatchSize": 128,
-      "parallelSlots": 1,
-      "kvOffload": false,
-      "serverReasoning": "off",
-      "specMethods": ["none"]
-    }}
-  }
-}
-```
+## Explicit schema migration and preflight
 
-Choose an unused port; do not displace another listener. The launcher grants only
-the selected catalog selector to the exact Application CodeEntry source identity,
-with explicit transition authority, and pins the manifest provider's exact source.
-Aliases do not mint grants or descriptor compatibility. All turns and merged
-options validate before RuntimeHost creation. Activation publishes capabilities
-without inference; the Job resolves and explicitly transitions once before calls.
-The host owns the catalog, aliases, caps and config-evidence selection. Definitions
-cannot provide paths, URLs, argv, environment, ports, domains, grants or required
-physical freshness/retention. The general schema bounds do not authorize increasing
-the real demonstration's CPU/context1024/token24/threads4 ceiling.
+EX-03 accepts `actant.experiment.definition@2` and trusted
+`actant.experiment.host@2`. Version-1 inputs explicitly reject; there is no silent
+reinterpretation or compatibility adapter. Single-config/single-repetition behavior
+and EX-01/02/R1 architectural assertions remain covered with migrated fixtures.
 
-The definition file is strict UTF-8 JSON capped at 1 MiB before parsing. Duplicate
-keys, unknown fields, nonfinite/bool-as-number/null controls and unsupported policies
-reject. Names/IDs are exact nonblank text up to 128 characters; user content is
-exact nonempty text up to 16384 characters. Whitespace is preserved. Defaults require
-`maxTokens` and `timeoutSeconds`; omitted temperature becomes 0.7. Supported options:
+The definition retains one conversation of 2..16 ordered user-only text turns,
+`historyPolicy: replay-answers`, `errorPolicy: stop`, and
+`contextPolicy: fresh-best-effort`. Configurations are an ordered nonempty list of
+unique names, approved profile aliases, defaults and unique `allowedOverrides`.
+Repetitions must be an exact positive integer, excluding bool. Execution order is
+configuration 1 repetitions 1..N, then configuration 2 repetitions 1..N, and so on.
+There is no reordering for residency, concurrent execution, implicit queue/wait,
+retry, continuation after failure, restoration or reservation across the suite.
 
-| Option | Bound |
+All configurations, including later ones, validate before ANY model startup.
+The input is strict UTF-8 JSON capped at 1 MiB before parsing. Duplicate keys,
+unknown fields, nonfinite values, bool-as-number/null controls, unsupported policies
+and invalid merged options reject. Names/IDs are exact nonblank text up to 128
+characters; content is exact nonempty text up to 16384 characters. No whitespace
+normalization. Defaults require tokens/time; omitted temperature becomes 0.7.
+Definitions and nested options/aliases are copied into immutable canonical bytes.
+SHA-256 hashes compact sorted-key UTF-8 JSON (`ensure_ascii=False`,
+`allow_nan=False`), including explicit defaults and configuration order.
+
+| Bound | Schema ceiling; host may narrow |
 | --- | --- |
-| temperature | finite 0–2 |
-| maxTokens | exact integer 1–4096, additionally host-capped |
-| timeoutSeconds | finite >0–120, additionally host-capped |
-| topP / minP | finite 0–1 |
-| topK | exact integer 1–100000 |
-| repeatPenalty | finite >0–10 |
+| configurations | 8 (`maxConfigurations`) |
+| repetitions | 10 (`maxRepetitions`) |
+| conversation executions | 32 (`maxExecutions`) |
+| total requested turn calls | 256 (`maxTurnCalls`) |
+| turns per conversation | 16 (`maxTurns`) |
+| combined answer/reasoning chars per turn | 65536 (`maxOutputCharacters`) |
+| retained canonical result | 64 MiB, conservative expansion check before startup |
+
+The host also supplies `maxTokens`/`timeoutSeconds`. The retained-data estimate
+includes query-history replay, output escaping, repeated definitions, native/profile
+metadata and up to 256 KiB private configuration evidence per unit. Oversized
+expansion rejects rather than truncating units. This is a logical JSON-data bound,
+not a process RSS or provider buffering promise. Atomic result writing uses compact
+canonical JSON with a final 64 MiB byte guard; inspect has the same byte ceiling.
+
+| Request option | Bound |
+| --- | --- |
+| temperature | finite 0..2 |
+| maxTokens | exact integer 1..4096, additionally host-capped |
+| timeoutSeconds | finite >0..120, additionally host-capped |
+| topP / minP | finite 0..1 |
+| topK | exact integer 1..100000 |
+| repeatPenalty | finite >0..10 |
 | seed | signed 32-bit exact integer |
 | reasoningFormat | none / auto / deepseek / deepseek-legacy |
-| reasoningEffort | nonblank text, at most 128 characters; no effectiveness promise |
-| chatTemplateKwargs | only exact boolean enable_thinking / preserve_reasoning |
+| reasoningEffort | nonblank text <=128 chars; no effectiveness promise |
+| chatTemplateKwargs | exact booleans enable_thinking / preserve_reasoning only |
 
-`allowedOverrides` is a unique subset of those option names. Every merged turn is
-validated, including the conflict between effort `none` and thinking `true`.
-The host additionally limits turns and combined answer/reasoning characters per
-turn (1–65536). Excess output fails the turn and retains only bounded partial
-diagnostics. A partial answer is never replayed. Context overflow is a provider
-error; this package does not clip, summarize or rewrite the conversation.
+Every turn's overrides must be permitted by EVERY selected configuration. Validate
+merged defaults/overrides, including effort `none` versus thinking `true` conflicts.
+Definitions cannot supply startup settings, paths, argv/env/ports/domains/grants,
+URLs or required physical freshness/retention. Schema ceilings do not authorize
+increasing the actual demonstration's resource limits.
 
-Turn one sends `[user1]`; turn two sends
-`[user1, assistant1.rawText, user2]`. Empty completed answers remain valid exact
-answers. Separate `llamaCppReasoning.content` never enters history. Each call uses
-canonical immutable `LlmMessages` bytes and `FreshContext(required=False,
-retain=False)`. Per-call admission/cleanup is retained; there is no conversation
-reservation. Other authorized work may intervene between calls, causing the next
-call to fail without automatic profile restoration.
+## Managed ownership and unit boundaries
 
-`prepare@1`, `run@1`, `inspect@1`, and `finish@1` are prefixed
-`experimentRunner.`. `onLoad` owns a bounded single-invocation recorder; overlapping
-prepared/running invocations reject. `inspect` returns a frozen byte snapshot with
-detached inspection copies, including after Job rollback. It retains no Context,
-transaction, IO facade, estimator or execution handle. Until the launcher supplies
-the independently observed terminal Job outcome to diagnostic `finish`, recorder
-`status` is null; application completion alone cannot certify run success. These
-diagnostics are ephemeral and are not committed authoritative mutation.
+The host independently freezes LlamaCppCatalog/aliases/caps. LlamaCppComposition
+pins exact provider and actual Application source EntrySelectors and grants only
+the deduplicated SELECTED selectors plus explicit transition authority. Unused
+catalog models receive no grants. Alias/name equality does not establish authority
+or descriptor compatibility. Activation publishes capabilities without inference.
 
-The launcher atomically writes `<opaque-runId>.json` through ManagedIo before
-runtime teardown, then updates the same file with host cleanup if possible. A new
-invocation gets a new run ID, even with an identical experiment ID. The outer
-`actant.experiment.execution@1` envelope keeps `run` (`actant.experiment.result@1`),
-actual `jobOutcome`, `launcherFailure`, `resultWriteFailure` and `hostCleanup`
-separate. Turn statuses include explicit `not-started`; unavailable evidence stays
-null/unknown. Cleanup comes from execution evidence or an exception's public
-`llmCleanup`, independently of original success/failure/cancellation. Failed-call
-private deltas are explicitly partial. Native usage/model/finish summaries and
-safe resolved profile metadata are bounded; native task IDs and bearer handles
-are excluded. The definition hash is SHA-256 of sorted-key compact JSON encoded
-as UTF-8 (`ensure_ascii=False`, `allow_nan=False`), including explicit default
-temperature. Structured query snapshots describe Application-sent messages, not
-wire-level serialization proof.
+Each unit resolves its profile, explicitly transitions, then reserves a conversation.
+Transition and reservation are separate admissions: another owner can win the gap;
+that denial stops this suite without takeover/retry. The exact issued session is
+passed to every `ctx.llm.run`. Even same-profile peers are excluded between turns.
+Each call retains `FreshContext(required=False, retain=False)`; replay is Application
+policy, not retained KV. Completed empty answers remain valid. Partial output and
+separate reasoning never enter history. Queries are immutable canonical LlmMessages:
+`[user1]`, then `[user1, assistant1.rawText, user2]`. No clipping or summarization;
+provider/context overflow stops the suite.
 
-Choose a directory private to the local user. The example uses ignored
-`python-embedded/` for config/results. There is no ACL manager or durable archive.
-Explicit `persistConfigurationEvidence=true` retains the composer's private
-planned/actual evidence with its existing effective-unknown labels; omission
-retains none. Default tracing discards records and no monitoring is activated.
-Prompts, raw exceptions and host settings are not printed by ordinary execution.
-If an atomic write/update fails, the CLI reports it and exits nonzero; it cannot
-persist its own write failure into the failed destination. An earlier successful
-file may therefore retain the pre-teardown snapshot. The in-process return value
-keeps original outcomes and final failure diagnostics. Process crashes can lose
-ephemeral results; EX-04 owns durability and complete wire provenance.
+The session closes in `finally` after per-call cleanup. Close queues release; it
+is NOT a synchronous release receipt. The launcher waits for the actual Job's
+runtime lifetime boundary to return before the next transition/reservation. Existing
+public cleanup diagnostics distinguish failed/unknown boundaries; no private drain,
+manual claim finish, provider stop or recovery is called. Exclusion is released
+between successful units, so other authorized work may intervene. UNKNOWN, busy,
+revocation or a reservation race stops the suite and leaves explicit unstarted units.
 
-Post-Job interruptions during finalization, evidence capture or persistence still
-enter the enclosing owned host-teardown boundary. A `KeyboardInterrupt` or other
-non-`Exception` exit is re-raised after cleanup, with an immutable diagnostic
-snapshot attached as `error.experimentExecution` for in-process callers. It cannot
-produce a successful CLI exit. Original run/turn/Job outcomes remain separate from
-the interrupted launcher/write and host cleanup; interrupted or uncertain cleanup
-stays `failed-or-unknown`. The first interruption remains primary if cleanup also
-raises. A failed/interrupted write is not retried. This is not a guarantee against
-process termination, repeated interruption inside provider cleanup, or a real
-provider abort validation.
+## Private outcomes and interruption handling
 
-Focused verification (synthetic process/HTTP IO, actual Actant runtime/provider):
+`actant.experiment.execution@2` wraps a fresh `actant.experiment.suite@1`. The suite
+has a fresh opaque suiteId, immutable definition/hash, timing/status and ordered
+units with stable independent unit IDs, config index/name/alias and repetition.
+Each unit has an actual Job outcome (null when unadmitted), independent unit status,
+lifetime-boundary status, optional private configuration evidence and a
+`actant.experiment.result@2` conversation result whose runId equals unitId.
+Conversation results retain turns/options/exact queries/answers/separate reasoning,
+timings, bounded native summaries and public executionEvidence snapshots. The unit
+is successful only when its Job, conversation, reservation close and lifetime
+boundary all meet their normal completion conditions. Suite success needs EVERY
+scheduled unit successful. Launcher/file/host failure remains separate and makes
+CLI nonzero even when every conversation succeeded.
+
+Reservation diagnostics distinguish acquisition attempted/acquired/failed, close
+not-attempted/queued/failed, and releaseReceipt always `unavailable`. A returned
+lifetime boundary is not a fabricated provider release receipt. Per-call cleanup
+comes from executionEvidence or exception llmCleanup; missing evidence is unknown.
+Reasoning null means unavailable, not proof internal thinking was disabled. Native
+task IDs, grants, live estimators and session handles are excluded. Configuration
+planned/actual/effective-unknown labels come from composition, only if explicitly
+selected by host; oversized private evidence is marked unavailable-over-limit.
+
+The per-Application recorder holds immutable snapshots, never Context, transactions,
+IO facades or sessions. Prepare rejects overlap; run executes one unit; finish
+projects the independently observed Job for ephemeral diagnostics; inspect returns
+a frozen snapshot. Before execution the launcher obtains a read-only `reader@1`
+view. `reader.read()` returns immutable snapshots without another runtime invocation:
+a pending UNKNOWN reservation can make later capability boundaries fail. This
+Application-only diagnostic view has no execution/drain rights and preserves data
+without repairing/quiescing that resource. Old snapshots remain unchanged.
+
+SuiteControl holds a suite-owned cancellation flag and only the active exact Job.
+Cancellation before a unit prevents Job admission and transition; during a unit it
+cancels that Job. Earlier terminal Jobs are never relabeled. Results for units that
+never start remain explicit with no invented Job/provider evidence.
+
+One private `<suiteId>.json` is written atomically through ManagedIo before host
+teardown, then updated with host cleanup if possible. A failed/interrupted write
+is not retried. It may leave no file or a pre-teardown snapshot; returned diagnostics
+report failure separately. R1's enclosing host finally protects finalization,
+evidence capture and aggregate persistence. The first KeyboardInterrupt or other
+non-Exception exit is re-raised after cleanup, with immutable `experimentExecution`
+diagnostics attached. Cleanup failure/uncertainty remains failed-or-unknown and
+cannot overwrite original Job/cancellation outcomes. Repeated interruption inside
+provider cleanup or process termination/crash cannot promise completed shutdown.
+
+Select a directory private to the local user; the example uses ignored
+`python-embedded/`. No ACL manager, journal, crash recovery, automatic archive,
+comparison, PM/G UI or full wire-provenance system is added. Default trace sinks
+discard records and no monitoring activates. Structured snapshots are Application-sent
+queries, not proof of exact HTTP serialization. EX-04/05 remain unassigned.
 
 ```powershell
 .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib --tb=short tests/first_party/experimentRunner
 ```
 
-Real acceptance remains separately gated on the supplied executable/model identity,
-hashes and effective build evidence. It requires **two nonempty actual Qwen
-responses** through this path, ordered history, separate reasoning evidence and
-cleanup evidence. Synthetic tests and semantic correctness of a memory answer
-cannot substitute for that demonstration.
+Deterministic tests use actual Actant Application/Job/managed composition with
+explicitly SYNTHETIC process/HTTP IO. Real EX-03 acceptance separately requires eight
+actual nonempty Qwen responses across two startup profiles/two repetitions/two
+turns, verified identities/build, exact order/history, reuse/transitions and cleanup.
+Worker-local asset absence must be reported as a blocker; prior EX-01/02 evidence
+and synthetic tests do not substitute. No semantic answer-quality oracle.

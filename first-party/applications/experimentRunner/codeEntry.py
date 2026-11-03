@@ -1,10 +1,11 @@
-# file: first-party/applications/experimentRunner/codeEntry.py ; version: 1
+# file: first-party/applications/experimentRunner/codeEntry.py ; version: 2
 """One bounded conversation Job with ephemeral, rollback-independent diagnostics."""
 from __future__ import annotations
 
 import importlib
 import json
 import time
+import sys
 from threading import Lock
 
 from backend.llm.executionSessions import FreshContext
@@ -62,6 +63,18 @@ def boundedNative(metadata):
     return json.loads(encoded) if len(encoded) <= 16384 else {'truncated': True}
 
 
+class DiagnosticReader:
+    """Read only immutable recorder bytes without a post-failure runtime invocation."""
+
+    def __init__(self, recorder):
+        """Retain the Application diagnostic source, never Context/session/IO authority."""
+        self._recorder = recorder
+
+    def read(self):
+        """Return the current immutable snapshot; previously returned snapshots stay frozen."""
+        return self._recorder.snapshot
+
+
 class Recorder:
     """Own one immutable bounded diagnostic snapshot, without retaining any Context."""
 
@@ -75,12 +88,17 @@ class Recorder:
 
     def prepare(self, ctx, payload):
         """Validate/freeze a new invocation before its caller-retained Job is started."""
-        definition = schema.validate(payload, self.policy.value())
+        schema.fields(payload, ('unitId', 'definition'))
+        schema.require(type(payload['unitId']) is str and len(payload['unitId']) == 32
+                       and all(char in '0123456789abcdef' for char in payload['unitId']), 'Invalid unit identity.')
+        definition = schema.validate(payload['definition'], self.policy.value())
+        schema.require(len(definition.value()['configurations']) == 1 and definition.value()['repetitions'] == 1,
+                       'A conversation Job requires exactly one unit.')
         with self.lock:
             if self.pending:
                 raise RuntimeError('An experiment invocation is already pending.')
             self.definition = definition
-            self.snapshot = schema.Snapshot(schema.canonical(results.initialResult(definition)))
+            self.snapshot = schema.Snapshot(schema.canonical(results.initialResult(definition, payload['unitId'])))
             self.startedNs = time.monotonic_ns()
             self.pending = True
             return self.snapshot.value()['runId']
@@ -89,12 +107,16 @@ class Recorder:
         """Return immutable ephemeral diagnostics, including after Job rollback."""
         return self.snapshot
 
+    def reader(self, ctx, payload):
+        """Issue a read-only diagnostic view before execution can block runtime admission."""
+        return DiagnosticReader(self)
+
     def publish(self, result):
         """Replace the recorder with detached canonical bytes only."""
         self.snapshot = schema.Snapshot(schema.canonical(result))
 
     def execute(self, ctx, runId):
-        """Transition once, then replay only successfully completed assistant answers."""
+        """Hold one actual exclusive session across answer replay and all per-call cleanup."""
         with self.lock:
             if not self.pending or self.snapshot.value()['runId'] != runId:
                 raise RuntimeError('No matching prepared invocation.')
@@ -111,10 +133,15 @@ class Recorder:
         history = []
         started = self.startedNs
         stage, current = 'transition', None
+        session = None
         try:
             ctx.cancellation.raiseIfRequested()
             profile = ctx.llm.profile(providerName='llama.cpp', model=selector)
             ctx.llm.transitionProfile(profile)
+            stage = 'reservation'
+            result['reservation']['acquisition'] = 'attempted'
+            session = ctx.llm.reserveConversation(profile)
+            result['reservation']['acquisition'] = 'acquired'
             for turn, current in zip(definition['conversation']['turns'], result['turns'], strict=True):
                 stage = 'before-turn'
                 ctx.cancellation.raiseIfRequested()
@@ -142,7 +169,7 @@ class Recorder:
                 try:
                     response = ctx.llm.run(providerName='llama.cpp', model=selector, query=query.toQuery(),
                                            providerOptions=requested, context=FreshContext(required=False, retain=False),
-                                           streamObserver=observe)
+                                           streamObserver=observe, session=session)
                     evidence = evidenceSnapshot(response.executionEvidence)
                     current['executionEvidence'] = evidence
                     current['cleanup'] = cleanupSnapshot(evidence)
@@ -173,6 +200,8 @@ class Recorder:
             ctx.cancellation.raiseIfRequested()
             result['applicationOutcome'] = 'completed'
         except Exception as error:
+            if stage == 'reservation' and session is None:
+                result['reservation']['acquisition'] = 'failed'
             result['applicationOutcome'] = 'cancelled' if isinstance(error, ExecutionCancelled) else 'failed'
             result['error'] = (current['error'] if current is not None and current['error'] is not None
                                else safeError(error, stage))
@@ -180,8 +209,23 @@ class Recorder:
                 raise ExecutionCancelled('Experiment execution cancelled.') from None
             raise RuntimeError('Experiment execution failed.') from None
         finally:
+            primary = sys.exception()
+            closeError = None
+            if session is not None:
+                try:
+                    session.close()
+                    result['reservation']['close'] = 'queued'
+                except BaseException as error:
+                    closeError = error
+                    result['reservation']['close'] = 'failed'
+                    if result['error'] is None:
+                        result['error'] = safeError(error, 'reservation-close')
             result.update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - started)
             self.publish(result)
+            if closeError is not None and primary is None:
+                if not isinstance(closeError, Exception):
+                    raise closeError
+                raise RuntimeError('Conversation reservation close failed.') from None
         return runId
 
     def finish(self, ctx, payload):
@@ -214,6 +258,6 @@ def onLoad(ctx):
     """Create one per-Application recorder and register capabilities without inference."""
     recorder = Recorder(ctx.config['experimentRunner'])
     for name, handler in (('prepare', recorder.prepare), ('run', recorder.execute),
-                          ('inspect', recorder.inspect), ('finish', recorder.finish)):
+                          ('inspect', recorder.inspect), ('reader', recorder.reader), ('finish', recorder.finish)):
         ctx.capabilities.register('experimentRunner.' + name + '@1', handler)
     return recorder

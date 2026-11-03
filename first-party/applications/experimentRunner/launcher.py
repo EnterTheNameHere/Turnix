@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/launcher.py ; version: 2
+# file: first-party/applications/experimentRunner/launcher.py ; version: 3
 """Trusted host composition and private per-execution persistence for EX-01/02."""
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import tempfile
 import time
 from collections.abc import Mapping
 from pathlib import Path
+from threading import Event, Lock
 
 from backend.io.managedIo import ManagedIo
 from backend.orchestration import Job
@@ -46,17 +47,20 @@ def hostConfiguration(value):
     """Freeze trusted launch config separately from untrusted declarative experiments."""
     value = schema.decode(schema.canonical(value))
     schema.fields(value, ('schemaId', 'llamaCpp', 'aliases', 'limits'), ('persistConfigurationEvidence',))
-    schema.require(value['schemaId'] == 'actant.experiment.host@1', 'Unsupported host schema.')
+    schema.require(value['schemaId'] == 'actant.experiment.host@2', 'Unsupported host schema; use version 2.')
     aliases, limits = value['aliases'], value['limits']
     schema.require(type(aliases) is dict and bool(aliases), 'Missing host aliases.')
     for alias, selector in aliases.items():
         schema.name(alias)
         schema.name(selector)
-    schema.fields(limits, ('maxTokens', 'timeoutSeconds', 'maxTurns', 'maxOutputCharacters'))
+    schema.fields(limits, ('maxTokens', 'timeoutSeconds', 'maxTurns', 'maxOutputCharacters',
+                          'maxConfigurations', 'maxRepetitions', 'maxExecutions', 'maxTurnCalls'))
     schema.number(limits['maxTokens'], 1, 4096, integer=True)
     schema.number(limits['timeoutSeconds'], 0, 120, exclusive=True)
     schema.number(limits['maxTurns'], 2, 16, integer=True)
     schema.number(limits['maxOutputCharacters'], 1, 65536, integer=True)
+    for key, maximum in (('maxConfigurations', 8), ('maxRepetitions', 10), ('maxExecutions', 32), ('maxTurnCalls', 256)):
+        schema.number(limits[key], 1, maximum, integer=True)
     schema.require(type(value.get('persistConfigurationEvidence', False)) is bool, 'Invalid evidence selection.')
     schema.require(type(value['llamaCpp']) is dict and value['llamaCpp'].get('manageServer') is True,
                    'Only trusted managed llama.cpp is supported.')
@@ -77,11 +81,12 @@ def prepare(definitionValue, hostValue):
     catalog = adapter.LlamaCppCatalog.fromConfig(host.value()['llamaCpp'])
     schema.require(all(selector in catalog.profiles for selector in host.value()['aliases'].values()),
                    'Host alias references an unavailable catalog selector.')
-    selector = host.value()['aliases'][definition.value()['configurations'][0]['profile']]
+    selectors = tuple(dict.fromkeys(host.value()['aliases'][config['profile']]
+                                   for config in definition.value()['configurations']))
     caller = adapter.EntrySelector.fromSource('applications.experimentRunner', '0.1.0', 'main', APP / 'codeEntry.py')
     provider = adapter.EntrySelector.fromSource('llmDrivers.llamaCpp', '0.3.0', 'driver', DRIVER / 'structuredCodeEntry.py')
     composer = adapter.LlamaCppComposition(domainId='experiment-runner', catalog=catalog,
-        providerEntries=(provider,), grants=(adapter.LlamaCppGrant(caller, (selector,), allowTransition=True),))
+        providerEntries=(provider,), grants=(adapter.LlamaCppGrant(caller, selectors, allowTransition=True),))
     return definition, host, composer
 
 
@@ -100,38 +105,84 @@ def persist(io, directory, result):
     """Atomically write one opaque-run file into an explicitly selected private directory."""
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / (result['run']['runId'] + '.json')
-    io.writeJsonAtomic(path, result)
+    path = directory / (result['suite']['suiteId'] + '.json')
+    encoded = schema.canonical(result)
+    schema.require(len(encoded) <= schema.MAX_RESULT_BYTES, 'Private suite result exceeds byte limit.')
+    io.writeTextAtomic(path, encoded.decode('utf-8'))
     return path
 
 
-def execute(prepared, resultsDirectory, *, job=None, handleInterrupt=True):
-    """Run one actual Application Job; preserve its outcome through launcher/write failures.
+class SuiteControl:
+    """Own suite cancellation and only the exact currently active Job, across unit gaps."""
 
-    The initial private write precedes teardown. A second atomic update records host
-    cleanup when possible. Neither persistence nor shutdown changes original Job or
-    turn outcomes. Non-Exception exits are re-raised only after owned teardown;
-    their experimentExecution attribute retains the immutable diagnostic envelope
-    when a private write was interrupted. No failed write is retried.
+    def __init__(self):
+        """Create an initially uncancelled suite controller without runtime authority."""
+        self._cancelled, self._lane, self._job = Event(), Lock(), None
+
+    @property
+    def requested(self):
+        """Report cancellation independently of any completed or not-yet-created Job."""
+        return self._cancelled.is_set()
+
+    def cancel(self):
+        """Prevent subsequent admission and cooperatively cancel only the active retained Job."""
+        with self._lane:
+            self._cancelled.set()
+            if self._job is not None:
+                self._job.requestCancellation()
+
+    def begin(self, job):
+        """Atomically reject pre-unit cancellation or select this exact pending Job."""
+        with self._lane:
+            if self.requested:
+                return False
+            if self._job is not None:
+                raise RuntimeError('A conversation Job is already active.')
+            self._job = job
+            return True
+
+    def end(self, job):
+        """Drop only this completed unit's handle, preserving cancellation between units."""
+        with self._lane:
+            if self._job is job:
+                self._job = None
+
+
+def unitStatus(unit):
+    """Project conversation success only after Job, calls, reservation and lifetime boundary."""
+    run = unit['run']
+    if unit['jobOutcome'] == 'Cancelled':
+        return 'cancelled'
+    if (unit['jobOutcome'] == 'Succeeded' and run['status'] == 'succeeded'
+            and run['reservation']['close'] == 'queued' and unit['lifetimeBoundary'] == 'completed'):
+        return 'succeeded'
+    return 'failed'
+
+
+def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterrupt=True):
+    """Execute config-major independent conversations, draining each Job before the next.
+
+    R1's enclosing owned teardown and deferred first interrupt protect aggregate
+    diagnostics/persistence too. No public session-release receipt is invented;
+    queued close and the returned runtime lifetime boundary are recorded separately.
     """
     definition, hostConfig, composer = prepared
     config = hostConfig.value()
+    control = SuiteControl() if control is None else control
+    if job is not None and job.cancellationRequested:
+        control.cancel()
     io = ManagedIo()
-    job = Job.new() if job is None else job
-    fallback = results.initialResult(definition)
+    suite = results.initialSuite(definition, schema.unitDefinition)
     startedNs = time.monotonic_ns()
-    envelope = {'schemaId': 'actant.experiment.execution@1', 'run': None, 'jobOutcome': None,
-                'launcherFailure': None, 'resultWriteFailure': None, 'hostCleanup': 'not-started',
-                'configurationEvidence': None}
+    envelope = {'schemaId': 'actant.experiment.execution@2', 'suite': suite,
+                'launcherFailure': None, 'resultWriteFailure': None, 'hostCleanup': 'not-started'}
     resultPath = None
-    host, runtime, runId = None, None, None
+    host, runtime = None, None
     temporary = tempfile.TemporaryDirectory(prefix='actant-experiment-')
-    working = temporary.name
-    stage = 'activation'
-    pendingExit = None
+    stage, pendingExit = 'activation', None
 
     def noteInterrupt(error, at):
-        """Defer non-Exception exits without disguising them as successful execution."""
+        """Keep the first non-Exception exit for re-raise after exact owned cleanup."""
         nonlocal pendingExit
         if not isinstance(error, Exception):
             if pendingExit is None:
@@ -139,67 +190,101 @@ def execute(prepared, resultsDirectory, *, job=None, handleInterrupt=True):
             if envelope['launcherFailure'] is None:
                 envelope['launcherFailure'] = {'category': 'launcher-interrupted', 'stage': at}
 
+    def launcherFailure(error, at):
+        """Retain only bounded phase/category diagnostics, never raw exception messages."""
+        noteInterrupt(error, at)
+        if envelope['launcherFailure'] is None:
+            envelope['launcherFailure'] = {'category': 'launcher-failed', 'stage': at}
+
     try:
         try:
             try:
-                host = RuntimeHost(applicationStore=ApplicationStore(Path(working) / 'saves'),
+                host = RuntimeHost(applicationStore=ApplicationStore(Path(temporary.name) / 'saves'),
                     packResolver=PackResolver(roots=(DRIVER, APP)), providerComposers=(composer,))
                 host.start()
                 runtime = host.createApplication(appPackId='applications.experimentRunner',
                     plan=ManualActivationPlan(packIds=('llmDrivers.llamaCpp', 'applications.experimentRunner')),
                     config={'llamaCpp': config['llamaCpp'], 'experimentRunner': policyFor(hostConfig)})
-                stage = 'preparation'
-                runId = runtime.invokeCapability('experimentRunner.prepare@1', definition.value())
+                reader = runtime.invokeCapability('experimentRunner.reader@1')
                 previousHandler = None
                 if handleInterrupt:
                     def cancel(signum, frame):
-                        """Request cooperative cancellation on the retained exact Job handle."""
-                        job.requestCancellation()
+                        """Cancel the suite across unit gaps and its exact active Job during inference."""
+                        control.cancel()
                     previousHandler = signal.signal(signal.SIGINT, cancel)
                 try:
-                    stage = 'job'
-                    runtime.runJob('experimentRunner.run@1', runId, job=job)
+                    for unit in suite['units']:
+                        if control.requested:
+                            break
+                        activeJob = job if unit['index'] == 1 and job is not None else Job.new()
+                        if not control.begin(activeJob):
+                            break
+                        runId, admitted, finished = None, False, False
+                        try:
+                            stage = 'preparation'
+                            unitDefinition = schema.unitDefinition(definition, unit['configurationIndex'] - 1)
+                            runId = runtime.invokeCapability('experimentRunner.prepare@1',
+                                {'unitId': unit['unitId'], 'definition': unitDefinition.value()})
+                            unit['status'] = 'running'
+                            stage = 'job'
+                            admitted = True
+                            try:
+                                runtime.runJob('experimentRunner.run@1', runId, job=activeJob)
+                            except BaseException:
+                                unit['lifetimeBoundary'] = 'failed-or-unknown'
+                                raise
+                            else:
+                                unit['lifetimeBoundary'] = 'failed-or-unknown' if runtime.lastLlmCleanup else 'completed'
+                            stage = 'diagnostic-finalization'
+                            if unit['lifetimeBoundary'] == 'completed':
+                                unit['run'] = runtime.invokeCapability('experimentRunner.finish@1',
+                                    {'runId': runId, 'jobOutcome': activeJob.state.value}).value()
+                                finished = True
+                        except BaseException as error:
+                            launcherFailure(error, stage)
+                        finally:
+                            if admitted:
+                                unit['jobOutcome'] = activeJob.state.value
+                            if runId is not None and not finished:
+                                try:
+                                    recorded = reader.read().value()
+                                    recorded['status'] = ('cancelled' if activeJob.state.value == 'Cancelled' else
+                                        'succeeded' if activeJob.state.value == 'Succeeded'
+                                        and recorded['applicationOutcome'] == 'completed'
+                                        and recorded['reservation']['close'] == 'queued' else 'failed')
+                                    unit['run'] = recorded
+                                except BaseException as error:
+                                    noteInterrupt(error, 'diagnostic-inspection')
+                            if unit['run']['status'] is None:
+                                unit['run']['status'] = 'failed'
+                            unit['status'] = unitStatus(unit)
+                            if config.get('persistConfigurationEvidence', False):
+                                try:
+                                    selector = config['aliases'][unit['profileAlias']]
+                                    evidence = plain(composer.configurationEvidence(host.executionResources, selector))
+                                    unit['configurationEvidence'] = (evidence if len(schema.canonical(evidence)) <= 262144
+                                        else {'status': 'unavailable-over-limit'})
+                                except BaseException as error:
+                                    unit['configurationEvidence'] = {'status': 'unavailable'}
+                                    noteInterrupt(error, 'configuration-evidence')
+                            control.end(activeJob)
+                        if unit['status'] != 'succeeded' or pendingExit is not None or envelope['launcherFailure'] is not None:
+                            break
                 finally:
                     if handleInterrupt:
                         signal.signal(signal.SIGINT, previousHandler)
-                envelope['jobOutcome'] = job.state.value
-                stage = 'diagnostic-finalization'
-                envelope['run'] = runtime.invokeCapability('experimentRunner.finish@1',
-                    {'runId': runId, 'jobOutcome': job.state.value}).value()
             except BaseException as error:
-                noteInterrupt(error, stage)
-                if envelope['launcherFailure'] is None:
-                    envelope['launcherFailure'] = {'category': 'launcher-failed', 'stage': stage}
-                envelope['jobOutcome'] = job.state.value
+                launcherFailure(error, stage)
             finally:
-                if runtime is not None and runId is not None and envelope['run'] is None:
-                    try:
-                        recorded = runtime.invokeCapability('experimentRunner.inspect@1').value()
-                        recorded['status'] = ('cancelled' if job.state.value == 'Cancelled' else
-                                              'succeeded' if job.state.value == 'Succeeded'
-                                              and recorded['applicationOutcome'] == 'completed' else 'failed')
-                        envelope['run'] = recorded
-                    except BaseException as error:
-                        noteInterrupt(error, 'diagnostic-inspection')
-                if envelope['run'] is None:
-                    envelope['run'] = fallback
-                    envelope['run']['status'] = 'failed'
-                    envelope['run'].update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - startedNs)
-                if config.get('persistConfigurationEvidence', False) and host is not None:
-                    try:
-                        selector = config['aliases'][definition.value()['configurations'][0]['profile']]
-                        envelope['configurationEvidence'] = plain(composer.configurationEvidence(host.executionResources, selector))
-                    except BaseException as error:
-                        envelope['configurationEvidence'] = {'status': 'unavailable'}
-                        noteInterrupt(error, 'configuration-evidence')
+                suite['status'] = ('succeeded' if all(unit['status'] == 'succeeded' for unit in suite['units']) else
+                    'cancelled' if control.requested or any(unit['status'] == 'cancelled' for unit in suite['units']) else 'failed')
+                suite.update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - startedNs)
                 try:
                     resultPath = persist(io, resultsDirectory, envelope)
                 except BaseException as error:
                     envelope['resultWriteFailure'] = {'category': 'result-write-failed', 'stage': 'before-teardown'}
                     noteInterrupt(error, 'before-teardown-write')
         finally:
-            # This owner boundary encloses every activation, finalization, evidence
-            # and initial-write path, including uncaught non-Exception exits.
             if host is not None:
                 try:
                     host.stop()
@@ -214,20 +299,14 @@ def execute(prepared, resultsDirectory, *, job=None, handleInterrupt=True):
                 envelope['resultWriteFailure'] = {'category': 'result-write-failed', 'stage': 'after-teardown'}
                 noteInterrupt(error, 'after-teardown-write')
     except BaseException as error:
-        # Unexpected diagnostic construction errors must also retain any earlier
-        # interruption; host cleanup above has already been attempted.
-        noteInterrupt(error, 'diagnostic-processing')
-        if envelope['launcherFailure'] is None:
-            envelope['launcherFailure'] = {'category': 'launcher-failed', 'stage': 'diagnostic-processing'}
+        launcherFailure(error, 'diagnostic-processing')
         if pendingExit is None:
             pendingExit = error
     finally:
         try:
             temporary.cleanup()
         except BaseException as error:
-            noteInterrupt(error, 'temporary-cleanup')
-            if envelope['launcherFailure'] is None:
-                envelope['launcherFailure'] = {'category': 'launcher-failed', 'stage': 'temporary-cleanup'}
+            launcherFailure(error, 'temporary-cleanup')
     snapshot = schema.Snapshot(schema.canonical(envelope))
     if pendingExit is not None:
         pendingExit.experimentExecution = snapshot
@@ -236,7 +315,6 @@ def execute(prepared, resultsDirectory, *, job=None, handleInterrupt=True):
 
 
 def exitCode(envelope):
-    """Project CLI success only when run, Job, persistence and host cleanup all succeed."""
-    return 0 if (envelope['run'] is not None and envelope['run']['status'] == 'succeeded'
-                 and envelope['jobOutcome'] == 'Succeeded' and envelope['launcherFailure'] is None
+    """Require complete suite success and independent launcher/persistence/host success."""
+    return 0 if (envelope['suite']['status'] == 'succeeded' and envelope['launcherFailure'] is None
                  and envelope['resultWriteFailure'] is None and envelope['hostCleanup'] == 'completed') else 1
