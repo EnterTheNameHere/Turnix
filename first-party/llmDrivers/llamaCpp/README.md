@@ -106,6 +106,14 @@ Permanent runtime/host shutdown closes future admission before provider finalize
 Pack-only unload keeps a reversible gate until its whole cleanup boundary succeeds.
 Pending invocations, composition or cleanup report typed incomplete disposition.
 
+Actual broker cleanup callbacks and resource disposal reserve mutually exclusive
+ownership on the exact resource service before effects begin. This ownership
+survives runtime removal from host tables. A live callback keeps its authorized
+unload path available; concurrent shutdown reports pending before closing that
+service or stopping its process. Callbacks run outside lanes. After the owner
+unwinds, explicit retry can drain pending cleanup; unknown disposition remains
+reported without repeating a failed process-stop attempt.
+
 Changing sampling/request controls reuses loaded weights. Different startup flags,
 context capacity, template defaults or auxiliary speculative weights are a new
 residency, requiring an explicit authorized idle transition. Busy, exclusive or

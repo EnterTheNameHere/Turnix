@@ -1,4 +1,4 @@
-# file: backend/runtime/runtimeHost.py ; version: 12
+# file: backend/runtime/runtimeHost.py ; version: 13
 from __future__ import annotations
 
 from contextlib import suppress
@@ -10,6 +10,7 @@ from backend.application.lifecycle import ApplicationLifecycle
 from backend.core.runtimeIds import newRuntimeId
 from backend.llm.errors import LlmExecutionCleanupError
 from backend.llm.executionSessions import LlmExecutionBindings, lifetimeBoundary, hostClosePreflight
+from backend.llm.providerComposition import finishResourceEffects, finishBrokerEffects
 from backend.observation import ObservationService
 from backend.packs.runtime import ManualActivationPlan, PackResolver
 from backend.runtime.executionResources import ExecutionResourceService
@@ -235,6 +236,7 @@ class RuntimeHost:
         """
         errors: list[Exception] = []
         with self._lane:
+            runtimes = tuple(self._runtimesByRunId.values())
             self.executionResources.close()
             if self.state is not RuntimeHostState.STOPPED:
                 try:
@@ -261,9 +263,9 @@ class RuntimeHost:
         # Queue revocation may have completed operations during legacy teardown.
         # First stage can remain pending until ER-01 drains its registered pins.
         with suppress(LlmExecutionCleanupError, ExceptionGroup):
-            self.llmExecutions.finishClose()
+            finishBrokerEffects(self.llmExecutions, self.executionResources, runtimes)
         try:
-            self.executionResources.finishClose()
+            finishResourceEffects(self.executionResources)
         except Exception as err:  # noqa: BLE001 - include pending/failed/unknown resource evidence.
             errors.append(err)
         if errors:

@@ -1,4 +1,4 @@
-# file: backend/llm/providerComposition.py ; version: 2
+# file: backend/llm/providerComposition.py ; version: 3
 """Trusted activation composition, distinct from execution admission and Jobs."""
 from __future__ import annotations
 
@@ -6,13 +6,82 @@ from contextvars import ContextVar
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import wraps
-from threading import get_ident
+from threading import RLock, get_ident
 from typing import Protocol
+from weakref import WeakKeyDictionary
 
 from backend.llm.errors import LlmExecutionOwnershipError, LlmExecutionCleanupError
 
 _invocation = ContextVar("actant.composition.invocation", default=False)
 _lifecycle = ContextVar("actant.composition.lifecycle", default=False)
+_effectTables = WeakKeyDictionary()
+_effectTablesLane = RLock()
+
+
+class _EffectOwnership:
+    """Exact service's cleanup callback ownership, not execution/resource admission."""
+
+    def __init__(self):
+        """Keep callbacks and a resource disposer mutually exclusive without holding lanes."""
+        self.lane = RLock()
+        self.callbacks = set()
+        self.callbackThread = None
+        self.disposer = None
+
+
+def _effectOwnership(resources):
+    """Return the stable effect gate even after a runtime leaves its host's tables."""
+    with _effectTablesLane:
+        if resources not in _effectTables:
+            _effectTables[resources] = _EffectOwnership()
+        return _effectTables[resources]
+
+
+@contextmanager
+def effectCleanupScope(resources):
+    """Reserve actual broker callback ownership before a resource disposer can win."""
+    ownership = _effectOwnership(resources)
+    ticket = object()
+    with ownership.lane:
+        if ownership.disposer is not None or ownership.callbackThread not in (None, get_ident()):
+            raise LlmExecutionCleanupError()
+        ownership.callbacks.add(ticket)
+        ownership.callbackThread = get_ident()
+    try:
+        yield
+    finally:
+        with ownership.lane:
+            ownership.callbacks.discard(ticket)
+            if not ownership.callbacks:
+                ownership.callbackThread = None
+
+
+def finishResourceEffects(resources):
+    """Exclusively own core close/effects; callback-free runtime shutdown precedes this.
+
+    Do not close the neutral service before owning this effect boundary: an earlier
+    live callback must still be able to perform its own authorized idle unload.
+    """
+    ownership = _effectOwnership(resources)
+    ticket = object()
+    with ownership.lane:
+        if ownership.callbacks or ownership.disposer is not None:
+            raise LlmExecutionCleanupError()
+        ownership.disposer = ticket
+    try:
+        resources.finishClose()
+    finally:
+        with ownership.lane:
+            ownership.disposer = None
+
+
+def finishBrokerEffects(bindings, resources, runtimes=(), registry=None):
+    """Protect explicit preflight/body drains as well as outer lifetime callbacks."""
+    with effectCleanupScope(resources):
+        with finalizationScope(runtimes) as blocked:
+            if blocked:
+                raise LlmExecutionCleanupError()
+            bindings.finishClose(registry)
 
 
 class ProviderComposer(Protocol):
@@ -100,19 +169,26 @@ def finalizationScope(runtimes):
     blocked = set()
     try:
         for runtime in dict.fromkeys(runtimes):
-            with runtime._admissionLane:
+            ownership = _effectOwnership(runtime.executionResources)
+            with ownership.lane, runtime._admissionLane:
                 attempt = runtime._compositionAttempt
-                if attempt is not None and attempt.phase not in ("cleanup", "aborted", "complete"):
+                if (ownership.disposer is not None or ownership.callbackThread not in (None, get_ident()) or (attempt is not None
+                        and attempt.phase not in ("cleanup", "aborted", "complete"))):
                     blocked.add(runtime)
                 else:
                     admission = object()
                     runtime._cleanupAdmissions.add(admission)
-                    issued.append((runtime, admission))
+                    ownership.callbacks.add(admission)
+                    ownership.callbackThread = get_ident()
+                    issued.append((runtime, admission, ownership))
         yield blocked
     finally:
-        for runtime, admission in issued:
-            with runtime._admissionLane:
+        for runtime, admission, ownership in issued:
+            with ownership.lane, runtime._admissionLane:
                 runtime._cleanupAdmissions.discard(admission)
+                ownership.callbacks.discard(admission)
+                if not ownership.callbacks:
+                    ownership.callbackThread = None
 
 
 def packUnloadBoundary(method):

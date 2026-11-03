@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 21
+# file: backend/application/applicationRuntime.py ; version: 22
 from __future__ import annotations
 
 from contextlib import suppress
@@ -12,7 +12,7 @@ from backend.context.codeEntryContext import CodeEntryContext, CodeEntryIdentity
 from backend.io.managedIo import ManagedIo, ManagedIoTransaction
 from backend.llm.executionSessions import helperCancellation, lifetimeBoundary, jobExecutionBoundary
 from backend.llm.providerComposition import (invocationBoundary, requireNoPendingComposition,
-    requireReady, requireInvocationEntry, hasLifecycleWork)
+    requireReady, requireInvocationEntry, hasLifecycleWork, finishBrokerEffects)
 from backend.runtime.executionResources import ExecutionResourceService
 from backend.llm.streamingRuntime import LlmProcessingPipeline, LlmProviderRegistry
 from backend.observation import ObservationService
@@ -435,7 +435,7 @@ class ApplicationRuntime:
             requireNoPendingComposition(self, permanent=False)
         self.llmExecutions.revokeRegistry(self.llmProviders, permanent=permanent)
         try:
-            self.llmExecutions.finishClose(self.llmProviders)
+            finishBrokerEffects(self.llmExecutions, self.executionResources, (self,), self.llmProviders)
         except ExceptionGroup:
             pass  # Final lifetime boundary reports retained cleanup evidence.
         if self.llmExecutions.pendingCalls(self.llmProviders) or hasLifecycleWork(self):
