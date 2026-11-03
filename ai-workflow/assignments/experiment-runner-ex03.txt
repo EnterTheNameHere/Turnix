@@ -1,0 +1,209 @@
+EXPERIMENT RUNNER EX-03 - SEQUENTIAL EXPERIMENT EXECUTION
+========================================================
+Owner/implementer: experiment-runner Application workstream.
+Coordinator/reviewer: Integration. Date: 2026-11-03.
+Authority: user: "EX03 is ready to be implemented, prepare the requirement for the implementer".
+Status: bounded implementation assignment prepared; no worker session launched.
+Repository/working branch: EnterTheNameHere/Turnix / actant-experiment-runner.
+Exact inspected starting parent: 4b375a340115b8e8c908b95042cb2455eb564a45.
+Canonical coordination baseline: eb5e13bb96957aa6753663d4ca5e8abd295a9b5d
+(read actant-integration explicitly).
+Imported full platform baseline on worker: b59363c; reconciled platform e3024b8.
+Current non-EX/non-coordination platform source is identical to the worker's
+complete platform projection. Refresh actual heads and mail before work.
+
+Objective / acceptance boundary
+---------------------------------
+Extend accepted EX-01/02/R1 to execute an explicit ordered list of authorized
+configurations and bounded repetitions. Each (configuration, repetition) executes
+one independent multi-turn conversation under an exclusive conversation session.
+Perform sequential explicit idle transitions, reuse compatible residency where
+permitted and preserve truthful per-call, conversation, Job and suite outcomes.
+Use existing Actant facilities; do not build a scheduler or raw provider client.
+EX-04 durable archival and EX-05 comparison/visualization remain unassigned.
+
+Source ownership / synchronization
+------------------------------------
+Own first-party/applications/experimentRunner/ and
+tests/first_party/experimentRunner/ on the Application branch ONLY. Keep the full
+current platform (backend, ALL reusable first-party Packs including llama.cpp,
+support/tooling/tests) in that combined checkout. Do not merge Integration's EX
+deletion into your owned files. Check the complete platform source projection,
+not just the provider you currently use; safely synchronize newer platform content
+without importing unrelated Application artifacts or overwriting uncommitted work.
+Record actual imported baseline/resulting parent. Do not replay old worker/source
+cherry-picks or introduce external-root launcher changes for this branch workflow.
+Publish coordination on actant-integration, not by upstreaming Application source.
+Integration accepts the delivered APPLICATION ref and compatibility evidence;
+it will NOT cherry-pick this AppPackage/tests into platform source.
+
+Required definition / execution contract
+-----------------------------------------
+1. Retain one immutable conversation definition with 2..16 ordered user input
+   turns and answer-only replay. Extend configurations to an ordered nonempty
+   list with unique names, each with a host-approved profile alias, defaults and
+   permitted turn overrides. Configuration name is a label, never a descriptor
+   compatibility key. Definitions cannot grant selectors or supply startup paths,
+   argv/env/ports/domain/process controls. All selected aliases and merged options
+   must validate before any model startup, including an invalid LATER config.
+2. repetitions is an exact positive integer, excluding bool. Deterministic order:
+   configurations in definition order, then repetition indices 1..N for each.
+   Do not reorder to optimize residency or run concurrently. Histories start empty
+   for EVERY unit, even for identical profiles or later runs. Within each unit:
+   first [user1], then [user1, assistant1.rawText, user2]. No previous unit's answer,
+   partial output or separate reasoning enters its history.
+3. Bound expansion and memory BEFORE startup. Suggested initial schema ceilings:
+   <=8 configurations, <=10 repetitions, <=32 total conversation executions,
+   <=256 total requested turn calls, existing <=1 MiB definition size. Trusted host
+   limits may narrow these and existing token/time/output caps, never be enlarged
+   by definitions. Worker may propose tighter limits with explicit rationale.
+   Validate product bounds without silent truncation, numeric coercion or sampling.
+4. Keep stop-on-first-error/cancellation policy in this package. No hidden retry,
+   continue-on-failure, parallelism, automatic wait/queue, profile restoration or
+   reservation spanning the whole experiment suite. Not-started units/turns remain
+   explicit after early stop. Caller may initiate a NEW execution later; this is
+   distinct from silently retrying an existing unit.
+5. Version definition/result/envelope schema explicitly if their meaning/shape
+   changes. Supply an exact example and canonical immutable hash semantics. Preserve
+   the accepted single-config/single-repetition BEHAVIOR and regression coverage;
+   do not add compatibility layers solely to preserve immature schema internals.
+   State whether old versioned input is supported or clearly rejected, update the
+   example/README and report intentional migrations. No silent reinterpretation.
+
+Actant execution / exclusive conversation lifecycle
+----------------------------------------------------
+6. A suite is Application/launcher orchestration, with one caller-retained actual
+   ApplicationRuntime.runJob Job per conversation execution. Preserve the actual
+   Job outcome for each unit. Do not flatten turns into unrelated Jobs or pretend
+   a single turn/Job success certifies the complete suite.
+7. Host prepares a trusted immutable catalog and grants ONLY the selected approved
+   selectors, deduplicated, to the exact real Application CodeEntry incarnation.
+   Alias existence does not mint authority. Keep provider source pinning and
+   explicit transition grants; no grants for arbitrary unused catalog selections.
+8. For each unit, check cancellation, resolve ctx.llm.profile for its selector,
+   explicitly transitionProfile before acquiring its reservation, then obtain
+   ctx.llm.reserveConversation(profile). Pass that exact session to every admitted
+   ctx.llm.run (and estimation/preview if used). Keep it through all turns/history
+   and final per-call cleanup; close in finally on success/failure/cancellation.
+   Continue FreshContext(required=False, retain=False) per call. Transcript replay
+   is Application policy, not retained KV. No physical retention/freshness promise.
+9. Exclusive means unrelated SAME-PROFILE calls are denied too, not only incompatible
+   transitions. No inference on activation/lifecycle hooks. Do not implement a
+   Python-only runner mutex as resource authority, mutate the driver/catalog or
+   call provider stop/ensureModel directly. No nested/reentrant execution trick.
+10. IMPORTANT EXISTING API: LlmConversationSession.close queues cleanup-only
+    revocation; runtime lifetimeBoundary/finishClose drains it outside runtime
+    locks. Therefore finish the conversation Job and its cleanup boundary BEFORE
+    transitioning/reserving the next unit. Do not call private finishClose/drain,
+    manually clear domain state or assume close synchronously proves release.
+    If this composition exposes a genuine public API gap, provide a deterministic
+    reproducer and ask Integration for a separately reviewed shared patch.
+11. Transition and reservation are separate admissions, not an atomic switch+lock.
+    Another owner may win between them. Busy/loading/draining/UNKNOWN/revocation
+    remains typed failure and stops this suite without takeover/retry. Release
+    exclusion between units, allowing other authorized work then. A compatible
+    explicit transition is expected to reuse residency; startup changes require
+    transition after the prior reservation and operations have drained. Never
+    derive compatibility from equal labels/target filenames alone.
+12. On uncertain provider cleanup, record UNKNOWN and stop; closing the conversation
+    or a later idle/process-exit observation cannot repair claims. Host teardown
+    and reservation close attempts do not certify provider quiescence. Preserve
+    cancellation/failure if resource cleanup also fails. No forced disposal or
+    host recovery policy. Preserve R1 post-Job interruption-safe teardown and first
+    interrupt behavior throughout aggregate/final persistence paths.
+
+Outcomes, cancellation and minimal results
+--------------------------------------------
+13. One new suite execution identity, distinct from immutable definition identity;
+    each unit has stable index/configuration name/profile alias/repetition number
+    and an independent conversation-execution identity. Retain requested settings,
+    resolved generation/identity evidence when available, per-turn queries/answers/
+    reasoning/timing/usage, actual Job outcome and separate reservation/lifetime/
+    provider/host cleanup diagnostics. Do not persist live session/grant handles.
+    Label attempted/queued/confirmed/unavailable evidence accurately; do not invent
+    a public reservation-release receipt that the existing API does not return.
+14. Suite success requires every scheduled unit/turn and its Job succeed with
+    required normal cleanup; launcher/file/host failures retain separate outcomes
+    and make terminal projection nonzero. Preserve completed/partial diagnostics
+    on ordinary failure/cancellation where possible, with bounded not-started
+    remainder. The recorder/file remains minimal and non-crash-durable; no journal,
+    restart/resume engine, archive/database or full query-as-sent capture system.
+15. Cancellation before a unit prevents its transition/Job admission. During a
+    unit, cancel its exact retained Job and let provider/session cleanup run.
+    Between units, a suite-owned cancellation flag prevents the next Job even
+    though there is no currently Running Job. Do not relabel previously completed
+    Jobs. Finalization/persistence interruption must retain the existing R1
+    distinction between original outcomes and launcher/write/cleanup failures.
+16. Keep validate/run/inspect usable with updated schema/example and private output
+    limits. Ordinary CLI prints aggregate status/counts/path, not raw prompts,
+    answers, reasoning, host config or identities. Update the minimum private file
+    seam only as necessary for ordered unit results. No comparison rankings,
+    optimization, export formats or PM/G UI in EX-03.
+
+Architectural tests / independent review
+------------------------------------------
+Use actual RuntimeHost/ApplicationRuntime/Job/managed composition with explicitly
+synthetic OS/HTTP IO for deterministic tests. Required cases include:
+- Two configurations x two repetitions x at least two turns: exact config-major
+  order, eight requests and independent [user1] starts; exact answer-only replay.
+- Full preflight rejects bad later alias/options, duplicate names, bool/zero/negative
+  repetitions and all product/host caps before the first launch. Immutable aliases.
+- Same profile repeated/sampling-only changes reuse generation/process; different
+  startup descriptors transition only after prior reservation/lifetime cleanup.
+- Pause between turns: peer Application same-profile inference and incompatible
+  transition both denied while protected; after boundary peer can be admitted.
+  Reservation/transition race denial leaves winning owner/process untouched.
+- Every call/estimate receives exact session; unauthorized/foreign/stale session
+  and grant use reject. No direct driver or process bypass.
+- Cancellation before first/between units/between turns/during stream and later
+  unit failure: preserve earlier results, unstarted remainder, Job truth and
+  reservation cleanup; UNKNOWN prevents further work and is never repaired.
+- Reservation-close/lifetime/provider/host/write failure and post-Job SIGINT keep
+  separate original outcomes, bounded partial evidence and existing R1 invariants.
+- CLI validate/run/inspect, schema/hash/version changes, and unchanged EX-01/02
+  behavior. Keep valid architectural assertions when adjusting schema fixtures.
+Run focused EX tests and complete combined checkout suite on actual Python 3.15;
+report exact commands/counts/skips and actual runtime. Follow path/version first
+lines, camelCase and proper class/function/private/magic/nested docstrings.
+No older-runtime compatibility machinery or unrelated platform refactor.
+
+Real acceptance (separate from synthetic tests)
+------------------------------------------------
+Minimum bounded EX-03 demo: two host-authorized startup profiles using the SAME
+supplied Qwen3-4B asset, two repetitions each, at least two input turns (eight
+actual completed calls). Choose a small startup difference within approved limits
+to demonstrate transition; same-profile repetitions demonstrate resident reuse.
+No new model, raised context/token/GPU/resource ceiling or automatic retry.
+Stay CPU/context1024/token24/threads<=4, original executable/model hashes/build;
+if changing a previously fixed test control is needed, report the exact reason
+and bounded choice before running. For example threads4 vs threads3 reduces the
+existing ceiling while making startup identities distinct.
+Record exact ordered histories, nonempty answers, reuse/transition generations,
+private build/config evidence, per-call cleanup, reservation boundaries and normal
+owned-child exits. Semantic answer correctness is not a platform oracle. Real
+cross-Application exclusion may be separately demonstrated if safely bounded;
+deterministic tests must prove it regardless. No unattended abort/emergency kill.
+Worker without authorized assets reports real gate BLOCKED; Integration can arrange
+the run on its existing approved assets. Do not borrow W:\Projects\Actant or
+Integration's runtime/config from another conversation without explicit access.
+Raw data stays private/ignored; publish only reviewed structural evidence.
+
+Implementation/reporting checkpoint
+-------------------------------------
+Begin with a concise concrete schema/unit-outcome and lifecycle plan in canonical
+knowledge/state, including actual sync parent and host cap choices. Implement
+within the requirements; escalate contradictory semantics or needed shared API
+changes with evidence before expanding scope. No additional design engine is
+authorized. Report delivered APPLICATION commit/parent, imported full platform
+baseline, changed owned paths, tests, real evidence or asset blocker, Provides/
+Requires and limits. Worker delivery is not Integration acceptance. Integration
+reviews the Application on its own ref; platform retains only coordination/evidence.
+
+Required reading
+-----------------
+Canonical index/protocol/sharing/state/inbox; source-reconciliation.txt and current
+EX-01/02 acceptance/R1 knowledge; execution-resource ER-03 acceptance and ER-04C
+correction knowledge; source backend/llm/executionSessions.py,
+backend/runtime/executionResources.py, backend/context/codeEntryContext.py and
+first-party/llmDrivers/llamaCpp/README.md. Do not infer current APIs from old
+pre-ER experiment-runner-transitions-review.txt descriptions of missing facilities.
