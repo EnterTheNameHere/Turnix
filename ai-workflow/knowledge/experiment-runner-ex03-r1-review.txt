@@ -1,0 +1,129 @@
+EXPERIMENT RUNNER EX-03-R1 - INDEPENDENT REVIEW / R2 FINDING
+===========================================================
+Owner/reviewer: Integration. Date: 2026-11-03.
+Application correction: 1be248106fe4161a0e84366d256dd8fdc6330f77, parent a4b9868.
+Canonical baseline: 4fa2b53f40455e491b6877a4c29163af7e655240.
+Decision: original signal deadlock R1 resolved; overall EX-03 NOT accepted.
+New bounded EX-03-R2 correction required. No App source imported upstream.
+
+R1 review / independent verification
+--------------------------------------
+Installed SIGINT handler now only sets a monotonic Python flag. It takes no
+Event/controller/Job locks and invokes no provider callback on the interrupted
+stack. Owned relay delivers ordinary exact-Job cancellation off-stack. Controller
+RLock plus publication recheck and launcher guard prevent the reviewed handoff
+deadlock/lost-gap cancellation. Reviewed same-thread raw child, six bounded actual
+signal modes, later unit handoffs and active-stream off-stack delivery tests.
+Relay startup is rooted, normal handler restoration/close are cleanup-scoped;
+uncertain relay/provider cleanup is not labeled confirmed. Complete platform
+projection unchanged; no backend/provider/API edits. Only owned launcher/README/
+tests changed. Two changed Python headers version3->4, AST/docstrings and diff
+checks pass independently. No Ruff claim; embedded-home warning persists.
+
+Own Integration Python 3.15.0b4 / pytest 9.2.0:
+  pristine combined source archive: 1898 passed in 17.64s, zero skips.
+Includes all 119 Application tests, unchanged original bounded signal reproduction
+and the 12 R1 cases. The original deadlock reproduction now passes, not relabeled.
+After that full run, added one independent fault-combination test to the ignored
+snapshot only: 1 FAILED, 119 deselected in 0.33s (DID NOT RAISE KeyboardInterrupt).
+Snapshot: python-embedded/review-ex03-r1-1be2481/, exact git archive of 1be2481.
+Tests explicitly selected that one combined tree and asserted backend/App/adapter
+origins, removing the original checkout import fallback. No external DRIVER injection.
+General full command from snapshot root:
+  <Integration Python> -X frozen_modules=off -c "import sys; from pathlib import Path; source=Path.cwd().resolve(); original=source.parents[1]; sys.path=[str(source)]+[p for p in sys.path if p and Path(p).resolve()!=original]; import pytest; raise SystemExit(pytest.main(['-q','--import-mode=importlib','--tb=short','tests']))"
+
+EX-03-R2 [P2]: relay cleanup failure swallows primary startup interrupt
+-----------------------------------------------------------------------
+first-party/applications/experimentRunner/launcher.py:340-349, originating at 273.
+relay.start() runs before the new handler is installed. An ordinary Ctrl+C there
+can raise KeyboardInterrupt through the existing caller handler. The enclosing
+finally restores signals/closes the relay BEFORE the except BaseException at 348
+records the primary error in pendingExit. If relay.close() raises an ordinary
+RuntimeError, that error replaces the primary interrupt. launcherFailure observes
+only the cleanup exception and execute returns an ordinary failed envelope instead
+of re-raising the original KeyboardInterrupt/attaching its diagnostic snapshot.
+This does not produce CLI success, but violates the explicit first-interrupt and
+independent cleanup-failure contract. It requires only ONE interrupt followed by
+an ordinary cleanup error, not repeated interruption inside provider shutdown.
+
+Independent deterministic reproduction starts the actual inert helper, injects
+KeyboardInterrupt immediately after startup, joins the helper normally in close,
+then injects a separate RuntimeError from close. The expected original interrupt
+is swallowed: pytest reports DID NOT RAISE KeyboardInterrupt. All provider IO is
+synthetic and no model is launched (startup occurs before first unit). This test
+combines two paths each covered separately by existing worker tests; those separate
+passing cases do not protect primary error precedence through the nested finally.
+
+Required correction: retain the first primary exit BEFORE signal cleanup can
+raise; preserve that exact object and its attached immutable diagnostics after
+all owned cleanup attempts. Report secondary signal cleanup independently and
+truthfully, without erasing primary cancellation/failure or reverting the R1
+signal-safe leaf/relay design. Also preserve primary startup/loop/handler-setup
+errors across signal restoration failures as applicable. No retry/forced thread
+disposal/backend changes. Add meaningful combined-fault tests, not only the two
+separate cases. Existing real signal handoff, active Job, UNKNOWN and R1 tests stay.
+
+Raw regression to append to delivered test module in an isolated snapshot
+--------------------------------------------------------------------------
+def test_review_ex03_first_start_interrupt_survives_relay_close_failure(rig, monkeypatch):
+    """Ordinary relay cleanup failure must not swallow the primary startup interrupt."""
+    originalStart = launcher._SignalCancellationRelay.start
+    originalClose = launcher._SignalCancellationRelay.close
+    first = KeyboardInterrupt('primary-start-interrupt')
+    relays = []
+    def start(self):
+        """Start the exact owned helper, then simulate Ctrl+C before handler installation."""
+        originalStart(self)
+        relays.append(self)
+        raise first
+    def close(self):
+        """Join the helper normally, then report an independent ordinary cleanup failure."""
+        originalClose(self)
+        raise RuntimeError('secondary-relay-close-failure')
+    monkeypatch.setattr(launcher._SignalCancellationRelay, 'start', start)
+    monkeypatch.setattr(launcher._SignalCancellationRelay, 'close', close)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        launcher.execute(launcher.prepare(definition(), rig[1]), rig[2])
+    assert caught.value is first
+    assert relays and not relays[0]._thread.is_alive()
+    assert caught.value.experimentExecution.value()['hostCleanup'] == 'completed'
+
+Run using the snapshot command prefix above, replacing pytest arguments with
+['-q','--import-mode=importlib','--tb=short','tests/first_party/experimentRunner',
+'-k','test_review_ex03_first_start']. Reproduction edits were not committed to
+platform or worker source. Independent correction belongs on Application branch.
+
+Actual ordinary corrected-source reassessment
+-----------------------------------------------
+One actual default-handleInterrupt=True run at unchanged Application 1be2481,
+same authorized executable/Qwen hashes, observed build12031/060b2fea4 and required
+advertised-pinned-surface checks. CPU/context1024/token24/threads4-vs3, same
+batch/ubatch128, one slot, no KV offload/reasoning on/speculation. Fresh unused
+loopback port, no model download/copy, takeover or GPU inference.
+Four actual Jobs/eight actual calls all succeed with nonempty answers; exact
+config-major order, independent wire/recorded histories, repetition generation
+reuse and startup generation change. All calls confirm cleanup; queued reservation
+close remains distinct from unavailable release receipt. At all four returned Job
+boundaries public domain state is READY/operations0/retainedContexts0/exclusive=false.
+Exactly two owned model children exit normally, host cleanup and private writes
+succeed, CLI projection 0. Default signal relay lifecycle is exercised and no
+experiment-cancellation thread remains afterward. No actual SIGINT or native
+abort injected; the combined-failure reproduction remains model-free/synthetic.
+Separate reasoning unavailable/null in all eight calls; effective provider state
+retains existing unknown-unqueried limitation. No semantic answer-quality oracle.
+Reviewed structural summary: knowledge/experiment-runner-ex03-r1-real-summary.json.
+Raw host/results/wire/build/hash artifacts private/ignored under
+python-embedded/ex03-review-real-r1-1be2481/; server log
+python-embedded/review-ex03-r1-real.private.log. Observers record unchanged transport,
+process and public boundary snapshots; no DRIVER injection or source changes.
+No W:\Projects\Actant access, remaining model/worker/operator session or forced
+disposal. This is ordinary evidence at 1be2481, not final acceptance or prior
+a4b9868 evidence relabeled. Worker still has no real-asset access claim.
+
+Continuation
+--------------
+R1 deadlock is resolved; R2 blocks final EX-03 acceptance. Preserve source boundary
+and prior exact-ref evidence. Send bounded R2 to worker, archive reviewed R1
+delivery, then independently review corrected Application ref and affected tests.
+EX-04/05, provider abort validation, scheduler/recovery and shared API changes are
+unassigned. Ordinary real evidence above does not resolve the combined R2 failure.
