@@ -1,4 +1,4 @@
-# file: tests/tools/test_executionResourceValidation.py ; version: 3
+# file: tests/tools/test_executionResourceValidation.py ; version: 4
 """ER-04 validation contracts: bounded metadata, private evidence and real facade composition."""
 import json
 import struct
@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from tools.executionResourceValidation import preflight
-from tools.executionResourceValidation.run import Recorder, ResponseEvidence, Validation, execute, load_adapter, unavailable_signals
+from tools.executionResourceValidation.run import Recorder, ResponseEvidence, Validation, execute, load_adapter, unavailable_signals, transport_facts
 from backend.telemetry import SignalUnavailable, GpuObservation
 from tests.first_party.llmDrivers.test_llamaCppExecutionResources import rig
 
@@ -177,3 +177,20 @@ def test_missing_nested_sensors_are_not_reported_as_real_zero():
     names = unavailable_signals(sample, 'gpu')
     assert 'gpu.temperatureCelsius' in names and 'gpu.fanSpeedPercent' in names
     assert 'gpu.gpuUtilizationPercent' not in names
+
+
+def test_wire_projection_preserves_control_facts_without_private_content():
+    """Protocol provenance must not disclose completion IDs, prompts or reasoning."""
+    secret = 'PRIVATE_WIRE_SENTINEL'
+    request = {'messages': [{'content': secret}], 'id_slot': 0, 'cache_prompt': False,
+               'reasoning_effort': 'none', 'chat_template_kwargs': {'enable_thinking': False}}
+    chunk = {'id': secret, 'choices': [{'delta': {'content': secret}, 'finish_reason': 'stop'}]}
+    records = [{'endpoint': '/v1/chat/completions', 'request': json.dumps(request),
+                'response': ['data: ' + json.dumps(chunk) + '\n', 'data: [DONE]\n']},
+               {'endpoint': '/slots'}]
+    result = transport_facts(records)
+    assert secret not in json.dumps(result)
+    assert result['streamCalls'][0] == {'ownedSlotRequested': True, 'cacheReuseDisabled': True,
+        'nativeDone': True, 'nativeIdConsistent': True, 'finishReasons': ['stop'],
+        'enableThinkingForwarded': False, 'reasoningEffortForwarded': 'none'}
+    assert result['postTerminalSlotReads'] == 1

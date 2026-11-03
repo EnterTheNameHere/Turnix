@@ -1,4 +1,4 @@
-# file: tools/executionResourceValidation/app/codeEntry.py ; version: 1
+# file: tools/executionResourceValidation/app/codeEntry.py ; version: 2
 """Small validation Application using only normal invocation facades and owned handles."""
 from backend.llm.executionSessions import FreshContext
 from backend.llm.llmTypes import LlmQuery
@@ -35,6 +35,12 @@ def run(ctx, payload):
         observation=_state.get('observation') if payload.get('observe') else None)
 
 
+def estimate(ctx, payload):
+    """Exercise actual template/tokenize endpoints under generation-scoped admission."""
+    return ctx.llm.estimateInputTokens(providerName='llama.cpp', model=payload['model'],
+        query=LlmQuery(formatId='text/plain', payload=payload['prompt']), providerOptions=payload['options'])
+
+
 def observe(ctx, payload):
     """Explicitly opt into bounded PM hardware/stream collection and same-app publication."""
     session = ctx.observations.request(ObservationRequest(sampleIntervalSeconds=0.1,
@@ -65,7 +71,7 @@ def onLoad(ctx):
     """Stage validation capabilities; no inference or collection occurs during activation."""
     _state.clear()
     for name, handler in [('transition', transition), ('reserve', reserve), ('release', release),
-                          ('run', run), ('observe', observe), ('revoke', revoke), ('snapshot', snapshot)]:
+                          ('run', run), ('estimate', estimate), ('observe', observe), ('revoke', revoke), ('snapshot', snapshot)]:
         ctx.capabilities.register('er04.' + name + '@1', handler)
     return _state
 

@@ -1,4 +1,4 @@
-# file: tools/executionResourceValidation/run.py ; version: 3
+# file: tools/executionResourceValidation/run.py ; version: 4
 """Explicit ER-04 local validation; never downloads models or bypasses managed admission."""
 from __future__ import annotations
 
@@ -61,6 +61,39 @@ def unavailable_signals(value, prefix=''):
         return [name for field in dataclasses.fields(value)
                 for name in unavailable_signals(getattr(value, field.name), (prefix + '.' if prefix else '') + field.name)]
     return []
+
+
+def transport_facts(records):
+    """Project fixed wire/protocol facts without exporting prompts, raw IDs or responses."""
+    calls = []
+    for record in records:
+        if record['endpoint'] != '/v1/chat/completions':
+            continue
+        request = json.loads(record['request'])
+        identities, finishes, done = set(), [], False
+        for line in ''.join(record['response']).splitlines():
+            if not line.startswith('data:'):
+                continue
+            payload = line[5:].strip()
+            if payload == '[DONE]':
+                done = True
+                continue
+            item = json.loads(payload)
+            if type(item.get('id')) is str:
+                identities.add(item['id'])
+            for choice in item.get('choices', []):
+                reason = choice.get('finish_reason')
+                if reason is not None:
+                    finishes.append(reason if reason in ('stop', 'length', 'tool_calls', 'content_filter', 'function_call') else 'other')
+        effort = request.get('reasoning_effort')
+        calls.append({'ownedSlotRequested': request.get('id_slot') == 0,
+            'cacheReuseDisabled': request.get('cache_prompt') is False, 'nativeDone': done,
+            'nativeIdConsistent': len(identities) == 1, 'finishReasons': finishes,
+            'enableThinkingForwarded': request.get('chat_template_kwargs', {}).get('enable_thinking'),
+            'reasoningEffortForwarded': effort if effort in ('none', 'low', 'medium', 'high') else None})
+    return {'streamCalls': calls, 'postTerminalSlotReads': sum(record['endpoint'] == '/slots' for record in records),
+            'templateCalls': sum(record['endpoint'] == '/apply-template' for record in records),
+            'tokenizerCalls': sum(record['endpoint'] == '/tokenize' for record in records)}
 
 
 def load_adapter():
@@ -266,6 +299,11 @@ class Validation:
         self.check('lazy-activation', len(self.recorder.processes) == 0)
         self.call(0, 'transition', 'A')
         first, generation = self.recorder.processes[-1], self.generation()
+        measured = self.call(0, 'estimate', {'model': 'A', 'prompt': self.config['prompt'],
+            'options': {'reasoningFormat': 'deepseek', 'timeoutSeconds': self.config['timeoutSeconds']}})
+        self.check('same-generation-template-tokenize', type(measured) is int and measured > 0
+                   and generation == self.generation() and first.poll() is None)
+        self.private.append({'estimatedInputTokens': measured})
         self.infer()
         self.infer(options={'temperature': 0.2})
         self.check('same-weight-fresh-no-reload', len(self.recorder.processes) == 1 and first.poll() is None and generation == self.generation())
@@ -363,10 +401,13 @@ def observe_browser(validation, viewer, config, folder):
         process.stdin.write(json.dumps({'viewer': viewer.origin, **descriptor, 'playwright': config['playwright'],
                                        'browser': config['browser'], 'output': str(folder)}) + '\n')
         process.stdin.flush()
-        with ThreadPoolExecutor(max_workers=1) as reader:
+        reader = ThreadPoolExecutor(max_workers=1)
+        try:
             ready = reader.submit(process.stdout.readline)
             if ready.result(30).strip() != 'connected':
                 raise RuntimeError('G-02 browser did not connect.')
+        finally:
+            reader.shutdown(wait=False, cancel_futures=True)
         validation.call(0, 'revoke')
         process.stdin.write('{}\n')
         process.stdin.flush()
@@ -424,6 +465,7 @@ def execute(config, folder, phases):
             if validation:
                 summary['checks'] = validation.checks
                 summary['cleanup'] = 'confirmed' if validation.close() else 'blocked'
+                summary['wireEvidence'] = transport_facts(recorder.requests)
                 write_json(folder / 'results.private.json', validation.private)
                 write_json(folder / 'configuration.private.json', validation.composer.configurationEvidence(validation.host.executionResources))
             if viewer:
