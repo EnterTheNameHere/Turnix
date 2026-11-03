@@ -1,4 +1,4 @@
-# file: tools/executionResourceValidation/abortProbe.py ; version: 3
+# file: tools/executionResourceValidation/abortProbe.py ; version: 4
 """Interactive, one-case ER-04C probe; emergency disposal requires explicit commands.
 
 Approval: canonical actant-integration coordination commit 2fff776, ER-04C
@@ -307,9 +307,15 @@ class Probe:
             self.record('inconclusive-no-pre-header-wait')
             return
         try:
-            active = self.slots()
-            if (self.session.response is not None or active.get('is_processing') is not True or
-                    type(active.get('id_task')) is not int):
+            deadline = time.monotonic() + 2
+            active = None
+            while time.monotonic() < deadline and self.session.response is None:
+                candidate = self.slots()
+                if candidate.get('is_processing') is True and type(candidate.get('id_task')) is int:
+                    active = candidate
+                    break
+                Event().wait(0.01)
+            if self.session.response is not None or active is None:
                 self.record('inconclusive-pre-header-boundary-lost')
                 return
             self.native_task, self.captured = active['id_task'], True

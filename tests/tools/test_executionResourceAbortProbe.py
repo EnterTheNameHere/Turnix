@@ -1,6 +1,8 @@
-# file: tests/tools/test_executionResourceAbortProbe.py ; version: 2
+# file: tests/tools/test_executionResourceAbortProbe.py ; version: 3
 """Protect the explicit exact-handle emergency boundary; no real provider is launched."""
 import subprocess
+from threading import Event
+from types import SimpleNamespace
 
 import pytest
 
@@ -117,3 +119,23 @@ def test_exception_context_cycle_is_bounded():
     error = RuntimeError('test-only cycle')
     error.__context__ = error
     assert len(exception_facts(error)) == 1
+
+
+def test_pre_header_probe_waits_past_initial_idle_without_fabricating_binding():
+    """A bounded initial idle sample is followed by actual active capture before abort."""
+    probe = Probe.__new__(Probe)
+    probe.case = 'pre-header-cancel'
+    probe.bound = Event()
+    probe.bound.set()
+    probe.session = SimpleNamespace(response=None)
+    replies = iter([{'id': 0, 'is_processing': False},
+                    {'id': 0, 'is_processing': True, 'id_task': 4}])
+    probe.slots = lambda: next(replies)
+    records, calls = [], []
+    probe.record = lambda kind, **values: records.append((kind, values))
+    probe.launch_worker = lambda target: calls.append('monitor')
+    probe.job = SimpleNamespace(requestCancellation=lambda: calls.append('cancel'))
+    probe.pre_header_cancel()
+    assert probe.captured and probe.native_task == 4 and probe.abort_requested
+    assert calls == ['monitor', 'cancel']
+    assert next(values for kind, values in records if kind == 'abort-requested')['headersReturned'] is False
