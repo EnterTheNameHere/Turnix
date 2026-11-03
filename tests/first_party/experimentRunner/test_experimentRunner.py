@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_experimentRunner.py ; version: 1
+# file: tests/first_party/experimentRunner/test_experimentRunner.py ; version: 2
 """EX-01/02 architectural tests: actual Application/provider composition, synthetic IO."""
 import importlib
 import json
@@ -613,3 +613,145 @@ def test_second_write_failure_preserves_initial_private_file(rig, monkeypatch):
     assert value['resultWriteFailure']['stage'] == 'after-teardown'
     assert value['hostCleanup'] == 'completed' and launcher.exitCode(value) == 1
     assert json.loads(path.read_text(encoding='utf-8'))['hostCleanup'] == 'not-started'
+
+
+def test_review_interrupt_during_persist_still_closes_owned_host(rig, monkeypatch):
+    """Interrupt result persistence after inference and require owned child reap."""
+    def interrupt(*args):
+        """Represent Ctrl+C after the Job signal handler has been restored."""
+        raise KeyboardInterrupt()
+    monkeypatch.setattr(launcher, 'persist', interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        execute(rig)
+    assert all(process.returncode is not None for process in rig[0]['processes']), 'owned child remains alive'
+
+
+@pytest.mark.parametrize('boundary', ['first-write', 'evidence', 'finalization', 'second-write'])
+def test_post_job_interrupt_reaps_child_and_preserves_primary_outcomes(rig, monkeypatch, boundary):
+    """Every post-Job diagnostic boundary defers the same interrupt through owned teardown."""
+    interruption = KeyboardInterrupt('private interrupt detail')
+    writes = []
+    originalPersist = launcher.persist
+
+    def persist(*args):
+        """Inject once at the selected write, preserving ordinary atomic writes otherwise."""
+        writes.append(True)
+        if boundary == 'first-write' and len(writes) == 1 or boundary == 'second-write' and len(writes) == 2:
+            raise interruption
+        return originalPersist(*args)
+
+    monkeypatch.setattr(launcher, 'persist', persist)
+    if boundary == 'evidence':
+        def evidence(*args):
+            """Interrupt only the composer's explicit private evidence accessor."""
+            raise interruption
+        monkeypatch.setattr(launcher.loadAdapter().LlamaCppComposition, 'configurationEvidence', evidence)
+    if boundary == 'finalization':
+        originalCreate = launcher.RuntimeHost.createApplication
+
+        def create(self, **kwargs):
+            """Keep the actual runtime, intercepting diagnostic finish after Job completion."""
+            runtime = originalCreate(self, **kwargs)
+            originalInvoke = runtime.invokeCapability
+
+            def invoke(capability, *args, **options):
+                """Leave run/inspect and all provider behavior unchanged."""
+                if capability == 'experimentRunner.finish@1':
+                    raise interruption
+                return originalInvoke(capability, *args, **options)
+            runtime.invokeCapability = invoke
+            return runtime
+        monkeypatch.setattr(launcher.RuntimeHost, 'createApplication', create)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        execute(rig)
+    assert caught.value is interruption
+    value = caught.value.experimentExecution.value()
+    assert value['jobOutcome'] == 'Succeeded' and value['run']['status'] == 'succeeded'
+    assert [turn['status'] for turn in value['run']['turns']] == ['succeeded', 'succeeded']
+    assert all(turn['cleanup']['quiescence'] == 'confirmed' for turn in value['run']['turns'])
+    assert value['hostCleanup'] == 'completed' and launcher.exitCode(value) == 1
+    assert value['launcherFailure']['category'] == 'launcher-interrupted'
+    assert 'private interrupt detail' not in json.dumps(value)
+    assert len(rig[0]['processes']) == 1 and rig[0]['processes'][0].returncode == 0
+    if boundary in ('first-write', 'second-write'):
+        assert value['resultWriteFailure']['stage'] == ('before-teardown' if boundary == 'first-write' else 'after-teardown')
+    else:
+        saved = list(rig[2].glob('*.json'))
+        assert len(saved) == 1 and json.loads(saved[0].read_text(encoding='utf-8')) == value
+
+
+def test_persist_interrupt_keeps_failed_job_and_unknown_cleanup(rig, monkeypatch):
+    """Interrupting diagnostics neither repairs an UNKNOWN provider nor relabels the failed Job."""
+    rig[0]['streams'][1] = stream('incomplete', done=False)
+
+    def interrupt(*args):
+        """Interrupt the first write after the real runtime has observed provider failure."""
+        raise KeyboardInterrupt()
+    monkeypatch.setattr(launcher, 'persist', interrupt)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        execute(rig)
+    value = caught.value.experimentExecution.value()
+    assert value['jobOutcome'] == 'Failed' and value['run']['status'] == 'failed'
+    assert [turn['status'] for turn in value['run']['turns']] == ['succeeded', 'failed']
+    assert value['run']['turns'][1]['cleanup']['quiescence'] == 'unknown'
+    assert value['hostCleanup'] == 'failed-or-unknown'
+    assert rig[0]['calls'] == 2 and len(rig[0]['processes']) == 1
+    assert rig[0]['processes'][0].returncode is None  # No unauthorized UNKNOWN disposal or repair.
+
+
+def test_persist_interrupt_keeps_cancelled_job(rig, monkeypatch):
+    """Post-Job interruption retains cancellation independently of private write failure."""
+    job = Job.new()
+    job.requestCancellation()
+
+    def interrupt(*args):
+        """Represent an interrupt while persisting the prepared cancelled invocation."""
+        raise KeyboardInterrupt()
+    monkeypatch.setattr(launcher, 'persist', interrupt)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        execute(rig, job=job)
+    value = caught.value.experimentExecution.value()
+    assert value['jobOutcome'] == 'Cancelled' and value['run']['status'] == 'cancelled'
+    assert all(turn['status'] == 'not-started' for turn in value['run']['turns'])
+    assert value['hostCleanup'] == 'completed' and rig[0]['processes'] == []
+
+
+def test_cleanup_interrupt_cannot_replace_earlier_persist_interrupt(rig, monkeypatch):
+    """Secondary cleanup interruption remains unknown while the first interrupt stays primary."""
+    first, second = KeyboardInterrupt('first'), KeyboardInterrupt('second')
+    originalStop = launcher.RuntimeHost.stop
+
+    def persist(*args):
+        """Supply the primary post-Job interruption."""
+        raise first
+
+    def stop(self):
+        """Dispose the synthetic child normally, then report an independent cleanup interruption."""
+        originalStop(self)
+        raise second
+    monkeypatch.setattr(launcher, 'persist', persist)
+    monkeypatch.setattr(launcher.RuntimeHost, 'stop', stop)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        execute(rig)
+    assert caught.value is first
+    value = caught.value.experimentExecution.value()
+    assert value['hostCleanup'] == 'failed-or-unknown'
+    assert value['jobOutcome'] == 'Succeeded' and value['run']['status'] == 'succeeded'
+    assert len(rig[0]['processes']) == 1 and rig[0]['processes'][0].returncode == 0
+
+
+def test_actual_post_job_sigint_restores_handler_and_reaps_child(rig, monkeypatch):
+    """A real Python SIGINT at first write follows the restored handler and still tears down."""
+    import signal
+    before = signal.getsignal(signal.SIGINT)
+
+    def persist(*args):
+        """Trigger Python's actual SIGINT handling after runJob restored the caller's handler."""
+        assert signal.getsignal(signal.SIGINT) is before
+        signal.raise_signal(signal.SIGINT)
+    monkeypatch.setattr(launcher, 'persist', persist)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        launcher.execute(launcher.prepare(definition(), rig[1]), rig[2])
+    assert signal.getsignal(signal.SIGINT) is before
+    assert caught.value.experimentExecution.value()['hostCleanup'] == 'completed'
+    assert len(rig[0]['processes']) == 1 and rig[0]['processes'][0].returncode == 0

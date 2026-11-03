@@ -138,6 +138,17 @@ file may therefore retain the pre-teardown snapshot. The in-process return value
 keeps original outcomes and final failure diagnostics. Process crashes can lose
 ephemeral results; EX-04 owns durability and complete wire provenance.
 
+Post-Job interruptions during finalization, evidence capture or persistence still
+enter the enclosing owned host-teardown boundary. A `KeyboardInterrupt` or other
+non-`Exception` exit is re-raised after cleanup, with an immutable diagnostic
+snapshot attached as `error.experimentExecution` for in-process callers. It cannot
+produce a successful CLI exit. Original run/turn/Job outcomes remain separate from
+the interrupted launcher/write and host cleanup; interrupted or uncertain cleanup
+stays `failed-or-unknown`. The first interruption remains primary if cleanup also
+raises. A failed/interrupted write is not retried. This is not a guarantee against
+process termination, repeated interruption inside provider cleanup, or a real
+provider abort validation.
+
 Focused verification (synthetic process/HTTP IO, actual Actant runtime/provider):
 
 ```powershell

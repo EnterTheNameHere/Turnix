@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/launcher.py ; version: 1
+# file: first-party/applications/experimentRunner/launcher.py ; version: 2
 """Trusted host composition and private per-execution persistence for EX-01/02."""
 from __future__ import annotations
 
@@ -110,7 +110,9 @@ def execute(prepared, resultsDirectory, *, job=None, handleInterrupt=True):
 
     The initial private write precedes teardown. A second atomic update records host
     cleanup when possible. Neither persistence nor shutdown changes original Job or
-    turn outcomes. The returned envelope remains available if both writes fail.
+    turn outcomes. Non-Exception exits are re-raised only after owned teardown;
+    their experimentExecution attribute retains the immutable diagnostic envelope
+    when a private write was interrupted. No failed write is retried.
     """
     definition, hostConfig, composer = prepared
     config = hostConfig.value()
@@ -126,78 +128,111 @@ def execute(prepared, resultsDirectory, *, job=None, handleInterrupt=True):
     temporary = tempfile.TemporaryDirectory(prefix='actant-experiment-')
     working = temporary.name
     stage = 'activation'
+    pendingExit = None
+
+    def noteInterrupt(error, at):
+        """Defer non-Exception exits without disguising them as successful execution."""
+        nonlocal pendingExit
+        if not isinstance(error, Exception):
+            if pendingExit is None:
+                pendingExit = error
+            if envelope['launcherFailure'] is None:
+                envelope['launcherFailure'] = {'category': 'launcher-interrupted', 'stage': at}
+
     try:
         try:
-            host = RuntimeHost(applicationStore=ApplicationStore(Path(working) / 'saves'),
-                packResolver=PackResolver(roots=(DRIVER, APP)), providerComposers=(composer,))
-            host.start()
-            runtime = host.createApplication(appPackId='applications.experimentRunner',
-                plan=ManualActivationPlan(packIds=('llmDrivers.llamaCpp', 'applications.experimentRunner')),
-                config={'llamaCpp': config['llamaCpp'], 'experimentRunner': policyFor(hostConfig)})
-            stage = 'preparation'
-            runId = runtime.invokeCapability('experimentRunner.prepare@1', definition.value())
-            previousHandler = None
-            if handleInterrupt:
-                def cancel(signum, frame):
-                    """Request cooperative cancellation on the retained exact Job handle."""
-                    job.requestCancellation()
-                previousHandler = signal.signal(signal.SIGINT, cancel)
             try:
-                stage = 'job'
-                runtime.runJob('experimentRunner.run@1', runId, job=job)
-            finally:
+                host = RuntimeHost(applicationStore=ApplicationStore(Path(working) / 'saves'),
+                    packResolver=PackResolver(roots=(DRIVER, APP)), providerComposers=(composer,))
+                host.start()
+                runtime = host.createApplication(appPackId='applications.experimentRunner',
+                    plan=ManualActivationPlan(packIds=('llmDrivers.llamaCpp', 'applications.experimentRunner')),
+                    config={'llamaCpp': config['llamaCpp'], 'experimentRunner': policyFor(hostConfig)})
+                stage = 'preparation'
+                runId = runtime.invokeCapability('experimentRunner.prepare@1', definition.value())
+                previousHandler = None
                 if handleInterrupt:
-                    signal.signal(signal.SIGINT, previousHandler)
-            envelope['jobOutcome'] = job.state.value
-            stage = 'diagnostic-finalization'
-            envelope['run'] = runtime.invokeCapability('experimentRunner.finish@1',
-                {'runId': runId, 'jobOutcome': job.state.value}).value()
-        except Exception:
-            envelope['launcherFailure'] = {'category': 'launcher-failed', 'stage': stage}
-            envelope['jobOutcome'] = job.state.value
-        finally:
-            if runtime is not None and runId is not None and envelope['run'] is None:
+                    def cancel(signum, frame):
+                        """Request cooperative cancellation on the retained exact Job handle."""
+                        job.requestCancellation()
+                    previousHandler = signal.signal(signal.SIGINT, cancel)
                 try:
-                    recorded = runtime.invokeCapability('experimentRunner.inspect@1').value()
-                    recorded['status'] = ('cancelled' if job.state.value == 'Cancelled' else
-                                          'succeeded' if job.state.value == 'Succeeded'
-                                          and recorded['applicationOutcome'] == 'completed' else 'failed')
-                    envelope['run'] = recorded
-                except Exception:
-                    pass  # Never replace the primary launcher/Job outcome with inspection failure.
-            if envelope['run'] is None:
-                envelope['run'] = fallback
-                envelope['run']['status'] = 'failed'
-                envelope['run'].update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - startedNs)
-            if envelope['run'] is not None:
+                    stage = 'job'
+                    runtime.runJob('experimentRunner.run@1', runId, job=job)
+                finally:
+                    if handleInterrupt:
+                        signal.signal(signal.SIGINT, previousHandler)
+                envelope['jobOutcome'] = job.state.value
+                stage = 'diagnostic-finalization'
+                envelope['run'] = runtime.invokeCapability('experimentRunner.finish@1',
+                    {'runId': runId, 'jobOutcome': job.state.value}).value()
+            except BaseException as error:
+                noteInterrupt(error, stage)
+                if envelope['launcherFailure'] is None:
+                    envelope['launcherFailure'] = {'category': 'launcher-failed', 'stage': stage}
+                envelope['jobOutcome'] = job.state.value
+            finally:
+                if runtime is not None and runId is not None and envelope['run'] is None:
+                    try:
+                        recorded = runtime.invokeCapability('experimentRunner.inspect@1').value()
+                        recorded['status'] = ('cancelled' if job.state.value == 'Cancelled' else
+                                              'succeeded' if job.state.value == 'Succeeded'
+                                              and recorded['applicationOutcome'] == 'completed' else 'failed')
+                        envelope['run'] = recorded
+                    except BaseException as error:
+                        noteInterrupt(error, 'diagnostic-inspection')
+                if envelope['run'] is None:
+                    envelope['run'] = fallback
+                    envelope['run']['status'] = 'failed'
+                    envelope['run'].update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - startedNs)
                 if config.get('persistConfigurationEvidence', False) and host is not None:
                     try:
                         selector = config['aliases'][definition.value()['configurations'][0]['profile']]
                         envelope['configurationEvidence'] = plain(composer.configurationEvidence(host.executionResources, selector))
-                    except Exception:
+                    except BaseException as error:
                         envelope['configurationEvidence'] = {'status': 'unavailable'}
+                        noteInterrupt(error, 'configuration-evidence')
                 try:
                     resultPath = persist(io, resultsDirectory, envelope)
-                except Exception:
+                except BaseException as error:
                     envelope['resultWriteFailure'] = {'category': 'result-write-failed', 'stage': 'before-teardown'}
+                    noteInterrupt(error, 'before-teardown-write')
+        finally:
+            # This owner boundary encloses every activation, finalization, evidence
+            # and initial-write path, including uncaught non-Exception exits.
             if host is not None:
                 try:
                     host.stop()
                     envelope['hostCleanup'] = 'completed'
-                except Exception:
+                except BaseException as error:
                     envelope['hostCleanup'] = 'failed-or-unknown'
-            if resultPath is not None:
-                try:
-                    persist(io, resultsDirectory, envelope)
-                except Exception:
-                    envelope['resultWriteFailure'] = {'category': 'result-write-failed', 'stage': 'after-teardown'}
+                    noteInterrupt(error, 'host-cleanup')
+        if resultPath is not None:
+            try:
+                persist(io, resultsDirectory, envelope)
+            except BaseException as error:
+                envelope['resultWriteFailure'] = {'category': 'result-write-failed', 'stage': 'after-teardown'}
+                noteInterrupt(error, 'after-teardown-write')
+    except BaseException as error:
+        # Unexpected diagnostic construction errors must also retain any earlier
+        # interruption; host cleanup above has already been attempted.
+        noteInterrupt(error, 'diagnostic-processing')
+        if envelope['launcherFailure'] is None:
+            envelope['launcherFailure'] = {'category': 'launcher-failed', 'stage': 'diagnostic-processing'}
+        if pendingExit is None:
+            pendingExit = error
     finally:
         try:
             temporary.cleanup()
-        except Exception:
+        except BaseException as error:
+            noteInterrupt(error, 'temporary-cleanup')
             if envelope['launcherFailure'] is None:
                 envelope['launcherFailure'] = {'category': 'launcher-failed', 'stage': 'temporary-cleanup'}
-    return schema.Snapshot(schema.canonical(envelope)), resultPath
+    snapshot = schema.Snapshot(schema.canonical(envelope))
+    if pendingExit is not None:
+        pendingExit.experimentExecution = snapshot
+        raise pendingExit
+    return snapshot, resultPath
 
 
 def exitCode(envelope):
