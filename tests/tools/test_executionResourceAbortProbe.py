@@ -1,10 +1,10 @@
-# file: tests/tools/test_executionResourceAbortProbe.py ; version: 1
+# file: tests/tools/test_executionResourceAbortProbe.py ; version: 2
 """Protect the explicit exact-handle emergency boundary; no real provider is launched."""
 import subprocess
 
 import pytest
 
-from tools.executionResourceValidation.abortProbe import OwnedChild, Probe, dispose
+from tools.executionResourceValidation.abortProbe import OwnedChild, Probe, dispose, exception_facts
 
 
 class Child:
@@ -98,3 +98,22 @@ def test_inadequate_active_binding_does_not_trigger_an_abort(slot):
     probe.record = lambda kind, **values: records.append(kind)
     probe.at_boundary(type('Session', (), {'nativeDone': False})())
     assert records == ['inconclusive-before-active-capture']
+
+
+def test_suppressed_transport_timeout_is_retained_as_private_evidence():
+    """Provider normalization from None must not hide the actual socket failure type."""
+    try:
+        try:
+            raise TimeoutError('test-only controlled socket timeout')
+        except TimeoutError:
+            raise RuntimeError('normalized provider error') from None
+    except RuntimeError as error:
+        facts = exception_facts(error)
+    assert [item['type'] for item in facts] == ['RuntimeError', 'TimeoutError']
+
+
+def test_exception_context_cycle_is_bounded():
+    """Malformed exception chains cannot turn evidence recording into a hung worker."""
+    error = RuntimeError('test-only cycle')
+    error.__context__ = error
+    assert len(exception_facts(error)) == 1

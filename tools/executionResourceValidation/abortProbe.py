@@ -1,4 +1,4 @@
-# file: tools/executionResourceValidation/abortProbe.py ; version: 1
+# file: tools/executionResourceValidation/abortProbe.py ; version: 2
 """Interactive, one-case ER-04C probe; emergency disposal requires explicit commands.
 
 Approval: canonical actant-integration coordination commit 2fff776, ER-04C
@@ -27,6 +27,17 @@ from tools.executionResourceValidation.run import (
 )
 
 CASES = ('job-cancel', 'disconnect', 'early-close', 'read-timeout', 'stream-delete')
+
+
+def exception_facts(error):
+    """Retain suppressed transport cause types privately without changing error semantics."""
+    result, seen = [], set()
+    while error is not None and id(error) not in seen and len(result) < 8:
+        seen.add(id(error))
+        result.append({'type': type(error).__name__,
+                       'functions': [frame.name for frame in traceback.extract_tb(error.__traceback__)]})
+        error = error.__cause__ if error.__cause__ is not None else error.__context__
+    return result
 
 
 @dataclass(frozen=True)
@@ -117,6 +128,11 @@ class Probe:
                             iterator.close()  # Reader thread owns the suspended generator.
                             return
                     yield event
+            except BaseException as error:
+                self.record('provider-stream-exit', exceptions=exception_facts(error))
+                (self.folder / 'stream-exit.private.txt').write_text(
+                    ''.join(traceback.format_exception(error)), encoding='utf-8')
+                raise
             finally:
                 iterator.close()
 
