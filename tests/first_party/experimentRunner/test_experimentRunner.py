@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_experimentRunner.py ; version: 4
+# file: tests/first_party/experimentRunner/test_experimentRunner.py ; version: 5
 """EX-01/02/R1/03 architectural tests: actual runtime/provider, synthetic process/HTTP IO."""
 import importlib
 import json
@@ -1538,3 +1538,261 @@ def test_ex03_r1_interrupted_relay_start_remains_owned_and_preserves_first_exit(
     result = caught.value.experimentExecution.value()
     assert result['hostCleanup'] == 'completed' and rig[0]['processes'] == []
     assert all(unit['jobOutcome'] is None for unit in result['suite']['units'])
+
+
+def test_review_ex03_first_start_interrupt_survives_relay_close_failure(rig, monkeypatch):
+    """Ordinary relay cleanup failure must not swallow the primary startup interrupt."""
+    originalStart = launcher._SignalCancellationRelay.start
+    originalClose = launcher._SignalCancellationRelay.close
+    first = KeyboardInterrupt('primary-start-interrupt')
+    relays = []
+    def start(self):
+        """Start the exact owned helper, then simulate Ctrl+C before handler installation."""
+        originalStart(self)
+        relays.append(self)
+        raise first
+    def close(self):
+        """Join the helper normally, then report an independent ordinary cleanup failure."""
+        originalClose(self)
+        raise RuntimeError('secondary-relay-close-failure')
+    monkeypatch.setattr(launcher._SignalCancellationRelay, 'start', start)
+    monkeypatch.setattr(launcher._SignalCancellationRelay, 'close', close)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        launcher.execute(launcher.prepare(definition(), rig[1]), rig[2])
+    assert caught.value is first
+    assert relays and not relays[0]._thread.is_alive()
+    assert caught.value.experimentExecution.value()['hostCleanup'] == 'completed'
+
+
+@pytest.mark.parametrize('kind', [KeyboardInterrupt, SystemExit])
+@pytest.mark.parametrize('site,cleanup', [('relay-start', 'relay-close'),
+    ('handler-install-before', 'handler-restoration'), ('handler-install-after', 'relay-close'),
+    ('handler-install-after', 'both'), ('loop-admission', 'handler-restoration'), ('loop-admission', 'both')])
+def test_ex03_r2_primary_exit_survives_paired_signal_cleanup_faults(rig, monkeypatch, kind, site, cleanup):
+    """Capture primary startup/setup/loop exits before independently failing restore and relay close."""
+    import signal
+    value = suiteDefinition(rig)
+    primary = kind('private primary exit')
+    originalStart, originalClose = launcher._SignalCancellationRelay.start, launcher._SignalCancellationRelay.close
+    nativeSignal = signal.signal
+    before = signal.getsignal(signal.SIGINT)
+    starts, closes, signalCalls, admissions = [], [], [], []
+    control = launcher.SuiteControl()
+    originalBegin = control.begin
+
+    def start(self):
+        """Root and start the actual helper before injecting the selected primary exit."""
+        originalStart(self)
+        starts.append(self)
+        if site == 'relay-start':
+            raise primary
+
+    def close(self):
+        """Always join the actual helper, then independently fail its cleanup report if selected."""
+        originalClose(self)
+        closes.append(self)
+        if cleanup in ('relay-close', 'both'):
+            raise RuntimeError('private secondary relay failure')
+
+    def setSignal(signum, handler):
+        """Exercise real installation/restoration, including an interrupt after installation took effect."""
+        signalCalls.append(handler)
+        if len(signalCalls) == 1 and site == 'handler-install-before':
+            raise primary
+        result = nativeSignal(signum, handler)
+        if len(signalCalls) == 1 and site == 'handler-install-after':
+            raise primary
+        if len(signalCalls) == 2 and cleanup in ('handler-restoration', 'both'):
+            raise RuntimeError('private secondary restoration failure')
+        return result
+
+    def begin(job):
+        """Leave the first actual Job untouched, then interrupt the next admission before any transition."""
+        admissions.append(job)
+        if len(admissions) == 2 and site == 'loop-admission':
+            raise primary
+        return originalBegin(job)
+
+    monkeypatch.setattr(launcher._SignalCancellationRelay, 'start', start)
+    monkeypatch.setattr(launcher._SignalCancellationRelay, 'close', close)
+    monkeypatch.setattr(signal, 'signal', setSignal)
+    monkeypatch.setattr(control, 'begin', begin)
+    try:
+        with pytest.raises(kind) as caught:
+            launcher.execute(launcher.prepare(value, rig[1]), rig[2], control=control)
+        assert caught.value is primary
+        result = caught.value.experimentExecution.value()
+        assert result['schemaId'] == 'actant.experiment.execution@3'
+        expectedStage = 'relay-start' if site == 'relay-start' else 'unit-admission' if site == 'loop-admission' else 'signal-handler-installation'
+        assert result['launcherFailure'] == {'category': 'launcher-interrupted', 'stage': expectedStage}
+        expected = (['handler-restoration', 'relay-close'] if cleanup == 'both' else [cleanup])
+        assert [failure['operation'] for failure in result['signalCleanupFailures']] == expected
+        assert all(failure['category'] == 'failed' for failure in result['signalCleanupFailures'])
+        assert result['hostCleanup'] == 'completed' and launcher.exitCode(result) == 1
+        assert starts == closes and len(starts) == 1 and not starts[0]._thread.is_alive()
+        assert signal.getsignal(signal.SIGINT) is before
+        assert 'private primary exit' not in json.dumps(result) and 'private secondary' not in json.dumps(result)
+        if site == 'loop-admission':
+            assert result['suite']['units'][0]['jobOutcome'] == 'Succeeded'
+            assert [unit['status'] for unit in result['suite']['units']] == ['succeeded', 'not-started', 'not-started', 'not-started']
+            assert rig[0]['calls'] == 2 and rig[0]['processes'][0].returncode == 0
+        else:
+            assert all(unit['jobOutcome'] is None for unit in result['suite']['units'])
+            assert rig[0]['processes'] == []
+        persisted = list(rig[2].glob('*.json'))
+        assert len(persisted) == 1 and json.loads(persisted[0].read_text(encoding='utf-8')) == result
+        result['signalCleanupFailures'].clear()
+        assert caught.value.experimentExecution.value()['signalCleanupFailures']
+    finally:
+        nativeSignal(signal.SIGINT, before)
+
+
+def test_ex03_r2_restoration_interrupt_precedes_relay_failure_after_completed_jobs(rig, monkeypatch):
+    """First interruption during restoration remains primary while all completed Job outcomes survive."""
+    import signal
+    primary = KeyboardInterrupt('private restoration interrupt')
+    nativeSignal = signal.signal
+    before = signal.getsignal(signal.SIGINT)
+    originalClose = launcher._SignalCancellationRelay.close
+    calls, closed = [], []
+
+    def setSignal(signum, handler):
+        """Restore the actual previous handler, then interrupt the restoration result."""
+        calls.append(handler)
+        result = nativeSignal(signum, handler)
+        if len(calls) == 2:
+            raise primary
+        return result
+
+    def close(self):
+        """Join normally before injecting the independent secondary ordinary error."""
+        originalClose(self)
+        closed.append(self)
+        raise RuntimeError('private secondary close error')
+    monkeypatch.setattr(signal, 'signal', setSignal)
+    monkeypatch.setattr(launcher._SignalCancellationRelay, 'close', close)
+    try:
+        with pytest.raises(KeyboardInterrupt) as caught:
+            launcher.execute(launcher.prepare(suiteDefinition(rig), rig[1]), rig[2])
+        assert caught.value is primary
+        result = caught.value.experimentExecution.value()
+        assert result['signalCleanupFailures'] == [
+            {'category': 'interrupted', 'operation': 'handler-restoration'},
+            {'category': 'failed', 'operation': 'relay-close'}]
+        assert result['suite']['status'] == 'succeeded'
+        assert all(unit['jobOutcome'] == 'Succeeded' for unit in result['suite']['units'])
+        assert result['hostCleanup'] == 'completed' and launcher.exitCode(result) == 1
+        assert closed and not closed[0]._thread.is_alive()
+        assert signal.getsignal(signal.SIGINT) is before
+    finally:
+        nativeSignal(signal.SIGINT, before)
+
+
+@pytest.mark.parametrize('site', ['relay-start', 'loop-admission'])
+def test_ex03_r2_ordinary_primary_failure_keeps_its_phase_across_cleanup_errors(rig, monkeypatch, site):
+    """Consumed ordinary launcher failures retain their original phase and separate secondary diagnostics."""
+    import signal
+    nativeSignal = signal.signal
+    before = signal.getsignal(signal.SIGINT)
+    originalStart, originalClose = launcher._SignalCancellationRelay.start, launcher._SignalCancellationRelay.close
+    control = launcher.SuiteControl()
+    begin = control.begin
+    calls, jobs, joined = [], [], []
+
+    def start(self):
+        """Start the actual helper, then fail normally before handler installation if selected."""
+        originalStart(self)
+        if site == 'relay-start':
+            raise RuntimeError('private primary startup failure')
+
+    def admit(job):
+        """Complete one unit before injecting an ordinary next-admission failure."""
+        jobs.append(job)
+        if len(jobs) == 2:
+            raise RuntimeError('private primary admission failure')
+        return begin(job)
+
+    def setSignal(signum, handler):
+        """Exercise real restoration before the secondary reporting fault."""
+        calls.append(handler)
+        result = nativeSignal(signum, handler)
+        if len(calls) == 2:
+            raise RuntimeError('private secondary restore failure')
+        return result
+
+    def close(self):
+        """Always join, then fail separately without replacing the primary launcher phase."""
+        originalClose(self)
+        joined.append(self)
+        raise RuntimeError('private secondary close failure')
+    monkeypatch.setattr(launcher._SignalCancellationRelay, 'start', start)
+    monkeypatch.setattr(launcher._SignalCancellationRelay, 'close', close)
+    monkeypatch.setattr(control, 'begin', admit)
+    monkeypatch.setattr(signal, 'signal', setSignal)
+    try:
+        snapshot, _ = launcher.execute(launcher.prepare(suiteDefinition(rig), rig[1]), rig[2], control=control)
+        result = snapshot.value()
+        assert result['launcherFailure'] == {'category': 'launcher-failed', 'stage': site if site == 'relay-start' else 'unit-admission'}
+        expected = ['relay-close'] if site == 'relay-start' else ['handler-restoration', 'relay-close']
+        assert [item['operation'] for item in result['signalCleanupFailures']] == expected
+        assert result['suite']['status'] == 'failed' and result['hostCleanup'] == 'completed'
+        assert launcher.exitCode(result) == 1 and joined and not joined[0]._thread.is_alive()
+        assert signal.getsignal(signal.SIGINT) is before
+        assert 'private primary' not in json.dumps(result)
+    finally:
+        nativeSignal(signal.SIGINT, before)
+
+
+def test_ex03_r2_first_interrupt_beats_secondary_cleanup_interrupt(rig, monkeypatch):
+    """Secondary non-Exception cleanup exit cannot replace the exact previously captured interrupt."""
+    first, secondary = KeyboardInterrupt(), SystemExit(17)
+    originalStart, originalClose = launcher._SignalCancellationRelay.start, launcher._SignalCancellationRelay.close
+
+    def start(self):
+        """Start normally and raise the primary exit before signal-handler installation."""
+        originalStart(self)
+        raise first
+
+    def close(self):
+        """Join normally and then raise a distinct secondary non-Exception exit."""
+        originalClose(self)
+        raise secondary
+    monkeypatch.setattr(launcher._SignalCancellationRelay, 'start', start)
+    monkeypatch.setattr(launcher._SignalCancellationRelay, 'close', close)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        launcher.execute(launcher.prepare(definition(), rig[1]), rig[2])
+    assert caught.value is first
+    result = caught.value.experimentExecution.value()
+    assert result['signalCleanupFailures'] == [{'category': 'interrupted', 'operation': 'relay-close'}]
+    assert result['hostCleanup'] == 'completed'
+
+
+@pytest.mark.parametrize('cancelled', [False, True])
+def test_ex03_r2_cleanup_error_keeps_primary_job_and_unknown_outcomes(rig, monkeypatch, cancelled):
+    """Separate relay cleanup errors cannot repair UNKNOWN or replace failed/cancelled unit outcomes."""
+    value = suiteDefinition(rig)
+    control = launcher.SuiteControl()
+    originalClose = launcher._SignalCancellationRelay.close
+    if cancelled:
+        def onCall(index):
+            """Cancel the actual active Job after native-send admission in this synthetic case."""
+            control.cancel()
+        rig[0]['onCall'] = onCall
+    else:
+        rig[0]['streams'][1] = stream('incomplete', done=False)
+
+    def close(self):
+        """Join the actual relay before independently failing its cleanup report."""
+        originalClose(self)
+        raise RuntimeError('private secondary close error')
+    monkeypatch.setattr(launcher._SignalCancellationRelay, 'close', close)
+    snapshot, _ = launcher.execute(launcher.prepare(value, rig[1]), rig[2], control=control)
+    result = snapshot.value()
+    first = result['suite']['units'][0]
+    assert first['jobOutcome'] == ('Cancelled' if cancelled else 'Failed')
+    assert first['status'] == ('cancelled' if cancelled else 'failed')
+    assert any(turn['cleanup']['quiescence'] == 'unknown' for turn in first['run']['turns'])
+    assert result['hostCleanup'] == 'failed-or-unknown'
+    assert result['signalCleanupFailures'] == [{'category': 'failed', 'operation': 'relay-close'}]
+    assert all(unit['status'] == 'not-started' and unit['jobOutcome'] is None for unit in result['suite']['units'][1:])
+    assert len(rig[0]['processes']) == 1 and rig[0]['processes'][0].returncode is None

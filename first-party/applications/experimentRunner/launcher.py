@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/launcher.py ; version: 4
+# file: first-party/applications/experimentRunner/launcher.py ; version: 5
 """Trusted host composition and private per-execution persistence for EX-01/02."""
 from __future__ import annotations
 
@@ -234,8 +234,9 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
     io = ManagedIo()
     suite = results.initialSuite(definition, schema.unitDefinition)
     startedNs = time.monotonic_ns()
-    envelope = {'schemaId': 'actant.experiment.execution@2', 'suite': suite,
-                'launcherFailure': None, 'resultWriteFailure': None, 'hostCleanup': 'not-started'}
+    envelope = {'schemaId': 'actant.experiment.execution@3', 'suite': suite,
+                'launcherFailure': None, 'signalCleanupFailures': [],
+                'resultWriteFailure': None, 'hostCleanup': 'not-started'}
     resultPath = None
     host, runtime = None, None
     temporary = tempfile.TemporaryDirectory(prefix='actant-experiment-')
@@ -256,6 +257,13 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
         if envelope['launcherFailure'] is None:
             envelope['launcherFailure'] = {'category': 'launcher-failed', 'stage': at}
 
+    def signalCleanupFailure(error, operation):
+        """Record each secondary signal-cleanup fault without replacing the captured primary exit."""
+        envelope['signalCleanupFailures'].append({
+            'category': 'interrupted' if not isinstance(error, Exception) else 'failed',
+            'operation': operation})
+        launcherFailure(error, 'signal-cleanup')
+
     try:
         try:
             try:
@@ -266,18 +274,24 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
                     plan=ManualActivationPlan(packIds=('llmDrivers.llamaCpp', 'applications.experimentRunner')),
                     config={'llamaCpp': config['llamaCpp'], 'experimentRunner': policyFor(hostConfig)})
                 reader = runtime.invokeCapability('experimentRunner.reader@1')
-                previousHandler, handlerInstalled, relay = None, False, None
+                previousHandler, handlerRestorationNeeded, relay = None, False, None
                 try:
                     if handleInterrupt:
                         relay = _SignalCancellationRelay(control)
+                        stage = 'relay-start'
                         relay.start()
 
                         def cancel(signum, frame):
                             """Set only the suite flag; the owned relay delivers active-Job cancellation."""
                             control.requestSignalCancellation()
-                        previousHandler = signal.signal(signal.SIGINT, cancel)
-                        handlerInstalled = True
+                        stage = 'signal-handler-installation'
+                        previousHandler = signal.getsignal(signal.SIGINT)
+                        # Own restoration before installation: signal.signal can
+                        # take effect and then be interrupted before returning.
+                        handlerRestorationNeeded = True
+                        signal.signal(signal.SIGINT, cancel)
                     for unit in suite['units']:
+                        stage = 'unit-admission'
                         if control.requested:
                             break
                         activeJob = job if unit['index'] == 1 and job is not None else Job.new()
@@ -337,14 +351,23 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
                             control.end(activeJob)
                         if unit['status'] != 'succeeded' or pendingExit is not None or envelope['launcherFailure'] is not None:
                             break
+                except BaseException as error:
+                    # Capture the actual primary BEFORE either cleanup action can
+                    # raise. The outer handler may otherwise see only its replacement.
+                    launcherFailure(error, stage)
+                    raise
                 finally:
                     stage = 'signal-cleanup'
-                    try:
-                        if handlerInstalled:
+                    if handlerRestorationNeeded:
+                        try:
                             signal.signal(signal.SIGINT, previousHandler)
-                    finally:
-                        if relay is not None:
+                        except BaseException as error:
+                            signalCleanupFailure(error, 'handler-restoration')
+                    if relay is not None:
+                        try:
                             relay.close()
+                        except BaseException as error:
+                            signalCleanupFailure(error, 'relay-close')
             except BaseException as error:
                 launcherFailure(error, stage)
             finally:

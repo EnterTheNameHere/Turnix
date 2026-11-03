@@ -121,7 +121,7 @@ revocation or a reservation race stops the suite and leaves explicit unstarted u
 
 ## Private outcomes and interruption handling
 
-`actant.experiment.execution@2` wraps a fresh `actant.experiment.suite@1`. The suite
+`actant.experiment.execution@3` wraps a fresh `actant.experiment.suite@1`. The suite
 has a fresh opaque suiteId, immutable definition/hash, timing/status and ordered
 units with stable independent unit IDs, config index/name/alias and repetition.
 Each unit has an actual Job outcome (null when unadmitted), independent unit status,
@@ -170,6 +170,19 @@ after Job publication, and the launcher checks it again before preparation. A si
 in the check/publication gap cannot be lost; a cancelled suite cannot admit the
 next unit. A request observed before orchestration ends keeps suite status cancelled
 even if the final Job won its completion race; completed Job/turn outcomes stay intact.
+
+The execution envelope advanced from version 2 to 3 for
+`signalCleanupFailures`: at most two fixed operation/category records for handler
+restoration and relay close. Definition/host/conversation-result version 2 and
+suite version 1 are unchanged. Primary startup, handler-setup or loop exits are
+captured **before** cleanup begins. Restoration and relay close are each attempted
+independently; secondary errors cannot replace the original interrupt or its exact
+attached diagnostic snapshot. Ordinary primary launcher failures retain their
+original phase. Restoration ownership is recorded before handler installation so
+an interrupted installation is still unwound. A failed restoration is recorded as
+failed, without asserting it took effect or retrying it. No raw exception message
+is stored in these records. Explicit inspect can still display earlier result JSON;
+this does not re-execute or reinterpret old definition versions.
 
 One private `<suiteId>.json` is written atomically through ManagedIo before host
 teardown, then updated with host cleanup if possible. A failed/interrupted write
