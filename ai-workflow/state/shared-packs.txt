@@ -88,38 +88,35 @@ current implementation surface merely because definitions remain present.
 Determine effective behavior through the wrapper and live capability path.
 
 
-llama.cpp shared-runtime materialization
-----------------------------------------
-Managed llama.cpp lifetime is no longer inherently CodeEntry/ApplicationRuntime-local.
-The active structured CodeEntry keeps an application-local provider facade, but
-manageServer=true acquires a RuntimeHost-owned shared driver lease.
+llama.cpp shared-runtime materialization (accepted ER-03, 2026-11-03)
+---------------------------------------------------------------------
+At Integration 68d766f, managed activation publishes a controlled-only facade and
+requires host-trusted LlamaCppComposition before application hooks/save/start.
+The old SharedServiceRegistry managed-driver lease path is retired, without hot
+stealing or stopping live old leases. One host-selected ER-01 domain owns immutable
+LC profiles/per-residency drivers and ER-02 protects profile/estimate/stream/cleanup.
+Loading stays lazy until explicit authorized transition; ensureModel cannot silently
+load/switch. Compatible calls share weights; busy/exclusive/unknown rejects.
+Lifecycle gates and exact-service finalizer ownership preserve callbacks through
+shutdown/rollback. Unknown provider disposition remains rooted without recovery.
 
-The same compatible managed configuration may therefore be consumed concurrently by
-multiple ApplicationRuns without starting mutually unaware llama-server processes.
-Pack activation no longer eagerly starts the default model; actual provider work
-materializes the selected model through the existing ensureModel() path.
-
-This is an ownership/lifetime seam, not a resource scheduler. Incompatible managed
-configurations currently conflict rather than being arbitrated.
-
-The structured llama.cpp provider now also participates in generic Job-owned
-cancellation. During an active inference HTTP stream it registers a stop callback on
-the generic CancellationSignal and closes that response when cancellation is
-requested. Job/ProcessingRun outcome classification remains outside the provider.
-Model startup/readiness before the stream is not yet interruptible.
-
+Integration independently accepted worker 63931d5/00bb521/6e8804e as
+fc536d2/4d19578/68d766f. 84 focused/reproduction, 861 relevant, 1711 full archive
+and 1711 full integrated tests passed, zero skips. Read knowledge/execution-resource-er03-acceptance.txt
+and provider README for host/catalog/entry/grant migration and outcome contracts.
+Consumers must migrate host composition/caller-helper grants and explicitly
+transition before first call; consumer branches remain unchanged/unverified.
+Stock required physical freshness/retention unsupported; best-effort fresh requests
+use owned slot/cache_prompt=false without weight reload. Actual retained-provider
+support, binary/model effects and ER-04 remain unmet/separate.
 
 Next shared-provider pressure
 -----------------------------
-The planned arbitration layer remains outside llama.cpp provider semantics.
-SharedServiceRegistry continues to own shared driver lifetime. A provider-neutral
-execution-resource layer is expected to arbitrate residency/active claims; llama.cpp
-will be the first concrete adapter for model materialization/replacement.
-
-The initial intended behavior is deliberately limited: idle incompatible residency may
-be replaced automatically, while incompatible actively used residency must surface
-explicit contention. Any future active preemption must use the owning Job cancellation
-path rather than terminating llama.cpp execution behind Job lifecycle semantics.
+ER-01/02/03 bounded synthetic controlled-provider adoption is accepted; no further
+package is inferred. Separately scope consumer migration or ER-04 supplied-asset
+validation when requested. There is no automatic idle replacement, scheduler,
+preemption, restart/recovery, ingress or suspension policy. Existing Job outcomes
+and opt-in PM/G observation contracts remain; no hardware collection is activated.
 
 Adoption boundary (source inspection, 2026-10-28)
 -------------------------------------------------
