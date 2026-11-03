@@ -1,0 +1,143 @@
+EXPERIMENT RUNNER EX-03 - INDEPENDENT APPLICATION REVIEW
+========================================================
+Owner/reviewer: Integration. Date: 2026-11-03.
+Reviewed Application: a4b98682b1041f75e9cdf181b0df927ce69eab91, parent 4b375a3.
+Canonical review baseline: 5b26b493addd98ee3024221d7818d2e5b41bfff2
+(actant-integration).
+Decision: NOT accepted. Bounded EX-03-R1 correction required.
+Application source remains ONLY on Application branch; no upstream source import.
+
+EX-03-R1 [P2]: SIGINT can deadlock the suite controller at Job handoff
+---------------------------------------------------------------------
+first-party/applications/experimentRunner/launcher.py:127-148, especially 129/136.
+SuiteControl uses threading.Lock. execute installs a Python SIGINT handler which
+synchronously calls control.cancel(). If the first SIGINT arrives on the main
+thread while begin/end/cancel already owns _lane, that handler tries to acquire
+the SAME non-reentrant lock. The main thread cannot release it until the handler
+returns; the handler cannot return until it acquires it. No further Job boundary
+or host finally is reached. At a later unit handoff an owned model may still be
+resident, so the standard terminal cancellation path can hang without cleanup.
+This is a single ordinary SIGINT, not the documented limitation of repeated
+interruptions inside provider shutdown or forced process termination.
+
+Independent model-free reproduction: dispatch actual Python SIGINT from the
+cancellation-flag check performed INSIDE begin's lock. Child prints that it is
+dispatching, then fails to return within four seconds. Bounded parent subprocess
+times out, kills and reaps only that exact MODEL-FREE diagnostic Python child.
+No actual model abort/kill, domain repair or emergency provider disposal involved.
+This confirms deterministic same-thread lock reentry on unchanged delivered source.
+
+Required correction: ensure SIGINT handling can request suite cancellation without
+blocking on a lock held by the interrupted thread. Preserve correct active-Job
+selection and first-cancellation behavior, including the interval between testing
+the cancellation flag and publishing the new Job. A naive reentrant-lock change
+must not lose cancellation there or admit later work after a gap cancellation.
+Do not relabel completed Jobs, replace cancellation with success, add retries,
+weaken resource cleanup or modify shared backend/provider APIs.
+Add deadline-bounded model-free actual SIGINT regressions at begin and end handoffs,
+plus exact active-Job cancellation and no subsequent transition/Job admission.
+Existing cross-thread cancellation, R1 aggregate interrupt and UNKNOWN tests remain.
+
+Raw reproduction / bounded command
+------------------------------------
+Use an isolated exact Application snapshot and this child as a standalone script:
+
+import importlib, signal, sys
+from pathlib import Path
+snapshot = Path(sys.argv[1])
+original = Path(sys.argv[2])
+sys.path = [str(snapshot)] + [p for p in sys.path if p and Path(p).resolve() != original]
+launcher = importlib.import_module('first-party.applications.experimentRunner.launcher')
+from backend.orchestration import Job
+control = launcher.SuiteControl()
+signal.signal(signal.SIGINT, lambda signum, frame: control.cancel())
+originalCheck = control._cancelled.is_set
+once = [False]
+def check():
+    """Dispatch once at a real locked flag check, simulating normal signal timing."""
+    if not once[0]:
+        once[0] = True
+        print('dispatching SIGINT while begin owns controller lock', flush=True)
+        signal.raise_signal(signal.SIGINT)
+    return originalCheck()
+control._cancelled.is_set = check
+control.begin(Job.new())
+print('controller returned', flush=True)
+
+Run from a parent Python process with subprocess.run([sys.executable,
+'-X', 'frozen_modules=off', CHILD_SCRIPT, SNAPSHOT_ROOT, ORIGINAL_CHECKOUT_ROOT],
+capture_output=True, text=True, timeout=4). Catch TimeoutExpired as failure of the
+controller completion expectation. The child starts NO runtime/server/model.
+Original result: timeout=4, stdout contains only the dispatch marker, no returned
+marker. Integration private exact harness/child:
+python-embedded/review-ex03-sigint-child.py. Do not run an unbounded hanging test.
+
+Independent source and existing tests
+---------------------------------------
+Reviewed changed definition/results/launcher/CodeEntry/CLI, templates, README and
+tests against EX-03 assignment, published plan and accepted EX-01/02/R1. Only ten
+Application-owned files changed (two new examples); no backend/provider changes.
+Complete non-EX/non-coordination platform projection matches canonical baseline.
+Six changed Python files pass independent AST, path/header and exact version
+increment/docstring audit. git diff --check passes. No Ruff claim.
+Definition@2/host@2/result@2/execution@2 and suite@1 migration explicitly reject v1.
+The diagnostic reader retains immutable recorder snapshots and supplies no Context,
+session/IO/estimator or execution/drain rights; source inspection found no shared
+API change needed for preserving partial data through expected UNKNOWN boundaries.
+
+Own Integration Python 3.15.0b4 / pytest 9.2.0:
+  untouched combined Application archive: 1886 passed in 14.30s, zero skips.
+Includes all 107 Application cases, 72 migrated prior cases plus 35 new cases.
+Current tests lack SIGINT reentry during controller lock ownership, so passing
+suite/cross-thread cancellation tests do not refute EX-03-R1.
+Actual test snapshot: ignored python-embedded/review-ex03-a4b9868/ from git archive.
+Command from snapshot root (select that source and remove embedded _pth fallback):
+  <Integration Python> -X frozen_modules=off -c "import sys; from pathlib import Path; source=Path.cwd().resolve(); original=source.parents[1]; sys.path=[str(source)]+[p for p in sys.path if p and Path(p).resolve()!=original]; import pytest; raise SystemExit(pytest.main(['-q','--import-mode=importlib','--tb=short','tests']))"
+Actual command also asserted backend/App/adapter origins inside SAME combined
+checkout. No external DRIVER injection. Existing embedded-home warning persists.
+
+Actual ordinary eight-call evidence at unchanged Application a4b9868
+---------------------------------------------------------------------
+Worker asset blocker is valid for its environment; Integration separately has the
+existing authorized assets/config. Rehashed actual executable and same Qwen GGUF
+against prior private ER-04 identities; both match. All four unit configuration
+snapshots show build12031/060b2fea4 and successful required advertised-pinned-surface
+check. Provider effective state retains existing unknown-unqueried limitation.
+
+Used checked-in host@2/suite examples with private supplied asset substitutions
+and an unused loopback port. Two startup profiles differ only threads4 vs threads3
+(threadsBatch4), reducing the existing ceiling. CPU/context1024/token24, batch/
+ubatch128, one slot, no KV offload, reasoning off, speculation none unchanged.
+This exact reduced-thread choice was scoped in assignment/example; no increased
+ceiling, new model, download/copy, takeover or GPU inference. Ordinary API launch
+used handleInterrupt=False, so it does NOT test the defective SIGINT path.
+
+Eight actual calls across four real Jobs/conversations: config1 rep1, config1
+rep2, config2 rep1, config2 rep2. All units/Jobs succeed; all eight answers nonempty.
+Wire and recorded histories exactly [user1], then [user1, assistant1.rawText, user2]
+within EACH independent unit. No history leak/reasoning reinjection or semantic
+answer-correctness oracle. Separate reasoning not exposed in any call (null).
+Each profile's repetitions reuse generation; the startup profile transition changes
+generation. All per-call cleanup confirmed. Four reservation closes are labeled
+queued, public release receipt unavailable as designed; separate public snapshots
+after actual runJob returns show READY/operations0/retainedContexts0/exclusive=false
+at ALL four lifetime boundaries. No fabricated release receipt or private drain.
+Exactly two owned model launches, both children actually exited normally. Host
+cleanup completed, private result writes succeeded, CLI projection 0. No live
+model/worker/operator sessions or emergency model disposition. Observers only
+capture exact transport bodies/Popen/public boundary snapshots and hide windows;
+payload/execution/cleanup source unchanged. No W:\Projects\Actant checkout access.
+
+Reviewed structural evidence: knowledge/experiment-runner-ex03-real-summary.json.
+Raw definitions/host/results/wire/configuration/asset identities and server logs
+remain ignored/private under python-embedded/ex03-review-real-a4b9868/ and
+python-embedded/review-ex03-real.private.log. Nothing raw published in the summary.
+This clears ordinary real-run evidence for THAT ref/scope; it is not overall
+EX-03 acceptance or real cancellation/abort-path proof.
+
+Continuation
+--------------
+Send EX-03-R1 to Application worker, archive reviewed delivery, record current
+state and await corrected Application ref. Independently recheck signal handoff,
+existing tests and affected normal paths before acceptance. No upstream App source
+import, EX-04/05, scheduler/recovery or shared API work is assigned.
