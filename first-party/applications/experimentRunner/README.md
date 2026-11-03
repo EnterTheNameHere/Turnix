@@ -157,6 +157,20 @@ Cancellation before a unit prevents Job admission and transition; during a unit 
 cancels that Job. Earlier terminal Jobs are never relabeled. Results for units that
 never start remain explicit with no invented Job/provider evidence.
 
+The installed Python SIGINT handler only stores a monotonic flag: it takes no
+controller/Event/Job lock and invokes no provider callbacks. A launcher-owned
+relay polls that flag and calls the exact active Job's ordinary cancellation API
+outside the interrupted stack. The relay is rooted before startup, exists only
+for the installed handler's lifetime, and is stopped/boundedly joined after handler
+restoration. Polling supplies no real-time cancellation latency promise. A failed
+relay cleanup is a separate launcher failure and cannot certify provider cleanup.
+Ordinary cross-thread `cancel()` captures the Job under a reentrant controller lane
+and invokes callbacks after releasing that lane. Handoff rechecks cancellation
+after Job publication, and the launcher checks it again before preparation. A signal
+in the check/publication gap cannot be lost; a cancelled suite cannot admit the
+next unit. A request observed before orchestration ends keeps suite status cancelled
+even if the final Job won its completion race; completed Job/turn outcomes stay intact.
+
 One private `<suiteId>.json` is written atomically through ManagedIo before host
 teardown, then updated with host cleanup if possible. A failed/interrupted write
 is not retried. It may leave no file or a pre-teardown snapshot; returned diagnostics

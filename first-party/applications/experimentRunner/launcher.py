@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/launcher.py ; version: 3
+# file: first-party/applications/experimentRunner/launcher.py ; version: 4
 """Trusted host composition and private per-execution persistence for EX-01/02."""
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import tempfile
 import time
 from collections.abc import Mapping
 from pathlib import Path
-from threading import Event, Lock
+from threading import RLock, Thread
 
 from backend.io.managedIo import ManagedIo
 from backend.orchestration import Job
@@ -112,12 +112,28 @@ def persist(io, directory, result):
     return path
 
 
+class _CancellationFlag:
+    """Monotonic Python-dispatch signal flag without Event's non-reentrant condition lock."""
+
+    def __init__(self):
+        """Create an unset flag; resetting a cancelled suite is deliberately unsupported."""
+        self._requested = False
+
+    def set(self):
+        """Publish cancellation with an idempotent attribute store, without taking locks."""
+        self._requested = True
+
+    def is_set(self):
+        """Read the monotonic flag without a lock or callback into Job/provider code."""
+        return self._requested
+
+
 class SuiteControl:
     """Own suite cancellation and only the exact currently active Job, across unit gaps."""
 
     def __init__(self):
         """Create an initially uncancelled suite controller without runtime authority."""
-        self._cancelled, self._lane, self._job = Event(), Lock(), None
+        self._cancelled, self._lane, self._job = _CancellationFlag(), RLock(), None
 
     @property
     def requested(self):
@@ -125,11 +141,16 @@ class SuiteControl:
         return self._cancelled.is_set()
 
     def cancel(self):
-        """Prevent subsequent admission and cooperatively cancel only the active retained Job."""
+        """Cancel from ordinary threads; Job callbacks never run inside the controller lane."""
+        self.requestSignalCancellation()
         with self._lane:
-            self._cancelled.set()
-            if self._job is not None:
-                self._job.requestCancellation()
+            job = self._job
+        if job is not None:
+            job.requestCancellation()
+
+    def requestSignalCancellation(self):
+        """Python SIGINT handler leaf: set a flag only, never acquire locks or call Job code."""
+        self._cancelled.set()
 
     def begin(self, job):
         """Atomically reject pre-unit cancellation or select this exact pending Job."""
@@ -139,13 +160,52 @@ class SuiteControl:
             if self._job is not None:
                 raise RuntimeError('A conversation Job is already active.')
             self._job = job
-            return True
+            # Reentry can cancel after the first check but before publication.
+            # Reject that gap cancellation rather than publishing uncancelled work.
+            if self.requested:
+                self._job = None
+            else:
+                return True
+        job.requestCancellation()
+        return False
 
     def end(self, job):
         """Drop only this completed unit's handle, preserving cancellation between units."""
         with self._lane:
             if self._job is job:
                 self._job = None
+
+
+class _SignalCancellationRelay:
+    """Deliver a signal flag to the exact active Job outside the interrupted Python stack."""
+
+    def __init__(self, control):
+        """Prepare an inert relay so its owner can retain it before starting the thread."""
+        self._control, self._stopping, self._failed = control, False, False
+        self._thread = Thread(target=self._deliver, name='experiment-cancellation', daemon=True)
+
+    def start(self):
+        """Start only after the launcher has rooted this relay in its cleanup scope."""
+        self._thread.start()
+
+    def _deliver(self):
+        """Poll the monotonic flag, then invoke ordinary cooperative cancellation off-stack."""
+        try:
+            while not self._stopping:
+                if self._control.requested:
+                    self._control.cancel()
+                    return
+                time.sleep(0.01)
+        except BaseException:
+            self._failed = True  # Never export raw callback failures through thread logging.
+
+    def close(self):
+        """Stop and boundedly join this relay; failure supplies no provider-cleanup proof."""
+        self._stopping = True
+        if self._thread.ident is not None:
+            self._thread.join(timeout=1)
+        if self._thread.is_alive() or self._failed:
+            raise RuntimeError('Suite cancellation relay did not close normally.')
 
 
 def unitStatus(unit):
@@ -206,18 +266,25 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
                     plan=ManualActivationPlan(packIds=('llmDrivers.llamaCpp', 'applications.experimentRunner')),
                     config={'llamaCpp': config['llamaCpp'], 'experimentRunner': policyFor(hostConfig)})
                 reader = runtime.invokeCapability('experimentRunner.reader@1')
-                previousHandler = None
-                if handleInterrupt:
-                    def cancel(signum, frame):
-                        """Cancel the suite across unit gaps and its exact active Job during inference."""
-                        control.cancel()
-                    previousHandler = signal.signal(signal.SIGINT, cancel)
+                previousHandler, handlerInstalled, relay = None, False, None
                 try:
+                    if handleInterrupt:
+                        relay = _SignalCancellationRelay(control)
+                        relay.start()
+
+                        def cancel(signum, frame):
+                            """Set only the suite flag; the owned relay delivers active-Job cancellation."""
+                            control.requestSignalCancellation()
+                        previousHandler = signal.signal(signal.SIGINT, cancel)
+                        handlerInstalled = True
                     for unit in suite['units']:
                         if control.requested:
                             break
                         activeJob = job if unit['index'] == 1 and job is not None else Job.new()
                         if not control.begin(activeJob):
+                            break
+                        if control.requested:
+                            control.end(activeJob)
                             break
                         runId, admitted, finished = None, False, False
                         try:
@@ -271,13 +338,18 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
                         if unit['status'] != 'succeeded' or pendingExit is not None or envelope['launcherFailure'] is not None:
                             break
                 finally:
-                    if handleInterrupt:
-                        signal.signal(signal.SIGINT, previousHandler)
+                    stage = 'signal-cleanup'
+                    try:
+                        if handlerInstalled:
+                            signal.signal(signal.SIGINT, previousHandler)
+                    finally:
+                        if relay is not None:
+                            relay.close()
             except BaseException as error:
                 launcherFailure(error, stage)
             finally:
-                suite['status'] = ('succeeded' if all(unit['status'] == 'succeeded' for unit in suite['units']) else
-                    'cancelled' if control.requested or any(unit['status'] == 'cancelled' for unit in suite['units']) else 'failed')
+                suite['status'] = ('cancelled' if control.requested or any(unit['status'] == 'cancelled' for unit in suite['units']) else
+                    'succeeded' if all(unit['status'] == 'succeeded' for unit in suite['units']) else 'failed')
                 suite.update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - startedNs)
                 try:
                     resultPath = persist(io, resultsDirectory, envelope)

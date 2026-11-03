@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_experimentRunner.py ; version: 3
+# file: tests/first_party/experimentRunner/test_experimentRunner.py ; version: 4
 """EX-01/02/R1/03 architectural tests: actual runtime/provider, synthetic process/HTTP IO."""
 import importlib
 import json
@@ -1271,3 +1271,270 @@ def test_ex03_checked_in_templates_validate_without_probing_assets(rig):
         prepared = launcher.prepare(definitionValue, host)
         assert prepared[0].value()['schemaId'] == 'actant.experiment.definition@2'
     assert rig[0]['processes'] == [] and rig[0]['requests'] == []
+
+
+RAW_SIGINT_REPRO = '''import importlib, signal, sys
+from pathlib import Path
+snapshot = Path(sys.argv[1])
+original = Path(sys.argv[2])
+sys.path = [str(snapshot)] + [p for p in sys.path if p and Path(p).resolve() != original]
+launcher = importlib.import_module('first-party.applications.experimentRunner.launcher')
+from backend.orchestration import Job
+control = launcher.SuiteControl()
+signal.signal(signal.SIGINT, lambda signum, frame: control.cancel())
+originalCheck = control._cancelled.is_set
+once = [False]
+def check():
+    """Dispatch once at a real locked flag check, simulating normal signal timing."""
+    if not once[0]:
+        once[0] = True
+        print('dispatching SIGINT while begin owns controller lock', flush=True)
+        signal.raise_signal(signal.SIGINT)
+    return originalCheck()
+control._cancelled.is_set = check
+control.begin(Job.new())
+print('controller returned', flush=True)
+'''
+
+
+def test_review_ex03_sigint_during_begin_completes_in_bounded_child():
+    """Run Integration's unchanged model-free reproduction under an exact-child deadline."""
+    import subprocess
+    import sys
+    result = subprocess.run([sys.executable, '-X', 'frozen_modules=off', '-c', RAW_SIGINT_REPRO,
+                             str(launcher.ROOT), str(launcher.ROOT)], capture_output=True, text=True, timeout=4,
+                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    assert result.returncode == 0, result.stderr
+    assert 'dispatching SIGINT while begin owns controller lock' in result.stdout
+    assert 'controller returned' in result.stdout
+
+
+SIGNAL_HANDOFF_CHILD = '''import importlib, inspect, signal, sys, time
+from pathlib import Path
+root = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(root))
+launcher = importlib.import_module('first-party.applications.experimentRunner.launcher')
+from backend.orchestration import Job
+assert Path(launcher.__file__).resolve().is_relative_to(root)
+mode = sys.argv[2]
+control = launcher.SuiteControl()
+job = Job.new()
+completed = Job.new()
+completed.start()
+completed.succeed()
+if mode.startswith('end'):
+    assert control.begin(completed)
+elif mode == 'active-event-lock':
+    assert control.begin(job)
+    job.start()
+relay = launcher._SignalCancellationRelay(control)
+relay.start()
+previous = signal.signal(signal.SIGINT, lambda signum, frame: control.requestSignalCancellation())
+beginLines, beginStart = inspect.getsourcelines(launcher.SuiteControl.begin)
+publish = next(beginStart + i for i, line in enumerate(beginLines) if 'self._job = job' in line)
+postcheck = max(beginStart + i for i, line in enumerate(beginLines) if 'if self.requested:' in line)
+lastReturn = next(beginStart + i for i, line in enumerate(beginLines) if 'return True' in line)
+endLines, endStart = inspect.getsourcelines(launcher.SuiteControl.end)
+clear = next(endStart + i for i, line in enumerate(endLines) if 'self._job = None' in line)
+fired = [False]
+def trace(frame, event, arg):
+    """Dispatch once at an exact production handoff or a held Job Event condition lock."""
+    if fired[0]:
+        return trace
+    code = frame.f_code
+    trigger = (event == 'line' and code is launcher.SuiteControl.begin.__code__ and
+               frame.f_lineno == {'begin-before-publish': publish, 'begin-after-publish': postcheck,
+                                 'begin-after-check': lastReturn}.get(mode))
+    trigger |= (mode == 'end-before-clear' and event == 'line' and
+                code is launcher.SuiteControl.end.__code__ and frame.f_lineno == clear)
+    trigger |= (mode == 'end-after-clear' and event == 'return' and code is launcher.SuiteControl.end.__code__)
+    if mode == 'active-event-lock' and event == 'line' and code.co_name == 'set' and frame.f_locals.get('self') is job.cancellationSignal._event:
+        trigger |= job.cancellationSignal._event._cond._is_owned()
+    if trigger:
+        fired[0] = True
+        signal.raise_signal(signal.SIGINT)
+    return trace
+try:
+    sys.settrace(trace)
+    if mode.startswith('begin'):
+        admitted = control.begin(job)
+    elif mode.startswith('end'):
+        control.end(completed)
+    else:
+        control.cancel()
+    sys.settrace(None)
+    assert fired[0] and control.requested
+    if mode in ('begin-before-publish', 'begin-after-publish'):
+        assert admitted is False and job.state.value == 'Cancelled'
+    if mode == 'begin-after-check':
+        deadline = time.monotonic() + 1
+        while not job.cancellationRequested and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert job.cancellationRequested
+        control.end(job)
+    if mode == 'active-event-lock':
+        assert job.cancellationRequested and job.state.value == 'Running'
+        control.end(job)
+    assert completed.state.value == 'Succeeded'
+    assert not control.begin(Job.new())
+finally:
+    sys.settrace(None)
+    signal.signal(signal.SIGINT, previous)
+    relay.close()
+assert not relay._thread.is_alive()
+print('handoff returned without late admission', flush=True)
+'''
+
+
+@pytest.mark.parametrize('boundary', ['begin-before-publish', 'begin-after-publish', 'begin-after-check',
+                                    'end-before-clear', 'end-after-clear', 'active-event-lock'])
+def test_ex03_r1_actual_signals_at_handoff_have_bounded_completion(boundary):
+    """Actual SIGINT can interrupt locked handoff/Event state without self-deadlock or lost flags."""
+    import subprocess
+    import sys
+    result = subprocess.run([sys.executable, '-X', 'frozen_modules=off', '-c', SIGNAL_HANDOFF_CHILD,
+                             str(launcher.ROOT), boundary], capture_output=True, text=True, timeout=4,
+                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    assert result.returncode == 0, result.stderr
+    assert 'handoff returned without late admission' in result.stdout
+
+
+@pytest.mark.parametrize('handoff', ['begin', 'end'])
+def test_ex03_r1_signal_at_later_handoff_prevents_next_job_and_transition(rig, monkeypatch, handoff):
+    """Installed signal handling stops at a later gap, preserves prior Job truth and reaps its child."""
+    import inspect
+    import signal
+    import sys
+    from backend.context.codeEntryContext import _LlmFacade
+    value = suiteDefinition(rig)
+    control = launcher.SuiteControl()
+    transitions, begun, seenJobs = [], [], []
+    originalBegin, originalEnd = control.begin, control.end
+    originalTransition = _LlmFacade.transitionProfile
+
+    def transition(self, profile):
+        """Count actual transition attempts, independently of compatible process reuse."""
+        transitions.append(profile)
+        return originalTransition(self, profile)
+
+    def atBoundary(method, job, target):
+        """Raise one actual SIGINT while the production handoff frame owns its lane."""
+        lines, start = inspect.getsourcelines(method)
+        lineNumber = next(start + index for index, line in enumerate(lines) if target in line)
+        previous = sys.gettrace()
+        once = []
+
+        def trace(frame, event, arg):
+            """Inject only on the selected actual handoff line; no controller behavior is replaced."""
+            if not once and event == 'line' and frame.f_code is method.__func__.__code__ and frame.f_lineno == lineNumber:
+                once.append(True)
+                signal.raise_signal(signal.SIGINT)
+            return trace
+        try:
+            sys.settrace(trace)
+            return method(job)
+        finally:
+            sys.settrace(previous)
+            assert once
+
+    def begin(job):
+        """Inject begin cancellation before publication of the second unit's pending Job."""
+        begun.append(job)
+        if handoff == 'begin' and len(begun) == 2:
+            return atBoundary(originalBegin, job, 'self._job = job')
+        return originalBegin(job)
+
+    def end(job):
+        """Inject end cancellation while detaching the first actual terminal Job."""
+        seenJobs.append(job)
+        if handoff == 'end' and len(seenJobs) == 1:
+            return atBoundary(originalEnd, job, 'self._job = None')
+        return originalEnd(job)
+    monkeypatch.setattr(control, 'begin', begin)
+    monkeypatch.setattr(control, 'end', end)
+    monkeypatch.setattr(_LlmFacade, 'transitionProfile', transition)
+    before = signal.getsignal(signal.SIGINT)
+    snapshot, _ = launcher.execute(launcher.prepare(value, rig[1]), rig[2], control=control)
+    result = snapshot.value()
+    assert signal.getsignal(signal.SIGINT) is before
+    assert result['suite']['status'] == 'cancelled'
+    assert [unit['status'] for unit in result['suite']['units']] == ['succeeded', 'not-started', 'not-started', 'not-started']
+    assert result['suite']['units'][0]['jobOutcome'] == seenJobs[0].state.value == 'Succeeded'
+    assert all(unit['jobOutcome'] is None for unit in result['suite']['units'][1:])
+    assert len(transitions) == 1 and rig[0]['calls'] == 2
+    assert result['hostCleanup'] == 'completed' and len(rig[0]['processes']) == 1 and rig[0]['processes'][0].returncode == 0
+
+
+def test_ex03_r1_actual_sigint_cancels_exact_active_job_off_stack(rig):
+    """The installed leaf handler lets the relay stop the actual retained Job during a blocked stream."""
+    import signal
+    from threading import get_ident
+    value = suiteDefinition(rig)
+    job, unrelated = Job.new(), Job.new()
+    unrelated.start()
+    unrelated.succeed()
+    stopped, deliveries = Event(), []
+    callerThread = get_ident()
+
+    def delivered():
+        """Count cancellation of this Job, not a newly created or previously completed Job."""
+        deliveries.append(get_ident())
+    job.cancellationSignal.registerCallback(delivered)
+
+    def blocked():
+        """Dispatch actual SIGINT, then require off-stack cancellation before releasing fake IO."""
+        yield stream('signal partial')[0]
+        signal.raise_signal(signal.SIGINT)
+        assert stopped.wait(3), 'active Job cancellation was not delivered'
+        raise OSError('Synthetic stopped stream')
+    rig[0]['streams'][0] = blocked()
+    rig[0]['onStop'] = stopped.set
+    before = signal.getsignal(signal.SIGINT)
+    snapshot, _ = launcher.execute(launcher.prepare(value, rig[1]), rig[2], job=job)
+    result = snapshot.value()
+    assert signal.getsignal(signal.SIGINT) is before
+    assert job.state.value == 'Cancelled' and unrelated.state.value == 'Succeeded'
+    assert len(deliveries) == 1 and deliveries[0] != callerThread
+    assert [unit['status'] for unit in result['suite']['units']] == ['cancelled', 'not-started', 'not-started', 'not-started']
+    assert result['suite']['units'][0]['run']['turns'][0]['partial']['answer'] == 'signal partial'
+    assert result['suite']['units'][0]['run']['turns'][0]['cleanup']['quiescence'] == 'unknown'
+    assert result['hostCleanup'] == 'failed-or-unknown' and rig[0]['calls'] == 1
+
+
+def test_ex03_r1_relay_failure_is_separate_from_successful_jobs(rig, monkeypatch):
+    """A separately failed relay close cannot relabel successful Jobs or skip owned host teardown."""
+    value = suiteDefinition(rig)
+    original = launcher._SignalCancellationRelay.close
+
+    def close(self):
+        """Join the actual relay, then inject only its independent cleanup-report failure."""
+        original(self)
+        raise RuntimeError('Synthetic relay close failure')
+    monkeypatch.setattr(launcher._SignalCancellationRelay, 'close', close)
+    snapshot, _ = launcher.execute(launcher.prepare(value, rig[1]), rig[2])
+    result = snapshot.value()
+    assert result['suite']['status'] == 'succeeded'
+    assert all(unit['jobOutcome'] == 'Succeeded' for unit in result['suite']['units'])
+    assert result['launcherFailure'] == {'category': 'launcher-failed', 'stage': 'signal-cleanup'}
+    assert result['hostCleanup'] == 'completed' and launcher.exitCode(result) == 1
+
+
+def test_ex03_r1_interrupted_relay_start_remains_owned_and_preserves_first_exit(rig, monkeypatch):
+    """The relay is cleanup-rooted before thread startup can be interrupted."""
+    original = launcher._SignalCancellationRelay.start
+    started = []
+    interruption = KeyboardInterrupt()
+
+    def start(self):
+        """Start the actual inert relay, then inject an interruption before handler installation."""
+        original(self)
+        started.append(self)
+        raise interruption
+    monkeypatch.setattr(launcher._SignalCancellationRelay, 'start', start)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        launcher.execute(launcher.prepare(definition(), rig[1]), rig[2])
+    assert caught.value is interruption
+    assert len(started) == 1 and not started[0]._thread.is_alive()
+    result = caught.value.experimentExecution.value()
+    assert result['hostCleanup'] == 'completed' and rig[0]['processes'] == []
+    assert all(unit['jobOutcome'] is None for unit in result['suite']['units'])
