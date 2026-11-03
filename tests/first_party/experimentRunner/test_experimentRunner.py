@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_experimentRunner.py ; version: 5
+# file: tests/first_party/experimentRunner/test_experimentRunner.py ; version: 6
 """EX-01/02/R1/03 architectural tests: actual runtime/provider, synthetic process/HTTP IO."""
 import importlib
 import json
@@ -113,7 +113,8 @@ def rig(tmp_path, monkeypatch):
     """Run production manifests, host, broker and provider; fake OS/HTTP only."""
     host = hostValue(tmp_path)
     adapter = launcher.loadAdapter()
-    state = {'processes': [], 'requests': [], 'calls': 0, 'streams': [stream(' amber '), stream('answer two')]}
+    state = {'processes': [], 'requests': [], 'requestBytes': [], 'calls': 0,
+             'streams': [stream(' amber '), stream('answer two')]}
 
     def popen(args, **kwargs):
         """Record exact synthetic launches."""
@@ -129,6 +130,7 @@ def rig(tmp_path, monkeypatch):
         """Record actual provider wire payloads without replacing application behavior."""
         body = None if request.data is None else json.loads(request.data)
         state['requests'].append((request.full_url, body))
+        state['requestBytes'].append((request.full_url, request.data))
         if request.full_url.endswith('/slots'):
             return Response(b'[{"id":0,"is_processing":false}]')
         if request.full_url.endswith('/apply-template'):
@@ -1796,3 +1798,52 @@ def test_ex03_r2_cleanup_error_keeps_primary_job_and_unknown_outcomes(rig, monke
     assert result['signalCleanupFailures'] == [{'category': 'failed', 'operation': 'relay-close'}]
     assert all(unit['status'] == 'not-started' and unit['jobOutcome'] is None for unit in result['suite']['units'][1:])
     assert len(rig[0]['processes']) == 1 and rig[0]['processes'][0].returncode is None
+
+
+def test_ex04_planning_required_checkpoint_cannot_rely_on_observer_raise(rig, tmp_path):
+    """Demonstrate current best-effort observer semantics through an actual admitted Job/session."""
+    host, runtime, _, _ = runtimeFor(launcher.prepare(definition(), rig[1]), tmp_path)
+
+    def observe(event):
+        """Represent a required checkpoint failure using only fixed synthetic diagnostic text."""
+        raise OSError('synthetic-required-checkpoint-failed')
+
+    def infer(ctx, payload):
+        """Use public managed session/stream APIs; no archive implementation or provider patch."""
+        profile = ctx.llm.profile(providerName='llama.cpp', model='Q')
+        ctx.llm.transitionProfile(profile)
+        session = ctx.llm.reserveConversation(profile)
+        try:
+            return ctx.llm.run(providerName='llama.cpp', model='Q',
+                query=entry.LlmMessages((entry.LlmMessage('user', 'synthetic planning probe'),)).toQuery(),
+                providerOptions={'maxTokens': 24, 'timeoutSeconds': 30}, session=session,
+                context=entry.FreshContext(required=False, retain=False), streamObserver=observe)
+        finally:
+            session.close()
+    publishTestCapability(runtime, 'test.ex04-observer@1', infer)
+    try:
+        job = runtime.runJob('test.ex04-observer@1')
+        assert job.state.value == 'Succeeded'
+        assert job.result.rawText == ' amber '
+        assert job.result.observerErrors and all('synthetic-required-checkpoint-failed' in error for error in job.result.observerErrors)
+        assert job.result.executionEvidence.snapshot()['quiescence'] == 'confirmed'
+        assert rig[0]['calls'] == 1
+    finally:
+        host.stop()
+
+
+def test_ex04_planning_structured_snapshot_is_not_serialized_provider_body(rig):
+    """Compare actual Request.data at the synthetic transport boundary to the recorded planned query."""
+    import hashlib
+    result, _ = execute(rig)
+    turns = result['suite']['units'][0]['run']['turns']
+    bodies = [body for url, body in rig[0]['requestBytes'] if url.endswith('/completions')]
+    assert len(bodies) == 2 and result['suite']['status'] == 'succeeded'
+    for turn, body in zip(turns, bodies, strict=True):
+        planned = schema.canonical(turn['query']['messages'])
+        actual = json.loads(body)
+        assert actual['messages'] == turn['query']['messages']
+        assert actual['id_slot'] == 0 and actual['cache_prompt'] is False and actual['stream'] is True
+        assert 'id_slot' not in turn['query'] and 'cache_prompt' not in turn['query']
+        assert actual['max_tokens'] == turn['requestedOptions']['maxTokens']
+        assert planned != body and hashlib.sha256(planned).digest() != hashlib.sha256(body).digest()
