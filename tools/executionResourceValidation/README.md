@@ -1,5 +1,19 @@
 # ER-04 local provider verification
 
+Model-free cancellation diagnostic (no config, model or provider process):
+
+```powershell
+.\python-embedded\python.exe -X frozen_modules=off -m tools.executionResourceValidation.transportProbe
+```
+
+This observes the actual managed stop callback with a controlled socket-pair HTTP
+reader. Timing and any concurrent read/close exception are diagnostic observations,
+not provider-quiescence evidence. See
+`ai-workflow/knowledge/execution-resource-er04c-cancellation-investigation.txt`
+and `ai-workflow/assignments/execution-resource-cancellation-probe.txt` for pinned
+source findings and the separately gated supervised live probe plan. Active real
+aborts remain blocked; this command does not change their status.
+
 This bounded harness exercises the accepted ER-01/02/03 host, two real validation
 Applications and the production llama.cpp composer. It is not Experiment Runner
 or a consumer migration. It never downloads/copies models, takes over ports,

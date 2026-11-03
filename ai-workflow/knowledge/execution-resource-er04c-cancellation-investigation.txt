@@ -1,0 +1,176 @@
+ER-04C GRACEFUL CANCELLATION INVESTIGATION
+=========================================
+Owner: Integration. Date: 2026-11-03. Investigation parent: bcdaaf5.
+Request: mail/integration/archive/2026-11-03-er04c-investigate-graceful-inference-cancellation.txt.
+Scope: source investigation, model-free diagnostic, and supervised live probe PLAN.
+Diagnostic/test source commit: 507bae6.
+No real inference/abort, provider correction, termination or recovery executed.
+
+Conclusion / status
+-------------------
+There are two source-backed candidates, neither real-asset verified here:
+1. Current header-free chat transport: disconnect -> reader destruction -> native
+   CANCEL(task ID) -> exact slot release, after any current decode finishes.
+2. Opt-in resumable chat: X-Conversation-Id plus DELETE /v1/stream?conv_id=...
+   signals the producer independently of a blocked client read. This additional
+   API was absent from the request's preliminary findings; investigate it before
+   concluding that ordinary chat has no explicit server-side stop route.
+Neither HTTP close, DELETE 204, lookup disappearance, nor arbitrary idle slot
+establishes exact inference quiescence. ER-04C/full ER-04 remain BLOCKED. There is
+not enough actual evidence to authorize a production cleanup correction yet.
+
+Pinned source / binary
+----------------------
+Upstream: ggml-org/llama.cpp, 060b2fea4ed528810ddc91d48fb22b3e4d63eb85.
+Sources below are relative to tools/server/ at that exact commit. Local downloaded
+copies are ignored under python-embedded/er04-local/pinned-source/.
+Rechecked supplied executable with --version only: 0.8.0-dev build 12031,
+060b2fea4, MSVC 19.44.35208.0 Windows AMD64. SHA-256 unchanged:
+f727ec0b2b18095982433b86768ce49470e79008170936d5656143b870109493.
+Configured model files are accessible; no model launched or weights copied.
+This establishes reported build identity, not binary/source reproducibility.
+
+Native cancellation and identity evidence
+-----------------------------------------
+server-queue.h: server_response_reader destructor calls stop().
+server-queue.cpp: stop() removes result waiters, posts CANCEL for unfinished native
+task IDs at queue front. This is a request, with no client cancellation receipt.
+server-context.cpp: process_single_task(CANCEL) matches slot.task->id to id_target
+and calls release(). While encode/decode is yielding, only metrics and SLOT_GET
+are processed; cancellation is deferred until decode returns. Queue priority is
+therefore not a prompt cancellation bound or an interrupt of a stuck decode.
+server-http.cpp: request is_connection_closed drives should_stop; failed sink
+write/stream completion runs on_complete and destroys the response owner.
+server-context.cpp: handle_completions_impl polls should_stop while waiting on
+results; server_res_generator uses HTTP_POLLING_SECONDS=1. This is polling cadence,
+not an end-to-end stop deadline.
+
+server_slot::to_json uses task or task_prev, exports id_task and is_processing;
+reset() moves task into task_prev. A post-release idle snapshot CAN retain the
+exact stopped task ID. SLOT_GET goes through the server queue, and can also run
+during decode. Active-before/idle-after samples of the same owned slot/task plus
+unchanged live Popen owner and residency generation are stronger than idle alone.
+They are candidate evidence, not an accepted generic quiescence rule.
+
+The SSE chat id is generated separately by gen_chatcmplid(), assigned to
+task.params.oaicompat_cmpl_id, and returned as the OpenAI-compatible stream ID.
+It is NOT the integer id_task. task_params::to_json does not expose that mapping.
+Never parse a chat ID as a task ID or use a post-abort task without a pre-abort
+binding. In the first bounded experiment use exactly one owned slot and one
+admitted request, no pending/foreign requests, and capture the active task before
+abort. Outside that isolation an authoritative mapping would need more work.
+The slot release log includes slot/task, but a cancel-request log alone proves
+only that a cancel was queued; correlate the later exact release separately.
+
+Additional resumable-stream API (source candidate)
+--------------------------------------------------
+server.cpp registers DELETE /v1/stream, GET /v1/stream and POST /v1/streams/lookup.
+server-stream.cpp attaches a resumable session only with X-Conversation-Id.
+Without that header, DELETE cannot address the current Actant chat request.
+With it, disconnect deliberately continues draining generation; should_stop
+instead observes the session's cancelled flag. DELETE evicts/cancels/finalizes
+that session, returns 204 even for an unknown ID, and does not wait for native
+slot release. Session replacement also cancels the previous same-key session.
+
+The eviction comment says underlying generation continues naturally, while
+server_res_spipe::should_stop/on_complete and server_response_reader destruction
+suggest the chat producer can unwind and enqueue CANCEL. This apparent comment/
+control-flow discrepancy needs a task-correlated real probe; do not resolve it
+by trusting the endpoint name or 204. Lookup is_done/disappearance describes the
+buffer session, not a native task acknowledgement. Use a fresh unguessable private
+per-operation ID if this path is tested; do not reuse application/conversation
+identity or expose lookup, which can match model-suffixed variants, as authority.
+
+Other interfaces
+----------------
+POST /v1/chat/completions/control accepts only reasoning_end, not general cancel.
+Realtime response.cancel belongs to the websocket/realtime slot machinery.
+Slot erase/save/restore manage cache; they are not inference cancellation.
+No registered ordinary response-ID cancellation endpoint found in server.cpp.
+Native /completion has different stream fields but is not adopted by Actant;
+changing the inference endpoint does not itself create a cancellation receipt.
+
+Actant lifecycle / mismatch
+--------------------------
+The trusted managed path is executionAdapter._Session, not the direct
+LlamaCppStreamProvider.stream legacy/external facade. _Session.stream marks sent
+BEFORE urlopen; registers signal.stop only AFTER response headers return. Native
+header delivery waits for the first result upstream. Cancellation during initial
+HTTP open therefore need not promptly reach the transport, although structural
+claim stop/revocation remains tracked. Signal.request and claim stop hooks invoke
+callbacks synchronously outside core locks. _Session.stop sets stopped and calls
+response.close; it does not call driver.stop, DELETE or a task-cancel endpoint.
+The current request sets id_slot/cache_prompt=false, but no X-Conversation-Id.
+
+trackedLines validates one stable SSE completion ID, native finish, then DONE.
+closeExecution confirms only unsent work or COMPLETED + nativeDone + !stopped
+followed by the owned slot idle on the unchanged resident. Abort/failure paths
+return UNKNOWN, retain ticket/slot/claim and block reuse/disposal. They do not
+query /slots to repair an aborted call. This conservative behavior is correct.
+ER-02 keeps primary cancellation/failure outcomes separate from cleanup evidence.
+Even actual eventual idle cannot clear an already finalized ER-01 unknown
+tombstone: no later-reconciliation API exists in this accepted slice.
+
+The model-free probe exercises the ACTUAL _Session.stop callback through
+CancellationSignal with HTTPResponse/BufferedReader over an owned socket pair.
+An observed raw-read Event establishes the buffered read boundary. On Python
+3.15.0b4 stop set its flag, but request() did not return within the 0.2-second
+observation while the peer withheld body data. Peer release allowed both workers
+to exit; the read thread reported AttributeError in readline/_close_conn during
+concurrent close. A repeat may differ: this is observed transport behavior, not
+a universal timing/exception assertion. All owned synthetic IO was closed.
+No provider, network service, model or resource-domain claim was involved.
+This supports investigating explicitly owned interruptible transport and
+single-reader finalization, rather than promising response.close is prompt.
+
+Verification
+------------
+Reproducer: tools/executionResourceValidation/transportProbe.py.
+  .\python-embedded\python.exe -X frozen_modules=off -m tools.executionResourceValidation.transportProbe
+Private results: python-embedded/er04-local/graceful-cancel-transport-probe.json
+and graceful-cancel-preflight.json. No prompts/paths/outputs exported.
+75 focused tests passed, including the new model-free no-provider-IO test plus
+existing managed cancellation, terminal/idle, quarantine and ER-04 tooling tests.
+Full suite: 1738 passed in 11.36s, zero skips, own Python 3.15.0b4.
+Both new files passed AST/exact path-version header/all function-class docstring
+checks; git diff --check passed. Ruff not run.
+No real-server abort verified. Existing fake-IO cases demonstrate preservation
+of cancelled Job outcome/unknown residency and no implicit process termination;
+they do not establish native server cancellation.
+
+Recommendation / continuation
+------------------------------
+Read assignments/execution-resource-cancellation-probe.txt for the concrete
+supervised case matrix, evidence rules and failure disposition gate.
+First compare header-free disconnect against the opt-in stream DELETE candidate.
+If actual evidence supports a bounded safe stop, the smallest provider-specific
+change would own per-operation transport/cancel identity, retain pre-abort native
+task binding, await exact release before cleanup finalizes, and otherwise return
+UNKNOWN. Keep stop delivery separate from blocking drain/finalization; do not add
+network polling to the synchronous signal callback. Adding resumable headers
+alone changes disconnect semantics and is not a fix.
+Regression requirements: pre-header cancel, blocked-read stop, early close,
+read timeout, duplicate/missing IDs, stale process/generation, wrong slot/task,
+natural completion racing cancel, unacknowledged/unknown DELETE and lifecycle
+revocation while drain is pending. Preserve ER-01/02/R1/R2 invariants.
+No implementation change is authorized merely by this recommendation.
+
+Live aborts remain BLOCKED because no operator-controlled disposition is settled
+for a provider that fails to stop, or for the exact live child retained by the
+unchanged adapter's unknown tombstone. A token cap/deadline does not solve a stuck
+decode, and source evidence cannot supply a live cleanup guarantee. If needed,
+the separate fallback proposal is explicit one-case authorization to terminate
+only the retained Actant-launched Popen child, verify wait/reap and exit, and
+preserve failed/unknown evidence. No PID rediscovery, port takeover, auto restart,
+domain reset or forced claim release. Process exit would not retroactively pass
+the graceful-stop case or authorize reuse of a tombstoned domain.
+
+Pinned source URLs
+------------------
+https://github.com/ggml-org/llama.cpp/blob/060b2fea4ed528810ddc91d48fb22b3e4d63eb85/tools/server/server-stream.cpp
+https://github.com/ggml-org/llama.cpp/blob/060b2fea4ed528810ddc91d48fb22b3e4d63eb85/tools/server/server-context.cpp
+https://github.com/ggml-org/llama.cpp/blob/060b2fea4ed528810ddc91d48fb22b3e4d63eb85/tools/server/server-queue.cpp
+https://github.com/ggml-org/llama.cpp/blob/060b2fea4ed528810ddc91d48fb22b3e4d63eb85/tools/server/server-queue.h
+https://github.com/ggml-org/llama.cpp/blob/060b2fea4ed528810ddc91d48fb22b3e4d63eb85/tools/server/server-http.cpp
+https://github.com/ggml-org/llama.cpp/blob/060b2fea4ed528810ddc91d48fb22b3e4d63eb85/tools/server/server-task.cpp
+https://github.com/ggml-org/llama.cpp/blob/060b2fea4ed528810ddc91d48fb22b3e4d63eb85/tools/server/server.cpp
