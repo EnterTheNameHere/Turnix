@@ -1,0 +1,119 @@
+ER-03-R2 CLEANUP EFFECT OWNERSHIP / WORKER EVIDENCE
+=================================================
+Owner: execution-resource-llamacpp worker. Date: 2026-11-03.
+Status: published for independent Integration review; NOT integrated/accepted.
+Repository: EnterTheNameHere/Turnix. Worker branch: execution-resource-llamacpp.
+Original dispatch parent: 897e491ec2015b55a86843dc58dbc1308eae24ef.
+Original implementation parent: 445a4f992ff09642b9e29c59905aebfb44b308f4.
+Original source: 63931d5ba89d2e449894bce46ccc3fbd10c7c13f.
+R1 source: 00bb521d8c7587b98f8e627703390c169a86333b.
+Canonical R2 review: a9765a0fb0d4355fead5bfe4ca45683580acc644.
+Exact R2 correction parent: 26bfeb75a442e0959bddc246f3fd1a8e64389e8e.
+This sync merge has parents 00bb521 and a9765a0. Empty backend/first-party/tests
+diff against 00bb521 verified; no replay, rebase or force push.
+R2 source: 6e8804e619362b746d51a8dd27a787865ff89c08 (pushed).
+Review source series 63931d5 + 00bb521 + 6e8804e, not synchronization/coordination
+commits. Source worktree is clean. Worker/coordination clones are isolated at
+C:/Users/Enter/Documents/ChatGPT/Actant/execution-resource-llamacpp and
+C:/Users/Enter/Documents/ChatGPT/Actant/er03-coordination. No other checkout edited.
+
+Failure and corrected contract
+-------------------------------
+The unchanged raw Integration R2 diagnostic failed before correction (1 failed
+in 0.34s): a real granted switch loaded A in a create hook, the hook failed, and
+host.stop terminated its process while the actual broker leaseCloser was paused.
+Runtime lifecycle counters alone also miss callbacks for runtimes already removed
+from host tables. A detached readiness check cannot protect this effect boundary.
+
+providerComposition now keeps a private weak table for each exact neutral resource
+service. Actual broker callback scopes reserve callback ownership; resource
+finishClose reserves exclusive disposer ownership. The same short lane decides
+the winner before either effect starts. No callback runs under that lane. Different
+threads and reentrant shutdown receive typed pending instead of crossing a live
+owner. Same-thread nested callback scopes retain their enclosing owner.
+This is callback/effect lifetime exclusion, not another execution claim manager.
+ER-01/02 remain the sole resource claims, reservation and retained-pin authority.
+
+Host/runtime admission and broker revocation close future logical entry first.
+Neutral service close is deferred until disposer ownership: closing it earlier
+would prevent a live lease callback from doing its own authorized idle unload.
+finishResourceEffects owns both neutral close and provider effects. ResourceCleanupError
+keeps owned unknown disposition for reporting; cleanup-ownership pending is not
+swallowed before disposal. A phase='cleanup' attempt without a live owner can
+still drain on explicit retry. No automatic unknown recovery or repeated failed
+process-stop attempt is introduced.
+
+All host/runtime/Pack lifetime broker drains carry the exact resource service,
+including global drains after a runtime has left the host map. finalizationScope
+atomically reserves both service callback ownership and runtime cleanup admission.
+Direct preflight/body drains use the same helper. ActivationAttempt.finishCleanup
+already runs within that scope. Core resource/broker APIs themselves are unchanged.
+Host stop body's callback-free close follows its successful effect preflight.
+
+Example: failed hook owns a paused leaseCloser -> host.stop returns pending before
+neutral close/process stop -> callback resumes and performs authorized unload ->
+explicit host.stop retry drains and stops host. If disposer wins first, callbacks
+remain deferred until it releases ownership, then retry drains them. If process
+exit is unknown, exact process/binding roots remain and retry reports that state.
+
+Exact source boundary and durable verification
+----------------------------------------------
+Changed source/header versions:
+- backend/llm/providerComposition.py 2 -> 3: exact-service effect ownership/helpers.
+- backend/llm/executionSessions.py 4 -> 5: lifetime and host preflight paths.
+- backend/application/applicationRuntime.py 21 -> 22: explicit runtime broker drain.
+- backend/runtime/runtimeHost.py 12 -> 13: final host broker/resource drains.
+- first-party/llmDrivers/llamaCpp/README.md: cleanup ownership/retry contract.
+- tests/backend/application/test_cleanupEffectOwnership.py version 1: nine cases.
+No adapter, neutral domain, Job, transaction, LC evidence/privacy, PM/G or consumer
+source changed. No public contract expansion. Existing examples remain applicable.
+
+Nine Event/barrier cases use actual host/manifest/grants/create hooks/broker/provider
+with fake process/HTTP boundaries: live callback before/after its actual lease close;
+disposer-first winner with deferred callback; runtime.close, closeApplicationRun and
+PackLoader.close versus host.stop; removed-runtime global broker cleanup; unknown
+process exit after owner unwind; reentrant host.stop from its owning cleanup callback.
+They check no effects across live ownership, original error preservation, callback
+count/rooting, retryability, and acquisition of host/runtime/admission/effect/registry/
+broker/resource/domain lanes while callback runs. No sleeps or real assets.
+
+Actual commands/results, worker cwd
+------------------------------------
+Own .\python-embedded\python.exe: Python 3.15.0b4 / pytest 9.2.0.
+Prefix P = .\python-embedded\python.exe -X frozen_modules=off
+
+P -m pytest -q --import-mode=importlib tests/backend/application/test_cleanupEffectOwnership.py
+  9 passed in 0.41s.
+P -m pytest -q --import-mode=importlib tests/backend/application/test_cleanupEffectOwnership.py tests/backend/application/test_compositionAdmission.py tests/first_party/llmDrivers/test_llamaCppExecutionResources.py
+  80 passed in 2.27s, zero skips.
+P -m pytest -q --import-mode=importlib tests/first_party/llmDrivers tests/backend/llm tests/backend/context tests/backend/runtime tests/backend/application tests/backend/orchestration tests/backend/packs tests/backend/telemetry tests/first_party/observationBridge
+  861 passed in 9.48s, zero skips.
+P -m pytest -q --import-mode=importlib tests
+  1711 passed in 11.45s, zero skips.
+P -c "import sys,os; sys.path.insert(0,os.getcwd()); import pytest; raise SystemExit(pytest.main(['-q','--import-mode=importlib','--tb=short','python-embedded/er03-r1-gate-reproducer.py','python-embedded/er03-r2-cleanup-reproducer.py']))"
+  4 passed in 0.24s. R2 file copied unchanged from canonical raw text; R1 is the
+  previously independently reviewed winner adaptation, unchanged this correction.
+  R2 alone first passed after correction in 0.28s. Before correction: 1 failed.
+P python-embedded/er03_headers.py
+  Five changed/new Python files pass exact path/header/version and all AST
+  function/class docstrings. Existing versions increment exactly once; new file 1.
+P python-embedded/er03_audit.py
+  No original test functions removed; original adapter/helper/provider docstrings pass.
+git diff --check; git diff --cached --check: pass.
+git diff 00bb521 HEAD --exit-code -- backend first-party tests
+  Empty at synchronized parent before R2 commit, exit 0.
+Ruff unavailable, not run. Existing embedded-home warning persists with passing tests.
+
+Limits / independent acceptance
+--------------------------------
+Integration independently confirmed R1 at 74/852/1702 before this correction.
+These R2 results are worker evidence only. No production source merged into
+actant-integration and no self-acceptance. Canonical refreshed through a9765a0;
+start/finish index/protocol/sharing/state/handoff/inboxes checked.
+Stock required physical freshness and retention remain unsupported; no claim of
+actual retained-provider realization. Pinned source 060b2fea4ed528810ddc91d48fb22b3e4d63eb85
+and existing LC controls/evidence are unchanged. Binary/model effects, real
+monitoring, ER-04 and consumer adoption remain unverified/separately gated.
+No weights, binary downloads, real inference, scheduler, preemption or recovery.
+Next: Integration independently replay R2/R1 and suites, inspect all effect paths,
+then decide acceptance/combined adoption. Worker awaits that review.
