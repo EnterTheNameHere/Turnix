@@ -1,4 +1,4 @@
-# file: tests/first_party/llmDrivers/test_llamaCppSpeculation.py ; version: 2
+# file: tests/first_party/llmDrivers/test_llamaCppSpeculation.py ; version: 3
 """LC-03 explicit method/auxiliary baseline, frozen lease inputs and combined gate."""
 from __future__ import annotations
 
@@ -443,6 +443,13 @@ def test_combined_required_gate_privacy_and_lc02_reasoning_still_work(config, mo
             """Return one validated idle slot; this fixture has default parallelism one."""
             return b'[{"id":0,"is_processing":false}]'
 
+        def read1(self, limit):
+            """Return the same bounded JSON once, then genuine fixture EOF."""
+            if getattr(self, 'read_done', False):
+                return b''
+            self.read_done = True
+            return self.read()
+
     def openResponse(request, **kwargs):
         """Capture inference request controls while leaving parser/result processing intact."""
         if request.full_url.endswith("/slots"):
@@ -451,6 +458,35 @@ def test_combined_required_gate_privacy_and_lc02_reasoning_still_work(config, mo
         return Response()
 
     monkeypatch.setattr(adapter.urlRequest, "urlopen", openResponse)
+    from tests.first_party.llmDrivers.test_llamaCppExecutionResources import adapter as managed
+
+    class Transport:
+        """Keep the LC combined test at the owned stream/JSON transport boundary."""
+
+        def __init__(self):
+            """Begin an inert transport that cannot connect to an actual endpoint."""
+            self.mayHaveSent, self.response = False, None
+
+        def open(self, request, **kwargs):
+            """Preserve exact payloads and exercise real native stream parsing."""
+            self.mayHaveSent = True
+            self.response = openResponse(request, **kwargs)
+            return self.response
+
+        def close(self):
+            """Close only the fixture response, without inventing drain evidence."""
+            if self.response is not None:
+                self.response.close()
+
+        def stop(self):
+            """The fixture has no blocking reader or physical process to interrupt."""
+            return None
+
+        def setReadTimeout(self, seconds):
+            """Accept each bounded JSON-read timeout without altering test bytes."""
+            return None
+
+    monkeypatch.setattr(managed._transport, 'OwnedHttpTransport', Transport)
     result = binding.run(
         query=LlmQuery(formatId="text/plain", payload="question"),
         providerOptions={"reasoningFormat": "deepseek", "chatTemplateKwargs": {"enable_thinking": True}})

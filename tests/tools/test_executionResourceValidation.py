@@ -1,4 +1,4 @@
-# file: tests/tools/test_executionResourceValidation.py ; version: 5
+# file: tests/tools/test_executionResourceValidation.py ; version: 6
 """ER-04 validation contracts: bounded metadata, private evidence and real facade composition."""
 import json
 import struct
@@ -158,7 +158,8 @@ def test_recorder_does_not_redirect_capability_probe_output(tmp_path):
         return SimpleNamespace(pid=42)
 
     adapter = SimpleNamespace(_impl=SimpleNamespace(subprocess=SimpleNamespace(Popen=popen)),
-                              http=SimpleNamespace(urlopen=None))
+                              http=SimpleNamespace(urlopen=None),
+                              _transport=SimpleNamespace(OwnedHttpTransport=object))
     binary = tmp_path / 'server.exe'
     with Recorder(adapter, binary, 'http://127.0.0.1:1', tmp_path) as recorder:
         adapter._impl.subprocess.Popen([str(binary), '--help'], stdout=-1, stderr=-1)

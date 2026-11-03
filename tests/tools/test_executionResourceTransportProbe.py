@@ -1,4 +1,4 @@
-# file: tests/tools/test_executionResourceTransportProbe.py ; version: 1
+# file: tests/tools/test_executionResourceTransportProbe.py ; version: 2
 """Exercise bounded real buffered-HTTP cancellation without any provider process."""
 from tools.executionResourceValidation import transportProbe
 
@@ -18,5 +18,6 @@ def test_transport_probe_exits_without_provider_io(monkeypatch):
     assert result['signalRequested'] and result['adapterStopMarked']
     assert result['workersExited'] and result['transportClosed']
     assert result['providerQuiescence'] == 'not-tested'
+    assert result['stopReturnedBeforePeerRelease'] and result['readReturnedBeforePeerRelease']
     # Timing and the read/close race's exception are observations, not portable
     # assertions that every scheduler or Python build must behave identically.

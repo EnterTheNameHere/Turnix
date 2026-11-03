@@ -1,4 +1,4 @@
-# file: tools/executionResourceValidation/run.py ; version: 5
+# file: tools/executionResourceValidation/run.py ; version: 6
 """Explicit ER-04 local validation; never downloads models or bypasses managed admission."""
 from __future__ import annotations
 
@@ -105,7 +105,8 @@ def transport_facts(records):
             'captureMalformed': malformed,
             'enableThinkingForwarded': request.get('chat_template_kwargs', {}).get('enable_thinking'),
             'reasoningEffortForwarded': effort if effort in ('none', 'low', 'medium', 'high') else None})
-    return {'streamCalls': calls, 'postTerminalSlotReads': sum(record['endpoint'] == '/slots' for record in records),
+    return {'streamCalls': calls, 'slotReads': sum(record['endpoint'] == '/slots' for record in records),
+            'postTerminalSlotReads': sum(record['endpoint'] == '/slots' and record.get('postNativeDone', True) for record in records),
             'templateCalls': sum(record['endpoint'] == '/apply-template' for record in records),
             'tokenizerCalls': sum(record['endpoint'] == '/tokenize' for record in records)}
 
@@ -158,6 +159,10 @@ class ResponseEvidence:
         """Retain synchronous JSON responses without changing their validation input."""
         return self.capture(self.response.read(*args))
 
+    def read1(self, *args):
+        """Record bounded owned-transport JSON reads without altering deadline behavior."""
+        return self.capture(self.response.read1(*args))
+
     def __iter__(self):
         """Retain native SSE/finish/usage evidence without changing event ordering."""
         for line in self.response:
@@ -184,6 +189,7 @@ class Recorder:
         """Install transparent boundary recording for this single-threaded harness owner."""
         self.popen = self.adapter._impl.subprocess.Popen
         self.urlopen = self.adapter.http.urlopen
+        self.transport = self.adapter._transport.OwnedHttpTransport
         self.log = (self.folder / 'server.log').open('ab')
 
         def launch(args, **kwargs):
@@ -196,28 +202,56 @@ class Recorder:
             self.launches.append({'pid': process.pid, 'argv': list(args), 'cwd': kwargs.get('cwd')})
             return process
 
-        def open_response(request, **kwargs):
-            """Record provider requests privately; never log authentication headers or bridge reads."""
+        def capture_response(request, opener, kwargs):
+            """Record exact bytes from either owned streams or ordinary auxiliary HTTP."""
             url = request if type(request) is str else request.full_url
             if not url.startswith(self.base_url + '/'):
-                return self.urlopen(request, **kwargs)
+                return opener(request, **kwargs)
             body = getattr(request, 'data', None)
             record = {'endpoint': url[len(self.base_url):], 'request': None if body is None else body.decode('utf-8'),
                       'response': [], 'truncated': False}
+            if record['endpoint'] == '/slots':
+                previous = next((r for r in reversed(self.requests) if r['endpoint'] == '/v1/chat/completions'), None)
+                record['postNativeDone'] = previous is not None and any(
+                    line.startswith('data:') and line[5:].strip() == '[DONE]'
+                    for part in previous['response'] for line in part.splitlines())
             if len(self.requests) >= 128:
                 raise RuntimeError('Validation evidence request bound exceeded.')
             self.requests.append(record)
-            response = self.urlopen(request, **kwargs)
+            response = opener(request, **kwargs)
             return ResponseEvidence(response, record)
+
+        def open_response(request, **kwargs):
+            """Record ordinary auxiliary HTTP without altering its transport ownership."""
+            return capture_response(request, self.urlopen, kwargs)
+
+        original_transport = self.transport
+
+        class RecordedTransport:
+            """Transparent owned-transport recording; stop and reader close retain their owner."""
+
+            def __init__(self):
+                """Wrap one inert production transport without opening a connection."""
+                self.transport = original_transport()
+
+            def open(self, request, **kwargs):
+                """Capture actual HTTP bytes while preserving the production stream object."""
+                return capture_response(request, self.transport.open, kwargs)
+
+            def __getattr__(self, name):
+                """Delegate stop/finalization/send state without asserting quiescence."""
+                return getattr(self.transport, name)
 
         self.adapter._impl.subprocess.Popen = launch
         self.adapter.http.urlopen = open_response
+        self.adapter._transport.OwnedHttpTransport = RecordedTransport
         return self
 
     def __exit__(self, *args):
         """Restore original transport/process factories and persist private provenance."""
         self.adapter._impl.subprocess.Popen = self.popen
         self.adapter.http.urlopen = self.urlopen
+        self.adapter._transport.OwnedHttpTransport = self.transport
         write_json(self.folder / 'transport.json', self.requests)
         write_json(self.folder / 'launches.json', self.launches)
         self.log.close()

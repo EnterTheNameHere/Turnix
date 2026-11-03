@@ -1,4 +1,4 @@
-# file: tools/executionResourceValidation/transportProbe.py ; version: 1
+# file: tools/executionResourceValidation/transportProbe.py ; version: 2
 """Model-free probe of the managed adapter's stop callback and HTTP buffered close.
 
 Only an owned socket pair is used. No server executable, model, residency, domain,
@@ -11,7 +11,7 @@ import json
 import socket
 import traceback
 from http.client import HTTPResponse
-from threading import Event, Thread
+from threading import Event, Thread, RLock
 
 from backend.orchestration import CancellationSignal
 from tools.executionResourceValidation.run import load_adapter
@@ -65,6 +65,20 @@ def probe_close():
     response = HTTPResponse(_ProbeSocket(raw))
     session = adapter._Session.__new__(adapter._Session)
     session.response, session.stopped = response, False
+    session.stopLane = RLock()
+    session.transport = adapter._transport.OwnedHttpTransport()
+    session.transport._socket = channel
+    channel.setblocking(False)
+    session.transport.setReadTimeout(3)
+    # Keep the exact Event-observed raw boundary, but let actual stop-aware
+    # receive handle IO rather than blocking directly on the socket.
+    def receive(buffer):
+        """Mark the real raw-read boundary and use the corrected owned receive loop."""
+        if raw.armed:
+            entered.set()
+        return session.transport.receive(buffer)
+
+    raw.readinto = receive
     signal = CancellationSignal()
     signal.registerCallback(session.stop)
     errors = []
@@ -77,6 +91,7 @@ def probe_close():
             errors.append({'phase': 'read', 'type': type(error).__name__,
                            'functions': [frame.name for frame in traceback.extract_tb(error.__traceback__)]})
         finally:
+            response.close()  # Only the owning reader performs buffered close.
             read_done.set()
 
     def stop():
@@ -106,6 +121,7 @@ def probe_close():
         if not stopping.wait(2):
             raise RuntimeError('The stop worker did not enter.')
         returned_before_release = stopped.wait(0.2)
+        read_done.wait(0.2)
         result = {
             'scope': 'model-free-socketpair-controlled-HTTPResponse',
             'signalRequested': signal.requested,
@@ -127,6 +143,7 @@ def probe_close():
         if any(worker.is_alive() for worker in workers):
             raise RuntimeError('Diagnostic worker did not exit within its IO guard.')
         response.close()
+        session.transport.close()
     result.update(workersExited=True, transportClosed=response.isclosed(), errors=errors)
     return result
 

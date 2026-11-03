@@ -1,4 +1,4 @@
-# file: tools/executionResourceValidation/abortProbe.py ; version: 2
+# file: tools/executionResourceValidation/abortProbe.py ; version: 3
 """Interactive, one-case ER-04C probe; emergency disposal requires explicit commands.
 
 Approval: canonical actant-integration coordination commit 2fff776, ER-04C
@@ -26,7 +26,8 @@ from tools.executionResourceValidation.run import (
     ROOT, Recorder, Validation, load_adapter, plain, transport_facts, unused_port, write_json,
 )
 
-CASES = ('job-cancel', 'disconnect', 'early-close', 'read-timeout', 'stream-delete')
+CASES = ('job-cancel', 'disconnect', 'early-close', 'read-timeout', 'stream-delete',
+         'blocked-job-cancel', 'pre-header-cancel')
 
 
 def exception_facts(error):
@@ -102,6 +103,7 @@ class Probe:
         self.recorder = Recorder(self.adapter, config['executable'], 'http://127.0.0.1:' + str(unused_port()), folder)
         self.recorder.__enter__()
         self.open_recorded = self.adapter.http.urlopen
+        self.original_transport = self.adapter._transport.OwnedHttpTransport
 
         def open_response(request, **kwargs):
             """Opt in only this case's exact chat request to resumable streaming."""
@@ -111,6 +113,33 @@ class Probe:
             return self.open_recorded(request, **kwargs)
 
         self.adapter.http.urlopen = open_response
+        probe = self
+        original_transport = self.original_transport
+
+        class CaseTransport(original_transport):
+            """Add only case-specific request/header/wait observation over recorded production IO."""
+
+            def open(self, request, **kwargs):
+                """Opt in this private DELETE case, or observe the pre-header raw wait."""
+                is_chat = request.full_url.endswith('/v1/chat/completions')
+                if is_chat and case == 'stream-delete':
+                    request.add_header('X-Conversation-Id', probe.conv_id)
+                if is_chat and case == 'pre-header-cancel':
+                    actual = self.transport
+                    original_wait = actual.waitSocket
+
+                    def wait(channel, deadline, *, writing=False):
+                        """Signal actual header receive wait without changing socket bytes or IO."""
+                        if not writing and not probe.bound.is_set():
+                            probe.bound.set()
+                            probe.record('pre-header-read-wait-entered')
+                        return original_wait(channel, deadline, writing=writing)
+
+                    actual.waitSocket = wait
+                    probe.launch_worker(probe.pre_header_cancel)
+                return super().open(request, **kwargs)
+
+        self.adapter._transport.OwnedHttpTransport = CaseTransport
         self.validation = Validation(config, folder, self.recorder, self.adapter)
         # Keep exactly one ApplicationRun for these cases, without provider IO.
         self.validation.host.closeApplicationRun(self.validation.runtimes[1].applicationRun.applicationRunId)
@@ -119,6 +148,8 @@ class Probe:
         def stream(session, request):
             """Intercept the first yielded event, preserving the issued admission/session."""
             iterator = self.original_stream(session, request)
+            if self.case == 'pre-header-cancel':
+                self.session = session
             try:
                 for event in iterator:
                     if self.session is None and event.eventType != 'completed':
@@ -192,6 +223,9 @@ class Probe:
             (self.folder / 'failure.private.txt').write_text(traceback.format_exc(), encoding='utf-8')
             self.record('worker-error', type=self.error)
         finally:
+            if self.session is not None:
+                self.record('adapter-cleanup', nativeTask=self.session.nativeTask,
+                            effect=plain(self.session.cleanupEffect), readerDone=self.session.readerDone.is_set())
             self.finished = True
             self.record('inference-worker-exited')
 
@@ -222,10 +256,22 @@ class Probe:
         self.abort_requested = True
         self.record('abort-requested', case=self.case)
         self.launch_worker(self.monitor)
-        if self.case == 'job-cancel':
+        if self.case in ('job-cancel', 'blocked-job-cancel'):
+            if self.case == 'blocked-job-cancel':
+                actual = session.transport.transport
+                original_wait = actual.waitSocket
+
+                def wait(channel, deadline, *, writing=False):
+                    """Expose the actual buffered raw read wait after the active task was captured."""
+                    if not writing and not self.bound.is_set():
+                        self.record('blocked-body-read-wait-entered')
+                        self.bound.set()
+                    return original_wait(channel, deadline, writing=writing)
+
+                actual.waitSocket = wait
             self.launch_worker(self.cancel_job)
             # Wait for signal visibility, not callback completion/transport drain.
-            if not self.bound.wait(2):
+            if self.case == 'job-cancel' and not self.bound.wait(2):
                 raise RuntimeError('Cancellation control worker did not enter.')
         elif self.case == 'disconnect':
             session.response.close()
@@ -233,22 +279,48 @@ class Probe:
         elif self.case == 'read-timeout':
             # Test-only socket control on the actual retained response. No fake
             # TimeoutError, proxy, foreign socket, new connection or extra request.
-            channel = session.response.response.fp.raw._sock
+            channel = session.transport.transport._socket
             if channel.getpeername() != ('127.0.0.1', int(self.recorder.base_url.rsplit(':', 1)[1])):
                 raise RuntimeError('The captured response socket peer is not the owned endpoint.')
-            channel.settimeout(0.01)
+            session.transport.setReadTimeout(0.01)
             self.record('owned-socket-read-timeout-set', seconds=0.01)
         elif self.case == 'stream-delete':
             self.launch_worker(self.delete_stream)
 
     def cancel_job(self):
         """Issue the actual Job cancellation from a separate supervised control thread."""
-        self.bound.set()
+        if self.case == 'blocked-job-cancel':
+            if not self.bound.wait(2):
+                self.record('inconclusive-no-blocked-body-read')
+                return
+        else:
+            self.bound.set()
         try:
             self.job.requestCancellation()
             self.record('job-cancellation-returned')
         except Exception as error:
             self.record('job-cancellation-error', type=type(error).__name__)
+
+    def pre_header_cancel(self):
+        """Capture a real active task during header wait; missing production binding stays unknown."""
+        if not self.bound.wait(2):
+            self.record('inconclusive-no-pre-header-wait')
+            return
+        try:
+            active = self.slots()
+            if (self.session.response is not None or active.get('is_processing') is not True or
+                    type(active.get('id_task')) is not int):
+                self.record('inconclusive-pre-header-boundary-lost')
+                return
+            self.native_task, self.captured = active['id_task'], True
+            self.record('active-bound', nativeTask=self.native_task, slot=active, completionId=None)
+            self.abort_requested = True
+            self.record('abort-requested', case=self.case, headersReturned=self.session.response is not None)
+            self.launch_worker(self.monitor)
+            self.job.requestCancellation()
+            self.record('job-cancellation-returned')
+        except Exception as error:
+            self.record('pre-header-control-error', type=type(error).__name__)
 
     def delete_stream(self):
         """Request deletion of only this operation's exact private resumable-session key."""
@@ -347,6 +419,7 @@ class Probe:
                 raise RuntimeError('Ordinary completed-case cleanup did not confirm exit.')
         self.adapter._Session.stream = self.original_stream
         self.adapter.http.urlopen = self.open_recorded
+        self.adapter._transport.OwnedHttpTransport = self.original_transport
         self.recorder.__exit__(None, None, None)
 
 
@@ -392,8 +465,8 @@ def main():
             elif command[0] in ('terminate', 'kill'):
                 probe.emergency(command[0])
             elif command[0] == 'finish':
-                summary = probe.status()
                 probe.finish()
+                summary = probe.status()
                 print(json.dumps({'finished': True, 'summary': summary}), flush=True)
                 return 0
             else:

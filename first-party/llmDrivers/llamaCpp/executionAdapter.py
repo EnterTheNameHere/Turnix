@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/executionAdapter.py ; version: 2
+# file: first-party/llmDrivers/llamaCpp/executionAdapter.py ; version: 3
 """Trusted llama.cpp adoption of ER-01 residency and ER-02 invocation sessions.
 
 Stock HTTP cannot require physical cache reuse. Retention and required freshness
@@ -10,9 +10,10 @@ import hashlib
 import importlib.util
 import json
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from threading import RLock
+from threading import Event, RLock
 from weakref import WeakKeyDictionary
 import urllib.request as http
 
@@ -42,6 +43,18 @@ def _implementation():
 
 
 _impl = _implementation()
+_transportName = 'actantFirstPartyLlamaCppOwnedTransport'
+if _transportName not in sys.modules:
+    _transportSpec = importlib.util.spec_from_file_location(
+        _transportName, Path(__file__).with_name('ownedTransport.py'))
+    _transportModule = importlib.util.module_from_spec(_transportSpec)
+    sys.modules[_transportName] = _transportModule
+    try:
+        _transportSpec.loader.exec_module(_transportModule)
+    except BaseException:
+        sys.modules.pop(_transportName, None)
+        raise
+_transport = sys.modules[_transportName]
 _OK = ProviderEffect(EffectStatus.ACKNOWLEDGED, Quiescence.CONFIRMED)
 _UNKNOWN = ProviderEffect(EffectStatus.UNKNOWN, Quiescence.UNKNOWN)
 _EMPTY_FAILURE = ProviderEffect(EffectStatus.FAILED, Quiescence.CONFIRMED)
@@ -332,39 +345,38 @@ class _ExecutionAdapter:
         return session
 
     def closeExecution(self, admission, session, reason):
-        """Separate local close from source-backed completion or unknown disposition."""
+        """Finalize exact-task evidence once; never repair a previous unknown result."""
         ticket = self.tickets.get(admission)
         if ticket is None:
             return LlmSessionCleanup(_OK)  # Parser failed before IO/partial allocation.
-        effect = _UNKNOWN
-        try:
-            if ticket.response is not None:
-                ticket.response.close()
-            if not ticket.uncertain:
-                if not ticket.sent:
-                    effect = _OK
-                elif reason is LlmSessionExit.COMPLETED and ticket.nativeDone and not ticket.stopped:
-                    ticket.requireResident()
-                    request = http.Request(f"{ticket.driver.baseUrl}/slots", method="GET")
-                    with http.urlopen(request, timeout=ticket.options.timeoutSeconds) as response:
-                        slots = json.loads(response.read().decode("utf-8"))
-                    ticket.requireResident()
-                    if (type(slots) is list and len(slots) == ticket.model.parallelSlots
-                            and all(type(s) is dict and type(s.get("id")) is int for s in slots)
-                            and {s["id"] for s in slots} == set(range(ticket.model.parallelSlots))):
-                        own = next(s for s in slots if s["id"] == ticket.slot)
-                        if own.get("is_processing") is False:
-                            effect = _OK
-        except Exception:
+        with ticket.finalizeLane:
+            if ticket.cleanupEffect is not None:
+                return LlmSessionCleanup(ticket.cleanupEffect)
             effect = _UNKNOWN
-        finally:
-            if ticket.unregister is not None:
-                ticket.unregister()
-        if effect == _OK:
-            with self.owner.lane:
-                self.owner.slots.discard(ticket.slot)
-            self.tickets.pop(admission, None)
-        return LlmSessionCleanup(effect)
+            try:
+                # An executing reader owns its transport. A concurrent failed
+                # iterator close cannot let this finalizer steal that ownership.
+                if ticket.readerDone.is_set() and not ticket.uncertain:
+                    if not ticket.sent:
+                        effect = _OK
+                    elif reason is LlmSessionExit.COMPLETED and ticket.nativeDone and not ticket.stopped:
+                        own = ticket.readSlot(timeout=min(ticket.options.timeoutSeconds, 1.0), cleanup=True)
+                        if (own['is_processing'] is False and
+                                (ticket.nativeTask is None or own.get('id_task') == ticket.nativeTask)):
+                            effect = _OK
+                    elif ticket.confirmStopped():
+                        effect = _OK
+            except Exception:
+                effect = _UNKNOWN
+            finally:
+                if ticket.unregister is not None:
+                    ticket.unregister()
+            ticket.cleanupEffect = effect  # Terminal even if provider becomes idle later.
+            if effect == _OK:
+                with self.owner.lane:
+                    self.owner.slots.discard(ticket.slot)
+                self.tickets.pop(admission, None)
+            return LlmSessionCleanup(effect)
 
 
 class _Session:
@@ -375,24 +387,121 @@ class _Session:
         self.adapter, self.admission, self.options = adapter, admission, options
         self.resident = adapter.owner.resident
         self.driver = None if self.resident is None else self.resident[1]
+        self.process = None if self.driver is None else self.driver.process
         self.model = None if self.resident is None else self.resident[2]
         self.response, self.unregister, self.slot = None, None, None
         self.sent = self.uncertain = self.nativeDone = self.stopped = False
         self.completionId, self.terminal = None, False
+        self.transport = None
+        self.stopLane, self.finalizeLane = RLock(), RLock()
+        self.readerDone = Event()
+        self.readerDone.set()
+        self.cleanupEffect = None
+        self.baselineTask = self.nativeTask = None
+        self.correlationLost = False
+        self.bindingAttempted = False
 
     def requireResident(self):
         """Reject stale/dying process objects before and after provider IO."""
+        self.requireOwnedResidency()
+        if not self.admission._claim.usable:
+            raise LlmExecutionOwnershipError("Admitted llama.cpp execution is revoked.")
+
+    def requireOwnedResidency(self):
+        """Cleanup authority survives revocation, but not process/token/ticket replacement."""
         if (self.resident is None or self.adapter.owner.resident is not self.resident
-                or self.admission not in self.adapter.tickets or not self.admission._claim.usable
+                or self.admission not in self.adapter.tickets or self.cleanupEffect is not None
                 or self.resident[0] != self.admission.residency
-                or self.driver.process is None or self.driver.process.poll() is not None):
+                or self.process is None or self.driver.process is not self.process or self.process.poll() is not None):
             raise LlmExecutionOwnershipError("Admitted llama.cpp residency is no longer available.")
 
     def stop(self):
-        """Cooperatively close local transport; this is never quiescence evidence."""
-        self.stopped = True
-        if self.response is not None:
-            self.response.close()
+        """Mark stop and interrupt only the owned raw socket, never the buffered reader."""
+        with self.stopLane:
+            self.stopped = True
+            transport = self.transport
+        if transport is not None:
+            transport.stop()
+
+    def readSlot(self, *, timeout, cleanup=False):
+        """Read the exact owned slot in a complete validated native slot set."""
+        require = self.requireOwnedResidency if cleanup else self.requireResident
+        require()
+        request = http.Request(f'{self.driver.baseUrl}/slots', method='GET')
+        deadline = time.monotonic() + timeout
+        transport = _transport.OwnedHttpTransport()
+        pieces, size = [], 0
+        try:
+            response = transport.open(request, timeout=timeout)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError('Managed slot acknowledgement arrived too late.')
+                transport.setReadTimeout(remaining)
+                piece = response.read1(min(65536, 1048577 - size))
+                if not piece:
+                    break
+                pieces.append(piece)
+                size += len(piece)
+                if size > 1048576:
+                    raise LlmProviderProtocolError('Managed slot acknowledgement exceeds its bound.')
+        finally:
+            transport.close()
+        if time.monotonic() >= deadline:
+            raise TimeoutError('Managed slot acknowledgement arrived too late.')
+        raw = b''.join(pieces)
+        slots = json.loads(raw.decode('utf-8'))
+        require()
+        if (type(slots) is not list or len(slots) != self.model.parallelSlots or
+                not all(type(s) is dict and type(s.get('id')) is int and
+                        type(s.get('is_processing')) is bool for s in slots) or
+                {s['id'] for s in slots} != set(range(self.model.parallelSlots))):
+            raise LlmProviderProtocolError('Managed slot acknowledgement has invalid ownership shape.')
+        return next(s for s in slots if s['id'] == self.slot)
+
+    def bindNativeTask(self):
+        """Bind once while this sole admitted request actively owns its native slot.
+
+        Managed slot allocation excludes another queued request for this slot.
+        The baseline must be idle; monotonic task IDs must advance beyond any
+        previous task. SSE IDs remain separate and cannot substitute for id_task.
+        """
+        try:
+            own = self.readSlot(timeout=min(self.options.timeoutSeconds, 1.0))
+            task = own.get('id_task')
+            if own['is_processing'] is not True:
+                return  # Already finished: normal terminal path may still establish drain.
+            if (type(task) is not int or task < 0 or
+                    (self.baselineTask is not None and task <= self.baselineTask)):
+                self.correlationLost = True
+                return
+            self.nativeTask = task
+        except Exception:
+            self.correlationLost = True
+
+    def confirmStopped(self):
+        """Bound exact same-task idle proof before finalization, otherwise keep unknown.
+
+        A two-second maximum observation budget (also limited by request timeout)
+        is not a stop guarantee. Revoked admission retains cleanup authority only.
+        Missing/mismatched IDs, changed residency/process and late replies fail shut.
+        """
+        if self.nativeTask is None or self.completionId is None or self.correlationLost:
+            return False
+        deadline = time.monotonic() + min(self.options.timeoutSeconds, 2.0)
+        idle = 0
+        while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            own = self.readSlot(timeout=min(remaining, 0.5), cleanup=True)
+            if time.monotonic() >= deadline or type(own.get('id_task')) is not int or own['id_task'] != self.nativeTask:
+                return False
+            idle = idle + 1 if own['is_processing'] is False else 0
+            if idle == 2:
+                return True
+            Event().wait(min(0.05, max(0, deadline - time.monotonic())))
+        return False
 
     def getExecutionProfile(self):
         """Expose existing safe LC metadata and an estimator scoped to this ticket."""
@@ -443,6 +552,14 @@ class _Session:
 
     def trackedLines(self):
         """Validate native terminal/ID independently of the legacy completed event."""
+        try:
+            yield from self._trackedLines()
+        except LlmProviderProtocolError:
+            self.correlationLost = True
+            raise
+
+    def _trackedLines(self):
+        """Parse private native identity and attempt active binding before yielding data."""
         for raw in self.response:
             if type(raw) is bytes and raw.startswith(b"data:"):
                 data = raw[5:].strip()
@@ -472,6 +589,10 @@ class _Session:
                             if finish not in ("stop", "length", "tool_calls", "content_filter", "function_call"):
                                 raise LlmProviderProtocolError("Invalid native llama.cpp finish reason.")
                             self.terminal = True
+                    if not self.bindingAttempted:
+                        self.bindingAttempted = True
+                        if not self.terminal and not self.stopped:
+                            self.bindNativeTask()
             yield raw
 
     def stream(self, request):
@@ -492,18 +613,38 @@ class _Session:
             headers={"Accept": "text/event-stream", "Content-Type": "application/json"}, method="POST")
         unregister = None
         try:
-            self.sent = True  # Failure may occur after the server accepted the request.
-            self.response = http.urlopen(transport, timeout=self.options.timeoutSeconds)
-            if self.stopped:
-                self.response.close()
-                raise LlmExecutionOwnershipError("Managed llama.cpp execution has stopped.")
+            baseline = self.readSlot(timeout=min(self.options.timeoutSeconds, 1.0))
+            if baseline['is_processing'] is not False:
+                self.uncertain = True
+                raise LlmProviderProtocolError('The admitted native slot was already active before send.')
+            previous = baseline.get('id_task')
+            if type(previous) is int and previous >= 0:
+                self.baselineTask = previous
+            elif 'id_task' in baseline:
+                self.correlationLost = True
+            self.requireResident()
+            self.readerDone.clear()
+            with self.stopLane:
+                self.transport = _transport.OwnedHttpTransport()
+                if self.stopped:
+                    self.transport.stop()
             if signal is not None:
                 unregister = signal.registerCallback(self.stop)
                 signal.raiseIfRequested()
-            with self.response:
-                yield from _impl._readEvents(self.trackedLines())
-        except (http.HTTPError, http.URLError, TimeoutError):
+            self.response = self.transport.open(transport, timeout=self.options.timeoutSeconds)
+            yield from _impl._readEvents(self.trackedLines())
+        except (http.HTTPError, http.URLError, OSError):
             raise LlmProviderConnectionError("Failed communicating with managed llama.cpp.") from None
         finally:
             if unregister is not None:
                 unregister()
+            try:
+                if self.transport is not None:
+                    self.sent = self.transport.mayHaveSent
+                    self.transport.close()  # The reader alone owns buffered close.
+            except Exception:
+                self.uncertain = True
+                # Keep the original cancellation/provider exception primary.
+                # A nominal completion instead fails at cleanup finalization.
+            finally:
+                self.readerDone.set()

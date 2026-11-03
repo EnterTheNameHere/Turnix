@@ -1,4 +1,4 @@
-# file: tests/first_party/llmDrivers/test_llamaCppExecutionResources.py ; version: 1
+# file: tests/first_party/llmDrivers/test_llamaCppExecutionResources.py ; version: 2
 """Actual ER-01/02/llama adapter with deterministic fake process/HTTP boundaries."""
 import importlib.util
 import json
@@ -73,9 +73,14 @@ class Response:
         """No assertion about server quiescence follows this local close."""
         self.closed = True
 
-    def read(self):
+    def read(self, limit=-1):
         """Return a configured synchronous JSON body."""
-        return self.data
+        return self.data if limit < 0 else self.data[:limit]
+
+    def read1(self, limit):
+        """Expose bounded JSON chunks and actual EOF for deadline-aware slot reading."""
+        result, self.data = self.data[:limit], self.data[limit:]
+        return result
 
     def __iter__(self):
         """Expose deterministic SSE lines, independently of local close."""
@@ -148,7 +153,10 @@ def onLoad(ctx):
         if "onHttp" in state:
             state["onHttp"](request)
         if path.endswith("/slots"):
-            return Response(json.dumps(state["slots"]).encode())
+            slots = state.get('baselineSlots', state['slots']) if 'response' not in state else state['slots']
+            if state.get('slotReplies'):
+                slots = state['slotReplies'].pop(0)
+            return Response(json.dumps(slots).encode())
         if path.endswith("/apply-template"):
             return Response(b'{"prompt":"rendered"}')
         if path.endswith("/tokenize"):
@@ -164,6 +172,38 @@ def onLoad(ctx):
 
     monkeypatch.setattr(adapter._impl.LlamaCppDriver, "_waitReady", ready)
     monkeypatch.setattr(adapter.http, "urlopen", urlopen)
+
+    class Transport:
+        """Replace only stream IO; production socket interruption has separate real-IO tests."""
+
+        def __init__(self):
+            """Record partial-send state and the exact fake response for this operation."""
+            self.mayHaveSent, self.response, self.stopped = False, None, False
+
+        def open(self, request, **kwargs):
+            """Pass unchanged wire bytes through the existing fake endpoint boundary."""
+            if self.stopped:
+                raise InterruptedError('Stopped before fake send.')
+            self.mayHaveSent = True
+            self.response = adapter.http.urlopen(request, **kwargs)
+            return self.response
+
+        def stop(self):
+            """Mark stop independently of native completion; fake close owns no read lock."""
+            self.stopped = True
+            if self.response is not None:
+                self.response.close()
+
+        def close(self):
+            """Finalize only the fake local response, with no server drain assertion."""
+            if self.response is not None:
+                self.response.close()
+
+        def setReadTimeout(self, seconds):
+            """Accept the reader's bounded remaining timeout without adding fake IO."""
+            self.readTimeout = seconds
+
+    monkeypatch.setattr(adapter._transport, 'OwnedHttpTransport', Transport)
     host = RuntimeHost(applicationStore=ApplicationStore(tmp_path / "saves"),
         packResolver=PackResolver(roots=(DRIVER, app.parent)), providerComposers=(composer,))
     host.start()
@@ -211,7 +251,7 @@ def test_unproven_terminal_quarantines_even_when_slot_reports_idle(rig, lines):
     with pytest.raises(LlmExecutionConflictError):
         runtime.invokeCapability("switch@1", "B")
     assert len(processes) == 1 and not processes[0].terminated
-    assert not any(url.endswith("/slots") for url, _ in requests)
+    assert sum(url.endswith('/slots') for url, _ in requests) <= 2  # Baseline/bind only; no unproven drain polling.
 
 
 @pytest.mark.parametrize("contract", ["fresh", "retain"])
@@ -424,6 +464,7 @@ def test_native_terminal_with_unproven_owned_slot_still_quarantines(rig, slots):
     runtime = create()
     runtime.invokeCapability("switch@1", "A")
     state["slots"] = slots
+    state['baselineSlots'] = [{'id': 0, 'is_processing': False}, {'id': 1, 'is_processing': False}]
     with pytest.raises(LlmExecutionCleanupError):
         runtime.invokeCapability("run@1", "A")
     assert host.executionResources.snapshots[0].state.value == "unknown"
@@ -449,7 +490,7 @@ def test_foreign_completion_id_does_not_release_claim(rig):
     with pytest.raises(LlmProviderProtocolError):
         runtime.invokeCapability("run@1", "A")
     assert host.executionResources.snapshots[0].state.value == "unknown"
-    assert not any(url.endswith("/slots") for url, _ in requests)
+    assert sum(url.endswith('/slots') for url, _ in requests) <= 2
 
 
 def test_cancelled_job_keeps_unknown_even_if_local_response_closed(rig):
@@ -479,7 +520,7 @@ def test_cancelled_job_keeps_unknown_even_if_local_response_closed(rig):
             release.set()
         assert pending.result(5).state is JobState.CANCELLED
     assert host.executionResources.snapshots[0].state.value == "unknown"
-    assert not processes[0].terminated and not any(url.endswith("/slots") for url, _ in requests)
+    assert not processes[0].terminated and sum(url.endswith('/slots') for url, _ in requests) <= 2
 
 
 def test_unmigrated_managed_activation_fails_before_hooks_save_or_start(rig):
@@ -785,7 +826,9 @@ def test_process_loss_after_native_terminal_cannot_confirm_wrong_residency(rig):
 
     def lose(request):
         """Lose process identity between terminal consumption and slot acknowledgement."""
-        if request.full_url.endswith("/slots"):
+        if request.full_url.endswith("/slots") and state.get('response') is not None:
+            state['slotChecks'] = state.get('slotChecks', 0) + 1
+        if state.get('slotChecks', 0) == 2:
             processes[0].returncode = 1
 
     state["onHttp"] = lose
