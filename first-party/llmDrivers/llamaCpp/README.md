@@ -137,9 +137,42 @@ local HTTP closure, EOF, cancellation, or an idle observation preceding a queued
 request does not establish quiescence. Malformed/disabled slot observations and
 ambiguous failures quarantine through ER-01; host close reports pending/unknown
 without automatic kill/restart/recovery. Normal completion releases claims and
-permits later explicit transitions. This is source-backed policy for the pin,
-not actual binary/model validation. Configure the server's slots endpoint for this
-policy; `--no-slots` cannot provide its normal-completion evidence.
+permits later explicit transitions. Configure the server's slots endpoint for
+this policy; `--no-slots` cannot provide its normal-completion evidence.
+
+Managed inference and slot acknowledgements now use private per-operation owned
+HTTP transports. Stop marks cancellation and interrupts the exact raw socket;
+short nonblocking socket waits check stop independently of Windows buffered-read
+behavior. The signal thread never closes `HTTPResponse`/`BufferedReader`. The
+owning reader closes them once, including pre-header and partial-send failures.
+There is no proxy/redirect fallback, process stop, resumable header or new public
+application authority in this path. The external provider path is unchanged.
+
+Abort cleanup can confirm drain **before claim finalization** when all of these
+conditions hold: the admitted slot was idle before send; a consistent native
+stream has bound a new integer `id_task` while that slot was active; the exact
+process object/residency is unchanged; and two subsequent owned-slot observations
+report that same task idle. SSE completion IDs are distinct from `id_task`.
+Managed slot ownership excludes queued reuse of the same slot until cleanup.
+Independent clients must not bypass that ownership at the managed HTTP endpoint;
+this mechanism is not isolation from hostile local clients.
+
+The observation budget is at most two seconds, also limited by the request's
+timeout. Each slot JSON response has its own remaining absolute deadline and
+1 MiB limit. Wrong/absent/stale IDs, malformed acknowledgements, changed ownership,
+deadline expiry and uncertain reader close preserve UNKNOWN. Neither EOF, a stop
+attempt, an arbitrary idle slot nor a cancelled Job supplies this evidence.
+Duplicate finalization returns the original result without polling or repairing
+a tombstone. Job cancellation/failure and rollback remain independent of safe
+provider cleanup, including natural completion racing cancellation.
+
+A stop before any possible request transmission is known unsent. A transmitted
+request interrupted before native task binding remains UNKNOWN even if later
+physical idle is observed. Pre-header interruption works, but cannot manufacture
+missing identity. OS address resolution is not promised interruptible. Header-free
+disconnect is preferred; resumable DELETE remains a separately tested alternative,
+not a production default. Actual bounded evidence and acceptance are recorded in
+`ai-workflow/knowledge/`, separately from deterministic transport/claim tests.
 
 Private `composer.configurationEvidence(resources, model)` explicitly retrieves
 matching actual launch evidence or planned/unlaunched catalog evidence, with the
@@ -402,8 +435,9 @@ history re-injection and consumer adoption are outside LC-02.
 
 Malformed reasoning/content/choice shapes, invalid UTF-8/JSON/metadata and missing
 `[DONE]` fail as protocol errors without reflecting raw private provider errors.
-Response contexts close on success/failure/consumer close; ordinary Job cancellation
-still closes the active HTTP response and rolls back incomplete processing. Passive
+Response contexts close on success/failure/consumer close. Managed Job cancellation
+interrupts its owned raw transport and the reader finalizes the response; external
+mode retains its direct response-close behavior. Incomplete processing rolls back. Passive
 observation counts nonempty answer text only; reasoning and raw request bodies are
 not added to observation, telemetry or G-01. No backend API/export change is made.
 

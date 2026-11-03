@@ -1,4 +1,4 @@
-# file: tools/executionResourceValidation/run.py ; version: 6
+# file: tools/executionResourceValidation/run.py ; version: 7
 """Explicit ER-04 local validation; never downloads models or bypasses managed admission."""
 from __future__ import annotations
 
@@ -501,7 +501,7 @@ def execute(config, folder, phases):
             summary['phases']['04B'] = {'status': 'verified'}
             validation.safety()
             summary['phases']['04C'] = {'status': 'blocked', 'safeCasesVerified': True,
-                'reason': 'active-abort-quiescence-and-safe-disposal-policy-unavailable',
+                'reason': 'active-aborts-require-separate-supervised-probes',
                 'remainingCases': ['active-cancellation', 'early-stream-close', 'transport-timeout']}
             if phases in ('all', 'observe'):
                 summary['phases']['04D'] = observe_browser(validation, viewer, config, folder)
