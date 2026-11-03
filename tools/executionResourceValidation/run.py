@@ -1,4 +1,4 @@
-# file: tools/executionResourceValidation/run.py ; version: 1
+# file: tools/executionResourceValidation/run.py ; version: 2
 """Explicit ER-04 local validation; never downloads models or bypasses managed admission."""
 from __future__ import annotations
 
@@ -130,7 +130,7 @@ class Recorder:
 
         def launch(args, **kwargs):
             """Redirect only the exact harness child log and preserve its actual Popen owner."""
-            if str(Path(args[0]).resolve()) != self.executable:
+            if str(Path(args[0]).resolve()) != self.executable or any(flag in args for flag in ('--version', '--help')):
                 return self.popen(args, **kwargs)
             kwargs = dict(kwargs, stdout=self.log, stderr=self.log)
             process = self.popen(args, **kwargs)

@@ -1,4 +1,4 @@
-# file: tests/tools/test_executionResourceValidation.py ; version: 1
+# file: tests/tools/test_executionResourceValidation.py ; version: 2
 """ER-04 validation contracts: bounded metadata, private evidence and real facade composition."""
 import json
 import struct
@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from tools.executionResourceValidation import preflight
-from tools.executionResourceValidation.run import ResponseEvidence, Validation, execute, load_adapter
+from tools.executionResourceValidation.run import Recorder, ResponseEvidence, Validation, execute, load_adapter
 from tests.first_party.llmDrivers.test_llamaCppExecutionResources import rig
 
 
@@ -146,3 +146,23 @@ def test_unknown_cleanup_reports_blocked_without_process_recovery():
     validation.private = []
     assert validation.close() is False
     assert validation.private == [{'cleanupErrorType': 'RuntimeError', 'snapshots': ()}]
+
+
+def test_recorder_does_not_redirect_capability_probe_output(tmp_path):
+    """Model-free help/version pipes must remain visible to the production LC checker."""
+    calls = []
+    def popen(args, **kwargs):
+        """Record test-owned launch options without creating a process."""
+        calls.append(kwargs)
+        return SimpleNamespace(pid=42)
+
+    adapter = SimpleNamespace(_impl=SimpleNamespace(subprocess=SimpleNamespace(Popen=popen)),
+                              http=SimpleNamespace(urlopen=None))
+    binary = tmp_path / 'server.exe'
+    with Recorder(adapter, binary, 'http://127.0.0.1:1', tmp_path) as recorder:
+        adapter._impl.subprocess.Popen([str(binary), '--help'], stdout=-1, stderr=-1)
+        assert calls[-1] == {'stdout': -1, 'stderr': -1}
+        assert not recorder.processes
+        adapter._impl.subprocess.Popen([str(binary), '-m', 'local.gguf'])
+        assert calls[-1]['stdout'] is recorder.log
+        assert len(recorder.processes) == 1
