@@ -1,0 +1,130 @@
+# file: ai-workflow/knowledge/execution-resource-er03-r1-gate-reproducer.txt ; version: 1
+"""Worker adaptation of Integration gate cases, accepting either actual admission winner."""
+import importlib.util
+import sys
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event, current_thread
+
+import pytest
+
+source = Path.cwd() / 'tests/first_party/llmDrivers/test_llamaCppExecutionResources.py'
+spec = importlib.util.spec_from_file_location('integrationEr03Fixtures', source)
+fixtures = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = fixtures
+spec.loader.exec_module(fixtures)
+rig = fixtures.rig
+
+
+def test_invocation_cannot_cross_activation_gate_after_precheck(rig, monkeypatch):
+    """An invocation checked before activation must not execute during composition."""
+    _, create, _, _, _, _, _, _, _ = rig
+    runtime = create()
+    checked, invoke, composing, release = Event(), Event(), Event(), Event()
+    original = runtime.requireCompositionReady
+
+    def ready():
+        """Pause the invocation immediately after its actual gate check passed."""
+        original()
+        if current_thread().name.startswith('prechecked-invocation'):
+            checked.set()
+            assert invoke.wait(5)
+
+    class BlockingComposer:
+        """Keep the new activation in its outside-lock composition phase."""
+
+        def compose(self, snapshot):
+            """Allow the already-checked invocation to contend for the runtime lane."""
+            composing.set()
+            assert release.wait(5)
+
+    def phase(ctx, payload):
+        """Expose whether arbitrary capability code entered the forbidden phase."""
+        return runtime._compositionAttempt.phase
+
+    fixtures.capability(runtime, 'phase@1', phase)
+    monkeypatch.setattr(runtime, 'requireCompositionReady', ready)
+    runtime.providerComposers = (BlockingComposer(),)
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix='prechecked-invocation') as callers:
+        with ThreadPoolExecutor(max_workers=1) as activations:
+            call = callers.submit(runtime.invokeCapability, 'phase@1')
+            assert checked.wait(5)
+            activation = activations.submit(runtime.packLoader.activate, fixtures.ManualActivationPlan(packIds=()))
+            try:
+                assert composing.wait(5)
+                invoke.set()
+                try:
+                    observed = call.result(5)
+                except (RuntimeError, fixtures.LlmExecutionOwnershipError):
+                    observed = 'rejected'
+                assert observed == 'rejected', f'Capability executed during {observed}'
+            finally:
+                invoke.set()
+                release.set()
+                activation.result(5)
+
+
+@pytest.mark.parametrize('action', ['close', 'stop'])
+def test_shutdown_cannot_cross_activation_gate_after_precheck(rig, monkeypatch, action):
+    """A close checked before activation must not finalize a still-composing runtime."""
+    _, create, _, processes, _, _, _, _, _ = rig
+    runtime = create()
+    runtime.invokeCapability('switch@1', 'A')
+    module = sys.modules[type(runtime).__module__]
+    original = module.requireNoPendingComposition
+    checked, shutdown, composing, release = Event(), Event(), Event(), Event()
+    admission = Event()
+    observed = {}
+
+    def preflight(target):
+        """Pause shutdown after it has observed no pending activation."""
+        original(target)
+        if current_thread().name.startswith('prechecked-shutdown'):
+            checked.set()
+            assert shutdown.wait(5)
+
+    class BlockingComposer:
+        """Own the activation snapshot while shutdown resumes its stale check."""
+
+        def compose(self, snapshot):
+            """Prevent the callback from returning until shutdown disposition is seen."""
+            observed["composing"] = True
+            composing.set()
+            admission.set()
+            assert release.wait(5)
+
+    def activate():
+        """Report either actual activation admission or a legitimate shutdown winner."""
+        try:
+            runtime.packLoader.activate(fixtures.ManualActivationPlan(packIds=()))
+        except fixtures.LlmExecutionOwnershipError:
+            observed["rejected"] = True
+            admission.set()
+
+    monkeypatch.setattr(module, 'requireNoPendingComposition', preflight)
+    runtime.providerComposers = (BlockingComposer(),)
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix='prechecked-shutdown') as closers:
+        with ThreadPoolExecutor(max_workers=1) as activations:
+            close = closers.submit(getattr(runtime, action))
+            assert checked.wait(5)
+            activation = activations.submit(activate)
+            try:
+                assert admission.wait(5)
+                shutdown.set()
+                try:
+                    close.result(5)
+                except fixtures.LlmExecutionCleanupError:
+                    pass
+                if observed.get("composing"):
+                    assert not processes[0].terminated, 'Shutdown finalized provider during composition'
+                    assert runtime.packLoader._loadedPacks, 'Shutdown unloaded Packs during composition'
+                else:
+                    assert observed.get("rejected"), 'Neither side acquired actual admission'
+                    assert not composing.is_set(), 'Rejected activation entered a composer'
+            finally:
+                shutdown.set()
+                release.set()
+                try:
+                    activation.result(5)
+                except (RuntimeError, fixtures.LlmExecutionOwnershipError):
+                    pass

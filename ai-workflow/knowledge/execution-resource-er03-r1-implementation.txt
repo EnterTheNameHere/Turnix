@@ -1,0 +1,164 @@
+ER-03-R1 WORKER CORRECTION / VERIFICATION EVIDENCE
+================================================
+Owner: execution-resource-llamacpp worker. Date: 2026-11-03.
+Status: correction published for independent review, NOT integrated/accepted.
+Repository: EnterTheNameHere/Turnix. Branch: execution-resource-llamacpp.
+Original dispatch parent: 897e491ec2015b55a86843dc58dbc1308eae24ef.
+Initial implementation parent: 445a4f992ff09642b9e29c59905aebfb44b308f4.
+Original source: 63931d5ba89d2e449894bce46ccc3fbd10c7c13f.
+Canonical correction review: 01e947c83133c7255048a485603fb4acdf5ea843.
+Exact correction parent / synchronization merge:
+  a9f810d1f87fd948703f799eab44847cf0d6826b
+Its parents are original worker 63931d5 and canonical review 01e947c; its source
+tree in backend/first-party/tests equals original 63931d5 (empty diff, exit 0).
+Correction source: 00bb521d8c7587b98f8e627703390c169a86333b.
+Preserved both histories without replay/rebase/force push. Canonical recheck still
+01e947c at publication. Original 63931d5 and correction 00bb521 are the source
+series to review; do not replay the synchronization merge or coordination commits.
+Worker source worktree clean after commit/push. No other chat/user checkout edited.
+
+Reproduced defects and corrected protocol
+------------------------------------------
+Own Python 3.15.0b4 reproduced all three Integration Event-controlled failures on
+the synchronized original source before edits: capability entered composing;
+runtime close and stop finalized a provider during an outstanding composer.
+The original source's readiness/no-pending checks were detached from actual use.
+Passing submitted tests did not establish those admission guarantees.
+
+One callback-free runtime admission lane now serializes actual activation,
+invocation and shutdown decisions. It is a lifecycle gate, not an ER-01 claim
+manager or provider scheduling authority. Activation publishes its exact attempt
+under this lane and rejects immediately if an invocation/finalizer already owns
+admission, or shutdown/unload has closed it. It does not wait for a handler's
+runtime execution lane. No gate/lane is held across composer callbacks.
+
+Invocation reserves an issued ticket after readiness diagnostics and before
+waiting for its existing execution lane. Actual invokeCapability/runJob entry
+rechecks live ticket membership, issuing thread, phase and shutdown admission
+while already in that execution lane. Tickets persist through outside-lane
+lifetime cleanup; copied/expired scopes cannot authorize the actual entry.
+Nested normal capabilities and existing Job/transaction serialization remain.
+Lifecycle continuation records the exact attempt and issuing thread; onLoad/
+lifecycle Contexts gain no direct LLM execution grant.
+
+Shutdown's no-pending operation now closes actual admission BEFORE any provider
+finalizer, not merely checking a snapshot. Permanent runtime/host closure cannot
+reopen. A winning activation is revoked but retains objects until its composer
+unwinds; shutdown returns typed pending. A winning shutdown prevents a later
+attempt from starting. Active/queued invocation ownership blocks legacy teardown;
+already-queued calls revalidate closed admission before arbitrary handler code.
+Cooperative controlled stop still runs outside lanes with Job outcome preserved.
+
+Host stop reserves every live/pending runtime's admission, including later batches
+in active runtimes, before any resource finalizer. Application close does the
+same for its exact runtime. Direct PackLoader unload keeps a reversible gate
+through the entire outside-lane cleanup boundary; a successful unload can later
+reactivate through fresh trusted composition. No old grant/Registration is revived.
+
+Outside-lane lifetime and failed-attempt cleanup reserve actual finalizer tickets
+against new activation. Runtime roots survive host removal until this finishes.
+A composing registry's effects are deferred; unrelated registries still drain/
+report failure rather than a global skip silently hiding their cleanup errors.
+Pending cleanup keeps ownership and reports uncertainty; no polling/recovery or
+callbacks under host/runtime/admission/registry/broker/domain lanes were added.
+
+Equivalent-path audit also reproduced two adjacent lifecycle failures before
+their narrow fixes: full Pack reload could not perform the new trusted binding
+required by the old controlled-name tombstone; and a revoked non-null binding
+could incorrectly satisfy the composition barrier. New replacement registration
+now goes through explicit accepted bind/R1 validation (never legacy fallback),
+and composer/barrier require the exact existing binding to be live. No grant
+extension, broker internals mutation or new binding/admission API is introduced.
+
+Source / durable regressions
+------------------------------
+Eight files: six production Python, one new Python test module, provider README.
+- providerComposition.py 1->2: runtime admission tickets, shutdown/unload and
+  finalization ownership; attempt publication/cleanup use the same short gate.
+- applicationRuntime.py 20->21: actual-use checks and shutdown ownership.
+- lifecycle.py 7->8: exact thread-bound issued continuation.
+- executionSessions.py 3->4: lifetime callback reservations and host shutdown
+  admission, keeping all accepted bind/claim/context/preview contracts unchanged.
+- packs/runtime.py 15->16: reversible unload boundary through outside-lane cleanup.
+- llamaCpp/executionAdapter.py 1->2: explicit fresh-registration bind and live check.
+- tests/backend/application/test_compositionAdmission.py, new version 1, 24 cases.
+- llamaCpp README: actual gate/cleanup and explicit full-reload migration semantics.
+ER-01, SharedServiceRegistry, driver/transport configuration/LC flags, PM/G,
+consumer code and all original test functions remain unchanged by this correction.
+
+Durable cases cover both winner orderings for capability/Job and runtime close/
+stop, Pack unload, host application close/stop; queued-call actual entry rejection;
+outside-lane finalizer reservations; expired copied scopes; handler-held lane
+immediate conflict; standalone initialization shutdown; failed-composer cleanup
+callback ownership; fresh full-plan reactivation; revoked binding rejection; and
+unrelated uncertain cleanup while a peer composes. Existing 47 provider cases
+still cover actual managed paths, domain contention and native completion policy.
+Events/Futures decide order; bounded waits are deadlock guards, not timing proof.
+
+Diagnostic preservation and accepted winner adaptation
+--------------------------------------------------------
+Original Integration raw diagnostic is retained unchanged in
+execution-resource-er03-gate-reproducer.txt. Its invocation case still applies.
+Its shutdown case assumed activation must start AFTER the no-pending function
+returned. That function now reserves shutdown atomically, so the legitimate
+winner is rejection of that later activation, as explicitly permitted in review.
+
+Worker adaptation: execution-resource-er03-r1-gate-reproducer.txt. It retains the
+original assertions whenever composition actually won and adds an Event reporting
+typed activation rejection when shutdown won. It does not weaken a composing
+owner's no-finalization assertion, poll or force activation after shutdown.
+Verified this SAME adapted diagnostic against an exact original-source archive:
+3 failed in 0.45s, reproducing the same original assertions. Corrected source:
+3 passed in 0.20s. The durable 24 cases additionally force the reverse orderings.
+
+Actual commands / final results
+--------------------------------
+Own worker Python 3.15.0b4, MSC 1951 AMD64 / pytest 9.2.0; unchanged local runtime
+from original ER-03 setup. Existing embedded-home warning persists with success.
+
+Original diagnostic on synchronized original source before edits:
+  Copy-Item ai-workflow/knowledge/execution-resource-er03-gate-reproducer.txt python-embedded/er03-gate-reproducer.py
+  .\python-embedded\python.exe -X frozen_modules=off -c "import sys,os; sys.path.insert(0,os.getcwd()); import pytest; raise SystemExit(pytest.main(['-q','--import-mode=importlib','--tb=short','python-embedded/er03-gate-reproducer.py']))"
+    3 failed in 0.27s, zero skips.
+
+Archive original 63931d5 into this worker's ignored python-embedded directory:
+  git archive --format=tar --output=python-embedded/er03-r1-original-63931d5.tar 63931d5ba89d2e449894bce46ccc3fbd10c7c13f
+  New-Item -ItemType Directory -Path python-embedded/er03-r1-original-63931d5 -Force
+  tar -xf python-embedded/er03-r1-original-63931d5.tar -C python-embedded/er03-r1-original-63931d5
+From that archive cwd (.. is this worker's own runtime):
+  ..\python.exe -X frozen_modules=off -c "import sys,os; sys.path.insert(0,os.getcwd()); import backend.llm.providerComposition as p; print(p.__file__); import pytest; raise SystemExit(pytest.main(['-q','--import-mode=importlib','--tb=short','../er03-r1-gate-reproducer.py']))"
+    Printed backend path inside exact archive. Adapted diagnostic: 3 failed, 0.45s.
+
+From worker root on final correction:
+  Copy-Item ai-workflow/knowledge/execution-resource-er03-r1-gate-reproducer.txt python-embedded/er03-r1-gate-reproducer.py
+  .\python-embedded\python.exe -X frozen_modules=off -c "import sys,os; sys.path.insert(0,os.getcwd()); import pytest; raise SystemExit(pytest.main(['-q','--import-mode=importlib','--tb=short','python-embedded/er03-r1-gate-reproducer.py']))"
+    Adapted diagnostic 3 passed in 0.20s.
+    The local file was authored before canonical publication; it is byte-identical
+    to the published working text (normal Git line-ending conversion only). The
+    Copy-Item line is the review reproduction step.
+  .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/backend/application/test_compositionAdmission.py tests/first_party/llmDrivers/test_llamaCppExecutionResources.py
+    71 passed in 1.76s (24 new plus 47 original), zero skips.
+  .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests/first_party/llmDrivers tests/backend/llm tests/backend/context tests/backend/runtime tests/backend/application tests/backend/orchestration tests/backend/packs tests/backend/telemetry tests/first_party/observationBridge
+    852 passed in 8.02s, zero skips.
+  .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib tests
+    1702 passed in 10.87s, zero skips (1678 original submission + 24).
+  .\python-embedded\python.exe -X frozen_modules=off python-embedded/er03_headers.py
+  .\python-embedded\python.exe -X frozen_modules=off python-embedded/er03_audit.py
+    Local ignored AST audit: all seven correction Python files have correct first-
+    line repository path/version (existing +1/new 1) and all class/function/private/
+    magic docstrings. No original test function removed.
+  git diff --check
+  git diff --cached --check
+    Passed. No source changes after final checks; committed worktree clean.
+  .\python-embedded\python.exe -X frozen_modules=off -m ruff --version
+    No module named ruff. Not installed/run; no lint claim.
+
+Limits / report-back
+-----------------------
+This is worker evidence, not independent acceptance. No original source merged
+into Integration by worker; review original 63931d5 plus correction 00bb521.
+Required stock retention/freshness remain unsupported as authorized; physical
+retained-provider adoption remains unmet. Actual binary/model/slot/cache/reset/
+quiescence effects, hardware monitoring, consumer adoption and ER-04 unverified.
+No model/inference/download, scheduler/preemption/recovery or global exclusivity.
+Integration must independently reproduce/check compatibility before accepting.
