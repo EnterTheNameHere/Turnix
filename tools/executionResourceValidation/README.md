@@ -22,9 +22,11 @@ Supervised real abort tool, authorized specifically by coordination commit
 .\python-embedded\python.exe -X frozen_modules=off -m tools.executionResourceValidation.abortProbe --config python-embedded/er04-local/config.json --case job-cancel
 ```
 
-Cases: `job-cancel`, `disconnect`, `early-close`, `read-timeout`, `stream-delete`.
+Cases: `job-cancel`, `disconnect`, `early-close`, `read-timeout`, `stream-delete`,
+`blocked-job-cancel`, `pre-header-cancel`.
 The helper initially loads no model. At the operator console use `run TOKEN`,
-then `status` to inspect the independently monitored case. Only after graceful
+then `status` to inspect the independently monitored case. When cleanup is
+confirmed, `finish TOKEN` performs normal runtime shutdown. Only after graceful
 observation ends with failed/unknown cleanup, explicitly issue `terminate TOKEN`
 for that retained child. A separate `kill TOKEN` is permitted only after a
 terminate wait timed out; no automatic escalation exists. `finish TOKEN` refuses
@@ -90,7 +92,8 @@ Node must be installed for the explicit browser phase. Nothing is installed for 
 
 Exit status is 0 for a completed selected scope, 1 for failure or unresolved owned
 cleanup, and 2 when a selected validation gate remains blocked. Thus `all` currently
-returns 2 even when its safe real cases complete: active aborts in 04C remain blocked.
+returns 2 even when its safe real cases complete: it excludes the separately
+supervised 04C abort probes and never imports their results as its own proof.
 
 Each invocation creates a new private run directory. Raw paths/argv, provider
 requests, output, reasoning, server logs and configuration are private artifacts.
@@ -113,14 +116,17 @@ physical freshness/retention is not turned into a fake capability.
 
 ## Active abort boundary
 
-Safe 04C cases exercise real active-stream busy denial, exclusive compatible-peer
-denial, explicit drain/switch, owner unload and cancellation before send. Active
-cancellation, early transport close and timeout are reported **blocked** in real
-mode: the accepted stock adapter cannot confirm their quiescence, and ER-01 has
-no authorized recovery/disposal for that unknown operation. Synthetic regression
-tests retain those fail-closed contracts. This harness does not silently run aborts
-and orphan or kill their servers. A separately reviewed cleanup/operator policy is
-needed to run those real cases responsibly; 04C is not claimed wholly verified.
+Safe `run.py` 04C cases exercise real active-stream busy denial, exclusive
+compatible-peer denial, explicit drain/switch, owner unload and cancel-before-send.
+It reports active cancel/early-close/timeout **blocked** because those are separate
+operator-supervised probes. Corrected provider source `d027870` now confirms
+native-bound cleanup; six actual abort cases released claims and closed normally.
+See `ai-workflow/knowledge/execution-resource-er04c-provider-correction.txt` and
+`verification/corrected-abort-summary.json`. Two actual pre-header capture attempts
+remained inconclusive. Missing binding after possible send deliberately preserves
+UNKNOWN; ER-01 has no later repair API. Full unqualified ER-04 is not accepted.
+Supervised emergency exact-child disposal is only an explicit test cleanup step,
+never native evidence or regular runtime recovery. No unattended aborts or kills.
 
 Any unexpected uncertainty in an otherwise ordinary run also stops dependent
 phases. Accepted host cleanup is attempted; a live unknown provider remains owned
