@@ -1,11 +1,12 @@
-# file: backend/llm/providerComposition.py ; version: 1
+# file: backend/llm/providerComposition.py ; version: 2
 """Trusted activation composition, distinct from execution admission and Jobs."""
 from __future__ import annotations
 
 from contextvars import ContextVar
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import wraps
-from threading import RLock
+from threading import get_ident
 from typing import Protocol
 
 from backend.llm.errors import LlmExecutionOwnershipError, LlmExecutionCleanupError
@@ -35,16 +36,99 @@ class ActivationCompositionSnapshot:
 
 
 def invocationBoundary(method):
-    """Reject activation under serialized invocation without changing Job semantics."""
+    """Reserve lifecycle exclusion through actual invocation and outside-lane cleanup."""
     @wraps(method)
     def execute(self, *args, **kwargs):
         """Keep copied/reentrant invocation scope from releasing enclosing lanes."""
         self.requireCompositionReady()
-        token = _invocation.set(True)
+        admission = reserveInvocation(self)
+        token = _invocation.set((self, admission))
         try:
             return method(self, *args, **kwargs)
         finally:
             _invocation.reset(token)
+            with self._admissionLane:
+                self._invocationAdmissions.pop(admission, None)
+    return execute
+
+
+def requireReady(runtime):
+    """Check readiness for diagnostics; actual invocation also reserves admission."""
+    with runtime._admissionLane:
+        _requireReadyUnlocked(runtime)
+
+
+def _requireReadyUnlocked(runtime):
+    """Inspect only runtime-issued gate state; never call user code under this lane."""
+    if runtime._closed or runtime._shutdownAdmission or runtime._unloadAdmission:
+        raise LlmExecutionOwnershipError("Runtime execution admission is closed.")
+    attempt = runtime._compositionAttempt
+    if attempt is not None and (attempt.revoked or attempt.phase != "running"
+            or _lifecycle.get() is not attempt or attempt.continuationThread != get_ident()):
+        raise LlmExecutionOwnershipError("Application activation has not completed provider composition.")
+
+
+def reserveInvocation(runtime):
+    """Atomically choose invocation versus activation before waiting for execution lane."""
+    with runtime._admissionLane:
+        _requireReadyUnlocked(runtime)
+        admission = object()
+        runtime._invocationAdmissions[admission] = get_ident()
+        return admission
+
+
+def requireInvocationEntry(runtime):
+    """Validate the issued live admission again at the actual serialized use boundary."""
+    current = _invocation.get()
+    with runtime._admissionLane:
+        if (not current or current[0] is not runtime
+                or runtime._invocationAdmissions.get(current[1]) != get_ident()):
+            raise LlmExecutionOwnershipError("Invocation admission is foreign, copied or expired.")
+        _requireReadyUnlocked(runtime)
+
+
+def hasLifecycleWork(runtime):
+    """Shutdown cannot enter legacy teardown while invocation/finalization still owns work."""
+    with runtime._admissionLane:
+        return bool(runtime._invocationAdmissions or runtime._cleanupAdmissions)
+
+
+@contextmanager
+def finalizationScope(runtimes):
+    """Atomically reserve outside-lock finalizers against a new activation attempt."""
+    issued = []
+    blocked = set()
+    try:
+        for runtime in dict.fromkeys(runtimes):
+            with runtime._admissionLane:
+                attempt = runtime._compositionAttempt
+                if attempt is not None and attempt.phase not in ("cleanup", "aborted", "complete"):
+                    blocked.add(runtime)
+                else:
+                    admission = object()
+                    runtime._cleanupAdmissions.add(admission)
+                    issued.append((runtime, admission))
+        yield blocked
+    finally:
+        for runtime, admission in issued:
+            with runtime._admissionLane:
+                runtime._cleanupAdmissions.discard(admission)
+
+
+def packUnloadBoundary(method):
+    """Keep a reversible unload admission closed until outside-lock cleanup finishes."""
+    @wraps(method)
+    def execute(self, *args, **kwargs):
+        """A surrounding permanent runtime shutdown already owns its closed gate."""
+        runtime = self._runtime
+        if runtime._llmClosePrepared and runtime._shutdownAdmission:
+            return method(self, *args, **kwargs)
+        runtime.prepareLlmClose(permanent=False)
+        result = method(self, *args, **kwargs)
+        with runtime._admissionLane:
+            runtime._unloadAdmission = False
+            runtime._llmClosePrepared = False
+        return result
     return execute
 
 
@@ -56,15 +140,17 @@ class ActivationAttempt:
         if _invocation.get() or _lifecycle.get():
             raise LlmExecutionOwnershipError("Activation cannot run inside an invocation or lifecycle hook.")
         self.runtime, self.initial, self.mode = runtime, initial, mode
-        self._gate = RLock()
-        self.checkpoint = len(runtime.packLoader._loadedPacks)
-        self.previousBarrier = runtime.packLoader._activationBarrierReached
+        self._gate = runtime._admissionLane
         self.phase = "preparing"
         self.revoked = False
         self.snapshot = None
-        with runtime._lane:
-            if runtime._compositionAttempt is not None or runtime._closed:
-                raise LlmExecutionOwnershipError("Activation is already pending or runtime is closed.")
+        self.continuationThread = None
+        with self._gate:
+            if (runtime._compositionAttempt is not None or runtime._closed or runtime._shutdownAdmission
+                    or runtime._unloadAdmission or runtime._invocationAdmissions or runtime._cleanupAdmissions):
+                raise LlmExecutionOwnershipError("Activation is busy or runtime admission is closed.")
+            self.checkpoint = len(runtime.packLoader._loadedPacks)
+            self.previousBarrier = runtime.packLoader._activationBarrierReached
             runtime._compositionAttempt = self
 
     def requireCurrent(self):
@@ -81,7 +167,9 @@ class ActivationAttempt:
             self.snapshot = ActivationCompositionSnapshot(runtime.executionResources,
                 runtime.llmExecutions, runtime.llmProviders, registrations,
                 tuple((identity, runtime._llmOwners[key]) for key, (identity, _) in runtime._codeEntries.items()), self)
-        self.phase = "composing"
+        with self._gate:
+            self.requireCurrent()
+            self.phase = "composing"
 
     def compose(self):
         """Call trusted composers with no enclosing host/runtime/registry lane."""
@@ -91,8 +179,10 @@ class ActivationAttempt:
             self.requireCurrent()
         for registration in self.snapshot.registrations:
             if getattr(registration.value, "requiresControlledComposition", False):
-                if self.runtime.llmExecutions.binding(self.snapshot.registry, registration) is None:
+                binding = self.runtime.llmExecutions.binding(self.snapshot.registry, registration)
+                if binding is None:
                     raise LlmExecutionOwnershipError("Managed llama.cpp requires trusted host composition.")
+                binding.requireLive()
         with self._gate:
             self.requireCurrent()
             self.phase = "ready"
@@ -111,11 +201,13 @@ class ActivationAttempt:
             self.revoked = True
             runtime = self.runtime
             if self.initial:
-                runtime.llmExecutions.revokeRegistry(runtime.llmProviders, permanent=True)
-            else:
-                for loaded in runtime.packLoader._loadedPacks[self.checkpoint:]:
-                    for entry in loaded.entries:
-                        runtime.revokeLlmCodeEntry(entry.identity.codeEntryInstanceId)
+                runtime._shutdownAdmission = True
+        if self.initial:
+            runtime.llmExecutions.revokeRegistry(runtime.llmProviders, permanent=True)
+        else:
+            for loaded in runtime.packLoader._loadedPacks[self.checkpoint:]:
+                for entry in loaded.entries:
+                    runtime.revokeLlmCodeEntry(entry.identity.codeEntryInstanceId)
 
     def abort(self):
         """Unwind only this batch; report every cleanup failure without losing roots."""
@@ -123,7 +215,8 @@ class ActivationAttempt:
         runtime = self.runtime
         errors = []
         with runtime._lane:
-            self.phase = "cleanup"
+            with self._gate:
+                self.phase = "cleanup"
             loader = runtime.packLoader
             errors.extend(loader._closeLoadedPacks(loader._loadedPacks[self.checkpoint:]))
             del loader._loadedPacks[self.checkpoint:]
@@ -139,11 +232,15 @@ class ActivationAttempt:
 
     def finishCleanup(self):
         """Drain broker-owned callbacks outside lanes, retaining incomplete attempts."""
-        self.runtime.llmExecutions.finishClose(self.runtime.llmProviders)
-        with self.runtime._lane:
-            self.phase = "aborted"
-            if self.runtime._compositionAttempt is self:
-                self.runtime._compositionAttempt = None
+        with finalizationScope((self.runtime,)) as composing:
+            if composing:
+                raise LlmExecutionCleanupError()
+            self.runtime.llmExecutions.finishClose(self.runtime.llmProviders)
+            with self.runtime._lane:
+                with self._gate:
+                    self.phase = "aborted"
+                    if self.runtime._compositionAttempt is self:
+                        self.runtime._compositionAttempt = None
 
 
 def activateBatch(loader, action):
@@ -164,10 +261,23 @@ def activateBatch(loader, action):
         raise
 
 
-def requireNoPendingComposition(runtime):
-    """Close admission immediately; never unload objects still owned by a composer."""
-    attempt = runtime._compositionAttempt
-    if attempt is not None and attempt.phase not in ("cleanup", "aborted", "complete"):
+def requireNoPendingComposition(runtime, *, permanent=True):
+    """Reserve shutdown atomically before any finalizer; a preflight is not authority.
+
+    Permanent runtime/host shutdown never reopens admission. Pack unloading keeps a
+    reversible gate until its whole outer cleanup boundary succeeds. Callbacks and
+    cooperative stops run after this callback-free gate/registry revocation stage.
+    """
+    with runtime._admissionLane:
+        if permanent:
+            runtime._shutdownAdmission = True
+        else:
+            runtime._unloadAdmission = True
+        attempt = runtime._compositionAttempt
+        pending = attempt is not None and attempt.phase not in ("cleanup", "aborted", "complete")
+        if pending:
+            attempt.revoked = True
+    runtime.llmExecutions.revokeRegistry(runtime.llmProviders, permanent=permanent)
+    if pending:
         attempt.abandon()
-        runtime.llmExecutions.revokeRegistry(runtime.llmProviders, permanent=True)
         raise LlmExecutionCleanupError()

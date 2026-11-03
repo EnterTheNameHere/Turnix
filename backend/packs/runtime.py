@@ -1,4 +1,4 @@
-# file: backend/packs/runtime.py ; version: 15
+# file: backend/packs/runtime.py ; version: 16
 from __future__ import annotations
 
 import hashlib
@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from backend.context.codeEntryContext import CodeEntryIdentity
 from backend.llm.executionSessions import lifetimeBoundary
-from backend.llm.providerComposition import activateBatch
+from backend.llm.providerComposition import activateBatch, packUnloadBoundary
 from backend.core.runtimeIds import newRuntimeId
 from backend.registration import RegistrationScope
 from backend.values.committed import CommittedValueLayer, CommittedValueTransaction
@@ -395,6 +395,7 @@ class PackLoader:
             attributes={"hook": hookName, "appPackId": loadedPack.pack.packId},
         )
 
+    @packUnloadBoundary
     @lifetimeBoundary
     def close(self) -> None:
         """Revokes new controlled work before legacy unload, without waiting across lanes."""

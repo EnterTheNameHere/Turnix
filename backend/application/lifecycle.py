@@ -1,10 +1,11 @@
-# file: backend/application/lifecycle.py ; version: 7
+# file: backend/application/lifecycle.py ; version: 8
 from __future__ import annotations
 
 from backend.packs.runtime import ManualActivationPlan
 from backend.application.applicationRuntime import ApplicationRuntime
 from backend.save import SaveBundle
 from backend.llm.providerComposition import ActivationAttempt, _lifecycle
+from threading import get_ident
 
 __all__ = ["ApplicationLifecycle"]
 
@@ -102,7 +103,8 @@ class ApplicationLifecycle:
             if attempt.phase != "ready":
                 raise RuntimeError("Provider composition is not ready.")
             attempt.phase = "running"
-        token = _lifecycle.set(True)
+            attempt.continuationThread = get_ident()
+        token = _lifecycle.set(attempt)
         try:
             result = (cls._resumeCreate(runtime=attempt.runtime) if attempt.mode == "create"
                       else cls._resumeLoad(runtime=attempt.runtime))

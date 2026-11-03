@@ -92,8 +92,19 @@ exact `EntrySelector` and `LlamaCppGrant(..., allowTransition=False)` as appropr
 Entry selection checks actual loaded Pack/version/entry/source SHA-256; it does
 not certify transitive imports. Runtime JSON must match the approved catalog.
 Bindings copy initial grants. Later entries/reactivated incarnations receive no
-implicit grant, live extension or rebinding. Unsafe activation inside a Job or
-lifecycle callback rejects. Partial later-batch failure preserves older bindings.
+implicit grant or live extension. A full drained unload and trusted full-plan
+reactivation issues a new provider Registration and new actual-owner grants; it
+never revives the previous registration's authority. Unsafe activation inside a
+Job or lifecycle callback rejects. Partial later-batch failure preserves older
+bindings, and a revoked binding cannot satisfy the composition barrier.
+
+Runtime lifecycle admission chooses invocation, activation and shutdown atomically.
+A detached readiness check is not execution authority: live invocation tickets are
+checked again at the actual serialized entry. Composer callbacks and deferred
+cleanup run outside lanes, while issued tickets exclude conflicting activation.
+Permanent runtime/host shutdown closes future admission before provider finalizers;
+Pack-only unload keeps a reversible gate until its whole cleanup boundary succeeds.
+Pending invocations, composition or cleanup report typed incomplete disposition.
 
 Changing sampling/request controls reuses loaded weights. Different startup flags,
 context capacity, template defaults or auxiliary speculative weights are a new
