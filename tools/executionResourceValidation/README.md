@@ -12,7 +12,34 @@ not provider-quiescence evidence. See
 `ai-workflow/knowledge/execution-resource-er04c-cancellation-investigation.txt`
 and `ai-workflow/assignments/execution-resource-cancellation-probe.txt` for pinned
 source findings and the separately gated supervised live probe plan. Active real
-aborts remain blocked; this command does not change their status.
+aborts require the separately authorized supervised tool below; this model-free
+command does not change their status.
+
+Supervised real abort tool, authorized specifically by coordination commit
+`2fff776` (one case/process, private evidence only):
+
+```powershell
+.\python-embedded\python.exe -X frozen_modules=off -m tools.executionResourceValidation.abortProbe --config python-embedded/er04-local/config.json --case job-cancel
+```
+
+Cases: `job-cancel`, `disconnect`, `early-close`, `read-timeout`, `stream-delete`.
+The helper initially loads no model. At the operator console use `run TOKEN`,
+then `status` to inspect the independently monitored case. Only after graceful
+observation ends with failed/unknown cleanup, explicitly issue `terminate TOKEN`
+for that retained child. A separate `kill TOKEN` is permitted only after a
+terminate wait timed out; no automatic escalation exists. `finish TOKEN` refuses
+live workers/unknown children. Closed stdin retains ownership. Keep the operator
+present; do not use parent exit or host shutdown to evade cleanup.
+
+The supplied Windows child Popen object, PID and kernel handle must all match.
+Emergency process exit is disposal, never native graceful-stop evidence or
+permission to clear an unknown claim. Ordinary `run.py` has no abort/kill policy.
+The test-only timeout case sets 0.01s on the actual owned response socket after
+active binding; the stream-delete case opts in only that private operation key.
+The early-close hook closes the actual admitted iterator at its own yield boundary.
+No production provider behavior changes. See
+`ai-workflow/knowledge/execution-resource-er04c-supervised-results.txt` and the
+reviewed structural `verification/abort-summary.json` for actual bounded outcomes.
 
 This bounded harness exercises the accepted ER-01/02/03 host, two real validation
 Applications and the production llama.cpp composer. It is not Experiment Runner
