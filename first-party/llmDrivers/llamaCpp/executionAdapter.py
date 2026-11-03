@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/executionAdapter.py ; version: 1
+# file: first-party/llmDrivers/llamaCpp/executionAdapter.py ; version: 2
 """Trusted llama.cpp adoption of ER-01 residency and ER-02 invocation sessions.
 
 Stock HTTP cannot require physical cache reuse. Retention and required freshness
@@ -160,11 +160,17 @@ class LlamaCppComposition:
         if len(registrations) != 1:
             raise LlmExecutionOwnershipError("Trusted llama.cpp provider identity is missing or ambiguous.")
         registration = registrations[0]
-        existing = snapshot.bindings.binding(snapshot.registry, registration)
+        try:
+            existing = snapshot.bindings.binding(snapshot.registry, registration)
+        except LlmExecutionOwnershipError:
+            # Replacement intent is fail-closed. Only a fresh explicit trusted bind
+            # below can publish; accepted R1 checks still validate exact lifetime.
+            existing = None
         facade = registration.value
         if type(facade) is not _impl._ManagedFacade or facade.requestedConfiguration != self.catalog.values:
             raise LlmExecutionOwnershipError("Managed llama.cpp configuration or facade is not host-approved.")
         if existing is not None:
+            existing.requireLive()
             with _tableLane:
                 owner = _domains.get(snapshot.resources, {}).get(self.domainId)
                 if owner is None or owner.envelope != self.catalog.envelope or existing.domain is not owner.domain:

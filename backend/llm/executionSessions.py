@@ -1,4 +1,4 @@
-# file: backend/llm/executionSessions.py ; version: 3
+# file: backend/llm/executionSessions.py ; version: 4
 """Trusted LLM composition over ER-01, with no provider-specific realization.
 
 Binding/owner creation and adapter evidence are backend hooks, never Pack grants.
@@ -347,21 +347,25 @@ _lifetime = ContextVar("actant.llm.lifetime-boundary", default=None)
 
 
 def lifetimeBoundary(method):
-    """Defers new owner cleanup until all enclosing host/runtime lanes have exited."""
+    """Defer callbacks outside lanes and reserve actual finalization versus activation."""
     @wraps(method)
     def execute(self, *args, **kwargs):
-        """Roots deferred work in the service, including failed and repeated teardown."""
+        """Root cleanup and admission tickets through failure, removal and repeated close."""
+        from backend.llm.providerComposition import finalizationScope
         outer = _lifetime.get()
         if outer is not None and not outer[0]:
             raise LlmExecutionOwnershipError("LLM lifetime scope is expired.")
-        scope = outer if outer is not None else [True, []]
+        scope = outer if outer is not None else [True, [], []]
         token = _lifetime.set(scope)
         runtime = getattr(self, "_runtime", self)
         registry = getattr(runtime, "llmProviders", None)
         if registry is not None:
             scope[1].append((registry.executions, registry))
+            scope[2].append(runtime)
         elif hasattr(self, "llmExecutions"):
             scope[1].append((self.llmExecutions, None))
+            scope[2].extend(tuple(getattr(self, "_runtimesByRunId", {}).values()))
+            scope[2].extend(tuple(getattr(self, "_pendingInitializations", {}).values()))
         primary = None
         result = None
         try:
@@ -374,42 +378,42 @@ def lifetimeBoundary(method):
             _lifetime.reset(token)
             if outer is None:
                 scope[0] = False
+                scope[2].extend(tuple(getattr(self, "_runtimesByRunId", {}).values()))
+                scope[2].extend(tuple(getattr(self, "_pendingInitializations", {}).values()))
                 errors = []
-                seen = set()
-                pending = tuple(getattr(self, "_pendingInitializations", {}).values())
-                pending += tuple(getattr(self, "_runtimesByRunId", {}).values())
-                ownAttempt = getattr(runtime, "_compositionAttempt", None)
-                compositionRunning = any(r._compositionAttempt is not None and r._compositionAttempt.phase
-                    not in ("cleanup", "aborted", "complete") for r in pending)
-                compositionRunning = compositionRunning or (ownAttempt is not None and ownAttempt.phase
-                    not in ("cleanup", "aborted", "complete"))
-                if (not compositionRunning and getattr(runtime, "_closed", False)
-                        and getattr(runtime, "_ownsExecutionResources", False)):
-                    try:
-                        runtime.executionResources.finishClose()
-                    except Exception as error:
-                        errors.append(error)
-                completeServices = {id(s) for s, r in scope[1] if r is None}
-                for service, target in scope[1]:
-                    if compositionRunning:
-                        continue  # Pending attempts retain callback ownership until unwind.
-                    if target is not None and id(service) in completeServices:
-                        continue
-                    key = (id(service), id(target))
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    try:
-                        service.finishClose(target)
-                    except Exception as error:  # noqa: BLE001 - preserve legacy/primary classification.
-                        errors.append(error)
+                with finalizationScope(scope[2]) as composing:
+                    if (runtime not in composing and getattr(runtime, "_closed", False)
+                            and getattr(runtime, "_ownsExecutionResources", False)):
+                        try:
+                            runtime.executionResources.finishClose()
+                        except Exception as error:
+                            errors.append(error)
+                    work = []
+                    blockedRegistries = {id(r.llmProviders) for r in composing}
+                    for service, target in scope[1]:
+                        if target is None and composing:
+                            work.extend((service, r.llmProviders) for r in dict.fromkeys(scope[2])
+                                if r not in composing and r.llmExecutions is service)
+                        elif target is None or id(target) not in blockedRegistries:
+                            work.append((service, target))
+                    completeServices = {id(service) for service, target in work if target is None}
+                    seen = set()
+                    for service, target in work:
+                        if target is not None and id(service) in completeServices:
+                            continue
+                        key = (id(service), id(target))
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        try:
+                            service.finishClose(target)
+                        except Exception as error:
+                            errors.append(error)
                 if errors:
                     self.lastLlmCleanup = tuple(errors)
                     if primary is not None:
                         primary.llmLifetimeCleanup = tuple(errors)
-                    elif getattr(result, "state", None) in ("Failed", "Cancelled"):
-                        pass  # Job classification stays authoritative; safe disposition is on the runtime.
-                    else:
+                    elif getattr(result, "state", None) not in ("Failed", "Cancelled"):
                         raise ExceptionGroup("LLM lifetime cleanup is incomplete.", errors)
     return execute
 
@@ -444,12 +448,15 @@ def hostClosePreflight(method):
         if method.__name__ == "stop":
             with host._lane:
                 host._stopping = True
-                pending = tuple(dict.fromkeys((*getattr(host, "_pendingInitializations", {}).values(),
-                    *(r for r in host._runtimesByRunId.values() if r._compositionAttempt is not None))))
-                for runtime in pending:
-                    attempt = runtime._compositionAttempt
-                    if attempt is not None:
-                        attempt.abandon()
+                from backend.llm.providerComposition import requireNoPendingComposition, hasLifecycleWork
+                runtimes = tuple(dict.fromkeys((*host._pendingInitializations.values(), *host._runtimesByRunId.values())))
+                for runtime in runtimes:
+                    try:
+                        requireNoPendingComposition(runtime)
+                    except LlmExecutionCleanupError:
+                        pass  # Admission is closed; callback ownership is checked before effects below.
+                pending = tuple(r for r in runtimes if r._compositionAttempt is not None
+                    or r.applicationRun.applicationRunId in host._pendingInitializations)
                 host.llmExecutions.revokeAll()
                 host.executionResources.close()
             if pending:
@@ -478,7 +485,7 @@ def hostClosePreflight(method):
                 host.executionResources.finishClose()
             with _ignoreIncompleteCleanup():
                 host.llmExecutions.finishClose()
-            if host.llmExecutions.pendingCalls():
+            if host.llmExecutions.pendingCalls() or any(hasLifecycleWork(r) for r in runtimes):
                 raise LlmExecutionCleanupError()
         else:
             applicationRunId = bound.arguments["applicationRunId"]
@@ -488,11 +495,11 @@ def hostClosePreflight(method):
                 host.requireActive()
                 runtime = host._runtimesByRunId[applicationRunId]
                 host.llmExecutions.revokeRegistry(runtime.llmProviders)
-            from backend.llm.providerComposition import requireNoPendingComposition
+            from backend.llm.providerComposition import requireNoPendingComposition, hasLifecycleWork
             requireNoPendingComposition(runtime)
             with _ignoreIncompleteCleanup():
                 host.llmExecutions.finishClose(runtime.llmProviders)
-            if host.llmExecutions.pendingCalls(runtime.llmProviders):
+            if host.llmExecutions.pendingCalls(runtime.llmProviders) or hasLifecycleWork(runtime):
                 raise LlmExecutionCleanupError()
         return method(host, *args, **kwargs)
     return execute

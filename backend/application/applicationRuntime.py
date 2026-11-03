@@ -1,4 +1,4 @@
-# file: backend/application/applicationRuntime.py ; version: 20
+# file: backend/application/applicationRuntime.py ; version: 21
 from __future__ import annotations
 
 from contextlib import suppress
@@ -11,7 +11,8 @@ from backend.capabilities.runtime import CapabilityRegistry
 from backend.context.codeEntryContext import CodeEntryContext, CodeEntryIdentity
 from backend.io.managedIo import ManagedIo, ManagedIoTransaction
 from backend.llm.executionSessions import helperCancellation, lifetimeBoundary, jobExecutionBoundary
-from backend.llm.providerComposition import invocationBoundary, requireNoPendingComposition
+from backend.llm.providerComposition import (invocationBoundary, requireNoPendingComposition,
+    requireReady, requireInvocationEntry, hasLifecycleWork)
 from backend.runtime.executionResources import ExecutionResourceService
 from backend.llm.streamingRuntime import LlmProcessingPipeline, LlmProviderRegistry
 from backend.observation import ObservationService
@@ -120,6 +121,11 @@ class ApplicationRuntime:
         self._ownsExecutionResources = executionResourceService is None
         self.executionResources = executionResourceService or ExecutionResourceService()
         self._compositionAttempt = None
+        self._admissionLane = RLock()
+        self._invocationAdmissions = {}
+        self._cleanupAdmissions = set()
+        self._shutdownAdmission = False
+        self._unloadAdmission = False
         self._llmOwners = {}
         self.lastLlmCleanup = ()
         self._llmClosePrepared = False
@@ -338,6 +344,10 @@ class ApplicationRuntime:
         if not _deferLlmClose:
             self.prepareLlmClose()
         else:
+            requireNoPendingComposition(self)
+            if hasLifecycleWork(self):
+                from backend.llm.errors import LlmExecutionCleanupError
+                raise LlmExecutionCleanupError()
             self._llmClosePrepared = True
         with self._lane:
             for codeEntryId in tuple(self._llmOwners):
@@ -373,6 +383,10 @@ class ApplicationRuntime:
         if not _deferLlmClose:
             self.prepareLlmClose()
         else:
+            requireNoPendingComposition(self)
+            if hasLifecycleWork(self):
+                from backend.llm.errors import LlmExecutionCleanupError
+                raise LlmExecutionCleanupError()
             self._llmClosePrepared = True
         with self._lane:
             for codeEntryId in tuple(self._llmOwners):
@@ -415,23 +429,23 @@ class ApplicationRuntime:
         Pending calls keep the runtime intact for explicit retry; this does not
         wait, recover unknown provider state, or change Job cancellation outcomes.
         """
-        requireNoPendingComposition(self)
+        if permanent:
+            requireNoPendingComposition(self)
+        else:
+            requireNoPendingComposition(self, permanent=False)
         self.llmExecutions.revokeRegistry(self.llmProviders, permanent=permanent)
         try:
             self.llmExecutions.finishClose(self.llmProviders)
         except ExceptionGroup:
             pass  # Final lifetime boundary reports retained cleanup evidence.
-        if self.llmExecutions.pendingCalls(self.llmProviders):
+        if self.llmExecutions.pendingCalls(self.llmProviders) or hasLifecycleWork(self):
             from backend.llm.errors import LlmExecutionCleanupError
             raise LlmExecutionCleanupError()
         self._llmClosePrepared = True
 
     def requireCompositionReady(self):
         """Exclude invocation through leaked references before trusted composition."""
-        with self._lane:
-            attempt = self._compositionAttempt
-            if attempt is not None and (attempt.revoked or attempt.phase != "running"):
-                raise RuntimeError("Application activation has not completed provider composition.")
+        requireReady(self)
 
     def requireActive(self) -> None:
         """Requires this runtime to own an active ApplicationRun."""
@@ -529,6 +543,7 @@ class ApplicationRuntime:
     ) -> object:
         """Invokes one resolved capability with a fresh call-specific context."""
         with self._lane:
+            requireInvocationEntry(self)
             self.requireOperational()
             registration = self.capabilities.resolve(capabilityId)
             try:
@@ -578,8 +593,8 @@ class ApplicationRuntime:
                 context.invalidate()
                 scope.withdraw()
 
-    @lifetimeBoundary
     @invocationBoundary
+    @lifetimeBoundary
     @jobExecutionBoundary
     def runJob(
         self,
@@ -597,6 +612,7 @@ class ApplicationRuntime:
         execution as before.
         """
         with self._lane:
+            requireInvocationEntry(self)
             self.requireActive()
             activeJob = Job.new() if job is None else job
             if not isinstance(activeJob, Job):
