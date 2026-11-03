@@ -1,4 +1,4 @@
-# file: tools/executionResourceValidation/run.py ; version: 4
+# file: tools/executionResourceValidation/run.py ; version: 5
 """Explicit ER-04 local validation; never downloads models or bypasses managed admission."""
 from __future__ import annotations
 
@@ -69,8 +69,14 @@ def transport_facts(records):
     for record in records:
         if record['endpoint'] != '/v1/chat/completions':
             continue
-        request = json.loads(record['request'])
         identities, finishes, done = set(), [], False
+        malformed = False
+        try:
+            request = json.loads(record['request'])
+            if type(request) is not dict:
+                raise ValueError('Invalid captured request shape.')
+        except (ValueError, TypeError):
+            request, malformed = {}, True
         for line in ''.join(record['response']).splitlines():
             if not line.startswith('data:'):
                 continue
@@ -78,17 +84,25 @@ def transport_facts(records):
             if payload == '[DONE]':
                 done = True
                 continue
-            item = json.loads(payload)
-            if type(item.get('id')) is str:
-                identities.add(item['id'])
-            for choice in item.get('choices', []):
-                reason = choice.get('finish_reason')
-                if reason is not None:
-                    finishes.append(reason if reason in ('stop', 'length', 'tool_calls', 'content_filter', 'function_call') else 'other')
+            try:
+                item = json.loads(payload)
+                if type(item) is not dict or type(item.get('choices', [])) is not list:
+                    raise ValueError('Invalid captured event shape.')
+                if type(item.get('id')) is str:
+                    identities.add(item['id'])
+                for choice in item.get('choices', []):
+                    if type(choice) is not dict:
+                        raise ValueError('Invalid captured choice shape.')
+                    reason = choice.get('finish_reason')
+                    if reason is not None:
+                        finishes.append(reason if reason in ('stop', 'length', 'tool_calls', 'content_filter', 'function_call') else 'other')
+            except (ValueError, TypeError):
+                malformed = True
         effort = request.get('reasoning_effort')
         calls.append({'ownedSlotRequested': request.get('id_slot') == 0,
             'cacheReuseDisabled': request.get('cache_prompt') is False, 'nativeDone': done,
             'nativeIdConsistent': len(identities) == 1, 'finishReasons': finishes,
+            'captureMalformed': malformed,
             'enableThinkingForwarded': request.get('chat_template_kwargs', {}).get('enable_thinking'),
             'reasoningEffortForwarded': effort if effort in ('none', 'low', 'medium', 'high') else None})
     return {'streamCalls': calls, 'postTerminalSlotReads': sum(record['endpoint'] == '/slots' for record in records),
@@ -435,6 +449,8 @@ def execute(config, folder, phases):
     summary['phases']['04A'] = {'status': 'verified', 'buildPinned': True, 'modelsInspected': 2,
                                'executableSha256': assets['executable']['sha256']}
     if phases == 'preflight':
+        for phase in ('04B', '04C', '04D', '04E'):
+            summary['phases'][phase] = {'status': 'blocked', 'reason': 'not-selected'}
         return summary, None
     adapter = load_adapter()
     from tools.observationViewer.server import ViewerServer
@@ -478,6 +494,16 @@ def execute(config, folder, phases):
     return summary, validation
 
 
+def exit_status(summary):
+    """Distinguish failed execution, an incomplete selected gate and a completed selected scope."""
+    if summary.get('failure') or summary.get('cleanup') == 'blocked':
+        return 1
+    if any(phase['status'] == 'blocked' and phase.get('reason') != 'not-selected'
+           for phase in summary['phases'].values()):
+        return 2
+    return 0
+
+
 def main():
     """Require explicit local config; keep failed owned cleanup rooted rather than kill/restart."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -498,7 +524,7 @@ def main():
         print('Pending provider ownership retained. Local evidence records exact owned PIDs; operator direction required.', flush=True)
         while any(process.poll() is None for process in validation.recorder.processes):
             Event().wait(1)  # Guard process lifetime only; never recovery or quiescence proof.
-    return 1 if summary.get('failure') or summary.get('cleanup') == 'blocked' else 0
+    return exit_status(summary)
 
 
 if __name__ == '__main__':

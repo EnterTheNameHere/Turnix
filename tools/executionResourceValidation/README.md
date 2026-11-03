@@ -47,6 +47,10 @@ authenticated same-app G-01 and installed-browser G-02 connection/revocation;
 `reasoning` adds Qwen request/template/server comparisons; `all` adds both.
 Node must be installed for the explicit browser phase. Nothing is installed for it.
 
+Exit status is 0 for a completed selected scope, 1 for failure or unresolved owned
+cleanup, and 2 when a selected validation gate remains blocked. Thus `all` currently
+returns 2 even when its safe real cases complete: active aborts in 04C remain blocked.
+
 Each invocation creates a new private run directory. Raw paths/argv, provider
 requests, output, reasoning, server logs and configuration are private artifacts.
 Transport capture is bounded and transparent: it forwards actual original bytes

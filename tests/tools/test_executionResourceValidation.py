@@ -1,4 +1,4 @@
-# file: tests/tools/test_executionResourceValidation.py ; version: 4
+# file: tests/tools/test_executionResourceValidation.py ; version: 5
 """ER-04 validation contracts: bounded metadata, private evidence and real facade composition."""
 import json
 import struct
@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from tools.executionResourceValidation import preflight
-from tools.executionResourceValidation.run import Recorder, ResponseEvidence, Validation, execute, load_adapter, unavailable_signals, transport_facts
+from tools.executionResourceValidation.run import Recorder, ResponseEvidence, Validation, execute, load_adapter, unavailable_signals, transport_facts, exit_status
 from backend.telemetry import SignalUnavailable, GpuObservation
 from tests.first_party.llmDrivers.test_llamaCppExecutionResources import rig
 
@@ -192,5 +192,23 @@ def test_wire_projection_preserves_control_facts_without_private_content():
     assert secret not in json.dumps(result)
     assert result['streamCalls'][0] == {'ownedSlotRequested': True, 'cacheReuseDisabled': True,
         'nativeDone': True, 'nativeIdConsistent': True, 'finishReasons': ['stop'],
+        'captureMalformed': False,
         'enableThinkingForwarded': False, 'reasoningEffortForwarded': 'none'}
     assert result['postTerminalSlotReads'] == 1
+
+
+@pytest.mark.parametrize('body', ['data: {malformed\n', 'data: []\n', 'data: {"choices":[false]}\n'])
+def test_malformed_wire_capture_does_not_lose_pending_owner_report(body):
+    """A protocol failure is evidence, not an exception in the harness's cleanup reporting."""
+    value = transport_facts([{'endpoint': '/v1/chat/completions', 'request': '{}', 'response': [body]}])
+    assert value['streamCalls'][0]['captureMalformed'] is True
+
+
+@pytest.mark.parametrize('summary,expected', [
+    ({'phases': {'04A': {'status': 'verified'}, '04B': {'status': 'blocked', 'reason': 'not-selected'}}}, 0),
+    ({'phases': {'04C': {'status': 'blocked', 'reason': 'unknown-quiescence'}}}, 2),
+    ({'phases': {}, 'cleanup': 'blocked'}, 1),
+    ({'phases': {}, 'failure': {'type': 'RuntimeError'}}, 1)])
+def test_cli_status_never_marks_a_blocked_gate_complete(summary, expected):
+    """Automation must distinguish harness delivery from completion of every selected gate."""
+    assert exit_status(summary) == expected
