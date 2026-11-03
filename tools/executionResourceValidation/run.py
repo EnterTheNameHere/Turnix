@@ -1,4 +1,4 @@
-# file: tools/executionResourceValidation/run.py ; version: 2
+# file: tools/executionResourceValidation/run.py ; version: 3
 """Explicit ER-04 local validation; never downloads models or bypasses managed admission."""
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from backend.orchestration import Job, JobState
 from backend.packs.runtime import ManualActivationPlan, PackResolver
 from backend.runtime import RuntimeHost
 from backend.save import ApplicationStore
+from backend.telemetry import SignalUnavailable
 from tools.executionResourceValidation.preflight import inspect_assets, load_config
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -50,6 +51,16 @@ def plain(value):
 def write_json(path, value):
     """Write private bounded evidence only within the caller-selected local run folder."""
     Path(path).write_text(json.dumps(plain(value), ensure_ascii=False, indent=2), encoding='utf-8')
+
+
+def unavailable_signals(value, prefix=''):
+    """Report missing nested sensor names separately from actual zero measurements."""
+    if isinstance(value, SignalUnavailable):
+        return [prefix]
+    if dataclasses.is_dataclass(value):
+        return [name for field in dataclasses.fields(value)
+                for name in unavailable_signals(getattr(value, field.name), (prefix + '.' if prefix else '') + field.name)]
+    return []
 
 
 def load_adapter():
@@ -331,8 +342,10 @@ class Validation:
 
 def observe_browser(validation, viewer, config, folder):
     """Exercise actual PM/G-01/G-02 and revoke the source before explicit teardown."""
+    validation.call(0, 'transition', 'Qoff')
     descriptor = validation.call(0, 'observe')
-    validation.infer(observe=True)
+    validation.infer(model='Qoff', options={'chatTemplateKwargs': {'enable_thinking': False},
+                                          'reasoningEffort': 'none'}, observe=True)
     observation = validation.call(0, 'snapshot')
     validation.check('pm-hardware-history', bool(observation.hardware) or observation.hardwareUnavailableReason is not None)
     validation.private.append({'observation': observation})
@@ -365,8 +378,7 @@ def observe_browser(validation, viewer, config, folder):
         if process.poll() is None:
             process.terminate()  # Exact test-owned browser helper, never a provider recovery path.
             process.wait(timeout=10)
-    missing = sorted({field.name for sample in observation.hardware for field in dataclasses.fields(sample)
-                      if type(getattr(sample, field.name)).__name__ == 'SignalUnavailable'})
+    missing = sorted({name for sample in observation.hardware for name in unavailable_signals(sample)})
     return {'status': 'verified', 'hardwareSamples': len(observation.hardware), 'unavailableGroups': missing,
             'hardwareUnavailable': observation.hardwareUnavailableReason is not None}
 

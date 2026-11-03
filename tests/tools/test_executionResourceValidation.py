@@ -1,4 +1,4 @@
-# file: tests/tools/test_executionResourceValidation.py ; version: 2
+# file: tests/tools/test_executionResourceValidation.py ; version: 3
 """ER-04 validation contracts: bounded metadata, private evidence and real facade composition."""
 import json
 import struct
@@ -9,7 +9,8 @@ from types import SimpleNamespace
 import pytest
 
 from tools.executionResourceValidation import preflight
-from tools.executionResourceValidation.run import Recorder, ResponseEvidence, Validation, execute, load_adapter
+from tools.executionResourceValidation.run import Recorder, ResponseEvidence, Validation, execute, load_adapter, unavailable_signals
+from backend.telemetry import SignalUnavailable, GpuObservation
 from tests.first_party.llmDrivers.test_llamaCppExecutionResources import rig
 
 
@@ -166,3 +167,13 @@ def test_recorder_does_not_redirect_capability_probe_output(tmp_path):
         adapter._impl.subprocess.Popen([str(binary), '-m', 'local.gguf'])
         assert calls[-1]['stdout'] is recorder.log
         assert len(recorder.processes) == 1
+
+
+def test_missing_nested_sensors_are_not_reported_as_real_zero():
+    """A valid zero utilization differs from unavailable GPU submetrics."""
+    missing = SignalUnavailable('not installed')
+    sample = GpuObservation(0, 'private name', 100, 40, 60, 0.0, 0.0,
+        missing, missing, missing, missing, missing, missing, missing)
+    names = unavailable_signals(sample, 'gpu')
+    assert 'gpu.temperatureCelsius' in names and 'gpu.fanSpeedPercent' in names
+    assert 'gpu.gpuUtilizationPercent' not in names
