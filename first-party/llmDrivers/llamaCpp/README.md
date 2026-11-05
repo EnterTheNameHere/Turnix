@@ -601,7 +601,7 @@ LC-02 request/estimation/separate reasoning semantics and optional answer-only
 observation remain unchanged. ER-03 adds the controlled adoption below; no automatic
 restart or consumer adoption is provided.
 
-### Private request evidence (EX-04; awaiting independent acceptance)
+### Private request evidence (EX-04 shared dependency)
 
 Trusted composition optionally accepts `requestEvidence=PrivateRequestEvidence()`
 and immutable `evidencePolicies=(RequestEvidencePolicy(entry, required=True,
