@@ -1,18 +1,24 @@
-# file: tests/first_party/llmDrivers/test_llamaCppRequestEvidence.py ; version: 1
+# file: tests/first_party/llmDrivers/test_llamaCppRequestEvidence.py ; version: 2
 """Private evidence through real managed admission/composition with synthetic IO."""
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from hashlib import sha256
+import gc
+import importlib.util
 import json
 import traceback
+import weakref
+from threading import Event
 
 import pytest
 
 from backend.llm.llmTypes import LlmQuery
+from backend.llm.executionSessions import LlmAdapterAdmission
 from backend.orchestration import Job, JobState
+from backend.observation import ObservationRequest
 from backend.packs.runtime import PackResolver
 from tests.first_party.llmDrivers.test_llamaCppExecutionResources import (
-    rig, adapter, capability,
+    rig, adapter, capability, stream, ROOT,
 )
 
 EvidenceError = adapter._evidence.RequestEvidenceError
@@ -339,3 +345,264 @@ def test_generic_job_diagnostics_exclude_private_sink_error(rig):
     assert SECRET not in repr(result)
     assert SECRET not in "".join(traceback.format_exception(caught.value))
     assert caught.value.__cause__ is None and caught.value.__context__ is None
+
+
+def observeSessions(monkeypatch):
+    """Retain only actual provider tickets for deterministic boundary assertions."""
+    sessions = []
+    original = adapter._Session.__init__
+    def initialize(session, *args):
+        """Record the ticket after its normal owned initialization."""
+        original(session, *args)
+        sessions.append(session)
+    monkeypatch.setattr(adapter._Session, "__init__", initialize)
+    return sessions
+
+
+@pytest.mark.parametrize("phase", ["serialized", "transport-attempt"])
+@pytest.mark.parametrize("action", ["registration", "binding", "access", "mutation", "conversation"])
+def test_exact_call_lifetime_withdrawal_prevents_send_and_preserves_cleanup(rig, monkeypatch, phase, action):
+    """Forward validation delegates all existing lifetimes without restricting cleanup."""
+    host, runtime, _, broker, owner, requests, _ = setupCapture(rig)
+    sessions = observeSessions(monkeypatch)
+    events = []
+    def call(ctx, payload):
+        """Use an actual exclusive conversation when testing its revocation."""
+        conversation = ctx.llm.reserveConversation(ctx.llm.profile(providerName="llama.cpp", model="A"))
+        try:
+            return ctx.llm.run(providerName="llama.cpp", model="A",
+                query=LlmQuery(formatId="text/plain", payload="hello"), session=conversation)
+        finally:
+            conversation.close()
+    capability(runtime, "lifetime@1", call)
+    def sink(event):
+        """Withdraw exactly the lifetime whose issuing call validates this ticket."""
+        events.append(event)
+        if event.phase == phase:
+            issuing = sessions[-1].admission._validator().__self__
+            if action == "registration":
+                runtime.llmProviders.unregisterOwnedBy(issuing.binding.registration.ownerId)
+            elif action == "binding":
+                owner._service.revokeBinding(issuing.binding)
+            elif action == "access":
+                issuing.access.close()
+            elif action == "mutation":
+                assert issuing.scope is not None
+                issuing.scope.resolve(False)
+            else:
+                issuing.conversation.close()
+        return True
+    with broker.scope(owner, correlation=("turn",), sink=sink):
+        result = runtime.runJob("lifetime@1", job=Job.new())
+    assert result.state is JobState.FAILED
+    assert not completionBodies(requests)
+    assert events[-1].phase == "final" and events[-1].mayHaveSent is False
+    ticket = sessions[-1]
+    assert ticket.cleanupEffect == adapter._OK and ticket.readerDone.is_set()
+    assert host.executionResources.snapshots[0].operations == 0
+    with pytest.raises(adapter.LlmExecutionOwnershipError):
+        ticket.admission.requireValid()
+
+
+def test_retained_admission_rejects_closed_call_and_does_not_retain_it(rig, monkeypatch):
+    """Weak delegation preserves exact identity while allowing dead calls to collect."""
+    _, runtime, _, broker, owner, _, _ = setupCapture(rig)
+    sessions = observeSessions(monkeypatch)
+    calls = []
+    def sink(event):
+        """Observe call reachability only, never keep its Context or bound method."""
+        if event.phase == "serialized":
+            calls.append(weakref.ref(sessions[-1].admission._validator().__self__))
+            sessions[-1].admission.requireValid()
+        return True
+    with broker.scope(owner, correlation=("turn",), sink=sink):
+        assert runtime.invokeCapability("run@1", "A") == "answer"
+    gc.collect()
+    assert calls[0]() is None
+    with pytest.raises(adapter.LlmExecutionOwnershipError):
+        sessions[-1].admission.requireValid()
+
+
+def test_unbound_admission_fails_closed():
+    """A manually constructed cleanup ticket cannot supply forward validation."""
+    class Claim:
+        """Minimal inert token used solely to construct an unbound admission."""
+        token = object()
+    admission = LlmAdapterAdmission(Claim())
+    with pytest.raises(adapter.LlmExecutionOwnershipError):
+        admission.requireValid()
+    assert "owner" not in repr(admission) and "validator" not in repr(admission)
+
+
+def test_default_off_still_rechecks_validity_immediately_before_send(rig, monkeypatch):
+    """Callback-free callers get the same final check after transport construction."""
+    _, create, _, _, requests, _, _, _, _ = rig
+    runtime = create()
+    runtime.invokeCapability("switch@1", "A")
+    sessions = observeSessions(monkeypatch)
+    original = adapter._transport.OwnedHttpTransport.__init__
+    def initialize(transport):
+        """Revoke at the last allocation before the unchanged inference send."""
+        original(transport)
+        if sessions and sessions[-1].readerDone.is_set() is False:
+            sessions[-1].admission.callerIdentity.revoke()
+    monkeypatch.setattr(adapter._transport.OwnedHttpTransport, "__init__", initialize)
+    result = runtime.runJob("run@1", "A", job=Job.new())
+    assert result.state is JobState.FAILED
+    assert not completionBodies(requests)
+    assert sessions[-1].cleanupEffect == adapter._OK
+
+
+def test_concurrent_application_capture_remains_call_and_owner_scoped(rig):
+    """Two real Apps overlap inference without sharing scopes, bodies or call IDs."""
+    _, first, _, broker, firstOwner, _, state = setupCapture(rig)
+    second = rig[1]()
+    identity = next(i for i, _ in second._codeEntries.values() if i.codeEntryId == "main")
+    secondOwner = second._llmOwners[identity.codeEntryInstanceId]
+    entered, release = Event(), Event()
+    firstEvents, secondEvents = [], []
+    def heldLines():
+        """Hold first response after content so peer actually overlaps its ticket."""
+        for index, line in enumerate(stream(text="first answer")):
+            yield line
+            if index == 1:
+                entered.set()
+                assert release.wait(5)
+    def select(request):
+        """Select distinct synthetic content at the real transport IO boundary."""
+        if request.full_url.endswith("/completions"):
+            state["lines"] = heldLines() if json.loads(request.data)["id_slot"] == 0 else stream(text="second answer")
+    state["onHttp"] = select
+    def firstCall():
+        """Create thread-local host scope on its supported execution thread."""
+        with broker.scope(firstOwner, correlation=("first",), sink=collect(firstEvents)):
+            return first.invokeCapability("run@1", "A")
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(firstCall)
+        assert entered.wait(5)
+        try:
+            with broker.scope(secondOwner, correlation=("second",), sink=collect(secondEvents)):
+                assert second.invokeCapability("run@1", "A") == "second answer"
+        finally:
+            release.set()
+        assert pending.result(timeout=5) == "first answer"
+    assert {e.correlation for e in firstEvents} == {("first",)}
+    assert {e.correlation for e in secondEvents} == {("second",)}
+    assert firstEvents[0].callId != secondEvents[0].callId
+    assert json.loads(firstEvents[0].body)["id_slot"] == 0
+    assert json.loads(secondEvents[0].body)["id_slot"] == 1
+
+
+def test_partial_cancellation_and_final_sink_failure_preserve_job_and_unknown(rig, monkeypatch):
+    """Capture cannot turn an unconfirmed native abort into a safe successful run."""
+    host, runtime, _, broker, owner, _, _ = setupCapture(rig)
+    tickets = observeSessions(monkeypatch)
+    job, events = Job.new(), []
+    def observe(event):
+        """Cancel exactly the actual active Job after first parsed delta."""
+        if event.eventType == "delta":
+            job.requestCancellation()
+    def call(ctx, payload):
+        """Use real pipeline cancellation, not an injected cleanup receipt."""
+        return ctx.llm.run(providerName="llama.cpp", model="A",
+            query=LlmQuery(formatId="text/plain", payload="hello"), streamObserver=observe)
+    def sink(event):
+        """Fail private final diagnostics after preserving the transport facts."""
+        events.append(event)
+        if event.phase == "final":
+            raise OSError(SECRET)
+        return True
+    capability(runtime, "partial@1", call)
+    with pytest.raises(EvidenceError):
+        with broker.scope(owner, correlation=("turn",), sink=sink):
+            result = runtime.runJob("partial@1", job=job)
+    assert result.state is JobState.CANCELLED
+    assert events[-1].mayHaveSent is True and events[-1].responseBodyObserved is True
+    assert tickets[-1].cleanupEffect == adapter._UNKNOWN
+    assert host.executionResources.snapshots[0].state.value == "unknown"
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_raw_private_evidence_excluded_from_trace_metadata_pm_and_graph_projection(rig, fail):
+    """Capture success/failure does not publish prompts, responses or sink paths."""
+    _, runtime, _, broker, owner, _, state = setupCapture(rig)
+    records, private, public = [], [], []
+    class Destination:
+        """Inspect actual immutable trace publication without altering runtime tracing."""
+        def writeTraceTypeDefinition(self, definition):
+            """Collect type definitions alongside real records."""
+            records.append(definition)
+        def write(self, record):
+            """Retain generic evidence for sentinel privacy assertions."""
+            records.append(record)
+    runtime.tracer.addDestination(Destination())
+    spec = importlib.util.spec_from_file_location("capturePrivacyGraphSchema", ROOT / "first-party/observationBridge/schema.py")
+    schema = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(schema)
+    state["lines"] = stream(text=SECRET)
+    def call(ctx, payload):
+        """Capture real PM observation and G serializer projection before scope ends."""
+        observation = ctx.observations.request(ObservationRequest(memory=False, cpu=False, gpu=False))
+        grant = ctx.observations.export(observation)
+        try:
+            result = ctx.llm.run(providerName="llama.cpp", model="A",
+                query=LlmQuery(formatId="text/plain", payload=SECRET), observation=observation)
+            public.append(result.providerMetadata)
+            public.append(result.executionProfile.metadata)
+            return "done"
+        finally:
+            public.append(observation.snapshot())
+            public.append(schema.serialize(grant.snapshot(), "publication", 1))
+    def sink(event):
+        """Store intentional private bytes, optionally raising a private filesystem error."""
+        private.append(event)
+        if fail and event.phase == "serialized":
+            raise OSError(SECRET)
+        return True
+    capability(runtime, "privacy@1", call)
+    if fail:
+        with pytest.raises(EvidenceError):
+            with broker.scope(owner, correlation=("turn",), sink=sink):
+                result = runtime.runJob("privacy@1", job=Job.new())
+        assert result.state is JobState.FAILED
+    else:
+        with broker.scope(owner, correlation=("turn",), sink=sink):
+            result = runtime.runJob("privacy@1", job=Job.new())
+        assert result.state is JobState.SUCCEEDED
+    assert SECRET in private[0].body.decode()
+    assert SECRET not in repr(records) + repr(public) + repr(result)
+    assert records and public
+
+
+def test_owner_revocation_between_stream_reads_stops_forward_use(rig):
+    """Already sent traffic remains uncertain; new reads cannot bypass exact-call validity."""
+    host, runtime, _, broker, owner, _, state = setupCapture(rig)
+    events = []
+    def lines():
+        """Revoke after first delivered chunk and before the following read boundary."""
+        for index, line in enumerate(stream()):
+            yield line
+            if index == 1:
+                owner.revoke()
+    state["lines"] = lines()
+    with pytest.raises(adapter.LlmExecutionOwnershipError):
+        with broker.scope(owner, correlation=("turn",), sink=collect(events)):
+            runtime.invokeCapability("run@1", "A")
+    assert events[-1].phase == "final" and events[-1].mayHaveSent is True
+    assert events[-1].responseBodyObserved is True
+    assert host.executionResources.snapshots[0].state.value == "unknown"
+
+
+def test_closed_scope_allows_only_already_claimed_final_diagnostics():
+    """An old ticket may finish after scope closure but cannot prepare another request."""
+    broker, owner, events = adapter.PrivateRequestEvidence(), object(), []
+    with pytest.raises(EvidenceError):
+        with broker.scope(owner, correlation=("turn",), sink=collect(events)):
+            ticket = broker.claim(owner, object())
+    with pytest.raises(EvidenceError):
+        ticket.serialized(b"{}", 10)
+    ticket.finish(mayHaveSent=True, headers=None, body=None)
+    ticket.finish(mayHaveSent=False, headers=True, body=True)
+    assert len(events) == 1 and events[0].phase == "final" and events[0].mayHaveSent is True
+    with pytest.raises(EvidenceError):
+        broker.claim(owner, object())

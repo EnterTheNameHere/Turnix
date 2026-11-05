@@ -601,7 +601,7 @@ LC-02 request/estimation/separate reasoning semantics and optional answer-only
 observation remain unchanged. ER-03 adds the controlled adoption below; no automatic
 restart or consumer adoption is provided.
 
-### Private request evidence (EX-04 draft; not accepted for adoption)
+### Private request evidence (EX-04; awaiting independent acceptance)
 
 Trusted composition optionally accepts `requestEvidence=PrivateRequestEvidence()`
 and immutable `evidencePolicies=(RequestEvidencePolicy(entry, required=True,
@@ -638,9 +638,14 @@ failure is sticky and raised on host scope exit if there was no earlier primary;
 an already returned successful Job remains a successful Job with a separate host
 capture failure. Earlier provider/cancellation/non-Exception exits keep precedence.
 
-Known draft blocker: callback-triggered owner revocation is not reflected by the
-existing admission's claim-usability check before inference open. Two deterministic
-regressions demonstrate this. Adoption is blocked pending Integration review of a
-minimal trusted admission validity-recheck hook; this draft does not read private
-owner lifecycle fields or silently expand the backend contract. No EX-04 acceptance,
+Adapter admission delegates forward validation to its exact issuing backend call,
+using a private weak method reference. Missing/expired validators fail closed;
+retaining admission does not retain the closed call or its mutation scope. The
+provider rechecks after required forward callbacks, immediately before inference
+open (including disabled/default-off), and at stream-read boundaries. Owner/access,
+registration, mutation/conversation and claim checks remain backend-owned. Old
+ticket cleanup/final diagnostics do not require forward validity. No authority lock
+is held across sinks or IO: revocation after a final check can still race with send.
+This is a boundary check, not an atomic send-versus-revoke guarantee. Independent
+shared acceptance precedes Application adoption. No complete EX-04 archive acceptance,
 real-provider archive evidence or stronger delivery/durability guarantee is claimed.

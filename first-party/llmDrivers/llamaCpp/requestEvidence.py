@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/requestEvidence.py ; version: 1
+# file: first-party/llmDrivers/llamaCpp/requestEvidence.py ; version: 2
 """Host-only private inference evidence; scopes locate, never grant execution.
 
 Sinks synchronously return True after their own durable acknowledgement. No sink
@@ -62,7 +62,7 @@ class _Scope:
     def requireLive(self):
         """Reject unsupported thread crossings and closed scope use."""
         with self.lane:
-            if not self.live or self.thread != get_ident():
+            if not self.live or self.finished or self.thread != get_ident():
                 raise RequestEvidenceError("Private request evidence scope is unavailable.")
 
     def emit(self, phase, **facts):
