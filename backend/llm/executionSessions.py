@@ -1,4 +1,4 @@
-# file: backend/llm/executionSessions.py ; version: 6
+# file: backend/llm/executionSessions.py ; version: 7
 """Trusted LLM composition over ER-01, with no provider-specific realization.
 
 Binding/owner creation and adapter evidence are backend hooks, never Pack grants.
@@ -17,7 +17,7 @@ from functools import wraps
 from inspect import signature
 from threading import RLock
 from typing import Protocol
-from weakref import WeakSet
+from weakref import WeakMethod, WeakSet
 
 from backend.llm.errors import (
     LlmContextLostError, LlmExecutionCleanupError, LlmExecutionConflictError,
@@ -617,13 +617,21 @@ def pipelineCancellation():
 class LlmAdapterAdmission:
     """Trusted adapter ticket and stop hook, excluding finish/owner assertions."""
 
-    def __init__(self, claim, contextResource=None, *, owner=None):
-        """Retains only ER-01 cleanup ownership and optional private provider context."""
+    def __init__(self, claim, contextResource=None, *, owner=None, validator=None):
+        """Keep cleanup ticket and a weak exact-call forward validator, never Context."""
         self.residency = claim.token
         self.contextResource = contextResource
         self._claim = claim
         self._owner = owner
+        self._validator = None if validator is None else WeakMethod(validator)
         self._stopRunning = False
+
+    def requireValid(self):
+        """Delegate issuing-call validity only; cleanup authority stays independent."""
+        validator = None if self._validator is None else self._validator()
+        if validator is None:
+            raise LlmExecutionOwnershipError("Adapter admission validation is unavailable.")
+        validator()
 
     @property
     def callerIdentity(self):
@@ -679,7 +687,8 @@ class LlmCallSession:
         self.claim, self.options, self.model, self.context = claim, options, model, context
         self.retained = retained
         self.conversation = conversation
-        self.admission = LlmAdapterAdmission(claim, retained._resource if retained else None, owner=access.owner)
+        self.admission = LlmAdapterAdmission(claim, retained._resource if retained else None,
+            owner=access.owner, validator=self.requireValid)
         self._provider = None
         self._iterator = None
         self._closed = False

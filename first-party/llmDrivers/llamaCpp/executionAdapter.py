@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/executionAdapter.py ; version: 4
+# file: first-party/llmDrivers/llamaCpp/executionAdapter.py ; version: 5
 """Trusted llama.cpp adoption of ER-01 residency and ER-02 invocation sessions.
 
 Stock HTTP cannot require physical cache reuse. Retention and required freshness
@@ -461,6 +461,7 @@ class _Session:
 
     def requireResident(self):
         """Reject stale/dying process objects before and after provider IO."""
+        self.admission.requireValid()
         self.requireOwnedResidency()
         if not self.admission._claim.usable:
             raise LlmExecutionOwnershipError("Admitted llama.cpp execution is revoked.")
@@ -620,6 +621,7 @@ class _Session:
         """Parse private native identity and attempt active binding before yielding data."""
         for raw in self.response:
             self.bodyObserved = True
+            self.requireResident()
             if type(raw) is bytes and raw.startswith(b"data:"):
                 data = raw[5:].strip()
                 if data == b"[DONE]":
@@ -705,6 +707,7 @@ class _Session:
                     signal.raiseIfRequested()
                 if self.stopped:
                     raise LlmExecutionOwnershipError("Managed llama.cpp execution has stopped.")
+            self.requireResident()
             self.response = self.transport.open(transport, timeout=self.options.timeoutSeconds)
             self.headersObserved = True
             if self.capture is not None:
