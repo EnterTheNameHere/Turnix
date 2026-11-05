@@ -1,0 +1,105 @@
+EX-04 ADAPTER ADMISSION VALIDATION - INTEGRATION DECISION
+=======================================================
+Date: 2026-11-05. Reviewer: Integration.
+Canonical input: c07ea65 on actant-integration.
+Draft: a56be61ade18c229dff8c9b152ca493f805022f2, platform-only branch
+actant-ex04-request-evidence, exact parent f491b978de19693e503aee8acb1bf4bff2d51043.
+Request: knowledge/experiment-runner-ex04-admission-gap.txt and corresponding
+2026-11-05-ex04-admission-validation-gap.txt inbox mail.
+
+Decision
+----------
+APPROVED: extend the separate shared assignment to add trusted adapter-only
+LlmAdapterAdmission.requireValid(), delegating to the EXISTING exact issuing
+LlmCallSession.requireValid(). No new lifecycle/grant authority is introduced.
+Implementer may proceed without another scope clarification within these bounds.
+Draft a56be61a is NOT accepted, integrated or safe for Application adoption.
+This review decides the demonstrated contract dependency, not final shared delivery
+or complete privacy/lifetime correctness of the draft.
+
+Independent finding / source basis
+-----------------------------------
+P1: owner revocation in a required pre-send capture callback does not prevent
+inference send. Both serialized and transport-attempt callbacks can revoke the
+actual caller, ACK and still reach inference open. A later failed Job cannot undo
+that request. Existing _Session.requireResident checks neutral claim usability,
+which does not synchronously reflect queued owner revocation.
+
+Confirmed backend source: revokeOwner marks owner._closed and queues cleanup;
+LlmInvocationAccess.requireValid checks membership/validity/actual owner closure
+and cancellation. LlmCallSession.requireValid adds exact binding liveness, mutation
+scope, call closure/claim, conversation and retained-context checks. Delegating
+this validator avoids a second provider-side implementation of lifecycle rules.
+Registration/binding withdrawal similarly belongs to that existing validator.
+Do not read private owner._closed fields in provider or alter neutral claim cleanup.
+
+Verification at unchanged published draft
+------------------------------------------
+Pristine git archive a56be61a, source/backend/provider origins asserted inside it,
+original checkout removed from sys.path. Own embedded Python3.15.0b4/pytest9.2.0:
+ pytest -q --import-mode=importlib --tb=short
+ tests/first_party/llmDrivers/test_llamaCppRequestEvidence.py:
+   26 passed, 2 failed in 1.03s, zero skips.
+ tests:
+   1805 passed, 2 failed in 12.19s, zero skips.
+Both failures are unchanged worker regressions:
+ test_callback_cancellation_or_owner_revocation_rechecked_before_send[revoke-serialized]
+ test_callback_cancellation_or_owner_revocation_rechecked_before_send[revoke-transport-attempt]
+Assertion fails because completionBodies(requests) contains actual synthetic
+inference traffic after revocation. Cancellation variants pass. No model launched.
+
+Additional REVIEW-ONLY in-memory diagnostic, no source edits/commits/import:
+wrap LlmCallSession.__init__ to bind its admission._reviewValidator=self.requireValid;
+attach admission.requireValid() delegation to that callback; wrap provider operational
+requireResident() to run original check then admission.requireValid(). Cleanup still
+uses requireOwnedResidency(). Same 28 capture tests plus existing 47 managed-resource
+tests: 75 passed in 1.91s, zero skips, including both original failing regressions.
+This supports the narrow direction; it is not a delivered fix or full verification
+of an implemented constructor/validator lifecycle. No production monkeypatch is
+authorized. Existing embedded-home warning persists; no Ruff or real EX-04 claim.
+
+Binding implementation limits
+-------------------------------
+1. Runtime installs the validator from the exact LlmCallSession that minted this
+   admission. No caller-supplied owner ID, ContextVar lookup or other call's cached
+   validator is authority. Missing/unbound validation must fail closed when invoked;
+   no no-op fallback to claim.usable. Keep callable/identity private, out of repr,
+   serialized evidence, metadata, public query/facade and generic telemetry.
+2. Delegate existing semantics, including cancellation. Do not mint a new claim,
+   grant, reservation or operation and do not reimplement backend checks in provider.
+   A retained admission must fail validation after its call/access closes, owner or
+   exact binding is revoked, or its existing mutation/conversation lifetime expires.
+   Do not retain an invocation Context, transaction or IO facade to implement this.
+   Root the callback before adapter use and avoid leaking dead call/scope references.
+3. Check after EACH forward-execution required callback and immediately before
+   inference open, including disabled/default-off path at that send boundary.
+   Keep existing owned residency and exact stop/cancellation checks; validation
+   does not replace native/process/generation checks. Later stream use must continue
+   to respect existing runtime validity. No lock held across a sink or network send.
+4. Normal execution validation and old-ticket cleanup are separate. Do NOT call
+   requireValid as a prerequisite for closeExecution, stop, native cleanup, queued
+   lifetime draining or final diagnostic callbacks. Revoked admission must still
+   finalize using its existing exact cleanup authority. Never clear UNKNOWN from
+   this check or require an expired scope to authorize cleanup.
+5. This is a boundary recheck, not an atomic revocation-versus-OS-send guarantee.
+   Revocation after the final check can still race with send. Preserve that limit;
+   do not hold authority locks across transport IO or redesign cancellation/ER-01.
+6. Preserve original two regressions unchanged. Add actual backend/provider tests
+   for exact registration/binding withdrawal during each pre-send callback, closed
+   call/access, normal/default-off behavior and separate cleanup after revocation.
+   Cover applicable conversation/mutation lifetime checks using the existing
+   validator. Keep cancellation, first-exit, sink failure/privacy and lock tests.
+   No monkeypatch as the production implementation or weakening/xfail of failures.
+
+Delivery / continuation
+-------------------------
+Continue platform-only actant-ex04-request-evidence from a56be61a. Permitted source
+boundary is unchanged: the two assigned shared source files plus private broker,
+provider README and directly relevant platform tests. Increment changed Python
+versions/docstrings. Broader shared source or API changes still require escalation.
+Run focused capture/managed-resource/backend lifecycle tests and complete platform
+suite on actual Python3.15. Report exact parent/ref/counts/skips and finish remaining
+scope/isolation/privacy coverage from original assignment; this review does not
+waive it. Submit corrected shared delivery to Integration for independent acceptance.
+No current draft import or Application adoption. App archive work remains allowed
+against a clearly synthetic seam. EX-05 and real/native abort/crash scope unchanged.
