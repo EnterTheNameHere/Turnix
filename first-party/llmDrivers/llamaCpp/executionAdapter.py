@@ -1,4 +1,4 @@
-# file: first-party/llmDrivers/llamaCpp/executionAdapter.py ; version: 3
+# file: first-party/llmDrivers/llamaCpp/executionAdapter.py ; version: 4
 """Trusted llama.cpp adoption of ER-01 residency and ER-02 invocation sessions.
 
 Stock HTTP cannot require physical cache reuse. Retention and required freshness
@@ -55,6 +55,19 @@ if _transportName not in sys.modules:
         sys.modules.pop(_transportName, None)
         raise
 _transport = sys.modules[_transportName]
+_evidenceName = 'actantFirstPartyLlamaCppRequestEvidence'
+if _evidenceName not in sys.modules:
+    _evidenceSpec = importlib.util.spec_from_file_location(
+        _evidenceName, Path(__file__).with_name('requestEvidence.py'))
+    _evidenceModule = importlib.util.module_from_spec(_evidenceSpec)
+    sys.modules[_evidenceName] = _evidenceModule
+    try:
+        _evidenceSpec.loader.exec_module(_evidenceModule)
+    except BaseException:
+        sys.modules.pop(_evidenceName, None)
+        raise
+_evidence = sys.modules[_evidenceName]
+PrivateRequestEvidence = _evidence.PrivateRequestEvidence
 _OK = ProviderEffect(EffectStatus.ACKNOWLEDGED, Quiescence.CONFIRMED)
 _UNKNOWN = ProviderEffect(EffectStatus.UNKNOWN, Quiescence.UNKNOWN)
 _EMPTY_FAILURE = ProviderEffect(EffectStatus.FAILED, Quiescence.CONFIRMED)
@@ -91,6 +104,21 @@ class LlamaCppGrant:
     entry: EntrySelector
     selectors: tuple
     allowTransition: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class RequestEvidencePolicy:
+    """Host-selected capture policy; omitted callers remain capture-disabled."""
+
+    entry: EntrySelector
+    required: bool = True
+    maxBodyBytes: int = 2 * 1024 * 1024
+
+    def __post_init__(self):
+        """Validate finite capture bounds independently of provider options."""
+        if (type(self.entry) is not EntrySelector or type(self.required) is not bool or
+                type(self.maxBodyBytes) is not int or not 1 <= self.maxBodyBytes <= 8 * 1024 * 1024):
+            raise ValueError("Invalid private request evidence policy.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,7 +167,8 @@ class LlamaCppCatalog:
 class LlamaCppComposition:
     """Host-selected provider composition; grants are snapshots, never subscriptions."""
 
-    def __init__(self, *, domainId, catalog, providerEntries, grants):
+    def __init__(self, *, domainId, catalog, providerEntries, grants,
+                 requestEvidence=None, evidencePolicies=()):
         """Record explicit host authority independently of mutable Application config."""
         if not isinstance(catalog, LlamaCppCatalog):
             raise TypeError("Expected a trusted LlamaCppCatalog.")
@@ -147,6 +176,11 @@ class LlamaCppComposition:
             raise ValueError("Controlled domain ID must be nonempty.")
         self.domainId, self.catalog = domainId, catalog
         self.providerEntries, self.grants = tuple(providerEntries), tuple(grants)
+        self.requestEvidence, self.evidencePolicies = requestEvidence, tuple(evidencePolicies)
+        if (requestEvidence is not None and type(requestEvidence) is not PrivateRequestEvidence or
+                any(type(p) is not RequestEvidencePolicy for p in self.evidencePolicies) or
+                (self.evidencePolicies and requestEvidence is None)):
+            raise ValueError("Invalid private request evidence composition.")
 
     def configurationEvidence(self, resources, model=None):
         """Explicit private host accessor; never project raw launch inputs to telemetry.
@@ -182,12 +216,21 @@ class LlamaCppComposition:
         facade = registration.value
         if type(facade) is not _impl._ManagedFacade or facade.requestedConfiguration != self.catalog.values:
             raise LlmExecutionOwnershipError("Managed llama.cpp configuration or facade is not host-approved.")
+        captureOwners = {}
+        for policy in self.evidencePolicies:
+            matches = [owner for identity, owner in snapshot.owners if policy.entry.matches(identity)]
+            if len(matches) != 1 or matches[0] in captureOwners:
+                raise LlmExecutionOwnershipError("Private request evidence caller is missing or ambiguous.")
+            captureOwners[matches[0]] = (policy.required, policy.maxBodyBytes)
         if existing is not None:
             existing.requireLive()
             with _tableLane:
                 owner = _domains.get(snapshot.resources, {}).get(self.domainId)
                 if owner is None or owner.envelope != self.catalog.envelope or existing.domain is not owner.domain:
                     raise LlmExecutionOwnershipError("Controlled llama.cpp domain envelope conflicts.")
+            if (existing.adapter.captureBroker is not self.requestEvidence or
+                    existing.adapter.captureOwners != captureOwners):
+                raise LlmExecutionOwnershipError("Private request evidence binding policy conflicts.")
             return  # No grant extension, including a matching later incarnation.
         grants = {}
         for policy in self.grants:
@@ -220,7 +263,8 @@ class LlamaCppComposition:
         try:
             snapshot.ticket.requireCurrent()
             snapshot.bindings.bind(snapshot.registry, registration, domain=owner.domain,
-                profiles=profiles, adapter=_ExecutionAdapter(owner, facade), grants=grants, leaseCloser=lease.close)
+                profiles=profiles, adapter=_ExecutionAdapter(owner, facade,
+                    self.requestEvidence, captureOwners), grants=grants, leaseCloser=lease.close)
         except BaseException as primary:
             if not getattr(primary, "llmBindingPublished", False):
                 try:
@@ -332,9 +376,11 @@ class _ExecutionAdapter:
     supportsRequiredFresh = False
     supportsRetention = False
 
-    def __init__(self, owner, facade):
+    def __init__(self, owner, facade, captureBroker=None, captureOwners=None):
         """Keep no Context or transaction; each admission owns one partial-open ticket."""
         self.owner, self.facade, self.tickets = owner, facade, {}
+        self.captureBroker = captureBroker
+        self.captureOwners = dict(captureOwners or {})
 
     def openExecution(self, admission, model, options):
         """Resolve only the admitted resident generation; never ensure/switch models."""
@@ -346,6 +392,16 @@ class _ExecutionAdapter:
 
     def closeExecution(self, admission, session, reason):
         """Finalize exact-task evidence once; never repair a previous unknown result."""
+        ticket = self.tickets.get(admission)
+        try:
+            return self._closeExecution(admission, session, reason)
+        finally:
+            if ticket is not None and ticket.capture is not None:
+                ticket.capture.finish(mayHaveSent=ticket.sent,
+                    headers=ticket.headersObserved, body=ticket.bodyObserved)
+
+    def _closeExecution(self, admission, session, reason):
+        """Compute actual cleanup before final evidence callbacks, outside sink code."""
         ticket = self.tickets.get(admission)
         if ticket is None:
             return LlmSessionCleanup(_OK)  # Parser failed before IO/partial allocation.
@@ -400,6 +456,8 @@ class _Session:
         self.baselineTask = self.nativeTask = None
         self.correlationLost = False
         self.bindingAttempted = False
+        self.capture = None
+        self.headersObserved = self.bodyObserved = None
 
     def requireResident(self):
         """Reject stale/dying process objects before and after provider IO."""
@@ -561,6 +619,7 @@ class _Session:
     def _trackedLines(self):
         """Parse private native identity and attempt active binding before yielding data."""
         for raw in self.response:
+            self.bodyObserved = True
             if type(raw) is bytes and raw.startswith(b"data:"):
                 data = raw[5:].strip()
                 if data == b"[DONE]":
@@ -603,6 +662,9 @@ class _Session:
         signal = request.cancellationSignal
         if signal is not None:
             signal.raiseIfRequested()
+        policy = self.adapter.captureOwners.get(self.admission.callerIdentity)
+        if policy is not None and policy[0]:
+            self.capture = self.adapter.captureBroker.claim(self.admission.callerIdentity, self.admission)
         payload = _impl._buildPayload(request, self.options, includeRequestedModel=False) if not self.adapter.facade.structured else {
             "messages": self.messages(request.query), "stream": True, "temperature": self.options.temperature,
             **{key: value for key, value in (("max_tokens", self.options.maxTokens), ("top_p", self.options.topP),
@@ -613,6 +675,11 @@ class _Session:
             headers={"Accept": "text/event-stream", "Content-Type": "application/json"}, method="POST")
         unregister = None
         try:
+            if self.capture is not None:
+                self.capture.serialized(transport.data, policy[1])
+                self.requireResident()
+                if signal is not None:
+                    signal.raiseIfRequested()
             baseline = self.readSlot(timeout=min(self.options.timeoutSeconds, 1.0))
             if baseline['is_processing'] is not False:
                 self.uncertain = True
@@ -631,7 +698,21 @@ class _Session:
             if signal is not None:
                 unregister = signal.registerCallback(self.stop)
                 signal.raiseIfRequested()
+            if self.capture is not None:
+                self.capture.attempt()
+                self.requireResident()
+                if signal is not None:
+                    signal.raiseIfRequested()
+                if self.stopped:
+                    raise LlmExecutionOwnershipError("Managed llama.cpp execution has stopped.")
             self.response = self.transport.open(transport, timeout=self.options.timeoutSeconds)
+            self.headersObserved = True
+            if self.capture is not None:
+                self.capture.requireLive()
+                self.capture.emit("response-headers-observed", responseHeadersObserved=True)
+                self.requireResident()
+                if signal is not None:
+                    signal.raiseIfRequested()
             yield from _impl._readEvents(self.trackedLines())
         except (http.HTTPError, http.URLError, OSError):
             raise LlmProviderConnectionError("Failed communicating with managed llama.cpp.") from None
