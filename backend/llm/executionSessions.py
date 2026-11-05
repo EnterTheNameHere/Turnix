@@ -1,4 +1,4 @@
-# file: backend/llm/executionSessions.py ; version: 5
+# file: backend/llm/executionSessions.py ; version: 6
 """Trusted LLM composition over ER-01, with no provider-specific realization.
 
 Binding/owner creation and adapter evidence are backend hooks, never Pack grants.
@@ -617,12 +617,18 @@ def pipelineCancellation():
 class LlmAdapterAdmission:
     """Trusted adapter ticket and stop hook, excluding finish/owner assertions."""
 
-    def __init__(self, claim, contextResource=None):
+    def __init__(self, claim, contextResource=None, *, owner=None):
         """Retains only ER-01 cleanup ownership and optional private provider context."""
         self.residency = claim.token
         self.contextResource = contextResource
         self._claim = claim
+        self._owner = owner
         self._stopRunning = False
+
+    @property
+    def callerIdentity(self):
+        """Trusted adapter-only identity comparison; never a diagnostic or grant."""
+        return self._owner
 
     def bindStop(self, callback):
         """Registers an exactly-once cooperative stop through the existing claim."""
@@ -673,7 +679,7 @@ class LlmCallSession:
         self.claim, self.options, self.model, self.context = claim, options, model, context
         self.retained = retained
         self.conversation = conversation
-        self.admission = LlmAdapterAdmission(claim, retained._resource if retained else None)
+        self.admission = LlmAdapterAdmission(claim, retained._resource if retained else None, owner=access.owner)
         self._provider = None
         self._iterator = None
         self._closed = False
