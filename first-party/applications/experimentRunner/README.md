@@ -1,4 +1,4 @@
-# Experiment Runner (EX-01/02/R1 and EX-03)
+# Experiment Runner (EX-01/02/03 and EX-04)
 
 This Application runs ordered configurations and repetitions through the managed
 Actant llama.cpp provider. Each conversation execution is one actual Job with its
@@ -33,8 +33,8 @@ between Jobs. A post-loop interruption is re-raised after owned teardown.
 
 ## Explicit schema migration and preflight
 
-EX-03 accepts `actant.experiment.definition@2` and trusted
-`actant.experiment.host@2`. Version-1 inputs explicitly reject; there is no silent
+This launcher accepts `actant.experiment.definition@2` and trusted
+`actant.experiment.host@3`. Old host@1/@2 and definition@1 inputs explicitly reject; there is no silent
 reinterpretation or compatibility adapter. Single-config/single-repetition behavior
 and EX-01/02/R1 architectural assertions remain covered with migrated fixtures.
 
@@ -121,7 +121,7 @@ revocation or a reservation race stops the suite and leaves explicit unstarted u
 
 ## Private outcomes and interruption handling
 
-`actant.experiment.execution@3` wraps a fresh `actant.experiment.suite@1`. The suite
+`actant.experiment.execution@4` wraps a fresh `actant.experiment.suite@1`. The suite
 has a fresh opaque suiteId, immutable definition/hash, timing/status and ordered
 units with stable independent unit IDs, config index/name/alias and repetition.
 Each unit has an actual Job outcome (null when unadmitted), independent unit status,
@@ -173,8 +173,8 @@ even if the final Job won its completion race; completed Job/turn outcomes stay 
 
 The execution envelope advanced from version 2 to 3 for
 `signalCleanupFailures`: at most two fixed operation/category records for handler
-restoration and relay close. Definition/host/conversation-result version 2 and
-suite version 1 are unchanged. Primary startup, handler-setup or loop exits are
+restoration and relay close. EX-04 retains definition/conversation-result version 2 and suite version 1;
+host advances to version 3 and execution to version 4. Primary startup, handler-setup or loop exits are
 captured **before** cleanup begins. Restoration and relay close are each attempted
 independently; secondary errors cannot replace the original interrupt or its exact
 attached diagnostic snapshot. Ordinary primary launcher failures retain their
@@ -195,10 +195,9 @@ cannot overwrite original Job/cancellation outcomes. Repeated interruption insid
 provider cleanup or process termination/crash cannot promise completed shutdown.
 
 Select a directory private to the local user; the example uses ignored
-`python-embedded/`. No ACL manager, journal, crash recovery, automatic archive,
-comparison, PM/G UI or full wire-provenance system is added. Default trace sinks
-discard records and no monitoring activates. Structured snapshots are Application-sent
-queries, not proof of exact HTTP serialization. EX-04/05 remain unassigned.
+`python-embedded/`. No ACL manager, automatic resume/replay, comparison or PM/G UI
+is added. Default trace sinks discard records and no monitoring activates. EX-04
+adds the private archive below; EX-05 remains unassigned.
 
 ```powershell
 .\python-embedded\python.exe -X frozen_modules=off -m pytest -q --import-mode=importlib --tb=short tests/first_party/experimentRunner
@@ -210,3 +209,111 @@ actual nonempty Qwen responses across two startup profiles/two repetitions/two
 turns, verified identities/build, exact order/history, reuse/transitions and cleanup.
 Worker-local asset absence must be reported as a blocker; prior EX-01/02 evidence
 and synthetic tests do not substitute. No semantic answer-quality oracle.
+
+## EX-04 acknowledged private archive
+
+Each launcher execution exclusively creates a new random archive directory under
+`--results`, independently of its suite/unit/turn IDs. The existing `<suiteId>.json`
+is a bounded compatibility diagnostic sidecar; its atomic writes are not archive
+checkpoints. Host schema 3 requires the explicit `archive` object in
+`host.example.json`. No host@2 migration or legacy-result relabeling is performed.
+
+```
+<archiveId>/manifest.json
+<archiveId>/records.log
+<archiveId>/artifacts/<sha256>.blob
+```
+
+Manifest/archive-record/archive-commit/archive-view/artifact-ref/provenance/partial/
+plan/turn-result/unit-summary/suite-summary are version 1 under `actant.experiment`.
+The exact strict grammar is in `archiveFormat.py`; unknown fields/versions reject.
+DATA hashes canonical sorted-key compact UTF-8 JSON excluding its `dataSha256`;
+COMMIT hashes its canonical fields excluding `commitSha256`. The first previous
+hash is SHA-256 of the **exact manifest bytes**, later hashes chain COMMITs.
+Artifacts are original immutable bytes with digest-derived filenames, declared
+length/media type/encoding; raw provider bodies are never reconstructed from queries.
+
+One launcher worker owns the OS handles outside all Job IO/rollback scopes. Each
+new blob is written completely, flushed/fsynced/closed before its DATA record;
+DATA is flushed/fsynced, then COMMIT is flushed/fsynced, then the caller gets ACK.
+Definition/ordered plan/selected provenance ACK precedes RuntimeHost activation.
+Unit/actual Job identity ACK precedes runJob; planned query/options and exact
+provider serialization/attempt ACK precede inference open. Completed-turn ACK
+precedes answer-only history extension; actual unit Job/lifetime ACK precedes the
+next transition. Suite, signal, host and temporary cleanup are later observations.
+The seal precedes writer close and is **not** a close/ACK-return receipt.
+
+Guarantee: acknowledged bytes are fresh-process readable after local process death
+while OS/filesystem remain running. Tests use local Windows NTFS; directory fsync
+is explicitly `unavailable-windows`. File fsync is not universal directory,
+power-loss, device-cache, network-filesystem or hardware durability. On-disk COMMIT
+may exist without caller-observed ACK (including timeout); recovery reports ACK and
+final writer-close observations unavailable. No server-consumption guarantee.
+
+Host finite defaults (and hard ceilings) are explicit in the checked-in template:
+archive 256 MiB (1 GiB), 8192 logical records (65536), DATA64KiB/COMMIT1KiB,
+artifact8MiB, exact request2MiB (8MiB), pending partial64KiB (256KiB), returned
+inspection16MiB (64MiB), 65536 events/turn (262144), 128 partial records/turn (1024).
+One pending buffer, one in-flight batch and one mandatory command; no unbounded
+queue. Serialized escaping, queued artifacts and conservative full expansion are
+bounded before launch; runtime exhaustion poisons the archive, never truncates a
+successful receipt or deletes earlier data. Raw partial archive diagnostics have
+independent byte/event/record caps; successful answer/reasoning still obeys the
+existing `maxOutputCharacters`, and the ephemeral partial view retains its old cap.
+These are retained-data limits, not a process RSS or available-disk guarantee.
+
+Partial triggers: 64 nonempty events, 4096 characters or 1 second pending, including
+reasoning-only content. Timer runs without new deltas. Thresholds trigger writes;
+they cannot promise disk ACK latency. Unacknowledged buffered/in-flight data may be
+lost. Mandatory ACK deadline defaults to 5 seconds (max30); waits are bounded and
+check the sticky failure channel. Failure cancels only the exact active Job through
+the suite controller outside writer locks, and every subsequent turn/unit checks
+the latch. Stalled writes remain worker-owned and may eventually commit; bounded
+close reports pending, never races a second writer or forcibly disposes it.
+
+`capturePolicy: required` binds the accepted managed broker to the actual composed
+caller. Scope surrounds each synchronous call on its execution thread. Missing/
+failing required body capture prevents send when known. `disabled` explicitly
+records provenance unavailability and emits no serialized-body receipts. Initial
+provenance includes file source hashes/version headers/platform ref and selected
+asset paths; `hashAssets` optionally hashes each distinct asset once with observation
+time and changed/unavailable labels. No filename implies a content hash. Requested,
+planned/actual launch and unknown provider-effective state remain distinct.
+Only successful-open headers and actually observed body facts are reported;
+mayHaveSent is not consumption. Prompts/reasoning/raw bytes stay private, with no
+Authorization, cookie, grant, Context or generic telemetry/body logging.
+
+```powershell
+.\python-embedded\python.exe -X frozen_modules=off first-party/applications/experimentRunner/run.py recover --archive PRIVATE_ARCHIVE_DIRECTORY
+.\python-embedded\python.exe -X frozen_modules=off first-party/applications/experimentRunner/run.py inspect --archive PRIVATE_ARCHIVE_DIRECTORY --unit UNIT_ID --turn TURN_ID --include-content
+```
+
+Recovery is read-only, stdlib-only and needs no runtime/config/model/assets/network.
+All committed references validate before projection. Final missing LF, empty final
+line or DATA without COMMIT preserves the previous prefix as incomplete. Complete
+invalid frames, interior corruption, missing blobs, bad hashes/types/order/versions
+are explicit corruption with last valid prefix. No missing terminal becomes suite
+success. Unreferenced artifacts are counted as orphans. Digest-only paths and regular
+file/reparse checks prevent archived reference escapes; hashes are integrity checks,
+not authenticated signatures or a hostile same-user concurrent-mutation defense.
+Inspection buffers at most four bounded artifacts per record, caps returned data,
+and bounds cumulative validation blob reads at four times archiveBytes; over-limit
+views reject explicitly. Journal reads are capped at archiveBytes. No automatic
+replay, resume, backend attach, process probing, resource repair or live authority
+reconstruction. Explicit legacy `inspect --result` continues to show its actual JSON.
+
+Non-Exception primaries are retained before teardown and re-raised exactly after
+independent signal/host/archive cleanup attempts. Archive failures and stalled close
+remain separate from original turn/Job/reservation/provider cleanup/UNKNOWN facts.
+A final capture failure cannot erase a returned successful turn's native cleanup.
+Real EX-04 acceptance still needs eight nonempty managed Qwen answers, independent
+wire-byte comparison and fresh offline archive inspection; synthetic evidence and
+previous EX-03 acceptance do not substitute. Worker asset absence remains a blocker.
+
+Startup evidence in both the archive and compatibility sidecar is an explicit
+projection: selected typed controls, profile/build identity/status and actual argv
+observation presence. Raw argv, environment and probe text are omitted because
+the provider private accessor can contain credentials. This does not alter the
+separate exact model-facing request BODY. File hashes are observed bytes, not a
+comprehensive loaded-code/OS attestation. Default recovery also returns compact
+last-observed unit/Job/turn/cleanup facts; planned entries never become live Jobs.

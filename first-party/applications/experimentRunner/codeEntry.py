@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/codeEntry.py ; version: 2
+# file: first-party/applications/experimentRunner/codeEntry.py ; version: 3
 """One bounded conversation Job with ephemeral, rollback-independent diagnostics."""
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 import time
 import sys
 from threading import Lock
+from contextlib import nullcontext
 
 from backend.llm.executionSessions import FreshContext
 from backend.llm.errors import (LlmExecutionConflictError, LlmExecutionCleanupError,
@@ -17,6 +18,7 @@ from backend.orchestration.cancellation import ExecutionCancelled
 
 schema = importlib.import_module('first-party.applications.experimentRunner.definition')
 results = importlib.import_module('first-party.applications.experimentRunner.results')
+archive = importlib.import_module('first-party.applications.experimentRunner.archive')
 
 
 def safeError(error, stage):
@@ -84,11 +86,14 @@ class Recorder:
         self.snapshot = None
         self.definition = None
         self.pending = False
+        self.archivePort = None
         self.lock = Lock()
 
     def prepare(self, ctx, payload):
         """Validate/freeze a new invocation before its caller-retained Job is started."""
-        schema.fields(payload, ('unitId', 'definition'))
+        schema.fields(payload, ('unitId', 'definition'), ('archivePort',))
+        port = payload.get('archivePort')
+        schema.require(port is None or type(port) is archive.UnitArchivePort, 'Invalid archive port.')
         schema.require(type(payload['unitId']) is str and len(payload['unitId']) == 32
                        and all(char in '0123456789abcdef' for char in payload['unitId']), 'Invalid unit identity.')
         definition = schema.validate(payload['definition'], self.policy.value())
@@ -98,6 +103,7 @@ class Recorder:
             if self.pending:
                 raise RuntimeError('An experiment invocation is already pending.')
             self.definition = definition
+            self.archivePort = port
             self.snapshot = schema.Snapshot(schema.canonical(results.initialResult(definition, payload['unitId'])))
             self.startedNs = time.monotonic_ns()
             self.pending = True
@@ -134,6 +140,7 @@ class Recorder:
         started = self.startedNs
         stage, current = 'transition', None
         session = None
+        port = self.archivePort
         try:
             ctx.cancellation.raiseIfRequested()
             profile = ctx.llm.profile(providerName='llama.cpp', model=selector)
@@ -144,6 +151,8 @@ class Recorder:
             result['reservation']['acquisition'] = 'acquired'
             for turn, current in zip(definition['conversation']['turns'], result['turns'], strict=True):
                 stage = 'before-turn'
+                if port is not None:
+                    port.check()
                 ctx.cancellation.raiseIfRequested()
                 query = LlmMessages(tuple(history + [LlmMessage('user', turn['content'])]))
                 requested = config['defaults'] | turn.get('overrides', {})
@@ -154,6 +163,8 @@ class Recorder:
 
                 def observe(event):
                     """Keep bounded private deltas as diagnostics only, never as replay history."""
+                    if port is not None:
+                        port.observe(event)
                     if event.eventType != 'delta':
                         return
                     reasoning = event.metadata.get('llamaCppReasoning', {}).get('content', '')
@@ -167,9 +178,14 @@ class Recorder:
                 stage = 'inference'
                 self.publish(result)
                 try:
-                    response = ctx.llm.run(providerName='llama.cpp', model=selector, query=query.toQuery(),
-                                           providerOptions=requested, context=FreshContext(required=False, retain=False),
-                                           streamObserver=observe, session=session)
+                    if port is not None:
+                        port.begin(turn['id'], current['query'], requested)
+                    with port.capture() if port is not None else nullcontext() as captureState:
+                        response = ctx.llm.run(providerName='llama.cpp', model=selector, query=query.toQuery(),
+                                               providerOptions=requested, context=FreshContext(required=False, retain=False),
+                                               streamObserver=observe, session=session)
+                        if captureState is not None:
+                            captureState[0] = True
                     evidence = evidenceSnapshot(response.executionEvidence)
                     current['executionEvidence'] = evidence
                     current['cleanup'] = cleanupSnapshot(evidence)
@@ -182,20 +198,33 @@ class Recorder:
                     if current['cleanup']['quiescence'] != 'confirmed':
                         raise RuntimeError('Execution cleanup is not confirmed.')
                     current['status'] = 'succeeded'
+                    current.update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - turnStart)
+                    if port is not None:
+                        stage = 'archive-turn'
+                        port.check()
+                        port.completed(current)
                     history.extend((LlmMessage('user', turn['content']), LlmMessage('assistant', response.rawText)))
                 except Exception as error:
                     attached = getattr(error, 'llmCleanup', None)
                     if attached is not None:
                         current['executionEvidence'] = evidenceSnapshot(attached)
                         current['cleanup'] = cleanupSnapshot(current['executionEvidence'])
-                    current['status'] = 'cancelled' if isinstance(error, ExecutionCancelled) else 'failed'
-                    current['error'] = safeError(error, stage)
+                    if stage != 'archive-turn':
+                        current['status'] = 'cancelled' if isinstance(error, ExecutionCancelled) else 'failed'
+                        current['error'] = safeError(error, stage)
+                        current.update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - turnStart)
+                        if port is not None:
+                            try:
+                                port.completed(current)
+                            except BaseException as archiveError:
+                                port.writer.fail(archiveError)
                     # Re-raise a fixed message so RuntimeHost's generic error tracing cannot expose content.
                     if isinstance(error, ExecutionCancelled):
                         raise ExecutionCancelled('Experiment execution cancelled.') from None
                     raise RuntimeError('Experiment inference failed.') from None
                 finally:
-                    current.update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - turnStart)
+                    if current['endedTimeNs'] is None:
+                        current.update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - turnStart)
                     self.publish(result)
             ctx.cancellation.raiseIfRequested()
             result['applicationOutcome'] = 'completed'
@@ -246,6 +275,7 @@ class Recorder:
             self.publish(value)
             self.pending = False
             self.definition = None
+            self.archivePort = None
             return self.snapshot
 
 

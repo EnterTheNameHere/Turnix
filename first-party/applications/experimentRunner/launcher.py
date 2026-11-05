@@ -1,9 +1,11 @@
-# file: first-party/applications/experimentRunner/launcher.py ; version: 5
+# file: first-party/applications/experimentRunner/launcher.py ; version: 6
 """Trusted host composition and private per-execution persistence for EX-01/02."""
 from __future__ import annotations
 
 import importlib
 import importlib.util
+import hashlib
+import os
 import json
 import signal
 import sys
@@ -15,12 +17,14 @@ from threading import RLock, Thread
 
 from backend.io.managedIo import ManagedIo
 from backend.orchestration import Job
+from backend.orchestration.cancellation import ExecutionCancelled
 from backend.packs.runtime import ManualActivationPlan, PackResolver
 from backend.runtime import RuntimeHost
 from backend.save import ApplicationStore
 
 schema = importlib.import_module('first-party.applications.experimentRunner.definition')
 results = importlib.import_module('first-party.applications.experimentRunner.results')
+archive = importlib.import_module('first-party.applications.experimentRunner.archive')
 APP = Path(__file__).resolve().parent
 ROOT = APP.parents[2]
 DRIVER = ROOT / 'first-party/llmDrivers/llamaCpp'
@@ -46,8 +50,13 @@ def readJson(path):
 def hostConfiguration(value):
     """Freeze trusted launch config separately from untrusted declarative experiments."""
     value = schema.decode(schema.canonical(value))
-    schema.fields(value, ('schemaId', 'llamaCpp', 'aliases', 'limits'), ('persistConfigurationEvidence',))
-    schema.require(value['schemaId'] == 'actant.experiment.host@2', 'Unsupported host schema; use version 2.')
+    schema.fields(value, ('schemaId', 'llamaCpp', 'aliases', 'limits', 'archive'), ('persistConfigurationEvidence',))
+    schema.require(value['schemaId'] == 'actant.experiment.host@3', 'Unsupported host schema; use version 3.')
+    archiveValue = value['archive']
+    schema.fields(archiveValue, (*archive.fmt.DEFAULTS, 'capturePolicy', 'hashAssets'))
+    archive.fmt.limits({key: archiveValue[key] for key in archive.fmt.DEFAULTS})
+    schema.require(archiveValue['capturePolicy'] in ('required', 'disabled') and type(archiveValue['hashAssets']) is bool,
+                   'Invalid archive capture policy.')
     aliases, limits = value['aliases'], value['limits']
     schema.require(type(aliases) is dict and bool(aliases), 'Missing host aliases.')
     for alias, selector in aliases.items():
@@ -77,6 +86,8 @@ def prepare(definitionValue, hostValue):
     """Validate every turn and selector before constructing or activating a runtime."""
     host = hostConfiguration(hostValue)
     definition = schema.validate(definitionValue, policyFor(host))
+    archive.preflight(definition, policyFor(host) | {'captureRequired': host.value()['archive']['capturePolicy'] == 'required'},
+        {k: host.value()['archive'][k] for k in archive.fmt.DEFAULTS})
     adapter = loadAdapter()
     catalog = adapter.LlamaCppCatalog.fromConfig(host.value()['llamaCpp'])
     schema.require(all(selector in catalog.profiles for selector in host.value()['aliases'].values()),
@@ -101,6 +112,34 @@ def plain(value):
     raise TypeError('Non-JSON private evidence.')
 
 
+def privateConfiguration(value):
+    """Keep bounded startup/build facts while omitting argv, environment and probe text.
+
+    The provider's full private accessor may contain credentials in extraArgs.
+    Exact inference body capture is separate from these startup observations.
+    """
+    launch = value.get('launch', {})
+    build = value.get('build', {})
+    requested = value.get('requested', {})
+    reported = value.get('userReportedBuild') or {}
+    controls = {}
+    allowed = ('contextWindowTokens', 'threads', 'threadsBatch', 'gpuLayers', 'parallelSlots',
+        'batchSize', 'ubatchSize', 'kvOffload', 'flashAttention', 'mmap', 'mlock', 'cpuMoeLayers', 'nCpuMoeLayers')
+    for name in allowed:
+        item = requested.get(name)
+        if item is None or type(item) in (bool, int, float):
+            controls[name] = item
+    return dict(schemaId=value.get('schemaId'), profileId=value.get('profileId'), mode=value.get('mode'),
+        requestedStartupControls=controls,
+        launch=dict(status=launch.get('status'), generation=launch.get('generation'),
+            actualArgvObserved=launch.get('actualArgv') is not None,
+            plannedArgvObserved=launch.get('plannedArgv') is not None),
+        build=dict(status=build.get('status'), sourceCommit=build.get('sourceCommit'), identityClaim=build.get('identityClaim')),
+        userReportedBuild={key: reported.get(key) for key in ('version', 'build', 'commit', 'provenance')},
+        providerReportedEffective={'status': 'unknown-unqueried'},
+        rawLaunchInputs='omitted-private-policy')
+
+
 def persist(io, directory, result):
     """Atomically write one opaque-run file into an explicitly selected private directory."""
     directory = Path(directory).resolve()
@@ -110,6 +149,47 @@ def persist(io, directory, result):
     schema.require(len(encoded) <= schema.MAX_RESULT_BYTES, 'Private suite result exceeds byte limit.')
     io.writeTextAtomic(path, encoded.decode('utf-8'))
     return path
+
+
+def provenance(config):
+    """Capture only selected source/asset identity once; no environment/header grants."""
+    sources = []
+    for path in (*sorted(APP.glob('*.py')), DRIVER / 'executionAdapter.py', DRIVER / 'requestEvidence.py',
+                 DRIVER / 'codeEntry.py', DRIVER / 'structuredCodeEntry.py', DRIVER / 'ownedTransport.py'):
+        raw = path.read_bytes()
+        sources.append(dict(path=path.relative_to(ROOT).as_posix(), sha256=hashlib.sha256(raw).hexdigest(),
+            versionHeader=raw.splitlines()[0].decode('utf-8')))
+    assets = []
+    selected = [(config['llamaCpp']['executable'], 'executable')]
+    selected += [(v['modelPath'], 'model') for v in config['llamaCpp']['models'].values()]
+    seen = set()
+    for rawPath, role in selected:
+        path = str(Path(rawPath).absolute())
+        if (path, role) in seen:
+            continue
+        seen.add((path, role))
+        fact = dict(path=path, role=role, sha256=None, status='unavailable-not-selected', observedTimeNs=time.time_ns())
+        if config['archive']['hashAssets']:
+            try:
+                hasher = hashlib.sha256()
+                with Path(path).open('rb') as source:
+                    before = os.fstat(source.fileno())
+                    while block := source.read(1024 * 1024):
+                        hasher.update(block)
+                    after = os.fstat(source.fileno())
+                if (before.st_size, before.st_mtime_ns) == (after.st_size, after.st_mtime_ns):
+                    fact.update(sha256=hasher.hexdigest(), status='hash-observed', bytes=after.st_size)
+                else:
+                    fact['status'] = 'unavailable-changed'
+            except Exception:
+                fact['status'] = 'unavailable'
+        assets.append(fact)
+    value = dict(platformBaseline='993e749aed93b240ea67532c73e7d27b612f3324', sources=sources, assets=assets,
+        sourceObservation='file-bytes-observed-not-loaded-code-attestation',
+        capturePolicy=config['archive']['capturePolicy'], serverConsumption='unknown', providerEffectiveState='unknown-unqueried',
+        validationPolicy={'aliases': config['aliases'], **config['limits']})
+    archive.fmt.require(len(schema.canonical(value)) <= 262144)
+    return value
 
 
 class _CancellationFlag:
@@ -175,6 +255,13 @@ class SuiteControl:
             if self._job is job:
                 self._job = None
 
+    def raiseIfCancelled(self):
+        """Check suite and exact active Job cancellation outside writer/backend lanes."""
+        with self._lane:
+            job = self._job
+        if self.requested or (job is not None and job.cancellationRequested):
+            raise ExecutionCancelled('Experiment suite cancelled.')
+
 
 class _SignalCancellationRelay:
     """Deliver a signal flag to the exact active Job outside the interrupted Python stack."""
@@ -234,13 +321,16 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
     io = ManagedIo()
     suite = results.initialSuite(definition, schema.unitDefinition)
     startedNs = time.monotonic_ns()
-    envelope = {'schemaId': 'actant.experiment.execution@3', 'suite': suite,
+    envelope = {'schemaId': 'actant.experiment.execution@4', 'suite': suite,
                 'launcherFailure': None, 'signalCleanupFailures': [],
-                'resultWriteFailure': None, 'hostCleanup': 'not-started'}
+                'resultWriteFailure': None, 'hostCleanup': 'not-started',
+                'archive': {'archiveId': None, 'path': None, 'failure': None, 'close': None}}
     resultPath = None
     host, runtime = None, None
     temporary = tempfile.TemporaryDirectory(prefix='actant-experiment-')
     stage, pendingExit = 'activation', None
+    writer = archiveRun = None
+    temporaryAttempted = archiveCloseAttempted = False
 
     def noteInterrupt(error, at):
         """Keep the first non-Exception exit for re-raise after exact owned cleanup."""
@@ -264,11 +354,37 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
             'operation': operation})
         launcherFailure(error, 'signal-cleanup')
 
+    def archiveFailure(error, at):
+        """Keep persistence failure independent and retain first non-Exception precedence."""
+        noteInterrupt(error, at)
+        if envelope['archive']['failure'] is None:
+            envelope['archive']['failure'] = dict(category='archive-failed', stage=at)
+        if writer is not None:
+            writer.fail(error)
+            if writer.primary is not None:
+                noteInterrupt(writer.primary, at)
+
     try:
         try:
             try:
+                stage = 'archive-initial'
+                caps = {key: config['archive'][key] for key in archive.fmt.DEFAULTS}
+                writer = archive.ArchiveWriter(resultsDirectory, suite, caps, control.cancel, cancelled=control.raiseIfCancelled)
+                archiveRun = archive.ArchiveRun(writer, definition, composer, config)
+                envelope['archive'].update(archiveId=writer.archiveId, path=str(writer.path))
+                adapter = loadAdapter()
+                composer.requestEvidence = (adapter.PrivateRequestEvidence()
+                    if config['archive']['capturePolicy'] == 'required' else None)
+                composer.evidencePolicies = (() if composer.requestEvidence is None else
+                    (adapter.RequestEvidencePolicy(composer.grants[0].entry, maxBodyBytes=caps['requestBytes']),))
+                try:
+                    archiveRun.initial(suite, provenance(config))
+                except BaseException as error:
+                    archiveFailure(error, stage)
+                    raise
+                stage = 'activation'
                 host = RuntimeHost(applicationStore=ApplicationStore(Path(temporary.name) / 'saves'),
-                    packResolver=PackResolver(roots=(DRIVER, APP)), providerComposers=(composer,))
+                    packResolver=PackResolver(roots=(DRIVER, APP)), providerComposers=(archiveRun,))
                 host.start()
                 runtime = host.createApplication(appPackId='applications.experimentRunner',
                     plan=ManualActivationPlan(packIds=('llmDrivers.llamaCpp', 'applications.experimentRunner')),
@@ -292,6 +408,7 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
                         signal.signal(signal.SIGINT, cancel)
                     for unit in suite['units']:
                         stage = 'unit-admission'
+                        writer.check()
                         if control.requested:
                             break
                         activeJob = job if unit['index'] == 1 and job is not None else Job.new()
@@ -303,9 +420,10 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
                         runId, admitted, finished = None, False, False
                         try:
                             stage = 'preparation'
+                            port = archiveRun.unit(unit, activeJob.jobId)
                             unitDefinition = schema.unitDefinition(definition, unit['configurationIndex'] - 1)
                             runId = runtime.invokeCapability('experimentRunner.prepare@1',
-                                {'unitId': unit['unitId'], 'definition': unitDefinition.value()})
+                                {'unitId': unit['unitId'], 'definition': unitDefinition.value(), 'archivePort': port})
                             unit['status'] = 'running'
                             stage = 'job'
                             admitted = True
@@ -343,12 +461,18 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
                                 try:
                                     selector = config['aliases'][unit['profileAlias']]
                                     evidence = plain(composer.configurationEvidence(host.executionResources, selector))
-                                    unit['configurationEvidence'] = (evidence if len(schema.canonical(evidence)) <= 262144
+                                    unit['configurationEvidence'] = (privateConfiguration(evidence) if len(schema.canonical(evidence)) <= 262144
                                         else {'status': 'unavailable-over-limit'})
                                 except BaseException as error:
                                     unit['configurationEvidence'] = {'status': 'unavailable'}
                                     noteInterrupt(error, 'configuration-evidence')
                             control.end(activeJob)
+                            try:
+                                if unit['unitId'] in archiveRun.ports:
+                                    archiveRun.unitOutcome(unit)
+                                writer.check()
+                            except BaseException as error:
+                                archiveFailure(error, 'unit-checkpoint')
                         if unit['status'] != 'succeeded' or pendingExit is not None or envelope['launcherFailure'] is not None:
                             break
                 except BaseException as error:
@@ -374,6 +498,13 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
                 suite['status'] = ('cancelled' if control.requested or any(unit['status'] == 'cancelled' for unit in suite['units']) else
                     'succeeded' if all(unit['status'] == 'succeeded' for unit in suite['units']) else 'failed')
                 suite.update(endedTimeNs=time.time_ns(), durationNs=time.monotonic_ns() - startedNs)
+                if archiveRun is not None:
+                    try:
+                        archiveRun.suiteOutcome(suite)
+                        archiveRun.cleanup('signal', 'failed-or-unknown' if envelope['signalCleanupFailures'] else 'completed',
+                            dict(failures=envelope['signalCleanupFailures']))
+                    except BaseException as error:
+                        archiveFailure(error, 'suite-checkpoint')
                 try:
                     resultPath = persist(io, resultsDirectory, envelope)
                 except BaseException as error:
@@ -387,6 +518,28 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
                 except BaseException as error:
                     envelope['hostCleanup'] = 'failed-or-unknown'
                     noteInterrupt(error, 'host-cleanup')
+            temporaryAttempted = True
+            temporaryOutcome = 'completed'
+            try:
+                temporary.cleanup()
+            except BaseException as error:
+                temporaryOutcome = 'failed-or-unknown'
+                launcherFailure(error, 'temporary-cleanup')
+            if archiveRun is not None:
+                try:
+                    archiveRun.cleanup('host', envelope['hostCleanup'] if host is not None else 'unavailable',
+                        dict(outcome=envelope['hostCleanup']))
+                    archiveRun.cleanup('temporary', temporaryOutcome, dict(outcome=temporaryOutcome))
+                    archiveRun.seal(suite['status'])
+                except BaseException as error:
+                    archiveFailure(error, 'archive-finalization')
+            if writer is not None:
+                archiveCloseAttempted = True
+                try:
+                    envelope['archive']['close'] = writer.close()
+                    writer.check()
+                except BaseException as error:
+                    archiveFailure(error, 'archive-close')
         if resultPath is not None:
             try:
                 persist(io, resultsDirectory, envelope)
@@ -398,10 +551,17 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
         if pendingExit is None:
             pendingExit = error
     finally:
-        try:
-            temporary.cleanup()
-        except BaseException as error:
-            launcherFailure(error, 'temporary-cleanup')
+        if not temporaryAttempted:
+            try:
+                temporary.cleanup()
+            except BaseException as error:
+                launcherFailure(error, 'temporary-cleanup')
+        if writer is not None and not archiveCloseAttempted:
+            try:
+                envelope['archive']['close'] = writer.close()
+                writer.check()
+            except BaseException as error:
+                archiveFailure(error, 'archive-close')
     snapshot = schema.Snapshot(schema.canonical(envelope))
     if pendingExit is not None:
         pendingExit.experimentExecution = snapshot
@@ -411,5 +571,8 @@ def execute(prepared, resultsDirectory, *, job=None, control=None, handleInterru
 
 def exitCode(envelope):
     """Require complete suite success and independent launcher/persistence/host success."""
+    archiveOutcome = envelope.get('archive', {})
+    close = archiveOutcome.get('close') or {}
     return 0 if (envelope['suite']['status'] == 'succeeded' and envelope['launcherFailure'] is None
-                 and envelope['resultWriteFailure'] is None and envelope['hostCleanup'] == 'completed') else 1
+                 and envelope['resultWriteFailure'] is None and envelope['hostCleanup'] == 'completed'
+                 and archiveOutcome.get('failure') is None and close.get('status') == 'completed') else 1

@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_experimentRunner.py ; version: 6
+# file: tests/first_party/experimentRunner/test_experimentRunner.py ; version: 7
 """EX-01/02/R1/03 architectural tests: actual runtime/provider, synthetic process/HTTP IO."""
 import importlib
 import json
@@ -30,7 +30,8 @@ def hostValue(tmp_path):
     executable, model = tmp_path / 'server.exe', tmp_path / 'model.gguf'
     executable.touch()
     model.touch()
-    return {'schemaId': 'actant.experiment.host@2',
+    return {'schemaId': 'actant.experiment.host@3',
+            'archive': dict(launcher.archive.fmt.DEFAULTS, capturePolicy='required', hashAssets=False),
             'llamaCpp': {'manageServer': True, 'executable': str(executable), 'defaultModel': 'Q',
                          'models': {'Q': {'modelPath': str(model), 'contextWindowTokens': 1024,
                                           'serverReasoning': 'off', 'parallelSlots': 1}}},
@@ -1624,7 +1625,7 @@ def test_ex03_r2_primary_exit_survives_paired_signal_cleanup_faults(rig, monkeyp
             launcher.execute(launcher.prepare(value, rig[1]), rig[2], control=control)
         assert caught.value is primary
         result = caught.value.experimentExecution.value()
-        assert result['schemaId'] == 'actant.experiment.execution@3'
+        assert result['schemaId'] == 'actant.experiment.execution@4'
         expectedStage = 'relay-start' if site == 'relay-start' else 'unit-admission' if site == 'loop-admission' else 'signal-handler-installation'
         assert result['launcherFailure'] == {'category': 'launcher-interrupted', 'stage': expectedStage}
         expected = (['handler-restoration', 'relay-close'] if cleanup == 'both' else [cleanup])
