@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/archiveFormat.py ; version: 1
+# file: first-party/applications/experimentRunner/archiveFormat.py ; version: 2
 """Strict, standard-library-only archive grammar; no execution or runtime imports."""
 from __future__ import annotations
 
@@ -151,6 +151,25 @@ def manifest(value):
     limits(value['limits'])
 
 
+def validateTransportFacts(turn, facts):
+    """Keep final local facts consistent with validated history, without receipt claims.
+
+    Final-only not-sent diagnostics remain valid before serialization. Response
+    observations cannot precede preparation/attempt or erase earlier observations.
+    A may-have-sent fact alone never proves response or server consumption.
+    """
+    sent = facts['mayHaveSent']
+    headers, body = facts['responseHeadersObserved'], facts['responseBodyObserved']
+    if sent is True:
+        require(turn['serializedRef'] is not None and turn['attempted'])
+    if headers is True or body is True:
+        require(sent is True)
+    if turn['headersObserved']:
+        require(headers is True and sent is True)
+    if turn['partials']:
+        require(body is True and headers is True and sent is True)
+
+
 class Grammar:
     """Typed ordered diagnostic state, never authority to resume or repair work."""
 
@@ -231,7 +250,9 @@ class Grammar:
                 self.planned[unit['unitId']] = unit
             provenance = document(payload['initialProvenanceRef'], 'provenance@1', ('facts',))
             require(type(provenance['facts']) is dict)
-            self.captureRequired = provenance['facts'].get('capturePolicy') == 'required'
+            capturePolicy = provenance['facts'].get('capturePolicy')
+            require(type(capturePolicy) is str and capturePolicy in ('required', 'disabled'))
+            self.captureRequired = capturePolicy == 'required'
             policy = provenance['facts'].get('validationPolicy')
             require(type(policy) is dict)
             schema = importlib.import_module('first-party.applications.experimentRunner.definition')
@@ -296,7 +317,8 @@ class Grammar:
                         require(message['role'] == ('user' if index % 2 == 0 else 'assistant') and type(message['content']) is str)
                     require(type(decode(blob(payload['requestedOptionsRef']))) is dict)
                     self.turns[unitId, turnId] = dict(attemptId=payload['attemptId'], phase=None,
-                        answerOffset=0, reasoningOffset=0, eventTo=0, partials=0, providerCallId=None)
+                        answerOffset=0, reasoningOffset=0, eventTo=0, partials=0, providerCallId=None,
+                        serializedRef=None, attempted=False, headersObserved=False, finalFacts=None)
                     state['active'] = turnId
                     state['turnIndex'] += 1
                 else:
@@ -323,12 +345,20 @@ class Grammar:
                             require(payload['bodyRef'] is None and payload['length'] is None and payload['sha256'] is None)
                         if phase in ('serialized', 'transport-attempt'):
                             require(all(payload[k] is None for k in ('mayHaveSent', 'responseHeadersObserved', 'responseBodyObserved')))
+                            if phase == 'serialized':
+                                turn['serializedRef'] = payload['bodyRef']
+                            else:
+                                turn['attempted'] = True
                         elif phase == 'response-headers-observed':
                             require(payload['mayHaveSent'] is None and payload['responseHeadersObserved'] is True and payload['responseBodyObserved'] is None)
+                            turn['headersObserved'] = True
                         else:
                             require(type(payload['mayHaveSent']) is bool)
                             require(payload['responseHeadersObserved'] in (None, True) and payload['responseBodyObserved'] in (None, True))
                             require(payload['responseBodyObserved'] is not True or payload['responseHeadersObserved'] is True)
+                            facts = {key: payload[key] for key in ('mayHaveSent', 'responseHeadersObserved', 'responseBodyObserved')}
+                            validateTransportFacts(turn, facts)
+                            turn['finalFacts'] = facts
                         turn['phase'] = phase
                     elif kind == 'partial':
                         require(payload['partial'] is True and payload['attemptId'] == turn['attemptId'])
@@ -344,13 +374,18 @@ class Grammar:
                         turn['eventTo'] = payload['eventTo']
                         turn['partials'] += 1
                         require(turn['partials'] <= self.caps['partialRecords'])
+                        if turn['finalFacts'] is not None:
+                            validateTransportFacts(turn, turn['finalFacts'])
                     else:
                         value = document(payload['resultRef'], 'turn-result@1', ('result',))['result']
                         fields(value, TURN_KEYS)
                         require(value['turnId'] == turnId and value['status'] in ('succeeded', 'failed', 'cancelled'))
                         if value['status'] == 'succeeded':
                             require(type(value['answer']) is str and value['partial'] is None)
-                            require(not self.captureRequired or turn['phase'] == 'final')
+                            if self.captureRequired:
+                                require(turn['serializedRef'] is not None and turn['attempted'] and turn['headersObserved']
+                                    and turn['phase'] == 'final' and turn['finalFacts'] is not None)
+                                require(all(fact is True for fact in turn['finalFacts'].values()))
                         require(value['reasoning'] is None or type(value['reasoning']) is str)
                         require(type(value['input']) is str and type(value['cleanup']) is dict)
                         for name in ('startedTimeNs', 'endedTimeNs', 'durationNs'):

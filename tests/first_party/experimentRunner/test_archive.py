@@ -1,4 +1,4 @@
-# file: tests/first_party/experimentRunner/test_archive.py ; version: 1
+# file: tests/first_party/experimentRunner/test_archive.py ; version: 2
 """Actual disk checkpoints, fresh process death/recovery and managed archive failure gates."""
 import importlib
 import json
@@ -257,10 +257,9 @@ port.begin(t['id'], {'formatId':'actant.llm.messages@1','messages':[{'role':'use
 w.observe(SimpleNamespace(eventType='delta', text='diagnostic partial', metadata={}))
 ack = None
 if sys.argv[3] == 'acked':
- ack = w.checkpoint('request-evidence', dict(attemptId=port.attemptId, providerCallId='b'*32,
-  phase='final', bodyRef=None, length=None, sha256=None, mayHaveSent=False,
-  responseHeadersObserved=None, responseBodyObserved=None, serverConsumption='unknown'),
-  unitId=port.unitId, turnId=port.turnId)
+ unavailable = a.artifact(a.fmt.canonical({'status':'unavailable'}))
+ ack = w.checkpoint('cleanup-observed', dict(component='temporary', observedOutcome='unavailable',
+  evidenceRef=unavailable[0]), artifacts=(unavailable,))
 print(json.dumps({'path':str(w.path), 'ack':ack}), flush=True)
 os._exit(23)
 '''

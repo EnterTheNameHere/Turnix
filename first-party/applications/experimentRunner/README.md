@@ -317,3 +317,17 @@ the provider private accessor can contain credentials. This does not alter the
 separate exact model-facing request BODY. File hashes are observed bytes, not a
 comprehensive loaded-code/OS attestation. Default recovery also returns compact
 last-observed unit/Job/turn/cleanup facts; planned entries never become live Jobs.
+
+EX-04-R1 tightens the existing version-1 typed protocol without changing stored
+record/artifact schemas. Each attempt remembers its validated exact body reference,
+transport attempt, acknowledged header observation and final local facts. Required
+successful turns need that entire history and positive may-have-sent/header/body
+observations. These facts still do not establish server consumption. Final facts
+cannot erase earlier header or partial-response observations; partial checkpoints
+after final facts must also agree. Final-only not-sent records remain valid for
+failed-before-serialization diagnostics; pre-connect and pre-header failures retain
+their actual false/ambiguous transport facts. Missing/unsupported capture policy
+rejects rather than implicitly opting out. Formerly accepted inconsistent archives
+now report corruption at the first invalid committed record with the preceding
+validated prefix preserved, including selected inspection views. No archive repair,
+byte fabrication, retry or migration is performed.
