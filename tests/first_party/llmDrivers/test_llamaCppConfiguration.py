@@ -1,4 +1,4 @@
-# file: tests/first_party/llmDrivers/test_llamaCppConfiguration.py ; version: 2
+# file: tests/first_party/llmDrivers/test_llamaCppConfiguration.py ; version: 3
 """LC-01 startup authority and evidence tests without models, GPUs or inference."""
 from __future__ import annotations
 
@@ -512,7 +512,7 @@ def test_template_file_and_auxiliary_inputs_are_frozen_as_paths_not_content_hash
     assert before["inputs"][-1]["configuredPath"] == "relative.jinja"
     calls = fakeLaunch(monkeypatch)
     launchOwnedDriver(value)
-    assert calls[0][1]["cwd"] == str(Path(before["inputs"][-1]["resolvedPath"]).parent)
+    assert Path(calls[0][1]["cwd"]) == Path(before["inputs"][-1]["resolvedPath"]).parent
     stopOwnedDriver(value)
 
 

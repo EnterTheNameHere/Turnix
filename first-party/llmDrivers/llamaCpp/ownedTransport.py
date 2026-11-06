@@ -60,8 +60,8 @@ class _HttpSocket:
 
     def makefile(self, mode):
         """Create the reader-owned standard buffer over this operation's raw reads."""
-        if mode != 'rb':
-            raise ValueError('Managed inference supports only binary HTTP reads.')
+        if mode != "rb":
+            raise ValueError("Managed inference supports only binary HTTP reads.")
         return io.BufferedReader(_RawReader(self.transport))
 
     def close(self):
@@ -87,7 +87,7 @@ class OwnedHttpTransport:
         """Reject new/raw IO once a stop or reader final close has been recorded."""
         with self._lane:
             if self._stopped or self._closed:
-                raise InterruptedError('Managed transport has stopped.')
+                raise InterruptedError("Managed transport has stopped.")
 
     def waitSocket(self, channel, deadline, *, writing=False):
         """Wait in short slices; Windows shutdown alone need not wake timeout-mode reads."""
@@ -95,7 +95,7 @@ class OwnedHttpTransport:
             self.requireRunning()
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError('Managed HTTP operation timed out.')
+                raise TimeoutError("Managed HTTP operation timed out.")
             ready, writable, exceptional = select.select(
                 [] if writing else [channel], [channel] if writing else [],
                 [channel], min(remaining, 0.05))
@@ -124,7 +124,7 @@ class OwnedHttpTransport:
             try:
                 count = channel.send(remaining)
                 if count <= 0:
-                    raise OSError('Managed HTTP connection closed during send.')
+                    raise OSError("Managed HTTP connection closed during send.")
                 remaining = remaining[count:]
             except BlockingIOError:
                 self.waitSocket(channel, deadline, writing=True)
@@ -133,7 +133,7 @@ class OwnedHttpTransport:
         """Set a private transport read bound, used by supervised timeout probes."""
         import math
         if type(seconds) not in (int, float) or not math.isfinite(seconds) or seconds <= 0:
-            raise ValueError('Managed read timeout must be positive and finite.')
+            raise ValueError("Managed read timeout must be positive and finite.")
         self.readTimeout = float(seconds)
 
     def connect(self, host, port, timeout):
@@ -143,11 +143,11 @@ class OwnedHttpTransport:
         observed after resolution prevents all subsequent connection/send work.
         """
         last = None
-        resolver_host = host.encode('ascii') if host.isascii() else host
+        resolver_host = host.encode("ascii") if host.isascii() else host
         for family, kind, protocol, _, address in socket.getaddrinfo(resolver_host, port, type=socket.SOCK_STREAM):
             with self._lane:
                 if self._stopped or self._closed:
-                    raise InterruptedError('Managed transport stopped before connect.')
+                    raise InterruptedError("Managed transport stopped before connect.")
                 channel = socket.socket(family, kind, protocol)
                 channel.setblocking(False)
                 self._socket = channel
@@ -158,7 +158,7 @@ class OwnedHttpTransport:
                     self.waitSocket(channel, time.monotonic() + timeout, writing=True)
                     result = channel.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
                 if result:
-                    raise OSError(result, 'Managed endpoint connection failed.')
+                    raise OSError(result, "Managed endpoint connection failed.")
                 self.requireRunning()
                 return _HttpSocket(self)
             except OSError as error:
@@ -166,19 +166,19 @@ class OwnedHttpTransport:
                 last = error
                 with self._lane:
                     if self._stopped or self._closed:
-                        raise InterruptedError('Managed transport stopped during connect.') from None
+                        raise InterruptedError("Managed transport stopped during connect.") from None
         if last is not None:
             raise last
-        raise OSError('Managed endpoint has no usable address.')
+        raise OSError("Managed endpoint has no usable address.")
 
     def open(self, request, *, timeout):
         """Send one request and obtain headers; a stop can interrupt either phase."""
         endpoint = urlsplit(request.full_url)
-        if endpoint.scheme != 'http' or not endpoint.hostname or endpoint.username or endpoint.fragment:
-            raise ValueError('Managed inference requires an explicit plain HTTP endpoint.')
+        if endpoint.scheme != "http" or not endpoint.hostname or endpoint.username or endpoint.fragment:
+            raise ValueError("Managed inference requires an explicit plain HTTP endpoint.")
         with self._lane:
             if self._opened or self._stopped or self._closed:
-                raise InterruptedError('Managed transport is stopped or already used.')
+                raise InterruptedError("Managed transport is stopped or already used.")
             self._opened = True
             self.setReadTimeout(timeout)
             connection = _Connection(endpoint.hostname, endpoint.port or 80, timeout, self)
@@ -186,20 +186,20 @@ class OwnedHttpTransport:
         connection.connect()
         with self._lane:
             if self._stopped or self._closed:
-                raise InterruptedError('Managed transport stopped before send.')
+                raise InterruptedError("Managed transport stopped before send.")
             self.mayHaveSent = True  # Sending can fail after partial server acceptance.
-        path = endpoint.path or '/'
+        path = endpoint.path or "/"
         if endpoint.query:
-            path += '?' + endpoint.query
+            path += "?" + endpoint.query
         connection.request(request.get_method(), path, body=request.data,
-                           headers={**dict(request.header_items()), 'Connection': 'close'})
+                           headers={**dict(request.header_items()), "Connection": "close"})
         response = connection.getresponse()
         self.response = response
         with self._lane:
             if self._stopped:
-                raise InterruptedError('Managed transport stopped before headers returned.')
+                raise InterruptedError("Managed transport stopped before headers returned.")
         if response.status != 200:
-            raise OSError('Managed inference returned an unsuccessful HTTP status.')
+            raise OSError("Managed inference returned an unsuccessful HTTP status.")
         return response
 
     def stop(self):
