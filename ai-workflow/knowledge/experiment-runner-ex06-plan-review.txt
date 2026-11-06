@@ -1,0 +1,193 @@
+EX-06 - INDEPENDENT INTEGRATION DESIGN REVIEW
+============================================
+Date: 2026-11-06. Owner: Integration coordinator/implementer.
+Reviewed checkpoint: 7b0ff97, parent 14cdc9b, on actant-integration.
+Plan: ai-workflow/knowledge/experiment-runner-ex06-plan.txt, sections 01-08.
+Application inspected: 0d84010bc64095c1080dc44842247c92945b48b8.
+Complete imported platform: b958470b2e2d63182bb0bda7d2f760c1492edff9.
+
+01. DECISION AND AUTHORITY
+--------------------------
+APPROVED WITH BINDING CONDITIONS as the Application design direction below.
+This is NOT production implementation authorization or EX-06 acceptance.
+The two shared dependencies are substantiated, not hypothetical. Their concrete
+API/lifecycle checkpoint is assigned separately at
+ai-workflow/assignments/experiment-runner-ex06-process-workspace.txt.
+Next implementer deliverable: that shared proposal and an App contract addendum.
+Integration reviews those contracts before authorizing shared production code;
+shared implementation must then be independently accepted and imported as part of
+the COMPLETE current platform before App production implementation authorization.
+No code, tool installation, real-model run or new live worker session is claimed.
+
+Approved bounded choices:
+- Definition@3 linear message/inference/save/cli, host@5 and explicitly versioned
+  archive@3/execution@6/result@3/suite@2/report@2/comparison@2 direction. Existing
+  definition@2, host@3/4 and archive@1/2 behavior/regressions remain supported.
+- Exactly one Ruff safe-fix pass, one format pass, one ty diagnostic and one Ruff
+  diagnostic, with two explicit inferences and growing original Classic history.
+  Generated code is never executed/imported. Final answer has no implicit save.
+- Literal/frozen strict UTF-8 inputs, deterministic normalized JSON and exact raw
+  JSON5 provenance; stdlib-only offline readers. Installed json5 is a dependency
+  candidate, not proof of parser resource bounds or a finished validator.
+- User/assistant roles only for this slice; reject system/tool, never silently
+  convert. Authored assistant messages retain their authored origin.
+- Existing ephemeral invocation workspace, one per configuration/repetition, for
+  the initial slice. Archive retains all required portable artifacts. Retained
+  run-root workspaces and host Workspace locking are not prerequisites or assigned.
+  These are distinct from durable host Workspace semantics in DA-28/IS-03.
+- One actual Job/capability invocation owns the procedure workspace/history/session.
+  CLI time remains separate from LLM timing; lint/type findings are normal allowed
+  nonzero outcomes, not a claim of generated-code quality or successful repair.
+
+02. INDEPENDENT SOURCE AND EXECUTION EVIDENCE
+---------------------------------------------
+Inspected current shared process/runtime.py, process/context.py,
+process/configuration.py, workspace/runtime.py, workspace/context.py,
+context/codeEntryContext.py, application/applicationRuntime.py,
+orchestration/cancellation.py and llm/structuredMessages.py under backend/.
+Inspected App codeEntry.py, launcher.py and archiveFormat.py directly at the
+Application ref; no App files were copied into Integration.
+Compared b958470 with current Integration backend/, first-party/, tests/ and
+requirements.txt: no differences. Checkpoint commit changes coordination only.
+
+Source confirms: configured ProcessRunner uses subprocess.run(capture_output=True),
+text UTF-8 errors=replace, no byte caps/cancellation parameter; ProcessFacade has
+only the initial validity check and receives no Job signal. Timeout wraps a raw
+subprocess exception. ApplicationRuntime traces str(error) on capability failure.
+WorkspaceFacade exposes materializeBytes/Text only; Context.invalidate removes its
+workspace best-effort. Structured messages accept only user and assistant.
+
+Independent actual Python 3.15.0b4 test command on unchanged 7b0ff97:
+ .\python-embedded\python.exe -X frozen_modules=off -m pytest -q
+ tests/backend/process tests/backend/workspace
+ tests/backend/application/test_processContextIntegration.py
+ tests/backend/application/test_workspaceProcessIntegration.py
+Result: 24 passed in 0.74s, zero skips. Existing embedded-home warning remains.
+
+Separate actual synthetic Job probe, same unchanged source:
+- Registered test capability on ApplicationRuntime with only embedded Python as
+  a configured tool; materialized exact CRLF bytes through the workspace facade.
+- Requested cancellation on the actual Running Job BEFORE calling ctx.process.run.
+  Child still executed, captured 300000 stdout characters, returned normal exit7;
+  only the enclosing Job boundary subsequently classified the Job Cancelled.
+  This confirms missing process admission cancellation and unbounded capture;
+  it does not claim cancellation of an already-running native Ruff/ty process.
+- The invocation workspace was removed at returned Job boundary in this probe;
+  this is observed cleanup, not a general workspace-removal receipt.
+- A separate owned Python child with 0.03s timeout confirmed the resulting
+  ProcessExecutionError string contains a private sentinel from its argument.
+  Thus the generic capability-failure trace can expose private process arguments.
+  All synthetic child calls completed or were reaped by subprocess timeout;
+  no review worker/reader thread was created.
+- Parsed the submitted JSON5 example with installed json5: NINE steps, TWO
+  inference steps, FOUR CLI steps. Plan's '10 distinct steps' claim is a factual
+  counting error; correct it in the addendum, without changing the desired flow.
+
+No EX-06 implementation, combined App suite, browser/model/Ruff/ty run, tool
+installation, physical cleanup guarantee or stronger retention claim was tested.
+
+03. BINDING SHARED CONTRACT REQUIREMENTS
+----------------------------------------
+A. Freeze the admitted process request BEFORE execution. The App requires ACK of
+the exact resolved argv/cwd/tool/policy intent before any spawn. A result available
+only after run() returns cannot supply that barrier. Propose one concrete minimal
+prepare/execute or pre-launch acknowledgement mechanism. Bind execution to that
+request, Context/Job and one-use admission; acknowledgement failure/cancellation
+prevents launch. Do not call archive/client callbacks under runtime/control locks.
+No filesystem observation/hash attests which executable image was actually loaded.
+
+B. Specify a finite deadline and per-stream raw byte limits enforced while reading,
+before buffer growth, with concurrent stdout/stderr handling and bounded drain.
+Separate retained bytes, bytes observed and unknown totals; never call a truncated
+stream complete. Decode only after bounded raw capture with explicit replacement
+facts. Overflow, timeout and cancellation stop later App steps and require owned
+disposition; no automatic retry of any possibly started process.
+
+C. Specify cancellation admission and spawn/register races, callback withdrawal,
+normal exit racing stop, first BaseException and cleanup failures, partial output,
+and launch-attempted versus started evidence. Forward actual Job cancellation;
+do not hold the ApplicationRun lane to request stop from another thread. Callbacks
+must be idempotent/no-fail and avoid blocking pipe close/reader ownership races.
+Preserve a cancellation primary as cancellation through existing Job semantics.
+
+D. A claimed confirmed boundary needs owned child reaped and owned readers/drain
+resolved. Scope this precisely; EOF/exit is not universal process-tree quiescence.
+Descendant-held pipes and unknown cleanup stop the suite, not silently release a
+workspace still in use or allow another unit to proceed. Specify a bounded failure
+disposition when cleanup cannot finish: who retains exact owned resources and what
+Context invalidation may do. Do not promise both unconditional finite cleanup and
+guaranteed arbitrary descendant termination. No process-name kill, borrowed child,
+global recovery or force-clearing UNKNOWN.
+
+E. Generic error/trace text must omit raw arguments, output and private paths,
+including timeout exceptions and any automatically surfaced cause/context text.
+Private immutable structured evidence is separately available to the App archive;
+safe errors must not destroy it. Test actual capability failure tracing, not just
+the wrapper error's type. Avoid a broad tracing subsystem change for this scope.
+
+F. Workspace read contract must specify exact return type/fields, byte cap enforced
+by maxBytes+1 read, regular-file/containment/reparse handling, opened-file identity,
+observed length/hash and invalidation/failure behavior. Reject detected changes;
+metadata comparison is not proof against hostile same-size in-place mutation.
+Clarify whether identity/hash are returned or derived from the returned bounded
+bytes, rather than implying bare readBytes returns unstated metadata. No raw App
+filesystem bypass or generic persistent workspace manager.
+
+Existing callers and normal nonzero exit semantics stay compatible. Proposed new
+bounded API is reusable platform code, not an App-only wrapper. Exact signatures,
+fields/enums, errors and cleanup semantics require the next shared review.
+
+04. BINDING APPLICATION CONTRACT REQUIREMENTS
+---------------------------------------------
+Before App implementation authorization, publish a concise addendum freezing:
+- Exact new record/artifact fields, kinds/version dispatch and valid failure/null
+  combinations; plan section07 currently defers exact key sets to implementation.
+  Bind run-inputs, normalized definition, ordered plan and all unit references
+  without cyclic/forward dependencies or any launch before required input ACK.
+- Every message/inference/save/CLI step's success and failure transition, pending
+  intent after a torn tail, operation/revision identity and source relationships.
+  A complete CLI result may coexist with unavailable post-file capture; preserve
+  both facts and reject full procedure success, without rewriting execution facts.
+- One step-planned intent without a result means execution MAY have occurred.
+  A seal means archive finalization, not procedure success. Missing ACK visibility
+  on offline recovery remains unavailable, never synthesized from COMMIT.
+- Exact definition@3 preflight and conservative budget calculation for all configs:
+  parser pre-scan, UTF-8/replayed history, raw/normalized inputs, all post-tool
+  revisions and escaping, stream evidence, observation/partial records and export.
+  No stateful/model/process operation before successful all-config validation.
+- Updated downstream PM/G/final-snapshot lifetime policy across intervening CLI
+  operations; keep accepted in-flight capture guards, no retry after LLM failure.
+- Read-only report/export privacy, actual availability/denominators, separate CLI
+  measures and comparison qualification by procedure, frozen inputs and assembled
+  query; preserve all EX-03/04/05 raw regressions on old and applicable new paths.
+
+The proposed source/host schema ownership and caps are accepted directionally.
+The addendum supplies missing exact contracts, not a larger workflow language.
+Actual approved Ruff/ty versions and flags/exit semantics must be checked before
+any later real gate. They are not verified by the JSON5 example or synthetic child.
+
+05. SOURCE BOUNDARY AND LATEST-PLATFORM SYNCHRONIZATION
+-------------------------------------------------------
+App source/tests/examples remain only on actant-experiment-runner. Integration
+acceptance records exact Application refs; it does not import App code. No explicit
+decision to import Application-exclusive artifacts upstream has been made.
+Platform process/workspace changes are a separate platform-only proposal/patch.
+
+At every continuation refresh canonical coordination and actual refs. Before any
+App source work, safely update its branch from the LATEST COMPLETE actant-integration,
+including the accepted shared dependency and reusable Packs/support, preserving all
+App-owned files. Record exact imported Integration ref, App parent/result and
+source projection. An earlier identical platform-source comparison is not an
+exemption from refreshing/synchronizing the latest branch. Never replay the historic
+Integration deletion of App source into its owning Application branch. No force push
+or whole-App upstream merge. Independent combined tests follow actual adoption.
+
+06. NEXT ACTION / STATUS
+-------------------------
+Implementer: produce the separately assigned shared API checkpoint on canonical
+coordination, with proposed platform-only source branch actant-ex06-process-workspace
+based on current Integration, plus the App contract addendum. No branch or source
+patch was created by this review. Integration: review those exact contracts, then
+explicitly authorize the bounded shared patch. Independently accept shared code,
+require COMPLETE downstream adoption, then authorize/review App implementation.
+EX-01 through EX-05 remain accepted; EX-06 implementation and final gates pending.
