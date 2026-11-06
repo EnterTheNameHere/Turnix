@@ -1,4 +1,4 @@
-# file: first-party/applications/experimentRunner/exporting.py ; version: 1
+# file: first-party/applications/experimentRunner/exporting.py ; version: 2
 """Bounded safe presentation and exclusive, manifest-last offline report publication."""
 from __future__ import annotations
 
@@ -91,14 +91,25 @@ def csvBytes(value):
 
 
 def table(value):
-    """Present only bounded safe summaries using escaped untrusted identifiers."""
+    """Show qualified outcomes, selection and measurements within one escaped summary budget."""
     reporting.reportSchema.validate(value)
     if value['schemaId'] == fmt.PREFIX + 'comparison@1':
-        return jsonBytes(dict(result=value['result'], mode=value['mode'], reasons=value['reasons'],
-                              difference=value['difference'])).decode('ascii')
-    lines = [jsonBytes(dict(sources=value['sources'], scopeCompleteness=value['scopeCompleteness'], counts=value['counts'])).decode('ascii')]
+        # The validated comparison is already summary-only, including its qualifiers.
+        return jsonBytes(value).decode('ascii')
+    lines, total = [], 0
+    def append(summary):
+        """Reserve each escaped line and delimiter before retaining or joining the whole output."""
+        nonlocal total
+        raw = jsonBytes(summary)
+        total += len(raw) + (1 if lines else 0)
+        require(total <= MAX_SUMMARY)
+        lines.append(raw.decode('ascii'))
+    append(dict(sources=value['sources'], selection=value['selection'], scopeCompleteness=value['scopeCompleteness'],
+                counts=value['counts'], diagnostics=value['diagnostics'], contentPolicy='summary-only'))
     for row in value['rows']:
-        lines.append(jsonBytes({k: row[k] for k in ('unitId', 'turnId', 'turnStatus', 'jobOutcome', 'callCleanup')}).decode('ascii'))
+        # Row schemas allow only identifiers, outcome/availability facts and typed metrics.
+        append(row)
+    append(dict(aggregates=value['metrics']))
     return '\n'.join(lines)
 
 

@@ -493,3 +493,18 @@ cannot become available report metrics. Online optional codec contradictions bec
 unavailable observation evidence, with no inference retry or changed Job/provider
 outcome. No timestamp is repaired, no clock domain is inferred, and no shared
 backend/provider/bridge/viewer contract was changed.
+
+EX-05-R2 makes the default terminal projection complete without changing structured
+reports or comparison decisions. Report output is escaped JSON lines: source scope,
+explicit selection/count/status header, one full summary row per selected turn, then
+named metric aggregates with contributing/excluded counts and rational means. Rows
+retain configuration/repetition/turn context, original outcomes/cleanup, metric
+IDs/definitions, values or unavailable reasons, units and measurement provenance.
+Comparison output retains the full validated summary-only comparison, including
+source validation/completeness/outcomes, selection, field availability and alignment
+qualifiers. A valid selected Equal from incomplete sources stays Equal and visibly
+incomplete. Default table rendering excludes private content even when handed a
+selected private report internally; the CLI still requires JSON for private flags.
+ASCII JSON escaping contains control/bidi strings. One 4 MiB whole-output budget
+counts every line and delimiter before joining/printing, so a size failure emits no
+partial diagnostic to stdout. No execution/observation path or stored schema changed.
